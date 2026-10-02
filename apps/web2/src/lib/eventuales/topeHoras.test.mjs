@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
-  TOPE_HORAS_DEFAULT, evaluarJornadasContraTope, evaluarTope, horasComprometidas, motivoTopeHoras,
-  normalizarTope, rangoPeriodo, topeEfectivo, turnoCuentaParaTope,
+  TOPE_HORAS_DEFAULT, TOPE_MARGEN_DEFAULT, chipTope, evaluarJornadasContraTope, evaluarTope, horasComprometidas, motivoCercaTope, motivoTopeHoras,
+  normalizarMargen, normalizarTope, rangoPeriodo, textoOcultosPorTope, topeEfectivo, turnoCuentaParaTope,
 } from './topeHoras.mjs';
 
 const emp = 'bacarsa';
@@ -56,10 +56,11 @@ describe('tope de horas del eventual', () => {
   it('bloquea al pasar el tope con el texto del turno, y 50 justo entra', () => {
     const turnos = [ev('2026-10-02', 40), ev('2026-10-03', 8)];
     const justo = evaluarJornadasContraTope({
-      turnos, empresaId: emp, periodo: 'CALENDARIO', tope: 50,
+      turnos, empresaId: emp, periodo: 'CALENDARIO', tope: 50, margen: 0,
       jornadas: [{ fecha: '2026-10-20', horas: 2, horaInicio: '08:00' }],
     });
     assert.equal(justo.supera, false);
+    assert.equal(justo.oculto, false);
     assert.equal(justo.usadas, 48);
     const pasa = evaluarJornadasContraTope({
       turnos, empresaId: emp, periodo: 'CALENDARIO', tope: 50,
@@ -70,6 +71,42 @@ describe('tope de horas del eventual', () => {
     assert.equal(motivoTopeHoras(48, 50, 8), pasa.motivo);
     assert.equal(evaluarTope({ usadas: 42, tope: 50, horasTurno: 8 }).supera, false);
     assert.equal(evaluarTope({ usadas: 43, tope: 50, horasTurno: 8 }).supera, true);
+  });
+
+  it('margen: con tope 50 y margen 2 no se ofrece a quien ya tiene 48 h o más, aunque el turno entre', () => {
+    assert.equal(TOPE_MARGEN_DEFAULT, 2);
+    assert.equal(normalizarMargen(undefined), 2);
+    assert.equal(normalizarMargen(-1), 2);
+    assert.equal(normalizarMargen(0), 0);
+    assert.equal(normalizarMargen(500, 2, 50), 50);
+    assert.equal(topeEfectivo({ eventualesTopeHoras: 50 }, null).margen, 2);
+    assert.equal(topeEfectivo({ eventualesTopeHoras: 50, eventualesTopeMargen: 5 }, null).margen, 5);
+    const cerca = evaluarTope({ usadas: 48, tope: 50, horasTurno: 1, margen: 2 });
+    assert.equal(cerca.supera, false);
+    assert.equal(cerca.cerca, true);
+    assert.equal(cerca.oculto, true);
+    assert.equal(cerca.aviso, false);
+    assert.equal(cerca.motivo, 'Cerca del tope mensual (48/50 h, margen 2 h)');
+    assert.equal(motivoCercaTope(48, 50, 2), cerca.motivo);
+    const libre = evaluarTope({ usadas: 47, tope: 50, horasTurno: 1, margen: 2 });
+    assert.equal(libre.oculto, false);
+    assert.equal(libre.aviso, true);
+    const sinMargen = evaluarTope({ usadas: 49, tope: 50, horasTurno: 1, margen: 0 });
+    assert.equal(sinMargen.oculto, false);
+    const alcanzado = evaluarTope({ usadas: 50, tope: 50, horasTurno: 1, margen: 0 });
+    assert.equal(alcanzado.alcanzado, true);
+    assert.equal(alcanzado.supera, true);
+    assert.equal(chipTope({ usadas: 50, tope: 50, margen: 2 }), 'Tope alcanzado');
+    assert.equal(chipTope({ usadas: 48, tope: 50, margen: 2 }), 'Cerca del tope');
+    assert.equal(chipTope({ usadas: 47, tope: 50, margen: 2 }), null);
+    assert.equal(textoOcultosPorTope(1), '1 eventual oculto por tope de horas');
+    assert.equal(textoOcultosPorTope(3), '3 eventuales ocultos por tope de horas');
+    const porJornadas = evaluarJornadasContraTope({
+      turnos: [ev('2026-10-02', 48)], empresaId: emp, periodo: 'CALENDARIO', tope: 50, margen: 2,
+      jornadas: [{ fecha: '2026-10-20', horas: 1, horaInicio: '08:00' }],
+    });
+    assert.equal(porJornadas.oculto, true);
+    assert.equal(porJornadas.motivo, 'Cerca del tope mensual (48/50 h, margen 2 h)');
   });
 
   it('el ciclo 26→25 no mezcla el mes calendario', () => {

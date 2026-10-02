@@ -25,6 +25,8 @@ export type EventualMovil = {
   /** `32/50 h este mes`. aviso = ámbar desde el 80%. */
   horasMes?: string;
   horasAviso?: boolean;
+  /** «Tope alcanzado» / «Cerca del tope»: visible en la bolsa, no se ofrece en los selectores. */
+  chipTope?: 'Tope alcanzado' | 'Cerca del tope' | null;
 };
 
 export type ArcaMovil = {
@@ -193,6 +195,7 @@ export function EventualesScreens(props: {
                       <span className="truncate text-[15px] font-semibold leading-tight text-slate-900">{persona.nombre}</span>
                       <span className="flex shrink-0 flex-wrap justify-end gap-1">
                         {persona.exigirMarco === false && <MovilBadge tone="violet" outline>Pruebas: sin exigir marco</MovilBadge>}
+                        {persona.chipTope && <span data-chip-tope={persona.chipTope === 'Tope alcanzado' ? 'alcanzado' : 'cerca'}><MovilBadge tone={persona.chipTope === 'Tope alcanzado' ? 'rose' : 'amber'} outline>{persona.chipTope}</MovilBadge></span>}
                         <MovilBadge tone={MARCO_TONE[persona.marcoEstado] || 'slate'}>{persona.marco}</MovilBadge>
                       </span>
                     </div>
@@ -230,7 +233,10 @@ export function EventualesScreens(props: {
                   {props.elegido.primerIngreso ? ` · 1º ingreso ${props.elegido.primerIngreso}` : ''}
                 </p>
                 {props.elegido.horasMes && (
-                  <p data-horas-mes className={`mt-2 text-sm font-semibold tabular-nums ${props.elegido.horasAviso ? 'text-amber-700' : 'text-slate-600'}`}>{props.elegido.horasMes}</p>
+                  <p data-horas-mes className={`mt-2 flex flex-wrap items-center gap-2 text-sm font-semibold tabular-nums ${props.elegido.horasAviso ? 'text-amber-700' : 'text-slate-600'}`}>
+                    {props.elegido.horasMes}
+                    {props.elegido.chipTope && <MovilBadge tone={props.elegido.chipTope === 'Tope alcanzado' ? 'rose' : 'amber'} outline>{props.elegido.chipTope}</MovilBadge>}
+                  </p>
                 )}
                 {(props.elegido.exigirMarco === false || props.elegido.exigirAltaArca === false) && (
                   <div className="mt-2 flex flex-wrap gap-1" data-pruebas="sin-marco">

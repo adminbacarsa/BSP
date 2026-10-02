@@ -120,6 +120,25 @@ async function main() {
   const cand80 = (al80.value?.candidatos || []).find((c) => c.cuil === CUIL);
   report('desde el 80% sigue elegible y avisa', al80.ok && cand80?.elegible === true && cand80?.horasMes?.aviso === true && cand80?.horasMes?.texto === '40/50 h este mes', `${cand80?.horasMes?.texto} aviso=${cand80?.horasMes?.aviso} ${cand80?.motivo || ''}`);
 
+  // Margen: con 40 h y margen 10 (tope 50) ya no se ofrece ni se acepta, aunque el turno entre.
+  const conMargen = await intentar(() => gestionarEventual.run({ accion: 'guardarTopeEmpresa', empresaId: EMP, horas: 50, periodo: 'CALENDARIO', margen: 10 }, ctx));
+  const listaMargen = await intentar(() => listarCandidatosEventuales.run({
+    empresaId: EMP,
+    jornadas: [{ fecha: '2026-11-20', horaInicio: '08:00', horaFin: '16:00', horas: 8 }],
+  }, ctx));
+  const candMargen = (listaMargen.value?.candidatos || []).find((c) => c.cuil === CUIL);
+  report('con margen 10 el que tiene 40/50 h queda oculto por tope', conMargen.ok && conMargen.value?.margen === 10 && candMargen?.elegible === false && candMargen?.motivoCodigo === 'TOPE_CERCA' && candMargen?.motivo === 'Cerca del tope mensual (40/50 h, margen 10 h)', candMargen?.motivo || listaMargen.message || conMargen.message || '');
+  const asignaMargen = await intentar(() => asignarEventualPlanificacion.run(pedido('2026-11-20', '08:00'), ctx));
+  report('el servidor tampoco acepta dentro del margen', !asignaMargen.ok && String(asignaMargen.message).includes('Cerca del tope mensual'), asignaMargen.message || 'asignó');
+  const chipMargen = await intentar(() => gestionarEventual.run({ accion: 'horasMes', empresaId: EMP, cuils: [CUIL], fecha: '2026-11-02' }, ctx));
+  report('la bolsa lo muestra con «Cerca del tope»', chipMargen.ok && chipMargen.value?.filas?.[0]?.chip === 'Cerca del tope' && chipMargen.value?.filas?.[0]?.cerca === true, JSON.stringify(chipMargen.value?.filas?.[0] || chipMargen.message));
+  await gestionarEventual.run({ accion: 'guardarTopeEmpresa', empresaId: EMP, horas: 50, periodo: 'CALENDARIO', margen: 2 }, ctx);
+  const sinMargen = await intentar(() => listarCandidatosEventuales.run({
+    empresaId: EMP,
+    jornadas: [{ fecha: '2026-11-20', horaInicio: '08:00', horaFin: '16:00', horas: 8 }],
+  }, ctx));
+  report('con margen 2 vuelve a ofrecerse (40 < 48)', sinMargen.ok && (sinMargen.value?.candidatos || []).find((c) => c.cuil === CUIL)?.elegible === true, sinMargen.message || '');
+
   const sinMotivo = await intentar(() => gestionarEventual.run({ accion: 'guardarTopeExcepcion', empresaId: EMP, cuil: CUIL, horas: 80, motivo: ' ' }, ctx));
   report('excepción sin motivo se rechaza', !sinMotivo.ok, sinMotivo.message || '');
   const conMotivo = await intentar(() => gestionarEventual.run({ accion: 'guardarTopeExcepcion', empresaId: EMP, cuil: CUIL, horas: 80, motivo: 'Cobertura de feriado' }, ctx));

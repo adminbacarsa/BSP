@@ -259,8 +259,10 @@ export const gestionarEventual = functions.https.onCall(async (data, context) =>
     const { evaluarTopeCuils } = await import('./topeHorasEventual');
     const reglas = await import('../eventuales-shared/topeHoras.mjs') as {
       normalizarTope: (valor: unknown, fallback?: number | null) => number | null;
+      normalizarMargen: (valor: unknown, fallback?: number | null, tope?: number) => number | null;
       normalizarPeriodo: (valor: unknown) => string;
       PERIODO_CICLO: string;
+      TOPE_MARGEN_DEFAULT: number;
       textoHorasMes: (usadas: number, tope: number) => string;
     };
     const empresaId = String(data?.empresaId || '');
@@ -273,19 +275,25 @@ export const gestionarEventual = functions.https.onCall(async (data, context) =>
       const horas = reglas.normalizarTope(data?.horas, null);
       if (!horas) throw new functions.https.HttpsError('invalid-argument', 'El tope tiene que ser mayor a 0 y hasta 400 h.');
       const periodo = reglas.normalizarPeriodo(data?.periodo);
+      const margenIn = data?.margen;
+      const margen = margenIn === undefined || margenIn === null || margenIn === ''
+        ? reglas.normalizarMargen(empresaSnap.data()?.eventualesTopeMargen, reglas.TOPE_MARGEN_DEFAULT, horas)
+        : reglas.normalizarMargen(margenIn, null, horas);
+      if (margen === null) throw new functions.https.HttpsError('invalid-argument', 'El margen tiene que ser 0 o más horas.');
       await empresaRef.set({
         eventualesTopeHoras: horas,
         eventualesPeriodoHoras: periodo,
+        eventualesTopeMargen: margen,
         eventualesTopeAt: admin.firestore.FieldValue.serverTimestamp(),
         eventualesTopePor: auth.uid,
       }, { merge: true });
       const periodoTxt = periodo === reglas.PERIODO_CICLO ? 'ciclo de liquidación 26→25' : 'mes calendario';
       await db().collection('audit_logs').add({
         action: 'EVENTUAL_TOPE_EMPRESA', module: 'EVENTUALES', actorUid: auth.uid, actorName: auth.uid,
-        empresaId, bolsaCuil: null, details: `Tope de horas por mes por eventual: ${horas} h · ${periodoTxt}.`,
+        empresaId, bolsaCuil: null, details: `Tope de horas por mes por eventual: ${horas} h · ${periodoTxt} · margen ${margen} h (no se ofrece desde ${Math.max(0, horas - margen)} h).`,
         timestamp: admin.firestore.FieldValue.serverTimestamp(),
       });
-      return { ok: true, horas, periodo };
+      return { ok: true, horas, periodo, margen };
     }
 
     if (accion === 'guardarTopeExcepcion') {
@@ -349,16 +357,22 @@ export const gestionarEventual = functions.https.onCall(async (data, context) =>
         tope: ev?.tope || 50,
         texto: ev?.texto || reglas.textoHorasMes(0, ev?.tope || 50),
         aviso: ev?.aviso === true,
+        margen: ev?.margen ?? reglas.TOPE_MARGEN_DEFAULT,
+        cerca: ev?.cerca === true,
+        alcanzado: ev?.alcanzado === true,
+        chip: ev?.chip || null,
         excepcion: ev?.excepcion === true,
         motivo: ev?.motivoExcepcion || null,
         topeEmpresa: ev?.topeEmpresa || 50,
       };
     });
     const primero = evals.values().next().value as { periodo?: string; topeEmpresa?: number } | undefined;
+    const topeEmpresa = primero?.topeEmpresa ?? reglas.normalizarTope(empresaSnap.data()?.eventualesTopeHoras, 50) ?? 50;
     return {
       ok: true,
       periodo: primero?.periodo || reglas.normalizarPeriodo(empresaSnap.data()?.eventualesPeriodoHoras),
-      tope: primero?.topeEmpresa ?? reglas.normalizarTope(empresaSnap.data()?.eventualesTopeHoras, 50),
+      tope: topeEmpresa,
+      margen: reglas.normalizarMargen(empresaSnap.data()?.eventualesTopeMargen, reglas.TOPE_MARGEN_DEFAULT, topeEmpresa),
       filas,
     };
   }

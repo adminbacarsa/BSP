@@ -25,7 +25,8 @@ export type EventualMotivoCodigo =
   | 'DESCANSO_12H'
   | 'GENERO_SIN_ESPECIFICAR'
   | 'GENERO_NO_COINCIDE'
-  | 'TOPE_HORAS';
+  | 'TOPE_HORAS'
+  | 'TOPE_CERCA';
 
 /** Género de la ficha / legajo: 'M' | 'F' | '' (sin especificar). Mismos valores que `cupoGenero.mjs`. */
 export type GeneroEventual = 'M' | 'F' | '';
@@ -79,7 +80,18 @@ export type EventualCandidato = {
   /** Género de la ficha ('' = sin especificar). Cupo por género en eventos. */
   genero: GeneroEventual;
   /** Horas ya usadas en el período de la empresa contra el tope. `aviso` = ≥ 80% y todavía entra. */
-  horasMes?: { usadas: number; tope: number; texto: string; aviso: boolean } | null;
+  horasMes?: EventualHorasMes | null;
+};
+
+/** Horas del período contra el tope: `cerca` = dentro del margen (no se ofrece), `alcanzado` = usadas ≥ tope. */
+export type EventualHorasMes = {
+  usadas: number;
+  tope: number;
+  margen: number;
+  texto: string;
+  aviso: boolean;
+  cerca: boolean;
+  alcanzado: boolean;
 };
 
 export type EventualBolsaRow = {
@@ -112,7 +124,7 @@ export type EventualBolsaRow = {
    * Tope del período de esta empresa, ya resuelto (excepción o default) con las horas usadas
    * y las del turno que se evalúa. Lo carga el servidor; sin esto el motor no limita.
    */
-  topeHoras?: { usadas: number; tope: number; horasTurno: number } | null;
+  topeHoras?: { usadas: number; tope: number; horasTurno: number; margen?: number } | null;
 };
 
 export type EventualTramo = { startMs: number; endMs: number; /** Horas del turno (bruto/anexo). */ horas?: number; /** YYYY-MM-DD del tramo. */ fecha?: string };
@@ -174,7 +186,27 @@ export const EVENTUAL_MOTIVOS: Record<EventualMotivoCodigo, string> = {
   GENERO_SIN_ESPECIFICAR: 'Sin género en la ficha: no cuenta para el cupo por género.',
   GENERO_NO_COINCIDE: 'El hueco es de otro grupo (género).',
   TOPE_HORAS: 'Supera el tope mensual.',
+  TOPE_CERCA: 'Cerca del tope mensual.',
 };
+
+/** Motivos por tope de horas: el candidato no se ofrece, se cuenta como oculto. */
+export const TOPE_MOTIVOS: readonly EventualMotivoCodigo[] = ['TOPE_HORAS', 'TOPE_CERCA'];
+
+export function esOcultoPorTope(c: { motivoCodigo?: string | null } | null | undefined): boolean {
+  return !!c && TOPE_MOTIVOS.includes(String(c.motivoCodigo || '') as EventualMotivoCodigo);
+}
+
+/** Separa la lista en los que se muestran y los ocultos por tope («N eventuales ocultos por tope de horas»). */
+export function separarOcultosPorTope<T extends { motivoCodigo?: string | null }>(lista: T[]): { visibles: T[]; ocultos: T[] } {
+  const visibles: T[] = [];
+  const ocultos: T[] = [];
+  for (const c of lista || []) (esOcultoPorTope(c) ? ocultos : visibles).push(c);
+  return { visibles, ocultos };
+}
+
+export function textoOcultosPorTope(n: number): string {
+  return n === 1 ? '1 eventual oculto por tope de horas' : `${n} eventuales ocultos por tope de horas`;
+}
 
 function fmtHorasTope(n: number): string {
   const r = Math.round(Number(n) * 100) / 100;
@@ -186,10 +218,34 @@ export function textoTopeHoras(usadas: number, tope: number, horasTurno: number)
   return `Supera el tope mensual (${fmtHorasTope(usadas)}/${fmtHorasTope(tope)} h, este turno ${fmtHorasTope(horasTurno)} h)`;
 }
 
-export function resumenHorasMes(usadas: number, tope: number): { texto: string; aviso: boolean } {
+/** Mismo texto que `motivoCercaTope` (`topeHoras.mjs`). */
+export function textoCercaTope(usadas: number, tope: number, margen: number): string {
+  return `Cerca del tope mensual (${fmtHorasTope(usadas)}/${fmtHorasTope(tope)} h, margen ${fmtHorasTope(margen)} h)`;
+}
+
+export function resumenHorasMes(usadas: number, tope: number, margen = 0): EventualHorasMes {
   const u = Number(usadas) || 0;
   const t = Number(tope) || 0;
-  return { texto: `${fmtHorasTope(u)}/${fmtHorasTope(t)} h este mes`, aviso: t > 0 && u / t >= 0.8 };
+  const m = Math.max(0, Number(margen) || 0);
+  const alcanzado = t > 0 && u >= t - 1e-9;
+  const cerca = t > 0 && u >= t - m - 1e-9;
+  return {
+    usadas: u,
+    tope: t,
+    margen: m,
+    texto: `${fmtHorasTope(u)}/${fmtHorasTope(t)} h este mes`,
+    aviso: t > 0 && !cerca && u / t >= 0.8,
+    cerca,
+    alcanzado,
+  };
+}
+
+/** Chip de la bolsa: «Tope alcanzado» / «Cerca del tope» / null. */
+export function chipTopeHoras(h: Pick<EventualHorasMes, 'cerca' | 'alcanzado'> | null | undefined): 'Tope alcanzado' | 'Cerca del tope' | null {
+  if (!h) return null;
+  if (h.alcanzado) return 'Tope alcanzado';
+  if (h.cerca) return 'Cerca del tope';
+  return null;
 }
 
 export function isEventoShift(shift: object | null | undefined): boolean {
@@ -426,10 +482,12 @@ export function evaluarEventualParaHueco(
     const usadas = Number(tope.usadas) || 0;
     const topeN = Number(tope.tope);
     const horasTurno = Number(tope.horasTurno) || 0;
-    const resumen = resumenHorasMes(usadas, topeN);
+    const margen = Math.max(0, Number(tope.margen) || 0);
+    const resumen = resumenHorasMes(usadas, topeN, margen);
     const supera = usadas + horasTurno > topeN + 1e-9;
-    base.horasMes = { usadas, tope: topeN, texto: resumen.texto, aviso: !supera && resumen.aviso };
+    base.horasMes = { ...resumen, aviso: !supera && resumen.aviso };
     if (supera) return bloquear('TOPE_HORAS', textoTopeHoras(usadas, topeN, horasTurno));
+    if (resumen.cerca) return bloquear('TOPE_CERCA', textoCercaTope(usadas, topeN, margen));
     if (base.horasMes.aviso) base.alertas.push(resumen.texto);
   }
   return base;

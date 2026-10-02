@@ -132,7 +132,7 @@ export async function evaluarEventualesServer(
     });
     for (const row of bolsa) {
       const ev = topes.get(String(row.cuil || ''));
-      if (ev) row.topeHoras = { usadas: ev.usadas, tope: ev.tope, horasTurno: ev.horasTurno };
+      if (ev) row.topeHoras = { usadas: ev.usadas, tope: ev.tope, horasTurno: ev.horasTurno, margen: ev.margen };
     }
   }
 

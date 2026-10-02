@@ -5,7 +5,7 @@
  */
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { evaluarEventualParaHueco } from '../packages/ops-core/src/eventoCoverage.ts';
+import { chipTopeHoras, evaluarEventualParaHueco, eventualesParaHueco, separarOcultosPorTope, textoOcultosPorTope } from '../packages/ops-core/src/eventoCoverage.ts';
 
 const EMP = 'bacarsa';
 const hoy = '2026-10-02';
@@ -47,4 +47,33 @@ const libre = evaluarEventualParaHueco(fila(null), hueco, []);
 assert.equal(libre.elegible, true);
 assert.equal(libre.horasMes, undefined);
 
-console.log('OK\ttope en el motor único y paridad de eventoCoverage.ts');
+// Margen: con tope 50 y margen 2, quien tiene 48 h no se ofrece aunque el turno de 1 h entre.
+const cerca = evaluarEventualParaHueco(fila({ usadas: 48, tope: 50, horasTurno: 1, margen: 2 }), hueco, []);
+assert.equal(cerca.elegible, false);
+assert.equal(cerca.motivoCodigo, 'TOPE_CERCA');
+assert.equal(cerca.motivo, 'Cerca del tope mensual (48/50 h, margen 2 h)');
+assert.equal(cerca.horasMes?.cerca, true);
+assert.equal(cerca.horasMes?.alcanzado, false);
+assert.equal(chipTopeHoras(cerca.horasMes), 'Cerca del tope');
+const alcanzado = evaluarEventualParaHueco(fila({ usadas: 50, tope: 50, horasTurno: 1, margen: 2 }), hueco, []);
+assert.equal(alcanzado.motivoCodigo, 'TOPE_HORAS');
+assert.equal(chipTopeHoras(alcanzado.horasMes), 'Tope alcanzado');
+const bajoMargen = evaluarEventualParaHueco(fila({ usadas: 47, tope: 50, horasTurno: 1, margen: 2 }), hueco, []);
+assert.equal(bajoMargen.elegible, true);
+assert.equal(bajoMargen.horasMes?.aviso, true);
+assert.equal(chipTopeHoras(bajoMargen.horasMes), null);
+
+// Los selectores: el motor no los lista (sin incluirNoElegibles) y con incluirNoElegibles se separan para la línea «N ocultos».
+const bolsa = [
+  { ...fila({ usadas: 48, tope: 50, horasTurno: 1, margen: 2 }), cuil: '20111111119', nombre: 'Cerca, Uno' },
+  { ...fila({ usadas: 10, tope: 50, horasTurno: 1, margen: 2 }), cuil: '20222222228', nombre: 'Libre, Dos' },
+  { ...fila({ usadas: 50, tope: 50, horasTurno: 1, margen: 2 }), cuil: '20333333337', nombre: 'Lleno, Tres' },
+];
+const soloElegibles = eventualesParaHueco({ bolsa, hueco, otrasJornadas: [] });
+assert.deepEqual(soloElegibles.map((c) => c.cuil), ['20222222228']);
+const { visibles, ocultos } = separarOcultosPorTope(eventualesParaHueco({ bolsa, hueco, otrasJornadas: [], incluirNoElegibles: true }));
+assert.deepEqual(visibles.map((c) => c.cuil), ['20222222228']);
+assert.equal(ocultos.length, 2);
+assert.equal(textoOcultosPorTope(ocultos.length), '2 eventuales ocultos por tope de horas');
+
+console.log('OK\ttope y margen en el motor único, ocultos por tope y paridad de eventoCoverage.ts');

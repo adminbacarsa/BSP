@@ -8,6 +8,8 @@ import { horasDeJornada } from './jornadas.mjs';
 
 export const TOPE_HORAS_DEFAULT = 50;
 export const TOPE_AVISO_DESDE = 0.8;
+/** Horas antes del tope desde las que el eventual deja de ofrecerse (con tope 50 y margen 2: de 48 a 50 h). */
+export const TOPE_MARGEN_DEFAULT = 2;
 export const TOPE_HORAS_MAX = 400;
 export const RESERVA_TOPE_MS = 2 * 60 * 1000;
 
@@ -45,6 +47,14 @@ export function normalizarTope(valor, fallback = TOPE_HORAS_DEFAULT) {
   return n;
 }
 
+/** Margen ≥ 0 (y no mayor al tope). Si no es válido, el default (2) o `fallback`. */
+export function normalizarMargen(valor, fallback = TOPE_MARGEN_DEFAULT, tope = TOPE_HORAS_MAX) {
+  if (valor === undefined || valor === null || valor === '') return fallback;
+  const n = round2(valor);
+  if (!Number.isFinite(n) || n < 0) return fallback;
+  return Math.min(n, Number(tope) || TOPE_HORAS_MAX);
+}
+
 function ymd(y, m, d) {
   return `${y}-${pad(m)}-${pad(d)}`;
 }
@@ -78,8 +88,28 @@ export function topeEfectivo(empresa, excepcion) {
   const topeEmpresa = normalizarTope(empresa?.eventualesTopeHoras, TOPE_HORAS_DEFAULT);
   const horas = normalizarTope(excepcion?.horas, null);
   const motivo = String(excepcion?.motivo || '').trim();
-  if (horas && motivo) return { tope: horas, periodo, excepcion: true, motivo, topeEmpresa };
-  return { tope: topeEmpresa, periodo, excepcion: false, motivo: null, topeEmpresa };
+  const tope = horas && motivo ? horas : topeEmpresa;
+  const margen = normalizarMargen(empresa?.eventualesTopeMargen, TOPE_MARGEN_DEFAULT, tope);
+  if (horas && motivo) return { tope, periodo, excepcion: true, motivo, topeEmpresa, margen };
+  return { tope, periodo, excepcion: false, motivo: null, topeEmpresa, margen };
+}
+
+export function motivoCercaTope(usadas, tope, margen) {
+  return `Cerca del tope mensual (${fmtHoras(usadas)}/${fmtHoras(tope)} h, margen ${fmtHoras(margen)} h)`;
+}
+
+/** Chip de la bolsa: «Tope alcanzado» (usadas ≥ tope), «Cerca del tope» (dentro del margen) o null. */
+export function chipTope({ usadas, tope, margen }) {
+  const u = round2(usadas);
+  const t = round2(tope);
+  if (!(t > 0)) return null;
+  if (u >= t - 1e-9) return 'Tope alcanzado';
+  if (u >= t - Math.max(0, round2(margen) || 0) - 1e-9) return 'Cerca del tope';
+  return null;
+}
+
+export function textoOcultosPorTope(n) {
+  return n === 1 ? '1 eventual oculto por tope de horas' : `${n} eventuales ocultos por tope de horas`;
 }
 
 export function textoHorasMes(usadas, tope) {
@@ -162,30 +192,43 @@ export function horasComprometidas({ turnos, reservas, empresaId, desde, hasta, 
   return round2(total);
 }
 
-export function evaluarTope({ usadas, tope, horasTurno }) {
+/**
+ * `supera` = el turno pasa el tope. `cerca` = las usadas ya están dentro del margen (no se ofrece).
+ * `oculto` = cualquiera de las dos: no aparece como opción y el servidor no acepta.
+ */
+export function evaluarTope({ usadas, tope, horasTurno, margen }) {
   const u = round2(usadas);
   const t = round2(tope);
   const h = round2(horasTurno);
+  const m = Math.max(0, round2(margen) || 0);
   const proyectadas = round2(u + h);
   const supera = t > 0 && proyectadas > t + 1e-9;
-  const aviso = t > 0 && !supera && u / t >= TOPE_AVISO_DESDE;
+  const cerca = t > 0 && u >= t - m - 1e-9;
+  const alcanzado = t > 0 && u >= t - 1e-9;
+  const oculto = supera || cerca;
+  const aviso = t > 0 && !oculto && u / t >= TOPE_AVISO_DESDE;
   return {
     usadas: u,
     tope: t,
+    margen: m,
     horasTurno: h,
     proyectadas,
     supera,
+    cerca,
+    alcanzado,
+    oculto,
     aviso,
     texto: textoHorasMes(u, t),
-    motivo: supera ? motivoTopeHoras(u, t, h) : null,
+    chip: chipTope({ usadas: u, tope: t, margen: m }),
+    motivo: supera ? motivoTopeHoras(u, t, h) : cerca ? motivoCercaTope(u, t, m) : null,
   };
 }
 
 /**
- * Jornadas nuevas agrupadas por período. Devuelve la evaluación que supera el tope,
- * o si ninguna lo hace, la del período más cargado (para el aviso del 80%).
+ * Jornadas nuevas agrupadas por período. Devuelve la evaluación que queda oculta por tope
+ * (supera o dentro del margen), o si ninguna, la del período más cargado (para el aviso del 80%).
  */
-export function evaluarJornadasContraTope({ turnos, reservas, empresaId, jornadas, periodo, tope, excluirIds, ahoraMs }) {
+export function evaluarJornadasContraTope({ turnos, reservas, empresaId, jornadas, periodo, tope, margen, excluirIds, ahoraMs }) {
   const grupos = new Map();
   for (const jornada of jornadas || []) {
     const fecha = String(jornada?.fecha || '').slice(0, 10);
@@ -200,8 +243,8 @@ export function evaluarJornadasContraTope({ turnos, reservas, empresaId, jornada
     const usadas = horasComprometidas({
       turnos, reservas, empresaId, desde: g.desde, hasta: g.hasta, excluirIds, ahoraMs, jornadasNuevas: jornadas,
     });
-    const ev = { ...evaluarTope({ usadas, tope, horasTurno: g.horasNuevas }), desde: g.desde, hasta: g.hasta, clave: g.clave };
-    if (ev.supera) return ev;
+    const ev = { ...evaluarTope({ usadas, tope, margen, horasTurno: g.horasNuevas }), desde: g.desde, hasta: g.hasta, clave: g.clave };
+    if (ev.oculto) return ev;
     if (!peor || ev.proyectadas > peor.proyectadas) peor = ev;
   }
   return peor;

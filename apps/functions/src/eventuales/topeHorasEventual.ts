@@ -4,7 +4,7 @@
  * período, y deja una reserva de 2 min para que dos aceptaciones a la vez no se pisen.
  */
 import * as admin from 'firebase-admin';
-import { FieldValue, Timestamp } from 'firebase-admin/firestore';
+import { Timestamp } from 'firebase-admin/firestore';
 import { AR_OFFSET_MS, arYmd } from '../common/arClock';
 
 export type JornadaTope = { fecha: string; horaInicio: string; horaFin?: string; horas: number };
@@ -12,10 +12,16 @@ export type JornadaTope = { fecha: string; horaInicio: string; horaFin?: string;
 export type EvalTope = {
   usadas: number;
   tope: number;
+  margen: number;
   horasTurno: number;
   supera: boolean;
+  /** Las usadas ya están dentro del margen: no se ofrece ni se acepta. */
+  cerca: boolean;
+  alcanzado: boolean;
+  oculto: boolean;
   aviso: boolean;
   texto: string;
+  chip: 'Tope alcanzado' | 'Cerca del tope' | null;
   motivo: string | null;
   desde?: string;
   hasta?: string;
@@ -31,7 +37,7 @@ type LibTope = {
   PERIODO_CALENDARIO: string;
   PERIODO_CICLO: string;
   rangoPeriodo: (fecha: string, periodo: string) => { desde: string; hasta: string; clave: string } | null;
-  topeEfectivo: (empresa: unknown, excepcion: unknown) => { tope: number; periodo: string; excepcion: boolean; motivo: string | null; topeEmpresa: number };
+  topeEfectivo: (empresa: unknown, excepcion: unknown) => { tope: number; periodo: string; excepcion: boolean; motivo: string | null; topeEmpresa: number; margen: number };
   horasDeTurnoEventual: (turno: unknown) => number;
   evaluarJornadasContraTope: (input: Record<string, unknown>) => (EvalTope & { desde: string; hasta: string }) | null;
   reservasVigentes: (reservas: unknown[], ahoraMs: number) => { empresaId?: string; fecha?: string; horaInicio?: string; horas?: number; venceAtMs?: number }[];
@@ -164,12 +170,13 @@ export async function evaluarTopeCuils(
       jornadas: p.jornadas,
       periodo: efectivo.periodo,
       tope: efectivo.tope,
+      margen: efectivo.margen,
       excluirIds: p.excluirTurnoIds,
       ahoraMs,
     });
     const vacio: EvalTope = {
-      usadas: 0, tope: efectivo.tope, horasTurno: 0, supera: false,
-      aviso: false, texto: reglas.textoHorasMes(0, efectivo.tope), motivo: null,
+      usadas: 0, tope: efectivo.tope, margen: efectivo.margen, horasTurno: 0, supera: false, cerca: false, alcanzado: false, oculto: false,
+      aviso: false, texto: reglas.textoHorasMes(0, efectivo.tope), chip: null, motivo: null,
       excepcion: efectivo.excepcion, motivoExcepcion: efectivo.motivo, topeEmpresa: efectivo.topeEmpresa, periodo: efectivo.periodo,
     };
     out.set(cuil, ev ? {
@@ -225,7 +232,7 @@ export async function reservarTopeHoras(
       empresa: empresaSnap.data() || {},
     });
     const ev = evals.get(cuil);
-    if (ev?.supera) return { ok: false, mensaje: ev.motivo || 'Supera el tope mensual.' };
+    if (ev?.oculto) return { ok: false, mensaje: ev.motivo || 'Supera el tope mensual.' };
     const vigentes = reglas.reservasVigentes(data.topeHorasReservas || [], ahoraMs)
       .filter((r) => !jornadas.some((j) => j.fecha === r.fecha && j.horaInicio === r.horaInicio));
     const nuevas = jornadas.map((j) => ({
@@ -239,5 +246,3 @@ export async function reservarTopeHoras(
     return { ok: true };
   });
 }
-
-export { FieldValue };

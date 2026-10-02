@@ -106,8 +106,12 @@ export {
   eventualesParaHueco,
   bloqueoCruceEventual,
   planEventualAusente,
+  esOcultoPorTope,
+  separarOcultosPorTope,
+  textoOcultosPorTope,
+  chipTopeHoras,
 } from './eventoCoverage';
-export type { EventualCandidato, EventualAusentePlan, EventualesHuecoInput, EventualBolsaRow } from './eventoCoverage';
+export type { EventualCandidato, EventualAusentePlan, EventualesHuecoInput, EventualBolsaRow, EventualHorasMes } from './eventoCoverage';
 export {
   COVERAGE_CASCADE_ORDER,
   COVERAGE_LEGACY_CANDIDATE_TYPES,

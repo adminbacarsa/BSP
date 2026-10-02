@@ -184,7 +184,7 @@ export function EventualesMovil() {
     [empresaId, fichas],
   );
 
-  const [horasMes, setHorasMes] = useState<Record<string, { texto: string; aviso: boolean }>>({});
+  const [horasMes, setHorasMes] = useState<Record<string, { texto: string; aviso: boolean; chip: 'Tope alcanzado' | 'Cerca del tope' | null }>>({});
 
   useEffect(() => {
     if (!empresaId) return;
@@ -192,10 +192,10 @@ export function EventualesMovil() {
     void runCallableOnline('Horas del mes', async () => {
       const fn = httpsCallable(functions, 'gestionarEventual');
       const res = await fn({ accion: 'horasMes', empresaId });
-      const data = res.data as { filas?: { cuil: string; texto: string; aviso: boolean }[] };
+      const data = res.data as { filas?: { cuil: string; texto: string; aviso: boolean; chip?: 'Tope alcanzado' | 'Cerca del tope' | null }[] };
       if (!vivo) return;
-      const map: Record<string, { texto: string; aviso: boolean }> = {};
-      for (const fila of data.filas || []) map[fila.cuil] = { texto: fila.texto, aviso: fila.aviso };
+      const map: Record<string, { texto: string; aviso: boolean; chip: 'Tope alcanzado' | 'Cerca del tope' | null }> = {};
+      for (const fila of data.filas || []) map[fila.cuil] = { texto: fila.texto, aviso: fila.aviso, chip: fila.chip || null };
       setHorasMes(map);
     }).catch(() => { /* la bolsa se ve igual sin las horas */ });
     return () => { vivo = false; };
@@ -221,6 +221,7 @@ export function EventualesMovil() {
           exigirAltaArca: ficha.exigirAltaArca,
           horasMes: horasMes[ficha.id]?.texto,
           horasAviso: horasMes[ficha.id]?.aviso,
+          chipTope: horasMes[ficha.id]?.chip || null,
         };
       });
   }, [buscar, empresaId, fichas, horasMes]);

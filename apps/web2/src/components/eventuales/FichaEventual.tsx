@@ -67,7 +67,7 @@ type Props = {
   onReactivar: () => void;
   onVolver?: () => void;
   /** Horas del período en la empresa activa (`32/50 h este mes`). */
-  horasMes?: { texto: string; aviso: boolean; usadas: number; tope: number; excepcion?: boolean; motivo?: string | null; topeEmpresa?: number } | null;
+  horasMes?: { texto: string; aviso: boolean; usadas: number; tope: number; excepcion?: boolean; motivo?: string | null; topeEmpresa?: number; chip?: string | null; alcanzado?: boolean; cerca?: boolean } | null;
   /** Guarda o quita (horas null) la excepción de tope de esta persona. */
   onGuardarTope?: (horas: number | null, motivo: string) => Promise<void>;
 };
@@ -267,6 +267,11 @@ export default function FichaEventual({ ficha, detalle, marcos, documentos, empr
             {horasMes && (
               <span data-horas-mes title={horasMes.excepcion ? `Excepción: ${horasMes.motivo || ''}` : 'Tope de la empresa'} className={`rounded-full border px-2 py-0.5 text-[10px] font-black ${horasMes.aviso ? 'border-amber-300 bg-amber-50 text-amber-800' : 'border-slate-200 bg-slate-50 text-slate-600'}`}>
                 {horasMes.texto}{horasMes.excepcion ? ' · excepción' : ''}
+              </span>
+            )}
+            {horasMes?.chip && (
+              <span data-chip-tope={horasMes.alcanzado ? 'alcanzado' : 'cerca'} title="No se ofrece en Planificación, eventos ni cobertura hasta el próximo período" className={`rounded-full border px-2 py-0.5 text-[10px] font-black ${horasMes.alcanzado ? 'border-rose-200 bg-rose-50 text-rose-800' : 'border-amber-300 bg-amber-50 text-amber-800'}`}>
+                {horasMes.chip}
               </span>
             )}
             {etiquetasPrueba.map((t) => (
