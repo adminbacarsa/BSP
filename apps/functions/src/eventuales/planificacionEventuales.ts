@@ -329,6 +329,12 @@ export const listarCandidatosEventuales = functions.https.onCall(async (data, co
     const otrasJornadas = await otrasJornadasDe(bolsa.cuil, jornadas, excluir);
     candidatos.push(evaluarCandidato({ bolsa, empresaId, jornadas, otrasJornadas, hoy, objetivoGeo }));
   }
+  const { puntajesPorClave } = await import('../desempeno/puntajeGuardiaJob');
+  const scores = await puntajesPorClave(db(), candidatos.map((c) => String((c as { cuil?: string }).cuil || '')));
+  for (const c of candidatos) {
+    const n = scores.get(String((c as { cuil?: string }).cuil || ''));
+    if (typeof n === 'number') (c as { puntaje?: number }).puntaje = n;
+  }
   const lista = ordenarCandidatos(candidatos).map((c) => {
     const { legajos, ...resto } = c as Record<string, unknown> & { legajos?: { empresaId?: string; employeeId?: string }[] };
     return { ...resto, employeeId: (legajos || []).find((l) => l.empresaId === empresaId)?.employeeId || null } as Record<string, unknown>;

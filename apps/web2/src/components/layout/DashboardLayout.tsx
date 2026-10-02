@@ -29,6 +29,7 @@ import { MovilBottomNav } from '@/components/movil/MovilBottomNav';
 import { MovilDesktopOnly } from '@/components/movil/MovilDesktopOnly';
 import { MovilMenuModulos } from '@/components/movil/MovilMenuModulos';
 import { useMovilMode } from '@/lib/movil/useMovilMode';
+import { GuardiaPuntajeProvider } from '@/context/GuardiaPuntajeContext';
 import { movilModuleForPath, movilRouteHasMobileVersion } from '@/lib/movil/navItems';
 
 /** Título del header según el módulo (ruta) actual */
@@ -951,7 +952,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   return (
     <PageHeaderProvider>
       <PendingGuardDeviceCountBoundary>
-        <LayoutInner>{children}</LayoutInner>
+        <GuardiaPuntajeProvider>
+          <LayoutInner>{children}</LayoutInner>
+        </GuardiaPuntajeProvider>
       </PendingGuardDeviceCountBoundary>
     </PageHeaderProvider>
   );

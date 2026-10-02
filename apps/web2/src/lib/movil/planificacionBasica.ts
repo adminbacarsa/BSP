@@ -51,6 +51,7 @@ export type CandidatoMovil = {
   monthHours: number;
   cap: number;
   km: number | null;
+  puntaje?: number;
   blocked: boolean;
   reason: string | null;
 };
@@ -62,6 +63,7 @@ export type EmpleadoMovil = {
   lat?: number | null;
   lng?: number | null;
   monthHours: number;
+  puntaje?: number;
 };
 
 export function hoyArgentina(now = new Date()): string {
@@ -280,7 +282,7 @@ export function candidatosParaHueco(input: {
     if (pisa) continue;
     const km = haversineKm(Number(emp.lat), Number(emp.lng), Number(input.objLat), Number(input.objLng));
     if (licencia) {
-      out.push({ employeeId: emp.id, name: emp.name, tab, monthHours: emp.monthHours, cap, km: km == null ? null : Math.round(km * 10) / 10, blocked: true, reason: `Tiene licencia ${licencia.code} ese día.` });
+      out.push({ employeeId: emp.id, name: emp.name, tab, monthHours: emp.monthHours, cap, km: km == null ? null : Math.round(km * 10) / 10, puntaje: emp.puntaje, blocked: true, reason: `Tiene licencia ${licencia.code} ese día.` });
       continue;
     }
     const conflicto = conflictosDeAsignacion({
@@ -303,6 +305,7 @@ export function candidatosParaHueco(input: {
       monthHours: emp.monthHours,
       cap,
       km: km == null ? null : Math.round(km * 10) / 10,
+      puntaje: emp.puntaje,
       blocked: conflicto.blocked,
       reason: conflicto.reason,
     });
@@ -311,6 +314,7 @@ export function candidatosParaHueco(input: {
     if (a.blocked !== b.blocked) return a.blocked ? 1 : -1;
     if (a.km != null && b.km != null && a.km !== b.km) return a.km - b.km;
     if ((a.km == null) !== (b.km == null)) return a.km == null ? 1 : -1;
+    if (typeof a.puntaje === 'number' && typeof b.puntaje === 'number' && a.puntaje !== b.puntaje) return b.puntaje - a.puntaje;
     return a.name.localeCompare(b.name, 'es');
   });
 }

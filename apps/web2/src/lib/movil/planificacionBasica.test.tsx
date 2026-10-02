@@ -314,3 +314,18 @@ test('publicar: borrador con publish, corrección con correct; el mismo markup p
   assert.match(a, /text-emerald-600[^>]*>Publicado</, 'el estado conserva su color semántico');
   assert.equal(/bg-\[#(1d4ed8|fde047)\]/.test(a), false);
 });
+
+test('puntaje desempata dentro de la misma distancia y no salta un bloqueado', () => {
+  const hueco = franjasDe([
+    turno({ id: 'v1', employeeId: 'VACANTE', code: 'M', date: '2026-10-03', start: '07:00', end: '15:00' }),
+  ], ['2026-10-02', ...dias]).find((f) => f.id === 'v1');
+  if (!hueco) throw new Error('falta el hueco');
+  const empleados: EmpleadoMovil[] = [
+    { id: 'ana', name: 'Ana', preferredObjectiveId: 'obj-peaje', lat: -31.4, lng: -64.18, monthHours: 40, puntaje: 40 },
+    { id: 'zoe', name: 'Zoe', preferredObjectiveId: 'obj-peaje', lat: -31.4, lng: -64.18, monthHours: 40, puntaje: 90 },
+  ];
+  const turnos = [turno({ id: 'v1', employeeId: 'VACANTE', code: 'M', date: '2026-10-03', start: '07:00', end: '15:00' })];
+  const candidatos = candidatosParaHueco({ hueco, empleados, turnos, objLat: -31.4, objLng: -64.18 });
+  assert.equal(candidatos[0]?.employeeId, 'zoe');
+  assert.equal(candidatos[1]?.employeeId, 'ana');
+});

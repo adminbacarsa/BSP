@@ -19,6 +19,8 @@ export type EventualCandidato = {
   uid?: string;
   distanceKm: number | null;
   confiabilidad: number;
+  /** Desempate después de la distancia y la confiabilidad. */
+  puntaje?: number;
   elegible?: boolean;
   motivo?: string;
 };
@@ -32,6 +34,7 @@ export type EventualBolsaRow = {
   aptoPsicofisico?: { estado?: string; vencimiento?: string };
   domicilioGeo?: { lat?: number; lng?: number } | null;
   confiabilidad?: number;
+  puntaje?: number;
   uid?: string;
   legajos?: { employeeId?: string; empresaId?: string }[];
   marcos?: Record<string, { firmado?: boolean; vencimiento?: string; estado?: string; fechaFirma?: string }>;
@@ -158,6 +161,7 @@ export function eventualesParaHueco(input?: EventualesHuecoInput | null): Eventu
       ...(row.uid ? { uid: String(row.uid) } : {}),
       distanceKm,
       confiabilidad: Number(row.confiabilidad) || 0,
+      ...(typeof row.puntaje === 'number' ? { puntaje: row.puntaje } : {}),
       elegible: marcoOk,
       ...(marcoOk ? {} : { motivo: 'Sin contrato marco' }),
     });
@@ -167,6 +171,7 @@ export function eventualesParaHueco(input?: EventualesHuecoInput | null): Eventu
     const db = b.distanceKm == null ? Number.POSITIVE_INFINITY : b.distanceKm;
     if (da !== db) return da - db;
     if (a.confiabilidad !== b.confiabilidad) return b.confiabilidad - a.confiabilidad;
+    if (typeof a.puntaje === 'number' && typeof b.puntaje === 'number' && a.puntaje !== b.puntaje) return b.puntaje - a.puntaje;
     return a.employeeName.localeCompare(b.employeeName, 'es');
   });
   return out;

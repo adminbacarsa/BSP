@@ -14,6 +14,7 @@ import {
 import { useOnlineFlag } from '@/components/movil/OperacionScreens';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
+import { useGuardiaPuntaje } from '@/context/guardiaPuntajeStore';
 import { useCronogramaSinPublicar } from '@/hooks/useCronogramaSinPublicar';
 import { functions } from '@/lib/firebase';
 import { getDateKeyInTimezone } from '@/lib/crm/crmDateUtils';
@@ -97,6 +98,7 @@ function mesLabelDe(ym: string): string {
 
 export function PlanificacionMovil() {
   const { empresaId, empresa } = useEmpresa();
+  const { totalDe } = useGuardiaPuntaje();
   const { isSuperAdmin, rolePermissions, canReadModule, user } = useAuth();
   const online = useOnlineFlag();
   const empresaSheet = useEmpresaSheet();
@@ -334,9 +336,12 @@ export function PlanificacionMovil() {
       objLat: objetivo?.lat,
       objLng: objetivo?.lng,
       banda: bandaCubrir,
-      empleados: empleados.map((emp) => ({ ...emp, monthHours: horasMesEmpleado(emp.id, ym, base) })),
+      empleados: empleados.map((emp) => {
+        const puntaje = totalDe(emp.id);
+        return { ...emp, monthHours: horasMesEmpleado(emp.id, ym, base), ...(puntaje == null ? {} : { puntaje }) };
+      }),
     }).filter((c) => !(sheet?.tipo === 'cubrir' && sheet.reemplazo && c.employeeId === franjaAbierta.employeeId));
-  }, [franjaAbierta, visibles, empleados, objetivo, sheet, bandaCubrir?.code, bandaCubrir?.start, bandaCubrir?.end]);
+  }, [franjaAbierta, visibles, empleados, objetivo, sheet, bandaCubrir?.code, bandaCubrir?.start, bandaCubrir?.end, totalDe]);
 
   // Permuta: compañeros del mismo objetivo ese día con los que el cambio no rompe tope, solape ni descanso.
   const companeros = franjaAbierta ? companerosCompatibles(franjaAbierta, visibles) : [];

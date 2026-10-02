@@ -4209,6 +4209,78 @@ export const scheduledHoursLedgerDirty = onScheduleV2(
   },
 );
 
+const puntajeOpts = {
+  region: 'us-central1' as const,
+  timeoutSeconds: 60,
+  memory: '256MiB' as const,
+};
+
+export const onTurnoWritePuntaje = onDocumentWrittenV2(
+  { document: 'turnos/{id}', ...puntajeOpts },
+  async (event) => {
+    const { handlePuntajeDirtyEvent } = await import('./desempeno/puntajeGuardiaJob');
+    await handlePuntajeDirtyEvent(event, ['employeeId']);
+  },
+);
+export const onAusenciaWritePuntaje = onDocumentWrittenV2(
+  { document: 'ausencias/{id}', ...puntajeOpts },
+  async (event) => {
+    const { handlePuntajeDirtyEvent } = await import('./desempeno/puntajeGuardiaJob');
+    await handlePuntajeDirtyEvent(event, ['employeeId']);
+  },
+);
+export const onConvocatoriaWritePuntaje = onDocumentWrittenV2(
+  { document: 'convocatorias_cobertura/{id}', ...puntajeOpts },
+  async (event) => {
+    const { handlePuntajeDirtyEvent } = await import('./desempeno/puntajeGuardiaJob');
+    await handlePuntajeDirtyEvent(event, ['candidateEmployeeId']);
+  },
+);
+export const onSolicitudEventoWritePuntaje = onDocumentWrittenV2(
+  { document: 'solicitudes_evento/{id}', ...puntajeOpts },
+  async (event) => {
+    const { handlePuntajeDirtyEvent } = await import('./desempeno/puntajeGuardiaJob');
+    await handlePuntajeDirtyEvent(event, ['empleadoId']);
+  },
+);
+export const onDesempenoEventoWritePuntaje = onDocumentWrittenV2(
+  { document: 'guardia_desempeno_eventos/{id}', ...puntajeOpts },
+  async (event) => {
+    const { handlePuntajeDirtyEvent } = await import('./desempeno/puntajeGuardiaJob');
+    await handlePuntajeDirtyEvent(event, ['empleadoId']);
+  },
+);
+
+export const scheduledPuntajeDirty = onScheduleV2(
+  {
+    schedule: '*/10 * * * *',
+    timeZone: 'America/Argentina/Buenos_Aires',
+    timeoutSeconds: 180,
+    memory: '256MiB',
+    region: 'us-central1',
+  },
+  async () => {
+    const { procesarPuntajeDirty } = await import('./desempeno/puntajeGuardiaJob');
+    const n = await procesarPuntajeDirty(admin.firestore());
+    if (n > 0) console.log(`[puntaje] recalculados=${n}`);
+  },
+);
+
+export const scheduledPuntajeDiario = onScheduleV2(
+  {
+    schedule: '50 4 * * *',
+    timeZone: 'America/Argentina/Buenos_Aires',
+    timeoutSeconds: 540,
+    memory: '512MiB',
+    region: 'us-central1',
+  },
+  async () => {
+    const { runPuntajeDiario } = await import('./desempeno/puntajeGuardiaJob');
+    const r = await runPuntajeDiario(admin.firestore());
+    console.log(`[puntaje] diario empresas=${r.empresas} personas=${r.personas}`);
+  },
+);
+
 export const scheduledHoursLedgerNightly = onScheduleV2(
   {
     schedule: '40 3 * * *',

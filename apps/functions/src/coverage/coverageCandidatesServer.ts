@@ -17,6 +17,7 @@ import {
   type CoverageGapView,
   type CoverageShiftView,
 } from './coverageCandidates';
+import { puntajesPorClave } from '../desempeno/puntajeGuardiaJob';
 
 export type CascadeConvLike = {
   empresaId: string;
@@ -214,6 +215,13 @@ export async function loadCoverageCandidateInput(
     };
   });
 
+  const scores = await puntajesPorClave(db, employees.map((e) => e.id));
+  const puntajePorEmpleado: Record<string, number> = {};
+  for (const emp of employees) {
+    const n = scores.get(emp.id);
+    if (typeof n === 'number') puntajePorEmpleado[emp.id] = n;
+  }
+
   return {
     nowMs: Date.now(),
     gap,
@@ -223,6 +231,7 @@ export async function loadCoverageCandidateInput(
     engagements,
     hardCapMs: SHIFT_HARD_CAP_MS,
     purpose: opts?.purpose || 'select',
+    puntajePorEmpleado,
   };
 }
 

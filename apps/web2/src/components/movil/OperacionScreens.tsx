@@ -15,6 +15,7 @@ import { accionesParaTurno, avisoManualRestanteSeg, type GuardAccion, type Guard
 import { etiquetaProximas, resumenProximas, type ProximaFranja } from '@/lib/movil/proximasFranjas';
 import { OPS_NOTA_MAX } from '@/lib/operaciones/opsNota';
 import { movilFechaCorta } from '@/lib/movil/fechaCorta';
+import { PuntajeChip } from '@/components/desempeno/PuntajeChip';
 
 /**
  * Botones de la hoja de acciones: primario = color de la empresa (negro por defecto),
@@ -102,6 +103,7 @@ export function GuardAccionesSheetBody({
           <strong className={`truncate text-sm font-semibold ${shift.isUnassigned ? 'text-rose-700' : 'text-slate-900'}`}>
             {shift.isUnassigned ? `VACANTE${shift.vacancyBand ? ` · ${shift.vacancyBand}` : ''}` : shift.employeeName || 'Sin nombre'}
           </strong>
+          {!shift.isUnassigned && <PuntajeChip sujetoId={String((shift as { bolsaCuil?: string }).bolsaCuil || shift.employeeId || '')} />}
           <MovilBadge tone={visual} className="ml-auto">{guardStatusLabel(shift)}</MovilBadge>
         </div>
         <GuardDetalleLines shift={shift} siblings={siblings} now={nowMs} />
@@ -581,6 +583,7 @@ export function GuardCard({
       >
         <span className="flex items-center gap-1.5">
           <strong className={`truncate text-[13px] font-semibold leading-5 ${c.esVacante ? 'text-rose-600' : 'text-slate-900'}`}>{c.nombre}</strong>
+          {!c.esVacante && <PuntajeChip sujetoId={String((shift as { bolsaCuil?: string }).bolsaCuil || shift.employeeId || '')} />}
           <span className="shrink-0 rounded border border-slate-300 px-1 text-[10px] font-bold leading-4 text-slate-700" data-movil-code={c.code}>{c.code}</span>
           {c.extra && <span className="shrink-0 rounded border border-slate-300 px-1 text-[10px] font-bold leading-4 text-slate-700" data-movil-extra={c.extra}>{c.extra}</span>}
           <span className={`ml-auto flex shrink-0 items-center gap-1 text-[10px] font-bold leading-4 tabular-nums ${MOVIL_TEXT[visual]}`} data-movil-estado={c.estado.kind}>
@@ -938,6 +941,7 @@ export function OperacionScreens({
                         <div className="min-w-0 flex-1">
                           <MovilBadge tone={visual}>{guardStatusLabel(shift)}</MovilBadge>
                           <h3 className="mt-0.5 truncate text-[15px] font-semibold leading-tight text-slate-900">{shift.isUnassigned ? `VACANTE${shift.vacancyBand ? ` · ${shift.vacancyBand}` : ''}` : shift.employeeName || 'Vacante'}</h3>
+                          {!shift.isUnassigned && <PuntajeChip sujetoId={String((shift as { bolsaCuil?: string }).bolsaCuil || shift.employeeId || '')} />}
                         </div>
                       </div>
                       <GuardDetalleLines shift={shift} siblings={siblingsOf(shift)} now={nowMs} />

@@ -179,6 +179,7 @@ export function ordenarCandidatos(lista) {
     if (a.distanciaKm != null && b.distanciaKm != null && a.distanciaKm !== b.distanciaKm) return a.distanciaKm - b.distanciaKm;
     if ((a.distanciaKm == null) !== (b.distanciaKm == null)) return a.distanciaKm == null ? 1 : -1;
     if ((a.confiabilidad ?? -1) !== (b.confiabilidad ?? -1)) return (b.confiabilidad ?? -1) - (a.confiabilidad ?? -1);
+    if (typeof a.puntaje === 'number' && typeof b.puntaje === 'number' && a.puntaje !== b.puntaje) return b.puntaje - a.puntaje;
     return String(a.nombre).localeCompare(String(b.nombre), 'es');
   });
 }

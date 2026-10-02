@@ -210,6 +210,8 @@ export interface BuildCoverageCandidatesInput {
   purpose?: 'select' | 'accept';
   /** No contar esta convocatoria como “ya convocado”. */
   ignoreConvocatoriaShiftId?: string;
+  /** Desempate dentro del escalón. Si falta en alguno de los dos, se usa el nombre. */
+  puntajePorEmpleado?: Record<string, number>;
 }
 
 export interface CoverageCandidateRow {
@@ -683,6 +685,9 @@ export function buildCoverageCandidates(input: BuildCoverageCandidatesInput): Co
       if (a.eligible !== b.eligible) return a.eligible ? -1 : 1;
       if (!!a.retainedForGap !== !!b.retainedForGap) return a.retainedForGap ? -1 : 1;
       if (a.positionRank !== b.positionRank) return a.positionRank - b.positionRank;
+      const pa = input.puntajePorEmpleado?.[a.employeeId];
+      const pb = input.puntajePorEmpleado?.[b.employeeId];
+      if (typeof pa === 'number' && typeof pb === 'number' && pa !== pb) return pb - pa;
       return a.employeeName.localeCompare(b.employeeName, 'es');
     });
   }

@@ -109,6 +109,7 @@ export function buildOpsCandidateInput(args: {
   absences?: unknown[];
   sessionBusy?: string[];
   now?: Date;
+  puntajePorEmpleado?: Record<string, number>;
 }): BuildCoverageCandidatesInput {
   const absence = args.absenceShift;
   const startMs = coverageMs(absence.shiftDateObj ?? absence.startTime);
@@ -153,6 +154,7 @@ export function buildOpsCandidateInput(args: {
     employees,
     sessionBusyEmployeeIds: args.sessionBusy || [],
     purpose: 'select',
+    ...(args.puntajePorEmpleado ? { puntajePorEmpleado: args.puntajePorEmpleado } : {}),
   };
 }
 
@@ -200,6 +202,7 @@ export function buildOpsCandidateView(args: {
   absences?: unknown[];
   sessionBusy?: string[];
   now?: Date;
+  puntajePorEmpleado?: Record<string, number>;
 }): OpsCandidateView {
   const input = buildOpsCandidateInput(args);
   const set = buildCoverageCandidates(input);
