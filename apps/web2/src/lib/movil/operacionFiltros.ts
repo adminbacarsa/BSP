@@ -1,5 +1,6 @@
 import { isActionableOpsVacancy, shiftMatchesOpsViewTab } from '@cosp/ops-core';
 import { shiftCountsInOpsHeader } from '@/lib/operaciones/opsHeaderCounts';
+import { eventClientId, eventClientName, eventGroupKey, eventGroupLabel, isEventShift } from '@/lib/operaciones/eventoCc';
 import type { GuardDetalleShift } from '@/lib/movil/guardDetalle';
 
 /** Solapas del escritorio que el celular muestra como contadores-filtro. */
@@ -38,8 +39,15 @@ export type OpsShiftMovil = GuardDetalleShift & {
   isFranco?: boolean;
   eventoId?: string;
   eventoNombre?: string;
+  servicioId?: string;
   servicioNombre?: string;
   origin?: string;
+  /** Ubicación del evento resuelta por el monitor (`eventoEnrichFields`). */
+  eventoObjectiveId?: string | null;
+  eventoObjectiveName?: string | null;
+  eventoLugar?: string | null;
+  eventoClientId?: string | null;
+  eventoClientName?: string | null;
 };
 
 export interface OpsObjetivoMovil {
@@ -48,6 +56,8 @@ export interface OpsObjetivoMovil {
   client: string;
   clientId: string;
   esEvento: boolean;
+  /** Evento: lugar (objetivo del evento o dirección). */
+  lugar?: string | null;
   active: number;
   retention: number;
   absent: number;
@@ -63,24 +73,34 @@ export interface OpsClienteMovil {
   objetivos: Array<{ id: string; name: string; turnos: number }>;
 }
 
+/** Mismo criterio que el escritorio y el mapa (`lib/operaciones/eventoCc.ts`). */
 export function esTurnoEvento(shift: { code?: unknown; origin?: unknown }): boolean {
-  const code = String(shift?.code || '').trim().toUpperCase();
-  const origin = String(shift?.origin || '').trim().toUpperCase();
-  return code === 'EV' || origin === 'EVENTO';
+  return isEventShift(shift);
 }
 
-function claveGrupo(shift: OpsShiftMovil): string {
-  if (esTurnoEvento(shift)) return `ev_${String(shift.eventoId || shift.eventoNombre || shift.objectiveId || 'evento').trim()}`;
+/** Clave del grupo de una tarjeta: el evento (`EV_{eventoId}_{servicioId}`) o el objetivo. */
+export function claveGrupo(shift: OpsShiftMovil): string {
+  if (esTurnoEvento(shift)) return eventGroupKey(shift);
   return String(shift.objectiveId || 'unknown').trim();
 }
 
 function nombreGrupo(shift: OpsShiftMovil): string {
-  if (esTurnoEvento(shift)) {
-    const evento = String(shift.eventoNombre || '').trim() || 'Evento sin nombre';
-    const servicio = String(shift.servicioNombre || '').trim();
-    return servicio ? `Evento: ${evento} · ${servicio}` : `Evento: ${evento}`;
-  }
+  if (esTurnoEvento(shift)) return eventGroupLabel(shift);
   return String(shift.objectiveName || '—').trim();
+}
+
+/** Cliente de la tarjeta: el del evento para EV, el del turno para el resto. */
+function clienteDe(shift: OpsShiftMovil): { id: string; name: string } {
+  if (esTurnoEvento(shift)) return { id: eventClientId(shift), name: eventClientName(shift) };
+  return { id: String(shift.clientId || '').trim(), name: String(shift.clientName || '').trim() };
+}
+
+/** Objetivo de la tarjeta para filtrar: el del evento (si se conoce) para EV; nunca el de base del guardia. */
+function objetivoDe(shift: OpsShiftMovil): { id: string; name: string } {
+  if (esTurnoEvento(shift)) {
+    return { id: String(shift.eventoObjectiveId || '').trim(), name: String(shift.eventoObjectiveName || shift.eventoLugar || '').trim() };
+  }
+  return { id: String(shift.objectiveId || '').trim(), name: String(shift.objectiveName || '').trim() };
 }
 
 /**
@@ -93,8 +113,8 @@ export function turnosVisiblesMovil<T extends OpsShiftMovil>(hoy: readonly T[], 
 }
 
 export function enAmbito(shift: OpsShiftMovil, filtro: Pick<OpsFiltroMovil, 'clientId' | 'objectiveId'>): boolean {
-  if (filtro.objectiveId && String(shift.objectiveId || '') !== filtro.objectiveId) return false;
-  if (filtro.clientId && String(shift.clientId || '') !== filtro.clientId) return false;
+  if (filtro.objectiveId && objetivoDe(shift).id !== filtro.objectiveId) return false;
+  if (filtro.clientId && clienteDe(shift).id !== filtro.clientId) return false;
   return true;
 }
 
@@ -128,16 +148,21 @@ export function agruparPorObjetivo<T extends OpsShiftMovil>(shifts: readonly T[]
     const key = claveGrupo(s);
     let grupo = map.get(key);
     if (!grupo) {
+      const cliente = clienteDe(s);
+      const esEvento = esTurnoEvento(s);
       grupo = {
         objectiveId: key,
         name: nombreGrupo(s),
-        client: String(s.clientName || '').trim(),
-        clientId: String(s.clientId || '').trim(),
-        esEvento: esTurnoEvento(s),
+        client: cliente.name,
+        clientId: cliente.id,
+        esEvento,
+        lugar: esEvento ? (String(s.eventoLugar || s.eventoObjectiveName || '').trim() || null) : null,
         active: 0, retention: 0, absent: 0, vacant: 0, plan: 0,
         shifts: [],
       };
       map.set(key, grupo);
+    } else if (grupo.esEvento && !grupo.lugar) {
+      grupo.lugar = String(s.eventoLugar || s.eventoObjectiveName || '').trim() || null;
     }
     grupo.shifts.push(s);
     if (s.isRetention || s.isPendingRetention) grupo.retention++;
@@ -160,7 +185,7 @@ export function clientesParaFiltro(
   catalogo: ReadonlyArray<{ id?: unknown; clientId?: unknown; name?: unknown; clientName?: unknown }> = [],
 ): OpsClienteMovil[] {
   const clientes = new Map<string, OpsClienteMovil>();
-  const objetivoDe = (clientId: string, clientName: string, objectiveId: string, objectiveName: string) => {
+  const agregarObjetivo = (clientId: string, clientName: string, objectiveId: string, objectiveName: string) => {
     let c = clientes.get(clientId);
     if (!c) {
       c = { id: clientId, name: clientName || clientId, turnos: 0, objetivos: [] };
@@ -177,12 +202,14 @@ export function clientesParaFiltro(
   for (const row of catalogo) {
     const clientId = String(row.clientId || '').trim();
     if (!clientId) continue;
-    objetivoDe(clientId, String(row.clientName || '').trim(), String(row.id || '').trim(), String(row.name || '').trim());
+    agregarObjetivo(clientId, String(row.clientName || '').trim(), String(row.id || '').trim(), String(row.name || '').trim());
   }
   for (const s of shifts) {
-    const clientId = String(s.clientId || '').trim();
-    if (!clientId) continue;
-    const { c, o } = objetivoDe(clientId, String(s.clientName || '').trim(), String(s.objectiveId || '').trim(), String(s.objectiveName || '').trim());
+    // EV cuenta para el cliente y el objetivo del evento, no para el objetivo de base del guardia.
+    const cliente = clienteDe(s);
+    if (!cliente.id) continue;
+    const objetivo = objetivoDe(s);
+    const { c, o } = agregarObjetivo(cliente.id, cliente.name, objetivo.id, objetivo.name);
     c.turnos++;
     if (o) o.turnos++;
   }

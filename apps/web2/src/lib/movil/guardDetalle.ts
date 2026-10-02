@@ -4,6 +4,7 @@ import { formatIngresoLine } from '@/lib/operaciones/ingresoLabel';
 import { convocadoEnCaminoLabel } from '@/lib/operaciones/convocadoVentana';
 import { formatOpsNotaLine, type OpsNota } from '@/lib/operaciones/opsNota';
 import { guardTone, type GuardFlags } from '@/lib/movil/guardTone';
+import { isEventShift } from '@/lib/operaciones/eventoCc';
 
 type TsLike = { seconds?: number; toMillis?: () => number; toDate?: () => Date } | Date | string | number | null | undefined;
 
@@ -273,7 +274,10 @@ export function guardDetalle(shift: GuardDetalleShift, siblings: readonly GuardD
     nombre,
     code: String(shift.code || '').trim().toUpperCase() || '—',
     puesto: String(shift.positionName || 'Puesto').trim(),
-    objetivo: String(shift.objectiveName || shift.clientName || '').trim(),
+    // EV: el lugar del evento (lo resuelve el monitor), nunca el objetivo de base del guardia.
+    objetivo: isEventShift(shift)
+      ? String(shift.eventoLugar || shift.eventoObjectiveName || shift.eventoNombre || shift.clientName || '').trim()
+      : String(shift.objectiveName || shift.clientName || '').trim(),
     horario: horarioPlanificado(shift),
     ingreso,
     estado: estadoDe(shift, nowMs),

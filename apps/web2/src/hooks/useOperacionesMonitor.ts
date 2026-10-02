@@ -11,6 +11,7 @@ import { shouldScopeQueriesToEmpresa, belongsToEmpresaView, updateDocForEmpresa,
 import { combinedContiguousRangeLabel, isTuraContiguousToParent, findParentShiftForTura } from '@/lib/refuerzo/turaContiguity';
 import { planningMonthHasActiveSla } from '@/lib/slaPlanningMatch';
 import { isFinServicioSinCronograma, shiftCountsInOpsHeader } from '@/lib/operaciones/opsHeaderCounts';
+import { buildEventosMap, buildObjetivoGeoMap, eventServicioLabel, eventoEnrichFields, isEventShift, type EventoDocLite } from '@/lib/operaciones/eventoCc';
 import {
   classifyOpsShift,
   isOpsCoverageHoursOnSourceDoc,
@@ -281,6 +282,8 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
     const [employees, setEmployees] = useState<any[]>([]);
     const [objectives, setObjectives] = useState<any[]>([]);
     const [servicesSLA, setServicesSLA] = useState<any[]>([]);
+    // Eventos vigentes de la empresa: dan la ubicación (objetivo del evento o coords) a los turnos EV.
+    const [eventos, setEventos] = useState<EventoDocLite[]>([]);
     const [recentLogs, setRecentLogs] = useState<any[]>([]);
     const [viewTab, setViewTab] = useState<'PRIORIDAD' | 'NO_LLEGO' | 'PLAN' | 'ACTIVOS' | 'RETENIDOS' | 'VACANTES' | 'AUSENTES' | 'FRANCOS' | 'TODOS'>('PRIORIDAD');
     const [selectedClientId, setSelectedClientId] = useState<string>(forcedClientId || '');
@@ -349,6 +352,23 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 .map(d => ({ id: d.id, ...d.data() } as { id: string; empresaId?: unknown }))
                 .filter(r => belongsToEmpresaView(r, empresaId, migracionCompleta));
             setServicesSLA(rows);
+        }));
+        // Eventos: `fecha` es el primer día del evento; un evento largo sigue vigente hoy aunque haya
+        // empezado semanas atrás, por eso la ventana arranca 45 días antes. Mismo índice que eventoService.
+        const evDesde = new Date(); evDesde.setDate(evDesde.getDate() - 45);
+        const evHasta = new Date(); evHasta.setDate(evHasta.getDate() + 1);
+        const ymdAr = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
+        const eventosQ = query(
+            collection(db, 'eventos'),
+            where('empresaId', '==', empresaId),
+            where('fecha', '>=', ymdAr(evDesde)),
+            where('fecha', '<=', ymdAr(evHasta)),
+            orderBy('fecha'),
+        );
+        unsubs.push(onSnapshot(eventosQ, snap => {
+            setEventos(snap.docs.map(d => ({ id: d.id, ...(d.data() as Record<string, unknown>) }) as EventoDocLite));
+        }, (err) => {
+            console.warn('[useOperacionesMonitor] eventos listener error:', err.code);
         }));
         const planifQ = empresaCollectionQuery('planificacion_estados', empresaId, scopeEmpresa);
         unsubs.push(onSnapshot(planifQ, snap => {
@@ -467,6 +487,8 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             if (key) objMap.set(key, { clientName: o.clientName, name: o.name, clientId: o.clientId });
             if (key && o.excluirDeOperacion === true) excludedObjectiveIds.add(String(key));
         });
+        const objGeoMap = buildObjetivoGeoMap(objectives);
+        const eventosById = buildEventosMap(eventos);
         // Filtrar SLAs por empresa usando clientId como fallback para docs legacy sin empresaId
         const clientIds = new Set(objectives.map((o: any) => o.clientId).filter(Boolean));
         const filteredSLA = filterSlaRowsByEmpresa(servicesSLA, empresaId, scopeEmpresa, clientIds);
@@ -515,7 +537,10 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             if (shift.status === 'COVERED' && !shift.isAbsent && (!shift.employeeId || shift.employeeId === 'VACANTE')) return null;
             const shiftCodeUpper = String(shift.code || shift.type || '').toUpperCase();
             const isFranco = isRestFrancoShift({ ...shift, code: shiftCodeUpper });
-            const rawPos = (shift.positionName || '').trim();
+            const isEvento = isEventShift({ ...shift, code: shiftCodeUpper });
+            // EV: el puesto es el servicio del evento. Un EV viejo sin positionName (o con el puesto SLA
+            // que quedó pegado) no se pierde ni se muestra con el puesto de base.
+            const rawPos = isEvento ? eventServicioLabel(shift) : (shift.positionName || '').trim();
             if ((!rawPos || rawPos === 'Sin Puesto' || rawPos === 'General') && !isFranco) return null;
             const displayPos = isFranco && (rawPos === 'General' || !rawPos) ? 'Franco' : rawPos;
 
@@ -607,6 +632,8 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 phone,
                 employeeId: effectiveEmployeeId || shift.employeeId,
                 isValidEmployee,
+                // Evento: ubicación y cliente del evento (nunca el objetivo de base del guardia).
+                ...(isEvento ? eventoEnrichFields(shift, eventosById, objGeoMap) : {}),
                 ...classified,
                 isFranco,
                 hasActiveSLA, isCustomPost,
@@ -1100,7 +1127,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         });
 
         return [...visibleRealShifts, ...filteredVirtualVacancies].sort((a:any, b:any) => a.shiftDateObj - b.shiftDateObj);
-    }, [mergedRawShifts, now, employees, objectives, servicesSLA, publishStatusMap, empresaId]);
+    }, [mergedRawShifts, now, employees, objectives, servicesSLA, publishStatusMap, empresaId, eventos]);
 
     const filteredObjectives = useMemo(() => {
         let list = selectedClientId ? objectives.filter((o: any) => o.clientId === selectedClientId) : objectives;
@@ -1145,10 +1172,13 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         return hoy.filter((s: any) => shiftMatchesOpsViewTab(s, viewTab));
     }, [processedData, viewTab, filterText, selectedClientId, now, publishStatusMap]);
 
-    /** Objetivos con geo para el mapa según pestaña/filtro activo (PLAN, ACT, VAC, etc.). */
+    /**
+     * Objetivos con geo para el mapa según pestaña/filtro activo (PLAN, ACT, VAC, etc.).
+     * Los EV no cuentan: el evento tiene su propio pin y el objetivo de base del guardia no se pinta por él.
+     */
     const mapTabObjectives = useMemo(() => {
         const ids = new Set(
-            listData.map((s: any) => String(s.objectiveId ?? '').trim()).filter(Boolean),
+            listData.filter((s: any) => !isEventShift(s)).map((s: any) => String(s.objectiveId ?? '').trim()).filter(Boolean),
         );
         return filteredObjectives.filter((o: any) =>
             ids.has(String(o.id ?? o.objectiveId ?? '').trim()),
@@ -1447,6 +1477,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         filteredObjectives,
         employees,
         servicesSLA,
+        eventos,
         rawShifts: mergedRawShifts,
         objectives,
         now,

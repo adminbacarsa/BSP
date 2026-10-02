@@ -4,6 +4,7 @@ import { opsShiftDayLabel } from '@/hooks/useOperacionesMonitor';
 import { ShiftCodeBadge } from '@/components/operaciones/ShiftCodeBadge';
 import { canRevertAbsenceNow } from '@/lib/operaciones/revertAbsenceWindow';
 import { formatRetentionDuration, formatRetentionLine } from '@cosp/ops-core';
+import { estadoGuardiaEvento, eventServicioLabel } from '@/lib/operaciones/eventoCc';
 
 const getRefuerzoLabel = (shift: any): 'RFZ' | 'TURA' | null => {
   const code = String(shift?.code || '').toUpperCase();
@@ -41,7 +42,12 @@ const toMs = (d: any): number => {
   return 0;
 };
 
-const getHeaderGradient = (statusText: string): string => {
+const getHeaderGradient = (statusText: string, isEvent?: boolean): string => {
+  if (isEvent) {
+    if (statusText.includes('aus') || statusText.includes('vac')) return 'linear-gradient(135deg, #9f1239, #be123c)';
+    if (statusText.includes('tarde')) return 'linear-gradient(135deg, #92400e, #b45309)';
+    return 'linear-gradient(135deg, #92400e, #d97706)';
+  }
   if (['VACANTE', 'AUSENCIA', 'VACANTE REPORTADA', 'DEVUELTA A PLANIF.'].includes(statusText))
     return 'linear-gradient(135deg, #9f1239, #be123c)';
   if (statusText === 'TARDE') return 'linear-gradient(135deg, #92400e, #b45309)';
@@ -126,8 +132,8 @@ export function OperacionesMapPopup({
   );
 
   return (
-    <div style={{ width: 'min(560px, calc(100vw - 24px))', fontFamily: 'ui-sans-serif, system-ui, sans-serif' }}>
-      <div style={{ background: getHeaderGradient(marker.statusText), borderRadius: '12px 12px 0 0', padding: '8px 12px' }}>
+    <div style={{ width: 'min(560px, calc(100vw - 24px))', fontFamily: 'ui-sans-serif, system-ui, sans-serif' }} data-ops-popup={marker.isEvent ? 'evento' : 'objetivo'}>
+      <div style={{ background: getHeaderGradient(marker.statusText, marker.isEvent), borderRadius: '12px 12px 0 0', padding: '8px 12px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <span
@@ -142,7 +148,10 @@ export function OperacionesMapPopup({
             >
               {marker.client}
             </span>
-            <span style={{ fontSize: '13px', fontWeight: 900, color: 'white', lineHeight: 1.2 }}>{marker.name}</span>
+            <span style={{ fontSize: '13px', fontWeight: 900, color: 'white', lineHeight: 1.2 }}>{marker.isEvent ? (marker.subtitle || marker.name) : marker.name}</span>
+            {marker.isEvent && marker.lugar && (
+              <span style={{ display: 'block', fontSize: '9px', fontWeight: 700, color: 'rgba(255,255,255,0.8)', marginTop: 2 }}>Lugar: {marker.lugar}</span>
+            )}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
             <span
@@ -180,7 +189,7 @@ export function OperacionesMapPopup({
         >
           <ColHeader col="nombre" label="Guardia" w="180px" />
           <ColHeader col="horario" label="Horario" w="100px" />
-          <ColHeader col="puesto" label="Puesto" />
+          <ColHeader col="puesto" label={marker.isEvent ? 'Servicio' : 'Puesto'} />
           <ColHeader col="estado" label="Estado" w="52px" />
           <span
             style={{
@@ -278,6 +287,12 @@ export function OperacionesMapPopup({
               statusLabel = shift.isUnassigned ? `VAC ${refuerzoLabel}` : refuerzoLabel;
               statusColor = refuerzoLabel === 'TURA' ? '#7c3aed' : '#dc2626';
             }
+            // Evento: presente / sin fichar / tarde / ausente (igual en el CC y en el celular).
+            const estadoEvento = marker.isEvent ? estadoGuardiaEvento(shift, now) : null;
+            if (estadoEvento && !shift.isRetention && !shift.isPendingClose && !shift.manualRetentionType) {
+              statusLabel = estadoEvento.label;
+              statusColor = estadoEvento.color;
+            }
 
             const displayName =
               refuerzoLabel && !shift.isUnassigned ? `${shift.employeeName || 'VACANTE'}` : shift.employeeName || 'VACANTE';
@@ -362,10 +377,11 @@ export function OperacionesMapPopup({
                     minWidth: 0,
                   }}
                 >
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shift.positionName || '—'}</span>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{marker.isEvent ? eventServicioLabel(shift) : (shift.positionName || '—')}</span>
                   <ShiftCodeBadge shift={shift} />
                 </span>
                 <span
+                  data-ops-estado={estadoEvento ? estadoEvento.estado : undefined}
                   style={{
                     width: '52px',
                     fontSize: '8px',

@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import {
-  AlertTriangle, ArrowLeft, ArrowRightLeft, Bell, CalendarClock, Clock, Hourglass, LogIn, MapPin, MessageSquare, MoreHorizontal, Phone, Radio, Search, ShieldAlert, StickyNote, Timer, User, UserCheck, UserX, X,
+  AlertTriangle, ArrowLeft, ArrowRightLeft, Bell, CalendarClock, Clock, Hourglass, LogIn, MapPin, MessageSquare, MoreHorizontal, Phone, Radio, Search, ShieldAlert, Star, StickyNote, Timer, User, UserCheck, UserX, X,
   type LucideIcon,
 } from 'lucide-react';
 import {
@@ -416,6 +416,9 @@ export interface MovilObjective {
   objectiveId: string;
   name: string;
   client?: string;
+  /** Grupo de evento («Evento: X · servicio»), ubicado en el lugar del evento. */
+  esEvento?: boolean;
+  lugar?: string | null;
   active: number;
   retention: number;
   absent: number;
@@ -751,9 +754,11 @@ export function OperacionScreens({
             <button type="button" onClick={onBack} aria-label="Volver" className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${MOVIL_BTN_SECONDARY}`}>
               <ArrowLeft size={16} strokeWidth={1.75} aria-hidden="true" />
             </button>
-            <MapPin size={13} strokeWidth={1.75} className="shrink-0 text-slate-500" aria-hidden="true" />
-            <h2 className="truncate text-[13px] font-semibold uppercase tracking-wide text-slate-900">{objective?.name || 'Objetivo'}</h2>
-            {objective?.client && <span className="hidden min-[360px]:inline truncate text-[10px] font-medium text-slate-400">· {objective.client}</span>}
+            {objective?.esEvento
+              ? <Star size={13} strokeWidth={1.75} className="shrink-0 text-amber-600" aria-hidden="true" />
+              : <MapPin size={13} strokeWidth={1.75} className="shrink-0 text-slate-500" aria-hidden="true" />}
+            <h2 className="truncate text-[13px] font-semibold uppercase tracking-wide text-slate-900" data-movil-evento={objective?.esEvento ? '1' : undefined}>{objective?.name || 'Objetivo'}</h2>
+            {(objective?.lugar || objective?.client) && <span className="hidden min-[360px]:inline truncate text-[10px] font-medium text-slate-400">· {objective?.lugar || objective?.client}</span>}
             <span className="ml-auto shrink-0 rounded border border-slate-300 px-2 text-[10px] font-bold leading-5 tabular-nums text-slate-700">{objective?.shifts.length ?? 0}</span>
           </div>
         )}
@@ -850,11 +855,13 @@ export function OperacionScreens({
               </p>
             )}
             {filtrando && grupos.map((grupo) => (
-              <section key={grupo.objectiveId} className="mb-3" data-movil-grupo={grupo.objectiveId}>
+              <section key={grupo.objectiveId} className="mb-3" data-movil-grupo={grupo.objectiveId} data-movil-grupo-evento={grupo.esEvento ? '1' : undefined}>
                 <button type="button" onClick={() => onOpen(grupo.objectiveId)} className="mb-1.5 flex w-full items-center gap-2 px-1 text-left">
-                  <MapPin size={13} strokeWidth={1.75} className="shrink-0 text-slate-400" aria-hidden="true" />
+                  {grupo.esEvento
+                    ? <Star size={13} strokeWidth={1.75} className="shrink-0 text-amber-600" aria-hidden="true" />
+                    : <MapPin size={13} strokeWidth={1.75} className="shrink-0 text-slate-400" aria-hidden="true" />}
                   <span className="truncate text-[11px] font-semibold uppercase tracking-wide text-slate-600">{grupo.name}</span>
-                  <span className="ml-auto shrink-0 text-[10px] font-medium tabular-nums text-slate-400">{grupo.client ? `${grupo.client} · ` : ''}{grupo.shifts.length}</span>
+                  <span className="ml-auto shrink-0 text-[10px] font-medium tabular-nums text-slate-400">{grupo.lugar ? `${grupo.lugar} · ` : grupo.client ? `${grupo.client} · ` : ''}{grupo.shifts.length}</span>
                 </button>
                 {grupo.shifts.map((shift) => (
                   <GuardCard key={shift.id} shift={shift} siblings={siblingsOf(shift)} {...cardProps} />
@@ -875,13 +882,13 @@ export function OperacionScreens({
                 <MovilCard
                   key={item.objectiveId}
                   className="mb-2"
-                  icon={MapPin}
-                  tone="slate"
+                  icon={item.esEvento ? Star : MapPin}
+                  tone={item.esEvento ? 'amber' : 'slate'}
                   title={item.name}
-                  subtitle={item.client || 'Objetivo'}
+                  subtitle={item.esEvento ? [item.client, item.lugar].filter(Boolean).join(' · ') || 'Evento' : item.client || 'Objetivo'}
                   badge={<MovilBadge tone={pctTone} size="md">{pct}%</MovilBadge>}
                   onClick={() => onOpen(item.objectiveId)}
-                  attrs={{ 'data-movil-objetivo-card': item.objectiveId }}
+                  attrs={{ 'data-movil-objetivo-card': item.objectiveId, ...(item.esEvento ? { 'data-movil-evento-card': '1' } : {}) }}
                 >
                   <MovilProgress pct={pct} tone={pctTone} className="mt-2.5" />
                   <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
