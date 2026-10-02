@@ -30,6 +30,7 @@ import { retainOutgoingForGap, releaseInvalidRetentionsRun } from './coverage/co
 import { skipAbsencePipelineForShift } from './coverage/coverageTraceShift';
 import { isEventoShift } from './eventos/eventoCoverage';
 import { ObjectiveOperationCache, simulableShiftSkipReasonResolved } from './common/simulableShift';
+import { loadObjectiveIdsExcluidos, turnoFueraDeCentroDeControl } from './common/excluirDeOperacion';
 import { isExtraNonReliefShift, isReliefEligibleShift } from './common/reliefEligibility';
 import { arPlanificacionEstadoKey } from './common/arClock';
 import { guardFirstName } from './common/pushGreeting';
@@ -1385,6 +1386,39 @@ export const requestCheckIn = functions.https.onCall(async (data, context) => {
     }
 });
 
+/** Cierre del turno de revisión Play. Solo el legajo con `fichadaRemota`. Sin novedad ni retención. */
+export const cerrarTurnoPortal = functions.https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sin permisos.');
+  const shiftId = String(data?.shiftId || '').trim();
+  if (!shiftId) throw new functions.https.HttpsError('invalid-argument', 'shiftId requerido.');
+  const db = admin.firestore();
+  const { resolvePortalEmployeeDocId } = await import('./fichajes/resolvePortalEmployee');
+  const empId = await resolvePortalEmployeeDocId(db, {
+    uid: context.auth.uid,
+    email: context.auth.token.email,
+  });
+  if (!empId) throw new functions.https.HttpsError('not-found', 'Empleado no encontrado.');
+  const { cerrarTurnoRevision } = await import('./fichajes/cerrarTurnoRevision');
+  try {
+    return await cerrarTurnoRevision(db, { shiftId, empId });
+  } catch (e) {
+    const msg = (e as Error)?.message || '';
+    if (msg === 'NOT_REVIEW') {
+      throw new functions.https.HttpsError('failed-precondition', 'Este cierre es solo para el legajo de revisión.');
+    }
+    if (msg === 'NOT_PRESENT') {
+      throw new functions.https.HttpsError('failed-precondition', 'Primero tenés que fichar el ingreso.');
+    }
+    if (msg === 'NOT_OWNER') {
+      throw new functions.https.HttpsError('permission-denied', 'El turno no es de tu legajo.');
+    }
+    if (msg === 'TURNO_NOT_FOUND') {
+      throw new functions.https.HttpsError('not-found', 'Turno no encontrado.');
+    }
+    throw new functions.https.HttpsError('internal', msg || 'No se pudo cerrar el turno.');
+  }
+});
+
 export const sesionOperador = sesionOperadorCallable;
 export const resolveStaffProfile = resolveStaffProfileCallable;
 export { scheduledCerrarContratosVencidos, reabrirContratoSla, cerrarContratoSla } from './servicios/contratoCierre';
@@ -2567,10 +2601,12 @@ export const detectarAusencias = functions
 
     let alerts = 0;
     let absents = 0;
+    const excludedObjectives = await loadObjectiveIdsExcluidos(db);
 
     for (const docSnap of snap.docs) {
       const shift = docSnap.data();
 
+      if (turnoFueraDeCentroDeControl(shift, excludedObjectives)) continue;
       if (!cc.isEnabled(shift.empresaId)) continue;
       if (cc.isDemo(shift.empresaId)) continue; // Demo genera presentes/ausentes/tardes
       // Saltar si ya estÃ¡ resuelto o si es una vacante (vacantes tienen su propio flujo)
@@ -2751,6 +2787,8 @@ export const gestionarVacantes = functions
 
     if (snap.empty) return null;
 
+    const excludedObjectives = await loadObjectiveIdsExcluidos(db);
+
     // Pre-fetch planificacion_estados para todos los objetivos con vacantes de planning
     // Los turnos operativos (RETEN/OPERATIONS_COVERAGE/SLA_VIRTUAL) siempre se procesan.
     const planKeySet = new Set<string>();
@@ -2788,6 +2826,7 @@ export const gestionarVacantes = functions
     for (const docSnap of snap.docs) {
       const shift = docSnap.data();
 
+      if (turnoFueraDeCentroDeControl(shift, excludedObjectives)) continue;
       if (!cc.isEnabled(shift.empresaId)) continue;
       // Ignorar borradores de planificación (draft flag)
       if (shift.draft === true) continue;

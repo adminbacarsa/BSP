@@ -2,6 +2,7 @@ import type { Firestore } from 'firebase-admin/firestore';
 import { isFrancoCoverageOriginDoc, isOpsCoverageHoursOnSourceDoc } from '../coverage/coverageTraceShift';
 import { arYearMonth, arYmd } from './arClock';
 import { planificacionEstadoLookupDocIds } from '../assistant/planificacionEstadoKeys';
+import { isExcluidoDeOperacion } from './excluirDeOperacion';
 
 /**
  * Códigos de licencia/ausencia de la grilla (`AbsenceCode` de `tipos_novedad`) + ART.
@@ -65,6 +66,7 @@ export function simulableShiftSkipReason(
   opts?: SimulableShiftOpts,
 ): SimulableSkipReason | null {
   if (!data) return 'VIRTUAL';
+  if (isExcluidoDeOperacion(data)) return 'FUERA_OPERACION';
   if (data.draft === true) return 'DRAFT';
   if (data.isVirtual === true) return 'VIRTUAL';
   if (isOpsCoverageHoursOnSourceDoc(data)) return 'OPS_COV_TRACE';

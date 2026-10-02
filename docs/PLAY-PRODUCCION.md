@@ -126,14 +126,14 @@ node scripts/crear-usuario-review-play.mjs
 node scripts/crear-usuario-review-play.mjs --apply --allow-prod
 ```
 
-Crea, en `pruebas_sa` (no en Bacar): Auth `play.review@bacarsa.com.ar` con claim `employee` (sin SuperAdmin), legajo `empleados/play_review_01` (`PLAY-01`) con `bypassDeviceCheck` y `fichadaRemota` (el gate de dispositivo y la geocerca los respetan solo en ese legajo), objetivo de prueba con coordenadas reales y **sin** `allowRemoteCheckIn`, y turnos `M` 07:00–15:00 publicados los próximos 30 días. Volver a correr `--apply` rota la clave.
+Crea, en `pruebas_sa` (no en Bacar): Auth `cosp@bacarsa.com.ar` (Mauro crea la casilla; el script la usa como usuario de Auth) con claim `employee` (sin SuperAdmin), legajo `empleados/play_review_01` (`PLAY-01`) con `bypassDeviceCheck` y `fichadaRemota` (el gate de dispositivo y la geocerca los respetan solo en ese legajo), objetivo `obj_play_review` con `excluirDeOperacion` (sin SLA: no entra al Centro de Control ni a los crons) y **sin** `allowRemoteCheckIn`, y turnos `M` 07:00–15:00 publicados los próximos 30 días. La app cierra el turno con «Cerrar turno». Volver a correr `--apply` rota la clave.
 
 El revisor puede fichar ese día desde cualquier lugar, a cualquier hora, porque el legajo tiene `fichadaRemota`. Otro legajo sigue con el radio de 80 m y la ventana normal.
 
 Instrucciones para Play:
 
 ```text
-Abrí COSP Guardia. Ingresá con play.review@bacarsa.com.ar y la contraseña indicada.
+Abrí COSP Guardia. Ingresá con cosp@bacarsa.com.ar y la contraseña indicada.
 Aceptá notificaciones y, si la pide, la ubicación (solo se usa al fichar).
 En Hoy ves el turno del día y podés fichar. En Agenda, el mes. En Más → Credencial y Política de privacidad.
 ```

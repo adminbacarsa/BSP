@@ -191,6 +191,19 @@ export function useCheckIn() {
     [invokeCheckIn, refreshPendingCount],
   );
 
+  const closeReviewShift = useCallback(async (shiftId: string) => {
+    setBusyShiftId(shiftId);
+    try {
+      const { cerrarTurnoPortal } = getPortalCallables();
+      await cerrarTurnoPortal({ shiftId });
+      return { ok: true as const, message: 'Turno cerrado' };
+    } catch (e) {
+      return { ok: false as const, message: mapPortalCallableError(e) };
+    } finally {
+      setBusyShiftId(null);
+    }
+  }, []);
+
   const notifyLateArrival = useCallback(async (shiftId: string, etaMinutes: number) => {
     setBusyShiftId(shiftId);
     try {
@@ -211,6 +224,7 @@ export function useCheckIn() {
     busyShiftId,
     lateEtaByShiftId,
     requestCheckInForShift,
+    closeReviewShift,
     notifyLateArrival,
     flushQueue,
   };

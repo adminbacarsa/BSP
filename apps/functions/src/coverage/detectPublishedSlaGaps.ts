@@ -1,6 +1,7 @@
 import { Timestamp, type Firestore } from 'firebase-admin/firestore';
 import { planificacionEstadoLookupDocIds, ymCordobaParts } from '../assistant/planificacionEstadoKeys';
 import { ObjectiveOperationCache, slaDayCoverage } from '../common/simulableShift';
+import { loadObjectiveIdsExcluidos } from '../common/excluirDeOperacion';
 import { seriesCodeOf } from '../common/shiftSeries';
 import { buildSlaUnplannedGapDocId } from './slaGapId';
 
@@ -71,11 +72,12 @@ export async function detectPublishedSlaGapsForEmpresa(
     daySet.add(ymdAr(new Date(ms)));
   }
   const opCache = new ObjectiveOperationCache();
+  const excludedObjectives = await loadObjectiveIdsExcluidos(db);
 
   for (const slaDoc of slaSnap.docs) {
     const sla = slaDoc.data();
     const objectiveId = String(sla.objectiveId || '').trim();
-    if (!objectiveId) continue;
+    if (!objectiveId || excludedObjectives.has(objectiveId)) continue;
 
     const positions = Array.isArray(sla.positions) ? sla.positions : [];
     const turnoSnap = await db

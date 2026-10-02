@@ -107,7 +107,7 @@ function HoyScreenContent() {
   } = usePortalAuth();
   const { shifts, allShifts, loading, error } = useEmployeeShifts(empDocId, user?.uid ?? null);
   const { objectivesMap } = useObjectivesMap();
-  const { pendingCount, pendingShiftIds, busyShiftId, requestCheckInForShift, notifyLateArrival, lateEtaByShiftId } =
+  const { pendingCount, pendingShiftIds, busyShiftId, requestCheckInForShift, closeReviewShift, notifyLateArrival, lateEtaByShiftId } =
     useCheckIn();
   const { empresaNombre } = useEmpresaBranding(employee?.empresaId);
   const appVersion = Constants.expoConfig?.version ?? '—';
@@ -341,6 +341,11 @@ function HoyScreenContent() {
   const rawStatus = mainShift?.status || (mainShift?.isPresent ? 'PRESENT' : 'ASSIGNED');
   const isConfirmed =
     !!mainShift && (mainShift.isPresent || rawStatus === 'PRESENT' || rawStatus === 'InProgress');
+  const canCloseReview =
+    employee?.fichadaRemota === true &&
+    isConfirmed &&
+    mainShift?.isCompleted !== true &&
+    !mainShift?.realEndTime;
   const hasPendingRequest = !!mainShift?.checkInRequestedAt && !isConfirmed;
   const hasLocalLateEta = !!mainShift && lateEtaByShiftId[mainShift.id] != null;
   const checkInStatusView = resolveCheckInUiStatus(
@@ -409,6 +414,13 @@ function HoyScreenContent() {
       fichadaRemota: employee?.fichadaRemota === true,
     });
     appAlert(result.ok ? 'Presente' : 'Fichada', result.message);
+  }
+
+  async function onCloseReview() {
+    if (!mainShift) return;
+    const result = await closeReviewShift(mainShift.id);
+    appAlert(result.ok ? 'Turno cerrado' : 'Cierre', result.message);
+    if (result.ok) refreshEmployee();
   }
 
   async function onLate() {
@@ -652,6 +664,14 @@ function HoyScreenContent() {
                         variant={checkInStatusView.actionLabel ? 'onHero' : 'success'}
                         loading={busyShiftId === mainShift?.id}
                         onPress={onCheckIn}
+                      />
+                    ) : null}
+                    {canCloseReview ? (
+                      <CommandButton
+                        label="Cerrar turno"
+                        variant="onHero"
+                        loading={busyShiftId === mainShift?.id}
+                        onPress={onCloseReview}
                       />
                     ) : null}
                     {portalFeatures.checkIn && canLate ? (

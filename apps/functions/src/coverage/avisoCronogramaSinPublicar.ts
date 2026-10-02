@@ -1,6 +1,7 @@
 import * as admin from 'firebase-admin';
 import type { Firestore } from 'firebase-admin/firestore';
 import { ObjectiveOperationCache } from '../common/simulableShift';
+import { loadObjectiveIdsExcluidos } from '../common/excluirDeOperacion';
 
 const TZ = 'America/Argentina/Cordoba';
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
@@ -104,6 +105,7 @@ export async function runAvisoCronogramaSinPublicar(
   const mesKey = `${tomorrow.year}-${String(tomorrow.month).padStart(2, '0')}`;
   const probe = admin.firestore.Timestamp.fromDate(new Date(`${tomorrow.ymd}T12:00:00-03:00`));
   const cache = new ObjectiveOperationCache();
+  const excludedObjectives = await loadObjectiveIdsExcluidos(db);
   const empresas = await db.collection('empresas').get();
   let created = 0;
   let updated = 0;
@@ -119,6 +121,7 @@ export async function runAvisoCronogramaSinPublicar(
     }
 
     for (const [objectiveId, sla] of byObjective) {
+      if (excludedObjectives.has(objectiveId)) continue;
       const verdict = await cache.operationVerdict(db, {
         empresaId,
         objectiveId,

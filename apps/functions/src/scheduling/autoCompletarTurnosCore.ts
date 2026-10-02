@@ -8,6 +8,7 @@ import {
 import { retainOutgoingForGap } from '../coverage/coverageRetention';
 import { handoffAtEnd } from '../coverage/handoffContinuity';
 import { ObjectiveOperationCache } from '../common/simulableShift';
+import { loadObjectiveIdsExcluidos, turnoFueraDeCentroDeControl } from '../common/excluirDeOperacion';
 import { isOpsCoverageHoursOnSourceDoc } from '../coverage/coverageTraceShift';
 import { isLicenseShiftCode } from '../common/simulableShift';
 import { isExtraNonReliefShift, isReliefEligibleShift } from '../common/reliefEligibility';
@@ -241,6 +242,7 @@ export async function runAutoCompletarTurnosPass(
 
   const slaCache = new Map<string, FirebaseFirestore.DocumentData[]>();
   const opCache = new ObjectiveOperationCache();
+  const excludedObjectives = await loadObjectiveIdsExcluidos(db);
   const reliefIncomingClaimed = new Set<string>();
   const reliefPendingClaimed = new Set<string>();
   const capEscalations: CapEscalation[] = [];
@@ -427,6 +429,7 @@ export async function runAutoCompletarTurnosPass(
       if (!endMs || endMs > cutoff.toMillis()) continue;
     }
     const shift = docSnap.data();
+    if (turnoFueraDeCentroDeControl(shift, excludedObjectives)) continue;
     if (passOpts?.empresaFilter && !passOpts.empresaFilter(ctx.shiftEmpresaId(shift))) continue;
     const ccOff = !ctx.isEnabled(shift.empresaId);
     if (isOpsCoverageHoursOnSourceDoc(shift as Record<string, unknown>)) continue;

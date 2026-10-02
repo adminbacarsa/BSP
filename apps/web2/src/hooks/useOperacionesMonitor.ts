@@ -30,6 +30,7 @@ import {
   buildRetentionWaitInfo,
   etiquetaCierreSinContinuidad,
   computeShiftCloseTimes,
+  turnoFueraDeCentroDeControl,
 } from '@cosp/ops-core';
 
 const registerPublishedState = (
@@ -460,9 +461,11 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         const empPhoneMap = new Map(); employees.forEach(e => empPhoneMap.set(e.id, e.phone || e.celular || ''));
         // Los objetivos usan "objectiveId" como ID, no "id" — mapear ambos para compatibilidad
         const objMap = new Map();
+        const excludedObjectiveIds = new Set<string>();
         objectives.forEach(o => {
             const key = o.id || o.objectiveId;
             if (key) objMap.set(key, { clientName: o.clientName, name: o.name, clientId: o.clientId });
+            if (key && o.excluirDeOperacion === true) excludedObjectiveIds.add(String(key));
         });
         // Filtrar SLAs por empresa usando clientId como fallback para docs legacy sin empresaId
         const clientIds = new Set(objectives.map((o: any) => o.clientId).filter(Boolean));
@@ -502,6 +505,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
 
         const realShifts = mergedRawShifts.map(shift => {
             if (!shift.shiftDateObj) return null;
+            if (turnoFueraDeCentroDeControl(shift, excludedObjectiveIds)) return null;
             if (shift.draft === true) return null;
             if (suppressedTuraIds.has(shift.id)) return null;
             if (isOpsCoverageHoursOnSourceDoc(shift as Record<string, unknown>)) return null;
@@ -626,6 +630,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         const dayCode = getDayCode(now);
 
         filteredSLA.forEach(sla => {
+            if (excludedObjectiveIds.has(String(sla.objectiveId ?? '').trim())) return;
             const objInfo = objMap.get(sla.objectiveId);
             if (!objInfo || !sla.positions) return;
 

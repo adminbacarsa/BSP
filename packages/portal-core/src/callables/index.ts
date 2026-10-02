@@ -28,6 +28,10 @@ export function createPortalCallables(functions: Functions) {
       PORTAL_CALLABLES.activateAndSetPassword,
     ),
     requestCheckIn: httpsCallable<RequestCheckInRequest, unknown>(functions, PORTAL_CALLABLES.requestCheckIn),
+    cerrarTurnoPortal: httpsCallable<{ shiftId: string }, { closed?: boolean }>(
+      functions,
+      PORTAL_CALLABLES.cerrarTurnoPortal,
+    ),
     notificarLlegadaTarde: httpsCallable<{ shiftId: string; etaMinutes?: number }, unknown>(
       functions,
       PORTAL_CALLABLES.notificarLlegadaTarde,

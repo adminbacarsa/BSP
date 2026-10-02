@@ -12,6 +12,7 @@ import { findPresentOutgoingAlignedToGapStart } from './relevoOutgoingMatch';
 import { isReliefEligibleShift } from '../common/reliefEligibility';
 import { seriesCodeOf, seriesHandoffKind } from '../common/shiftSeries';
 import { buildAutoClosePatch, clearRetentionOnReliefClose } from '../scheduling/shiftClose';
+import { isExcluidoDeOperacion } from '../common/excluirDeOperacion';
 
 export type PresenciaSource =
   | 'PORTAL_GPS'
@@ -237,8 +238,10 @@ export async function registrarPresencia(
     console.warn('[registrarPresencia] cancelar ¿Venís?:', (e as Error).message),
   );
 
-  // Notificación de confirmación al guardia (no bloqueante)
-  void (async () => {
+  const fueraDeCc = isExcluidoDeOperacion(shiftData);
+
+  // Notificación de confirmación al guardia (no bloqueante). El objetivo de revisión no avisa.
+  if (!fueraDeCc) void (async () => {
     try {
       const isPortal = source === 'PORTAL_GPS';
       const inName = guardFirstName({ employeeName: shiftData.employeeName });
@@ -296,8 +299,8 @@ export async function registrarPresencia(
     }
   })();
 
-  // Novedad ingreso (no bloqueante)
-  void db
+  // Novedad ingreso (no bloqueante). El objetivo de revisión no entra al CC.
+  if (!fueraDeCc) void db
     .collection('novedades')
     .add({
       type: 'INGRESO_AUTOREGISTRO',
@@ -507,8 +510,9 @@ export async function registrarPresencia(
     })
     .catch(() => {});
 
-  // Llegada tarde (sin AA previa) → crear registro LT en ausencias para RRHH
-  if (isLate && !shiftData.absenceType) {
+  // Llegada tarde (sin AA previa) → crear registro LT en ausencias para RRHH.
+  // El objetivo de revisión no deja rastro en RRHH ni en el CC.
+  if (isLate && !shiftData.absenceType && !fueraDeCc) {
     void (async () => {
       try {
         const startMs2 = scheduledStartTs?.toMillis?.() ?? 0;
@@ -542,7 +546,7 @@ export async function registrarPresencia(
     })();
   }
 
-  if (windowEval.lateNoNotice === true) {
+  if (windowEval.lateNoNotice === true && !fueraDeCc) {
     const mins = windowEval.lateMinutes ?? 0;
     try {
       const existingNov = await db.collection('novedades').where('shiftId', '==', shiftId).limit(25).get();
