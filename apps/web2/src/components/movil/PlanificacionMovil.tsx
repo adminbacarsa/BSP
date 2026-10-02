@@ -46,6 +46,7 @@ import {
   clientesParaSelector,
   estructuraSlaDelMes,
   esSlotSintetico,
+  eventosSemana,
   filasSemana,
   guardarSeleccion,
   huecoDeCelda,
@@ -58,6 +59,7 @@ import {
   mesesDeSemana,
   opcionDelTurno,
   opcionesTurnoDelDia,
+  plantelDe,
   puedeCorregirEnCelular,
   puestoDe,
   semanaAnterior,
@@ -266,6 +268,8 @@ export function PlanificacionMovil() {
   const filas = useMemo(() => (estructura ? filasSemana(estructura.estructura) : []), [estructura]);
   const celdas = useMemo(() => (objetivoSel ? celdasSemana(filas, diasSemana, visibles, objetivoSel.id) : []), [filas, diasSemana, visibles, objetivoSel]);
   const licencias = useMemo(() => (objetivoSel ? licenciasSemana(diasSemana, visibles, objetivoSel.id) : []), [diasSemana, visibles, objetivoSel]);
+  // Guardias del plantel afectados a un evento: el EV vive en el objetivo del evento, se busca por guardia.
+  const eventosPlantel = useMemo(() => (objetivoSel ? eventosSemana(diasSemana, visibles, plantelDe(visibles, objetivoSel.id, empleados)) : []), [diasSemana, visibles, objetivoSel, empleados]);
   const huecos = useMemo(() => huecosSemana(celdas, licencias), [celdas, licencias]);
   const keyMes = objetivoSel ? `${objetivoSel.id}|${ymSemana}` : null;
   const estadoMes = keyMes ? publicado[keyMes] ?? null : null;
@@ -533,6 +537,7 @@ export function PlanificacionMovil() {
                   filas={filas}
                   celdas={celdas}
                   licencias={licencias}
+                  eventos={eventosPlantel}
                   sinEstructura={sinEstructura}
                   onAnterior={() => setLunes((l) => semanaAnterior(l))}
                   onSiguiente={() => setLunes((l) => semanaSiguiente(l))}
@@ -583,7 +588,10 @@ export function PlanificacionMovil() {
         }}
         onDia={setDia}
         onHueco={(franja) => { if (exigirEdicion(franja)) setSheet({ tipo: 'cubrir', franja, reemplazo: false }); }}
-        onAsignado={(franja) => { if (exigirEdicion(franja)) setSheet({ tipo: 'cambiar', franjaId: franja.id }); }}
+        onAsignado={(franja) => {
+          if (franja.evento) { toast.message('Turno de evento: se gestiona desde Eventos (solo lectura acá).'); return; }
+          if (exigirEdicion(franja)) setSheet({ tipo: 'cambiar', franjaId: franja.id });
+        }}
         onPublicar={() => { void guardarCambios(); }}
       />
       {panel === 'semana' && objetivoSel && (
