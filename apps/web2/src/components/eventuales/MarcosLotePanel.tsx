@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { FileCheck2, Printer, Upload, X } from 'lucide-react';
 import { toast } from 'sonner';
+import { textoImprimirMarcos } from '@/lib/eventuales/listoUx.mjs';
 import { MARCO_VERSION } from '@/lib/eventuales/marcoAnexoConst.mjs';
 import { marcoDeBolsa } from '@/lib/eventuales/marcoTexto.mjs';
 import {
@@ -29,7 +30,7 @@ type Props = {
   fichas: PersonaMarco[];
   seleccionados: string[];
   puedeEditar: boolean;
-  /** Botones solo con ícono y tooltip (barra superior compacta). */
+  /** Botones de la barra superior de Eventuales (altura 36 px, con texto y cantidad). */
   compacto?: boolean;
   llamar: (nombre: string, data: Record<string, unknown>) => Promise<Record<string, unknown>>;
 };
@@ -184,15 +185,14 @@ export default function MarcosLotePanel({ empresaId, nombreEmpresa, fichas, sele
     <>
       {compacto ? (
         <>
-          <button type="button" onClick={imprimir} disabled={imprimiendo} aria-label="Imprimir marcos"
-            title={seleccionados.length ? `Imprimir marcos de ${seleccionados.length} seleccionados (2 ejemplares c/u, con QR)` : `Imprimir marcos pendientes en ${nombreEmpresa || 'la empresa'} (${pendientes.length})`}
-            className="relative inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50 disabled:opacity-50">
-            <Printer size={16} />
-            {(seleccionados.length || pendientes.length) > 0 && <span className="absolute -right-1 -top-1 rounded-full bg-indigo-600 px-1.5 text-[9px] font-black text-white">{seleccionados.length || pendientes.length}</span>}
+          <button type="button" onClick={imprimir} disabled={imprimiendo} data-marcos-imprimir
+            title={seleccionados.length ? `Un PDF con el contrato marco de los ${seleccionados.length} seleccionados: 2 ejemplares por persona, con QR en la hoja de firmas` : `Un PDF con el contrato marco de cada persona sin marco o vencido en ${nombreEmpresa || 'la empresa'}: 2 ejemplares por persona, con QR en la hoja de firmas`}
+            className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50">
+            <Printer size={14} /> {textoImprimirMarcos({ seleccionados: seleccionados.length, pendientes: pendientes.length })}
           </button>
-          <button type="button" onClick={abrir} aria-label="Subir escaneos en lote" title={`Subir escaneos de marcos firmados (PDF o fotos) para ${nombreEmpresa || 'la empresa'}`}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-sm hover:bg-emerald-700">
-            <Upload size={16} />
+          <button type="button" onClick={abrir} data-marcos-subir title={`Subir los escaneos de los contratos marco firmados (PDF o fotos) para ${nombreEmpresa || 'la empresa'}. Se lee el QR de cada hoja.`}
+            className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-emerald-600 px-3 text-xs font-bold text-white shadow-sm hover:bg-emerald-700">
+            <Upload size={14} /> Subir marcos firmados
           </button>
         </>
       ) : (

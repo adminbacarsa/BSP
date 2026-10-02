@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { collection, getDocs, onSnapshot, query, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import {
-  AlertTriangle, ArrowLeft, Building2, CircleDashed, Download, FileCheck2, FileSpreadsheet, FileX2, Home, Landmark, Mail, MapPin, Phone, Plus, ScrollText, Search, UserCheck, UserPlus, UserX, Users, X,
+  ArrowLeft, Building2, Download, FileSpreadsheet, Landmark, MapPin, Plus, ScrollText, Search, UserPlus, Users, X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import DashboardLayout from '@/components/layout/DashboardLayout';
@@ -14,15 +14,20 @@ import { PageHeader, PageShell } from '@/components/ui';
 import FichaEventual, { type DocumentoVista, type EmpresaPlataforma, type FichaEventualData, type MarcoVista } from '@/components/eventuales/FichaEventual';
 import ArcaPendientesPanel from '@/components/eventuales/ArcaPendientesPanel';
 import MarcosLotePanel from '@/components/eventuales/MarcosLotePanel';
+import {
+  ChipPruebas, EstadoFilaChip, GuiaEventuales, TarjetasResumen, type GuiaVista, type PasoChecklist, type TarjetaResumen,
+} from '@/components/eventuales/EventualesUx';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { db, functions } from '@/lib/firebase';
 import { RNOS_DEFAULT_FICHA } from '@/lib/eventuales/ficha.mjs';
 import {
-  contadoresFiltros, empresasPlataformaDeDocs, faltantesConvocable, FILTROS_LISTA, filtrarFichas, iniciales, plantillaNomina, siglaEmpresa, textoDisponibilidad, textoLegajo,
+  empresasPlataformaDeDocs, filtrarFichas, iniciales, plantillaNomina, textoLegajo,
 } from '@/lib/eventuales/fichaUx.mjs';
 import { GRUPO_EVENTUALES_ID } from '@/lib/eventuales/grupo.mjs';
-import { marcoDeBolsa } from '@/lib/eventuales/marcoTexto.mjs';
+import {
+  checklistFicha, estadoFila, FILTROS_SECUNDARIOS, pasosGuia, resumenBolsa, TARJETAS_RESUMEN, TEXTO_TODA_LA_BOLSA,
+} from '@/lib/eventuales/listoUx.mjs';
 
 type Ficha = FichaEventualData;
 
@@ -54,10 +59,6 @@ const fmtFechaLista = (iso: string) => {
   return d && m && y ? `${d}/${m}/${y}` : '';
 };
 
-const ICONO_FILTRO: Record<string, React.ElementType> = {
-  DISPONIBLE: UserCheck, NO_DISPONIBLE: UserX, VENCE: AlertTriangle, INCOMPLETOS: CircleDashed, TODOS: Users,
-};
-
 const VISTA_NOMINA: Record<string, { texto: string; tono: string }> = {
   NUEVO: { texto: 'Nuevo', tono: 'bg-emerald-50 text-emerald-800' },
   ACTUALIZAR: { texto: 'Actualiza', tono: 'bg-indigo-50 text-indigo-800' },
@@ -76,10 +77,6 @@ type ResumenNomina = {
   nuevo: number; actualizar: number; sinCambio: number; cuilInvalido: number; duplicado: number;
   planta: number; empresaDesconocida: number; mailInvalido: number; sinNombre?: number; fechaInvalida?: number;
 };
-
-function EstadoIcono({ icon: Icon, ok, title }: { icon: React.ElementType; ok: boolean; title: string }) {
-  return <span title={title} aria-label={title} className={`inline-flex h-5 w-5 items-center justify-center rounded-md ${ok ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}><Icon size={11} /></span>;
-}
 
 export default function EventualesPage() {
   const { isSuperAdmin, rolePermissions } = useAuth();
@@ -106,6 +103,7 @@ export default function EventualesPage() {
   const [empresasAsignar, setEmpresasAsignar] = useState<string[]>([]);
   const [importando, setImportando] = useState(false);
   const [habilitando, setHabilitando] = useState('');
+  const [arcaPendientes, setArcaPendientes] = useState<number | null>(null);
   const [reporteNomina, setReporteNomina] = useState<{
     dryRun: boolean;
     resumen: ResumenNomina;
@@ -165,13 +163,27 @@ export default function EventualesPage() {
     () => (filtrarFichas({ fichas, empresaId: empresaActivaId, todaLaBolsa, filtro, buscar, hoy: hoy() }) as Ficha[]).sort((a, b) => a.nombre.localeCompare(b.nombre)),
     [fichas, empresaActivaId, todaLaBolsa, filtro, buscar],
   );
-  const contadores = useMemo(() => contadoresFiltros({ fichas, empresaId: empresaActivaId, todaLaBolsa, hoy: hoy() }) as Record<string, number>, [fichas, empresaActivaId, todaLaBolsa]);
+  const tarjetas = useMemo(
+    () => resumenBolsa({ fichas, empresaId: empresaActivaId, todaLaBolsa, hoy: hoy(), arcaPendientes }) as TarjetaResumen[],
+    [fichas, empresaActivaId, todaLaBolsa, arcaPendientes],
+  );
+  const guia = useMemo(() => pasosGuia({ fichas, empresaId: empresaActivaId, todaLaBolsa, hoy: hoy() }) as GuiaVista, [fichas, empresaActivaId, todaLaBolsa]);
 
   const llamar = async (nombre: string, data: Record<string, unknown>) => {
     const fn = httpsCallable(functions, nombre);
     const res = await fn(data);
     return res.data as Record<string, unknown>;
   };
+
+  /** Cantidad de la tarjeta «ARCA pendientes»: la misma consulta que el panel (`arcaPendientes`). */
+  useEffect(() => {
+    if (!empresaActivaId || mostrarArca) return;
+    let vivo = true;
+    httpsCallable(functions, 'gestionarEventual')({ accion: 'arcaPendientes', empresaId: empresaActivaId })
+      .then((res) => { if (vivo) setArcaPendientes(((res.data as { envios?: unknown[] })?.envios || []).length); })
+      .catch(() => { if (vivo) setArcaPendientes(null); });
+    return () => { vivo = false; };
+  }, [empresaActivaId, mostrarArca]);
 
   const abrirDetalle = async (id: string) => {
     setElegida(id);
@@ -301,6 +313,23 @@ export default function EventualesPage() {
   };
 
   const ficha = fichas.find((f) => f.id === elegida) || null;
+  const checklist = useMemo(
+    () => (ficha ? (checklistFicha(ficha, hoy(), empresaActivaId, nombreEmpresaActiva) as PasoChecklist[]) : []),
+    [ficha, empresaActivaId, nombreEmpresaActiva],
+  );
+  const abrirAlta = () => { setEditando(''); setForm({ ...vacio(), empresasHabilitadas: empresaActivaId ? [empresaActivaId] : [] }); };
+  const abrirImportar = () => setReporteNomina({ dryRun: true, resumen: { nuevo: 0, actualizar: 0, sinCambio: 0, cuilInvalido: 0, duplicado: 0, planta: 0, empresaDesconocida: 0, mailInvalido: 0 }, vista: [], filas: [] });
+  const elegirTarjeta = (id: string) => {
+    if (id === 'ARCA') { setMostrarArca(true); return; }
+    setMostrarArca(false);
+    setFiltro((actual) => (actual === id ? 'DISPONIBLE' : id));
+  };
+  const filtrarDesdeGuia = (f: string) => { setMostrarArca(false); setElegida(null); setFiltro(f); };
+  const filtroSecundario = FILTROS_SECUNDARIOS.some((f) => f.id === filtro) ? filtro : '';
+  const tituloFiltro = TARJETAS_RESUMEN.find((t) => t.id === filtro)?.titulo
+    || FILTROS_SECUNDARIOS.find((f) => f.id === filtro)?.label
+    || guia.pasos.find((p) => p.filtro === filtro)?.titulo
+    || '';
 
   if (movil) {
     return (
@@ -327,68 +356,82 @@ export default function EventualesPage() {
             icon={Users}
             className="!mb-2"
             actions={(
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2" data-acciones-eventuales>
                 {puede('create') && (
-                  <button type="button" onClick={() => { setEditando(''); setForm({ ...vacio(), empresasHabilitadas: empresaActivaId ? [empresaActivaId] : [] }); }} title="Alta en la bolsa" aria-label="Alta en la bolsa"
-                    className="inline-flex h-9 items-center gap-1 rounded-xl bg-indigo-600 px-3 text-xs font-bold text-white shadow-sm hover:bg-indigo-700 active:scale-95">
-                    <Plus size={16} /> Alta
+                  <button type="button" onClick={abrirAlta} title="Cargar una persona nueva en la bolsa de eventuales"
+                    className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-indigo-600 px-3 text-xs font-bold text-white shadow-sm hover:bg-indigo-700 active:scale-95">
+                    <Plus size={15} /> Alta de eventual
                   </button>
                 )}
                 {puede('update') && (
-                  <button type="button" title="Importar nómina de eventuales" aria-label="Importar nómina de eventuales" onClick={() => setReporteNomina({ dryRun: true, resumen: { nuevo: 0, actualizar: 0, sinCambio: 0, cuilInvalido: 0, duplicado: 0, planta: 0, empresaDesconocida: 0, mailInvalido: 0 }, vista: [], filas: [] })}
-                    className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50">
-                    <FileSpreadsheet size={16} />
-                  </button>
+                  <span className="inline-flex h-9 items-stretch overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                    <button type="button" title="Subir un Excel con la nómina: nada se escribe hasta Aplicar" onClick={abrirImportar}
+                      className="inline-flex items-center gap-1.5 px-3 text-xs font-bold text-slate-700 hover:bg-slate-50">
+                      <FileSpreadsheet size={15} /> Importar planilla
+                    </button>
+                    <button type="button" onClick={() => void descargarPlantillaNomina()} title="Descargar la plantilla de ejemplo (Excel con los encabezados y una fila modelo)"
+                      className="inline-flex items-center gap-1 border-l border-slate-200 px-2.5 text-[11px] font-bold text-indigo-700 hover:bg-indigo-50">
+                      <Download size={13} /> Plantilla
+                    </button>
+                  </span>
                 )}
                 <MarcosLotePanel compacto empresaId={empresaActivaId} nombreEmpresa={nombreEmpresaActiva} fichas={fichas} seleccionados={seleccion} puedeEditar={puede('update')} llamar={llamar} />
                 <button
                   type="button"
+                  data-arca-toggle
                   onClick={() => setMostrarArca((v) => !v)}
-                  title="Altas, bajas y anulaciones de ARCA"
-                  className={`inline-flex h-9 items-center gap-2 rounded-xl border px-3 text-xs font-semibold shadow-sm ${mostrarArca ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}>
-                  <Landmark size={16} />
-                  ARCA pendientes
+                  title="Altas y bajas sin número de transacción, y anulaciones por acusar en la web de ARCA"
+                  className={`inline-flex h-9 items-center gap-1.5 rounded-xl border px-3 text-xs font-bold shadow-sm ${mostrarArca ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}>
+                  <Landmark size={15} />
+                  ARCA pendientes{arcaPendientes != null ? ` (${arcaPendientes})` : ''}
                 </button>
                 <Link
                   href="/admin/rrhh/eventuales/escala"
-                  title="Escala salarial CCT 422/05 (bruto del anexo)"
-                  className="inline-flex h-9 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50">
-                  <ScrollText size={16} />
+                  title="Escala salarial CCT 422/05: de ahí sale el bruto del anexo del eventual"
+                  className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 shadow-sm hover:bg-slate-50">
+                  <ScrollText size={15} />
                   Escala salarial
                 </Link>
               </div>
             )}
           />
 
+          <TarjetasResumen tarjetas={tarjetas} activo={mostrarArca ? 'ARCA' : filtro} onElegir={elegirTarjeta} />
+
           {mostrarArca ? (
-            <ArcaPendientesPanel empresaId={empresaActivaId} empresaNombre={nombreEmpresaActiva} puedeConfirmar={puede('update')} />
+            <div className="space-y-2">
+              <button type="button" onClick={() => setMostrarArca(false)} className="inline-flex items-center gap-1 text-xs font-bold text-indigo-700 hover:underline"><ArrowLeft size={13} /> Volver a la lista</button>
+              <ArcaPendientesPanel empresaId={empresaActivaId} empresaNombre={nombreEmpresaActiva} puedeConfirmar={puede('update')} />
+            </div>
           ) : (
           <>
-          <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
+          <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm" data-filtros-eventuales>
             <label className="flex min-w-[200px] flex-1 items-center gap-2 rounded-xl bg-slate-50 px-3 py-2">
               <Search size={14} className="text-slate-400" />
-              <input value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Nombre, CUIL o DNI" className="w-full bg-transparent text-sm outline-none" />
+              <input value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Buscar por nombre, CUIL, DNI o legajo" className="w-full bg-transparent text-sm outline-none" />
               {buscar && <button type="button" onClick={() => setBuscar('')} aria-label="Limpiar búsqueda" className="text-slate-400"><X size={14} /></button>}
             </label>
-            <div className="flex flex-wrap gap-1">
-              {FILTROS_LISTA.map((f) => {
-                const Icon = ICONO_FILTRO[f.id] || Users;
-                const on = filtro === f.id;
-                return (
-                  <button key={f.id} type="button" onClick={() => setFiltro(f.id)} title={f.label}
-                    className={`inline-flex items-center gap-1 rounded-xl px-2.5 py-1.5 text-[11px] font-bold transition ${on ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`}>
-                    <Icon size={12} /> <span className="hidden sm:inline">{f.label}</span>
-                    <span className={`rounded-full px-1.5 text-[9px] font-black ${on ? 'bg-white/20' : 'bg-slate-100 text-slate-500'}`}>{contadores[f.id] ?? 0}</span>
-                  </button>
-                );
-              })}
-            </div>
-            <label className="ml-auto inline-flex cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-[11px] font-bold text-slate-600" title="Ver a todos los eventuales del grupo, aunque no estén habilitados en esta empresa">
-              <span className={`relative h-5 w-9 rounded-full transition ${todaLaBolsa ? 'bg-indigo-600' : 'bg-slate-300'}`}>
+            <label className="inline-flex items-center gap-2 text-[11px] font-bold text-slate-600">
+              Mostrar
+              <select
+                data-filtro-secundario
+                value={filtroSecundario}
+                onChange={(e) => { if (e.target.value) setFiltro(e.target.value); }}
+                className="rounded-xl border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold text-slate-800"
+              >
+                {!filtroSecundario && <option value="">{tituloFiltro || 'Filtro'}</option>}
+                {FILTROS_SECUNDARIOS.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
+              </select>
+            </label>
+            <label className="inline-flex cursor-pointer items-start gap-2 rounded-xl px-2 py-1 text-[11px] text-slate-600 lg:ml-auto" title={TEXTO_TODA_LA_BOLSA}>
+              <span className={`relative mt-0.5 h-5 w-9 shrink-0 rounded-full transition ${todaLaBolsa ? 'bg-indigo-600' : 'bg-slate-300'}`}>
                 <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition ${todaLaBolsa ? 'left-[18px]' : 'left-0.5'}`} />
               </span>
-              <input type="checkbox" className="hidden" checked={todaLaBolsa} onChange={(e) => setTodaLaBolsa(e.target.checked)} />
-              Toda la bolsa del grupo
+              <input type="checkbox" data-toda-la-bolsa className="hidden" checked={todaLaBolsa} onChange={(e) => setTodaLaBolsa(e.target.checked)} />
+              <span>
+                <span className="block font-bold">Toda la bolsa del grupo</span>
+                <span className="block text-[10px] text-slate-500">{TEXTO_TODA_LA_BOLSA}</span>
+              </span>
             </label>
           </div>
 
@@ -400,65 +443,70 @@ export default function EventualesPage() {
             </div>
           )}
 
-          <div className="grid gap-4 lg:grid-cols-[340px_1fr]">
-            <ul className={`max-h-[72vh] overflow-auto rounded-2xl border border-slate-200 bg-white p-1.5 shadow-sm ${elegida ? 'hidden lg:block' : ''}`}>
-              {visibles.map((f) => {
-                const faltan = faltantesConvocable(f, hoy(), todaLaBolsa ? '' : empresaActivaId) as { id: string; texto: string }[];
-                const marcoActiva = marcoDeBolsa(f, empresaActivaId, hoy());
-                const habilitadaAca = f.empresasHabilitadas.includes(empresaActivaId);
-                const activo = elegida === f.id;
-                return (
-                  <li key={f.id} className={`flex items-center gap-2 rounded-xl px-2 py-1.5 transition ${activo ? 'bg-indigo-50' : 'hover:bg-slate-50'}`}>
-                    {puede('update') && (
-                      <input type="checkbox" checked={seleccion.includes(f.id)} title="Seleccionar" aria-label={`Seleccionar a ${f.nombre}`}
-                        onChange={(e) => setSeleccion(e.target.checked ? [...seleccion, f.id] : seleccion.filter((id) => id !== f.id))}
-                        className="h-4 w-4 shrink-0 rounded border-slate-300 accent-indigo-600" />
-                    )}
-                    <button type="button" onClick={() => abrirDetalle(f.id)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
-                      <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-xs font-black ${f.disponibilidad === 'NO_DISPONIBLE' ? 'bg-slate-200 text-slate-500' : 'bg-indigo-100 text-indigo-700'}`}>{iniciales(f.nombre)}</span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-bold text-slate-800">{f.nombre || f.id}</span>
-                        <span className="flex flex-wrap items-center gap-1 text-[10px] text-slate-400">
-                          <span className="tabular-nums">{f.id}</span>
-                          {textoLegajo(f.legajoPlanilla) && <span className="font-bold text-slate-500">{textoLegajo(f.legajoPlanilla)}</span>}
-                          {f.primerIngreso && <span>1º {fmtFechaLista(f.primerIngreso)}</span>}
-                          {f.disponibilidad === 'NO_DISPONIBLE' && <span className="rounded-full bg-slate-200 px-1.5 font-black text-slate-600">{textoDisponibilidad(f.disponibilidad)}</span>}
+          <div className="grid gap-4 lg:grid-cols-[360px_1fr]">
+            <div className={`flex max-h-[72vh] flex-col rounded-2xl border border-slate-200 bg-white shadow-sm ${elegida ? 'hidden lg:flex' : ''}`}>
+              <p className="flex items-center justify-between border-b border-slate-100 px-3 py-2 text-[11px] font-bold text-slate-500" data-lista-titulo>
+                <span>{tituloFiltro || 'Lista'} · {visibles.length}</span>
+                {filtro !== 'DISPONIBLE' && <button type="button" onClick={() => setFiltro('DISPONIBLE')} className="text-indigo-700 hover:underline">Ver todos los disponibles</button>}
+              </p>
+              <ul className="flex-1 overflow-auto p-1.5" data-lista-eventuales>
+                {visibles.map((f) => {
+                  const estado = estadoFila(f, hoy(), todaLaBolsa ? '' : empresaActivaId) as { tono: string; texto: string };
+                  const habilitadaAca = f.empresasHabilitadas.includes(empresaActivaId);
+                  const activo = elegida === f.id;
+                  return (
+                    <li key={f.id} data-fila-eventual={f.id} className={`flex items-center gap-2 rounded-xl px-2 py-2 transition ${activo ? 'bg-indigo-50' : 'hover:bg-slate-50'}`}>
+                      {puede('update') && (
+                        <input type="checkbox" checked={seleccion.includes(f.id)} title="Seleccionar para asignar empresas o imprimir marcos" aria-label={`Seleccionar a ${f.nombre}`}
+                          onChange={(e) => setSeleccion(e.target.checked ? [...seleccion, f.id] : seleccion.filter((id) => id !== f.id))}
+                          className="h-4 w-4 shrink-0 rounded border-slate-300 accent-indigo-600" />
+                      )}
+                      <button type="button" onClick={() => abrirDetalle(f.id)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+                        <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-xs font-black ${f.disponibilidad === 'NO_DISPONIBLE' ? 'bg-slate-200 text-slate-500' : 'bg-indigo-100 text-indigo-700'}`}>{iniciales(f.nombre)}</span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-bold text-slate-800">{f.nombre || f.id}</span>
+                          <span className="block truncate text-[10px] text-slate-500">
+                            <span className="tabular-nums">CUIL {f.id}</span>
+                            {textoLegajo(f.legajoPlanilla) ? ` · ${textoLegajo(f.legajoPlanilla)}` : ''}
+                            {f.primerIngreso ? ` · 1º ingreso ${fmtFechaLista(f.primerIngreso)}` : ''}
+                          </span>
+                          <span className="mt-1 flex flex-wrap items-center gap-1">
+                            <EstadoFilaChip estado={estado} />
+                            <ChipPruebas ficha={f} />
+                            {todaLaBolsa && !habilitadaAca && f.disponibilidad !== 'NO_DISPONIBLE' && (
+                              <span className="text-[10px] text-slate-500" title={f.empresasHabilitadas.length ? `Habilitado en ${f.empresasHabilitadas.map(nombreEmpresa).join(', ')}` : 'Sin empresa habilitada'}>
+                                {f.empresasHabilitadas.length ? `Habilitado en ${f.empresasHabilitadas.map(nombreEmpresa).join(', ')}` : 'Sin empresa habilitada'}
+                              </span>
+                            )}
+                          </span>
                         </span>
-                        <span className="mt-1 flex flex-wrap items-center gap-1">
-                          <EstadoIcono icon={Mail} ok={!!f.mail} title={f.mail ? `Mail: ${f.mail}` : 'Falta mail'} />
-                          <EstadoIcono icon={Phone} ok={!!f.telefono} title={f.telefono ? `Teléfono: ${f.telefono}` : 'Falta teléfono'} />
-                          <EstadoIcono icon={Home} ok={!!f.domicilio} title={f.domicilio ? `Domicilio: ${f.domicilio}` : 'Falta domicilio'} />
-                          {habilitadaAca && (marcoActiva.estado === 'MARCO_VIGENTE'
-                            ? <EstadoIcono icon={FileCheck2} ok title={`Marco vigente en ${nombreEmpresaActiva}`} />
-                            : <EstadoIcono icon={FileX2} ok={false} title={marcoActiva.estado === 'VENCIDO' ? `Marco vencido en ${nombreEmpresaActiva}` : `Sin contrato marco en ${nombreEmpresaActiva}`} />)}
-                          {f.empresasHabilitadas.map((id) => (
-                            <span key={id} title={`Habilitado en ${nombreEmpresa(id)}`} className={`rounded-md px-1.5 py-0.5 text-[9px] font-black ${id === empresaActivaId ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600'}`}>{siglaEmpresa(nombreEmpresa(id))}</span>
-                          ))}
-                          {f.empresasHabilitadas.length === 0 && <span className="rounded-md bg-amber-50 px-1.5 py-0.5 text-[9px] font-black text-amber-700" title="Sin empresa habilitada">Sin empresa</span>}
-                          {faltan.some((c) => c.id === 'CREDENCIAL' || c.id === 'APTO') && <span title={faltan.filter((c) => c.id === 'CREDENCIAL' || c.id === 'APTO').map((c) => c.texto).join(', ')} className="inline-flex h-5 w-5 items-center justify-center rounded-md bg-rose-50 text-rose-600"><AlertTriangle size={11} /></span>}
-                        </span>
-                      </span>
-                    </button>
-                    {todaLaBolsa && !habilitadaAca && puede('update') && (
-                      <button type="button" onClick={() => habilitarEnActiva(f.id)} disabled={habilitando === f.id} title={`Habilitar en ${nombreEmpresaActiva}`} aria-label={`Habilitar en ${nombreEmpresaActiva}`}
-                        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-indigo-200 bg-white text-indigo-600 shadow-sm hover:bg-indigo-50 disabled:opacity-50">
-                        <UserPlus size={14} />
                       </button>
-                    )}
+                      {todaLaBolsa && !habilitadaAca && puede('update') && f.disponibilidad !== 'NO_DISPONIBLE' && (
+                        <button type="button" onClick={() => habilitarEnActiva(f.id)} disabled={habilitando === f.id} title={`Habilitar en ${nombreEmpresaActiva} para poder convocarlo desde acá`}
+                          className="inline-flex h-8 shrink-0 items-center gap-1 rounded-xl border border-indigo-200 bg-white px-2 text-[11px] font-bold text-indigo-700 shadow-sm hover:bg-indigo-50 disabled:opacity-50">
+                          <UserPlus size={13} /> {habilitando === f.id ? 'Habilitando…' : 'Habilitar acá'}
+                        </button>
+                      )}
+                    </li>
+                  );
+                })}
+                {visibles.length === 0 && (
+                  <li className="p-6 text-center text-xs text-slate-400">
+                    {buscar
+                      ? 'Nadie coincide con la búsqueda.'
+                      : todaLaBolsa ? 'Nadie en la bolsa está en este grupo.' : `Nadie habilitado en ${nombreEmpresaActiva} está en este grupo. Probá «Toda la bolsa del grupo».`}
                   </li>
-                );
-              })}
-              {visibles.length === 0 && (
-                <li className="p-6 text-center text-xs text-slate-400">
-                  {todaLaBolsa ? 'Nadie en la bolsa cumple ese filtro.' : `Nadie habilitado en ${nombreEmpresaActiva} cumple ese filtro. Probá «Toda la bolsa del grupo».`}
-                </li>
-              )}
-            </ul>
+                )}
+              </ul>
+            </div>
 
             <div className={!elegida ? 'hidden lg:block' : ''}>
-              {!ficha && <div className="flex h-40 items-center justify-center rounded-2xl border border-dashed border-slate-200 text-sm text-slate-400">Elegí una persona de la lista.</div>}
+              {!ficha && (
+                <GuiaEventuales guia={guia} nombreEmpresa={todaLaBolsa ? 'Toda la bolsa del grupo' : nombreEmpresaActiva} onFiltrar={filtrarDesdeGuia} onAlta={puede('create') ? abrirAlta : undefined} />
+              )}
               {ficha && (
                 <FichaEventual
+                  checklist={checklist}
                   ficha={ficha}
                   detalle={detalle}
                   marcos={marcos}

@@ -60,6 +60,7 @@
     "test:migrate-fixes": "node scripts/test-empresa-migrate-fixes.mjs",
     "eval:planning-agent": "node scripts/eval-planning-agent.mjs",
     "eval:puntaje-guardia": "node --experimental-strip-types scripts/eval-puntaje-guardia.mjs",
+    "eval:eventuales-ux": "node scripts/eval-eventuales-ux.mjs",
     "eval:escalas-cct": "node --experimental-strip-types scripts/escalas-cct/eval-escala-422.mjs",
     "eval:escalas-job": "npx tsx scripts/escalas-cct/eval-escala-job.mjs",
     "eval:guard-capacity": "npx tsx apps/web2/scripts/eval-guard-capacity.ts",
@@ -109,7 +110,7 @@
     "import:eventuales:dry": "node scripts/import-eventuales-planilla.mjs",
     "test:movil-planificacion": "npx tsx --tsconfig apps/web2/tsconfig.json --test apps/web2/src/lib/movil/planificacionBasica.test.tsx apps/web2/src/lib/movil/planificacionTurnosSla.test.tsx",
     "test:planif-toolbar": "npx tsx --tsconfig apps/web2/tsconfig.json --test apps/web2/src/lib/planificacion/toolbarFloatMenu.test.tsx",
-    "test:eventuales": "node --experimental-strip-types --test apps/web2/src/lib/eventuales/eventuales.test.mjs apps/web2/src/lib/eventuales/remuneracion.test.mjs apps/web2/src/lib/eventuales/arcaTxt.test.mjs apps/web2/src/lib/eventuales/arcaEnvios.test.mjs apps/web2/src/lib/eventuales/avisos.test.mjs apps/web2/src/lib/eventuales/flujo.test.mjs apps/web2/src/lib/eventuales/ficha.test.mjs apps/web2/src/lib/eventuales/planificacion.test.mjs apps/web2/src/lib/eventuales/candidatosUnificados.test.mjs apps/web2/src/lib/eventuales/marcoAnexo.test.mjs apps/web2/src/lib/eventuales/marcosLote.test.mjs apps/web2/src/lib/eventuales/fichaUx.test.mjs apps/web2/src/lib/eventuales/pruebasSwitch.test.mjs apps/web2/src/lib/eventuales/plazoAnulacion.test.mjs apps/web2/src/lib/eventuales/escalaCct.test.mjs apps/web2/src/lib/eventuales/cupoGenero.test.mjs",
+    "test:eventuales": "node --experimental-strip-types --test apps/web2/src/lib/eventuales/eventuales.test.mjs apps/web2/src/lib/eventuales/remuneracion.test.mjs apps/web2/src/lib/eventuales/arcaTxt.test.mjs apps/web2/src/lib/eventuales/arcaEnvios.test.mjs apps/web2/src/lib/eventuales/avisos.test.mjs apps/web2/src/lib/eventuales/flujo.test.mjs apps/web2/src/lib/eventuales/ficha.test.mjs apps/web2/src/lib/eventuales/planificacion.test.mjs apps/web2/src/lib/eventuales/candidatosUnificados.test.mjs apps/web2/src/lib/eventuales/marcoAnexo.test.mjs apps/web2/src/lib/eventuales/marcosLote.test.mjs apps/web2/src/lib/eventuales/fichaUx.test.mjs apps/web2/src/lib/eventuales/pruebasSwitch.test.mjs apps/web2/src/lib/eventuales/plazoAnulacion.test.mjs apps/web2/src/lib/eventuales/escalaCct.test.mjs apps/web2/src/lib/eventuales/cupoGenero.test.mjs apps/web2/src/lib/eventuales/listoUx.test.mjs",
     "eval:marcos-lote": "npx tsx scripts/eval-marcos-lote-qr.mts"
   },
   "keywords": [
