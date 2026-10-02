@@ -12,6 +12,7 @@
 import * as admin from 'firebase-admin';
 import * as functions from 'firebase-functions/v1';
 import { CONVOCATORIA_TIMEOUT_MINUTES } from '../coverage/convocatoriaTimeout';
+import { escribirTurnoEvento } from '../eventos/turnoEvento';
 
 const SUPER = ['SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP'];
 const AR_OFFSET = '-03:00';
@@ -461,6 +462,7 @@ async function escribirTurnosEventual(p: {
   const cuil = bolsa.cuil;
   const publicadoPorFecha = new Map<string, boolean>();
   const batch = db().batch();
+  let writes = 0;
   const turnoIds: string[] = [];
   for (const t of turnosIn) {
     let draft = false;
@@ -468,6 +470,35 @@ async function escribirTurnosEventual(p: {
       const clave = t.fecha.slice(0, 7);
       if (!publicadoPorFecha.has(clave)) publicadoPorFecha.set(clave, await cronogramaPublicado(objectiveId, t.fecha));
       draft = !publicadoPorFecha.get(clave);
+    }
+    if (evento) {
+      const escrito = await escribirTurnoEvento(db(), {
+        empresaId,
+        employeeId,
+        employeeName: bolsa.nombre,
+        eventoId: evento.eventoId,
+        eventoNombre: evento.eventoNombre,
+        servicioId: evento.servicioId,
+        servicioNombre: t.positionName || p.positionName || evento.servicioNombre || 'Evento',
+        servicioFecha: t.fecha,
+        horaInicio: t.horaInicio,
+        horaFin: t.horaFin,
+        horas: t.horas,
+        clientId: p.clientId,
+        clientName: p.clientName,
+        extra: {
+          esEventual: true,
+          bolsaCuil: cuil,
+          eventualAltaArcaConfirmada: false,
+          ...camposTurnoDesdeSwitches(bolsa),
+          ...(p.cubreA?.employeeName ? { comments: `Cubriendo a ${String(p.cubreA.employeeName)}`, coversEmployeeId: p.cubreA.employeeId || null } : { comments: 'Eventual (bolsa)' }),
+          ...(p.extraTurno || {}),
+          actorName: p.actorName,
+          createdBy: 'PLANIFICADOR_EVENTUALES',
+        },
+      });
+      turnoIds.push(escrito.turnoId);
+      continue;
     }
     const start = tsAr(t.fecha, t.horaInicio);
     let end = tsAr(t.fecha, t.horaFin);
@@ -485,9 +516,9 @@ async function escribirTurnosEventual(p: {
       clientName: p.clientName || null,
       objectiveId,
       objectiveName: p.objectiveName || null,
-      positionName: t.positionName || p.positionName || (evento ? evento.servicioNombre || 'Evento' : 'General'),
-      code: evento ? 'EV' : String(t.code || 'M').toUpperCase(),
-      type: t.name || (evento ? 'Evento' : String(t.code || 'M').toUpperCase()),
+      positionName: t.positionName || p.positionName || 'General',
+      code: String(t.code || 'M').toUpperCase(),
+      type: t.name || String(t.code || 'M').toUpperCase(),
       hours: Number(t.horas) || 0,
       startTime: start,
       endTime: end,
@@ -497,7 +528,6 @@ async function escribirTurnosEventual(p: {
       isAbsent: false,
       isCompleted: false,
       draft,
-      ...(evento ? { origin: 'EVENTO', eventoId: evento.eventoId || null, eventoNombre: evento.eventoNombre || null, servicioId: evento.servicioId || null, servicioNombre: evento.servicioNombre || null } : {}),
       ...(p.cubreA?.employeeName ? { comments: `Cubriendo a ${String(p.cubreA.employeeName)}`, coversEmployeeId: p.cubreA.employeeId || null } : { comments: 'Eventual (bolsa)' }),
       ...(p.extraTurno || {}),
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -505,11 +535,13 @@ async function escribirTurnosEventual(p: {
       createdBy: 'PLANIFICADOR_EVENTUALES',
     });
     turnoIds.push(ref.id);
+    writes += 1;
   }
   for (const shiftId of ((p.cubreA?.shiftIds || []) as unknown[]).map(String).filter(Boolean)) {
     batch.update(db().collection('turnos').doc(shiftId), { coveredBy: bolsa.nombre, coveredByEmployeeId: employeeId, coveredByEventual: true });
+    writes += 1;
   }
-  await batch.commit();
+  if (writes) await batch.commit();
 
   const periodos = [...new Set(turnosIn.map((t) => periodoDe(t.fecha)))];
   const contratos = [];

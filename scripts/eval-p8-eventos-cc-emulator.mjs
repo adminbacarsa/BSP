@@ -173,7 +173,7 @@ async function main() {
   const cov = (await db.collection('turnos').doc(covId).get()).data();
   report(
     'cobertura escribe EV',
-    cov?.code === 'EV' && cov?.origin === 'OPERATIONS_COVERAGE' && cov?.eventoId === 'ev_noche' && cov?.servicioNombre === 'Molinete',
+    cov?.code === 'EV' && cov?.type === 'Evento' && cov?.origin === 'EVENTO' && cov?.eventoId === 'ev_noche' && cov?.servicioNombre === 'Molinete' && cov?.positionName === 'Molinete' && cov?.draft === false,
     `code=${cov?.code} ev=${cov?.eventoId}`,
   );
 

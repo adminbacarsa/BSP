@@ -1751,6 +1751,7 @@ export {
 } from './coverage/convocatoriasCobertura';
 
 export { respondEventoConvocatoria, noPuedoAsistirEventual } from './eventos/eventoPortalCallables';
+export { asignarGuardiaEvento } from './eventos/eventoAssignAdmin';
 
 // =========================================================
 // 13. ENVÃO DE ACCESO AL PORTAL DE EMPLEADOS

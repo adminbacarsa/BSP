@@ -3,6 +3,7 @@ import { isFrancoCoverageOriginDoc } from './coverageTraceShift';
 import { isFrancoShiftCode } from '../common/simulableShift';
 import { resolveCoverageBandCode } from './coverageExtAdvSegments';
 import { isEventoShift } from '../eventos/eventoCoverage';
+import { asegurarObjetivoDeEvento, camposTurnoEvento } from '../eventos/turnoEvento';
 import {
   gapWindowFromTitularShift,
   shiftEndMs,
@@ -265,7 +266,9 @@ export function isActiveOpsCoverageDoc(
   data: Record<string, any> | undefined | null,
 ): boolean {
   if (!data) return false;
-  if (String(data.origin || '').toUpperCase() !== 'OPERATIONS_COVERAGE') return false;
+  const origin = String(data.origin || '').toUpperCase();
+  const coberturaDeEvento = origin === 'EVENTO' && data.eventGap === true && !!data.coverageType;
+  if (origin !== 'OPERATIONS_COVERAGE' && !coberturaDeEvento) return false;
   if (data.coverageSuperseded === true) return false;
   if (String(data.status || '').toUpperCase() === 'CANCELLED') return false;
   if (data.isDeleted === true) return false;
@@ -442,10 +445,11 @@ export async function applyCoverage(
     ?? params.endTime
     ?? (titular.endTime as admin.firestore.Timestamp)
     ?? null;
-  const posName = params.positionName || titular.positionName || null;
+  const eventGap = isEventoShift(titular as { code?: unknown; origin?: unknown });
+  const eventServicioNombre = String(titular.servicioNombre || params.positionName || titular.positionName || 'Evento');
+  const posName = eventGap ? eventServicioNombre : (params.positionName || titular.positionName || null);
   const ct = ctEarly;
   const isRet = ct === 'RET';
-  const eventGap = isEventoShift(titular as { code?: unknown; origin?: unknown });
   const writtenCode = eventGap ? 'EV' : (ct === 'FT' ? 'FT' : bandCode);
 
   const sourceId = String(params.sourceShiftId || '').trim();
@@ -537,6 +541,34 @@ export async function applyCoverage(
     }
   }
 
+  let eventCampos: Record<string, unknown> | null = null;
+  if (eventGap) {
+    const eventObjetivo = await asegurarObjetivoDeEvento(db, {
+      eventoId: titular.eventoId,
+      servicioId: titular.servicioId,
+      eventoNombre: titular.eventoNombre,
+      clientId: params.clientId ?? titular.clientId,
+      clientName: params.clientName ?? titular.clientName,
+    });
+    eventCampos = {
+      ...camposTurnoEvento({
+        empresaId,
+        eventoId: titular.eventoId,
+        eventoNombre: titular.eventoNombre,
+        servicioId: titular.servicioId,
+        servicioNombre: titular.servicioNombre || eventServicioNombre,
+        clientId: eventObjetivo.clientId || params.clientId || titular.clientId,
+        clientName: eventObjetivo.clientName || params.clientName || titular.clientName,
+        objectiveId: eventObjetivo.objectiveId || params.objectiveId || titular.objectiveId,
+        objectiveName: eventObjetivo.objectiveName || params.objectiveName || titular.objectiveName,
+        startTime: startTs,
+        endTime: endTs,
+        sourceShiftId: sourceId || null,
+      }),
+      eventGap: true,
+    };
+  }
+
   const existingCovSnap = await db.collection('turnos').doc(covDocId).get();
   const existingCov = existingCovSnap.exists
     ? (existingCovSnap.data() as Record<string, unknown>)
@@ -556,19 +588,11 @@ export async function applyCoverage(
       positionName: posName,
       coversPositionName: posName,
       code: writtenCode,
-      type: writtenCode,
-      ...(eventGap
-        ? {
-          eventoId: titular.eventoId ?? null,
-          eventoNombre: titular.eventoNombre ?? null,
-          servicioId: titular.servicioId ?? null,
-          servicioNombre: titular.servicioNombre ?? null,
-          eventGap: true,
-        }
-        : {}),
+      type: eventGap ? 'Evento' : writtenCode,
+      ...(eventCampos || {}),
       startTime: startTs,
       endTime: endTs,
-      origin: 'OPERATIONS_COVERAGE',
+      origin: eventGap ? 'EVENTO' : 'OPERATIONS_COVERAGE',
       resolvedBy: params.resolvedBy,
       coverageType: ct,
       ...linkFields,
