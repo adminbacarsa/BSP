@@ -923,6 +923,12 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // Propuestas de escala CCT 422/05 leídas del PDF (callable `extraerEscalaCct422`). Solo el servidor escribe.
+    match /escalas_cct/{propuestaId} {
+      allow read: if isSuperAdmin() || isAdmin();
+      allow write: if false;
+    }
+
     match /config/eventuales {
       allow read: if isSuperAdmin() || isAdmin();
       allow write: if false;

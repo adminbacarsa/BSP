@@ -112,6 +112,7 @@ cronoapp/
 | `hours_ledger_dirty` | H2f. Doc `{empresaId}_{objectiveId}_{yyyy-mm}`. Lo escriben los triggers (turnos/fichada, publicar o despublicar `planificacion_estados`, `servicios_sla`, `clients.objetivos`, ausencias). Escritura solo servidor; lectura tenant admin para mostrar «Actualizando…». Mauro publica las reglas. |
 | `roles` | Permisos por módulo. Estructura: `{ permissions: { MODULE_KEY: ['read','create',...] } }` |
 | `payroll_settings` | Modo de horas publicado al endpoint de liquidación (`hoursMode: planned \| real`). Doc id = `empresaId`. |
+| `escalas_cct` | Propuestas de escala **CCT 422/05** (SUVICO–CAESI) leídas del PDF: callable `extraerEscalaCct422` (anexo con texto → parser; escaneado → Gemini visión, secreto `GEMINI_API_KEY`). Siempre `estado: PROPUESTA`, confianza por campo, id `CCT_422_05_{vigenciaDesde}_{hash8}`. No toca `escalas_salariales`; aprobar es un paso aparte de RRHH. Fuente oficial: Disposiciones DNRYRT en BORA / argentina.gob.ar/normativa. Doc: `docs/ESCALAS-CCT-AUTOMATICAS.md`. Test: `npm run eval:escalas-cct`. **Reglas sin publicar.** |
 | `integrity_reports` | Informe nocturno (03:30 AR, `scheduledIntegrityScan`) por empresa. Doc id = `{empresaId}_{yyyy-mm-dd}`. Solo reporta. Si hay hallazgos, novedad `INTEGRIDAD_DATOS` (oculta en el monitor de Ops). |
 
 ### Períodos de horas (no mezclar)

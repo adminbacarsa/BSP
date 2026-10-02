@@ -3728,6 +3728,7 @@ export { gestionarEventual, crearAccesoEventual, listarTurnosEventual } from './
 export { gestionarMarcoEventual, pedirCodigoAnexoEventual, confirmarAnexoEventual } from './eventuales/marcoAnexoCall';
 export { subirMarcosLote } from './marcosLote/subirMarcosLote';
 export { acusarReciboContrato } from './eventuales/acusarReciboContrato';
+export { extraerEscalaCct422 } from './escalas/extraerEscalaCct422';
 // Eventuales en Planificación/Eventos: candidatos de la bolsa, asignación, sustitución y contrato por turnos.
 export {
   listarCandidatosEventuales,
