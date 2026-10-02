@@ -7,6 +7,7 @@ import {
   type EventualBolsaRow,
   type EventualCandidato,
   type EventualJornadaOcupada,
+  type EventualTramo,
 } from './eventoCoverage';
 import { puntajesPorClave } from '../desempeno/puntajeGuardiaJob';
 
@@ -28,6 +29,112 @@ function hmAr(ms: number): string {
   return `${h}:${m}`;
 }
 
+/** Códigos que no son jornada trabajada: no cuentan para el cruce 12 h (igual que `turnoAJornada`). */
+const CODIGOS_SIN_JORNADA = new Set(['F', 'FF', 'FP', 'V', 'L', 'E', 'A', 'ART', 'AA', 'PG', 'SGS', 'SUS']);
+
+export type EvaluarEventualesServerOpts = {
+  empresaId: string;
+  /** Uno (hueco del CC) o varios (Planificación multi-día) tramos en ms. */
+  tramos: EventualTramo[];
+  lat?: number | null;
+  lng?: number | null;
+  hoyYmd?: string;
+  /** Solo estas fichas (asignar / convocar / aceptar evalúan una). Default: toda la bolsa DISPONIBLE. */
+  bolsa?: EventualBolsaRow[];
+  /** Turnos que no cuentan como ocupados (los del propio eventual que se están reemplazando). */
+  excluirTurnoIds?: Set<string>;
+  /** true = toda la bolsa con motivo (Planificación). false = solo elegibles + sin marco (CC). */
+  incluirNoElegibles?: boolean;
+  /**
+   * Ventana `scheduleDate` [desde, hasta] para cargar los turnos ocupados (Planificación: ±2 días
+   * de las jornadas). Sin ventana se cargan todos los turnos del CUIL (CC, como siempre).
+   */
+  ventana?: { desde: string; hasta: string } | null;
+};
+
+async function bolsaDisponible(db: admin.firestore.Firestore): Promise<EventualBolsaRow[]> {
+  const snap = await db.collection('eventuales_bolsa').where('disponibilidad', '==', 'DISPONIBLE').get();
+  return snap.docs.map((d) => {
+    const data = d.data() as EventualBolsaRow;
+    return { ...data, cuil: String(data.cuil || d.id) };
+  });
+}
+
+/** Jornadas ya ocupadas de esos CUIL en todo el grupo (sin borradores, francos ni licencias). */
+async function jornadasOcupadas(
+  db: admin.firestore.Firestore,
+  cuils: string[],
+  ventana: { desde: string; hasta: string } | null | undefined,
+  excluirTurnoIds: Set<string>,
+): Promise<EventualJornadaOcupada[]> {
+  const otras: EventualJornadaOcupada[] = [];
+  for (let i = 0; i < cuils.length; i += 10) {
+    const chunk = cuils.slice(i, i + 10);
+    if (!chunk.length) continue;
+    let q: admin.firestore.Query = db.collection('turnos').where('bolsaCuil', 'in', chunk);
+    if (ventana) q = q.where('scheduleDate', '>=', ventana.desde).where('scheduleDate', '<=', ventana.hasta);
+    const turns = await q.get();
+    for (const doc of turns.docs) {
+      if (excluirTurnoIds.has(doc.id)) continue;
+      const data = doc.data();
+      if (data.draft === true || data.isDeleted === true || data.status === 'INACTIVE' || data.isUnassigned === true) continue;
+      if (data.isFranco === true || CODIGOS_SIN_JORNADA.has(String(data.code || '').toUpperCase())) continue;
+      const s = msOf(data.startTime);
+      const e = msOf(data.endTime);
+      if (!s || !e || e <= s) continue;
+      otras.push({
+        cuil: String(data.bolsaCuil || ''),
+        empresaId: String(data.empresaId || ''),
+        startMs: s,
+        endMs: e,
+      });
+    }
+  }
+  return otras;
+}
+
+/**
+ * Único camino del servidor al motor `eventualesParaHueco` (ops-core / `eventoCoverage.ts`):
+ * CC, cascada, convocatoria de evento y Planificación evalúan con los mismos criterios.
+ */
+export async function evaluarEventualesServer(
+  db: admin.firestore.Firestore,
+  opts: EvaluarEventualesServerOpts,
+): Promise<EventualCandidato[]> {
+  const empresaId = String(opts.empresaId || '').trim();
+  const tramos = (opts.tramos || []).filter((t) => t.startMs && t.endMs && t.endMs > t.startMs);
+  if (!empresaId || !tramos.length) return [];
+  const bolsa = opts.bolsa ?? await bolsaDisponible(db);
+  const cuils = bolsa.map((b) => String(b.cuil || '').trim()).filter(Boolean);
+  const otras = await jornadasOcupadas(db, cuils, opts.ventana, opts.excluirTurnoIds || new Set());
+
+  const scores = await puntajesPorClave(db, cuils);
+  for (const row of bolsa) {
+    const n = scores.get(String(row.cuil || ''));
+    if (typeof n === 'number') row.puntaje = n;
+  }
+
+  const lat = Number(opts.lat);
+  const lng = Number(opts.lng);
+  const startMs = Math.min(...tramos.map((t) => t.startMs));
+  const endMs = Math.max(...tramos.map((t) => t.endMs));
+  return eventualesParaHueco({
+    bolsa,
+    hueco: {
+      empresaId,
+      startMs,
+      endMs,
+      jornadas: tramos,
+      lat: opts.lat != null && Number.isFinite(lat) ? lat : null,
+      lng: opts.lng != null && Number.isFinite(lng) ? lng : null,
+      hoyYmd: opts.hoyYmd || arYmd(Date.now()),
+    },
+    otrasJornadas: otras,
+    incluirNoElegibles: opts.incluirNoElegibles === true,
+  });
+}
+
+/** Hueco del CC / cascada: elegibles de toda la bolsa para ese turno. */
 export async function loadEventualesParaHueco(
   db: admin.firestore.Firestore,
   shift: {
@@ -44,53 +151,15 @@ export async function loadEventualesParaHueco(
   const startMs = msOf(shift.startTime);
   const endMs = msOf(shift.endTime);
   if (!empresaId || !startMs || !endMs) return [];
-
-  const snap = await db.collection('eventuales_bolsa').where('disponibilidad', '==', 'DISPONIBLE').get();
-  const bolsa: EventualBolsaRow[] = snap.docs.map((d) => {
-    const data = d.data() as EventualBolsaRow;
-    return { ...data, cuil: String(data.cuil || d.id) };
-  });
-  const cuils = bolsa.map((b) => b.cuil).filter(Boolean);
-  const otras: EventualJornadaOcupada[] = [];
-  for (let i = 0; i < cuils.length; i += 10) {
-    const chunk = cuils.slice(i, i + 10);
-    if (!chunk.length) continue;
-    const turns = await db.collection('turnos').where('bolsaCuil', 'in', chunk).get();
-    for (const doc of turns.docs) {
-      const data = doc.data();
-      if (data.draft === true || data.isDeleted === true || data.status === 'INACTIVE') continue;
-      const s = msOf(data.startTime);
-      const e = msOf(data.endTime);
-      if (!s || !e || e <= s) continue;
-      otras.push({
-        cuil: String(data.bolsaCuil || ''),
-        empresaId: String(data.empresaId || ''),
-        startMs: s,
-        endMs: e,
-      });
-    }
-  }
-
-  const scores = await puntajesPorClave(db, bolsa.map((b) => b.cuil));
-  for (const row of bolsa) {
-    const n = scores.get(row.cuil);
-    if (typeof n === 'number') row.puntaje = n;
-  }
-
   const lat = Number(shift.lat ?? shift.latitude);
   const lng = Number(shift.lng ?? shift.longitude);
-  return eventualesParaHueco({
-    bolsa,
-    hueco: {
-      empresaId,
-      startMs,
-      endMs,
-      lat: Number.isFinite(lat) ? lat : null,
-      lng: Number.isFinite(lng) ? lng : null,
-      hoyYmd: arYmd(Date.now()),
-    },
-    otrasJornadas: otras,
-  }).filter((row) => row.elegible !== false);
+  const pool = await evaluarEventualesServer(db, {
+    empresaId,
+    tramos: [{ startMs, endMs }],
+    lat: Number.isFinite(lat) ? lat : null,
+    lng: Number.isFinite(lng) ? lng : null,
+  });
+  return pool.filter((row) => row.elegible !== false);
 }
 
 /**

@@ -4,8 +4,7 @@
  */
 import { calcularPuntaje, calcularPuntajeDeFuentes, PUNTAJE_FUENTES } from '../apps/functions/src/desempeno/puntajeGuardia.ts';
 import { buildCoverageCandidates, pickBestCandidate } from '../packages/ops-core/src/coverageCandidates.ts';
-import { eventualesParaHueco } from '../packages/ops-core/src/eventoCoverage.ts';
-import { ordenarCandidatos } from '../apps/web2/src/lib/eventuales/planificacion.mjs';
+import { eventualesParaHueco, ordenarEventuales } from '../packages/ops-core/src/eventoCoverage.ts';
 
 const results = [];
 function report(id, ok, detail) {
@@ -134,9 +133,10 @@ const evs = eventualesParaHueco({
 });
 report('eventuales', evs[0]?.cuil === 'zoe' && evs[1]?.cuil === 'ana', evs.map((r) => r.cuil).join(','));
 
-const orden = ordenarCandidatos([
-  { elegible: true, distanciaKm: 3, confiabilidad: 5, nombre: 'Ana', puntaje: 40, cuil: 'ana' },
-  { elegible: true, distanciaKm: 3, confiabilidad: 5, nombre: 'Zoe', puntaje: 90, cuil: 'zoe' },
+// Mismo motor para Planificación y CC (`ordenarEventuales`): el puntaje desempata a igual distancia y confiabilidad.
+const orden = ordenarEventuales([
+  { elegible: true, distanceKm: 3, distanciaKm: 3, confiabilidad: 5, confiabilidadInformada: true, employeeName: 'Ana', nombre: 'Ana', puntaje: 40, cuil: 'ana' },
+  { elegible: true, distanceKm: 3, distanciaKm: 3, confiabilidad: 5, confiabilidadInformada: true, employeeName: 'Zoe', nombre: 'Zoe', puntaje: 90, cuil: 'zoe' },
 ]);
 report('ordenar', orden[0].cuil === 'zoe', orden.map((r) => r.cuil).join(','));
 

@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import {
-  evaluarCandidato, jornadasDeTurnos, ordenarCandidatos, planContratoDesdeTurnos, turnoAJornada, distanciaKm,
-} from './planificacion.mjs';
+import { jornadasDeTurnos, planContratoDesdeTurnos, turnoAJornada, vencimientosDe } from './planificacion.mjs';
 import { armarLote } from './flujo.mjs';
 
+// Los casos de candidatos (motor único `eventualesParaHueco`) están en candidatosUnificados.test.mjs.
 const hoy = '2026-10-01';
 const bolsa = {
   cuil: '20999999991', nombre: 'PEREZ, JUAN', disponibilidad: 'DISPONIBLE', empresasHabilitadas: ['bacarsa'],
@@ -12,9 +11,6 @@ const bolsa = {
   habilitacion9236: { vencimiento: '2027-06-01' }, confiabilidad: 90,
   marcos: { bacarsa: { firmado: true, fechaFirma: '2026-01-01', vigenciaDias: 365 } },
 };
-const objetivoGeo = { lat: -31.40, lng: -64.19 };
-const M = { fecha: '2026-10-05', horaInicio: '07:00', horaFin: '15:00', horas: 8 };
-const N = { fecha: '2026-10-05', horaInicio: '23:00', horaFin: '07:00', horas: 8 };
 
 // 07:00 AR = 10:00Z
 const ts = (iso) => ({ seconds: Date.parse(iso) / 1000, nanoseconds: 0 });
@@ -23,32 +19,11 @@ const turno = (over = {}) => ({
   startTime: ts('2026-10-05T10:00:00.000Z'), endTime: ts('2026-10-05T18:00:00.000Z'), ...over,
 });
 
-describe('candidatos eventuales', () => {
-  it('elegible con distancia, confiabilidad y aviso de vencimiento', () => {
-    const c = evaluarCandidato({ bolsa, empresaId: 'bacarsa', jornadas: [M], hoy, objetivoGeo });
-    assert.equal(c.elegible, true);
-    assert.ok(c.distanciaKm > 0 && c.distanciaKm < 5);
-    assert.equal(c.confiabilidad, 90);
-    assert.deepEqual(c.alertas, ['apto vence 2026-10-20']);
-  });
-
-  it('motivo visible: no habilitado, no disponible, vencido, superposición y descanso 12 h', () => {
-    assert.equal(evaluarCandidato({ bolsa, empresaId: 'grupos_bacar_sa', jornadas: [M], hoy }).motivoCodigo, 'EMPRESA_NO_HABILITADA');
-    assert.equal(evaluarCandidato({ bolsa: { ...bolsa, disponibilidad: 'NO_DISPONIBLE' }, empresaId: 'bacarsa', jornadas: [M], hoy }).motivoCodigo, 'NO_DISPONIBLE');
-    assert.equal(evaluarCandidato({ bolsa: { ...bolsa, credencialVencimiento: '2026-09-01' }, empresaId: 'bacarsa', jornadas: [M], hoy }).motivoCodigo, 'CREDENCIAL_VENCIDA');
-    const sup = evaluarCandidato({ bolsa, empresaId: 'bacarsa', jornadas: [M], otrasJornadas: [{ ...M, empresaId: 'grupos_bacar_sa' }], hoy });
-    assert.equal(sup.motivoCodigo, 'SUPERPOSICION');
-    assert.match(sup.motivo, /grupos_bacar_sa/);
-    const desc = evaluarCandidato({ bolsa, empresaId: 'bacarsa', jornadas: [{ fecha: '2026-10-06', horaInicio: '08:00', horaFin: '16:00', horas: 8 }], otrasJornadas: [{ ...N, empresaId: 'grupos_bacar_sa' }], hoy });
-    assert.equal(desc.motivoCodigo, 'DESCANSO_12H');
-  });
-
-  it('ordena elegibles primero y por distancia', () => {
-    const lejos = { ...bolsa, cuil: '2', nombre: 'B', domicilioGeo: { lat: '-32.9', lon: '-68.8' } };
-    const noHab = { ...bolsa, cuil: '3', nombre: 'A', empresasHabilitadas: [] };
-    const lista = ordenarCandidatos([noHab, lejos, bolsa].map((b) => evaluarCandidato({ bolsa: b, empresaId: 'bacarsa', jornadas: [M], hoy, objetivoGeo })));
-    assert.deepEqual(lista.map((c) => c.cuil), ['20999999991', '2', '3']);
-    assert.equal(distanciaKm(null, objetivoGeo), null);
+describe('vencimientos de la ficha', () => {
+  it('credencial, apto y habilitación con OK / PRONTO / VENCIDO / SIN_DATO', () => {
+    assert.deepEqual(vencimientosDe(bolsa, hoy).map((v) => [v.tipo, v.estado]), [['credencial', 'OK'], ['apto', 'PRONTO'], ['habilitacion', 'OK']]);
+    assert.equal(vencimientosDe({ ...bolsa, credencialVencimiento: '2026-09-01' }, hoy)[0].estado, 'VENCIDO');
+    assert.equal(vencimientosDe({}, hoy)[2].estado, 'SIN_DATO');
   });
 });
 
