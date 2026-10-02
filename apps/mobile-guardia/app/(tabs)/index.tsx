@@ -407,6 +407,7 @@ function HoyScreenContent() {
       employeeIds: eventualLegajos.map((l) => l.employeeId),
       previewAsEmployeeId: isPreviewMode ? String(mainShift.employeeId || '') : null,
       fichadaRemota: employee?.fichadaRemota === true,
+      empresaId: employee?.empresaId ?? null,
     });
     appAlert(result.ok ? 'Presente' : 'Fichada', result.message);
   }
