@@ -214,7 +214,7 @@ export const arcaEnviosApi = onRequest(
         const snap = await q.limit(MAX_PENDIENTES).get();
         res.status(200).json({
           envios: snap.docs
-            .filter((d) => d.data().enviable !== false)
+            .filter((d) => d.data().enviable !== false && d.data().tipo !== 'ANULACION')
             .map((d) => ({
               envioId: d.id,
               empresaId: d.data().empresaId,

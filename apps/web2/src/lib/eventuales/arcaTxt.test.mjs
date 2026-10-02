@@ -56,6 +56,11 @@ describe('TXT ARCA posiciones fijas', () => {
     assert.equal(baja.linea.slice(29, 39), '2026/10/02');
     assert.equal(baja.linea.slice(45, 47), '30');
     assert.equal(baja.enviable, true);
+    const sinHaberes = lineaMovimientoArca({
+      contrato, cuil, bruto: 0, obraSocial: '123456', empresa, movimiento: 'BT', revista: '30', fechaBaja: '2026-10-02',
+    });
+    assert.equal(sinHaberes.linea.slice(57, 72), '000000000000000');
+    assert.equal(brutoParaTxt({ contrato: { ...contrato, sinDevengamiento: true }, escalas: [{ status: 'ACTIVE', basicoMensual: 1 }] }).bruto, 0);
   });
 
   it('no se envía si faltan el código de convenio y la categoría', () => {

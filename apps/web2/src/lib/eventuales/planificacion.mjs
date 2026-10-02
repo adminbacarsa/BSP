@@ -7,7 +7,8 @@
  */
 import { bloqueoCruce, clasificarAlta, habilitadoEnEmpresa, TANDA_DEFAULT } from './flujo.mjs';
 import {
-  CONSTANCIA_NO_SE_PRESENTO, MODULO_ANULACION_INCORPORACIONES, MOTIVO_BAJA_SIN_EFECTIVIZACION, plazoAnulacionAlta, revistaDesistimientoDe,
+  CARGA_ANULACION_MANUAL, CONSTANCIA_NO_SE_PRESENTO, MODULO_ANULACION_INCORPORACIONES, MOTIVO_BAJA_SIN_EFECTIVIZACION,
+  OBSERVACION_INTERNA_NO_PRESENTACION, plazoAnulacionAlta, revistaDesistimientoDe,
 } from './plazoAnulacion.mjs';
 import { MOTIVO_SIN_MARCO } from './marcoAnexoConst.mjs';
 import { ETIQUETA_PRUEBAS_SIN_MARCO, exigeMarco } from './pruebasSwitch.mjs';
@@ -250,6 +251,8 @@ export function planContratoDesdeTurnos({
         fechaAlta: fechaInicio, fechaInicio, horaInicio, fechaBaja: null,
         venceAnulacionMs: plazo.venceMs, avisoFeriados: plazo.avisoFeriados,
         constanciaInterna: CONSTANCIA_NO_SE_PRESENTO, confirmarConContador: false, bruto: 0,
+        carga: CARGA_ANULACION_MANUAL, enviable: false, txt: null,
+        nroTransaccionAlta: String(envioAt?.nroTransaccion || ''),
       });
       return { accion: 'CERRAR', contrato: { ...actual, ...comun, estado: 'ANULADO', jornadas: [], cierre: { motivo: 'ANULAR_ALTA', at: new Date(ahoraMs).toISOString() } }, envios, patchesEnvios };
     }
@@ -258,6 +261,7 @@ export function planContratoDesdeTurnos({
       motivo: MOTIVO_BAJA_SIN_EFECTIVIZACION, revista: revistaDesistimientoDe(arcaEventuales),
       fechaAlta: fechaInicio, fechaInicio, horaInicio, fechaBaja: fechaInicio,
       constanciaInterna: CONSTANCIA_NO_SE_PRESENTO, confirmarConContador: false, avisoFeriados: plazo.avisoFeriados,
+      observacionesInternas: OBSERVACION_INTERNA_NO_PRESENTACION, sinDevengamiento: true, devengaArt: false, bruto: 0,
     });
     return { accion: 'CERRAR', contrato: { ...actual, ...comun, estado: 'FINALIZADO', cierre: { motivo: 'BAJA_FUERA_DE_PLAZO', at: new Date(ahoraMs).toISOString() } }, envios, patchesEnvios };
   }

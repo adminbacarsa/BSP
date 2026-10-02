@@ -198,18 +198,18 @@ async function auditar(action: string, actorUid: string, empresaId: string, cuil
 
 async function txtBajaDesistimiento(empresaId: string, contrato: Record<string, unknown>, cuil: string, bolsa: Record<string, unknown>, envio: Record<string, unknown>) {
   try {
-    const { lineaMovimientoArca, brutoParaTxt } = await import('../eventuales-shared/arcaTxt.mjs') as {
+    const { lineaMovimientoArca } = await import('../eventuales-shared/arcaTxt.mjs') as {
       lineaMovimientoArca: (i: Record<string, unknown>) => { linea: string; advertencias: string[]; enviable: boolean };
-      brutoParaTxt: (i: Record<string, unknown>) => { ok: boolean; bruto: number };
+    };
+    const { OBSERVACION_INTERNA_NO_PRESENTACION } = await import('../eventuales-shared/plazoAnulacion.mjs') as {
+      OBSERVACION_INTERNA_NO_PRESENTACION: string;
     };
     const empresa = { id: empresaId, ...((await db().collection('empresas').doc(empresaId).get()).data() || {}) };
-    const escalasSnap = await db().collection('escalas_salariales').where('status', '==', 'ACTIVE').get();
-    const bruto = brutoParaTxt({ contrato, escalas: escalasSnap.docs.map((d) => d.data()) });
     const fechaBaja = String(envio.fechaBaja || envio.fechaInicio || contrato.fechaAlta || '');
     const out = lineaMovimientoArca({
       contrato: { ...contrato, fechaAlta: envio.fechaInicio || contrato.fechaAlta },
       cuil,
-      bruto: bruto.bruto,
+      bruto: 0,
       obraSocial: bolsa.obraSocialRnos || '',
       empresa,
       movimiento: 'BT',
@@ -217,9 +217,16 @@ async function txtBajaDesistimiento(empresaId: string, contrato: Record<string, 
       fechaBaja,
     });
     const advertencias = [...out.advertencias];
-    if (!bruto.ok) advertencias.push('RETRIBUCION_PENDIENTE');
     if (envio.avisoFeriados) advertencias.push(String(envio.avisoFeriados));
-    return { txt: out.linea, advertencias, enviable: out.enviable && bruto.ok, bruto: bruto.bruto };
+    return {
+      txt: out.linea,
+      advertencias,
+      enviable: out.enviable,
+      bruto: 0,
+      sinDevengamiento: true,
+      devengaArt: false,
+      observacionesInternas: OBSERVACION_INTERNA_NO_PRESENTACION,
+    };
   } catch (e) {
     return { txt: null, advertencias: ['TXT_NO_GENERADO', (e as Error)?.message || ''], enviable: false, bruto: 0 };
   }
@@ -298,7 +305,7 @@ export async function sincronizarContratoEventual(empresaId: string, cuil: strin
   for (const envio of plan.envios) {
     const tipo = String(envio.tipo);
     const txt = tipo === 'ANULACION'
-      ? { txt: null, advertencias: envio.avisoFeriados ? [String(envio.avisoFeriados)] : [], enviable: true, bruto: 0 }
+      ? { txt: null, advertencias: envio.avisoFeriados ? [String(envio.avisoFeriados)] : [], enviable: false, bruto: 0, carga: 'MANUAL_WEB' }
       : tipo === 'BAJA_NO_PRESENTACION'
         ? await txtBajaDesistimiento(empresaId, plan.contrato || {}, cuil, bolsa, envio)
         : tipo === 'AT' || tipo === 'BT'
@@ -328,7 +335,19 @@ export async function sincronizarContratoEventual(empresaId: string, cuil: strin
     batch.update(db().collection('arca_envios').doc(id), { ...resto, ...extra, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
   }
   await batch.commit();
-  const enviosLuego = (await db().collection('arca_envios').where('contratoIds', 'array-contains', contratoId).get()).docs.map((d) => ({ id: d.id, ...d.data() }));
+  const enviosLuego = (await db().collection('arca_envios').where('contratoIds', 'array-contains', contratoId).get()).docs.map((d) => ({ id: d.id, ...d.data() })) as ({ id: string; tipo?: string; constanciaInasistencia?: unknown } & Record<string, unknown>)[];
+  const { anotarNoPresentacion } = await import('./eventualNoSePresento');
+  for (const envio of enviosLuego) {
+    if (envio.tipo !== 'BAJA_NO_PRESENTACION' && envio.tipo !== 'ANULACION') continue;
+    if (envio.constanciaInasistencia) continue;
+    await anotarNoPresentacion(db(), {
+      envioId: String(envio.id),
+      empresaId,
+      cuil,
+      empleadoId: String(employeeId || ''),
+      actorUid,
+    });
+  }
   await marcarTurnosConContrato(turnos, contratoId, enviosLuego);
   if (estado === 'ANULADO') {
     const { propagarAltaEnTurnos } = await import('../arca/altaArcaDenorm');

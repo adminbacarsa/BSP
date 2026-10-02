@@ -47,7 +47,10 @@ const ops = movilNavForPermissions((key) => key === 'OPERATIONS', '/admin/operac
 check('barra de Operación sin RRHH', ops === 'Objetivos,Alertas,Sala,Menú');
 
 // Pantallas + components/movil/ui + BottomSheet compilados con el helper compartido.
-const screens = compileMovilScreens(outdir, lib, ['RrhhScreens', 'EventualesScreens']);
+const plazoUrl = pathToFileURL(join(root, 'lib/eventuales/plazoAnulacion.mjs')).href;
+const screens = compileMovilScreens(outdir, lib, ['RrhhScreens', 'EventualesScreens'], {
+  '@/lib/eventuales/plazoAnulacion.mjs': plazoUrl,
+});
 
 const { createElement } = await import(pathToFileURL(require.resolve('react')).href);
 const { renderToStaticMarkup } = await import(pathToFileURL(require.resolve('react-dom/server')).href);
@@ -170,6 +173,18 @@ const confirmado = renderToStaticMarkup(createElement(EventualesScreens, {
   arca: [evProps.arca[1], { ...evProps.arca[0], estado: 'CONFIRMADO', nroTransaccion: '20261001-AT-000777' }],
 }));
 check('alta confirmada pasa a CONFIRMADO con su transacción', confirmado.includes('Confirmados ahora') && confirmado.includes('data-arca-estado="CONFIRMADO"') && confirmado.includes('Transacción 20261001-AT-000777') && confirmado.includes('ARCA pendiente · Pruebas S.A. · <span class="tabular-nums text-slate-900">1</span>'));
+const anulaHtml = renderToStaticMarkup(createElement(EventualesScreens, {
+  ...evOnline,
+  arcaId: 'n',
+  acuse: '',
+  ahoraMs: Date.parse('2026-10-05T18:00:00-03:00'),
+  arca: [{
+    id: 'n', nombre: 'Sosa, Carla', cuil: '20-11111111-2', cuil11: '20111111112', tipo: 'ANULACION', estado: 'PENDIENTE',
+    fecha: '05/10/2026', nroTransaccion: '', fechaInicioArca: '20261005', nroTransaccionAlta: '778899',
+    venceAnulacionMs: Date.parse('2026-10-06T00:00:00-03:00'),
+  }],
+}));
+check('anulación es tarea manual con datos, plazo y acuse', anulaHtml.includes('data-anulacion-manual="1"') && anulaHtml.includes('data-anula-cuil="1"') && anulaHtml.includes('20111111112') && anulaHtml.includes('20261005') && anulaHtml.includes('778899') && anulaHtml.includes('Anular Registro') && anulaHtml.includes('data-anula-plazo="abierto"') && anulaHtml.includes('Registrar acuse') && !anulaHtml.includes('Confirmar en ARCA'));
 
 if (failed) {
   console.error(failed, 'fallos');

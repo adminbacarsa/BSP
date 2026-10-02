@@ -15,6 +15,19 @@ export const HORA_CORTE_TURNO_NOCHE = 17 * 60;
 export const MODULO_ANULACION_INCORPORACIONES = 'ANULACION_INCORPORACIONES';
 export const MOTIVO_BAJA_SIN_EFECTIVIZACION = 'desistimiento / sin efectivización de tareas';
 export const CONSTANCIA_NO_SE_PRESENTO = 'NO_SE_PRESENTO';
+/** Código de motivo confirmado por el contador: 30 = Rescisión / extinción antes del inicio. */
+export const CODIGO_MOTIVO_BAJA_NO_PRESENTACION = '30';
+/** Observación interna del envío y del legajo. No sale en el TXT. */
+export const OBSERVACION_INTERNA_NO_PRESENTACION = 'Sin efectivización de tareas / No presentación al primer turno';
+/** La anulación de alta se hace a mano en la web de ARCA. El TXT por lote queda sin armar. */
+export const CARGA_ANULACION_MANUAL = 'MANUAL_WEB';
+export const PASOS_ANULACION_MANUAL = [
+  'Entrá a ARCA con la clave fiscal de la empresa.',
+  'Abrí Simplificación Registral → Relaciones Laborales → Anular Registro.',
+  'Cargá el CUIL de 11 dígitos, la fecha de inicio AAAAMMDD (la misma del alta) y el número de transacción del alta original.',
+  'Confirmá. ARCA entrega el acuse en el acto.',
+  'Pegá ese acuse acá. El envío queda ANULADO. Si el plazo vence sin acuse, pasa solo a baja código 30.',
+];
 
 function pad(n) {
   return String(n).padStart(2, '0');
@@ -128,17 +141,83 @@ export function plazoAnulacionAlta({ fechaInicio, horaInicio = '08:00', ahoraMs,
 }
 
 export function revistaDesistimientoDe(cfg) {
-  const code = String(cfg?.situacionRevistaDesistimiento || cfg?.situacionRevistaNoInicio || '30').trim();
-  return code || '30';
+  const code = String(cfg?.situacionRevistaDesistimiento || cfg?.situacionRevistaNoInicio || CODIGO_MOTIVO_BAJA_NO_PRESENTACION).trim();
+  return code || CODIGO_MOTIVO_BAJA_NO_PRESENTACION;
+}
+
+/** YYYY-MM-DD → AAAAMMDD. Vacío si la fecha no es la del alta. */
+export function fechaAaaammdd(iso) {
+  const ymd = String(iso || '').slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(ymd) ? ymd.replace(/-/g, '') : '';
+}
+
+export function cuil11(raw) {
+  const digits = String(raw || '').replace(/\D/g, '');
+  return digits.length === 11 ? digits : '';
+}
+
+/** Datos que el contador carga en «Anular Registro». */
+export function datosAnulacionManual(envio) {
+  return {
+    cuil: cuil11(envio?.bolsaCuil || envio?.cuil),
+    fechaInicio: fechaAaaammdd(envio?.fechaInicio || envio?.fechaAlta),
+    nroTransaccionAlta: String(envio?.nroTransaccionAlta || '').trim(),
+    venceMs: Number(envio?.venceAnulacionMs) || 0,
+    pasos: PASOS_ANULACION_MANUAL,
+  };
+}
+
+/** Cuenta regresiva del plazo RG 2988. `ms` es lo que falta. */
+export function cuentaRegresivaAnulacion(venceMs, ahoraMs) {
+  const vence = Number(venceMs) || 0;
+  if (!vence) return { vencido: false, texto: 'Sin plazo cargado', ms: 0 };
+  const ms = vence - (Number(ahoraMs) || 0);
+  if (ms <= 0) return { vencido: true, texto: 'Plazo vencido: pasa a baja código 30', ms: 0 };
+  const totalMin = Math.floor(ms / 60000);
+  const dias = Math.floor(totalMin / (60 * 24));
+  const horas = Math.floor((totalMin % (60 * 24)) / 60);
+  const min = totalMin % 60;
+  const partes = [];
+  if (dias > 0) partes.push(`${dias} d`);
+  if (horas > 0 || dias > 0) partes.push(`${horas} h`);
+  partes.push(`${String(min).padStart(2, '0')} min`);
+  return { vencido: false, texto: partes.join(' '), ms };
+}
+
+export function acuseAnulacionValido(acuse) {
+  const texto = String(acuse || '').trim();
+  if (texto.length < 3) return { ok: false, codigo: 'FALTA_ACUSE' };
+  if (texto.length > 120) return { ok: false, codigo: 'ACUSE_LARGO' };
+  return { ok: true, acuse: texto };
+}
+
+export function observacionesConInasistencia(actual) {
+  const prev = String(actual || '').trim();
+  if (prev.includes(OBSERVACION_INTERNA_NO_PRESENTACION)) return prev;
+  return prev ? `${prev}\n${OBSERVACION_INTERNA_NO_PRESENTACION}` : OBSERVACION_INTERNA_NO_PRESENTACION;
+}
+
+/**
+ * Haberes y ART que se pueden exportar. El no presentado (anexo sin efecto, jornada
+ * no pagada o baja por no efectivización) devenga 0 y no genera ART.
+ */
+export function devengamientoExportable(doc) {
+  if (!doc || doc.sinEfecto === true || doc.sinDevengamiento === true || doc.pagaJornada === false || doc.noSePresento === true) {
+    return { bruto: 0, art: false, motivo: 'SIN_EFECTIVIZACION' };
+  }
+  const bruto = Number(doc.bruto);
+  const hay = Number.isFinite(bruto) && bruto > 0;
+  return { bruto: hay ? bruto : 0, art: hay, motivo: null };
 }
 
 /**
  * Anulación pendiente que ya no entra en la ventana → baja.
  * No toca envíos ya subidos ni los que no son anulación.
  */
-export function convertirAnulacionVencida(envio, { ahoraMs, feriados = [], revistaDesistimiento = '30' } = {}) {
+export function convertirAnulacionVencida(envio, { ahoraMs, feriados = [], revistaDesistimiento = CODIGO_MOTIVO_BAJA_NO_PRESENTACION } = {}) {
   if (!envio || envio.tipo !== 'ANULACION') return { convertir: false };
   if (envio.quitadoDelLote === true) return { convertir: false };
+  if (envio.estado === 'ANULADO' || envio.acuseAnulacion) return { convertir: false };
   if (!['PENDIENTE', 'ERROR', 'MANUAL'].includes(String(envio.estado || ''))) return { convertir: false };
   const fechaInicio = String(envio.fechaInicio || envio.fechaAlta || '').slice(0, 10);
   const plazo = plazoAnulacionAlta({
@@ -157,9 +236,13 @@ export function convertirAnulacionVencida(envio, { ahoraMs, feriados = [], revis
       lote: 'BT',
       modulo: null,
       motivo: MOTIVO_BAJA_SIN_EFECTIVIZACION,
-      revista: String(revistaDesistimiento || '30'),
+      revista: String(revistaDesistimiento || CODIGO_MOTIVO_BAJA_NO_PRESENTACION),
       fechaBaja: fechaInicio,
       constanciaInterna: CONSTANCIA_NO_SE_PRESENTO,
+      observacionesInternas: OBSERVACION_INTERNA_NO_PRESENTACION,
+      sinDevengamiento: true,
+      devengaArt: false,
+      bruto: 0,
       convertidoDe: 'ANULACION',
       convertidoPor: 'VENTANA_VENCIDA',
       confirmarConContador: false,

@@ -49,6 +49,12 @@ type EnvioArcaServidor = {
   estado?: string;
   fecha?: string;
   nroTransaccion?: string;
+  fechaInicioArca?: string;
+  nroTransaccionAlta?: string;
+  venceAnulacionMs?: number;
+  pasos?: string[];
+  observacionesInternas?: string;
+  revista?: string;
 };
 
 function hoy(): string {
@@ -72,6 +78,13 @@ function envioAMovil(row: EnvioArcaServidor): ArcaMovil {
     estado: String(row.estado || ''),
     fecha: fmtFechaAr(String(row.fecha || '')),
     nroTransaccion: String(row.nroTransaccion || ''),
+    cuil11: String(row.cuil || '').replace(/\D/g, ''),
+    fechaInicioArca: String(row.fechaInicioArca || ''),
+    nroTransaccionAlta: String(row.nroTransaccionAlta || ''),
+    venceAnulacionMs: Number(row.venceAnulacionMs) || 0,
+    pasos: row.pasos,
+    observacionesInternas: String(row.observacionesInternas || ''),
+    revista: String(row.revista || ''),
   };
 }
 
@@ -97,6 +110,7 @@ export function EventualesMovil() {
   const [arcaEnviando, setArcaEnviando] = useState(false);
   const [arcaId, setArcaId] = useState('');
   const [nro, setNro] = useState('');
+  const [acuse, setAcuse] = useState('');
   const [pendingLabel, setPendingLabel] = useState<string | null>(null);
 
   useEffect(() => {
@@ -148,7 +162,7 @@ export function EventualesMovil() {
       const data = res.data as { envios?: EnvioArcaServidor[] };
       const nuevos = (data.envios || []).map(envioAMovil);
       setArca((previos) => {
-        const confirmadosRecientes = previos.filter((envio) => envio.estado === 'CONFIRMADO' && !nuevos.some((n) => n.id === envio.id));
+        const confirmadosRecientes = previos.filter((envio) => (envio.estado === 'CONFIRMADO' || envio.estado === 'ANULADO') && !nuevos.some((n) => n.id === envio.id));
         return [...nuevos, ...confirmadosRecientes];
       });
     }).catch((error: unknown) => {
@@ -272,6 +286,31 @@ export function EventualesMovil() {
     }).finally(() => setArcaEnviando(false));
   };
 
+  const registrarAcuse = () => {
+    const envio = arca.find((row) => row.id === arcaId) || null;
+    const texto = acuse.trim();
+    if (!envio || envio.tipo !== 'ANULACION' || texto.length < 3) {
+      toast.error('Pegá el acuse que devolvió ARCA.');
+      return;
+    }
+    if (!online) {
+      toast.error('ARCA requiere conexión.');
+      return;
+    }
+    setArcaEnviando(true);
+    void llamar('ARCA', { accion: 'arcaAcuseAnulacion', envioId: envio.id, acuse: texto }).then(() => {
+      toast.success('Anulación registrada. El envío quedó ANULADO.');
+      setAcuse('');
+      setArcaId('');
+      setArca((lista) => lista.map((row) => (row.id === envio.id ? { ...row, estado: 'ANULADO' } : row)));
+      cargarArca(true);
+    }).catch((error: unknown) => {
+      const msg = error instanceof Error ? error.message : 'No se pudo registrar el acuse.';
+      toast.error(msg.includes('PLAZO_VENCIDO') ? 'El plazo venció: el envío pasa a baja código 30.' : msg);
+      if (msg.includes('PLAZO_VENCIDO')) cargarArca(true);
+    }).finally(() => setArcaEnviando(false));
+  };
+
   if (!permitido) {
     return <p className="p-6 text-sm font-semibold text-slate-600">No tenés permiso de Eventuales.</p>;
   }
@@ -309,6 +348,9 @@ export function EventualesMovil() {
         arcaId={arcaId}
         onArca={(id) => { setArcaId(id); setNro(''); }}
         onConfirmarArca={confirmarArca}
+        acuse={acuse}
+        onAcuse={setAcuse}
+        onRegistrarAcuse={registrarAcuse}
         arcaEnviando={arcaEnviando}
         elegido={elegido}
         puedeSwitch={puedeSwitch}

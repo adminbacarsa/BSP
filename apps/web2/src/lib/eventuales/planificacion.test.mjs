@@ -118,11 +118,18 @@ describe('contrato desde turnos', () => {
     assert.equal(na.envios[0].tipo, 'ANULACION');
     assert.equal(na.envios[0].motivo, null);
     assert.equal(na.envios[0].lote, 'ANULACION');
+    assert.equal(na.envios[0].carga, 'MANUAL_WEB');
+    assert.equal(na.envios[0].enviable, false);
+    assert.equal(na.envios[0].txt, null);
     assert.equal(na.contrato.estado, 'ANULADO');
     const bt = planContratoDesdeTurnos({ empresaId: 'bacarsa', bolsa, turnos: [], contratoActual: confirmado, enviosActuales: [{ id: 'at1', tipo: 'AT', estado: 'CONFIRMADO' }], ahoraMs: Date.parse('2026-10-07T12:00:00.000Z') });
     assert.equal(bt.envios[0].tipo, 'BAJA_NO_PRESENTACION');
     assert.equal(bt.envios[0].fechaBaja, '2026-10-05');
     assert.equal(bt.envios[0].motivo, 'desistimiento / sin efectivización de tareas');
+    assert.equal(bt.envios[0].observacionesInternas, 'Sin efectivización de tareas / No presentación al primer turno');
+    assert.equal(bt.envios[0].bruto, 0);
+    assert.equal(bt.envios[0].sinDevengamiento, true);
+    assert.equal(bt.envios[0].devengaArt, false);
     assert.equal(bt.contrato.estado, 'FINALIZADO');
   });
 

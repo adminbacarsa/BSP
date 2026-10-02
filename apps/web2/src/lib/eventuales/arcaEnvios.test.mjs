@@ -68,6 +68,16 @@ describe('envíos ARCA', () => {
     assert.equal(ok.patch.token, null);
     assert.equal(ok.patch.intentos.length, 2);
     assert.equal(transicionEnvio({ ...envio, ...ok.patch }, { estado: 'SUBIENDO' }).codigo, 'TRANSICION_INVALIDA');
+    const anulacion = { ...envio, tipo: 'ANULACION', estado: 'PENDIENTE' };
+    assert.equal(transicionEnvio(anulacion, { estado: 'ANULADO', acuse: 'x' }).codigo, 'FALTA_ACUSE');
+    assert.equal(transicionEnvio(envio, { estado: 'ANULADO', acuse: 'ACUSE-1' }).codigo, 'NO_ES_ANULACION');
+    const acuse = transicionEnvio(anulacion, { estado: 'ANULADO', origen: 'MANUAL', acuse: ' ACUSE-8841 ' });
+    assert.equal(acuse.ok, true);
+    assert.equal(acuse.patch.estado, 'ANULADO');
+    assert.equal(acuse.patch.acuseAnulacion, 'ACUSE-8841');
+    assert.equal(acuse.patch.enviable, false);
+    assert.equal(acuse.patch.txt, null);
+    assert.equal(transicionEnvio({ ...anulacion, ...acuse.patch }, { estado: 'CONFIRMADO', nroTransaccion: '1' }).codigo, 'TRANSICION_INVALIDA');
   });
 
   it('el link es de un solo uso, vence a las 48 h y no muestra datos personales', () => {

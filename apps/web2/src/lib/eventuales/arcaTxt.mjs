@@ -25,9 +25,10 @@ export const ARCA_EVENTUALES_DEFAULT = {
    */
   movimientoAnulacion: 'NA',
   /**
-   * Revista de la baja cuando venció la anulación (desistimiento / sin efectivización de tareas).
-   * 30 es el de la baja habitual hasta que la empresa cargue el que indique el contador.
-   * `empresas.arcaEventuales.situacionRevistaDesistimiento` lo pisa. `situacionRevistaNoInicio` es el alias viejo.
+   * Revista de la baja cuando venció la anulación. El contador confirmó el código 30
+   * (Rescisión / extinción antes del inicio). La retribución de esa baja va en 0:
+   * no hay devengamiento de haberes ni de ART. `situacionRevistaDesistimiento` de la
+   * empresa lo pisa. `situacionRevistaNoInicio` es el alias viejo.
    */
   situacionRevistaDesistimiento: '30',
   situacionRevistaNoInicio: '30',
@@ -119,11 +120,18 @@ function armarLinea({ movimiento, revista, cuil, fechaAlta, fechaBaja, bruto, ob
  * Retribución pactada del TXT (posiciones 58-72). Solo entra una escala ACTIVE.
  * Sin escala aprobada el envío no se manda.
  */
+export function jornadasDevengables(jornadas) {
+  return (jornadas || []).filter((j) => j && j.noSePresento !== true && j.pagaJornada !== false && j.sinDevengamiento !== true);
+}
+
 export function brutoParaTxt({ contrato, escalas }) {
+  if (contrato?.sinDevengamiento === true || contrato?.noSePresento === true) {
+    return { ok: true, codigo: 'SIN_DEVENGAMIENTO', bruto: 0, sinDevengamiento: true };
+  }
   const activas = (escalas || []).filter((e) => e && e.status === 'ACTIVE');
   if (!activas.length) return { ok: false, codigo: 'RETRIBUCION_PENDIENTE', bruto: 0 };
   const r = calcularRemuneracionContrato({
-    jornadas: contrato?.jornadas || [],
+    jornadas: jornadasDevengables(contrato?.jornadas),
     categoria: contrato?.categoria || 'VIGILADOR_GENERAL',
     escalas: activas,
     incluirCierre: false,

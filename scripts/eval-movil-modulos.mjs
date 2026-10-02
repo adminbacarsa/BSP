@@ -106,8 +106,10 @@ check('rrhh: enfermedad sin certificado queda En verificación; licencia con cer
 
 // ── Render de pantallas (390x844) ──
 const serviciosStub = writeStub(outdir, 'serviciosMovilStub', "export const ESTADO_LABEL = { active: 'En operación', withoutPlan: 'Con servicio sin operación', closed: 'Cerrado', none: 'Sin servicio' };\n");
+const plazoUrl = pathToFileURL(join(root, 'lib/eventuales/plazoAnulacion.mjs')).href;
 const screens = compileMovilScreens(outdir, lib, ['MovilMenuScreens', 'EmpresaSheetBody', 'RrhhScreens', 'EventualesScreens', 'SupervisionScreens', 'ServiciosMovilScreens'], {
   '@/lib/servicios/serviciosMovil': serviciosStub,
+  '@/lib/eventuales/plazoAnulacion.mjs': plazoUrl,
 });
 const { createElement } = await import(pathToFileURL(require.resolve('react')).href);
 const { renderToStaticMarkup } = await import(pathToFileURL(require.resolve('react-dom/server')).href);

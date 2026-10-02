@@ -4,7 +4,7 @@
  */
 import { randomBytes } from 'crypto';
 
-export const ESTADOS_ENVIO = ['PENDIENTE', 'SUBIENDO', 'CONFIRMADO', 'ERROR', 'MANUAL'] as const;
+export const ESTADOS_ENVIO = ['PENDIENTE', 'SUBIENDO', 'CONFIRMADO', 'ERROR', 'MANUAL', 'ANULADO'] as const;
 export type EstadoEnvio = (typeof ESTADOS_ENVIO)[number];
 export type OrigenEnvio = 'ROBOT' | 'MANUAL' | 'LINK';
 
@@ -12,17 +12,19 @@ export const TOKEN_VIGENCIA_MS = 48 * 60 * 60 * 1000;
 export const ALERTA_ALTA_PENDIENTE_MS = 2 * 60 * 60 * 1000;
 
 const TRANSICIONES: Record<EstadoEnvio, EstadoEnvio[]> = {
-  PENDIENTE: ['SUBIENDO', 'MANUAL', 'ERROR', 'CONFIRMADO'],
+  PENDIENTE: ['SUBIENDO', 'MANUAL', 'ERROR', 'CONFIRMADO', 'ANULADO'],
   SUBIENDO: ['CONFIRMADO', 'ERROR', 'MANUAL'],
-  ERROR: ['PENDIENTE', 'SUBIENDO', 'MANUAL', 'CONFIRMADO'],
-  MANUAL: ['CONFIRMADO', 'ERROR'],
+  ERROR: ['PENDIENTE', 'SUBIENDO', 'MANUAL', 'CONFIRMADO', 'ANULADO'],
+  MANUAL: ['CONFIRMADO', 'ERROR', 'ANULADO'],
   CONFIRMADO: [],
+  ANULADO: [],
 };
 
 export type EnvioDoc = {
   estado?: EstadoEnvio;
   origen?: OrigenEnvio | null;
-  tipo?: 'AT' | 'BT';
+  tipo?: string;
+  acuseAnulacion?: string | null;
   txt?: string;
   intentos?: unknown[];
   token?: string | null;
@@ -49,6 +51,7 @@ export function transicionEnvio(
     error?: string | null;
     actor?: string | null;
     at?: string;
+    acuse?: string | null;
   },
 ): ResultadoTransicion {
   const actual = (envio?.estado || 'PENDIENTE') as EstadoEnvio;
@@ -75,6 +78,15 @@ export function transicionEnvio(
     patch.nroTransaccion = String(input.nroTransaccion).trim();
     patch.constanciaUrl = input.constanciaUrl || envio.constanciaUrl || null;
     patch.token = null;
+  }
+  if (input.estado === 'ANULADO') {
+    if (envio?.tipo !== 'ANULACION') return { ok: false, codigo: 'NO_ES_ANULACION' };
+    const acuseTxt = String(input.acuse || '').trim();
+    if (acuseTxt.length < 3) return { ok: false, codigo: 'FALTA_ACUSE' };
+    if (acuseTxt.length > 120) return { ok: false, codigo: 'ACUSE_LARGO' };
+    patch.acuseAnulacion = acuseTxt;
+    patch.txt = null;
+    patch.enviable = false;
   }
   if (input.estado === 'ERROR') patch.ultimoError = input.error || 'SIN_DETALLE';
   return { ok: true, patch };

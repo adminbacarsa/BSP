@@ -73,7 +73,7 @@ export const gestionarEventual = functions.https.onCall(async (data, context) =>
   const mapa: Record<string, string> = {
     crear: 'create', editar: 'update', baja: 'delete', reactivar: 'update', detalle: 'read',
     asignarEmpresas: 'update', importarContacto: 'update', habilitarEmpresa: 'update',
-    arcaPendientes: 'read', arcaConfirmar: 'update', switchesPruebas: 'update',
+    arcaPendientes: 'read', arcaConfirmar: 'update', arcaAcuseAnulacion: 'update', switchesPruebas: 'update',
   };
   const permiso = mapa[accion];
   if (!permiso) throw new functions.https.HttpsError('invalid-argument', 'Acción desconocida.');
@@ -116,6 +116,8 @@ export const gestionarEventual = functions.https.onCall(async (data, context) =>
   if (accion === 'arcaPendientes') {
     const empresaId = String(data?.empresaId || '');
     if (!empresaId) throw new functions.https.HttpsError('invalid-argument', 'Falta la empresa.');
+    const { vencerAnulacionesPendientes } = await import('./eventualNoSePresento');
+    await vencerAnulacionesPendientes(db(), Date.now());
     const snap = await db().collection('arca_envios').where('empresaId', '==', empresaId).limit(80).get();
     const abiertos = snap.docs.filter((doc) => ['PENDIENTE', 'ERROR', 'MANUAL', 'SUBIENDO'].includes(String(doc.data().estado || '')) && doc.data().quitadoDelLote !== true);
     const fichaCache = new Map<string, Promise<admin.firestore.DocumentSnapshot | null>>();
@@ -135,10 +137,22 @@ export const gestionarEventual = functions.https.onCall(async (data, context) =>
       const ms = created?.toMillis?.();
       return ms ? new Date(ms - 3 * 3600 * 1000).toISOString().slice(0, 10) : '';
     };
+    const { fechaAaaammdd, PASOS_ANULACION_MANUAL } = await import('../eventuales-shared/plazoAnulacion.mjs') as {
+      fechaAaaammdd: (iso: unknown) => string;
+      PASOS_ANULACION_MANUAL: string[];
+    };
     const envios = await Promise.all(abiertos.slice(0, 30).map(async (doc) => {
       const row = doc.data();
       const cuil = String(row.bolsaCuil || '');
       const ficha = await fichaDe(cuil);
+      const fechaInicio = String(row.fechaInicio || row.fechaAlta || '').slice(0, 10);
+      let nroAlta = String(row.nroTransaccionAlta || '');
+      const contratoId = Array.isArray(row.contratoIds) ? String(row.contratoIds[0] || '') : '';
+      if (row.tipo === 'ANULACION' && !nroAlta && contratoId) {
+        const hermanos = await db().collection('arca_envios').where('contratoIds', 'array-contains', contratoId).get();
+        const alta = hermanos.docs.find((d) => d.data().tipo === 'AT' && d.data().estado === 'CONFIRMADO');
+        nroAlta = String(alta?.data().nroTransaccion || '');
+      }
       return {
         id: doc.id,
         nombre: String(ficha?.data()?.nombre || cuil || 'Sin nombre'),
@@ -148,6 +162,14 @@ export const gestionarEventual = functions.https.onCall(async (data, context) =>
         canal: String(row.canal || ''),
         fecha: fechaDe(row),
         nroTransaccion: String(row.nroTransaccion || ''),
+        fechaInicio,
+        fechaInicioArca: fechaAaaammdd(fechaInicio),
+        nroTransaccionAlta: nroAlta,
+        venceAnulacionMs: Number(row.venceAnulacionMs) || 0,
+        carga: String(row.carga || ''),
+        observacionesInternas: String(row.observacionesInternas || ''),
+        revista: String(row.revista || ''),
+        pasos: row.tipo === 'ANULACION' ? PASOS_ANULACION_MANUAL : [],
       };
     }));
     envios.sort((a, b) => (a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : 0));
@@ -167,6 +189,40 @@ export const gestionarEventual = functions.https.onCall(async (data, context) =>
     });
     if (out.status !== 200) throw new functions.https.HttpsError('failed-precondition', String(out.body.error || 'No se pudo confirmar.'));
     return { ok: true };
+  }
+
+  if (accion === 'arcaAcuseAnulacion') {
+    const { transicionEnvio } = await import('../arca/arcaEnviosCore');
+    const { plazoAnulacionAlta, convertirAnulacionVencida, revistaDesistimientoDe } = await import('../eventuales-shared/plazoAnulacion.mjs') as {
+      plazoAnulacionAlta: (i: Record<string, unknown>) => { puedeAnular: boolean };
+      convertirAnulacionVencida: (envio: Record<string, unknown>, opts: Record<string, unknown>) => { convertir: boolean };
+      revistaDesistimientoDe: (cfg: unknown) => string;
+    };
+    const envioId = String(data?.envioId || '');
+    const acuse = String(data?.acuse || '').trim();
+    if (!envioId) throw new functions.https.HttpsError('invalid-argument', 'Falta el envío.');
+    const ref = db().collection('arca_envios').doc(envioId);
+    const snap = await ref.get();
+    if (!snap.exists) throw new functions.https.HttpsError('not-found', 'No existe el envío.');
+    const envio = snap.data() || {};
+    if (envio.tipo !== 'ANULACION') throw new functions.https.HttpsError('failed-precondition', 'NO_ES_ANULACION');
+    const feriados = (await db().collection('feriados').get()).docs.map((d) => d.data());
+    const plazo = plazoAnulacionAlta({
+      fechaInicio: envio.fechaInicio || envio.fechaAlta,
+      horaInicio: envio.horaInicio || '08:00',
+      ahoraMs: Date.now(),
+      feriados,
+    });
+    if (!plazo.puedeAnular || convertirAnulacionVencida(envio, { ahoraMs: Date.now(), feriados, revistaDesistimiento: revistaDesistimientoDe(null) }).convertir) {
+      const { vencerAnulacionesPendientes } = await import('./eventualNoSePresento');
+      await vencerAnulacionesPendientes(db(), Date.now());
+      throw new functions.https.HttpsError('failed-precondition', 'PLAZO_VENCIDO');
+    }
+    const out = transicionEnvio(envio as never, { estado: 'ANULADO', origen: 'MANUAL', acuse, actor: auth.uid });
+    if (!out.ok) throw new functions.https.HttpsError('failed-precondition', out.codigo || 'NO_SE_PUDO');
+    await ref.update({ ...out.patch, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+    await auditar('ARCA_ANULACION_ACUSE', auth.uid, String(envio.bolsaCuil || ''), `Acuse de anulación ${acuse} en ${envioId}`);
+    return { ok: true, estado: 'ANULADO' };
   }
 
   if (accion === 'switchesPruebas') {

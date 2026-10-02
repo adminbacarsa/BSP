@@ -5,16 +5,17 @@
  */
 import { lineasCargaMasiva } from './arcaTxt.mjs';
 
-export const ESTADOS_ENVIO = ['PENDIENTE', 'SUBIENDO', 'CONFIRMADO', 'ERROR', 'MANUAL'];
+export const ESTADOS_ENVIO = ['PENDIENTE', 'SUBIENDO', 'CONFIRMADO', 'ERROR', 'MANUAL', 'ANULADO'];
 export const TOKEN_VIGENCIA_MS = 48 * 60 * 60 * 1000;
 export const ALERTA_ALTA_PENDIENTE_MS = 2 * 60 * 60 * 1000;
 
 const TRANSICIONES = {
-  PENDIENTE: ['SUBIENDO', 'MANUAL', 'ERROR', 'CONFIRMADO'],
+  PENDIENTE: ['SUBIENDO', 'MANUAL', 'ERROR', 'CONFIRMADO', 'ANULADO'],
   SUBIENDO: ['CONFIRMADO', 'ERROR', 'MANUAL'],
-  ERROR: ['PENDIENTE', 'SUBIENDO', 'MANUAL', 'CONFIRMADO'],
-  MANUAL: ['CONFIRMADO', 'ERROR'],
+  ERROR: ['PENDIENTE', 'SUBIENDO', 'MANUAL', 'CONFIRMADO', 'ANULADO'],
+  MANUAL: ['CONFIRMADO', 'ERROR', 'ANULADO'],
   CONFIRMADO: [],
+  ANULADO: [],
 };
 
 function txtDeContrato({ contrato, cuil, bruto, obraSocial, empresa }) {
@@ -69,7 +70,7 @@ export function planEnvioBaja(input) {
   };
 }
 
-export function transicionEnvio(envio, { estado, origen, nroTransaccion, constanciaUrl, error, actor, at }) {
+export function transicionEnvio(envio, { estado, origen, nroTransaccion, constanciaUrl, error, actor, at, acuse }) {
   const actual = envio?.estado || 'PENDIENTE';
   if (!ESTADOS_ENVIO.includes(estado)) return { ok: false, codigo: 'ESTADO_DESCONOCIDO' };
   if (!(TRANSICIONES[actual] || []).includes(estado)) {
@@ -94,6 +95,15 @@ export function transicionEnvio(envio, { estado, origen, nroTransaccion, constan
     patch.nroTransaccion = String(nroTransaccion).trim();
     patch.constanciaUrl = constanciaUrl || envio.constanciaUrl || null;
     patch.token = null;
+  }
+  if (estado === 'ANULADO') {
+    if (envio?.tipo !== 'ANULACION') return { ok: false, codigo: 'NO_ES_ANULACION' };
+    const acuseTxt = String(acuse || '').trim();
+    if (acuseTxt.length < 3) return { ok: false, codigo: 'FALTA_ACUSE' };
+    if (acuseTxt.length > 120) return { ok: false, codigo: 'ACUSE_LARGO' };
+    patch.acuseAnulacion = acuseTxt;
+    patch.txt = null;
+    patch.enviable = false;
   }
   if (estado === 'ERROR') patch.ultimoError = error || 'SIN_DETALLE';
   return { ok: true, patch };

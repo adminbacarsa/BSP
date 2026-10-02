@@ -1,3 +1,4 @@
+import { cuentaRegresivaAnulacion, PASOS_ANULACION_MANUAL } from '@/lib/eventuales/plazoAnulacion.mjs';
 import { BottomSheet } from './BottomSheet';
 import { MovilBadge } from './ui/MovilBadge';
 import { MovilTopBar } from './ui/MovilTopBar';
@@ -32,6 +33,14 @@ export type ArcaMovil = {
   estado: string;
   fecha: string;
   nroTransaccion: string;
+  /** Anulación manual: CUIL de 11 dígitos, fecha AAAAMMDD y transacción del alta. */
+  cuil11?: string;
+  fechaInicioArca?: string;
+  nroTransaccionAlta?: string;
+  venceAnulacionMs?: number;
+  pasos?: string[];
+  observacionesInternas?: string;
+  revista?: string;
 };
 
 const MARCO_TONE: Record<string, MovilTone> = {
@@ -46,12 +55,59 @@ const ARCA_ESTADO_TONE: Record<string, MovilTone> = {
   MANUAL: 'amber',
   SUBIENDO: 'amber',
   PENDIENTE: 'slate',
+  ANULADO: 'emerald',
 };
 
 export function arcaTipoTexto(tipo: string): string {
   if (tipo === 'AT') return 'Alta';
   if (tipo === 'BT') return 'Baja';
+  if (tipo === 'ANULACION') return 'Anulación';
+  if (tipo === 'BAJA_NO_PRESENTACION') return 'Baja';
   return tipo || 'Envío';
+}
+
+function AnulacionManualMovil(props: {
+  envio: ArcaMovil;
+  acuse: string;
+  onAcuse?: (value: string) => void;
+  onRegistrar?: () => void;
+  ahoraMs?: number;
+  online: boolean;
+  enviando?: boolean;
+}) {
+  const plazo = cuentaRegresivaAnulacion(props.envio.venceAnulacionMs, props.ahoraMs ?? Date.now());
+  const pasos = props.envio.pasos?.length ? props.envio.pasos : PASOS_ANULACION_MANUAL;
+  return (
+    <div data-anulacion-manual="1" className="mt-2 space-y-2">
+      <p className="text-[12px] font-medium text-slate-500">Tarea manual en la web de ARCA. No se arma TXT por lote.</p>
+      <dl className="space-y-1 text-[13px] font-semibold tabular-nums text-slate-900">
+        <div className="flex justify-between gap-2"><dt className="font-medium text-slate-500">CUIL</dt><dd data-anula-cuil="1">{props.envio.cuil11 || '—'}</dd></div>
+        <div className="flex justify-between gap-2"><dt className="font-medium text-slate-500">Fecha de inicio</dt><dd data-anula-fecha="1">{props.envio.fechaInicioArca || '—'}</dd></div>
+        <div className="flex justify-between gap-2"><dt className="font-medium text-slate-500">Transacción del alta</dt><dd data-anula-nro="1">{props.envio.nroTransaccionAlta || '—'}</dd></div>
+      </dl>
+      <p data-anula-plazo={plazo.vencido ? 'vencido' : 'abierto'} className={`text-[12px] font-semibold ${plazo.vencido ? 'text-rose-700' : 'text-slate-700'}`}>
+        Plazo RG 2988 · {plazo.texto}
+      </p>
+      <ol className="list-decimal space-y-1 pl-4 text-[12px] font-medium text-slate-600">
+        {pasos.map((paso) => <li key={paso}>{paso}</li>)}
+      </ol>
+      <input
+        value={props.acuse}
+        onChange={(event) => props.onAcuse?.(event.target.value)}
+        placeholder="Acuse de anulación"
+        disabled={plazo.vencido}
+        className={`${INPUT} text-base disabled:bg-slate-50 disabled:text-slate-400`}
+      />
+      <button
+        type="button"
+        onClick={props.onRegistrar}
+        disabled={plazo.vencido || props.acuse.trim().length < 3 || !props.online || props.enviando}
+        className={`${BTN} ${MOVIL_BTN_PRIMARY} disabled:opacity-40`}
+      >
+        {plazo.vencido ? 'Plazo vencido' : props.enviando ? 'Guardando…' : 'Registrar acuse'}
+      </button>
+    </div>
+  );
 }
 
 const INPUT = 'min-h-12 w-full rounded-lg border border-slate-200 bg-white px-3 font-semibold text-slate-900 placeholder:font-medium placeholder:text-slate-400';
@@ -89,6 +145,11 @@ export function EventualesScreens(props: {
   arcaId: string;
   onArca: (id: string) => void;
   onConfirmarArca: () => void;
+  /** Acuse de la anulación hecha a mano en la web de ARCA. */
+  acuse?: string;
+  onAcuse?: (value: string) => void;
+  onRegistrarAcuse?: () => void;
+  ahoraMs?: number;
   arcaEnviando?: boolean;
   elegido: EventualMovil | null;
   /** Switches de pruebas: solo SuperAdmin o RRHH con EVENTUALES.update. */
@@ -97,8 +158,8 @@ export function EventualesScreens(props: {
   onSwitch?: (campo: 'exigirMarco' | 'exigirAltaArca', valor: boolean) => void;
 }) {
   const envioElegido = props.arca.find((envio) => envio.id === props.arcaId) || null;
-  const pendientes = props.arca.filter((envio) => envio.estado !== 'CONFIRMADO');
-  const confirmados = props.arca.filter((envio) => envio.estado === 'CONFIRMADO');
+  const pendientes = props.arca.filter((envio) => envio.estado !== 'CONFIRMADO' && envio.estado !== 'ANULADO');
+  const confirmados = props.arca.filter((envio) => envio.estado === 'CONFIRMADO' || envio.estado === 'ANULADO');
   return (
     <div data-movil-screen={props.panel} data-viewport="390x844" className="mx-auto flex min-h-[844px] w-full max-w-[390px] flex-col touch-manipulation overflow-x-hidden bg-[#f7f8fa] pb-24">
       <MovilTopBar modulo="Eventuales" empresa={props.empresa} onEmpresa={props.onEmpresa} online={props.online} pendingLabel={props.pendingLabel} />
@@ -240,10 +301,14 @@ export function EventualesScreens(props: {
               )}
               {pendientes.length === 0 && props.arcaCargando && <li className={`${MOVIL_CARD} p-4 text-sm font-semibold text-slate-500`}>Buscando envíos…</li>}
             </ul>
-            <section className={`${MOVIL_CARD} p-4`} data-movil-arca-form={envioElegido ? envioElegido.id : 'sin-envio'}>
+            <section className={`${MOVIL_CARD} p-4`} data-movil-arca-form={envioElegido ? envioElegido.id : 'sin-envio'} data-arca-tarea={envioElegido?.tipo === 'ANULACION' ? 'manual' : 'transaccion'}>
               <h2 className="text-sm font-semibold text-slate-900">
                 {envioElegido ? `${arcaTipoTexto(envioElegido.tipo)} ${envioElegido.tipo} · ${envioElegido.nombre}` : 'Elegí un envío de la lista'}
               </h2>
+              {envioElegido?.tipo === 'ANULACION' ? (
+                <AnulacionManualMovil envio={envioElegido} acuse={props.acuse || ''} onAcuse={props.onAcuse} onRegistrar={props.onRegistrarAcuse} ahoraMs={props.ahoraMs} online={props.online} enviando={props.arcaEnviando} />
+              ) : (
+              <>
               <p className="mt-1 text-[12px] font-medium text-slate-500">
                 {envioElegido
                   ? 'Cargá el número de transacción que devolvió ARCA. El envío queda CONFIRMADO y la fichada del eventual se habilita.'
@@ -265,16 +330,18 @@ export function EventualesScreens(props: {
               >
                 {!props.online ? 'ARCA requiere conexión' : props.arcaEnviando ? 'Confirmando…' : 'Confirmar en ARCA'}
               </button>
+              </>
+              )}
             </section>
             {confirmados.length > 0 && (
               <>
                 <p className="px-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Confirmados ahora</p>
                 <ul className="space-y-2" data-movil-list="arca-confirmados">
                   {confirmados.map((envio) => (
-                    <li key={envio.id} className={`${MOVIL_CARD} p-3`} data-arca={envio.id} data-arca-estado="CONFIRMADO">
+                    <li key={envio.id} className={`${MOVIL_CARD} p-3`} data-arca={envio.id} data-arca-estado={envio.estado}>
                       <div className="flex items-start justify-between gap-2">
                         <span className="truncate text-[15px] font-semibold leading-tight text-slate-900">{envio.nombre}</span>
-                        <MovilBadge tone="emerald">CONFIRMADO</MovilBadge>
+                        <MovilBadge tone="emerald">{envio.estado}</MovilBadge>
                       </div>
                       <p className="mt-1 text-[12px] font-medium tabular-nums text-slate-500">
                         <span className="font-semibold text-slate-900">{arcaTipoTexto(envio.tipo)} {envio.tipo}</span>

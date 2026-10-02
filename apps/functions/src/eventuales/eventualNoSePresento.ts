@@ -35,18 +35,17 @@ async function txtBajaNoPresentacion(
     fechaBaja: string;
     revista: string;
   },
-): Promise<{ txt: string | null; advertencias: string[]; enviable: boolean; bruto: number }> {
-  const { lineaMovimientoArca, brutoParaTxt } = await import('../eventuales-shared/arcaTxt.mjs') as {
+): Promise<{ txt: string | null; advertencias: string[]; enviable: boolean; bruto: number; sinDevengamiento: boolean; devengaArt: boolean; observacionesInternas: string }> {
+  const { lineaMovimientoArca } = await import('../eventuales-shared/arcaTxt.mjs') as {
     lineaMovimientoArca: (i: Record<string, unknown>) => { linea: string; advertencias: string[]; enviable: boolean };
-    brutoParaTxt: (i: Record<string, unknown>) => { ok: boolean; bruto: number };
   };
-  const escalas = await db.collection('escalas_salariales').where('status', '==', 'ACTIVE').get();
-  const calc = brutoParaTxt({ contrato: input.contrato, escalas: escalas.docs.map((d) => d.data()) });
-  const advertencias = calc.ok ? [] : ['RETRIBUCION_PENDIENTE'];
+  const { OBSERVACION_INTERNA_NO_PRESENTACION } = await import('../eventuales-shared/plazoAnulacion.mjs') as {
+    OBSERVACION_INTERNA_NO_PRESENTACION: string;
+  };
   const linea = lineaMovimientoArca({
     contrato: { ...input.contrato, fechaAlta: input.contrato.fechaAlta || input.fechaInicio },
     cuil: input.cuil,
-    bruto: calc.ok ? calc.bruto : 0,
+    bruto: 0,
     obraSocial: input.bolsa.obraSocialRnos || '',
     empresa: input.empresa,
     movimiento: 'BT',
@@ -55,10 +54,92 @@ async function txtBajaNoPresentacion(
   });
   return {
     txt: linea.linea,
-    advertencias: [...linea.advertencias, ...advertencias],
-    enviable: linea.enviable && advertencias.length === 0,
-    bruto: calc.ok ? calc.bruto : 0,
+    advertencias: linea.advertencias,
+    enviable: linea.enviable,
+    bruto: 0,
+    sinDevengamiento: true,
+    devengaArt: false,
+    observacionesInternas: OBSERVACION_INTERNA_NO_PRESENTACION,
   };
+}
+
+/**
+ * Deja en el envío y en el legajo la observación del contador, y adjunta la constancia
+ * (novedad + audit). Idempotente: si el doc ya existe no lo pisa.
+ */
+export async function anotarNoPresentacion(
+  db: admin.firestore.Firestore,
+  opts: {
+    envioId: string;
+    empresaId: string;
+    cuil: string;
+    empleadoId?: string;
+    shiftId?: string;
+    actorUid: string;
+    novedadId?: string | null;
+    auditId?: string | null;
+  },
+): Promise<{ novedadId: string; auditId: string }> {
+  const { OBSERVACION_INTERNA_NO_PRESENTACION, observacionesConInasistencia } = await import('../eventuales-shared/plazoAnulacion.mjs') as {
+    OBSERVACION_INTERNA_NO_PRESENTACION: string;
+    observacionesConInasistencia: (actual: unknown) => string;
+  };
+  const frase = OBSERVACION_INTERNA_NO_PRESENTACION;
+  const novedadId = opts.novedadId || `cert_inasistencia_${opts.envioId}`;
+  const auditId = opts.auditId || `constancia_inasistencia_${opts.envioId}`;
+  const novRef = db.collection('novedades').doc(novedadId);
+  if (!(await novRef.get()).exists) {
+    await novRef.set({
+      type: 'CERTIFICADO_INASISTENCIA',
+      status: 'PENDIENTE',
+      empresaId: opts.empresaId,
+      shiftId: opts.shiftId || null,
+      employeeId: opts.empleadoId || null,
+      bolsaCuil: opts.cuil || null,
+      envioId: opts.envioId,
+      description: frase,
+      createdAt: FieldValue.serverTimestamp(),
+      source: opts.actorUid,
+    });
+  }
+  const audRef = db.collection('audit_logs').doc(auditId);
+  if (!(await audRef.get()).exists) {
+    await audRef.set({
+      action: 'CONSTANCIA_INASISTENCIA',
+      module: 'EVENTUALES',
+      actorUid: opts.actorUid,
+      empresaId: opts.empresaId,
+      bolsaCuil: opts.cuil || null,
+      envioId: opts.envioId,
+      turnoId: opts.shiftId || null,
+      details: frase,
+      timestamp: FieldValue.serverTimestamp(),
+    });
+  }
+  await db.collection('arca_envios').doc(opts.envioId).set({
+    observacionesInternas: frase,
+    constanciaInasistencia: { novedadId, auditId, texto: frase },
+    updatedAt: FieldValue.serverTimestamp(),
+  }, { merge: true });
+  const legajos: admin.firestore.DocumentReference[] = [];
+  if (opts.empleadoId) legajos.push(db.collection('empleados').doc(opts.empleadoId));
+  if (opts.cuil) {
+    const porCuil = await db.collection('empleados').where('cuil', '==', opts.cuil).limit(15).get();
+    for (const doc of porCuil.docs) legajos.push(doc.ref);
+  }
+  const vistos = new Set<string>();
+  for (const ref of legajos) {
+    if (vistos.has(ref.path)) continue;
+    vistos.add(ref.path);
+    const snap = await ref.get();
+    if (!snap.exists) continue;
+    const data = snap.data() || {};
+    if (opts.empresaId && data.empresaId && String(data.empresaId) !== opts.empresaId && ref.id !== opts.empleadoId) continue;
+    const observacionesInternas = observacionesConInasistencia(data.observacionesInternas);
+    if (observacionesInternas === String(data.observacionesInternas || '').trim()) continue;
+    await ref.set({ observacionesInternas, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  }
+  return { novedadId, auditId };
 }
 
 /**
@@ -106,6 +187,16 @@ export async function vencerAnulacionesPendientes(db: admin.firestore.Firestore,
     const { regenerarTxt: _drop, ...patch } = conv.patch;
     void _drop;
     await doc.ref.update({ ...patch, ...baja, updatedAt: FieldValue.serverTimestamp() });
+    const previa = (data.constanciaInasistencia || {}) as { novedadId?: string; auditId?: string };
+    await anotarNoPresentacion(db, {
+      envioId: doc.id,
+      empresaId,
+      cuil,
+      empleadoId: String((contratoSnap?.data() || {}).employeeId || ''),
+      actorUid: 'VENTANA_VENCIDA',
+      novedadId: previa.novedadId || null,
+      auditId: previa.auditId || null,
+    });
     n += 1;
   }
   return n;
@@ -233,8 +324,10 @@ export async function aplicarEventualNoSePresento(
           estado: 'PENDIENTE',
           txt: null,
           advertencias: plazo.avisoFeriados ? [plazo.avisoFeriados] : [],
-          enviable: true,
+          enviable: false,
+          carga: 'MANUAL_WEB',
           bruto: 0,
+          nroTransaccionAlta: String(ats.find((d) => d.data().estado === 'CONFIRMADO')?.data().nroTransaccion || ''),
           fechaAlta: fechaInicio,
           fechaInicio,
           horaInicio,
@@ -321,7 +414,15 @@ export async function aplicarEventualNoSePresento(
     await db.collection('anexo_codigos').doc(contratoId).set({ sinEfecto: true, sinEfectoAt: FieldValue.serverTimestamp() }, { merge: true });
     const anexos = await db.collection('anexos_eventuales').where('contratoId', '==', contratoId).get();
     for (const anexo of anexos.docs) {
-      await anexo.ref.set({ sinEfecto: true, sinEfectoAt: FieldValue.serverTimestamp(), sinEfectoMotivo: plan.desempeno }, { merge: true });
+      await anexo.ref.set({
+        sinEfecto: true,
+        sinEfectoAt: FieldValue.serverTimestamp(),
+        sinEfectoMotivo: plan.desempeno,
+        sinDevengamiento: true,
+        devengaArt: false,
+        brutoAnulado: anexo.data().bruto ?? null,
+        bruto: 0,
+      }, { merge: true });
     }
   }
 
@@ -358,8 +459,9 @@ export async function aplicarEventualNoSePresento(
     createdAt: FieldValue.serverTimestamp(),
   }, { merge: true });
 
+  let novedadId: string | null = null;
   if (!opts.aviso) {
-    await db.collection('novedades').add({
+    const novRef = await db.collection('novedades').add({
       type: 'AUSENCIA_EVENTUAL',
       status: 'PENDIENTE',
       empresaId,
@@ -373,7 +475,9 @@ export async function aplicarEventualNoSePresento(
       description: `${shift.employeeName || sol.empleadoNombre || 'Eventual'} faltó sin avisar a ${shift.eventoNombre || 'el evento'}. No se paga la jornada. ARCA: ${plan.arca.tipo || 'alta cancelada'}.`,
       createdAt: Timestamp.now(),
       source: opts.actorUid,
+      envioId: envioId || null,
     });
+    novedadId = novRef.id;
   }
 
   let reconvocado = false;
@@ -397,7 +501,7 @@ export async function aplicarEventualNoSePresento(
     console.warn('[eventualNoSePresento] cascada:', (err as Error)?.message);
   }
 
-  await db.collection('audit_logs').add({
+  const auditRef = await db.collection('audit_logs').add({
     action: opts.aviso ? 'EVENTUAL_NO_PUEDE_ASISTIR' : 'EVENTUAL_FALTA_SIN_AVISO',
     module: 'EVENTUALES',
     actorUid: opts.actorUid,
@@ -409,6 +513,18 @@ export async function aplicarEventualNoSePresento(
     envioId,
     timestamp: FieldValue.serverTimestamp(),
   });
+  if (envioId && (plan.arca.accion === 'ANULACION' || plan.arca.accion === 'BAJA')) {
+    await anotarNoPresentacion(db, {
+      envioId,
+      empresaId,
+      cuil,
+      empleadoId,
+      shiftId,
+      actorUid: opts.actorUid,
+      novedadId,
+      auditId: auditRef.id,
+    });
+  }
 
   return { ok: true, arca: plan.arca.tipo || 'CANCELADO', desempeno: plan.desempeno, reconvocado };
 }

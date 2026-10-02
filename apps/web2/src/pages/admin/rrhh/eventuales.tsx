@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { collection, getDocs, onSnapshot, query, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import {
-  AlertTriangle, ArrowLeft, Building2, CircleDashed, Download, FileCheck2, FileSpreadsheet, FileX2, Home, Mail, MapPin, Phone, Plus, Search, UserCheck, UserPlus, UserX, Users, X,
+  AlertTriangle, ArrowLeft, Building2, CircleDashed, Download, FileCheck2, FileSpreadsheet, FileX2, Home, Landmark, Mail, MapPin, Phone, Plus, Search, UserCheck, UserPlus, UserX, Users, X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import DashboardLayout from '@/components/layout/DashboardLayout';
@@ -12,6 +12,7 @@ import { EventualesMovil } from '@/components/movil/EventualesMovil';
 import { useMovilMode } from '@/lib/movil/useMovilMode';
 import { PageHeader, PageShell } from '@/components/ui';
 import FichaEventual, { type DocumentoVista, type EmpresaPlataforma, type FichaEventualData, type MarcoVista } from '@/components/eventuales/FichaEventual';
+import ArcaPendientesPanel from '@/components/eventuales/ArcaPendientesPanel';
 import MarcosLotePanel from '@/components/eventuales/MarcosLotePanel';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
@@ -89,6 +90,7 @@ export default function EventualesPage() {
 
   const [filtro, setFiltro] = useState('DISPONIBLE');
   const [buscar, setBuscar] = useState('');
+  const [mostrarArca, setMostrarArca] = useState(false);
   const [todaLaBolsa, setTodaLaBolsa] = useState(false);
   const [fichas, setFichas] = useState<Ficha[]>([]);
   const [empresas, setEmpresas] = useState<EmpresaPlataforma[]>([]);
@@ -338,10 +340,22 @@ export default function EventualesPage() {
                   </button>
                 )}
                 <MarcosLotePanel compacto empresaId={empresaActivaId} nombreEmpresa={nombreEmpresaActiva} fichas={fichas} seleccionados={seleccion} puedeEditar={puede('update')} llamar={llamar} />
+                <button
+                  type="button"
+                  onClick={() => setMostrarArca((v) => !v)}
+                  title="Altas, bajas y anulaciones de ARCA"
+                  className={`inline-flex h-9 items-center gap-2 rounded-xl border px-3 text-xs font-semibold shadow-sm ${mostrarArca ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}>
+                  <Landmark size={16} />
+                  ARCA pendientes
+                </button>
               </div>
             )}
           />
 
+          {mostrarArca ? (
+            <ArcaPendientesPanel empresaId={empresaActivaId} empresaNombre={nombreEmpresaActiva} puedeConfirmar={puede('update')} />
+          ) : (
+          <>
           <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
             <label className="flex min-w-[200px] flex-1 items-center gap-2 rounded-xl bg-slate-50 px-3 py-2">
               <Search size={14} className="text-slate-400" />
@@ -455,6 +469,8 @@ export default function EventualesPage() {
               )}
             </div>
           </div>
+          </>
+          )}
         </div>
 
         {asignarAbierto && (
