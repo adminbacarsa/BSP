@@ -68,8 +68,11 @@ describe('flujo operativo', () => {
       turnos: [],
       ahoraMs: Date.parse('2026-10-02T15:00:00.000Z'),
     });
-    assert.equal(despues.baja.movimiento, 'NA');
-    assert.equal(despues.baja.confirmarConContador, true);
+    assert.equal(despues.baja.accion, 'ANULAR_ALTA');
+    assert.equal(despues.baja.tipo, 'ANULACION');
+    assert.equal(despues.baja.movimiento, null);
+    assert.equal(despues.baja.motivo, null);
+    assert.equal(despues.baja.modulo, 'ANULACION_INCORPORACIONES');
 
     const tarde = planSustitucion({
       envioTitular: { id: 'a', estado: 'CONFIRMADO' },

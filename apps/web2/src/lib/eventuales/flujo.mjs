@@ -3,13 +3,15 @@
  * para la empresa convocante, y ARCA sale en lotes de esa empresa.
  */
 import { fechaAltaDeJornadas, fechaBajaDeJornadas, finDeJornada, inicioDeJornada } from './jornadas.mjs';
+import {
+  CONSTANCIA_NO_SE_PRESENTO, MODULO_ANULACION_INCORPORACIONES, MOTIVO_BAJA_SIN_EFECTIVIZACION, plazoAnulacionAlta,
+} from './plazoAnulacion.mjs';
 
 export const DESCANSO_MIN_MINUTOS = 12 * 60;
 export const TANDA_DEFAULT = { altaHora: '18:00', bajaHora: '09:00' };
 
-/** NA = hipótesis de anulación de alta. La tabla oficial no define NA/NB; el contador tiene que confirmarlo. */
+/** @deprecated El alta se anula por el módulo de Anulación de Incorporaciones, no con el movimiento NA. */
 export const MOVIMIENTO_ANULACION_ALTA = 'NA';
-export const ANULACION_ALTA_MAX_HORAS = 24;
 
 function clave(fecha, minutos) {
   const [y, m, d] = String(fecha).split('-').map(Number);
@@ -150,34 +152,47 @@ export function confirmarLote(envios, lote, nroTransaccion) {
     : e));
 }
 
-function dentroDe24h(fechaAlta, ahoraMs) {
-  if (!fechaAlta) return false;
-  const inicio = clave(fechaAlta, 0) * 60000;
-  return ahoraMs - inicio < ANULACION_ALTA_MAX_HORAS * 3600000;
-}
-
 /**
- * Si el AT no se subió, sale del lote. Si ya se subió y no trabajó, NA dentro de las 24 h
- * del inicio (rechazo BTU pasado ese plazo). NA/NB quedan para confirmar con el contador.
+ * Si el AT no se subió, sale del lote. Si ya se subió y no trabajó, anulación de incorporaciones
+ * dentro del plazo de la RG 2988/2010 art. 9; vencido, baja por desistimiento.
  */
-export function planSustitucion({ envioTitular, contratoTitular, sustituto, turnos, ahoraMs = Date.now(), tanda = TANDA_DEFAULT }) {
+export function planSustitucion({ envioTitular, contratoTitular, sustituto, turnos, ahoraMs = Date.now(), tanda = TANDA_DEFAULT, feriados = [], revistaDesistimiento = '30' }) {
   const subido = envioTitular && ['SUBIENDO', 'CONFIRMADO'].includes(envioTitular.estado);
+  const jornada = (contratoTitular?.jornadas || [])[0] || {};
+  const plazo = plazoAnulacionAlta({
+    fechaInicio: jornada.fecha || contratoTitular?.fechaAlta,
+    horaInicio: jornada.horaInicio || contratoTitular?.horaInicio || '08:00',
+    ahoraMs,
+    feriados,
+  });
   let baja;
   if (!subido) {
     baja = { accion: 'QUITAR_DEL_LOTE', movimiento: null, envioId: envioTitular?.id || null };
-  } else if (dentroDe24h(contratoTitular?.fechaAlta, ahoraMs)) {
+  } else if (plazo.puedeAnular) {
     baja = {
       accion: 'ANULAR_ALTA',
-      movimiento: MOVIMIENTO_ANULACION_ALTA,
-      confirmarConContador: true,
-      nota: 'NA es la hipótesis de anulación de alta. Confirmar con el contador: la tabla de rechazos habla de anular altas (BTU, 24 h) pero no publica el significado de NA/NB.',
+      tipo: 'ANULACION',
+      movimiento: null,
+      modulo: MODULO_ANULACION_INCORPORACIONES,
+      motivo: null,
+      lote: 'ANULACION',
+      confirmarConContador: false,
+      venceMs: plazo.venceMs,
+      avisoFeriados: plazo.avisoFeriados,
+      nota: 'Módulo de Anulación de Incorporaciones. No es una baja y no lleva código de motivo.',
     };
   } else {
     baja = {
       accion: 'BAJA_FUERA_DE_PLAZO',
+      tipo: 'BAJA_NO_PRESENTACION',
       movimiento: 'BT',
-      confirmarConContador: true,
-      nota: 'Pasaron 24 h del inicio: ARCA rechaza anular el alta (BTU). La baja BT no usa el motivo 30. Confirmar el movimiento con el contador.',
+      motivo: MOTIVO_BAJA_SIN_EFECTIVIZACION,
+      revista: String(revistaDesistimiento || '30'),
+      fechaBaja: String(jornada.fecha || contratoTitular?.fechaAlta || ''),
+      constanciaInterna: CONSTANCIA_NO_SE_PRESENTO,
+      confirmarConContador: false,
+      avisoFeriados: plazo.avisoFeriados,
+      nota: 'Venció la ventana de anulación. Baja con fecha de inicio y motivo de desistimiento.',
     };
   }
   const alta = sustituto

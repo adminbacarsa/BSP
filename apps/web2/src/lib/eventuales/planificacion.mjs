@@ -5,7 +5,10 @@
  * Funciones puras. El servidor (apps/functions/src/eventuales/planificacionEventuales.ts)
  * las alimenta con Firestore y escribe el resultado.
  */
-import { bloqueoCruce, clasificarAlta, habilitadoEnEmpresa, MOVIMIENTO_ANULACION_ALTA, ANULACION_ALTA_MAX_HORAS, TANDA_DEFAULT } from './flujo.mjs';
+import { bloqueoCruce, clasificarAlta, habilitadoEnEmpresa, TANDA_DEFAULT } from './flujo.mjs';
+import {
+  CONSTANCIA_NO_SE_PRESENTO, MODULO_ANULACION_INCORPORACIONES, MOTIVO_BAJA_SIN_EFECTIVIZACION, plazoAnulacionAlta, revistaDesistimientoDe,
+} from './plazoAnulacion.mjs';
 import { MOTIVO_SIN_MARCO } from './marcoAnexoConst.mjs';
 import { ETIQUETA_PRUEBAS_SIN_MARCO, exigeMarco } from './pruebasSwitch.mjs';
 import { marcoDeBolsa } from './marcoTexto.mjs';
@@ -198,25 +201,19 @@ function atSubido(envio) {
   return !!envio && ['SUBIENDO', 'CONFIRMADO'].includes(envio.estado);
 }
 
-function dentroDe24h(fechaAlta, ahoraMs) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(fechaAlta || ''))) return false;
-  const [y, m, d] = String(fechaAlta).split('-').map(Number);
-  const inicio = Date.UTC(y, m - 1, d) - AR_OFFSET_MIN * 60000;
-  return ahoraMs - inicio < ANULACION_ALTA_MAX_HORAS * 3600000;
-}
-
 /**
  * Contrato de una empresa según los turnos del eventual en esa empresa.
  *
  * - Sin turnos publicados y con borradores → contrato BORRADOR (no sube a ARCA).
  * - Con turnos publicados → CONFIRMADO; jornadas = publicadas; nace envío AT si no existe.
  * - AT ya subido y cambian las fechas → envío MR.
- * - Sin turnos: AT no subido → ANULADO y el AT sale del lote; AT subido → NA (24 h) o BT.
+ * - Sin turnos: AT no subido → ANULADO y el AT sale del lote; AT subido → anulación de
+ *   incorporaciones dentro del plazo RG 2988, o baja por desistimiento si venció.
  *
  * Devuelve `{ accion, contrato, envios: [nuevo...], patchesEnvios: [{id, patch}] }`.
  */
 export function planContratoDesdeTurnos({
-  empresaId, bolsa, employeeId = null, turnos, contratoActual = null, enviosActuales = [], ahoraMs = Date.now(), tanda = TANDA_DEFAULT,
+  empresaId, bolsa, employeeId = null, turnos, contratoActual = null, enviosActuales = [], ahoraMs = Date.now(), tanda = TANDA_DEFAULT, feriados = [], arcaEventuales = null,
 }) {
   const todas = jornadasDeTurnos((turnos || []).filter((t) => String(t?.empresaId || '') === String(empresaId)));
   const publicadas = todas.filter((j) => j.publicada);
@@ -242,11 +239,26 @@ export function planContratoDesdeTurnos({
       if (envioAt?.id) patchesEnvios.push({ id: envioAt.id, patch: { quitadoDelLote: true, quitadoMotivo: 'SIN_TURNOS' } });
       return { accion: 'CERRAR', contrato: { ...actual, ...comun, estado: 'ANULADO', jornadas: [], cierre: { motivo: 'SIN_TURNOS', at: new Date(ahoraMs).toISOString() } }, envios, patchesEnvios };
     }
-    if (dentroDe24h(actual.fechaAlta, ahoraMs)) {
-      envios.push({ empresaId, tipo: MOVIMIENTO_ANULACION_ALTA, estado: 'PENDIENTE', canal: 'URGENTE', fechaAlta: actual.fechaAlta, fechaBaja: actual.fechaBaja, confirmarConContador: true });
+    const jornada = (actual.jornadas || [])[0] || {};
+    const fechaInicio = String(jornada.fecha || actual.fechaAlta || '');
+    const horaInicio = String(jornada.horaInicio || actual.horaInicio || '08:00');
+    const plazo = plazoAnulacionAlta({ fechaInicio, horaInicio, ahoraMs, feriados });
+    if (plazo.puedeAnular) {
+      envios.push({
+        empresaId, tipo: 'ANULACION', estado: 'PENDIENTE', canal: 'URGENTE', lote: 'ANULACION',
+        modulo: MODULO_ANULACION_INCORPORACIONES, movimiento: null, motivo: null, revista: null,
+        fechaAlta: fechaInicio, fechaInicio, horaInicio, fechaBaja: null,
+        venceAnulacionMs: plazo.venceMs, avisoFeriados: plazo.avisoFeriados,
+        constanciaInterna: CONSTANCIA_NO_SE_PRESENTO, confirmarConContador: false, bruto: 0,
+      });
       return { accion: 'CERRAR', contrato: { ...actual, ...comun, estado: 'ANULADO', jornadas: [], cierre: { motivo: 'ANULAR_ALTA', at: new Date(ahoraMs).toISOString() } }, envios, patchesEnvios };
     }
-    envios.push({ empresaId, tipo: 'BT', estado: 'PENDIENTE', canal: 'URGENTE', fechaAlta: actual.fechaAlta, fechaBaja: actual.fechaBaja, confirmarConContador: true });
+    envios.push({
+      empresaId, tipo: 'BAJA_NO_PRESENTACION', estado: 'PENDIENTE', canal: 'URGENTE', lote: 'BT', movimiento: 'BT',
+      motivo: MOTIVO_BAJA_SIN_EFECTIVIZACION, revista: revistaDesistimientoDe(arcaEventuales),
+      fechaAlta: fechaInicio, fechaInicio, horaInicio, fechaBaja: fechaInicio,
+      constanciaInterna: CONSTANCIA_NO_SE_PRESENTO, confirmarConContador: false, avisoFeriados: plazo.avisoFeriados,
+    });
     return { accion: 'CERRAR', contrato: { ...actual, ...comun, estado: 'FINALIZADO', cierre: { motivo: 'BAJA_FUERA_DE_PLAZO', at: new Date(ahoraMs).toISOString() } }, envios, patchesEnvios };
   }
 

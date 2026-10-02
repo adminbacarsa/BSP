@@ -3,8 +3,9 @@
  *  - Aviso («No puedo asistir», hasta el inicio): cancela la aceptación, el anexo queda sin efecto
  *    y la cascada del evento convoca al siguiente.
  *  - Falta sin aviso (T+30, `markShiftAbsent`): AA, no se paga, aviso a RRHH y la misma cascada.
- * ARCA: si el AT no se subió se saca del lote; si ya se subió, anulación dentro del plazo o baja
- * el día de inicio (lote urgente). El puntaje no se calcula: solo queda el evento de desempeño.
+ * ARCA: si el AT no se subió se saca del lote; si ya se subió, anulación de incorporaciones
+ * dentro del plazo de la RG 2988/2010 art. 9, o baja el día de inicio si venció.
+ * El puntaje no se calcula: solo queda el evento de desempeño.
  */
 import * as admin from 'firebase-admin';
 import * as functions from 'firebase-functions/v1';
@@ -15,6 +16,99 @@ const AR_OFFSET = '-03:00';
 
 function ymdAr(ms: number): string {
   return new Date(ms - 3 * 3600000).toISOString().slice(0, 10);
+}
+
+function hmAr(ms: number): string {
+  const d = new Date(ms - 3 * 3600000);
+  return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+}
+
+async function txtBajaNoPresentacion(
+  db: admin.firestore.Firestore,
+  input: {
+    empresaId: string;
+    empresa: Record<string, unknown>;
+    contrato: Record<string, unknown>;
+    cuil: string;
+    bolsa: Record<string, unknown>;
+    fechaInicio: string;
+    fechaBaja: string;
+    revista: string;
+  },
+): Promise<{ txt: string | null; advertencias: string[]; enviable: boolean; bruto: number }> {
+  const { lineaMovimientoArca, brutoParaTxt } = await import('../eventuales-shared/arcaTxt.mjs') as {
+    lineaMovimientoArca: (i: Record<string, unknown>) => { linea: string; advertencias: string[]; enviable: boolean };
+    brutoParaTxt: (i: Record<string, unknown>) => { ok: boolean; bruto: number };
+  };
+  const escalas = await db.collection('escalas_salariales').where('status', '==', 'ACTIVE').get();
+  const calc = brutoParaTxt({ contrato: input.contrato, escalas: escalas.docs.map((d) => d.data()) });
+  const advertencias = calc.ok ? [] : ['RETRIBUCION_PENDIENTE'];
+  const linea = lineaMovimientoArca({
+    contrato: { ...input.contrato, fechaAlta: input.contrato.fechaAlta || input.fechaInicio },
+    cuil: input.cuil,
+    bruto: calc.ok ? calc.bruto : 0,
+    obraSocial: input.bolsa.obraSocialRnos || '',
+    empresa: input.empresa,
+    movimiento: 'BT',
+    revista: input.revista,
+    fechaBaja: input.fechaBaja,
+  });
+  return {
+    txt: linea.linea,
+    advertencias: [...linea.advertencias, ...advertencias],
+    enviable: linea.enviable && advertencias.length === 0,
+    bruto: calc.ok ? calc.bruto : 0,
+  };
+}
+
+/**
+ * Anulaciones de incorporaciones todavía sin subir cuya ventana ya venció pasan a baja.
+ * La decide `convertirAnulacionVencida`. La corre el scheduler y también el encolado.
+ */
+export async function vencerAnulacionesPendientes(db: admin.firestore.Firestore, ahoraMs = Date.now()): Promise<number> {
+  const { convertirAnulacionVencida, revistaDesistimientoDe } = await import('../eventuales-shared/plazoAnulacion.mjs') as {
+    convertirAnulacionVencida: (envio: Record<string, unknown>, opts: Record<string, unknown>) => { convertir: boolean; patch?: Record<string, unknown> };
+    revistaDesistimientoDe: (cfg: unknown) => string;
+  };
+  const { arcaEventualesDe } = await import('../eventuales-shared/arcaTxt.mjs') as {
+    arcaEventualesDe: (e: unknown) => unknown;
+  };
+  const [snap, ferSnap] = await Promise.all([
+    db.collection('arca_envios').where('tipo', '==', 'ANULACION').limit(40).get(),
+    db.collection('feriados').get(),
+  ]);
+  const feriados = ferSnap.docs.map((d) => d.data());
+  let n = 0;
+  for (const doc of snap.docs) {
+    const data = doc.data();
+    if (data.estado !== 'PENDIENTE' || data.quitadoDelLote === true) continue;
+    const empresaId = String(data.empresaId || '');
+    const empresaSnap = empresaId ? await db.collection('empresas').doc(empresaId).get() : null;
+    const empresa = { id: empresaId, ...(empresaSnap?.data() || {}) };
+    const revista = revistaDesistimientoDe(arcaEventualesDe(empresa));
+    const conv = convertirAnulacionVencida(data, { ahoraMs, feriados, revistaDesistimiento: revista });
+    if (!conv.convertir || !conv.patch) continue;
+    const contratoId = Array.isArray(data.contratoIds) ? String(data.contratoIds[0] || '') : '';
+    const contratoSnap = contratoId ? await db.collection('contratos_eventuales').doc(contratoId).get() : null;
+    const cuil = String(data.bolsaCuil || '').replace(/\D/g, '');
+    const bolsaSnap = cuil ? await db.collection('eventuales_bolsa').doc(cuil).get() : null;
+    const fechaInicio = String(conv.patch.fechaBaja || data.fechaInicio || data.fechaAlta || '');
+    const baja = await txtBajaNoPresentacion(db, {
+      empresaId,
+      empresa,
+      contrato: contratoSnap?.data() || {},
+      cuil,
+      bolsa: bolsaSnap?.data() || {},
+      fechaInicio,
+      fechaBaja: fechaInicio,
+      revista,
+    });
+    const { regenerarTxt: _drop, ...patch } = conv.patch;
+    void _drop;
+    await doc.ref.update({ ...patch, ...baja, updatedAt: FieldValue.serverTimestamp() });
+    n += 1;
+  }
+  return n;
 }
 
 export async function aplicarEventualNoSePresento(
@@ -56,12 +150,23 @@ export async function aplicarEventualNoSePresento(
   const ats = (enviosSnap?.docs || []).filter((d) => d.data().tipo === 'AT' && d.data().quitadoDelLote !== true);
   const atSubido = ats.some((d) => ['SUBIENDO', 'CONFIRMADO'].includes(String(d.data().estado || '')));
   const empresaSnap = empresaId ? await db.collection('empresas').doc(empresaId).get() : null;
-  const { arcaEventualesDe, lineaMovimientoArca } = await import('../eventuales-shared/arcaTxt.mjs') as {
-    arcaEventualesDe: (e: unknown) => { movimientoAnulacion?: string; anulacionAltaMaxHoras?: number; situacionRevistaNoInicio?: string };
+  const { arcaEventualesDe } = await import('../eventuales-shared/arcaTxt.mjs') as {
+    arcaEventualesDe: (e: unknown) => { situacionRevistaDesistimiento?: string; situacionRevistaNoInicio?: string };
     lineaMovimientoArca: (i: Record<string, unknown>) => { linea: string; advertencias: string[]; enviable: boolean };
   };
+  const { plazoAnulacionAlta, convertirAnulacionVencida, revistaDesistimientoDe } = await import('../eventuales-shared/plazoAnulacion.mjs') as {
+    plazoAnulacionAlta: (i: Record<string, unknown>) => { puedeAnular: boolean; venceMs: number; avisoFeriados: string | null };
+    convertirAnulacionVencida: (envio: Record<string, unknown>, opts: Record<string, unknown>) => { convertir: boolean; patch?: Record<string, unknown> };
+    revistaDesistimientoDe: (cfg: unknown) => string;
+  };
   const cfg = arcaEventualesDe({ id: empresaId, ...(empresaSnap?.data() || {}) });
+  const feriadosSnap = await db.collection('feriados').get();
+  const feriados = feriadosSnap.docs.map((d) => d.data());
   const fechaInicio = String(shift.scheduleDate || sol.jornada?.fecha || (inicioMs ? ymdAr(inicioMs) : ''));
+  const horaInicio = String(sol.jornada?.horaInicio || (inicioMs ? hmAr(inicioMs) : '08:00'));
+  const plazo = plazoAnulacionAlta({ fechaInicio, horaInicio, ahoraMs, feriados });
+  if (plazo.avisoFeriados) console.warn(`[eventualNoSePresento] ${plazo.avisoFeriados}`);
+  const revista = revistaDesistimientoDe(cfg);
   const plan = planEventualAusente({
     isEventual: true,
     employeeId: String(shift.employeeId || sol.empleadoId || ''),
@@ -74,9 +179,8 @@ export async function aplicarEventualNoSePresento(
     inicioMs,
     ahoraMs,
     fechaInicio,
-    plazoAnulacionHoras: Number(cfg.anulacionAltaMaxHoras) || 24,
-    movimientoAnulacion: cfg.movimientoAnulacion || 'NA',
-    revistaNoInicio: cfg.situacionRevistaNoInicio || '30',
+    puedeAnular: plazo.puedeAnular,
+    revistaDesistimiento: revista,
   });
   if (!plan) throw new Error('NO_ES_EVENTUAL');
 
@@ -95,58 +199,93 @@ export async function aplicarEventualNoSePresento(
         updatedAt: FieldValue.serverTimestamp(),
       });
     }
-  } else if (plan.arca.tipo && plan.arca.movimiento) {
-    const ya = (enviosSnap?.docs || []).find((d) => d.data().tipo === plan.arca.tipo && d.data().estado === 'PENDIENTE');
+  } else if (plan.arca.tipo) {
+    const pendientes = (enviosSnap?.docs || []).filter((d) => d.data().tipo === 'ANULACION' && d.data().estado === 'PENDIENTE' && d.data().quitadoDelLote !== true);
+    let convertida = false;
+    for (const pend of pendientes) {
+      const conv = convertirAnulacionVencida(pend.data(), { ahoraMs, feriados, revistaDesistimiento: revista });
+      if (!conv.convertir || !conv.patch) continue;
+      const baja = await txtBajaNoPresentacion(db, {
+        empresaId, empresa: { id: empresaId, ...(empresaSnap?.data() || {}) }, contrato, cuil, bolsa,
+        fechaInicio, fechaBaja: String(conv.patch.fechaBaja || fechaInicio), revista,
+      });
+      const { regenerarTxt: _drop, ...patch } = conv.patch;
+      void _drop;
+      await pend.ref.update({ ...patch, ...baja, updatedAt: FieldValue.serverTimestamp() });
+      envioId = pend.id;
+      convertida = true;
+    }
+    const ya = convertida
+      ? { id: envioId }
+      : (enviosSnap?.docs || []).find((d) => d.data().tipo === plan.arca.tipo && d.data().estado === 'PENDIENTE');
     if (!ya) {
-      let bruto = plan.arca.bruto ?? 0;
-      const advertenciasExtra: string[] = [];
-      if (plan.arca.accion === 'BAJA') {
-        const { brutoParaTxt } = await import('../eventuales-shared/arcaTxt.mjs') as {
-          brutoParaTxt: (i: Record<string, unknown>) => { ok: boolean; bruto: number };
-        };
-        const escalas = await db.collection('escalas_salariales').where('status', '==', 'ACTIVE').get();
-        const calc = brutoParaTxt({ contrato, escalas: escalas.docs.map((d) => d.data()) });
-        bruto = calc.ok ? calc.bruto : 0;
-        if (!calc.ok) advertenciasExtra.push('RETRIBUCION_PENDIENTE');
-      }
-      const linea = lineaMovimientoArca({
-        contrato: { ...contrato, fechaAlta: contrato.fechaAlta || fechaInicio },
-        cuil,
-        bruto,
-        obraSocial: bolsa.obraSocialRnos || '',
-        empresa: { id: empresaId, ...(empresaSnap?.data() || {}) },
-        movimiento: plan.arca.movimiento,
-        revista: plan.arca.revista || (plan.arca.accion === 'ANULACION' ? '01' : cfg.situacionRevistaNoInicio || '30'),
-        fechaBaja: plan.arca.fechaBaja || '',
-      });
       const ref = db.collection('arca_envios').doc();
-      await ref.set({
-        empresaId,
-        contratoIds: contratoId ? [contratoId] : [],
-        bolsaCuil: cuil,
-        tipo: plan.arca.tipo,
-        movimiento: plan.arca.movimiento,
-        lote: 'BT',
-        canal: 'URGENTE',
-        estado: 'PENDIENTE',
-        txt: linea.linea,
-        advertencias: [...linea.advertencias, ...advertenciasExtra],
-        enviable: linea.enviable && advertenciasExtra.length === 0,
-        bruto,
-        fechaAlta: contrato.fechaAlta || fechaInicio,
-        fechaBaja: plan.arca.fechaBaja || null,
-        motivo: plan.arca.motivo,
-        revista: plan.arca.revista,
-        confirmarConContador: true,
-        origen: null,
-        nroTransaccion: null,
-        quitadoDelLote: false,
-        intentos: [],
-        createdAt: FieldValue.serverTimestamp(),
-        createdBy: opts.actorUid,
-      });
+      if (plan.arca.accion === 'ANULACION') {
+        await ref.set({
+          empresaId,
+          contratoIds: contratoId ? [contratoId] : [],
+          bolsaCuil: cuil,
+          tipo: 'ANULACION',
+          movimiento: null,
+          modulo: plan.arca.modulo,
+          lote: 'ANULACION',
+          canal: 'URGENTE',
+          estado: 'PENDIENTE',
+          txt: null,
+          advertencias: plazo.avisoFeriados ? [plazo.avisoFeriados] : [],
+          enviable: true,
+          bruto: 0,
+          fechaAlta: fechaInicio,
+          fechaInicio,
+          horaInicio,
+          fechaBaja: null,
+          venceAnulacionMs: plazo.venceMs,
+          avisoFeriados: plazo.avisoFeriados,
+          motivo: null,
+          revista: null,
+          constanciaInterna: plan.arca.constanciaInterna,
+          confirmarConContador: false,
+          origen: null,
+          nroTransaccion: null,
+          quitadoDelLote: false,
+          intentos: [],
+          createdAt: FieldValue.serverTimestamp(),
+          createdBy: opts.actorUid,
+        });
+      } else {
+        const baja = await txtBajaNoPresentacion(db, {
+          empresaId, empresa: { id: empresaId, ...(empresaSnap?.data() || {}) }, contrato, cuil, bolsa,
+          fechaInicio, fechaBaja: plan.arca.fechaBaja || fechaInicio, revista: plan.arca.revista || revista,
+        });
+        await ref.set({
+          empresaId,
+          contratoIds: contratoId ? [contratoId] : [],
+          bolsaCuil: cuil,
+          tipo: plan.arca.tipo,
+          movimiento: 'BT',
+          lote: 'BT',
+          canal: 'URGENTE',
+          estado: 'PENDIENTE',
+          ...baja,
+          fechaAlta: fechaInicio,
+          fechaInicio,
+          horaInicio,
+          fechaBaja: plan.arca.fechaBaja || fechaInicio,
+          motivo: plan.arca.motivo,
+          revista: plan.arca.revista,
+          constanciaInterna: plan.arca.constanciaInterna,
+          confirmarConContador: false,
+          avisoFeriados: plazo.avisoFeriados,
+          origen: null,
+          nroTransaccion: null,
+          quitadoDelLote: false,
+          intentos: [],
+          createdAt: FieldValue.serverTimestamp(),
+          createdBy: opts.actorUid,
+        });
+      }
       envioId = ref.id;
-    } else {
+    } else if (!convertida) {
       envioId = ya.id;
     }
   }

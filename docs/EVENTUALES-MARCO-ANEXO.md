@@ -22,6 +22,10 @@ Mauro lo pidió para pasárselo al abogado. Describe cómo funciona hoy y la pre
 - `pedirCodigoAnexoEventual({ contratoId | convocatoriaId })`. Lo pide el eventual logueado. Respuesta: `{ canales: ['PUSH'|'MAIL'], venceMs, mensaje }`. El mensaje es «Te enviamos un código de 6 dígitos a tu app y a tu mail terminado en …» (solo los canales que salieron). El código no vuelve en la respuesta: va en el push, en Alertas y en el mail. Sin token y sin mail: error `SIN_CANAL`, mensaje «No pudimos enviarte el código. Contactá a RRHH.»
 - `confirmarAnexoEventual({ contratoId | convocatoriaId, codigo, dispositivo?, ubicacion? })`. Si el código cierra, responde `{ ok, hashAnexo, link }`. Si no: `CODIGO_INVALIDO`, `CODIGO_USADO` o `CODIGO_VENCIDO`.
 
+## Anulación de alta (RG 2988/2010 art. 9)
+
+Si el alta ya se informó y la persona no va a trabajar, la anulación es el módulo de **Anulación de Incorporaciones**: no es una baja y no lleva código de motivo. El plazo (`plazoAnulacionAlta`, hora de Argentina) es hasta las 24:00 del día de inicio; si el turno empieza a las 17:00 o después, hasta las 12:00 del día siguiente; si ese día es sábado, domingo o feriado nacional (RRHH → Feriados, colección `feriados`), hasta las 12:00 del primer día hábil siguiente. Sin feriados cargados para el año, el sistema avisa y el sábado/domingo igual corren. Vencida la ventana: baja con fecha de baja = la fecha prevista de inicio, motivo «desistimiento / sin efectivización de tareas» y revista `empresas.arcaEventuales.situacionRevistaDesistimiento` (default 30), más la constancia interna de que no se presentó. Una anulación que sigue pendiente cuando cierra la ventana pasa a esa baja sola.
+
 ## Pregunta para el abogado
 
 ¿Tiene valor de conformidad expresa, para cada convocatoria, el anexo aceptado en la aplicación con un código de un solo uso (push a la app y mail), hash del PDF y constancia de fecha, usuario, dispositivo e IP, cuando el contrato marco se firmó una sola vez en papel y la cláusula séptima dice que esa aceptación integra el marco?

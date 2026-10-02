@@ -185,8 +185,8 @@ export function eventualesParaHueco(input?: EventualesHuecoInput | null): Eventu
 
 /**
  * Qué hacer con ARCA cuando el eventual no va a trabajar.
- * NA y el plazo salen del manual de carga masiva, pero la tabla no define NA/NB:
- * quedan en constante hasta que el contador los confirme (`empresa.arcaEventuales` los pisa).
+ * `puedeAnular` lo calcula `plazoAnulacionAlta` (RG 2988/2010 art. 9). La anulación es el
+ * módulo de Anulación de Incorporaciones: no lleva código de motivo. Vencida la ventana, baja.
  */
 export type EventualAusenteArca = {
   accion: 'CANCELAR_AT' | 'ANULACION' | 'BAJA';
@@ -198,6 +198,8 @@ export type EventualAusenteArca = {
   fechaBaja: string | null;
   revista: string | null;
   motivo: string | null;
+  modulo: string | null;
+  constanciaInterna: string | null;
 };
 
 export type DesempenoEventualTipo = 'CANCELACION_ANTICIPADA' | 'CANCELACION_TARDIA' | 'FALTA_SIN_AVISO';
@@ -232,11 +234,11 @@ export function planEventualAusente(input: {
   ahoraMs?: number;
   /** YYYY-MM-DD del inicio fijado. La baja usa este día, no el fin del contrato. */
   fechaInicio?: string;
-  /** Default 24. Configurable en `arcaEventuales.anulacionAltaMaxHoras`. */
-  plazoAnulacionHoras?: number;
-  /** Default NA. TODO confirmar con el contador. */
-  movimientoAnulacion?: string;
-  /** Default 30 (el de la baja habitual). TODO: la tabla no tiene «no inicio efectivo». */
+  /** Resultado de `plazoAnulacionAlta`. Sin este dato no se anula: queda la baja. */
+  puedeAnular?: boolean;
+  /** Código de revista de la baja por desistimiento. `empresas.arcaEventuales.situacionRevistaDesistimiento`. */
+  revistaDesistimiento?: string;
+  /** Alias histórico del código de revista. */
   revistaNoInicio?: string;
 }): EventualAusentePlan | null {
   if (input.isEventual !== true) return null;
@@ -247,12 +249,14 @@ export function planEventualAusente(input: {
   const aviso = input.aviso === true;
   const inicioMs = Number(input.inicioMs) || 0;
   const ahoraMs = Number(input.ahoraMs) || 0;
-  const plazoHoras = Number(input.plazoAnulacionHoras) > 0 ? Number(input.plazoAnulacionHoras) : 24;
-  const dentroDePlazo = !inicioMs || ahoraMs - inicioMs < plazoHoras * 3600000;
+  const vacio = { modulo: null, constanciaInterna: null };
   const arca: EventualAusenteArca = input.atSubido !== true
-    ? { accion: 'CANCELAR_AT', tipo: null, movimiento: null, canal: null, bruto: null, fechaBaja: null, revista: null, motivo: null }
-    : dentroDePlazo
-      ? { accion: 'ANULACION', tipo: 'ANULACION', movimiento: String(input.movimientoAnulacion || 'NA'), canal: 'URGENTE', bruto: 0, fechaBaja: null, revista: null, motivo: null }
+    ? { accion: 'CANCELAR_AT', tipo: null, movimiento: null, canal: null, bruto: null, fechaBaja: null, revista: null, motivo: null, ...vacio }
+    : input.puedeAnular === true
+      ? {
+        accion: 'ANULACION', tipo: 'ANULACION', movimiento: null, canal: 'URGENTE', bruto: 0,
+        fechaBaja: null, revista: null, motivo: null, modulo: 'ANULACION_INCORPORACIONES', constanciaInterna: 'NO_SE_PRESENTO',
+      }
       : {
         accion: 'BAJA',
         tipo: 'BAJA_NO_PRESENTACION',
@@ -260,8 +264,10 @@ export function planEventualAusente(input: {
         canal: 'URGENTE',
         bruto: null,
         fechaBaja: String(input.fechaInicio || ''),
-        revista: String(input.revistaNoInicio || '30'),
-        motivo: 'no inicio efectivo de prestación',
+        revista: String(input.revistaDesistimiento || input.revistaNoInicio || '30'),
+        motivo: 'desistimiento / sin efectivización de tareas',
+        modulo: null,
+        constanciaInterna: 'NO_SE_PRESENTO',
       };
   const horasAntes = inicioMs > 0 ? (inicioMs - ahoraMs) / 3600000 : 0;
   const desempeno: DesempenoEventualTipo = aviso
