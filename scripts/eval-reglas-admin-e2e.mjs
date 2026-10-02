@@ -230,7 +230,10 @@ async function run() {
   add('staff A lee escala salarial', await c.get(tok.a, 'escalas_salariales/esc1'), true);
   add('staff A no escribe escala', await c.update(tok.a, 'escalas_salariales/esc1', { status: 'INACTIVE' }), false);
   add('SuperAdmin escribe escala', await c.update(tok.sa, 'escalas_salariales/esc1', { status: 'ACTIVE' }), true);
-  add('escalas_cct no tiene match', await c.get(tok.sa, 'escalas_cct/cct1'), false);
+  add('SuperAdmin lee escalas_cct', await c.get(tok.sa, 'escalas_cct/cct1'), true);
+  add('staff lee escalas_cct', await c.get(tok.a, 'escalas_cct/cct1'), true);
+  add('guardia no lee escalas_cct', await c.get(tok.g, 'escalas_cct/cct1'), false);
+  add('nadie escribe escalas_cct', await c.update(tok.sa, 'escalas_cct/cct1', { status: 'X' }), false);
   add('staff A lee hours_ledger A', await c.get(tok.a, 'hours_ledger/hA'), true);
   add('staff A no lee hours_ledger B', await c.get(tok.a, 'hours_ledger/hB'), false);
   add('staff A no escribe hours_ledger', await c.update(tok.a, 'hours_ledger/hA', { empresaId: A }), false);
