@@ -16,6 +16,7 @@ import { resolveTuraExtensionOperacionesTarget } from '@/lib/refuerzo/turaContig
 import { registrarPresenciaOps } from '@/services/registrarPresenciaOps';
 import { opsLateArrivalBadgeLabel } from '@/lib/operaciones/opsLateArrivalMonitor';
 import { formatIngresoLine } from '@/lib/operaciones/ingresoLabel';
+import { ALTA_ARCA_AVISO_TEXTO, ALTA_ARCA_AVISO_TITLE, altaArcaPendienteVisible } from '@/lib/operaciones/guardCardEstado';
 import { isExtraNonReliefShift, isReliefEligibleShift, formatRetentionDuration, formatRetentionLine } from '@cosp/ops-core';
 import { SeriesReliefPicker } from '@/components/operaciones/SeriesReliefPicker';
 import { ShiftCodeBadge } from '@/components/operaciones/ShiftCodeBadge';
@@ -1331,8 +1332,8 @@ export default function TacticalMapView() {
                                                     </span>
                                                 </p>
                                                 <p className="text-[10px] text-slate-400 leading-tight">{s.objectiveName} · {s.positionName} · <span className="font-mono">{formatTimeSimple(s.shiftDateObj)}</span></p>
-                                                {s.esEventual === true && s.eventualAltaArcaConfirmada !== true && s.shiftDateObj instanceof Date && Date.now() >= s.shiftDateObj.getTime() - 2 * 60 * 60 * 1000 && (
-                                                    <p className="text-[10px] font-black text-amber-700">ALTA_ARCA_PENDIENTE</p>
+                                                {altaArcaPendienteVisible(s, new Date()) && (
+                                                    <p className="text-[10px] font-bold text-amber-700" title={ALTA_ARCA_AVISO_TITLE}>{ALTA_ARCA_AVISO_TEXTO}</p>
                                                 )}
                                                 {s.isPresent && s.retentionWait && !s.cierreSinFranja ? <p className="text-[10px] font-bold text-orange-700">{formatRetentionLine(s.retentionWait)}</p> : null}
                                                 {s.isPresent && formatIngresoLine(s) ? <p className="text-[10px] font-bold text-emerald-700">{formatIngresoLine(s)}</p> : null}

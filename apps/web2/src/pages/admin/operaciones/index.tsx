@@ -83,6 +83,7 @@ import { isExtraNonReliefShift, isReliefEligibleShift, formatRetentionDuration, 
 import { SeriesReliefPicker } from '@/components/operaciones/SeriesReliefPicker';
 import { ShiftCodeBadge } from '@/components/operaciones/ShiftCodeBadge';
 import { canRevertAbsenceNow, isRevertAbsenceExpired } from '@/lib/operaciones/revertAbsenceWindow';
+import { ALTA_ARCA_AVISO_TEXTO, ALTA_ARCA_AVISO_TITLE, altaArcaPendienteVisible, mostrarDescubierto } from '@/lib/operaciones/guardCardEstado';
 import { shiftHardCapAt } from '@/lib/operaciones/shiftHardCap';
 
 const OperacionesMap = dynamic(() => import('@/components/operaciones/OperacionesMap'), { loading: () => <div className="h-full flex items-center justify-center text-slate-400">Cargando Mapa...</div>, ssr: false });
@@ -1095,19 +1096,16 @@ const shiftPostLabel = (shift: any): string => {
     return String(shift?.positionName || '—').trim();
 };
 
-const ALTA_ARCA_ALERTA_MS = 2 * 60 * 60 * 1000;
-function altaArcaPendienteVisible(shift: { esEventual?: boolean; eventualAltaArcaConfirmada?: boolean; shiftDateObj?: Date }, now: Date): boolean {
-    if (shift?.esEventual !== true || shift?.eventualAltaArcaConfirmada === true) return false;
-    const start = shift.shiftDateObj instanceof Date ? shift.shiftDateObj.getTime() : NaN;
-    if (!Number.isFinite(start)) return false;
-    return now.getTime() >= start - ALTA_ARCA_ALERTA_MS;
-}
+const AltaArcaAviso = () => (
+    <span className="text-[9px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded shrink-0" title={ALTA_ARCA_AVISO_TITLE}>{ALTA_ARCA_AVISO_TEXTO}</span>
+);
 
 const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHandover, onOpenInterrupt, onOpenCoverage, onReportPlanning, onOpenWorkedFranco, onNovedadAbsence, onOpenWA, onOpenAbsenceDecision, onOpenRRHH, onOpenManualRetention, isCompact, isAutoMode, onRevertAbsence }: any) => {
     let accentColor = 'bg-slate-400'; let rowBg = 'bg-white';
+    const descubierto = mostrarDescubierto(shift);
 
     if (shift.isUnassigned && shift.isReportedToPlanning)   { accentColor = 'bg-slate-500';   rowBg = 'bg-slate-50'; }
-    else if (shift.isDescubierto || shift.isSinCobertura) { accentColor = 'bg-slate-400'; rowBg = 'bg-slate-50'; }
+    else if (descubierto) { accentColor = 'bg-slate-400'; rowBg = 'bg-slate-50'; }
     else if (shift.isResolvedByOps)   { accentColor = 'bg-indigo-500';  rowBg = 'bg-indigo-50/40'; }
     else if (shift.isUnassigned)       { accentColor = 'bg-rose-500';    rowBg = 'bg-rose-50/40'; }
     else if (shift.isRetention)        { accentColor = 'bg-orange-500';  rowBg = 'bg-orange-50/40'; }
@@ -1142,7 +1140,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
         ? (shift.vacancyBand ? `VACANTE · ${shift.vacancyBand}` : (shift.employeeName || 'VACANTE'))
         : (shift.employeeName || 'Desconocido');
     if (shift.isUnassigned && shift.isReportedToPlanning) name = name.replace('VACANTE: ', '').replace('VACANTE · ', '');
-    if ((shift.isDescubierto || shift.isSinCobertura) && !shift.operacionallyCovered) {
+    if (descubierto && !shift.operacionallyCovered) {
         name = (shift.vacancyBand ? `DESCUBIERTO · ${shift.vacancyBand}` : 'DESCUBIERTO');
     }
     const refuerzoLabel = getRefuerzoLabel(shift);
@@ -1155,7 +1153,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     // Badge de estado
     let badge = null;
     if (shift.isUnassigned && shift.isReportedToPlanning)  badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-600 text-white flex items-center gap-0.5 shrink-0"><CornerUpLeft size={8}/> DEVUELTO</span>;
-    else if (shift.isDescubierto || shift.isSinCobertura) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-500 text-white shrink-0">DESCUBIERTO</span>;
+    else if (descubierto) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-500 text-white shrink-0">DESCUBIERTO</span>;
     else if (shift.isTuraCutSegment) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-violet-700 text-white shrink-0">TURA 2º tramo</span>;
     else if (refuerzoLabel && shift.isUnassigned) badge = <span className={`text-[9px] font-black px-1.5 py-0.5 rounded text-white shrink-0 bg-fuchsia-600`}>{`VACANTE ${refuerzoLabel}`}</span>;
     else if (refuerzoLabel) badge = <span className={`text-[9px] font-black px-1.5 py-0.5 rounded text-white shrink-0 ${refuerzoLabel === 'TURA' ? 'bg-violet-600' : 'bg-red-600'}`}>{refuerzoLabel}</span>;
@@ -1230,9 +1228,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                     <ShiftCodeBadge shift={shift} />
                     {dayTagEl}
                     {badge}
-                    {altaArcaPendienteVisible(shift, now) && (
-                        <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-600 text-white shrink-0" title="Sin número de transacción: no puede fichar">ALTA_ARCA_PENDIENTE</span>
-                    )}
+                    {altaArcaPendienteVisible(shift, now) && <AltaArcaAviso />}
                 </div>
                 <div className="flex items-center gap-1.5 text-[9px] text-slate-400 leading-tight mt-0.5">
                     <span className="truncate">{shift.objectiveName} · <span className="text-indigo-500">{shiftPostLabel(shift)}</span></span>
@@ -1312,9 +1308,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                             <span className="text-[10px] text-slate-400">{shift.clientName || shift.objectiveName}</span>
                         </div>
                     </div>
-                    <div className="flex items-center gap-1.5 shrink-0">{dayTagEl}{badge}{altaArcaPendienteVisible(shift, now) && (
-                        <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-600 text-white shrink-0" title="Sin número de transacción: no puede fichar">ALTA_ARCA_PENDIENTE</span>
-                    )}</div>
+                    <div className="flex items-center gap-1.5 shrink-0">{dayTagEl}{badge}{altaArcaPendienteVisible(shift, now) && <AltaArcaAviso />}</div>
                 </div>
                 {/* Fila 2: objetivo · posición */}
                 <div className="flex items-center gap-2 text-[10px] text-slate-500 mb-1.5 pl-10">
@@ -5219,8 +5213,9 @@ export default function OperacionesPage() {
                     <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl p-6 border border-slate-200">
                         <h3 className="font-bold text-lg text-slate-900 mb-1">Revertir ausencia</h3>
                         <p className="text-sm text-slate-600 mb-4">
-                            {revertAbsenceChoice.shift.employeeName} tiene cobertura o convocatorias activas.
-                            ¿Qué hacemos?
+                            {revertAbsenceChoice.shift.coveredByEmployeeName
+                                ? <>El lugar ya lo cubre <b>{revertAbsenceChoice.shift.coveredByEmployeeName}</b>{revertAbsenceChoice.shift.coverageType ? ` (${revertAbsenceChoice.shift.coverageType})` : ''}. Si {revertAbsenceChoice.shift.employeeName} llegó quedan dos para un lugar: elegí a quién liberás.</>
+                                : <>{revertAbsenceChoice.shift.employeeName} tiene cobertura o convocatorias activas. ¿Qué hacemos?</>}
                         </p>
                         <button
                             type="button"
@@ -5231,17 +5226,21 @@ export default function OperacionesPage() {
                             }}
                             className="w-full py-3 mb-2 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700"
                         >
-                            Cancelar cobertura y revertir
+                            {revertAbsenceChoice.shift.coveredByEmployeeName
+                                ? `Liberar a ${revertAbsenceChoice.shift.coveredByEmployeeName} · vuelve ${revertAbsenceChoice.shift.employeeName}`
+                                : 'Cancelar cobertura y revertir'}
                         </button>
                         <button
                             type="button"
                             onClick={() => {
                                 setRevertAbsenceChoice({ isOpen: false, shift: null });
-                                toast.info(`${revertAbsenceChoice.shift?.employeeName || 'Titular'} permanece ausente (AA).`);
+                                toast.info(`${revertAbsenceChoice.shift?.employeeName || 'Titular'} permanece ausente (AA)${revertAbsenceChoice.shift?.coveredByEmployeeName ? `; sigue ${revertAbsenceChoice.shift.coveredByEmployeeName}` : ''}.`);
                             }}
                             className="w-full py-3 mb-2 bg-slate-100 text-slate-800 font-bold rounded-xl hover:bg-slate-200"
                         >
-                            Dejar AA
+                            {revertAbsenceChoice.shift.coveredByEmployeeName
+                                ? `Liberar a ${revertAbsenceChoice.shift.employeeName} · sigue ${revertAbsenceChoice.shift.coveredByEmployeeName} (queda AA)`
+                                : 'Dejar AA'}
                         </button>
                         <button
                             type="button"

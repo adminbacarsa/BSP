@@ -412,3 +412,210 @@ export async function aplicarEventualNoSePresento(
 
   return { ok: true, arca: plan.arca.tipo || 'CANCELADO', desempeno: plan.desempeno, reconvocado };
 }
+
+export type DeshacerNoSePresentoResult = {
+  ok: true;
+  nada?: boolean;
+  arca: 'AT_REENCOLADO' | 'AT_YA_CONFIRMADO' | 'SIN_AT' | 'ARCA_REVISAR';
+  desempeno: 'LLEGADA_TARDE_SIN_AVISO' | null;
+  novedadesCerradas: number;
+};
+
+/**
+ * El operador revirtió la ausencia del eventual (llegó dentro de la ventana): se deshace lo que
+ * `aplicarEventualNoSePresento` hizo por la falta sin aviso. Vuelve a pagarse la jornada, el AT
+ * quitado del lote vuelve como URGENTE (si ya se lo anuló o dio de baja en ARCA no se puede
+ * deshacer solo: queda aviso para RRHH), la falta en desempeño se reemplaza por llegada tarde
+ * y la novedad AUSENCIA_EVENTUAL se cierra con la nota de reversión.
+ */
+export async function deshacerEventualNoSePresento(
+  db: admin.firestore.Firestore,
+  opts: { shiftId: string; actorUid: string; lateMinutes?: number; ahoraMs?: number },
+): Promise<DeshacerNoSePresentoResult> {
+  const ahoraMs = opts.ahoraMs || Date.now();
+  const shiftRef = db.collection('turnos').doc(opts.shiftId);
+  const shiftSnap = await shiftRef.get();
+  if (!shiftSnap.exists) throw new Error('SIN_TURNO');
+  const shift = shiftSnap.data() || {};
+  if (!shift.eventualNoSePresentoAt) return { ok: true, nada: true, arca: 'SIN_AT', desempeno: null, novedadesCerradas: 0 };
+
+  const cuil = String(shift.bolsaCuil || '').replace(/\D/g, '');
+  const empresaId = String(shift.empresaId || '');
+  const porTurno = await db.collection('solicitudes_evento').where('turnoId', '==', opts.shiftId).limit(1).get();
+  const solSnap = porTurno.docs[0] || null;
+  const sol = solSnap?.data() || {};
+  const contratoId = String(sol.contratoId || shift.eventualContratoId || '');
+  const lateMinutes = Math.max(0, Math.round(Number(opts.lateMinutes) || 0));
+  const hora = hmAr(ahoraMs);
+  const nota = `Ausencia revertida por el operador: ingresó ${hora}${lateMinutes > 0 ? ` (${lateMinutes} min tarde)` : ''}.`;
+
+  let arca: DeshacerNoSePresentoResult['arca'] = 'SIN_AT';
+  const avisosArca: string[] = [];
+  if (contratoId) {
+    const envios = await db.collection('arca_envios').where('contratoIds', 'array-contains', contratoId).get();
+    const ats = envios.docs.filter((d) => d.data().tipo === 'AT');
+    const bajas = envios.docs.filter((d) => ['ANULACION', 'BAJA_NO_PRESENTACION'].includes(String(d.data().tipo || '')));
+    for (const baja of bajas) {
+      const data = baja.data();
+      if (data.quitadoDelLote === true) continue;
+      if (['SUBIENDO', 'CONFIRMADO'].includes(String(data.estado || ''))) {
+        avisosArca.push(`${data.tipo} ${data.estado}`);
+        continue;
+      }
+      await baja.ref.update({
+        quitadoDelLote: true,
+        quitadoMotivo: 'AUSENCIA_REVERTIDA',
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    }
+    const confirmado = ats.find((d) => d.data().estado === 'CONFIRMADO');
+    if (confirmado) {
+      arca = 'AT_YA_CONFIRMADO';
+    } else {
+      const quitado = ats.find((d) => d.data().quitadoDelLote === true && d.data().quitadoMotivo === 'NO_SE_PRESENTO');
+      const vivo = ats.find((d) => d.data().quitadoDelLote !== true && ['PENDIENTE', 'ERROR', 'MANUAL'].includes(String(d.data().estado || '')));
+      if (vivo) {
+        await vivo.ref.update({ canal: 'URGENTE', urgentePorReversion: true, updatedAt: FieldValue.serverTimestamp() });
+        arca = 'AT_REENCOLADO';
+      } else if (quitado) {
+        await quitado.ref.update({
+          quitadoDelLote: false,
+          quitadoMotivo: FieldValue.delete(),
+          canceladoMotivo: FieldValue.delete(),
+          canal: 'URGENTE',
+          estado: 'PENDIENTE',
+          urgentePorReversion: true,
+          reencoladoAt: FieldValue.serverTimestamp(),
+          reencoladoMotivo: 'AUSENCIA_REVERTIDA',
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        arca = 'AT_REENCOLADO';
+      }
+    }
+    if (avisosArca.length) arca = 'ARCA_REVISAR';
+
+    const contratoSnap = await db.collection('contratos_eventuales').doc(contratoId).get();
+    if (contratoSnap.exists) {
+      const contrato = contratoSnap.data() || {};
+      const inicioMs = (shift.startTime as { toMillis?: () => number })?.toMillis?.() || 0;
+      const finMs = (shift.endTime as { toMillis?: () => number })?.toMillis?.() || 0;
+      const jornada = sol.jornada || {
+        fecha: String(shift.scheduleDate || (inicioMs ? ymdAr(inicioMs) : '')),
+        horaInicio: inicioMs ? hmAr(inicioMs) : '08:00',
+        horaFin: finMs ? hmAr(finMs) : '16:00',
+        horas: Number(shift.hours) || 0,
+      };
+      const jornadas = ((contrato.jornadas || []) as { fecha?: string; horaInicio?: string }[]).filter(Boolean);
+      const yaEsta = jornadas.some((j) => j.fecha === jornada.fecha && j.horaInicio === jornada.horaInicio);
+      const nuevas = yaEsta ? jornadas : [...jornadas, jornada];
+      const fechaBaja = nuevas.map((j) => String(j.fecha || '')).sort().pop() || jornada.fecha;
+      await contratoSnap.ref.set({
+        estado: 'CONFIRMADO',
+        status: 'ACTIVE',
+        jornadas: nuevas,
+        fechaBaja,
+        cierre: FieldValue.delete(),
+        reabiertoAt: FieldValue.serverTimestamp(),
+        reabiertoMotivo: 'AUSENCIA_REVERTIDA',
+        updatedAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+      if (arca === 'AT_YA_CONFIRMADO') {
+        const { propagarAltaEnTurnos } = await import('../arca/altaArcaDenorm');
+        const nro = confirmado ? String(confirmado.data().nroTransaccion || '') : '';
+        await propagarAltaEnTurnos(db, { contratoIds: [contratoId], nroTransaccion: nro || null, encender: true });
+      }
+    }
+    await db.collection('anexo_codigos').doc(contratoId).set({ sinEfecto: false, sinEfectoAt: FieldValue.delete(), reactivadoAt: FieldValue.serverTimestamp() }, { merge: true });
+    const anexos = await db.collection('anexos_eventuales').where('contratoId', '==', contratoId).get();
+    for (const anexo of anexos.docs) {
+      await anexo.ref.set({ sinEfecto: false, sinEfectoAt: FieldValue.delete(), sinEfectoMotivo: FieldValue.delete(), reactivadoAt: FieldValue.serverTimestamp() }, { merge: true });
+    }
+    if (solSnap) {
+      // El doc del anexo nace al firmar: si existe, está firmado.
+      const firmado = anexos.size > 0 || !!sol.anexoId || !!sol.anexoFirmadoAt;
+      const anexoEstado = firmado ? 'FIRMADO' : (sol.exigirMarco === false ? 'NO_EXIGIDO' : 'PENDIENTE');
+      await solSnap.ref.update({
+        noSePresento: false,
+        noSePresentoAt: FieldValue.delete(),
+        noSePresentoRevertidoAt: FieldValue.serverTimestamp(),
+        anexoEstado,
+        anexoMensaje: FieldValue.delete(),
+        arcaNoSePresento: FieldValue.delete(),
+      });
+    }
+  }
+
+  await shiftRef.update({
+    noSePresento: FieldValue.delete(),
+    pagaJornada: true,
+    eventualNoSePresentoAt: FieldValue.delete(),
+    eventualNoSePresentoMotivo: FieldValue.delete(),
+    eventualArcaAccion: FieldValue.delete(),
+    eventualDesempeno: FieldValue.delete(),
+    eventualNoSePresentoRevertidoAt: FieldValue.serverTimestamp(),
+    eventualNoSePresentoRevertidoPor: opts.actorUid,
+    eventualArcaReversion: arca,
+    ...(cuil ? { excluirBolsaCuils: FieldValue.arrayRemove(cuil) } : {}),
+  });
+
+  const desempenoId = `FALTA_SIN_AVISO_${opts.shiftId}_${cuil || 'x'}`;
+  await db.collection('guardia_desempeno_eventos').doc(desempenoId).delete();
+  let desempeno: DeshacerNoSePresentoResult['desempeno'] = null;
+  if (lateMinutes > 5) {
+    desempeno = 'LLEGADA_TARDE_SIN_AVISO';
+    await db.collection('guardia_desempeno_eventos').doc(`LLEGADA_TARDE_SIN_AVISO_${opts.shiftId}_${cuil || 'x'}`).set({
+      empleadoId: String(shift.employeeId || ''),
+      bolsaCuil: cuil || null,
+      tipo: 'LLEGADA_TARDE_SIN_AVISO',
+      fecha: String(shift.scheduleDate || ''),
+      turnoId: opts.shiftId,
+      eventoId: shift.eventoId || null,
+      empresaId,
+      esEventual: true,
+      lateMinutes,
+      revertidaDesdeFalta: true,
+      createdAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+  }
+
+  const novs = await db.collection('novedades').where('shiftId', '==', opts.shiftId).where('type', '==', 'AUSENCIA_EVENTUAL').get();
+  for (const nov of novs.docs) {
+    await nov.ref.update({
+      status: 'ATENDIDA',
+      resolved: true,
+      resolvedAt: FieldValue.serverTimestamp(),
+      resolvedBy: opts.actorUid,
+      reversionNota: nota,
+      description: `${String(nov.data().description || '')} ${nota}`.trim(),
+    });
+  }
+  if (arca === 'ARCA_REVISAR') {
+    await db.collection('novedades').add({
+      type: 'ARCA_REVISAR',
+      status: 'PENDIENTE',
+      empresaId,
+      shiftId: opts.shiftId,
+      eventoId: shift.eventoId || null,
+      employeeId: shift.employeeId || null,
+      employeeName: String(shift.employeeName || ''),
+      bolsaCuil: cuil || null,
+      description: `${shift.employeeName || 'Eventual'} llegó y se revirtió la ausencia, pero en ARCA ya se procesó ${avisosArca.join(', ')}. Revisar el alta a mano.`,
+      createdAt: Timestamp.now(),
+      source: opts.actorUid,
+    });
+  }
+
+  await db.collection('audit_logs').add({
+    action: 'EVENTUAL_AUSENCIA_REVERTIDA',
+    module: 'EVENTUALES',
+    actorUid: opts.actorUid,
+    empresaId,
+    bolsaCuil: cuil || null,
+    details: `${nota} Se paga la jornada. ARCA ${arca}. Desempeño: ${desempeno || 'sin falta'}.`,
+    turnoId: opts.shiftId,
+    solicitudId: solSnap?.id || null,
+    timestamp: FieldValue.serverTimestamp(),
+  });
+
+  return { ok: true, arca, desempeno, novedadesCerradas: novs.size };
+}

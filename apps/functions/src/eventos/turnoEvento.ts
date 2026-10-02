@@ -362,13 +362,22 @@ export async function normalizarTurnoEvExistente(db, shiftId, opts: Record<strin
     draft: false,
     empresaId: data.empresaId || opts.empresaId || null,
   };
+  if (!String(data.employeeName || '').trim() && data.employeeId && data.employeeId !== 'VACANTE') {
+    const cuil = String(data.bolsaCuil || '').replace(/\D/g, '');
+    const bolsa = cuil ? await db.collection('eventuales_bolsa').doc(cuil).get() : null;
+    const legajo = bolsa?.exists ? null : await db.collection('empleados').doc(String(data.employeeId)).get();
+    const nombre = bolsa?.exists
+      ? String(bolsa.data()?.nombre || '')
+      : legajo?.exists ? `${legajo.data()?.lastName || ''}, ${legajo.data()?.firstName || ''}`.replace(/^, |, $/g, '').trim() : '';
+    if (nombre) patch.employeeName = nombre;
+  }
   const links = [];
   if (opts.francoShiftId) {
     patch.sourceShiftId = opts.francoShiftId;
     links.push({ id: opts.francoShiftId, patch: parcheOrigenCobertura(shiftId) });
   }
   const pisado = String(data.replacedCode || '').toUpperCase() === 'RET' || /ret[eé]n/i.test(String(data.type || ''));
-  const preview = { id: shiftId, nombre: data.employeeName || '', patch, links, aviso: lugar.aviso, retenPisado: pisado };
+  const preview = { id: shiftId, nombre: data.employeeName || patch.employeeName || '', patch, links, aviso: lugar.aviso, retenPisado: pisado };
   if (!opts.apply) return preview;
   await ref.set(patch, { merge: true });
   for (const link of links) await db.collection('turnos').doc(link.id).set(link.patch, { merge: true });
