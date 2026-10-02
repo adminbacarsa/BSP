@@ -1,7 +1,7 @@
 import React, { useState, type ReactNode } from 'react';
 import { CalendarX2, Check, ChevronDown, ChevronUp } from 'lucide-react';
 import type { CandidatoMovil, FranjaMovil, TabCandidato } from '@/lib/movil/planificacionBasica';
-import type { OpcionTurno } from '@/lib/movil/planificacionSemana';
+import { AVISO_MES_SIN_PUBLICAR, type OpcionTurno } from '@/lib/movil/planificacionSemana';
 import type { CronogramaGrupo, CronogramaItem } from '@/lib/movil/cronogramaAlertas';
 import { MovilTopBar } from './ui/MovilTopBar';
 import { MovilBadge } from './ui/MovilBadge';
@@ -42,12 +42,13 @@ function Chip({ on, onClick, children, disabled, attrs }: { on: boolean; onClick
 
 /**
  * Alerta agrupada de Planificación: «15 objetivos sin cronograma de octubre». Se despliega a la
- * lista por objetivo, cada uno con «Publicar» (abre ese objetivo y mes en la semana) y «Vista».
+ * lista por objetivo, cada uno con «Ver semana» (abre ese objetivo y mes en solo lectura: el celular
+ * no publica, se publica desde la computadora) y «Vista».
  */
-export function CronogramaSinPublicarCard({ grupo, onVista, onPublicar, abiertoInicial = false }: {
+export function CronogramaSinPublicarCard({ grupo, onVista, onAbrir, abiertoInicial = false }: {
   grupo: CronogramaGrupo;
   onVista: (ids: readonly string[]) => void;
-  onPublicar: (item: CronogramaItem) => void;
+  onAbrir: (item: CronogramaItem) => void;
   abiertoInicial?: boolean;
 }) {
   const [abierto, setAbierto] = useState(abiertoInicial);
@@ -73,8 +74,8 @@ export function CronogramaSinPublicarCard({ grupo, onVista, onPublicar, abiertoI
                 <span className="block truncate text-[13px] font-semibold text-slate-900">{item.objectiveName}</span>
                 <span className="block text-[11px] font-medium text-slate-500">{item.corte ? `Mañana corta a las ${item.corte}` : 'Mañana no entra en operación'}</span>
               </span>
-              <button type="button" onClick={() => onPublicar(item)} className={`h-8 shrink-0 rounded px-2.5 text-[11px] font-semibold ${MOVIL_BTN_PRIMARY}`} data-cronograma-publicar={item.objectiveId}>
-                Publicar
+              <button type="button" onClick={() => onAbrir(item)} className={`h-8 shrink-0 rounded px-2.5 text-[11px] font-semibold ${MOVIL_BTN_SECONDARY}`} data-cronograma-abrir={item.objectiveId}>
+                Ver semana
               </button>
               <button type="button" onClick={() => onVista([item.id])} aria-label={`Marcar como vista ${item.objectiveName}`} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded ${MOVIL_BTN_SECONDARY}`} data-cronograma-vista={item.id}>
                 <Check size={14} strokeWidth={2} aria-hidden="true" />
@@ -99,13 +100,17 @@ export function PlanificacionMovilView(props: {
   dias: string[];
   dia: string;
   franjas: FranjaMovil[];
+  /** Cambios locales pendientes de «Publicar corrección» (solo meses publicados). */
   porPublicar: number;
-  puedePublicar: boolean;
+  /** Permiso `correct`: el único que escribe desde el celular. */
+  puedeCorregir: boolean;
+  /** false = algún mes de estos días no está publicado: se muestra el aviso de solo lectura. */
   mesPublicado: boolean;
   /** CRONOGRAMA_SIN_PUBLICAR agrupadas por mes (pendientes). */
   cronograma?: CronogramaGrupo[];
   onCronogramaVista?: (ids: readonly string[]) => void;
-  onCronogramaPublicar?: (item: CronogramaItem) => void;
+  /** Abre ese objetivo y mes en la semana (solo lectura si no está publicado). */
+  onCronogramaAbrir?: (item: CronogramaItem) => void;
   onDia: (dia: string) => void;
   onHueco: (franja: FranjaMovil) => void;
   onAsignado: (franja: FranjaMovil) => void;
@@ -129,7 +134,7 @@ export function PlanificacionMovilView(props: {
           {(props.cronograma || []).length > 0 && (
             <div className="space-y-2 px-3 pt-3">
               {(props.cronograma || []).map((grupo) => (
-                <CronogramaSinPublicarCard key={grupo.mesLabel} grupo={grupo} onVista={(ids) => props.onCronogramaVista?.(ids)} onPublicar={(item) => props.onCronogramaPublicar?.(item)} />
+                <CronogramaSinPublicarCard key={grupo.mesLabel} grupo={grupo} onVista={(ids) => props.onCronogramaVista?.(ids)} onAbrir={(item) => props.onCronogramaAbrir?.(item)} />
               ))}
             </div>
           )}
@@ -139,7 +144,7 @@ export function PlanificacionMovilView(props: {
         <div className="flex-1" data-plan-panel="dias">
           <div className="px-3 pt-3">
             <p className="text-[11px] font-medium text-slate-500" data-movil-fecha="1">Próximos días</p>
-            {!props.mesPublicado && <p className={`mt-1 text-[11px] font-semibold ${MOVIL_TEXT.amber}`}>Hay meses en borrador: los cambios se guardan sin avisar al guardia hasta publicar.</p>}
+            {!props.mesPublicado && <p className={`mt-1 text-[11px] font-semibold ${MOVIL_TEXT.amber}`} data-plan-solo-lectura="dias">{AVISO_MES_SIN_PUBLICAR}</p>}
           </div>
           <div className="flex gap-2 px-3 py-3">
             {props.dias.map((fecha) => {
@@ -157,7 +162,7 @@ export function PlanificacionMovilView(props: {
           </div>
           <div className="space-y-2 px-3 pb-28">
             {(props.cronograma || []).map((grupo) => (
-              <CronogramaSinPublicarCard key={grupo.mesLabel} grupo={grupo} onVista={(ids) => props.onCronogramaVista?.(ids)} onPublicar={(item) => props.onCronogramaPublicar?.(item)} />
+              <CronogramaSinPublicarCard key={grupo.mesLabel} grupo={grupo} onVista={(ids) => props.onCronogramaVista?.(ids)} onAbrir={(item) => props.onCronogramaAbrir?.(item)} />
             ))}
             {huecos > 0 && (
               <p className={`px-3 py-2 text-[11px] font-semibold ${MOVIL_CARD} ${MOVIL_TEXT.rose}`}>{huecos} hueco{huecos === 1 ? '' : 's'} en estos 4 días</p>
@@ -192,11 +197,12 @@ export function PlanificacionMovilView(props: {
             <div className="fixed bottom-16 left-0 right-0 z-40 mx-auto w-full max-w-[390px] px-3">
               <button
                 type="button"
-                disabled={!props.puedePublicar}
+                disabled={!props.puedeCorregir}
                 onClick={props.onPublicar}
+                data-plan-publicar="correccion"
                 className={`min-h-12 w-full rounded text-sm font-semibold ${MOVIL_BTN_PRIMARY} disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-500`}
               >
-                {props.puedePublicar ? `${props.mesPublicado ? 'Publicar corrección' : 'Guardar borrador'} · ${props.porPublicar} cambio${props.porPublicar === 1 ? '' : 's'}` : 'Falta permiso para guardar'}
+                {props.puedeCorregir ? `Publicar corrección · ${props.porPublicar} cambio${props.porPublicar === 1 ? '' : 's'}` : 'Falta permiso para corregir'}
               </button>
             </div>
           )}

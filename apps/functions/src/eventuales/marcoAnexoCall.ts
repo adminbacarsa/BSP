@@ -5,6 +5,7 @@
 import { Readable } from 'stream';
 import * as admin from 'firebase-admin';
 import * as functions from 'firebase-functions/v1';
+import { MailNotConfiguredError, sendSystemMail } from '../common/mailer';
 
 const CUENTA_DRIVE = 'comtroldata@appspot.gserviceaccount.com';
 const callable = functions.runWith({ serviceAccount: CUENTA_DRIVE }).https;
@@ -59,6 +60,54 @@ export async function lib() {
     CODIGO_ANEXO_MINUTOS: number;
     VIGENCIA_MARCO_DIAS: number;
   }>;
+}
+
+/**
+ * Bruto que va en el anexo. Toma las `escalas_salariales` ACTIVE (las escribe `gestionarEscalaCct` al
+ * aprobar) vigentes a la fecha de cada jornada; si en esa fecha no hay, usa la de hoy y el anexo lo dice.
+ * Si no hay ninguna escala, el anexo queda con «[monto calculado]» como antes.
+ */
+export async function brutoDelAnexo(
+  contrato: Record<string, unknown>,
+  jornadas: unknown[],
+  hoy: string,
+): Promise<{ bruto: number | null; brutoTexto: string | null; escalaTexto: string; escalas: string[]; escalaRespaldo: boolean }> {
+  const vacio = { bruto: null, brutoTexto: null, escalaTexto: '', escalas: [] as string[], escalaRespaldo: false };
+  try {
+    const { calcularRemuneracionContrato, textoEscalaAplicada, formatoPesos } = await import('../eventuales-shared/remuneracion.mjs') as {
+      calcularRemuneracionContrato: (i: Record<string, unknown>) => Record<string, any>;
+      textoEscalaAplicada: (r: Record<string, unknown>) => string;
+      formatoPesos: (n: number) => string;
+    };
+    const { fechasFeriadosNacionales } = await import('../eventuales-shared/plazoAnulacion.mjs') as {
+      fechasFeriadosNacionales: (f: unknown[]) => string[];
+    };
+    const [escalasSnap, feriadosSnap] = await Promise.all([
+      db().collection('escalas_salariales').where('status', '==', 'ACTIVE').get(),
+      db().collection('feriados').get(),
+    ]);
+    if (escalasSnap.empty) return vacio;
+    const feriados = fechasFeriadosNacionales(feriadosSnap.docs.map((d) => d.data()));
+    const r = calcularRemuneracionContrato({
+      jornadas: Array.isArray(jornadas) ? jornadas : [],
+      categoria: String(contrato.categoria || 'VIGILADOR_GENERAL'),
+      escalas: escalasSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+      feriados,
+      incluirCierre: false,
+      hoy,
+    });
+    if (!r.ok || !(Number(r.bruto) > 0)) return vacio;
+    return {
+      bruto: Number(r.bruto),
+      brutoTexto: formatoPesos(Number(r.bruto)),
+      escalaTexto: textoEscalaAplicada(r),
+      escalas: Array.isArray(r.escalas) ? r.escalas.map(String) : [],
+      escalaRespaldo: r.escalaRespaldo === true,
+    };
+  } catch (e) {
+    console.warn('[anexo] bruto no calculado:', (e as Error)?.message);
+    return vacio;
+  }
 }
 
 async function raizDrive() {
@@ -324,24 +373,18 @@ async function tieneTokenPush(uid: string): Promise<boolean> {
 }
 
 async function enviarMailCodigo(destino: string, codigo: string): Promise<void> {
-  const gmailUser = (process.env.GMAIL_USER || '').trim();
-  const gmailPass = (process.env.GMAIL_PASS || '').replace(/\s+/g, '');
-  if (!gmailUser || !gmailPass) {
-    throw new functions.https.HttpsError('failed-precondition', 'El mail no está configurado. Contactá a RRHH.');
+  try {
+    await sendSystemMail({
+      to: destino,
+      subject: 'Código para aceptar el anexo',
+      text: `Tu código de 6 dígitos para aceptar el anexo es ${codigo}. Vence en 15 minutos. Si no lo pediste, avisá a RRHH.`,
+    });
+  } catch (err) {
+    if (err instanceof MailNotConfiguredError) {
+      throw new functions.https.HttpsError('failed-precondition', 'El mail no está configurado. Contactá a RRHH.');
+    }
+    throw new functions.https.HttpsError('internal', err instanceof Error ? err.message : 'No se pudo enviar el mail.');
   }
-  const nodemailer = await import('nodemailer');
-  const transporter = nodemailer.createTransport({
-    host: 'smtp.gmail.com',
-    port: 465,
-    secure: true,
-    auth: { user: gmailUser, pass: gmailPass },
-  });
-  await transporter.sendMail({
-    from: `"COSP" <${gmailUser}>`,
-    to: destino,
-    subject: 'Código para aceptar el anexo',
-    text: `Tu código de 6 dígitos para aceptar el anexo es ${codigo}. Vence en 15 minutos. Si no lo pediste, avisá a RRHH.`,
-  });
 }
 
 async function refCodigo(contratoId: string, convocatoriaId: string) {
@@ -457,6 +500,8 @@ export const confirmarAnexoEventual = callable.onCall(async (data, context) => {
   const empresaNombre = String(empresaDoc.name || empresaDoc.razonSocial || empresaDoc.nombre || empresaId || 'Empresa');
   const jornadas = (contrato.jornadas || data?.jornadas || []) as { fecha?: string }[];
   const planMarco = m.planMarco({ firmado: marco.firmado === true, fechaFirma: marco.fechaFirma, vigenciaDias: marco.vigenciaDias, hoy: fecha });
+  // Bruto del anexo: escala APROBADA vigente a la fecha de cada jornada; sin escala en esa fecha, la de hoy y aviso.
+  const brutoAnexo = await brutoDelAnexo(contrato, jornadas, fecha);
   const datosAnexo = {
     numero: String(contrato.numero || ref.id || '').slice(0, 24),
     empresaNombre,
@@ -469,7 +514,8 @@ export const confirmarAnexoEventual = callable.onCall(async (data, context) => {
     causa: contrato.causa || data?.causa,
     lugar,
     jornadas,
-    bruto: contrato.brutoEstimado ?? data?.bruto,
+    bruto: brutoAnexo.brutoTexto ?? contrato.brutoEstimado ?? data?.bruto,
+    escalaTexto: brutoAnexo.escalaTexto,
   };
   const anexoTexto = m.textoAnexo(datosAnexo);
   const hashAnexo = m.sha256(anexoTexto);
@@ -499,6 +545,7 @@ export const confirmarAnexoEventual = callable.onCall(async (data, context) => {
     bolsaCuil: cuil, empresaId, contratoId: contratoId || null, convocatoriaId: convocatoriaId || null,
     hashAnexo, uid: context.auth.uid, fechaHora: ahora, link: anexoGuardado.link, storagePath: anexoGuardado.storagePath,
     constanciaHash: hashAnexo, constanciaLink: anexoGuardado.link, drivePendiente: anexoGuardado.drivePendiente,
+    bruto: brutoAnexo.bruto, escalas: brutoAnexo.escalas, escalaRespaldo: brutoAnexo.escalaRespaldo, escalaTexto: brutoAnexo.escalaTexto || null,
   });
   // La convocatoria del evento (si la hubo) pasa a «anexo firmado» para la solapa Estado.
   if (contratoId) {

@@ -4,6 +4,7 @@ import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { toast } from 'sonner';
 import { EventualesScreens, type ArcaMovil, type EventualMovil, type EventualesPanel } from '@/components/movil/EventualesScreens';
+import { EscalaMovilPanel } from '@/components/movil/EscalaMovilPanel';
 import { MovilBottomNav } from '@/components/movil/MovilBottomNav';
 import { useEmpresaSheet } from '@/components/movil/useEmpresaSheet';
 import { useOnlineFlag } from '@/components/movil/OperacionScreens';
@@ -96,7 +97,7 @@ export function EventualesMovil() {
   const permitido = isSuperAdmin || canReadModule('EVENTUALES') || canReadModule('RRHH');
   const router = useRouter();
   const panelQuery = String(router.query.panel || '');
-  const panel: EventualesPanel = panelQuery === 'arca' || panelQuery === 'alta' ? panelQuery : 'bolsa';
+  const panel: EventualesPanel = panelQuery === 'arca' || panelQuery === 'alta' || panelQuery === 'escala' ? panelQuery : 'bolsa';
   const cerrarAlta = () => { void router.push('/admin/rrhh/eventuales/'); };
   const [fichas, setFichas] = useState<Ficha[]>([]);
   const [buscar, setBuscar] = useState('');
@@ -356,6 +357,7 @@ export function EventualesMovil() {
         puedeSwitch={puedeSwitch}
         switchGuardando={switchGuardando}
         onSwitch={cambiarSwitch}
+        escala={panel === 'escala' ? <EscalaMovilPanel /> : null}
       />
       {empresaSheet.sheet}
       <MovilBottomNav />

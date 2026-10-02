@@ -1,10 +1,11 @@
+import type { ReactNode } from 'react';
 import { cuentaRegresivaAnulacion, PASOS_ANULACION_MANUAL } from '@/lib/eventuales/plazoAnulacion.mjs';
 import { BottomSheet } from './BottomSheet';
 import { MovilBadge } from './ui/MovilBadge';
 import { MovilTopBar } from './ui/MovilTopBar';
 import { MOVIL_BTN_PRIMARY, MOVIL_BTN_SECONDARY, MOVIL_CARD, type MovilTone } from './ui/tones';
 
-export type EventualesPanel = 'bolsa' | 'arca' | 'alta';
+export type EventualesPanel = 'bolsa' | 'arca' | 'alta' | 'escala';
 
 export type EventualMovil = {
   id: string;
@@ -156,6 +157,8 @@ export function EventualesScreens(props: {
   puedeSwitch?: boolean;
   switchGuardando?: string;
   onSwitch?: (campo: 'exigirMarco' | 'exigirAltaArca', valor: boolean) => void;
+  /** Panel «Escala» (solo lectura): lo arma el contenedor para que esta pantalla no dependa de Firestore. */
+  escala?: ReactNode;
 }) {
   const envioElegido = props.arca.find((envio) => envio.id === props.arcaId) || null;
   const pendientes = props.arca.filter((envio) => envio.estado !== 'CONFIRMADO' && envio.estado !== 'ANULADO');
@@ -164,7 +167,8 @@ export function EventualesScreens(props: {
     <div data-movil-screen={props.panel} data-viewport="390x844" className="mx-auto flex min-h-[844px] w-full max-w-[390px] flex-col touch-manipulation overflow-x-hidden bg-[#f7f8fa] pb-24">
       <MovilTopBar modulo="Eventuales" empresa={props.empresa} onEmpresa={props.onEmpresa} online={props.online} pendingLabel={props.pendingLabel} />
       <div className="flex flex-1 flex-col gap-3 px-3 py-3">
-        {props.panel !== 'arca' && (
+        {props.panel === 'escala' && (props.escala || <p className={`${MOVIL_CARD} p-4 text-sm font-semibold text-slate-500`}>Escala salarial · solo lectura en el celular.</p>)}
+        {props.panel !== 'arca' && props.panel !== 'escala' && (
           <>
             <input value={props.buscar} onChange={(event) => props.onBuscar(event.target.value)} placeholder="Buscar por nombre, CUIL o legajo" className={`${INPUT} text-base`} />
             <p className="px-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">

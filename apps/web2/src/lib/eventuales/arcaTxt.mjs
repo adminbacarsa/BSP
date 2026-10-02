@@ -118,13 +118,14 @@ function armarLinea({ movimiento, revista, cuil, fechaAlta, fechaBaja, bruto, ob
 
 /**
  * Retribución pactada del TXT (posiciones 58-72). Solo entra una escala ACTIVE.
+ * Sin devengamiento (no se presentó) el bruto es 0 y no exige escala.
  * Sin escala aprobada el envío no se manda.
  */
 export function jornadasDevengables(jornadas) {
   return (jornadas || []).filter((j) => j && j.noSePresento !== true && j.pagaJornada !== false && j.sinDevengamiento !== true);
 }
 
-export function brutoParaTxt({ contrato, escalas }) {
+export function brutoParaTxt({ contrato, escalas, hoy }) {
   if (contrato?.sinDevengamiento === true || contrato?.noSePresento === true) {
     return { ok: true, codigo: 'SIN_DEVENGAMIENTO', bruto: 0, sinDevengamiento: true };
   }
@@ -135,9 +136,14 @@ export function brutoParaTxt({ contrato, escalas }) {
     categoria: contrato?.categoria || 'VIGILADOR_GENERAL',
     escalas: activas,
     incluirCierre: false,
+    hoy: hoy || hoyAr(),
   });
   if (!r.ok || !(Number(r.bruto) > 0)) return { ok: false, codigo: 'RETRIBUCION_PENDIENTE', bruto: 0 };
-  return { ok: true, bruto: r.bruto };
+  return { ok: true, bruto: r.bruto, escalas: r.escalas, escalaRespaldo: r.escalaRespaldo === true, advertencias: r.advertencias || [] };
+}
+
+function hoyAr() {
+  return new Date(Date.now() - 3 * 3600 * 1000).toISOString().slice(0, 10);
 }
 
 /**

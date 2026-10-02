@@ -16,6 +16,7 @@ const ETIQUETA: Record<string, string> = {
   ARCA_ERROR: 'ARCA — error de envío',
   MARCO_POR_VENCER: 'Contrato marco — vence en 30 días',
   CRONOGRAMA_SIN_PUBLICAR: 'Cronograma sin publicar (18:00)',
+  ESCALA_CCT_PROPUESTA: 'Escala salarial CCT 422/05 — propuesta nueva',
 };
 
 const ROL_LABEL: Record<string, string> = {
@@ -23,6 +24,7 @@ const ROL_LABEL: Record<string, string> = {
   PLANIFICACION: 'Planificación',
   RRHH: 'RRHH',
   SUPERVISION: 'Supervisión',
+  EVENTUALES: 'Eventuales',
 };
 
 const vacio = (): Record<string, Destinatario[]> =>

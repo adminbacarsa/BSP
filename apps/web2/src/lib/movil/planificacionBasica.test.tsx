@@ -2,9 +2,10 @@ import React from 'react';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { PlanificacionMovilView } from '@/components/movil/PlanificacionMovilView';
+import { CronogramaSinPublicarCard, PlanificacionMovilView } from '@/components/movil/PlanificacionMovilView';
 import { BarraPublicar, CeldaSheetBody, SelectorObjetivoSheetBody, SemanaEncabezado, SemanaGrilla } from '@/components/movil/PlanificacionSemanaView';
 import { buildMovilTheme } from '@/lib/companyTheme';
+import { AVISO_MES_SIN_PUBLICAR, mesPublicadoDe, puedeCorregirEnCelular } from '@/lib/movil/planificacionSemana';
 import {
   aplicarCambios,
   candidatosParaHueco,
@@ -94,7 +95,7 @@ test('render 390x844 marca la vacante y no arma una tabla', () => {
       dia="2026-10-03"
       franjas={franjas}
       porPublicar={0}
-      puedePublicar={false}
+      puedeCorregir={false}
       mesPublicado
       onDia={() => {}}
       onHueco={() => {}}
@@ -176,8 +177,8 @@ test('semana lun→dom con filas del SLA, celdas guardia + código y huecos marc
   assert.equal((html.match(/data-plan-fila="/g) || []).length, 5);
 
   const encabezado = renderToStaticMarkup(<SemanaEncabezado clienteNombre="Peaje" objetivoNombre="Peaje 9 Norte" onSelector={() => {}} publicado={false} huecos={total} cambios={2} mesLabel="octubre" />);
-  assert.match(encabezado, /data-plan-estado-mes="Borrador"/);
-  assert.match(encabezado, /text-amber-600[^>]*>Borrador</);
+  assert.match(encabezado, /data-plan-estado-mes="Sin publicar"/);
+  assert.match(encabezado, /text-amber-600[^>]*>Sin publicar</);
   assert.match(encabezado, /data-plan-cambios="2"/);
 });
 
@@ -270,16 +271,99 @@ test('un horario que se superpone o pasa 12:59 queda bloqueado', () => {
   assert.match(tope.reason || '', /12:59/);
 });
 
-test('publicar: borrador con publish, corrección con correct; el mismo markup para dos empresas de colores distintos', () => {
-  const borrador = renderToStaticMarkup(<BarraPublicar cambios={0} publicado={false} puedeEditar puedeCorregir={false} puedePublicar mesLabel="octubre" onGuardar={() => {}} onPublicarMes={() => {}} />);
-  assert.match(borrador, /data-plan-publicar="publicar"[^>]*>Publicar octubre</);
-  const sinPermiso = renderToStaticMarkup(<BarraPublicar cambios={0} publicado={false} puedeEditar puedeCorregir={false} puedePublicar={false} mesLabel="octubre" onGuardar={() => {}} onPublicarMes={() => {}} />);
-  assert.equal(sinPermiso, '');
-  const correccion = renderToStaticMarkup(<BarraPublicar cambios={3} publicado puedeEditar puedeCorregir puedePublicar={false} mesLabel="octubre" onGuardar={() => {}} onPublicarMes={() => {}} />);
+test('el celular no publica meses ni guarda borradores: solo lectura sin publicar, corrección con correct', () => {
+  // Mes sin publicar: aviso fijo, sin botón de publicar aunque haya permiso o cambios.
+  const sinPublicar = renderToStaticMarkup(<BarraPublicar cambios={0} publicado={false} puedeCorregir onGuardar={() => {}} />);
+  assert.match(sinPublicar, /data-plan-solo-lectura="1"/);
+  assert.ok(sinPublicar.includes(AVISO_MES_SIN_PUBLICAR));
+  assert.equal(sinPublicar.includes('data-plan-publicar'), false);
+  assert.equal(sinPublicar.includes('Publicar octubre'), false);
+  assert.equal(sinPublicar.includes('borrador'), false);
+  const sinPublicarConCambios = renderToStaticMarkup(<BarraPublicar cambios={2} publicado={false} puedeCorregir onGuardar={() => {}} />);
+  assert.equal(sinPublicarConCambios.includes('data-plan-publicar'), false);
+  // Mes publicado: corrección con permiso `correct`; sin cambios, nada.
+  const publicadoSinCambios = renderToStaticMarkup(<BarraPublicar cambios={0} publicado puedeCorregir onGuardar={() => {}} />);
+  assert.equal(publicadoSinCambios, '');
+  const correccion = renderToStaticMarkup(<BarraPublicar cambios={3} publicado puedeCorregir onGuardar={() => {}} />);
   assert.match(correccion, /data-plan-publicar="correccion"[^>]*>Publicar corrección · 3 cambios</);
-  const guardar = renderToStaticMarkup(<BarraPublicar cambios={1} publicado={false} puedeEditar puedeCorregir={false} puedePublicar mesLabel="octubre" onGuardar={() => {}} onPublicarMes={() => {}} />);
-  assert.match(guardar, /data-plan-publicar="borrador"[^>]*>Guardar borrador · 1 cambio</);
+  const sinPermiso = renderToStaticMarkup(<BarraPublicar cambios={1} publicado puedeCorregir={false} onGuardar={() => {}} />);
+  assert.match(sinPermiso, /data-plan-publicar="correccion"[^>]*disabled/);
+  assert.match(sinPermiso, /Falta permiso para corregir/);
+  // Gate de edición: solo mes publicado + correct.
+  assert.deepEqual(puedeCorregirEnCelular(true, true), { ok: true, motivo: null });
+  assert.equal(puedeCorregirEnCelular(false, true).motivo, AVISO_MES_SIN_PUBLICAR);
+  assert.equal(puedeCorregirEnCelular(null, true).motivo, AVISO_MES_SIN_PUBLICAR);
+  assert.match(puedeCorregirEnCelular(true, false).motivo || '', /permiso/);
+  assert.equal(mesPublicadoDe({ 'obj-peaje|2026-10': { publishedAt: true, publishedBy: 'x' } }, 'obj-peaje', '2026-10-05'), true);
+  assert.equal(mesPublicadoDe({ 'obj-peaje|2026-10': { publishedAt: true, publishedBy: 'x' } }, 'obj-peaje', '2026-11-01'), null);
+});
 
+test('render celular: semana con mes publicado vs sin publicar', () => {
+  const { estructura } = estructuraPeaje();
+  const filas = filasSemana(estructura);
+  const diasSem = semanaDe('2026-10-05');
+  const turnos = [turno({ id: 'm1', employeeId: 'baez', employeeName: 'Baez', code: 'M', date: '2026-10-05' })];
+  const celdas = celdasSemana(filas, diasSem, turnos, 'obj-peaje');
+  const celdaN = celdas[2][0];
+  const celdaM = celdas[0][0];
+  // Publicado: la celda ofrece cubrir y los guardias se pueden tocar.
+  const editable = renderToStaticMarkup(<CeldaSheetBody celda={celdaN} onGuardia={() => {}} onCubrir={() => {}} />);
+  assert.match(editable, /data-plan-cubrir="1"/);
+  assert.equal(editable.includes('data-plan-celda-solo-lectura'), false);
+  const editableM = renderToStaticMarkup(<CeldaSheetBody celda={celdaM} onGuardia={() => {}} onCubrir={() => {}} />);
+  assert.match(editableM, /<button[^>]*data-plan-guardia="m1"/);
+  assert.match(editableM, />Baez</);
+  // Sin publicar: solo lectura, con el aviso y sin acciones.
+  const soloLectura = renderToStaticMarkup(<CeldaSheetBody celda={celdaN} soloLectura onGuardia={() => {}} onCubrir={() => {}} />);
+  assert.match(soloLectura, /data-plan-celda-solo-lectura="1"/);
+  assert.equal(soloLectura.includes('data-plan-cubrir'), false);
+  assert.ok(soloLectura.includes(AVISO_MES_SIN_PUBLICAR));
+  assert.match(soloLectura, /hueco sin cubrir/i);
+  const soloLecturaM = renderToStaticMarkup(<CeldaSheetBody celda={celdaM} soloLectura onGuardia={() => {}} onCubrir={() => {}} />);
+  assert.equal(soloLecturaM.includes('<button'), false);
+  assert.match(soloLecturaM, />Baez</);
+  // Encabezado: Publicado vs Sin publicar.
+  const pub = renderToStaticMarkup(<SemanaEncabezado clienteNombre="Peaje" objetivoNombre="Peaje 9 Norte" onSelector={() => {}} publicado huecos={0} cambios={0} mesLabel="octubre" />);
+  assert.match(pub, /data-plan-estado-mes="Publicado"/);
+  const noPub = renderToStaticMarkup(<SemanaEncabezado clienteNombre="Peaje" objetivoNombre="Peaje 9 Norte" onSelector={() => {}} publicado={false} huecos={0} cambios={0} mesLabel="octubre" />);
+  assert.match(noPub, /data-plan-estado-mes="Sin publicar"/);
+  assert.equal(noPub.includes('Borrador'), false);
+  // Próximos días con mes sin publicar: aviso y sin botón de publicar.
+  const dias2 = renderToStaticMarkup(
+    <PlanificacionMovilView
+      empresa="pruebas_sa"
+      online
+      pendingLabel={null}
+      panel="dias"
+      onPanel={() => {}}
+      dias={dias}
+      dia="2026-10-03"
+      franjas={[]}
+      porPublicar={0}
+      puedeCorregir
+      mesPublicado={false}
+      onDia={() => {}}
+      onHueco={() => {}}
+      onAsignado={() => {}}
+      onPublicar={() => {}}
+    />,
+  );
+  assert.match(dias2, /data-plan-solo-lectura="dias"/);
+  assert.ok(dias2.includes(AVISO_MES_SIN_PUBLICAR));
+  assert.equal(dias2.includes('data-plan-publicar'), false);
+  // La alerta de cronograma sin publicar abre la semana («Ver semana»), no publica.
+  const grupo = {
+    mesKey: '2026-10',
+    mesLabel: 'octubre',
+    items: [{ id: 'a1', objectiveId: 'obj-peaje', objectiveName: 'Peaje 9 Norte', clientId: 'cli', clientName: 'Peaje', year: 2026, month: 10, cortaManana: true, corteHm: '07:00', linkPublicar: '/admin/planificacion/?objectiveId=obj-peaje&clientId=cli&year=2026&month=10' }],
+  } as unknown as Parameters<typeof CronogramaSinPublicarCard>[0]['grupo'];
+  const tarjeta = renderToStaticMarkup(<CronogramaSinPublicarCard grupo={grupo} abiertoInicial onVista={() => {}} onAbrir={() => {}} />);
+  assert.match(tarjeta, /data-cronograma-abrir="obj-peaje"[^>]*>Ver semana</);
+  assert.equal(tarjeta.includes('data-cronograma-publicar'), false);
+  assert.equal(/>Publicar</.test(tarjeta), false);
+});
+
+test('el mismo markup para dos empresas de colores distintos', () => {
   const render = (empresa: string) => renderToStaticMarkup(
     <PlanificacionMovilView
       empresa={empresa}
@@ -292,7 +376,7 @@ test('publicar: borrador con publish, corrección con correct; el mismo markup p
       dia="2026-10-03"
       franjas={[]}
       porPublicar={0}
-      puedePublicar={false}
+      puedeCorregir={false}
       mesPublicado
       onDia={() => {}}
       onHueco={() => {}}

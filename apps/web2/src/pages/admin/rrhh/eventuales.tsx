@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { collection, getDocs, onSnapshot, query, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import {
-  AlertTriangle, ArrowLeft, Building2, CircleDashed, Download, FileCheck2, FileSpreadsheet, FileX2, Home, Landmark, Mail, MapPin, Phone, Plus, Search, UserCheck, UserPlus, UserX, Users, X,
+  AlertTriangle, ArrowLeft, Building2, CircleDashed, Download, FileCheck2, FileSpreadsheet, FileX2, Home, Landmark, Mail, MapPin, Phone, Plus, ScrollText, Search, UserCheck, UserPlus, UserX, Users, X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import DashboardLayout from '@/components/layout/DashboardLayout';
@@ -348,6 +348,13 @@ export default function EventualesPage() {
                   <Landmark size={16} />
                   ARCA pendientes
                 </button>
+                <Link
+                  href="/admin/rrhh/eventuales/escala"
+                  title="Escala salarial CCT 422/05 (bruto del anexo)"
+                  className="inline-flex h-9 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50">
+                  <ScrollText size={16} />
+                  Escala salarial
+                </Link>
               </div>
             )}
           />

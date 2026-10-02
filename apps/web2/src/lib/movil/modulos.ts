@@ -5,7 +5,7 @@
  */
 export type MovilModuloId = 'operacion' | 'supervision' | 'planificacion' | 'eventuales' | 'rrhh' | 'servicios';
 
-export type MovilIcono = 'objetivos' | 'alertas' | 'sala' | 'semana' | 'dias' | 'huecos' | 'hoy' | 'cargar' | 'novedades' | 'bolsa' | 'arca' | 'alta' | 'lista' | 'menu';
+export type MovilIcono = 'objetivos' | 'alertas' | 'sala' | 'semana' | 'dias' | 'huecos' | 'hoy' | 'cargar' | 'novedades' | 'bolsa' | 'arca' | 'alta' | 'escala' | 'lista' | 'menu';
 
 export interface MovilSeccion {
   id: string;

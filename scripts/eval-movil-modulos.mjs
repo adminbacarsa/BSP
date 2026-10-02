@@ -35,7 +35,9 @@ check('Planificación: Semana · Próximos días · Menú', labels(m.barraDelMod
 check('Planificación apunta a la pantalla celular', m.moduloMovilDe('/admin/planificacion/').href === '/admin/movil/planificacion/' && m.rutaTieneVersionMovil('/admin/movil/planificacion') && !m.rutaTieneVersionMovil('/admin/reportes'));
 check('Servicios también con CLIENTS; Supervisión solo con SUPERVISION', m.modulosMovil(solo('CLIENTS')).map((x) => x.id).join(',') === 'servicios' && m.modulosMovil(solo('SUPERVISION')).map((x) => x.id).join(',') === 'supervision');
 check('RRHH: Hoy · Cargar · Novedades · Menú', labels(m.barraDelModulo(m.moduloMovilDe('/admin/rrhh/movil/'))) === 'Hoy · Cargar · Novedades · Menú');
-check('Eventuales: Bolsa · ARCA · Alta · Menú', labels(m.barraDelModulo(m.moduloMovilDe('/admin/rrhh/eventuales/'))) === 'Bolsa · ARCA · Alta · Menú');
+check('Eventuales: Bolsa · ARCA · Alta · Escala · Menú', labels(m.barraDelModulo(m.moduloMovilDe('/admin/rrhh/eventuales/'))) === 'Bolsa · ARCA · Alta · Escala · Menú');
+check('Eventuales: ?panel=escala es la sección Escala', m.seccionActiva(m.moduloMovilDe('/admin/rrhh/eventuales/'), { panel: 'escala' }) === 'escala');
+check('Eventuales: alerta ESCALA_CCT_PROPUESTA es del módulo', m.moduloMovilDe('/admin/rrhh/eventuales/').esAlertaDelModulo({ type: 'ESCALA_CCT_PROPUESTA' }));
 check('Servicios: Lista · Menú', labels(m.barraDelModulo(m.moduloMovilDe('/admin/servicios/'))) === 'Lista · Menú');
 check('sección activa por panel', m.seccionActiva(m.moduloMovilDe('/admin/rrhh/movil/'), { panel: 'ausencia' }) === 'cargar' && m.seccionActiva(m.moduloMovilDe('/admin/operaciones/'), {}) === 'objetivos' && m.seccionActiva(m.moduloMovilDe('/admin/operaciones/', { modo: 'supervision', panel: 'alertas' }), { panel: 'alertas' }) === 'alertas');
 

@@ -40,16 +40,36 @@ export function escalaDocId(escala) {
   return `${escala.convenio}_${escala.categoria}_${escala.vigenciaDesde}`;
 }
 
+function esDeCategoria(escala, categoria) {
+  if (escala.categoria === categoria) return true;
+  return Array.isArray(escala.aliases) && escala.aliases.includes(categoria);
+}
+
 export function escalaVigente(escalas, categoria, fecha) {
   const lista = (escalas || []).filter((e) => {
     if (e.status !== 'ACTIVE') return false;
-    if (e.categoria !== categoria) return false;
+    if (!esDeCategoria(e, categoria)) return false;
     if (String(e.vigenciaDesde) > fecha) return false;
     if (e.vigenciaHasta && String(e.vigenciaHasta) < fecha) return false;
     return true;
   });
   lista.sort((a, b) => String(b.vigenciaDesde).localeCompare(String(a.vigenciaDesde)));
   return lista[0] || null;
+}
+
+/**
+ * Sin escala en la fecha de la jornada: la vigente hoy y, si tampoco, la última ACTIVE de la
+ * categoría. Siempre con `motivo` para que el anexo avise.
+ */
+export function escalaConRespaldo(escalas, categoria, fecha, hoy) {
+  const exacta = escalaVigente(escalas, categoria, fecha);
+  if (exacta) return { escala: exacta, fallback: false, motivo: null };
+  const deHoy = hoy ? escalaVigente(escalas, categoria, hoy) : null;
+  if (deHoy) return { escala: deHoy, fallback: true, motivo: 'SIN_ESCALA_EN_FECHA_USA_HOY' };
+  const activas = (escalas || []).filter((e) => e.status === 'ACTIVE' && esDeCategoria(e, categoria))
+    .sort((a, b) => String(b.vigenciaDesde).localeCompare(String(a.vigenciaDesde)));
+  if (activas[0]) return { escala: activas[0], fallback: true, motivo: 'SIN_ESCALA_EN_FECHA_USA_ULTIMA' };
+  return { escala: null, fallback: true, motivo: 'SIN_ESCALA' };
 }
 
 function feriadosSet(feriados) {
@@ -205,7 +225,50 @@ export function calcularJornada(jornada, escala, feriados) {
 function montoAdicional(ad, dias, horas) {
   if (ad.modo === 'POR_HORA') return ad.monto * horas;
   if (ad.modo === 'POR_JORNADA' || ad.modo === 'POR_DIA') return ad.monto * dias;
+  if (ad.modo === 'MENSUAL_PRORRATEO') {
+    const divisor = Number(ad.divisorDias) > 0 ? Number(ad.divisorDias) : 30;
+    return ad.monto * (dias / divisor);
+  }
   return ad.monto;
+}
+
+/** Presentismo: porcentaje del básico (escalas viejas) o monto fijo mensual del acta 422/05, prorrateado por día. */
+function montoPresentismo(escala, dias) {
+  const p = escala?.presentismo;
+  if (!p) return null;
+  const divisorDias = Number(p.divisorDias) > 0 ? Number(p.divisorDias) : 30;
+  if (p.pct != null) return redondear(escala.basicoMensual * (p.pct / 100) * (dias / divisorDias));
+  if (Number.isFinite(p.monto) && p.monto > 0) return redondear(p.monto * (dias / divisorDias));
+  return null;
+}
+
+function rotuloEscala(escala) {
+  const f = escala?.fuente || {};
+  const disp = f.disposicion ? `Disp. ${String(f.disposicion).replace(/^DI-(\d{4})-(\d+)-.*$/, '$2/$1')}` : null;
+  const partes = [disp, f.acuerdoNro ? `Acuerdo ${f.acuerdoNro}` : null].filter(Boolean);
+  const vig = `${fechaCorta(escala?.vigenciaDesde)}${escala?.vigenciaHasta ? `–${fechaCorta(escala.vigenciaHasta)}` : ''}`;
+  const version = escala?.escalaVersion != null ? ` v${escala.escalaVersion}` : '';
+  return `${partes.length ? partes.join(' · ') : escalaDocId(escala)}${version} (${vig})`;
+}
+
+function fechaCorta(iso) {
+  const s = String(iso || '').slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? `${s.slice(8, 10)}/${s.slice(5, 7)}/${s.slice(0, 4)}` : '—';
+}
+
+/** Para el anexo: de qué escala salió el bruto y si se usó una de respaldo. */
+export function textoEscalaAplicada(resultado) {
+  if (!resultado?.ok) return '';
+  const lista = (resultado.escalasDetalle || []).map(rotuloEscala);
+  const base = lista.length ? `Escala aplicada: ${[...new Set(lista)].join('; ')}.` : '';
+  const respaldo = (resultado.advertencias || []).filter((a) => a.codigo === 'ESCALA_RESPALDO');
+  if (!respaldo.length) return base;
+  const fechas = [...new Set(respaldo.map((a) => fechaCorta(a.fecha)))].join(', ');
+  return `${base} Aviso: para ${fechas} no hay escala aprobada vigente; se usó la escala vigente a la fecha de emisión y el monto se recalcula cuando se publique la que corresponda.`;
+}
+
+export function formatoPesos(n) {
+  return pesos(n);
 }
 
 function pesos(n) {
@@ -223,11 +286,13 @@ export function clausulaRemuneracion(resultado) {
   const cierre = resultado.cierre
     ? ` Al cierre se adicionan SAC proporcional ${pesos(resultado.cierre.sac)} y vacaciones no gozadas proporcionales ${pesos(resultado.cierre.vacaciones)} (${resultado.cierre.vacacionesDias} días).`
     : '';
-  return `La remuneración bruta de este período es ${pesos(resultado.bruto)}, calculada según la escala vigente del CCT 422/05 (SUVICO) a la fecha de cada jornada, categoría ${resultado.categoriaLabel}. Valor hora = básico mensual / ${resultado.divisorHoras} h. Desglose: ${lineas}. No es un monto fijo pactado: si cambia la escala vigente, se recalcula.${cierre}`;
+  const escalaTxt = textoEscalaAplicada(resultado);
+  return `La remuneración bruta de este período es ${pesos(resultado.bruto)}, calculada según la escala vigente del CCT 422/05 (SUVICO) a la fecha de cada jornada, categoría ${resultado.categoriaLabel}. Valor hora = básico mensual / ${resultado.divisorHoras} h. Desglose: ${lineas}. No es un monto fijo pactado: si cambia la escala vigente, se recalcula.${cierre}${escalaTxt ? ` ${escalaTxt}` : ''}`;
 }
 
 /**
- * @param {{ jornadas: object[], categoria: string, escalas: object[], feriados?: Set<string>|string[]|Record<string, boolean>, incluirCierre?: boolean }} input
+ * @param {{ jornadas: object[], categoria: string, escalas: object[], feriados?: Set<string>|string[]|Record<string, boolean>, incluirCierre?: boolean, hoy?: string }} input
+ * `hoy` (YYYY-MM-DD) habilita el respaldo: sin escala en la fecha de la jornada se usa la vigente hoy y se avisa.
  */
 export function calcularRemuneracionContrato(input) {
   const jornadas = input.jornadas || [];
@@ -237,9 +302,15 @@ export function calcularRemuneracionContrato(input) {
   let remunerativo = 0;
   let noRemunerativo = 0;
   const escalasUsadas = [];
+  const hoy = /^\d{4}-\d{2}-\d{2}$/.test(String(input.hoy || '')) ? String(input.hoy) : null;
+  const escalaDe = (fecha) => {
+    const r = escalaConRespaldo(input.escalas, input.categoria, fecha, hoy);
+    if (r.escala && r.fallback) advertencias.push({ codigo: 'ESCALA_RESPALDO', motivo: r.motivo, fecha, escalaId: escalaDocId(r.escala) });
+    return r.escala;
+  };
 
   for (const jornada of jornadas) {
-    const escala = escalaVigente(input.escalas, input.categoria, jornada.fecha);
+    const escala = escalaDe(jornada.fecha);
     if (!escala) {
       return { ok: false, codigo: 'SIN_ESCALA', fecha: jornada.fecha, categoria: input.categoria };
     }
@@ -265,15 +336,14 @@ export function calcularRemuneracionContrato(input) {
   const dias = new Set(jornadas.map((j) => j.fecha)).size;
   const horas = redondear(detalle.reduce((n, j) => n + j.horasDiurnas + j.horasNocturnas, 0));
   const escalaCierre = jornadas.length
-    ? escalaVigente(input.escalas, input.categoria, detalle[detalle.length - 1].fecha)
+    ? escalaConRespaldo(input.escalas, input.categoria, detalle[detalle.length - 1].fecha, hoy).escala
     : null;
 
-  if (escalaCierre?.presentismo?.pct != null) {
-    const divisorDias = Number(escalaCierre.presentismo.divisorDias) > 0 ? Number(escalaCierre.presentismo.divisorDias) : 30;
-    const monto = redondear(escalaCierre.basicoMensual * (escalaCierre.presentismo.pct / 100) * (dias / divisorDias));
-    pushSi('PRESENTISMO', 'Presentismo proporcional', monto, escalaCierre.presentismo.tipo !== 'NO_REMUNERATIVO');
-    if (escalaCierre.presentismo.tipo === 'NO_REMUNERATIVO') noRemunerativo += monto;
-    else remunerativo += monto;
+  const presentismo = escalaCierre ? montoPresentismo(escalaCierre, dias) : null;
+  if (presentismo != null) {
+    pushSi('PRESENTISMO', 'Presentismo proporcional', presentismo, escalaCierre.presentismo.tipo !== 'NO_REMUNERATIVO');
+    if (escalaCierre.presentismo.tipo === 'NO_REMUNERATIVO') noRemunerativo += presentismo;
+    else remunerativo += presentismo;
   }
 
   for (const ad of escalaCierre?.adicionales || []) {
@@ -312,6 +382,15 @@ export function calcularRemuneracionContrato(input) {
     categoriaLabel: escalaCierre?.categoriaLabel || input.categoria,
     divisorHoras: escalaCierre ? valorHoraDe(escalaCierre).divisor : DIVISOR_HORAS_COSP,
     escalas: escalasUsadas.map(escalaDocId),
+    escalasDetalle: escalasUsadas.map((e) => ({
+      id: escalaDocId(e),
+      escalaCctId: e.escalaCctId || null,
+      escalaVersion: e.escalaVersion ?? null,
+      vigenciaDesde: e.vigenciaDesde || null,
+      vigenciaHasta: e.vigenciaHasta || null,
+      fuente: e.fuente || null,
+    })),
+    escalaRespaldo: advertencias.some((a) => a.codigo === 'ESCALA_RESPALDO'),
     bruto,
     remunerativo,
     noRemunerativo,

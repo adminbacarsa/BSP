@@ -1,0 +1,2490 @@
+{
+  "cct": "CCT_422_05",
+  "estado": "PROPUESTA",
+  "extraccion": "TEXTO_OFICIAL",
+  "partes": [
+    "SUVICO",
+    "CAESI"
+  ],
+  "vigenciaDesde": "2026-01-01",
+  "vigenciaHasta": "2026-06-30",
+  "tramos": [
+    {
+      "mes": "2026-01",
+      "vigenciaDesde": "2026-01-01",
+      "vigenciaHasta": "2026-01-31",
+      "mesConfianza": "MEDIA",
+      "mesMotivo": "MES_POR_POSICION",
+      "categorias": [
+        {
+          "codigo": "VIGILADOR",
+          "label": "Vigilador",
+          "labelLeido": "Vigilador",
+          "codigoArca": "033104",
+          "basico": {
+            "valor": 867200,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 165000,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 473800,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 10000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1516000,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1516000,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "VIGILADOR_BOMBERO",
+          "label": "Vigilador Bombero",
+          "labelLeido": "Vigilador Bombero",
+          "codigoArca": null,
+          "basico": {
+            "valor": 923700,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 178900,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 473800,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 10000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1586400,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1586400,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "ADMINISTRATIVO",
+          "label": "Administrativo",
+          "labelLeido": "Administrativo",
+          "codigoArca": null,
+          "basico": {
+            "valor": 949700,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 186100,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 473800,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 10000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1619600,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1619600,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "ENCARGADO_TURNO",
+          "label": "Encargado de turno",
+          "labelLeido": "Encargado de turno",
+          "codigoArca": null,
+          "basico": {
+            "valor": 946300,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 177800,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 546100,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 10000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1680200,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1680200,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "CONTROLADOR_ADMISION",
+          "label": "Controlador de admisión y permanencia gral",
+          "labelLeido": "Controlador de admisión y permanencia gral",
+          "codigoArca": null,
+          "basico": {
+            "valor": 881000,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 162700,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 475400,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 10000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1529100,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1529100,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "ACUDE_ALARMA",
+          "label": "Acude alarma",
+          "labelLeido": "Acude alarma",
+          "codigoArca": null,
+          "basico": {
+            "valor": 932200,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 161500,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 511400,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 10000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1615100,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1615100,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "GUIA_TECNICO",
+          "label": "Guía Técnico",
+          "labelLeido": "Guía Tecnico",
+          "codigoArca": null,
+          "basico": {
+            "valor": 949700,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 186100,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 473800,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 10000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1619600,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1619600,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "INSTALADOR_SEG_ELECTRONICA",
+          "label": "Inst. de elem. de Seg. Electrónica",
+          "labelLeido": "Inst. de elem. de Seg. Electrónica",
+          "codigoArca": null,
+          "basico": {
+            "valor": 978800,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 192900,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 473800,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 10000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1655500,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1655500,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "PERSONAL_MONITOREO",
+          "label": "Personal de Monitoreo",
+          "labelLeido": "Personal de Monitoreo",
+          "codigoArca": null,
+          "basico": {
+            "valor": 932200,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 161500,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 511400,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 10000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1615100,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1615100,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "SUPERVISION_ALARMA",
+          "label": "Supervisión de Alarma",
+          "labelLeido": "Supervisión de Alarma",
+          "codigoArca": null,
+          "basico": {
+            "valor": 947400,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 176800,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 546200,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 10000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1680400,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1680400,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "INVESTIGADOR",
+          "label": "Investigador",
+          "labelLeido": "Investigador",
+          "codigoArca": null,
+          "basico": {
+            "valor": 966300,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 179900,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 573000,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 10000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1729200,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1729200,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "CUSTODIO_PRIMERA",
+          "label": "Custodio de Primera",
+          "labelLeido": "Custodio de Primera",
+          "codigoArca": null,
+          "basico": {
+            "valor": 962300,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 176800,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 578500,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 10000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1727600,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1727600,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "CUSTODIO_BRIGADA",
+          "label": "Custodio Brigada",
+          "labelLeido": "Custodio Brigada",
+          "codigoArca": null,
+          "basico": {
+            "valor": 988200,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 176900,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 572000,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 10000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1747100,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1747100,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "SUPERVISOR_GENERAL",
+          "label": "Supervisor General",
+          "labelLeido": "Supervisor General",
+          "codigoArca": null,
+          "basico": {
+            "valor": 1066600,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 216800,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 650000,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 10000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1943400,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1943400,
+          "sumaCierra": true
+        }
+      ],
+      "aeroportuario": {
+        "valor": 117490,
+        "confianza": "ALTA"
+      },
+      "adicionalVacacionesPorDia": {
+        "valor": 18952,
+        "confianza": "ALTA"
+      }
+    },
+    {
+      "mes": "2026-02",
+      "vigenciaDesde": "2026-02-01",
+      "vigenciaHasta": "2026-02-28",
+      "mesConfianza": "MEDIA",
+      "mesMotivo": "MES_POR_POSICION",
+      "categorias": [
+        {
+          "codigo": "VIGILADOR",
+          "label": "Vigilador",
+          "labelLeido": "Vigilador",
+          "codigoArca": "033104",
+          "basico": {
+            "valor": 876000,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 165000,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 473800,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1539800,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1539800,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "VIGILADOR_BOMBERO",
+          "label": "Vigilador Bombero",
+          "labelLeido": "Vigilador Bombero",
+          "codigoArca": null,
+          "basico": {
+            "valor": 933600,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 178900,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 473800,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1611300,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1611300,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "ADMINISTRATIVO",
+          "label": "Administrativo",
+          "labelLeido": "Administrativo",
+          "codigoArca": null,
+          "basico": {
+            "valor": 960200,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 186100,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 473800,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1645100,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1645100,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "ENCARGADO_TURNO",
+          "label": "Encargado de turno",
+          "labelLeido": "Encargado de turno",
+          "codigoArca": null,
+          "basico": {
+            "valor": 957700,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 177800,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 546100,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1706600,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1706600,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "CONTROLADOR_ADMISION",
+          "label": "Controlador de admisión y permanencia gral",
+          "labelLeido": "Controlador de admisión y permanencia gral",
+          "codigoArca": null,
+          "basico": {
+            "valor": 890000,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 162700,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 475400,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1553100,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1553100,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "ACUDE_ALARMA",
+          "label": "Acude alarma",
+          "labelLeido": "Acude alarma",
+          "codigoArca": null,
+          "basico": {
+            "valor": 942500,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 161500,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 511400,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1640400,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1640400,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "GUIA_TECNICO",
+          "label": "Guía Técnico",
+          "labelLeido": "Guía Tecnico",
+          "codigoArca": null,
+          "basico": {
+            "valor": 960200,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 186100,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 473800,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1645100,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1645100,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "INSTALADOR_SEG_ELECTRONICA",
+          "label": "Inst. de elem. de Seg. Electrónica",
+          "labelLeido": "Inst. de elem. de Seg. Electrónica",
+          "codigoArca": null,
+          "basico": {
+            "valor": 989800,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 192900,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 473800,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1681500,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1681500,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "PERSONAL_MONITOREO",
+          "label": "Personal de Monitoreo",
+          "labelLeido": "Personal de Monitoreo",
+          "codigoArca": null,
+          "basico": {
+            "valor": 942500,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 161500,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 511400,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1640400,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1640400,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "SUPERVISION_ALARMA",
+          "label": "Supervisión de Alarma",
+          "labelLeido": "Supervisión de Alarma",
+          "codigoArca": null,
+          "basico": {
+            "valor": 958800,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 176800,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 546200,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1706800,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1706800,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "INVESTIGADOR",
+          "label": "Investigador",
+          "labelLeido": "Investigador",
+          "codigoArca": null,
+          "basico": {
+            "valor": 978400,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 179900,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 573000,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1756300,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1756300,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "CUSTODIO_PRIMERA",
+          "label": "Custodio de Primera",
+          "labelLeido": "Custodio de Primera",
+          "codigoArca": null,
+          "basico": {
+            "valor": 974500,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 176800,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 578500,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1754800,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1754800,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "CUSTODIO_BRIGADA",
+          "label": "Custodio Brigada",
+          "labelLeido": "Custodio Brigada",
+          "codigoArca": null,
+          "basico": {
+            "valor": 1000600,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 176900,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 572000,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1774500,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1774500,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "SUPERVISOR_GENERAL",
+          "label": "Supervisor General",
+          "labelLeido": "Supervisor General",
+          "codigoArca": null,
+          "basico": {
+            "valor": 1082100,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 216800,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 650000,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1973900,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1973900,
+          "sumaCierra": true
+        }
+      ],
+      "aeroportuario": {
+        "valor": 118685,
+        "confianza": "ALTA"
+      },
+      "adicionalVacacionesPorDia": {
+        "valor": 18952,
+        "confianza": "ALTA"
+      }
+    },
+    {
+      "mes": "2026-03",
+      "vigenciaDesde": "2026-03-01",
+      "vigenciaHasta": "2026-03-31",
+      "mesConfianza": "MEDIA",
+      "mesMotivo": "MES_POR_POSICION",
+      "categorias": [
+        {
+          "codigo": "VIGILADOR",
+          "label": "Vigilador",
+          "labelLeido": "Vigilador",
+          "codigoArca": "033104",
+          "basico": {
+            "valor": 884800,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 165000,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 473800,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1548600,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1548600,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "VIGILADOR_BOMBERO",
+          "label": "Vigilador Bombero",
+          "labelLeido": "Vigilador Bombero",
+          "codigoArca": null,
+          "basico": {
+            "valor": 942900,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 178900,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 473800,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1620600,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1620600,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "ADMINISTRATIVO",
+          "label": "Administrativo",
+          "labelLeido": "Administrativo",
+          "codigoArca": null,
+          "basico": {
+            "valor": 969700,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 186100,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 473800,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1654600,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1654600,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "ENCARGADO_TURNO",
+          "label": "Encargado de turno",
+          "labelLeido": "Encargado de turno",
+          "codigoArca": null,
+          "basico": {
+            "valor": 967400,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 177800,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 546100,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1716300,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1716300,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "CONTROLADOR_ADMISION",
+          "label": "Controlador de admisión y permanencia gral",
+          "labelLeido": "Controlador de admisión y permanencia gral",
+          "codigoArca": null,
+          "basico": {
+            "valor": 898900,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 162700,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 475400,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1562000,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1562000,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "ACUDE_ALARMA",
+          "label": "Acude alarma",
+          "labelLeido": "Acude alarma",
+          "codigoArca": null,
+          "basico": {
+            "valor": 951900,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 161500,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 511400,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1649800,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1649800,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "GUIA_TECNICO",
+          "label": "Guía Técnico",
+          "labelLeido": "Guía Tecnico",
+          "codigoArca": null,
+          "basico": {
+            "valor": 969700,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 186100,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 473800,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1654600,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1654600,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "INSTALADOR_SEG_ELECTRONICA",
+          "label": "Inst. de elem. de Seg. Electrónica",
+          "labelLeido": "Inst. de elem. de Seg. Electrónica",
+          "codigoArca": null,
+          "basico": {
+            "valor": 999400,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 192900,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 473800,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1691100,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1691100,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "PERSONAL_MONITOREO",
+          "label": "Personal de Monitoreo",
+          "labelLeido": "Personal de Monitoreo",
+          "codigoArca": null,
+          "basico": {
+            "valor": 951900,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 161500,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 511400,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1649800,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1649800,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "SUPERVISION_ALARMA",
+          "label": "Supervisión de Alarma",
+          "labelLeido": "Supervisión de Alarma",
+          "codigoArca": null,
+          "basico": {
+            "valor": 968500,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 176800,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 546200,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1716500,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1716500,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "INVESTIGADOR",
+          "label": "Investigador",
+          "labelLeido": "Investigador",
+          "codigoArca": null,
+          "basico": {
+            "valor": 988500,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 179900,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 573000,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1766400,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1766400,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "CUSTODIO_PRIMERA",
+          "label": "Custodio de Primera",
+          "labelLeido": "Custodio de Primera",
+          "codigoArca": null,
+          "basico": {
+            "valor": 984500,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 176800,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 578500,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1764800,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1764800,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "CUSTODIO_BRIGADA",
+          "label": "Custodio Brigada",
+          "labelLeido": "Custodio Brigada",
+          "codigoArca": null,
+          "basico": {
+            "valor": 1010700,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 176900,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 572000,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1784600,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1784600,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "SUPERVISOR_GENERAL",
+          "label": "Supervisor General",
+          "labelLeido": "Supervisor General",
+          "codigoArca": null,
+          "basico": {
+            "valor": 1093400,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 216800,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 650000,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1985200,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1985200,
+          "sumaCierra": true
+        }
+      ],
+      "aeroportuario": {
+        "valor": 119880,
+        "confianza": "ALTA"
+      },
+      "adicionalVacacionesPorDia": {
+        "valor": 18952,
+        "confianza": "ALTA"
+      }
+    },
+    {
+      "mes": "2026-04",
+      "vigenciaDesde": "2026-04-01",
+      "vigenciaHasta": "2026-04-30",
+      "mesConfianza": "MEDIA",
+      "mesMotivo": "MES_POR_POSICION",
+      "categorias": [
+        {
+          "codigo": "VIGILADOR",
+          "label": "Vigilador",
+          "labelLeido": "Vigilador",
+          "codigoArca": "033104",
+          "basico": {
+            "valor": 893650,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 165000,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 480500,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1564150,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1564150,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "VIGILADOR_BOMBERO",
+          "label": "Vigilador Bombero",
+          "labelLeido": "Vigilador Bombero",
+          "codigoArca": null,
+          "basico": {
+            "valor": 952400,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 178900,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 480500,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1636800,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1636800,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "ADMINISTRATIVO",
+          "label": "Administrativo",
+          "labelLeido": "Administrativo",
+          "codigoArca": null,
+          "basico": {
+            "valor": 979500,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 186100,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 480500,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1671100,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1671100,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "ENCARGADO_TURNO",
+          "label": "Encargado de turno",
+          "labelLeido": "Encargado de turno",
+          "codigoArca": null,
+          "basico": {
+            "valor": 977000,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 177800,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 553800,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1733600,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1733600,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "CONTROLADOR_ADMISION",
+          "label": "Controlador de admisión y permanencia gral",
+          "labelLeido": "Controlador de admisión y permanencia gral",
+          "codigoArca": null,
+          "basico": {
+            "valor": 907900,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 162700,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 482100,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1577700,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1577700,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "ACUDE_ALARMA",
+          "label": "Acude alarma",
+          "labelLeido": "Acude alarma",
+          "codigoArca": null,
+          "basico": {
+            "valor": 961300,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 161500,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 518600,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1666400,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1666400,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "GUIA_TECNICO",
+          "label": "Guía Técnico",
+          "labelLeido": "Guía Tecnico",
+          "codigoArca": null,
+          "basico": {
+            "valor": 979500,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 186100,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 480500,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1671100,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1671100,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "INSTALADOR_SEG_ELECTRONICA",
+          "label": "Inst. de elem. de Seg. Electrónica",
+          "labelLeido": "Inst. de elem. de Seg. Electrónica",
+          "codigoArca": null,
+          "basico": {
+            "valor": 1009700,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 192900,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 480500,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1708100,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1708100,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "PERSONAL_MONITOREO",
+          "label": "Personal de Monitoreo",
+          "labelLeido": "Personal de Monitoreo",
+          "codigoArca": null,
+          "basico": {
+            "valor": 961300,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 161500,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 518600,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1666400,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1666400,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "SUPERVISION_ALARMA",
+          "label": "Supervisión de Alarma",
+          "labelLeido": "Supervisión de Alarma",
+          "codigoArca": null,
+          "basico": {
+            "valor": 978100,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 176800,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 553900,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1733800,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1733800,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "INVESTIGADOR",
+          "label": "Investigador",
+          "labelLeido": "Investigador",
+          "codigoArca": null,
+          "basico": {
+            "valor": 998100,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 179900,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 581100,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1784100,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1784100,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "CUSTODIO_PRIMERA",
+          "label": "Custodio de Primera",
+          "labelLeido": "Custodio de Primera",
+          "codigoArca": null,
+          "basico": {
+            "valor": 994000,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 176800,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 586700,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1782500,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1782500,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "CUSTODIO_BRIGADA",
+          "label": "Custodio Brigada",
+          "labelLeido": "Custodio Brigada",
+          "codigoArca": null,
+          "basico": {
+            "valor": 1020500,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 176900,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 580100,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1802500,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1802500,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "SUPERVISOR_GENERAL",
+          "label": "Supervisor General",
+          "labelLeido": "Supervisor General",
+          "codigoArca": null,
+          "basico": {
+            "valor": 1104100,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 216800,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 659200,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 25000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 2005100,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 2005100,
+          "sumaCierra": true
+        }
+      ],
+      "aeroportuario": {
+        "valor": 121080,
+        "confianza": "ALTA"
+      },
+      "adicionalVacacionesPorDia": {
+        "valor": 19220,
+        "confianza": "ALTA"
+      }
+    },
+    {
+      "mes": "2026-05",
+      "vigenciaDesde": "2026-05-01",
+      "vigenciaHasta": "2026-05-31",
+      "mesConfianza": "MEDIA",
+      "mesMotivo": "MES_POR_POSICION",
+      "categorias": [
+        {
+          "codigo": "VIGILADOR",
+          "label": "Vigilador",
+          "labelLeido": "Vigilador",
+          "codigoArca": "033104",
+          "basico": {
+            "valor": 902600,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 165000,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 487000,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 30000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1584600,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1584600,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "VIGILADOR_BOMBERO",
+          "label": "Vigilador Bombero",
+          "labelLeido": "Vigilador Bombero",
+          "codigoArca": null,
+          "basico": {
+            "valor": 962300,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 178900,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 487000,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 30000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1658200,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1658200,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "ADMINISTRATIVO",
+          "label": "Administrativo",
+          "labelLeido": "Administrativo",
+          "codigoArca": null,
+          "basico": {
+            "valor": 989800,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 186100,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 487000,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 30000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1692900,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1692900,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "ENCARGADO_TURNO",
+          "label": "Encargado de turno",
+          "labelLeido": "Encargado de turno",
+          "codigoArca": null,
+          "basico": {
+            "valor": 987100,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 177800,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 561300,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 30000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1756200,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1756200,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "CONTROLADOR_ADMISION",
+          "label": "Controlador de admisión y permanencia gral",
+          "labelLeido": "Controlador de admisión y permanencia gral",
+          "codigoArca": null,
+          "basico": {
+            "valor": 917000,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 162700,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 488600,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 30000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1598300,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1598300,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "ACUDE_ALARMA",
+          "label": "Acude alarma",
+          "labelLeido": "Acude alarma",
+          "codigoArca": null,
+          "basico": {
+            "valor": 971100,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 161500,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 525600,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 30000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1688200,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1688200,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "GUIA_TECNICO",
+          "label": "Guía Técnico",
+          "labelLeido": "Guía Tecnico",
+          "codigoArca": null,
+          "basico": {
+            "valor": 989800,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 186100,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 487000,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 30000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1692900,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1692900,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "INSTALADOR_SEG_ELECTRONICA",
+          "label": "Inst. de elem. de Seg. Electrónica",
+          "labelLeido": "Inst. de elem. de Seg. Electrónica",
+          "codigoArca": null,
+          "basico": {
+            "valor": 1020500,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 192900,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 487000,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 30000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1730400,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1730400,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "PERSONAL_MONITOREO",
+          "label": "Personal de Monitoreo",
+          "labelLeido": "Personal de Monitoreo",
+          "codigoArca": null,
+          "basico": {
+            "valor": 971100,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 161500,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 525600,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 30000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1688200,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1688200,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "SUPERVISION_ALARMA",
+          "label": "Supervisión de Alarma",
+          "labelLeido": "Supervisión de Alarma",
+          "codigoArca": null,
+          "basico": {
+            "valor": 988200,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 176800,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 561400,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 30000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1756400,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1756400,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "INVESTIGADOR",
+          "label": "Investigador",
+          "labelLeido": "Investigador",
+          "codigoArca": null,
+          "basico": {
+            "valor": 1008500,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 179900,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 589000,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 30000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1807400,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1807400,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "CUSTODIO_PRIMERA",
+          "label": "Custodio de Primera",
+          "labelLeido": "Custodio de Primera",
+          "codigoArca": null,
+          "basico": {
+            "valor": 1004400,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 176800,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 594600,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 30000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1805800,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1805800,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "CUSTODIO_BRIGADA",
+          "label": "Custodio Brigada",
+          "labelLeido": "Custodio Brigada",
+          "codigoArca": null,
+          "basico": {
+            "valor": 1031300,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 176900,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 587900,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 30000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1826100,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1826100,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "SUPERVISOR_GENERAL",
+          "label": "Supervisor General",
+          "labelLeido": "Supervisor General",
+          "codigoArca": null,
+          "basico": {
+            "valor": 1116400,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 216800,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 668100,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 30000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 2031300,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 2031300,
+          "sumaCierra": true
+        }
+      ],
+      "aeroportuario": {
+        "valor": 122290,
+        "confianza": "ALTA"
+      },
+      "adicionalVacacionesPorDia": {
+        "valor": 19480,
+        "confianza": "ALTA"
+      }
+    },
+    {
+      "mes": "2026-06",
+      "vigenciaDesde": "2026-06-01",
+      "vigenciaHasta": "2026-06-30",
+      "mesConfianza": "MEDIA",
+      "mesMotivo": "MES_POR_POSICION",
+      "categorias": [
+        {
+          "codigo": "VIGILADOR",
+          "label": "Vigilador",
+          "labelLeido": "Vigilador",
+          "codigoArca": "033104",
+          "basico": {
+            "valor": 911650,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 165000,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 498000,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 70000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1644650,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1644650,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "VIGILADOR_BOMBERO",
+          "label": "Vigilador Bombero",
+          "labelLeido": "Vigilador Bombero",
+          "codigoArca": null,
+          "basico": {
+            "valor": 974100,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 178900,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 498000,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 70000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1721000,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1721000,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "ADMINISTRATIVO",
+          "label": "Administrativo",
+          "labelLeido": "Administrativo",
+          "codigoArca": null,
+          "basico": {
+            "valor": 1003000,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 186100,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 498000,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 70000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1757100,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1757100,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "ENCARGADO_TURNO",
+          "label": "Encargado de turno",
+          "labelLeido": "Encargado de turno",
+          "codigoArca": null,
+          "basico": {
+            "valor": 1001000,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 177800,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 574000,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 70000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1822800,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1822800,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "CONTROLADOR_ADMISION",
+          "label": "Controlador de admisión y permanencia gral",
+          "labelLeido": "Controlador de admisión y permanencia gral",
+          "codigoArca": null,
+          "basico": {
+            "valor": 926500,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 162700,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 499700,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 70000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1658900,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1658900,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "ACUDE_ALARMA",
+          "label": "Acude alarma",
+          "labelLeido": "Acude alarma",
+          "codigoArca": null,
+          "basico": {
+            "valor": 983100,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 161500,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 537500,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 70000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1752100,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1752100,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "GUIA_TECNICO",
+          "label": "Guía Técnico",
+          "labelLeido": "Guía Tecnico",
+          "codigoArca": null,
+          "basico": {
+            "valor": 1003000,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 186100,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 498000,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 70000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1757100,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1757100,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "INSTALADOR_SEG_ELECTRONICA",
+          "label": "Inst. de elem. de Seg. Electrónica",
+          "labelLeido": "Inst. de elem. de Seg. Electrónica",
+          "codigoArca": null,
+          "basico": {
+            "valor": 1035100,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 192900,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 498000,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 70000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1796000,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1796000,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "PERSONAL_MONITOREO",
+          "label": "Personal de Monitoreo",
+          "labelLeido": "Personal de Monitoreo",
+          "codigoArca": null,
+          "basico": {
+            "valor": 983100,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 161500,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 537500,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 70000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1752100,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1752100,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "SUPERVISION_ALARMA",
+          "label": "Supervisión de Alarma",
+          "labelLeido": "Supervisión de Alarma",
+          "codigoArca": null,
+          "basico": {
+            "valor": 1002100,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 176800,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 574100,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 70000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1823000,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1823000,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "INVESTIGADOR",
+          "label": "Investigador",
+          "labelLeido": "Investigador",
+          "codigoArca": null,
+          "basico": {
+            "valor": 1023700,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 179900,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 602300,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 70000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1875900,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1875900,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "CUSTODIO_PRIMERA",
+          "label": "Custodio de Primera",
+          "labelLeido": "Custodio de Primera",
+          "codigoArca": null,
+          "basico": {
+            "valor": 1019500,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 176800,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 608000,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 70000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1874300,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1874300,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "CUSTODIO_BRIGADA",
+          "label": "Custodio Brigada",
+          "labelLeido": "Custodio Brigada",
+          "codigoArca": null,
+          "basico": {
+            "valor": 1047200,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 176900,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 601200,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 70000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 1895300,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 1895300,
+          "sumaCierra": true
+        },
+        {
+          "codigo": "SUPERVISOR_GENERAL",
+          "label": "Supervisor General",
+          "labelLeido": "Supervisor General",
+          "codigoArca": null,
+          "basico": {
+            "valor": 1138300,
+            "confianza": "ALTA"
+          },
+          "presentismo": {
+            "valor": 216800,
+            "confianza": "ALTA"
+          },
+          "viatico": {
+            "valor": 683200,
+            "confianza": "ALTA"
+          },
+          "noRemunerativo": {
+            "valor": 70000,
+            "confianza": "ALTA"
+          },
+          "total": {
+            "valor": 2108300,
+            "confianza": "ALTA"
+          },
+          "totalCalculado": 2108300,
+          "sumaCierra": true
+        }
+      ],
+      "aeroportuario": {
+        "valor": 123515,
+        "confianza": "ALTA"
+      },
+      "adicionalVacacionesPorDia": {
+        "valor": 19920,
+        "confianza": "ALTA"
+      }
+    }
+  ],
+  "conceptos": {
+    "basico": "REMUNERATIVO_MENSUAL",
+    "presentismo": "REMUNERATIVO_FIJO_MENSUAL",
+    "viatico": "NO_REMUNERATIVO_MENSUAL_ART_106_LCT",
+    "noRemunerativo": "NO_REMUNERATIVO_MENSUAL_ACUERDO",
+    "total": "BRUTO_CONFORMADO_SIN_ANTIGUEDAD",
+    "aeroportuario": "ADICIONAL_REMUNERATIVO_MENSUAL",
+    "adicionalVacacionesPorDia": "ADICIONAL_REMUNERATIVO_POR_DIA_VACACIONES_TOPE_21"
+  },
+  "noRemunerativoSeIncorporaAlBasicoDesde": "2026-07-01",
+  "fuente": {
+    "url": "https://www.argentina.gob.ar/sites/default/files/infoleg/426471/disp120.pdf",
+    "titulo": null,
+    "disposicion": "DI-2026-120-APN-DNRYRT#MCH",
+    "expediente": "EX-2025-142737110-APN-DGDTEYSS#MCH",
+    "documentoRE": "RE-2025-142735643-APN-DGDTEYSS#MCH",
+    "acuerdoNro": "305/26",
+    "boletinOficial": null
+  },
+  "documentoHash": "33fa9b5b04e7f8ab1efa867e1138eee0d4875dd62f62530210113bec481c7e84",
+  "confianzaGlobal": "MEDIA",
+  "advertencias": [],
+  "generadoEn": "2026-10-01T00:00:00.000Z"
+}
