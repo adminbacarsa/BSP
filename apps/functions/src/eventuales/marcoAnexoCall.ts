@@ -350,35 +350,37 @@ async function refCodigo(contratoId: string, convocatoriaId: string) {
   return db().collection('anexo_codigos').doc(id);
 }
 
-export const pedirCodigoAnexoEventual = callable.onCall(async (data, context) => {
-  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Tenés que iniciar sesión.');
+/**
+ * Genera y manda el código OTP del anexo (push y/o mail) y guarda su hash en `anexo_codigos/{contratoId|convocatoriaId}`.
+ * Lo usan la callable `pedirCodigoAnexoEventual` (la app) y la aceptación de un evento (`aceptarConvocatoriaEventualEvento`).
+ * Si no hay canal devuelve `{ ok: false, mensaje }` sin lanzar: quien llama decide si es error.
+ */
+export async function enviarCodigoAnexo(p: {
+  contratoId: string;
+  convocatoriaId: string;
+  cuil: string;
+  bolsa: Record<string, unknown>;
+  uid: string;
+}): Promise<{ ok: boolean; canales: string[]; venceMs: number | null; mensaje: string }> {
   const m = await lib();
-  const contratoId = String(data?.contratoId || '');
-  const convocatoriaId = String(data?.convocatoriaId || '');
-  const ref = await refCodigo(contratoId, convocatoriaId);
-  const cuil = String(data?.cuil || context.auth.token.bolsaCuil || '');
-  const bolsa = cuil ? (await db().collection('eventuales_bolsa').doc(cuil).get()).data() || {} : {};
-  if (bolsa.uid && bolsa.uid !== context.auth.uid && String(context.auth.token.role) !== 'EVENTUAL') {
-    throw new functions.https.HttpsError('permission-denied', 'El código es del eventual.');
-  }
-  const uid = String(bolsa.uid || context.auth.uid || '');
-  const mail = String(bolsa.mail || '');
-  const canal = m.canalCodigo({ mail, tienePush: await tieneTokenPush(uid) });
-  if (!canal.ok) throw new functions.https.HttpsError('failed-precondition', canal.mensaje || m.MENSAJE_SIN_CANAL);
+  const ref = await refCodigo(p.contratoId, p.convocatoriaId);
+  const mail = String(p.bolsa.mail || '');
+  const canal = m.canalCodigo({ mail, tienePush: await tieneTokenPush(p.uid) });
+  if (!canal.ok) return { ok: false, canales: [], venceMs: null, mensaje: canal.mensaje || m.MENSAJE_SIN_CANAL };
   const codigo = m.nuevoCodigoAnexo();
   const salt = admin.firestore().collection('_').doc().id;
   const venceMs = Date.now() + m.CODIGO_ANEXO_MINUTOS * 60 * 1000;
   const entregados: string[] = [];
   if (canal.canales?.includes('PUSH')) {
     await db().collection('user_notifications').add({
-      uid,
+      uid: p.uid,
       title: 'Código para aceptar el anexo',
       body: `Tu código es ${codigo}. Vence en 15 minutos.`,
       type: 'CODIGO_ANEXO',
       target: 'employee',
       read: false,
-      contratoId: contratoId || null,
-      convocatoriaId: convocatoriaId || null,
+      contratoId: p.contratoId || null,
+      convocatoriaId: p.convocatoriaId || null,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
     entregados.push('PUSH');
@@ -390,15 +392,15 @@ export const pedirCodigoAnexoEventual = callable.onCall(async (data, context) =>
     } catch (err) {
       if (!entregados.length) {
         const mensaje = err instanceof functions.https.HttpsError ? err.message : 'No pudimos enviar el mail. Contactá a RRHH.';
-        throw new functions.https.HttpsError('failed-precondition', mensaje);
+        return { ok: false, canales: [], venceMs: null, mensaje };
       }
     }
   }
-  if (!entregados.length) throw new functions.https.HttpsError('failed-precondition', m.MENSAJE_SIN_CANAL);
+  if (!entregados.length) return { ok: false, canales: [], venceMs: null, mensaje: m.MENSAJE_SIN_CANAL };
   await ref.set({
-    contratoId: contratoId || null,
-    convocatoriaId: convocatoriaId || null,
-    bolsaCuil: cuil,
+    contratoId: p.contratoId || null,
+    convocatoriaId: p.convocatoriaId || null,
+    bolsaCuil: p.cuil,
     salt,
     hash: m.hashCodigo(codigo, salt),
     usado: false,
@@ -408,6 +410,22 @@ export const pedirCodigoAnexoEventual = callable.onCall(async (data, context) =>
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
   });
   return { ok: true, canales: entregados, venceMs, mensaje: m.mensajeEnvioCodigo({ canales: entregados, mail }) };
+}
+
+export const pedirCodigoAnexoEventual = callable.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Tenés que iniciar sesión.');
+  const contratoId = String(data?.contratoId || '');
+  const convocatoriaId = String(data?.convocatoriaId || '');
+  await refCodigo(contratoId, convocatoriaId);
+  const cuil = String(data?.cuil || context.auth.token.bolsaCuil || '');
+  const bolsa = cuil ? (await db().collection('eventuales_bolsa').doc(cuil).get()).data() || {} : {};
+  if (bolsa.uid && bolsa.uid !== context.auth.uid && String(context.auth.token.role) !== 'EVENTUAL') {
+    throw new functions.https.HttpsError('permission-denied', 'El código es del eventual.');
+  }
+  const uid = String(bolsa.uid || context.auth.uid || '');
+  const envio = await enviarCodigoAnexo({ contratoId, convocatoriaId, cuil, bolsa, uid });
+  if (!envio.ok) throw new functions.https.HttpsError('failed-precondition', envio.mensaje);
+  return { ok: true, canales: envio.canales, venceMs: envio.venceMs, mensaje: envio.mensaje };
 });
 
 export const confirmarAnexoEventual = callable.onCall(async (data, context) => {
@@ -479,5 +497,13 @@ export const confirmarAnexoEventual = callable.onCall(async (data, context) => {
     hashAnexo, uid: context.auth.uid, fechaHora: ahora, link: anexoGuardado.link, storagePath: anexoGuardado.storagePath,
     constanciaHash: hashAnexo, constanciaLink: anexoGuardado.link, drivePendiente: anexoGuardado.drivePendiente,
   });
+  // La convocatoria del evento (si la hubo) pasa a «anexo firmado» para la solapa Estado.
+  if (contratoId) {
+    const sols = await db().collection('solicitudes_evento').where('contratoId', '==', contratoId).get();
+    for (const s of sols.docs) {
+      if (s.data().esEventual !== true) continue;
+      await s.ref.update({ anexoEstado: 'FIRMADO', anexoId, anexoHash: hashAnexo, anexoFirmadoAt: admin.firestore.FieldValue.serverTimestamp() });
+    }
+  }
   return { ok: true, hashAnexo, link: anexoGuardado.link, constanciaLink: anexoGuardado.link };
 });

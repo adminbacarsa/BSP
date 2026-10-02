@@ -17,6 +17,9 @@ export type EventualMovil = {
   legajo: string;
   /** Primer ingreso en formato dd/MM/yyyy ('' si no se cargó). */
   primerIngreso: string;
+  /** Switches de pruebas de la ficha (default true). */
+  exigirMarco?: boolean;
+  exigirAltaArca?: boolean;
 };
 
 export type ArcaMovil = {
@@ -88,6 +91,10 @@ export function EventualesScreens(props: {
   onConfirmarArca: () => void;
   arcaEnviando?: boolean;
   elegido: EventualMovil | null;
+  /** Switches de pruebas: solo SuperAdmin o RRHH con EVENTUALES.update. */
+  puedeSwitch?: boolean;
+  switchGuardando?: string;
+  onSwitch?: (campo: 'exigirMarco' | 'exigirAltaArca', valor: boolean) => void;
 }) {
   const envioElegido = props.arca.find((envio) => envio.id === props.arcaId) || null;
   const pendientes = props.arca.filter((envio) => envio.estado !== 'CONFIRMADO');
@@ -113,7 +120,10 @@ export function EventualesScreens(props: {
                   >
                     <div className="flex items-start justify-between gap-2">
                       <span className="truncate text-[15px] font-semibold leading-tight text-slate-900">{persona.nombre}</span>
-                      <MovilBadge tone={MARCO_TONE[persona.marcoEstado] || 'slate'}>{persona.marco}</MovilBadge>
+                      <span className="flex shrink-0 flex-wrap justify-end gap-1">
+                        {persona.exigirMarco === false && <MovilBadge tone="violet" outline>Pruebas: sin exigir marco</MovilBadge>}
+                        <MovilBadge tone={MARCO_TONE[persona.marcoEstado] || 'slate'}>{persona.marco}</MovilBadge>
+                      </span>
                     </div>
                     <dl className="mt-1.5 grid grid-cols-3 gap-2 text-[11px] font-medium text-slate-500">
                       <div>
@@ -145,6 +155,36 @@ export function EventualesScreens(props: {
                   {props.elegido.legajo ? ` · Legajo ${props.elegido.legajo}` : ' · Sin legajo'}
                   {props.elegido.primerIngreso ? ` · 1º ingreso ${props.elegido.primerIngreso}` : ''}
                 </p>
+                {(props.elegido.exigirMarco === false || props.elegido.exigirAltaArca === false) && (
+                  <div className="mt-2 flex flex-wrap gap-1" data-pruebas="sin-marco">
+                    {props.elegido.exigirMarco === false && <MovilBadge tone="violet" outline>Pruebas: sin exigir marco</MovilBadge>}
+                    {props.elegido.exigirAltaArca === false && <MovilBadge tone="violet" outline>Pruebas: sin exigir alta ARCA</MovilBadge>}
+                  </div>
+                )}
+                {props.puedeSwitch && props.onSwitch && (
+                  <div className="mt-3 space-y-2" data-switches-pruebas>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Modo pruebas</p>
+                    {([
+                      { campo: 'exigirMarco' as const, label: 'Exigir contrato marco y habilitación', on: props.elegido.exigirMarco !== false },
+                      { campo: 'exigirAltaArca' as const, label: 'Exigir alta ARCA para fichar', on: props.elegido.exigirAltaArca !== false },
+                    ]).map((sw) => (
+                      <button
+                        key={sw.campo}
+                        type="button"
+                        role="switch"
+                        aria-checked={sw.on}
+                        data-switch={sw.campo}
+                        data-on={sw.on ? '1' : '0'}
+                        disabled={!props.online || props.switchGuardando === sw.campo}
+                        onClick={() => props.onSwitch?.(sw.campo, !sw.on)}
+                        className={`flex min-h-12 w-full items-center justify-between gap-3 rounded-lg border px-3 text-left text-sm font-semibold disabled:opacity-50 ${sw.on ? 'border-slate-200 bg-white text-slate-900' : 'border-violet-300 bg-white text-violet-800'}`}
+                      >
+                        <span>{sw.label}</span>
+                        <span className={`shrink-0 text-[11px] font-bold uppercase ${sw.on ? 'text-emerald-700' : 'text-violet-700'}`}>{sw.on ? 'ON' : 'OFF · pruebas'}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
                 {props.elegido.telefono && (
                   <a href={`tel:${props.elegido.telefono}`} className={`${BTN} ${MOVIL_BTN_SECONDARY} mt-3`}>Llamar</a>
                 )}

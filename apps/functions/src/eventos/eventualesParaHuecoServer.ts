@@ -178,6 +178,8 @@ export async function registrarAsignacionEventualEnBatch(
   batch.update(db.collection('turnos').doc(opts.covDocId), {
     esEventual: true,
     eventualAltaArcaConfirmada: altaPrevia.confirmada,
+    // Switch de pruebas «Exigir alta ARCA para fichar» (ausente = true), denormalizado para el gate de fichada.
+    eventualExigirAltaArca: bolsaSnap.data()?.exigirAltaArca !== false,
     eventualContratoId: contratoId,
     bolsaCuil: cuil,
     ...(altaPrevia.confirmada && altaPrevia.nroTransaccion ? { nroTransaccion: altaPrevia.nroTransaccion } : {}),

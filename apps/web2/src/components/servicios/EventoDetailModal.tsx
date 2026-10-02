@@ -16,12 +16,13 @@ import { useAuth } from '@/context/AuthContext';
 import { aptitudTypeService } from '@/services/aptitudTypeService';
 import { type AptitudType, type EmpleadoAptitud } from '@/lib/rrhh/aptitudTypes';
 import EventualesCandidatosPanel from '@/components/eventuales/EventualesCandidatosPanel';
-import { asignarEventualPlanificacion, canConvocarEventuales } from '@/services/eventualesPlanificacionService';
+import { canConvocarEventuales, convocarEventualEvento } from '@/services/eventualesPlanificacionService';
 import {
     AccionChip,
     ConvocatoriaResumen,
     ErrorCallableBox,
     EstadoSolicitudChip,
+    EventualEstadoLinea,
     SituacionAccionBadges,
 } from '@/components/servicios/EventoConvocarResumen';
 import {
@@ -492,7 +493,11 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
     const aceptaron = aprobadas.filter(s => s.tipo !== 'admin_asigna');
     const pendientes = srvSols.filter(s => s.status === 'convocado' || s.status === 'pendiente');
     const rechazaron = srvSols.filter(s => s.status === 'rechazada');
+    /** Eventuales que no respondieron en el plazo: no generaron nada, el lugar quedó libre. */
+    const vencieron = srvSols.filter(s => s.status === 'vencida');
     const yaEnviadosIds = new Set(srvSols.map(s => s.empleadoId));
+    /** Turno EV del eventual que aceptó (anexo/ARCA en «Estado convocatoria»). */
+    const turnoEvDe = (sol: SolicitudEvento) => evTurnos.find(t => t.servicioId === sol.servicioId && (t.employeeId === sol.empleadoId || (sol.bolsaCuil && t.bolsaCuil === sol.bolsaCuil))) || null;
 
     // EV turnos del servicio sin solicitud correspondiente (asignados directo desde planificador)
     const srvEvTurnos = evTurnos.filter(t => selectedSrvId ? t.servicioId === selectedSrvId : true);
@@ -725,22 +730,21 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                                     setEventualBusy(true);
                                                     setEventualError(null);
                                                     try {
-                                                        await asignarEventualPlanificacion({
+                                                        // Convocatoria, nunca asignación directa: turno EV, contrato, AT y anexo recién cuando acepta en la app.
+                                                        const res = await convocarEventualEvento({
                                                             empresaId,
                                                             cuil: candidato.cuil,
-                                                            objectiveId: null,
+                                                            jornada,
                                                             clientId: evento.clienteId || null,
                                                             clientName: evento.clienteNombre || null,
                                                             positionName: selectedSrv.nombre || 'Evento',
-                                                            turnos: [{ ...jornada, code: 'EV', name: 'Evento', positionName: selectedSrv.nombre || 'Evento' }],
-                                                            modo: 'TURNOS',
                                                             evento: { eventoId: evento.id!, eventoNombre: evento.nombre, servicioId: selectedSrv.id, servicioNombre: selectedSrv.nombre },
                                                         });
                                                         setUltimoEventual(null);
-                                                        addToast(`${candidato.nombre.split(',')[0]} (eventual) asignado a ${selectedSrv.nombre} y notificado`, 'success');
+                                                        addToast(`${candidato.nombre.split(',')[0]} (eventual) convocado a ${selectedSrv.nombre}: tiene que aceptar en la app${res.pruebasSinMarco ? ' · Pruebas: sin exigir marco' : ''}`, 'success');
                                                     } catch (e) {
                                                         setUltimoEventual(candidato);
-                                                        setEventualError(mensajeErrorCallable(e, `No se pudo asignar a ${candidato.nombre.split(',')[0]} (eventual).`));
+                                                        setEventualError(mensajeErrorCallable(e, `No se pudo convocar a ${candidato.nombre.split(',')[0]} (eventual).`));
                                                     } finally {
                                                         setEventualBusy(false);
                                                     }
@@ -748,7 +752,7 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                                 return (
                                                     <div className="flex-1 overflow-hidden flex flex-col px-3 py-3">
                                                         <p className="text-[9px] font-bold text-fuchsia-800 bg-fuchsia-50 border border-fuchsia-100 rounded-lg px-3 py-1.5 mb-2 shrink-0">
-                                                            {selectedSrv.nombre} · {fmtFecha(selectedSrv.fecha)} · {jornada.horaInicio}–{jornada.horaFin} ({horas}h). El eventual se asigna directo (se notifica); el contrato de la empresa se confirma y entra al lote AT.
+                                                            {selectedSrv.nombre} · {fmtFecha(selectedSrv.fecha)} · {jornada.horaInicio}–{jornada.horaFin} ({horas}h). El eventual se convoca y tiene que aceptar en la app. Recién al aceptar: turno EV, anexo al marco (código por app/mail) y alta ARCA (urgente si es en menos de 24 h). Si rechaza o no responde, no se genera nada y el lugar queda libre.
                                                         </p>
                                                         {eventualError && (
                                                             <div className="mb-2 shrink-0">
@@ -1067,7 +1071,10 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                                     <div className="space-y-1">
                                                         {sSols.map(sol => (
                                                             <div key={sol.id} className="flex items-center gap-3 px-3 py-2.5 bg-white dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-lg">
-                                                                <p className="text-xs font-medium text-slate-700 dark:text-slate-200 flex-1">{sol.empleadoNombre}</p>
+                                                                <div className="flex-1 min-w-0">
+                                                                    <p className="text-xs font-medium text-slate-700 dark:text-slate-200">{sol.empleadoNombre}</p>
+                                                                    <EventualEstadoLinea sol={sol} turno={turnoEvDe(sol)} />
+                                                                </div>
                                                                 <EstadoSolicitudChip sol={sol} />
                                                             </div>
                                                         ))}
@@ -1108,7 +1115,10 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                                     <div className="space-y-1">
                                                         {aceptaron.map(sol => (
                                                             <div key={sol.id} className="flex items-center gap-3 px-3 py-2.5 bg-white dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-lg">
-                                                                <p className="text-xs font-medium text-slate-700 dark:text-slate-200 flex-1">{sol.empleadoNombre}</p>
+                                                                <div className="flex-1 min-w-0">
+                                                                    <p className="text-xs font-medium text-slate-700 dark:text-slate-200">{sol.empleadoNombre}</p>
+                                                                    <EventualEstadoLinea sol={sol} turno={turnoEvDe(sol)} />
+                                                                </div>
                                                                 <EstadoSolicitudChip sol={sol} />
                                                             </div>
                                                         ))}
@@ -1139,7 +1149,8 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                                             <div key={sol.id} className="flex items-center gap-3 px-3 py-2.5 bg-white dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-lg">
                                                                 <div className="flex-1 min-w-0">
                                                                     <p className="text-xs font-medium text-slate-700 dark:text-slate-200">{sol.empleadoNombre}</p>
-                                                                    <p className="text-[9px] text-slate-400">{sol.tipo === 'admin_convoca' ? 'Convocado, tiene que aceptar desde la app' : 'Solicitó participar'}</p>
+                                                                    <p className="text-[9px] text-slate-400">{sol.tipo === 'admin_convoca' ? (sol.esEventual ? 'Eventual convocado: tiene que aceptar desde la app (si no responde, vence y el lugar queda libre)' : 'Convocado, tiene que aceptar desde la app') : 'Solicitó participar'}</p>
+                                                                    <EventualEstadoLinea sol={sol} />
                                                                 </div>
                                                                 <EstadoSolicitudChip sol={sol} />
                                                             </div>
@@ -1153,7 +1164,27 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                                     <div className="space-y-1">
                                                         {rechazaron.map(sol => (
                                                             <div key={sol.id} className="flex items-center gap-3 px-3 py-2.5 bg-white dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-lg">
-                                                                <p className="text-xs font-medium text-slate-700 dark:text-slate-200 flex-1">{sol.empleadoNombre}</p>
+                                                                <div className="flex-1 min-w-0">
+                                                                    <p className="text-xs font-medium text-slate-700 dark:text-slate-200">{sol.empleadoNombre}</p>
+                                                                    <EventualEstadoLinea sol={sol} />
+                                                                </div>
+                                                                <EstadoSolicitudChip sol={sol} />
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </section>
+                                            )}
+                                            {vencieron.length > 0 && (
+                                                <section>
+                                                    <p className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-2 uppercase tracking-wider">Vencieron sin responder — {vencieron.length}</p>
+                                                    <div className="space-y-1">
+                                                        {vencieron.map(sol => (
+                                                            <div key={sol.id} className="flex items-center gap-3 px-3 py-2.5 bg-white dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-lg">
+                                                                <div className="flex-1 min-w-0">
+                                                                    <p className="text-xs font-medium text-slate-700 dark:text-slate-200">{sol.empleadoNombre}</p>
+                                                                    <p className="text-[9px] text-slate-400">No respondió en el plazo: no se generó turno, contrato ni alta. Se puede volver a convocar.</p>
+                                                                    <EventualEstadoLinea sol={sol} />
+                                                                </div>
                                                                 <EstadoSolicitudChip sol={sol} />
                                                             </div>
                                                         ))}

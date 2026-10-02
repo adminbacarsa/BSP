@@ -182,23 +182,72 @@ export function textoAvisoGuardia(
 }
 
 export type EstadoConvocatoriaUi = {
-  key: 'ASIGNADO' | 'ACEPTO' | 'PENDIENTE' | 'RECHAZO' | 'OTRO';
+  key: 'ASIGNADO' | 'ACEPTO' | 'PENDIENTE' | 'RECHAZO' | 'VENCIO' | 'OTRO';
   label: string;
   detalle: string;
 };
 
 /**
  * Estado para la solapa «Estado convocatoria». La asignación directa (`tipo: admin_asigna`)
- * no es una aceptación: se muestra «Asignado (notificado)».
+ * no es una aceptación: se muestra «Asignado (notificado)». `vencida` = eventual que no respondió
+ * en el plazo: no se generó turno, contrato ni AT y el lugar quedó libre.
  */
-export function estadoSolicitudUi(sol: { status?: string; tipo?: string }): EstadoConvocatoriaUi {
+export function estadoSolicitudUi(sol: { status?: string; tipo?: string; esEventual?: boolean }): EstadoConvocatoriaUi {
   const status = String(sol.status || '');
   const tipo = String(sol.tipo || '');
   if (status === 'aprobada' && tipo === 'admin_asigna') return { key: 'ASIGNADO', label: 'Asignado (notificado)', detalle: 'Libre o RET: asignación directa, no tenía que aceptar' };
   if (status === 'aprobada') return { key: 'ACEPTO', label: 'Aceptó', detalle: tipo === 'guardia_solicita' ? 'Pidió participar y fue aprobado' : 'Aceptó la convocatoria' };
   if (status === 'rechazada') return { key: 'RECHAZO', label: 'Rechazó', detalle: 'Rechazó la convocatoria' };
-  if (status === 'convocado' || status === 'pendiente') return { key: 'PENDIENTE', label: 'Pendiente', detalle: tipo === 'admin_convoca' ? 'Convocado, todavía no respondió' : 'Solicitó participar' };
+  if (status === 'vencida') return { key: 'VENCIO', label: 'Venció', detalle: 'No respondió en el plazo: no se generó nada y el lugar quedó libre' };
+  if (status === 'convocado' || status === 'pendiente') return { key: 'PENDIENTE', label: 'Pendiente', detalle: tipo === 'admin_convoca' ? (sol.esEventual ? 'Eventual convocado, tiene que aceptar desde la app' : 'Convocado, todavía no respondió') : 'Solicitó participar' };
   return { key: 'OTRO', label: status || '—', detalle: '' };
+}
+
+export type SolicitudEventualLike = {
+  status?: string;
+  esEventual?: boolean;
+  pruebasSinMarco?: boolean;
+  anexoEstado?: string | null;
+  arcaCanal?: string | null;
+  contratoId?: string | null;
+};
+
+export type TurnoEventualLike = {
+  esEventual?: boolean;
+  eventualAltaArcaConfirmada?: boolean;
+  eventualExigirAltaArca?: boolean;
+  nroTransaccion?: string | null;
+};
+
+export type DetalleEventualUi = {
+  anexo: { label: string; tono: 'ok' | 'pendiente' | 'neutro' } | null;
+  arca: { label: string; tono: 'ok' | 'pendiente' | 'neutro' } | null;
+  pruebas: string | null;
+};
+
+/**
+ * Detalle de un eventual en «Estado convocatoria»: anexo (pendiente / firmado) y ARCA
+ * (pendiente / confirmada) una vez que aceptó. El ARCA sale del turno EV (`eventualAltaArcaConfirmada`,
+ * mismo dato que el gate de fichada); el anexo lo escribe el servidor en la solicitud.
+ */
+export function detalleEventualUi(sol: SolicitudEventualLike, turno?: TurnoEventualLike | null): DetalleEventualUi {
+  const pruebas = sol.pruebasSinMarco ? 'Pruebas: sin exigir marco' : null;
+  if (!sol.esEventual || String(sol.status || '') !== 'aprobada') return { anexo: null, arca: null, pruebas };
+  const anexoEstado = String(sol.anexoEstado || '');
+  const anexo = anexoEstado === 'FIRMADO'
+    ? { label: 'Anexo firmado', tono: 'ok' as const }
+    : anexoEstado === 'NO_EXIGIDO'
+      ? { label: 'Anexo no exigido (pruebas)', tono: 'neutro' as const }
+      : anexoEstado === 'SIN_CANAL'
+        ? { label: 'Anexo sin canal (RRHH)', tono: 'pendiente' as const }
+        : { label: 'Anexo pendiente', tono: 'pendiente' as const };
+  const arcaConfirmada = turno?.eventualAltaArcaConfirmada === true || sol.arcaCanal === 'CONFIRMADA';
+  const arca = arcaConfirmada
+    ? { label: `ARCA confirmada${turno?.nroTransaccion ? ` · Nº ${turno.nroTransaccion}` : ''}`, tono: 'ok' as const }
+    : turno?.eventualExigirAltaArca === false
+      ? { label: 'ARCA pendiente (ficha igual, pruebas)', tono: 'neutro' as const }
+      : { label: `ARCA pendiente${sol.arcaCanal === 'URGENTE' ? ' · urgente' : ''}`, tono: 'pendiente' as const };
+  return { anexo, arca, pruebas };
 }
 
 const CODIGOS_CALLABLE: Record<string, string> = {

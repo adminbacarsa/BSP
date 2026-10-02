@@ -11,6 +11,7 @@ import { httpsCallable } from 'firebase/functions';
 import { AlertTriangle, Loader2, MapPin, Phone, RotateCcw, Search, ShieldCheck, UserCheck, UserX } from 'lucide-react';
 import { functions } from '@/lib/firebase';
 import { mensajeErrorCallable } from '@/lib/eventos/convocatoriaPlan';
+import { PruebasBadge } from '@/components/servicios/EventoConvocarResumen';
 
 export type JornadaEventual = { fecha: string; horaInicio: string; horaFin: string; horas: number };
 
@@ -26,6 +27,8 @@ export type CandidatoEventual = {
     vencimientos: { tipo: string; fecha: string | null; estado: 'OK' | 'PRONTO' | 'VENCIDO' | 'SIN_DATO' }[];
     alertas: string[];
     employeeId: string | null;
+    /** Ficha con «Exigir contrato marco y habilitación» en OFF: elegible sin marco ni empresa habilitada. */
+    pruebasSinMarco?: boolean;
 };
 
 type Props = {
@@ -167,6 +170,7 @@ export default function EventualesCandidatosPanel({
                                         </span>
                                     )}
                                     <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded bg-violet-100 text-violet-800">Eventual</span>
+                                    {c.pruebasSinMarco && <PruebasBadge compact />}
                                 </div>
                             </div>
                             {!c.elegible && c.motivo && (

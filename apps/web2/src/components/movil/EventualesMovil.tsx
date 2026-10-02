@@ -36,6 +36,9 @@ type Ficha = {
   disponibilidad: string;
   empresasHabilitadas: string[];
   marcos: Record<string, { firmado?: boolean; fechaFirma?: string; vigenciaDias?: number }>;
+  /** Switches de pruebas (ausente = true). */
+  exigirMarco: boolean;
+  exigirAltaArca: boolean;
 };
 
 type EnvioArcaServidor = {
@@ -73,7 +76,7 @@ function envioAMovil(row: EnvioArcaServidor): ArcaMovil {
 }
 
 export function EventualesMovil() {
-  const { isSuperAdmin, canReadModule } = useAuth();
+  const { isSuperAdmin, canReadModule, rolePermissions } = useAuth();
   const { empresaId, empresa } = useEmpresa();
   const online = useOnlineFlag();
   const empresaSheet = useEmpresaSheet();
@@ -121,6 +124,8 @@ export function EventualesMovil() {
           disponibilidad: String(data.disponibilidad || ''),
           empresasHabilitadas: Array.isArray(data.empresasHabilitadas) ? data.empresasHabilitadas.map(String) : [],
           marcos: (data.marcos && typeof data.marcos === 'object' ? data.marcos : {}) as Ficha['marcos'],
+          exigirMarco: data.exigirMarco !== false,
+          exigirAltaArca: data.exigirAltaArca !== false,
         };
       });
       setFichas(rows);
@@ -179,9 +184,27 @@ export function EventualesMovil() {
           telefono: ficha.telefono,
           legajo: ficha.legajoPlanilla,
           primerIngreso: fmtFechaAr(ficha.primerIngreso),
+          exigirMarco: ficha.exigirMarco,
+          exigirAltaArca: ficha.exigirAltaArca,
         };
       });
   }, [buscar, empresaId, fichas]);
+
+  // Switches de pruebas: solo con EVENTUALES.update (o SuperAdmin); el servidor vuelve a exigirlo y escribe audit_logs.
+  const puedeSwitch = isSuperAdmin || (rolePermissions?.EVENTUALES || []).includes('update');
+  const [switchGuardando, setSwitchGuardando] = useState('');
+  const cambiarSwitch = (campo: 'exigirMarco' | 'exigirAltaArca', valor: boolean) => {
+    if (!elegidaId || !online) {
+      toast.error('El switch requiere conexión.');
+      return;
+    }
+    setSwitchGuardando(campo);
+    void llamar('Switch de pruebas', { accion: 'switchesPruebas', cuil: elegidaId, [campo]: valor }).then(() => {
+      toast.success(valor ? 'Vuelve a exigirse.' : 'Modo pruebas activado.');
+    }).catch((error: unknown) => {
+      toast.error(error instanceof Error ? error.message : 'No se pudo guardar el switch.');
+    }).finally(() => setSwitchGuardando(''));
+  };
 
   const elegido = personas.find((persona) => persona.id === elegidaId) || null;
   const cuilOk = normalizeCuil(cuil);
@@ -288,6 +311,9 @@ export function EventualesMovil() {
         onConfirmarArca={confirmarArca}
         arcaEnviando={arcaEnviando}
         elegido={elegido}
+        puedeSwitch={puedeSwitch}
+        switchGuardando={switchGuardando}
+        onSwitch={cambiarSwitch}
       />
       {empresaSheet.sheet}
       <MovilBottomNav />

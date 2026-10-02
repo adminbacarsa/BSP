@@ -16,9 +16,11 @@ export type EstadoSolicitudEvento =
   | 'aprobada'
   | 'rechazada'
   | 'cerrada'
-  | 'reserva';
+  | 'reserva'
+  /** Convocatoria de eventual sin respuesta en el plazo: no generó nada. */
+  | 'vencida';
 
-export type TipoSolicitudEvento = 'guardia_solicita' | 'admin_convoca';
+export type TipoSolicitudEvento = 'guardia_solicita' | 'admin_convoca' | 'admin_asigna';
 
 export interface UbicacionServicioEvento {
   tipo: 'objetivo_existente' | 'nueva';
@@ -79,4 +81,11 @@ export interface SolicitudEvento {
   respondidoAt?: unknown;
   respondidoPor?: string;
   creadoAt?: unknown;
+  /** Convocatoria de un eventual de la bolsa: al aceptar nace turno EV + contrato + AT + código del anexo. */
+  esEventual?: boolean;
+  bolsaCuil?: string;
+  pruebasSinMarco?: boolean;
+  anexoEstado?: 'PENDIENTE_ACEPTACION' | 'PENDIENTE' | 'FIRMADO' | 'SIN_CANAL' | 'NO_EXIGIDO';
+  contratoId?: string | null;
+  venceAt?: unknown;
 }

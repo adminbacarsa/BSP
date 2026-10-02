@@ -7,6 +7,8 @@ import { ALERTA_ALTA_PENDIENTE_MS } from './arcaEnviosCore';
 
 export function isAltaArcaConfirmada(shift: Record<string, unknown> | null | undefined): boolean {
   if (!shift || shift.esEventual !== true) return true;
+  // Switch de pruebas de la ficha («Exigir alta ARCA para fichar» en OFF), denormalizado en el turno.
+  if (shift.eventualExigirAltaArca === false) return true;
   return shift.eventualAltaArcaConfirmada === true;
 }
 

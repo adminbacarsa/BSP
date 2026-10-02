@@ -7,6 +7,7 @@
  */
 import { bloqueoCruce, clasificarAlta, habilitadoEnEmpresa, MOVIMIENTO_ANULACION_ALTA, ANULACION_ALTA_MAX_HORAS, TANDA_DEFAULT } from './flujo.mjs';
 import { MOTIVO_SIN_MARCO } from './marcoAnexoConst.mjs';
+import { ETIQUETA_PRUEBAS_SIN_MARCO, exigeMarco } from './pruebasSwitch.mjs';
 import { marcoDeBolsa } from './marcoTexto.mjs';
 import { fechaAltaDeJornadas, fechaBajaDeJornadas, horasDeJornada } from './jornadas.mjs';
 import { vencePronto } from './ficha.mjs';
@@ -157,10 +158,14 @@ export function evaluarCandidato({ bolsa, empresaId, jornadas, otrasJornadas = [
   };
   const bloquear = (codigo, mensaje) => ({ ...base, elegible: false, motivoCodigo: codigo, motivo: mensaje || MOTIVOS[codigo] || codigo });
   if (bolsa?.disponibilidad === 'NO_DISPONIBLE') return bloquear('NO_DISPONIBLE');
-  if (!habilitadoEnEmpresa(bolsa, empresaId)) return bloquear('EMPRESA_NO_HABILITADA');
+  // Switch de pruebas: con `exigirMarco: false` no se exige empresa habilitada ni marco vigente.
+  const conMarco = exigeMarco(bolsa);
+  base.pruebasSinMarco = !conMarco;
+  if (!conMarco) base.alertas.push(ETIQUETA_PRUEBAS_SIN_MARCO);
+  if (conMarco && !habilitadoEnEmpresa(bolsa, empresaId)) return bloquear('EMPRESA_NO_HABILITADA');
   const marco = marcoDeBolsa(bolsa, empresaId, hoy);
-  if (marco.estado !== 'MARCO_VIGENTE') return bloquear('SIN_MARCO');
-  if (marco.avisar) base.alertas.push(`contrato marco vence ${marco.vencimiento}`);
+  if (conMarco && marco.estado !== 'MARCO_VIGENTE') return bloquear('SIN_MARCO');
+  if (conMarco && marco.avisar) base.alertas.push(`contrato marco vence ${marco.vencimiento}`);
   const vencido = vencimientos.find((v) => v.estado === 'VENCIDO');
   if (vencido) {
     const codigo = vencido.tipo === 'credencial' ? 'CREDENCIAL_VENCIDA' : vencido.tipo === 'apto' ? 'APTO_VENCIDO' : 'HABILITACION_VENCIDA';

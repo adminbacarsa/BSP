@@ -4,10 +4,13 @@
  * Sin Firestore ni contextos: se renderizan en `scripts/eval-eventos-convocar.mjs`.
  */
 import React from 'react';
-import { AlertTriangle, Bell, CheckCircle, Clock, RotateCcw, Send, UserCheck, XCircle } from 'lucide-react';
+import { AlertTriangle, Bell, CheckCircle, Clock, FlaskConical, RotateCcw, Send, TimerOff, UserCheck, XCircle } from 'lucide-react';
 import {
+  detalleEventualUi,
   estadoSolicitudUi,
   etiquetaAccion,
+  type SolicitudEventualLike,
+  type TurnoEventualLike,
   explicacionAccion,
   textoBotonPlan,
   tituloGrupoConvocar,
@@ -167,7 +170,7 @@ export function ConvocatoriaResumen({
 }
 
 /** Chip de estado de una solicitud: Asignado (notificado) / Aceptó / Pendiente / Rechazó. */
-export function EstadoSolicitudChip({ sol }: { sol: { status?: string; tipo?: string } }) {
+export function EstadoSolicitudChip({ sol }: { sol: { status?: string; tipo?: string; esEventual?: boolean } }) {
   const ui = estadoSolicitudUi(sol);
   const cls = ui.key === 'ASIGNADO'
     ? 'text-sky-700 dark:text-sky-400'
@@ -175,13 +178,48 @@ export function EstadoSolicitudChip({ sol }: { sol: { status?: string; tipo?: st
       ? 'text-emerald-600 dark:text-emerald-400'
       : ui.key === 'RECHAZO'
         ? 'text-rose-500'
-        : 'text-slate-400 dark:text-slate-500';
-  const Icon = ui.key === 'ASIGNADO' ? UserCheck : ui.key === 'ACEPTO' ? CheckCircle : ui.key === 'RECHAZO' ? XCircle : Clock;
+        : ui.key === 'VENCIO'
+          ? 'text-amber-600 dark:text-amber-400'
+          : 'text-slate-400 dark:text-slate-500';
+  const Icon = ui.key === 'ASIGNADO' ? UserCheck : ui.key === 'ACEPTO' ? CheckCircle : ui.key === 'RECHAZO' ? XCircle : ui.key === 'VENCIO' ? TimerOff : Clock;
   return (
     <span data-estado={ui.key} title={ui.detalle} className={`inline-flex items-center gap-1 text-[10px] shrink-0 ${cls}`}>
       <Icon size={11} />
       {ui.label}
     </span>
+  );
+}
+
+const DETALLE_TONO: Record<'ok' | 'pendiente' | 'neutro', string> = {
+  ok: 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-900/20 dark:text-emerald-400',
+  pendiente: 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-300',
+  neutro: 'border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300',
+};
+
+/** Etiqueta «Pruebas: sin exigir marco» (ficha, candidatos, convocatoria). */
+export function PruebasBadge({ texto = 'Pruebas: sin exigir marco', compact }: { texto?: string; compact?: boolean }) {
+  return (
+    <span data-pruebas="sin-marco" className={`inline-flex items-center gap-1 rounded-full border border-fuchsia-200 bg-fuchsia-50 font-black uppercase tracking-wide text-fuchsia-800 dark:border-fuchsia-900/40 dark:bg-fuchsia-900/20 dark:text-fuchsia-300 ${compact ? 'px-1.5 py-0.5 text-[8px]' : 'px-2 py-0.5 text-[9px]'}`}>
+      <FlaskConical size={compact ? 9 : 10} />
+      {texto}
+    </span>
+  );
+}
+
+/**
+ * Línea de detalle de un eventual en «Estado convocatoria»: Eventual · Pruebas · Anexo · ARCA.
+ * Sin anexo/ARCA mientras no aceptó.
+ */
+export function EventualEstadoLinea({ sol, turno }: { sol: SolicitudEventualLike; turno?: TurnoEventualLike | null }) {
+  if (!sol.esEventual) return null;
+  const d = detalleEventualUi(sol, turno);
+  return (
+    <div data-eventual-detalle className="mt-1 flex flex-wrap items-center gap-1">
+      <span className="rounded bg-violet-100 px-1.5 py-0.5 text-[8px] font-black uppercase text-violet-800 dark:bg-violet-900/30 dark:text-violet-300">Eventual</span>
+      {d.pruebas && <PruebasBadge compact texto={d.pruebas} />}
+      {d.anexo && <span data-anexo={d.anexo.tono} className={`rounded-full border px-1.5 py-0.5 text-[8px] font-bold ${DETALLE_TONO[d.anexo.tono]}`}>{d.anexo.label}</span>}
+      {d.arca && <span data-arca={d.arca.tono} className={`rounded-full border px-1.5 py-0.5 text-[8px] font-bold ${DETALLE_TONO[d.arca.tono]}`}>{d.arca.label}</span>}
+    </div>
   );
 }
 

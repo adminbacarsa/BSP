@@ -54,6 +54,36 @@ export async function asignarEventualPlanificacion(params: AsignarEventualParams
     return res.data;
 }
 
+export type ConvocarEventualEventoParams = {
+    empresaId: string;
+    cuil: string;
+    jornada: JornadaEventual;
+    evento: { eventoId: string; eventoNombre: string; servicioId: string; servicioNombre: string };
+    clientId?: string | null;
+    clientName?: string | null;
+    positionName?: string | null;
+    objetivoGeo?: { lat: number; lng: number } | null;
+};
+
+export type ConvocarEventualEventoResult = {
+    ok: boolean;
+    solicitudId: string;
+    employeeId: string;
+    /** Momento (ms) en que vence si no responde: queda «Venció» y el lugar libre. */
+    venceAt: number;
+    pruebasSinMarco: boolean;
+};
+
+/**
+ * Desde el evento el eventual se CONVOCA (nunca asignación directa): nace la solicitud `convocado`
+ * y el push con Aceptar / Rechazar. Turno EV, contrato, AT y anexo recién cuando acepta en la app.
+ */
+export async function convocarEventualEvento(params: ConvocarEventualEventoParams): Promise<ConvocarEventualEventoResult> {
+    const call = httpsCallable<ConvocarEventualEventoParams, ConvocarEventualEventoResult>(functions, 'convocarEventualEvento');
+    const res = await call(params);
+    return res.data;
+}
+
 export async function sustituirEventualPlanificacion(params: SustituirEventualParams): Promise<{ ok: boolean; employeeId: string; turnoIds: string[] }> {
     const call = httpsCallable<SustituirEventualParams, { ok: boolean; employeeId: string; turnoIds: string[] }>(functions, 'sustituirEventualPlanificacion');
     const res = await call(params);

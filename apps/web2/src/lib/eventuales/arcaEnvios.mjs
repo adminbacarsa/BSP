@@ -134,9 +134,13 @@ export function altaConfirmada(envios) {
   return (envios || []).some((e) => e.tipo === 'AT' && e.estado === 'CONFIRMADO');
 }
 
-/** Gate de fichada. El turno del eventual lleva el estado denormalizado del alta. */
+/**
+ * Gate de fichada. El turno del eventual lleva el estado denormalizado del alta.
+ * `eventualExigirAltaArca: false` (switch de pruebas de la ficha) deja fichar sin alta confirmada.
+ */
 export function isAltaArcaConfirmada(shift) {
   if (!shift || shift.esEventual !== true) return true;
+  if (shift.eventualExigirAltaArca === false) return true;
   return shift.eventualAltaArcaConfirmada === true;
 }
 

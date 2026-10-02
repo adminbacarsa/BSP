@@ -12,9 +12,13 @@ import {
 } from 'firebase/firestore';
 import { stampEmpresaId } from '@/lib/multiempresa';
 
-export type EstadoSolicitudEvento = 'pendiente' | 'convocado' | 'aprobada' | 'rechazada' | 'cerrada' | 'reserva';
+/** `vencida` = convocatoria de eventual sin respuesta en el plazo (`venceAt`): no generó nada, el lugar quedó libre. */
+export type EstadoSolicitudEvento = 'pendiente' | 'convocado' | 'aprobada' | 'rechazada' | 'cerrada' | 'reserva' | 'vencida';
 /** `admin_asigna` = asignación directa desde Eventos (libre/RET): nace `aprobada`, no es una aceptación. */
 export type TipoSolicitudEvento = 'guardia_solicita' | 'admin_convoca' | 'admin_asigna';
+
+/** Estado del anexo al marco de una convocatoria de eventual (lo escribe el servidor). */
+export type AnexoEstadoSolicitud = 'PENDIENTE_ACEPTACION' | 'PENDIENTE' | 'FIRMADO' | 'SIN_CANAL' | 'NO_EXIGIDO';
 
 export interface SolicitudEvento {
     id?: string;
@@ -33,6 +37,20 @@ export interface SolicitudEvento {
     respondidoAt?: any;
     respondidoPor?: string;
     creadoAt?: any;
+    /** Convocatoria de un eventual de la bolsa (`convocarEventualEvento`). */
+    esEventual?: boolean;
+    bolsaCuil?: string;
+    /** Ficha con «Exigir contrato marco y habilitación» en OFF. */
+    pruebasSinMarco?: boolean;
+    etiquetasPruebas?: string[];
+    anexoEstado?: AnexoEstadoSolicitud;
+    anexoMensaje?: string | null;
+    /** Canal del alta AT al aceptar: URGENTE (< 24 h), LOTE o CONFIRMADA si ya tenía alta. */
+    arcaCanal?: 'URGENTE' | 'LOTE' | 'CONFIRMADA' | null;
+    contratoId?: string | null;
+    turnoIds?: string[];
+    venceAt?: any;
+    vencidaAt?: any;
 }
 
 export const solicitudEventoService = {

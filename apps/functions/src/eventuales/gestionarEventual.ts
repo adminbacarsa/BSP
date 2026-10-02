@@ -73,7 +73,7 @@ export const gestionarEventual = functions.https.onCall(async (data, context) =>
   const mapa: Record<string, string> = {
     crear: 'create', editar: 'update', baja: 'delete', reactivar: 'update', detalle: 'read',
     asignarEmpresas: 'update', importarContacto: 'update', habilitarEmpresa: 'update',
-    arcaPendientes: 'read', arcaConfirmar: 'update',
+    arcaPendientes: 'read', arcaConfirmar: 'update', switchesPruebas: 'update',
   };
   const permiso = mapa[accion];
   if (!permiso) throw new functions.https.HttpsError('invalid-argument', 'Acción desconocida.');
@@ -167,6 +167,35 @@ export const gestionarEventual = functions.https.onCall(async (data, context) =>
     });
     if (out.status !== 200) throw new functions.https.HttpsError('failed-precondition', String(out.body.error || 'No se pudo confirmar.'));
     return { ok: true };
+  }
+
+  if (accion === 'switchesPruebas') {
+    const { planSwitchesPruebas } = await import('../eventuales-shared/pruebasSwitch.mjs') as {
+      planSwitchesPruebas: (input: unknown, actual: unknown) => { ok: boolean; codigo?: string; campo?: string; patch?: Record<string, boolean>; patchTurnos?: Record<string, boolean>; cambios?: string[]; detalle?: string };
+    };
+    const cuil = String(data?.cuil || '').replace(/\D/g, '');
+    const ref = db().collection('eventuales_bolsa').doc(cuil);
+    const snap = await ref.get();
+    if (!snap.exists) throw new functions.https.HttpsError('not-found', 'No está en la bolsa.');
+    const plan = planSwitchesPruebas({ exigirMarco: data?.exigirMarco, exigirAltaArca: data?.exigirAltaArca }, snap.data() || {});
+    if (!plan.ok) throw new functions.https.HttpsError('invalid-argument', plan.codigo || 'DATOS');
+    if (!plan.cambios?.length) return { ok: true, cambios: [], turnosActualizados: 0 };
+    await ref.set({ ...plan.patch, switchesPruebasAt: admin.firestore.FieldValue.serverTimestamp(), switchesPruebasPor: auth.uid, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    // El gate de fichada lee el turno: los turnos desde hoy heredan el switch de ARCA.
+    let turnosActualizados = 0;
+    if (plan.patchTurnos && Object.keys(plan.patchTurnos).length) {
+      const hoy = new Date(Date.now() - 3 * 3600000).toISOString().slice(0, 10);
+      const turnos = await db().collection('turnos').where('bolsaCuil', '==', cuil).where('scheduleDate', '>=', hoy).get();
+      const batch = db().batch();
+      for (const t of turnos.docs) {
+        if (t.data().esEventual !== true) continue;
+        batch.update(t.ref, plan.patchTurnos);
+        turnosActualizados += 1;
+      }
+      if (turnosActualizados) await batch.commit();
+    }
+    await auditar('EVENTUAL_SWITCH_PRUEBAS', auth.uid, cuil, `${plan.detalle}${turnosActualizados ? ` · ${turnosActualizados} turno/s actualizados` : ''}`);
+    return { ok: true, cambios: plan.cambios, turnosActualizados };
   }
 
   if (accion === 'habilitarEmpresa') {

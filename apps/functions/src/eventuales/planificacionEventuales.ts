@@ -11,6 +11,7 @@
  */
 import * as admin from 'firebase-admin';
 import * as functions from 'firebase-functions/v1';
+import { CONVOCATORIA_TIMEOUT_MINUTES } from '../coverage/convocatoriaTimeout';
 
 const SUPER = ['SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP'];
 const AR_OFFSET = '-03:00';
@@ -127,7 +128,11 @@ async function asegurarLegajo(bolsa: Record<string, unknown> & { cuil: string },
   if (previo?.employeeId) {
     const doc = await db().collection('empleados').doc(previo.employeeId).get();
     if (doc.exists) {
-      if (String(doc.data()?.status || '').toLowerCase() === 'inactivo') await doc.ref.update({ status: 'activo', reactivadoAt: admin.firestore.FieldValue.serverTimestamp() });
+      const patch: Record<string, unknown> = {};
+      if (String(doc.data()?.status || '').toLowerCase() === 'inactivo') Object.assign(patch, { status: 'activo', reactivadoAt: admin.firestore.FieldValue.serverTimestamp() });
+      // El push de la convocatoria sale por `empleados.uid`: si el acceso a la app se creó después del legajo, se completa acá.
+      if (bolsa.uid && !doc.data()?.uid) patch.uid = bolsa.uid;
+      if (Object.keys(patch).length) await doc.ref.update(patch);
       return previo.employeeId;
     }
   }
@@ -363,7 +368,48 @@ export const asignarEventualPlanificacion = functions.https.onCall(async (data, 
     return { ok: true, employeeId, nombre: bolsa.nombre };
   }
 
-  const evento = data?.evento as { eventoId?: string; eventoNombre?: string; servicioId?: string; servicioNombre?: string } | null;
+  const evento = data?.evento as EventoRef | null;
+  const { turnoIds, contratos } = await escribirTurnosEventual({
+    bolsa, empresaId, employeeId, turnosIn, evento, objectiveId,
+    objectiveName: data?.objectiveName ? String(data.objectiveName) : null,
+    clientId: data?.clientId ? String(data.clientId) : null,
+    clientName: data?.clientName ? String(data.clientName) : null,
+    positionName: data?.positionName ? String(data.positionName) : null,
+    cubreA: (data?.cubreA as CubreA | null) || null,
+    actorUid: auth.uid,
+    actorName: String(auth.token.email || auth.uid),
+  });
+  await auditar('EVENTUAL_ASIGNADO_PLANIFICACION', auth.uid, empresaId, cuil, `${bolsa.nombre} asignado a ${data?.objectiveName || objectiveId || evento?.eventoNombre || '—'}: ${turnosIn.length} turno/s (${turnosIn.map((t) => `${t.fecha} ${t.code || 'EV'}`).join(', ')}).`, { employeeId, objectiveId, turnoIds });
+  return { ok: true, employeeId, turnoIds, contratos };
+});
+
+type EventoRef = { eventoId?: string; eventoNombre?: string; servicioId?: string; servicioNombre?: string };
+type CubreA = { employeeId?: string; employeeName?: string; shiftIds?: unknown[] };
+
+/**
+ * Escribe los turnos del eventual (draft según cronograma; eventos siempre publicados) y sincroniza
+ * el contrato de cada mes. Único camino para Planificación y para la aceptación de un evento.
+ */
+async function escribirTurnosEventual(p: {
+  bolsa: Record<string, unknown> & { cuil: string };
+  empresaId: string;
+  employeeId: string;
+  turnosIn: TurnoIn[];
+  evento: EventoRef | null;
+  objectiveId: string | null;
+  objectiveName: string | null;
+  clientId: string | null;
+  clientName: string | null;
+  positionName: string | null;
+  cubreA: CubreA | null;
+  actorUid: string;
+  actorName: string;
+  extraTurno?: Record<string, unknown>;
+}): Promise<{ turnoIds: string[]; contratos: { accion: string; contratoId: string; estado: string | null }[] }> {
+  const { periodoDe } = await lib();
+  const { camposTurnoDesdeSwitches } = await import('../eventuales-shared/pruebasSwitch.mjs') as { camposTurnoDesdeSwitches: (b: unknown) => Record<string, unknown> };
+  const { bolsa, empresaId, employeeId, turnosIn, evento, objectiveId } = p;
+  const cuil = bolsa.cuil;
   const publicadoPorFecha = new Map<string, boolean>();
   const batch = db().batch();
   const turnoIds: string[] = [];
@@ -385,11 +431,12 @@ export const asignarEventualPlanificacion = functions.https.onCall(async (data, 
       esEventual: true,
       bolsaCuil: cuil,
       eventualAltaArcaConfirmada: false,
-      clientId: data?.clientId || null,
-      clientName: data?.clientName || null,
+      ...camposTurnoDesdeSwitches(bolsa),
+      clientId: p.clientId || null,
+      clientName: p.clientName || null,
       objectiveId,
-      objectiveName: data?.objectiveName || null,
-      positionName: t.positionName || data?.positionName || (evento ? evento.servicioNombre || 'Evento' : 'General'),
+      objectiveName: p.objectiveName || null,
+      positionName: t.positionName || p.positionName || (evento ? evento.servicioNombre || 'Evento' : 'General'),
       code: evento ? 'EV' : String(t.code || 'M').toUpperCase(),
       type: t.name || (evento ? 'Evento' : String(t.code || 'M').toUpperCase()),
       hours: Number(t.horas) || 0,
@@ -402,24 +449,226 @@ export const asignarEventualPlanificacion = functions.https.onCall(async (data, 
       isCompleted: false,
       draft,
       ...(evento ? { origin: 'EVENTO', eventoId: evento.eventoId || null, eventoNombre: evento.eventoNombre || null, servicioId: evento.servicioId || null, servicioNombre: evento.servicioNombre || null } : {}),
-      ...(data?.cubreA?.employeeName ? { comments: `Cubriendo a ${String(data.cubreA.employeeName)}`, coversEmployeeId: data.cubreA.employeeId || null } : { comments: 'Eventual (bolsa)' }),
+      ...(p.cubreA?.employeeName ? { comments: `Cubriendo a ${String(p.cubreA.employeeName)}`, coversEmployeeId: p.cubreA.employeeId || null } : { comments: 'Eventual (bolsa)' }),
+      ...(p.extraTurno || {}),
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      actorName: auth.token.email || auth.uid,
+      actorName: p.actorName,
       createdBy: 'PLANIFICADOR_EVENTUALES',
     });
     turnoIds.push(ref.id);
   }
-  for (const shiftId of ((data?.cubreA?.shiftIds || []) as unknown[]).map(String).filter(Boolean)) {
+  for (const shiftId of ((p.cubreA?.shiftIds || []) as unknown[]).map(String).filter(Boolean)) {
     batch.update(db().collection('turnos').doc(shiftId), { coveredBy: bolsa.nombre, coveredByEmployeeId: employeeId, coveredByEventual: true });
   }
   await batch.commit();
 
   const periodos = [...new Set(turnosIn.map((t) => periodoDe(t.fecha)))];
   const contratos = [];
-  for (const periodo of periodos) contratos.push(await sincronizarContratoEventual(empresaId, cuil, periodo, auth.uid));
-  await auditar('EVENTUAL_ASIGNADO_PLANIFICACION', auth.uid, empresaId, cuil, `${bolsa.nombre} asignado a ${data?.objectiveName || objectiveId || evento?.eventoNombre || '—'}: ${turnosIn.length} turno/s (${turnosIn.map((t) => `${t.fecha} ${t.code || 'EV'}`).join(', ')}).`, { employeeId, objectiveId, turnoIds });
-  return { ok: true, employeeId, turnoIds, contratos };
+  for (const periodo of periodos) contratos.push(await sincronizarContratoEventual(empresaId, cuil, periodo, p.actorUid));
+  return { turnoIds, contratos };
+}
+
+// ── Eventos: convocatoria → aceptación ────────────────────────────────────────
+
+/** Mismo plazo que una convocatoria del CC: pasado, la solicitud vence y el lugar queda libre. */
+export const EVENTO_EVENTUAL_TIMEOUT_MIN = CONVOCATORIA_TIMEOUT_MINUTES;
+
+function jornadaDeSolicitud(sol: Record<string, unknown>): Jornada | null {
+  const j = (sol.jornada || null) as Partial<Jornada> | null;
+  if (j && validarJornada(j)) return { fecha: j.fecha, horaInicio: j.horaInicio, horaFin: j.horaFin, horas: Number(j.horas) || 0 };
+  return null;
+}
+
+/**
+ * Desde el evento (EventoDetailModal → Eventuales) se CONVOCA al eventual: nace la solicitud `convocado`
+ * con `esEventual` y el push lo manda `onSolicitudEventoCreated`. No se crea turno, contrato ni AT
+ * hasta que acepte en la app (`respondEventoConvocatoria` → `aceptarConvocatoriaEventualEvento`).
+ */
+export const convocarEventualEvento = functions.https.onCall(async (data, context) => {
+  const auth = await exigirConvocar(context);
+  const { evaluarCandidato } = await lib();
+  const { exigeMarco, exigeAltaArca, etiquetasPruebas } = await import('../eventuales-shared/pruebasSwitch.mjs') as LibPruebas;
+  const empresaId = String(data?.empresaId || '');
+  const cuil = String(data?.cuil || '').replace(/\D/g, '');
+  const evento = (data?.evento || null) as EventoRef | null;
+  const jornadaIn = data?.jornada as Partial<Jornada> | undefined;
+  if (!empresaId || !cuil) throw new functions.https.HttpsError('invalid-argument', 'Faltan empresa o CUIL.');
+  if (!evento?.eventoId || !evento.servicioId) throw new functions.https.HttpsError('invalid-argument', 'Falta el evento o el servicio.');
+  if (!jornadaIn || !validarJornada(jornadaIn)) throw new functions.https.HttpsError('invalid-argument', 'Falta la jornada del servicio.');
+  const jornada: Jornada = { fecha: jornadaIn.fecha, horaInicio: jornadaIn.horaInicio, horaFin: jornadaIn.horaFin, horas: Number(jornadaIn.horas) || 0 };
+
+  const bolsa = await bolsaDe(cuil);
+  const otrasJornadas = await otrasJornadasDe(cuil, [jornada]);
+  const objetivoGeo = await objetivoGeoDe(empresaId, data?.clientId ? String(data.clientId) : null, null, data?.objetivoGeo);
+  const evaluacion = evaluarCandidato({ bolsa, empresaId, jornadas: [jornada], otrasJornadas, hoy: hoyAr(), objetivoGeo });
+  if (!evaluacion.elegible) throw new functions.https.HttpsError('failed-precondition', evaluacion.motivo || evaluacion.motivoCodigo || 'NO_ELEGIBLE');
+
+  const employeeId = await asegurarLegajo(bolsa, empresaId, auth.uid);
+  const abiertas = await db().collection('solicitudes_evento')
+    .where('eventoId', '==', String(evento.eventoId))
+    .where('servicioId', '==', String(evento.servicioId))
+    .where('empleadoId', '==', employeeId)
+    .get();
+  const viva = abiertas.docs.find((d) => ['convocado', 'aprobada', 'pendiente'].includes(String(d.data().status || '')));
+  if (viva) throw new functions.https.HttpsError('already-exists', `${bolsa.nombre} ya tiene una convocatoria ${String(viva.data().status)} en este servicio.`);
+
+  const venceAt = admin.firestore.Timestamp.fromMillis(Date.now() + EVENTO_EVENTUAL_TIMEOUT_MIN * 60000);
+  const ref = db().collection('solicitudes_evento').doc();
+  await ref.set({
+    empresaId,
+    eventoId: String(evento.eventoId),
+    eventoNombre: String(evento.eventoNombre || ''),
+    servicioId: String(evento.servicioId),
+    servicioNombre: String(evento.servicioNombre || ''),
+    servicioFecha: jornada.fecha,
+    empleadoId: employeeId,
+    empleadoNombre: String(bolsa.nombre || ''),
+    tipo: 'admin_convoca',
+    status: 'convocado',
+    convocadoPor: auth.uid,
+    esEventual: true,
+    bolsaCuil: cuil,
+    jornada,
+    clientId: data?.clientId ? String(data.clientId) : null,
+    clientName: data?.clientName ? String(data.clientName) : null,
+    positionName: data?.positionName ? String(data.positionName) : String(evento.servicioNombre || 'Evento'),
+    exigirMarco: exigeMarco(bolsa),
+    exigirAltaArca: exigeAltaArca(bolsa),
+    pruebasSinMarco: !exigeMarco(bolsa),
+    etiquetasPruebas: etiquetasPruebas(bolsa),
+    anexoEstado: exigeMarco(bolsa) ? 'PENDIENTE_ACEPTACION' : 'NO_EXIGIDO',
+    venceAt,
+    timeoutMin: EVENTO_EVENTUAL_TIMEOUT_MIN,
+    creadoAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+  await auditar('EVENTUAL_CONVOCADO_EVENTO', auth.uid, empresaId, cuil, `${bolsa.nombre} convocado a ${evento.eventoNombre || evento.eventoId} · ${evento.servicioNombre || ''} ${jornada.fecha} ${jornada.horaInicio}–${jornada.horaFin}. Vence en ${EVENTO_EVENTUAL_TIMEOUT_MIN} min.${exigeMarco(bolsa) ? '' : ' Pruebas: sin exigir marco.'}`, { employeeId, solicitudId: ref.id, eventoId: evento.eventoId });
+  return { ok: true, solicitudId: ref.id, employeeId, venceAt: venceAt.toMillis(), pruebasSinMarco: !exigeMarco(bolsa) };
 });
+
+type LibPruebas = {
+  exigeMarco: (b: unknown) => boolean;
+  exigeAltaArca: (b: unknown) => boolean;
+  etiquetasPruebas: (b: unknown) => string[];
+  camposTurnoDesdeSwitches: (b: unknown) => Record<string, unknown>;
+};
+
+export type AceptacionEventual = {
+  turnoIds: string[];
+  contratoId: string | null;
+  anexoEstado: 'PENDIENTE' | 'SIN_CANAL' | 'NO_EXIGIDO';
+  anexoMensaje: string | null;
+  arcaCanal: 'URGENTE' | 'LOTE' | 'CONFIRMADA' | null;
+};
+
+/**
+ * El eventual aceptó desde la app. Recién acá: turno EV + contrato CONFIRMADO + AT (URGENTE si el
+ * servicio empieza en < 24 h) + código del anexo (OTP por push/mail). Si no hay canal para el código,
+ * la aceptación igual queda y el anexo figura «sin canal» para que RRHH lo resuelva.
+ */
+export async function aceptarConvocatoriaEventualEvento(
+  solicitudId: string,
+  sol: Record<string, unknown>,
+  actor: { uid: string; email?: string | null },
+): Promise<AceptacionEventual> {
+  const { evaluarCandidato } = await lib();
+  const { exigeMarco } = await import('../eventuales-shared/pruebasSwitch.mjs') as LibPruebas;
+  const cuil = String(sol.bolsaCuil || '').replace(/\D/g, '');
+  const empresaId = String(sol.empresaId || '');
+  if (!cuil || !empresaId) throw new functions.https.HttpsError('failed-precondition', 'La convocatoria no tiene eventual o empresa.');
+  const venceMs = (sol.venceAt as admin.firestore.Timestamp | undefined)?.toMillis?.() ?? 0;
+  if (venceMs && Date.now() > venceMs) {
+    await db().collection('solicitudes_evento').doc(solicitudId).update({
+      status: 'vencida', vencidaAt: admin.firestore.FieldValue.serverTimestamp(), venceAt: admin.firestore.FieldValue.delete(),
+    });
+    throw new functions.https.HttpsError('failed-precondition', 'La convocatoria venció. Pedile al coordinador que te vuelva a convocar.');
+  }
+  const bolsa = await bolsaDe(cuil);
+  const jornada = jornadaDeSolicitud(sol);
+  if (!jornada) throw new functions.https.HttpsError('failed-precondition', 'La convocatoria no tiene horario.');
+  const otrasJornadas = await otrasJornadasDe(cuil, [jornada]);
+  const evaluacion = evaluarCandidato({ bolsa, empresaId, jornadas: [jornada], otrasJornadas, hoy: hoyAr(), objetivoGeo: null });
+  if (!evaluacion.elegible) throw new functions.https.HttpsError('failed-precondition', evaluacion.motivo || evaluacion.motivoCodigo || 'NO_ELEGIBLE');
+
+  const employeeId = String(sol.empleadoId || '') || await asegurarLegajo(bolsa, empresaId, actor.uid);
+  const evento: EventoRef = {
+    eventoId: String(sol.eventoId || ''),
+    eventoNombre: String(sol.eventoNombre || ''),
+    servicioId: String(sol.servicioId || ''),
+    servicioNombre: String(sol.servicioNombre || ''),
+  };
+  const { turnoIds, contratos } = await escribirTurnosEventual({
+    bolsa, empresaId, employeeId,
+    turnosIn: [{ ...jornada, code: 'EV', name: 'Evento', positionName: String(sol.positionName || evento.servicioNombre || 'Evento') }],
+    evento,
+    objectiveId: null,
+    objectiveName: null,
+    clientId: sol.clientId ? String(sol.clientId) : null,
+    clientName: sol.clientName ? String(sol.clientName) : null,
+    positionName: sol.positionName ? String(sol.positionName) : null,
+    cubreA: null,
+    actorUid: actor.uid,
+    actorName: String(actor.email || actor.uid),
+    extraTurno: { solicitudEventoId: solicitudId, convocadoAceptoAt: admin.firestore.FieldValue.serverTimestamp() },
+  });
+  const contratoId = contratos[0]?.contratoId || null;
+
+  let arcaCanal: AceptacionEventual['arcaCanal'] = null;
+  if (contratoId) {
+    const envios = await db().collection('arca_envios').where('contratoIds', 'array-contains', contratoId).get();
+    const at = envios.docs.map((d) => d.data()).find((e) => e.tipo === 'AT' && !e.quitadoDelLote);
+    if (at?.estado === 'CONFIRMADO') arcaCanal = 'CONFIRMADA';
+    else if (at) {
+      // Evento en menos de 24 h: el alta no espera al lote de las 18:00.
+      const inicioMs = tsAr(jornada.fecha, jornada.horaInicio).toMillis();
+      const urgente = inicioMs - Date.now() < 24 * 3600000;
+      arcaCanal = urgente ? 'URGENTE' : (String(at.canal || 'LOTE') as 'URGENTE' | 'LOTE');
+      if (urgente && at.canal !== 'URGENTE') {
+        const atDoc = envios.docs.find((d) => d.data().tipo === 'AT' && !d.data().quitadoDelLote);
+        if (atDoc) await atDoc.ref.update({ canal: 'URGENTE', urgentePorEvento: true, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+      }
+    }
+  }
+
+  let anexoEstado: AceptacionEventual['anexoEstado'] = 'NO_EXIGIDO';
+  let anexoMensaje: string | null = null;
+  if (exigeMarco(bolsa) && contratoId) {
+    const { enviarCodigoAnexo } = await import('./marcoAnexoCall');
+    const envio = await enviarCodigoAnexo({ contratoId, convocatoriaId: '', cuil, bolsa, uid: String(bolsa.uid || actor.uid || '') });
+    anexoEstado = envio.ok ? 'PENDIENTE' : 'SIN_CANAL';
+    anexoMensaje = envio.mensaje;
+  }
+
+  await db().collection('solicitudes_evento').doc(solicitudId).update({
+    status: 'aprobada',
+    respondidoAt: admin.firestore.FieldValue.serverTimestamp(),
+    venceAt: admin.firestore.FieldValue.delete(),
+    turnoIds,
+    turnoId: turnoIds[0] || null,
+    contratoId,
+    anexoEstado,
+    anexoMensaje,
+    arcaCanal,
+  });
+  await auditar('EVENTUAL_ACEPTO_EVENTO', actor.uid, empresaId, cuil, `${bolsa.nombre} aceptó ${evento.eventoNombre || evento.eventoId}: turno EV ${jornada.fecha} ${jornada.horaInicio}–${jornada.horaFin}. Contrato ${contratoId || '—'}, AT ${arcaCanal || '—'}, anexo ${anexoEstado}.`, { employeeId, solicitudId, contratoId, turnoIds });
+  return { turnoIds, contratoId, anexoEstado, anexoMensaje, arcaCanal };
+}
+
+/** Convocatorias de eventuales a eventos sin respuesta: vencen y el lugar queda libre. Lo corre `checkConvocatoriaTimeouts`. */
+export async function vencerConvocatoriasEventualesEvento(now = admin.firestore.Timestamp.now()): Promise<number> {
+  const snap = await db().collection('solicitudes_evento').where('venceAt', '<=', now).limit(50).get();
+  let n = 0;
+  for (const d of snap.docs) {
+    const sol = d.data();
+    if (String(sol.status || '') !== 'convocado') {
+      await d.ref.update({ venceAt: admin.firestore.FieldValue.delete() });
+      continue;
+    }
+    await d.ref.update({ status: 'vencida', vencidaAt: now, venceAt: admin.firestore.FieldValue.delete() });
+    await auditar('EVENTUAL_CONVOCATORIA_VENCIDA', 'SYSTEM_SCHEDULER', String(sol.empresaId || ''), String(sol.bolsaCuil || ''), `${sol.empleadoNombre || ''} no respondió la convocatoria a ${sol.eventoNombre || sol.eventoId} en ${sol.timeoutMin || EVENTO_EVENTUAL_TIMEOUT_MIN} min.`, { solicitudId: d.id, eventoId: sol.eventoId || null });
+    n += 1;
+  }
+  return n;
+}
 
 /** Los turnos del titular desde `desdeFecha` (objetivo opcional) pasan al sustituto. Contratos de ambos se recalculan. */
 export const sustituirEventualPlanificacion = functions.https.onCall(async (data, context) => {

@@ -1640,6 +1640,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
                               <span className="block text-sm font-black text-slate-800 truncate">{row.employeeName}</span>
                               <span className="block text-[10px] text-slate-500">
                                 {row.distanceKm == null ? 'Sin geo' : `${row.distanceKm} km`} · confiabilidad {row.confiabilidad}
+                                {row.pruebasSinMarco && <span data-pruebas="sin-marco" className="ml-1 rounded-full border border-fuchsia-200 bg-fuchsia-50 px-1.5 py-0.5 text-[8px] font-black uppercase text-fuchsia-800">Pruebas: sin exigir marco</span>}
                               </span>
                             </span>
                             <span className={`text-[10px] font-black shrink-0 ${row.elegible === false ? 'text-slate-400' : 'text-indigo-700'}`}>{row.elegible === false ? (row.motivo || 'Sin contrato marco') : 'Convocar'}</span>

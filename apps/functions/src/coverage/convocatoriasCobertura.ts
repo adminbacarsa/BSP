@@ -27,6 +27,7 @@ import {
   isEventoShift,
 } from '../eventos/eventoCoverage';
 import { loadEventualesParaHueco, registrarAsignacionEventualEnBatch } from '../eventos/eventualesParaHuecoServer';
+import { CONVOCATORIA_TIMEOUT_MINUTES } from './convocatoriaTimeout';
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
@@ -81,7 +82,8 @@ export interface ConvocatoriaCoberturaDoc {
 
 // 3 min: tiempo de espera por paso antes de avanzar al siguiente.
 // El paso anterior queda ESCALATED (sigue aceptando). El primero que confirma gana.
-const TIMEOUT_MINUTES = 3;
+// Mismo plazo para la convocatoria de un eventual a un evento (`convocatoriaTimeout.ts`).
+const TIMEOUT_MINUTES = CONVOCATORIA_TIMEOUT_MINUTES;
 
 // ─── Helper: crear notificación interna (dispara FCM via trigger) ─────────────
 
@@ -1609,6 +1611,15 @@ export const checkConvocatoriaTimeouts = onSchedule(
   async () => {
     const db = admin.firestore();
     const now = Timestamp.now();
+
+    // Convocatorias de eventuales a eventos (`solicitudes_evento` con `venceAt`): vencen con el mismo plazo.
+    try {
+      const { vencerConvocatoriasEventualesEvento } = await import('../eventuales/planificacionEventuales');
+      const vencidas = await vencerConvocatoriasEventualesEvento(now);
+      if (vencidas) console.log(`[checkConvocatoriaTimeouts] ${vencidas} convocatoria/s de eventual a evento vencida/s`);
+    } catch (e) {
+      console.error('[checkConvocatoriaTimeouts] eventos eventuales:', (e as Error).message);
+    }
 
     const timedOut = await db.collection('convocatorias_cobertura')
       .where('status', '==', 'PENDING')

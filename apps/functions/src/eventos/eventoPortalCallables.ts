@@ -76,6 +76,24 @@ async function assertPortalEmployee(
   return { uid: authUid, empId: resolved.empId, empData: resolved.empData, actingAsPreview: false };
 }
 
+async function legajoEsDelUid(
+  db: admin.firestore.Firestore,
+  empleadoId: string,
+  bolsaCuil: string,
+  uid: string,
+): Promise<boolean> {
+  if (!uid) return false;
+  if (empleadoId) {
+    const emp = await db.collection('empleados').doc(empleadoId).get();
+    if (emp.exists && String(emp.data()?.uid || '') === uid) return true;
+  }
+  if (bolsaCuil) {
+    const bolsa = await db.collection('eventuales_bolsa').doc(bolsaCuil).get();
+    if (bolsa.exists && String(bolsa.data()?.uid || '') === uid) return true;
+  }
+  return false;
+}
+
 function calcHorasServicio(tipoTurno: string, horaInicio: string, horaFin: string): number {
   if (tipoTurno === '3x8' || tipoTurno === '2x12') return 24;
   const [sh, sm] = horaInicio.split(':').map(Number);
@@ -102,8 +120,11 @@ export const respondEventoConvocatoria = functions.https.onCall(async (data, con
     throw new functions.https.HttpsError('not-found', 'Solicitud no encontrada.');
   }
   const sol = snap.data()!;
+  const esEventual = sol.esEventual === true;
   if (String(sol.empleadoId) !== empId) {
-    throw new functions.https.HttpsError('permission-denied', 'La convocatoria no es tuya.');
+    // El eventual tiene un legajo por empresa con el mismo uid: alcanza con que el legajo convocado sea suyo.
+    const esSuya = esEventual && await legajoEsDelUid(db, String(sol.empleadoId), String(sol.bolsaCuil || ''), context.auth!.uid);
+    if (!esSuya) throw new functions.https.HttpsError('permission-denied', 'La convocatoria no es tuya.');
   }
   if (sol.status !== 'convocado') {
     throw new functions.https.HttpsError('failed-precondition', 'La solicitud ya no espera tu respuesta.');
@@ -113,9 +134,47 @@ export const respondEventoConvocatoria = functions.https.onCall(async (data, con
     await ref.update({
       status: 'rechazada',
       respondidoAt: FieldValue.serverTimestamp(),
+      ...(esEventual ? { venceAt: FieldValue.delete() } : {}),
       ...(actingAsPreview ? { previewRespondedBy: context.auth!.uid } : {}),
     });
     return { success: true, status: 'rechazada' };
+  }
+
+  if (esEventual) {
+    // Recién al aceptar: turno EV + contrato + AT + código del anexo. Rechazo o vencimiento no generan nada.
+    const { aceptarConvocatoriaEventualEvento } = await import('../eventuales/planificacionEventuales');
+    const out = await aceptarConvocatoriaEventualEvento(solicitudId, sol, {
+      uid: context.auth!.uid,
+      email: typeof context.auth!.token.email === 'string' ? context.auth!.token.email : null,
+    });
+    const bolsa = (await db.collection('eventuales_bolsa').doc(String(sol.bolsaCuil || '')).get()).data() || {};
+    const guardUid = typeof bolsa.uid === 'string' && bolsa.uid ? bolsa.uid : context.auth!.uid;
+    const nombre = guardFirstName({ employeeName: String(sol.empleadoNombre || '') });
+    const anexoTexto = out.anexoEstado === 'PENDIENTE'
+      ? ' Te mandamos el código para aceptar el anexo.'
+      : out.anexoEstado === 'SIN_CANAL' ? ' RRHH te va a acercar el anexo.' : '';
+    await db.collection('user_notifications').add({
+      uid: guardUid,
+      employeeId: String(sol.empleadoId || ''),
+      empresaId: sol.empresaId || null,
+      type: 'EVENTO_CONFIRMADO',
+      target: 'employee',
+      title: 'Evento confirmado',
+      body: `${nombre ? `${nombre}, quedaste` : 'Quedaste'} en ${sol.servicioNombre || sol.eventoNombre}.${anexoTexto}`,
+      eventoId: sol.eventoId,
+      servicioId: sol.servicioId,
+      solicitudId,
+      contratoId: out.contratoId,
+      anexoEstado: out.anexoEstado,
+      read: false,
+      readAt: null,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+    return {
+      success: true,
+      status: 'aprobada',
+      eventual: { contratoId: out.contratoId, anexoEstado: out.anexoEstado, anexoMensaje: out.anexoMensaje, arcaCanal: out.arcaCanal, turnoIds: out.turnoIds },
+    };
   }
 
   const eventoSnap = await db.collection('eventos').doc(String(sol.eventoId)).get();

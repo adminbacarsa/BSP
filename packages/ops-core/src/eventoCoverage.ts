@@ -21,6 +21,8 @@ export type EventualCandidato = {
   confiabilidad: number;
   elegible?: boolean;
   motivo?: string;
+  /** Ficha con «Exigir contrato marco y habilitación» en OFF: convocable sin marco ni empresa habilitada. */
+  pruebasSinMarco?: boolean;
 };
 
 export type EventualBolsaRow = {
@@ -35,6 +37,8 @@ export type EventualBolsaRow = {
   uid?: string;
   legajos?: { employeeId?: string; empresaId?: string }[];
   marcos?: Record<string, { firmado?: boolean; vencimiento?: string; estado?: string; fechaFirma?: string }>;
+  /** Switch de pruebas de la ficha. Ausente = true. */
+  exigirMarco?: boolean;
 };
 
 export type EventualHueco = {
@@ -131,7 +135,8 @@ export function eventualesParaHueco(input?: EventualesHuecoInput | null): Eventu
     const cuil = String(row.cuil || '').trim();
     if (!cuil) continue;
     if (String(row.disponibilidad || 'DISPONIBLE').toUpperCase() !== 'DISPONIBLE') continue;
-    if (!(row.empresasHabilitadas || []).includes(hueco.empresaId)) continue;
+    const exigeMarco = row.exigirMarco !== false;
+    if (exigeMarco && !(row.empresasHabilitadas || []).includes(hueco.empresaId)) continue;
     if (!vigente(row.credencialVencimiento, hoy)) continue;
     const apto = row.aptoPsicofisico || {};
     if (String(apto.estado || '').trim().toUpperCase() !== 'APTO') continue;
@@ -142,10 +147,10 @@ export function eventualesParaHueco(input?: EventualesHuecoInput | null): Eventu
     );
     if (!cruce.ok) continue;
     const marco = (row.marcos || {})[hueco.empresaId];
-    const marcoOk = marco?.firmado === true
+    const marcoOk = !exigeMarco || (marco?.firmado === true
       && marco.estado !== 'VENCIDO'
       && marco.estado !== 'SIN_MARCO'
-      && (!marco.vencimiento || String(marco.vencimiento) >= hoy);
+      && (!marco.vencimiento || String(marco.vencimiento) >= hoy));
     const geo = row.domicilioGeo;
     const distanceKm = geo && hueco.lat != null && hueco.lng != null && Number.isFinite(geo.lat) && Number.isFinite(geo.lng)
       ? Math.round(haversineKm(Number(geo.lat), Number(geo.lng), Number(hueco.lat), Number(hueco.lng)) * 10) / 10
@@ -160,6 +165,7 @@ export function eventualesParaHueco(input?: EventualesHuecoInput | null): Eventu
       confiabilidad: Number(row.confiabilidad) || 0,
       elegible: marcoOk,
       ...(marcoOk ? {} : { motivo: 'Sin contrato marco' }),
+      ...(exigeMarco ? {} : { pruebasSinMarco: true, motivo: 'Pruebas: sin exigir marco' }),
     });
   }
   out.sort((a, b) => {

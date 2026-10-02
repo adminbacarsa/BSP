@@ -151,6 +151,8 @@ export default function EventualesPage() {
           primerIngreso: String(data.primerIngreso || ''),
           arcaHistorial: Array.isArray(data.arcaHistorial) ? data.arcaHistorial : [],
           marcos: (data.marcos && typeof data.marcos === 'object' ? data.marcos : {}) as Ficha['marcos'],
+          exigirMarco: data.exigirMarco !== false,
+          exigirAltaArca: data.exigirAltaArca !== false,
         };
       }));
     });

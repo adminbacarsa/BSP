@@ -3773,10 +3773,12 @@ export { gestionarMarcoEventual, pedirCodigoAnexoEventual, confirmarAnexoEventua
 export { subirMarcosLote } from './marcosLote/subirMarcosLote';
 export { acusarReciboContrato } from './eventuales/acusarReciboContrato';
 // Eventuales en Planificación/Eventos: candidatos de la bolsa, asignación, sustitución y contrato por turnos.
+// `convocarEventualEvento`: desde el evento se convoca (acepta en la app → turno EV + contrato + AT + anexo).
 export {
   listarCandidatosEventuales,
   asignarEventualPlanificacion,
   sustituirEventualPlanificacion,
+  convocarEventualEvento,
   onTurnoEventualWrite,
 } from './eventuales/planificacionEventuales';
 

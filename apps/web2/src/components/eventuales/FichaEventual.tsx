@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import {
-  ArrowLeft, Building2, Check, Download, FileText, FolderOpen, History, Home, KeyRound, Landmark, Mail, Pencil, Phone,
+  ArrowLeft, Building2, Check, Download, FileText, FlaskConical, FolderOpen, History, Home, KeyRound, Landmark, Mail, Pencil, Phone,
   RefreshCw, RotateCcw, ShieldAlert, Upload, User, UserX,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { TabBar } from '@/components/ui';
 import { RNOS_DEFAULT_FICHA } from '@/lib/eventuales/ficha.mjs';
+import { etiquetasPruebas, SWITCHES_PRUEBAS } from '@/lib/eventuales/pruebasSwitch.mjs';
 import {
   fmtFechaAr, humanizar, iniciales, opcionesVigenciaMarco, textoDisponibilidad, textoEstadoMarco, textoLegajo, textoObraSocial, VIGENCIA_MARCO_DEFAULT,
 } from '@/lib/eventuales/fichaUx.mjs';
@@ -36,6 +37,9 @@ export type FichaEventualData = {
   primerIngreso: string;
   arcaHistorial: { estado?: string; fecha?: string; origen?: string }[];
   marcos: Record<string, { firmado?: boolean; fechaFirma?: string; vigenciaDias?: number }>;
+  /** Switches de pruebas (ausente = true). */
+  exigirMarco: boolean;
+  exigirAltaArca: boolean;
 };
 
 export type MarcoVista = { estado?: string; vencimiento?: string; avisar?: boolean };
@@ -81,7 +85,35 @@ const HISTORIAL_LABEL: Record<string, string> = {
   EVENTUAL_CONTACTO: 'Datos de contacto importados',
   EVENTUAL_NOMINA: 'Nómina importada',
   EVENTUAL_DOC: 'Documento',
+  EVENTUAL_SWITCH_PRUEBAS: 'Switch de pruebas',
+  EVENTUAL_CONVOCADO_EVENTO: 'Convocado a evento',
+  EVENTUAL_ACEPTO_EVENTO: 'Aceptó evento',
+  EVENTUAL_CONVOCATORIA_VENCIDA: 'Convocatoria vencida',
 };
+
+type SwitchCampo = 'exigirMarco' | 'exigirAltaArca';
+
+function SwitchPrueba({ campo, label, ayuda, on, disabled, busy, onChange }: { campo: SwitchCampo; label: string; ayuda: string; on: boolean; disabled: boolean; busy: boolean; onChange: (valor: boolean) => void }) {
+  return (
+    <label data-switch={campo} data-on={on ? '1' : '0'} className={`flex items-start gap-3 rounded-xl border px-3 py-2 ${on ? 'border-slate-100 bg-slate-50/60' : 'border-fuchsia-200 bg-fuchsia-50/60'}`}>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
+        aria-label={label}
+        disabled={disabled || busy}
+        onClick={() => onChange(!on)}
+        className={`relative mt-0.5 h-5 w-9 shrink-0 rounded-full transition disabled:opacity-50 ${on ? 'bg-emerald-500' : 'bg-fuchsia-500'}`}
+      >
+        <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition ${on ? 'left-[18px]' : 'left-0.5'}`} />
+      </button>
+      <span className="min-w-0 flex-1">
+        <span className="block text-xs font-bold text-slate-800">{label} <span className={`ml-1 text-[10px] font-black ${on ? 'text-emerald-700' : 'text-fuchsia-700'}`}>{on ? 'ON' : 'OFF · pruebas'}</span></span>
+        <span className="block text-[10px] text-slate-500">{ayuda}</span>
+      </span>
+    </label>
+  );
+}
 
 function IconBtn({ title, onClick, children, tono = 'neutro', disabled }: { title: string; onClick: () => void; children: React.ReactNode; tono?: 'neutro' | 'primario' | 'peligro' | 'ok'; disabled?: boolean }) {
   const clases = {
@@ -122,6 +154,21 @@ export default function FichaEventual({ ficha, detalle, marcos, documentos, empr
   const [empresaMarco, setEmpresaMarco] = useState('');
   const [archivoMarco, setArchivoMarco] = useState<File | null>(null);
   const [guardandoEmpresa, setGuardandoEmpresa] = useState('');
+  const [guardandoSwitch, setGuardandoSwitch] = useState<SwitchCampo | ''>('');
+  const etiquetasPrueba = etiquetasPruebas(ficha) as string[];
+
+  const cambiarSwitch = async (campo: SwitchCampo, valor: boolean) => {
+    setGuardandoSwitch(campo);
+    try {
+      await llamar('gestionarEventual', { accion: 'switchesPruebas', cuil: ficha.id, [campo]: valor });
+      toast.success(valor ? 'Vuelve a exigirse.' : `Modo pruebas: ${SWITCHES_PRUEBAS.find((s) => s.campo === campo)?.etiquetaOff || 'sin exigir'}.`);
+      recargar();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo guardar el switch.');
+    } finally {
+      setGuardandoSwitch('');
+    }
+  };
 
   const nombreEmpresa = (id: string) => empresas.find((e) => e.id === id)?.nombre || 'Empresa';
   const habilitadas = ficha.empresasHabilitadas;
@@ -207,6 +254,9 @@ export default function FichaEventual({ ficha, detalle, marcos, documentos, empr
             <span className={`rounded-full border px-2 py-0.5 text-[10px] font-black ${noDisponible ? TONO.malo : TONO.ok}`}>{textoDisponibilidad(ficha.disponibilidad)}</span>
             {ficha.uid && <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-black text-indigo-700">Con acceso a la app</span>}
             {ficha.riesgoEncadenamiento && <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-black text-amber-800">Encadenamiento: {ficha.riesgoEncadenamiento}</span>}
+            {etiquetasPrueba.map((t) => (
+              <span key={t} data-pruebas="sin-marco" className="inline-flex items-center gap-1 rounded-full border border-fuchsia-200 bg-fuchsia-50 px-2 py-0.5 text-[10px] font-black text-fuchsia-800"><FlaskConical size={10} /> {t}</span>
+            ))}
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -281,7 +331,31 @@ export default function FichaEventual({ ficha, detalle, marcos, documentos, empr
                 })}
                 {empresas.length === 0 && <p className="text-xs text-slate-400">Cargando empresas…</p>}
               </div>
-              {habilitadas.length === 0 && <p className="mt-2 text-xs font-bold text-amber-700">Sin empresa habilitada: no se lo puede convocar.</p>}
+              {habilitadas.length === 0 && <p className="mt-2 text-xs font-bold text-amber-700">{ficha.exigirMarco ? 'Sin empresa habilitada: no se lo puede convocar.' : 'Sin empresa habilitada: igual se lo puede convocar (pruebas, sin exigir marco).'}</p>}
+            </div>
+
+            <div data-switches-pruebas>
+              <p className="mb-2 flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-slate-400"><FlaskConical size={11} /> Modo pruebas (solo SuperAdmin o RRHH con permiso)</p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <SwitchPrueba
+                  campo="exigirMarco"
+                  label="Exigir contrato marco y habilitación"
+                  ayuda="En OFF se lo puede convocar y puede aceptar sin marco vigente ni empresa habilitada, y no se bloquea por anexo."
+                  on={ficha.exigirMarco}
+                  disabled={!puede('update')}
+                  busy={guardandoSwitch === 'exigirMarco'}
+                  onChange={(v) => void cambiarSwitch('exigirMarco', v)}
+                />
+                <SwitchPrueba
+                  campo="exigirAltaArca"
+                  label="Exigir alta ARCA para fichar"
+                  ayuda="En OFF ficha aunque el alta AT no esté confirmada (sin número de transacción)."
+                  on={ficha.exigirAltaArca}
+                  disabled={!puede('update')}
+                  busy={guardandoSwitch === 'exigirAltaArca'}
+                  onChange={(v) => void cambiarSwitch('exigirAltaArca', v)}
+                />
+              </div>
             </div>
 
             <div>

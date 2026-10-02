@@ -126,6 +126,27 @@ check('modal: mismas funciones (assignGuardToEvent, solicitudes_evento)', modal.
 const panel = readFileSync(join(root, 'components/eventuales/EventualesCandidatosPanel.tsx'), 'utf8');
 check('panel eventuales: mensaje entendible + Reintentar', panel.includes("mensajeErrorCallable(e, 'No se pudo cargar la bolsa de eventuales.')") && panel.includes('Reintentar') && panel.includes('setIntento'));
 
+// ── Circuito eventual en evento: convocar → aceptar; estados Venció / anexo / ARCA; switch de pruebas ──
+check('estado: vencida → Venció', P.estadoSolicitudUi({ status: 'vencida' }).key === 'VENCIO' && chip({ status: 'vencida' }).includes('data-estado="VENCIO"') && chip({ status: 'vencida' }).includes('Venció'));
+const detPend = P.detalleEventualUi({ esEventual: true, status: 'aprobada', anexoEstado: 'PENDIENTE_ACEPTACION', arcaCanal: 'URGENTE' }, { eventualAltaArcaConfirmada: false });
+check('detalle eventual: anexo pendiente + ARCA pendiente urgente', detPend.anexo?.label === 'Anexo pendiente' && /ARCA pendiente/.test(detPend.arca?.label || '') && /urgente/i.test(detPend.arca?.label || '') && detPend.pruebas === null);
+const detOk = P.detalleEventualUi({ esEventual: true, status: 'aprobada', anexoEstado: 'FIRMADO' }, { eventualAltaArcaConfirmada: true, nroTransaccion: 'TX-1' });
+check('detalle eventual: anexo firmado + ARCA confirmada con Nº', detOk.anexo?.label === 'Anexo firmado' && detOk.anexo?.tono === 'ok' && /ARCA confirmada/.test(detOk.arca?.label || '') && /TX-1/.test(detOk.arca?.label || ''));
+const detPruebas = P.detalleEventualUi({ esEventual: true, status: 'aprobada', anexoEstado: 'NO_EXIGIDO', pruebasSinMarco: true, etiquetasPruebas: ['Pruebas: sin exigir marco'] }, { eventualAltaArcaConfirmada: false, eventualExigirAltaArca: false });
+check('detalle eventual: pruebas → anexo no exigido, ARCA ficha igual', /no exigido/i.test(detPruebas.anexo?.label || '') && /ficha igual/i.test(detPruebas.arca?.label || '') && detPruebas.pruebas === 'Pruebas: sin exigir marco');
+const linea = renderToStaticMarkup(createElement(UI.EventualEstadoLinea, { sol: { esEventual: true, status: 'aprobada', anexoEstado: 'PENDIENTE_ACEPTACION', arcaCanal: 'URGENTE', pruebasSinMarco: true }, turno: { eventualAltaArcaConfirmada: false } }));
+check('línea eventual en Estado: Eventual + Pruebas + anexo + ARCA', linea.includes('data-eventual-detalle') && linea.includes('Eventual') && linea.includes('data-pruebas="sin-marco"') && linea.includes('data-anexo') && linea.includes('Anexo pendiente') && linea.includes('data-arca') && linea.includes('ARCA pendiente'));
+const lineaNo = renderToStaticMarkup(createElement(UI.EventualEstadoLinea, { sol: { esEventual: false, status: 'aprobada' }, turno: null }));
+check('línea eventual no se pinta para nómina', !lineaNo.includes('data-eventual-detalle'));
+const badge = renderToStaticMarkup(createElement(UI.PruebasBadge, { compact: true }));
+check('PruebasBadge: texto fijo', badge.includes('data-pruebas="sin-marco"') && badge.includes('Pruebas: sin exigir marco'));
+check('modal: eventual se CONVOCA (no asignación directa) y Estado muestra vencidas', modal.includes('convocarEventualEvento({') && !modal.includes('asignarEventualPlanificacion(') && modal.includes('<EventualEstadoLinea') && modal.includes("s.status === 'vencida'") && modal.includes('Vencieron sin responder'));
+check('panel candidatos: marca Pruebas: sin exigir marco', panel.includes('c.pruebasSinMarco') && panel.includes('<PruebasBadge'));
+const csm = readFileSync(join(root, 'components/operaciones/CoverageSessionManager.tsx'), 'utf8');
+check('CC: la fila del eventual marca Pruebas: sin exigir marco', csm.includes('row.pruebasSinMarco') && csm.includes('Pruebas: sin exigir marco'));
+const ficha = readFileSync(join(root, 'components/eventuales/FichaEventual.tsx'), 'utf8');
+check('ficha escritorio: dos switches por gestionarEventual switchesPruebas, solo con update', ficha.includes("accion: 'switchesPruebas'") && ficha.includes('Exigir contrato marco y habilitación') && ficha.includes('Exigir alta ARCA para fichar') && ficha.includes("puede('update')") && ficha.includes('data-switches-pruebas'));
+
 rmSync(outdir, { recursive: true, force: true });
 if (failed) {
   console.error(failed, 'fallos');
