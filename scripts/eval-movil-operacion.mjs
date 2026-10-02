@@ -419,6 +419,87 @@ check('etiqueta del chip', F.etiquetaAmbito({ clientId: 'c1', objectiveId: null 
 check('mensaje de lista vacía', F.mensajeVacio({ estado: 'AUSENTES', clientId: 'c2', objectiveId: null }, clientesF) === 'Sin guardias en AUS para Malagueño' && F.mensajeVacio({ estado: 'RETENIDOS', clientId: null, objectiveId: null }, clientesF) === 'Sin guardias en RET');
 const gruposF = F.agruparPorObjetivo(F.turnosFiltrados(visiblesF, F.FILTRO_VACIO, NOW_F), NOW_F);
 check('agrupado por objetivo, evento aparte y criticidad primero', gruposF.map((g) => g.name).join('|') === 'Peaje 9 Norte|CET Río Ceballos|Obrador Malagueño|Evento: Fiesta patronal' && gruposF[3].esEvento && gruposF[0].shifts.length === 6);
+// ── Eventos en el CC: el evento es su propio punto (lista, celular y mapa), nunca el objetivo de base ──
+const EC = await importFront('lib/operaciones/eventoCc.ts');
+const baseEv = { empresa: 'Pruebas S.A.', modeLabel: 'Manual', online: true, pendingLabel: null, now: NOW_F.getTime(), panel: 'home', alerts: [], objective: null, onAmbito: () => {}, onQuitarAmbito: () => {}, ...noops };
+const MM = await importFront('lib/operaciones/mapMarkersBuild.ts');
+const MI = await importFront('lib/operaciones/mapMarkerIcons.ts');
+const objetivosGeo = [
+  { id: 'peaje', name: 'Peaje 9 Norte', clientId: 'c1', clientName: 'Ruta 9', lat: -31.3, lng: -64.2 },
+  { id: 'plaza', name: 'Plaza de la Música', clientId: 'c3', clientName: 'Municipalidad', lat: -31.41, lng: -64.19 },
+];
+const eventosDoc = [{
+  id: 'pumas', nombre: 'pumas', clienteId: 'c3', clienteNombre: 'Municipalidad', fecha: '2026-10-01', status: 'activo',
+  servicios: [
+    { id: 's1', nombre: 'Control acceso', ubicacion: { tipo: 'objetivo_existente', objectiveId: 'plaza', objectiveNombre: 'Plaza de la Música' } },
+    { id: 's2', nombre: 'Playón', ubicacion: { tipo: 'nueva', direccion: 'Av. Costanera 2000', latitud: -31.4, longitud: -64.18 } },
+  ],
+}];
+const eventosMap = EC.buildEventosMap(eventosDoc);
+const geoMap = EC.buildObjetivoGeoMap(objetivosGeo);
+const evFx = (over) => ({ code: 'EV', origin: 'EVENTO', eventoId: 'pumas', eventoNombre: 'pumas', servicioId: 's1', servicioNombre: 'Control acceso', shiftDateObj: ar('15:00'), endDateObj: ar('23:00'), phone: '351', ...over });
+// Shape A (viejo): objectiveId = objetivo de BASE del guardia, positionName = puesto SLA que quedó pegado.
+const evA = evFx({ id: 'evA', ...ruta9, objectiveId: 'peaje', objectiveName: 'Peaje 9 Norte', positionName: 'Puesto 1', employeeId: 'e1', employeeName: 'Baez, Juan', isPresent: true, realStartTime: ar('15:00') });
+// Shape B (viejo): sin objectiveId (eventual de la bolsa); todavía no fichó y está en ventana.
+const evB = evFx({ id: 'evB', objectiveId: null, objectiveName: null, clientId: 'c3', clientName: 'Municipalidad', positionName: 'Control acceso', employeeId: 'ev9', employeeName: 'Quiroga, Sol', esEventual: true, shiftDateObj: ar('15:30'), isFuture: true });
+// Shape C (viejo): objectiveId = objetivo del evento; ausente.
+const evC = evFx({ id: 'evC', objectiveId: 'plaza', objectiveName: 'Plaza de la Música', clientId: 'c3', clientName: 'Municipalidad', positionName: 'Control acceso', employeeId: 'e3', employeeName: 'Sosa, Carla', isAbsent: true });
+// Shape nuevo (unificado): eventoId + servicioId + positionName = servicio + objectiveId = objetivo del evento; tarde sin aviso.
+const evD = evFx({ id: 'evD', servicioId: 's2', servicioNombre: 'Playón', objectiveId: 'plaza', objectiveName: 'Plaza de la Música', clientId: 'c3', clientName: 'Municipalidad', positionName: 'Playón', employeeId: 'e6', employeeName: 'Lopez, Ana', isLateUnnotified: true });
+// Sin doc del evento y sin coords: aparece en la lista pero no tiene pin. Con coords en el turno: pin desde el turno.
+const evE = evFx({ id: 'evE', eventoId: 'fantasma', eventoNombre: 'Sin doc', servicioId: null, servicioNombre: null, ...ruta9, objectiveId: 'peaje', objectiveName: 'Peaje 9 Norte', positionName: 'Puesto 2', employeeId: 'e7', employeeName: 'Perez, Hugo', isPresent: true });
+const evF = evFx({ id: 'evF', eventoId: 'conCoords', eventoNombre: 'Feria', servicioId: 'f1', servicioNombre: 'Ingreso', objectiveId: null, clientId: 'c4', clientName: 'Feria SRL', positionName: 'Ingreso', eventoLat: -31.5, eventoLng: -64.3, eventoObjectiveName: 'Predio Ferial', employeeId: 'e8', employeeName: 'Diaz, Rosa', isPresent: true });
+const regularPeaje = fx({ id: 'pp1', ...ruta9, objectiveId: 'peaje', objectiveName: 'Peaje 9 Norte', employeeId: 'e2', employeeName: 'Guerrero, Martín', code: 'T', isPresent: true, realStartTime: ar('15:02') });
+const enriquecidos = [evA, evB, evC, evD, evE, evF].map((s) => EC.enrichEventShift(s, eventosMap, geoMap));
+const [eA, eB, eC, eD, eE, eF] = enriquecidos;
+check('EV con objectiveId de base: la ubicación es la del evento (objetivo del evento), nunca Peaje', eA.eventoObjectiveId === 'plaza' && eA.eventoLat === -31.41 && eA.eventoLng === -64.19 && eA.eventoLugar === 'Plaza de la Música' && eA.eventoClientName === 'Municipalidad' && eA.objectiveId === 'peaje');
+check('EV sin objectiveId: igual resuelve el lugar del evento', eB.eventoObjectiveId === 'plaza' && eB.eventoLat === -31.41 && eB.eventoLugar === 'Plaza de la Música');
+check('EV con objectiveId del evento: mismo lugar', eC.eventoObjectiveId === 'plaza' && eC.eventoLat === -31.41);
+check('shape nuevo: servicio con coords propias (ubicación nueva) sale del doc del evento', eD.eventoLat === -31.4 && eD.eventoLng === -64.18 && eD.eventoLugar === 'Av. Costanera 2000' && eD.eventoObjectiveId === null);
+check('sin doc del evento no se asume el objetivo de base como lugar', eE.eventoObjectiveId === null && eE.eventoLat === null && eE.eventoLugar === null);
+check('sin doc pero con coords en el turno: el lugar sale del turno', eF.eventoLat === -31.5 && eF.eventoLng === -64.3 && eF.eventoLugar === 'Predio Ferial' && eF.eventoUbicacionSource === 'turno');
+check('un M/T/N con eventoId suelto no es evento; la etiqueta del servicio ignora el puesto SLA pegado', !EC.isEventShift({ code: 'M', eventoId: 'x' }) && EC.eventServicioLabel(eA) === 'Control acceso' && EC.shiftPlaceLabel(eA) === 'Plaza de la Música' && EC.shiftPlaceLabel(regularPeaje) === 'Peaje 9 Norte');
+check('etiqueta y clave del grupo: «Evento: pumas · Control acceso»', EC.eventGroupLabel(eA) === 'Evento: pumas · Control acceso' && EC.eventGroupKey(eA) === 'EV_pumas_s1' && EC.eventGroupKey(eB) === EC.eventGroupKey(eA) && EC.eventGroupKey(eD) === 'EV_pumas_s2' && EC.eventGroupLabel(eE) === 'Evento: Sin doc');
+const gruposEv = EC.buildEventoGroups([...enriquecidos, regularPeaje], NOW_F);
+const gS1 = gruposEv.find((g) => g.eventKey === 'EV_pumas_s1');
+check('grupos por evento · servicio con contadores (A activo, B plan, C ausente) y lugar del evento', gruposEv.length === 4 && gS1 && gS1.shifts.length === 3 && gS1.active === 1 && gS1.absent === 1 && gS1.plan === 1 && gS1.lugar === 'Plaza de la Música' && gS1.client === 'Municipalidad' && gS1.clientId === 'c3' && gS1.criticalShift?.id === 'evC' && gruposEv[0].eventKey === 'EV_pumas_s1');
+const estadosEv = Object.fromEntries(enriquecidos.map((s) => [s.id, EC.estadoGuardiaEvento(s, NOW_F).estado]));
+check('estado del guardia en el evento: presente, sin fichar, ausente, tarde', estadosEv.evA === 'PRESENTE' && estadosEv.evB === 'SIN_FICHAR' && estadosEv.evC === 'AUSENTE' && estadosEv.evD === 'TARDE');
+const markers = MM.buildOperacionesMapMarkers(objetivosGeo, [...enriquecidos, regularPeaje], NOW_F);
+const mPeaje = markers.find((m) => m.id === 'peaje');
+const mS1 = markers.find((m) => m.id === 'EV_pumas_s1');
+const mS2 = markers.find((m) => m.id === 'EV_pumas_s2');
+const mF = markers.find((m) => m.id === 'EV_conCoords_f1');
+check('el objetivo de base ya no dice «· Evento» ni cuenta al EV', mPeaje && mPeaje.name === 'Peaje 9 Norte' && !mPeaje.isEvent && mPeaje.shifts.length === 1 && mPeaje.shifts[0].id === 'pp1' && mPeaje.statusText === 'ACTIVO');
+check('pin propio del evento en la ubicación del evento, con los guardias de cualquier origen', mS1 && mS1.isEvent && mS1.name === 'pumas' && mS1.subtitle === 'Evento: pumas · Control acceso' && mS1.lugar === 'Plaza de la Música' && mS1.shifts.map((s) => s.id).sort().join(',') === 'evA,evB,evC' && Math.abs(mS1.lat - -31.41) < 0.01 && Math.abs(mS1.lng - -64.19) < 0.01 && mS1.layerOrder === 2);
+check('pin del evento: ícono distinto y estado agregado (ausente → alerta; tarde → amarillo)', mS1.iconPreset === 'EVENT_ALERT' && mS1.statusText === 'EVENTO · 1 aus' && mS1.eventoResumen.presentes === 1 && mS1.eventoResumen.sinFichar === 1 && mS1.eventoResumen.ausentes === 1 && mS2 && mS2.iconPreset === 'EVENT_LATE' && mS2.lat === -31.4 && MI.isEventMarkerPreset('EVENT') && !MI.isEventMarkerPreset('GREEN') && MI.buildOperacionesMarkerIcon('EVENT').url !== MI.buildOperacionesMarkerIcon('AMBER').url);
+check('sin ubicación no hay pin (el evento igual está en la lista); con coords en el turno sí', !markers.some((m) => m.id.startsWith('EV_fantasma')) && mF && mF.lat === -31.5 && mF.client === 'Feria SRL' && gruposEv.some((g) => g.eventKey === 'EV_fantasma_sin_servicio'));
+check('un objetivo que solo tiene un EV queda sin actividad en el mapa (el EV está en el evento)', (() => { const only = MM.buildOperacionesMapMarkers(objetivosGeo, [eA], NOW_F).find((m) => m.id === 'peaje'); return only && only.statusText === 'S/A' && !only.hasShift; })());
+// Celular: mismo grupo, mismo lugar, filtros por el objetivo/cliente del evento
+const visEv = F.turnosVisiblesMovil([...enriquecidos, regularPeaje], pruebasSaPublicado);
+check('celular: EV sin objectiveId y sin mes publicado igual entra (origen operativo)', visEv.length === 7 && visEv.some((s) => s.id === 'evB'));
+const gruposMovEv = F.agruparPorObjetivo(visEv, NOW_F);
+const gMov = gruposMovEv.find((g) => g.objectiveId === 'EV_pumas_s1');
+check('celular agrupa «Evento: pumas · Control acceso» con lugar y cliente del evento, aparte del Peaje', gMov && gMov.esEvento && gMov.name === 'Evento: pumas · Control acceso' && gMov.lugar === 'Plaza de la Música' && gMov.client === 'Municipalidad' && gMov.shifts.length === 3 && gruposMovEv.find((g) => g.objectiveId === 'peaje')?.shifts.length === 1);
+check('celular: filtrar por Peaje no trae el EV de Baez; filtrar por la Plaza o la Municipalidad sí', !F.enAmbito(eA, { clientId: null, objectiveId: 'peaje' }) && F.enAmbito(eA, { clientId: null, objectiveId: 'plaza' }) && F.enAmbito(eA, { clientId: 'c3', objectiveId: null }) && !F.enAmbito(eA, { clientId: 'c1', objectiveId: null }) && F.enAmbito(regularPeaje, { clientId: 'c1', objectiveId: 'peaje' }));
+const clientesEv = F.clientesParaFiltro(visEv, objetivosGeo);
+// Plaza: evA, evB y evC (el Playón tiene coords propias, cuenta solo para el cliente). Peaje: solo el T regular.
+check('celular: el selector cuenta el EV en el objetivo del evento, no en el de base', clientesEv.find((c) => c.id === 'c3')?.objetivos.find((o) => o.id === 'plaza')?.turnos === 3 && clientesEv.find((c) => c.id === 'c3')?.turnos === 4 && clientesEv.find((c) => c.id === 'c1')?.objetivos.find((o) => o.id === 'peaje')?.turnos === 1);
+const contEv = F.contadoresMovil(visEv, F.FILTRO_VACIO, NOW_F);
+check('contadores ACT/PLA/TAR/AUS cuentan a los guardias del evento', contEv.ACTIVOS === 4 && contEv.PLAN === 1 && contEv.NO_LLEGO === 1 && contEv.AUSENTES === 1);
+check('detalle del guardia del EV muestra el lugar del evento, no el Peaje', guardDetalle(eA, [], NOW_F.getTime()).objetivo === 'Plaza de la Música');
+const homeEv = render(OperacionScreens, { ...baseEv, filtro: F.FILTRO_VACIO, contadores: contEv, grupos: gruposMovEv, objectives: gruposMovEv.filter((o) => o.active + o.retention + o.absent + o.vacant + o.plan > 0), ambitoLabel: null, vacioLabel: null });
+check('home 390: tarjeta del evento con estrella y lugar', homeEv.includes('data-movil-evento-card="1"') && homeEv.includes('Evento: pumas · Control acceso') && homeEv.includes('Municipalidad · Plaza de la Música'));
+const panelEv = render(OperacionScreens, { ...baseEv, filtro: F.FILTRO_VACIO, contadores: contEv, grupos: [], objectives: gruposMovEv, objective: gMov, panel: 'objetivo', ambitoLabel: null, vacioLabel: null });
+check('panel del evento: encabezado del evento y sus 3 guardias', panelEv.includes('data-movil-evento="1"') && (panelEv.match(/data-movil-detalle=/g) || []).length === 3 && panelEv.includes('BAEZ Juan') && panelEv.includes('QUIROGA Sol'));
+const ausEvHtml = render(OperacionScreens, { ...baseEv, filtro: { ...F.FILTRO_VACIO, estado: 'AUSENTES' }, contadores: contEv, grupos: F.agruparPorObjetivo(F.turnosFiltrados(visEv, { ...F.FILTRO_VACIO, estado: 'AUSENTES' }, NOW_F), NOW_F), objectives: gruposMovEv, ambitoLabel: null, vacioLabel: null });
+check('AUS agrupa a la ausente bajo el evento', ausEvHtml.includes('data-movil-grupo="EV_pumas_s1"') && ausEvHtml.includes('data-movil-grupo-evento="1"') && ausEvHtml.includes('SOSA Carla'));
+const monitorSrc = readFileSync(join(web2, 'src/hooks/useOperacionesMonitor.ts'), 'utf8');
+const ccSrc = readFileSync(join(web2, 'src/pages/admin/operaciones/index.tsx'), 'utf8');
+const markersHookSrc = readFileSync(join(web2, 'src/hooks/useOperacionesMapMarkers.ts'), 'utf8');
+check('monitor: escucha eventos, no pierde el EV sin puesto y le pega la ubicación del evento', monitorSrc.includes("collection(db, 'eventos')") && monitorSrc.includes('eventServicioLabel(shift)') && monitorSrc.includes('eventoEnrichFields(shift, eventosById, objGeoMap)') && monitorSrc.includes('!isEventShift(s)'));
+check('CC y mapa usan la misma pieza (eventoCc / mapMarkersBuild) y no queda «· Evento» en el objetivo', ccSrc.includes("from '@/lib/operaciones/eventoCc'") && !ccSrc.includes('const isEventShift = ') && ccSrc.includes('buildEventoGroups(hoy, now)') && markersHookSrc.includes('buildOperacionesMapMarkers') && !readFileSync(join(web2, 'src/lib/operaciones/mapMarkersBuild.ts'), 'utf8').includes('· Evento`'));
+
 const memoria = new Map();
 const storageF = { getItem: (k) => memoria.get(k) ?? null, setItem: (k, v) => memoria.set(k, v), removeItem: (k) => memoria.delete(k) };
 F.guardarFiltro('pruebas_sa', { estado: 'AUSENTES', clientId: 'c1', objectiveId: null }, storageF);
@@ -758,7 +839,7 @@ check('primer plano: notificación persistente con requireInteraction, vibrate y
 const novSrc = readFileSync(join(repo, 'apps/functions/src/notifications/onNovedadCreated.ts'), 'utf8');
 check('onNovedadCreated: ausencia, retención larga, tope 12:59, convocatoria rechazada y sin candidato con deep-link', ['AUSENCIA_AUTO', 'RETENCION_LARGA', 'TOPE_JORNADA', 'CONVOCATORIA_RECHAZADA', 'VACANTE_SIN_COBERTURA', 'SIN_COBERTURA'].every((t) => novSrc.includes(`'${t}'`)) && novSrc.includes('vibrate: [300, 120, 300]') && novSrc.includes('fcmOptions: { link }'));
 const movilSrc = readFileSync(join(web2, 'src/components/movil/OperacionMovil.tsx'), 'utf8');
-check('OperacionMovil: ?shiftId abre el objetivo y la hoja de acciones del turno', movilSrc.includes('router.query.shiftId') && movilSrc.includes('setAccionesShiftId(shift.id)') && movilSrc.includes('setSelectedId(esTurnoEvento(shift)'));
+check('OperacionMovil: ?shiftId abre el objetivo y la hoja de acciones del turno', movilSrc.includes('router.query.shiftId') && movilSrc.includes('setAccionesShiftId(shift.id)') && movilSrc.includes('setSelectedId(claveGrupo(shift))'));
 
 // ── Estilo del panel (components/movil/ui): barra oscura, encabezado RRHH, KPIs, tarjetas, píldoras ──
 const UI = await importFront('components/movil/ui/index.ts');

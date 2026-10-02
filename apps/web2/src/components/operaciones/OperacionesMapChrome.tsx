@@ -6,7 +6,7 @@ const LEGEND: { color: string; label: string }[] = [
   { color: '#f59e0b', label: 'Tarde' },
   { color: '#e11d48', label: 'Vacante / Ausente' },
   { color: '#f97316', label: 'Retención' },
-  { color: '#d97706', label: 'Evento' },
+  { color: '#d97706', label: 'Evento (pin ★)' },
   { color: '#7c3aed', label: 'Devuelto' },
   { color: '#3b82f6', label: 'Franco' },
   { color: '#64748b', label: 'Sin turno' },

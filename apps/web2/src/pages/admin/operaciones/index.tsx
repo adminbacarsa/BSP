@@ -80,6 +80,15 @@ import { convocadoEnCaminoLabel } from '@/lib/operaciones/convocadoVentana';
 import { formatOpsNotaLine } from '@/lib/operaciones/opsNota';
 import { ConvocatoriaTimeline } from '@/components/operaciones/ConvocatoriaTimeline';
 import { isExtraNonReliefShift, isReliefEligibleShift, formatRetentionDuration, formatRetentionLine } from '@cosp/ops-core';
+import {
+    isEventShift,
+    eventGroupKey as getEventGroupKey,
+    eventGroupLabel as getEventGroupLabel,
+    eventServicioLabel,
+    eventClientName,
+    buildEventoGroups,
+    shiftPlaceLabel,
+} from '@/lib/operaciones/eventoCc';
 import { SeriesReliefPicker } from '@/components/operaciones/SeriesReliefPicker';
 import { ShiftCodeBadge } from '@/components/operaciones/ShiftCodeBadge';
 import { canRevertAbsenceNow, isRevertAbsenceExpired } from '@/lib/operaciones/revertAbsenceWindow';
@@ -1064,34 +1073,13 @@ const ManualRetentionModal = ({ isOpen, onClose, shift }: any) => {
     );
 };
 
-/** Solo turnos realmente de evento (EV). No alcanza con eventoId suelto en un M/T/N. */
-const isEventShift = (shift: any): boolean => {
-    const code = String(shift?.code || '').trim().toUpperCase();
-    const origin = String(shift?.origin || '').trim().toUpperCase();
-    return code === 'EV' || origin === 'EVENTO';
-};
-
-const getEventGroupKey = (shift: any): string => {
-    const eventoId = String(shift?.eventoId || '').trim();
-    const servicioId = String(shift?.servicioId || '').trim();
-    if (eventoId || servicioId) return `EV_${eventoId || 'sin_evento'}_${servicioId || 'sin_servicio'}`;
-    const eventoNombre = String(shift?.eventoNombre || '').trim();
-    const servicioNombre = String(shift?.servicioNombre || '').trim();
-    return `EVNAME_${eventoNombre || 'evento'}_${servicioNombre || 'servicio'}`;
-};
-
-const getEventGroupLabel = (shift: any): string => {
-    const evento = String(shift?.eventoNombre || '').trim() || 'Evento sin nombre';
-    const servicio = String(shift?.servicioNombre || '').trim();
-    if (servicio) return `Evento: ${evento} · ${servicio}`;
-    return `Evento: ${evento}`;
-};
-
-/** En EV mostrar el servicio del evento, no el puesto SLA que quedó pegado al convertir. */
+/**
+ * Eventos en el CC: `isEventShift`, `getEventGroupKey`, `getEventGroupLabel` vienen de
+ * `lib/operaciones/eventoCc.ts` (misma lógica en lista, celular y mapa).
+ * En EV mostrar el servicio del evento, no el puesto SLA que quedó pegado al convertir.
+ */
 const shiftPostLabel = (shift: any): string => {
-    if (isEventShift(shift)) {
-        return String(shift?.servicioNombre || shift?.eventoNombre || shift?.positionName || 'Evento').trim();
-    }
+    if (isEventShift(shift)) return eventServicioLabel(shift);
     return String(shift?.positionName || '—').trim();
 };
 
@@ -1235,7 +1223,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                     )}
                 </div>
                 <div className="flex items-center gap-1.5 text-[9px] text-slate-400 leading-tight mt-0.5">
-                    <span className="truncate">{shift.objectiveName} · <span className="text-indigo-500">{shiftPostLabel(shift)}</span></span>
+                    <span className="truncate">{shiftPlaceLabel(shift)} · <span className="text-indigo-500">{shiftPostLabel(shift)}</span></span>
                     <span className={`shrink-0 font-bold ${dayInlineClass}`}>{dayTag.label}</span>
                     <span className="shrink-0 font-mono">{displayShiftTimeRange(shift)}</span>
                     {convocadoCuenta && <span className="shrink-0 font-bold text-indigo-600">{convocadoCuenta}</span>}
@@ -1309,7 +1297,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                                 <span className="truncate">{name}</span>
                                 {!shift.isUnassigned && <PuntajeChip sujetoId={String((shift as { bolsaCuil?: string }).bolsaCuil || shift.employeeId || '')} />}
                             </span>
-                            <span className="text-[10px] text-slate-400">{shift.clientName || shift.objectiveName}</span>
+                            <span className="text-[10px] text-slate-400">{isEventShift(shift) ? (eventClientName(shift) || shiftPlaceLabel(shift)) : (shift.clientName || shift.objectiveName)}</span>
                         </div>
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">{dayTagEl}{badge}{altaArcaPendienteVisible(shift, now) && (
@@ -1319,7 +1307,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                 {/* Fila 2: objetivo · posición */}
                 <div className="flex items-center gap-2 text-[10px] text-slate-500 mb-1.5 pl-10">
                     <MapPin size={10} className="text-indigo-400 shrink-0"/>
-                    <span className="truncate font-medium">{shift.objectiveName}</span>
+                    <span className="truncate font-medium">{shiftPlaceLabel(shift)}</span>
                     <span className="text-slate-300">·</span>
                     <span className="text-indigo-600 font-bold truncate inline-flex items-center gap-1">{shiftPostLabel(shift)}<ShiftCodeBadge shift={shift} /></span>
                     {shift.turaContiguous && shift.turaImputationPos && (
@@ -1647,7 +1635,11 @@ function OpsObjectiveGridCard({
 const ObjectiveGroup = ({ group, modals, isCompact, onReport, viewTab, onOpenWorkedFranco, onNovedadAbsence, onOpenWA, onOpenAbsenceDecision, onOpenRRHH, isAutoMode, isPublished, layoutGrid }: any) => {
     const [expanded, setExpanded] = useState(!layoutGrid);
     const cardRef = useRef<HTMLDivElement>(null);
-    const split = useMemo(() => splitShiftsByEvent(group.items || []), [group.items]);
+    // El grupo del evento ya es propio (groupedList): sus guardias van directo, sin sub-bloque.
+    const split = useMemo(
+        () => (group.isEvent ? { regular: group.items || [], eventGroups: [] as ReturnType<typeof splitShiftsByEvent>['eventGroups'] } : splitShiftsByEvent(group.items || [])),
+        [group.items, group.isEvent],
+    );
     const expandedBody = (
         <div className="p-2 bg-slate-50 space-y-2">
             {split.eventGroups.length > 0 && (
@@ -1694,7 +1686,7 @@ const ObjectiveGroup = ({ group, modals, isCompact, onReport, viewTab, onOpenWor
                 ref={cardRef}
                 className={`bg-white rounded-xl border shadow-sm overflow-hidden min-w-0 ${layoutGrid ? 'mb-0' : 'mb-3'} ${isPublished === false ? 'border-amber-300' : 'border-slate-300'} ${expanded && layoutGrid ? 'ring-2 ring-indigo-300 shadow-lg' : ''}`}
             >
-                <div className={`px-3 py-2 border-b flex justify-between items-center cursor-pointer ${isPublished === false ? 'bg-amber-50 border-amber-200 hover:bg-amber-100' : 'bg-slate-100 border-slate-200 hover:bg-slate-200'}`} onClick={() => setExpanded(!expanded)}>
+                <div className={`px-3 py-2 border-b flex justify-between items-center cursor-pointer ${group.isEvent ? 'bg-amber-50 border-amber-200 hover:bg-amber-100' : isPublished === false ? 'bg-amber-50 border-amber-200 hover:bg-amber-100' : 'bg-slate-100 border-slate-200 hover:bg-slate-200'}`} onClick={() => setExpanded(!expanded)}>
                     <div className="flex items-center gap-2 min-w-0">
                         <div className="bg-slate-700 text-white w-5 h-5 rounded flex items-center justify-center text-[10px] font-black shrink-0">{group.items.length}</div>
                         <div className="min-w-0">
@@ -3532,7 +3524,15 @@ export default function OperacionesPage() {
     const groupedList = useMemo(() => {
         if (!isGrouped) return [];
         const groups: Record<string, any> = {};
-        logic.listData.forEach((s: any) => { const k = s.objectiveId || 'unknown'; if (!groups[k]) groups[k] = { id: k, name: s.objectiveName || 'Sin Objetivo', client: s.clientName || 'Cliente', items: [] }; groups[k].items.push(s); });
+        logic.listData.forEach((s: any) => {
+            // EV: grupo propio del evento, nunca el objetivo de base del guardia.
+            const ev = isEventShift(s);
+            const k = ev ? getEventGroupKey(s) : (s.objectiveId || 'unknown');
+            if (!groups[k]) groups[k] = ev
+                ? { id: k, name: getEventGroupLabel(s), client: eventClientName(s) || 'Evento', isEvent: true, items: [] }
+                : { id: k, name: s.objectiveName || 'Sin Objetivo', client: s.clientName || 'Cliente', items: [] };
+            groups[k].items.push(s);
+        });
         return Object.values(groups).sort((a: any, b: any) => {
             const cmp = (a.client || '').localeCompare(b.client || '');
             return cmp !== 0 ? cmp : (a.name || '').localeCompare(b.name || '');
@@ -3591,43 +3591,17 @@ export default function OperacionesPage() {
         return logic.processedData.filter((s: any) => isOpsShiftHoy(s, now));
     }, [logic.processedData]);
 
+    /**
+     * Eventos del día agrupados «Evento: {evento} · {servicio}» (`buildEventoGroups`: la misma pieza
+     * que usan el celular y el pin del mapa). El cliente es el del evento, no el de base del guardia.
+     */
     const eventsWithAlerts = useMemo(() => {
         const now = new Date();
-        const map = new Map<string, any>();
         const hoy = logic.processedData.filter((s: any) => isOpsShiftHoy(s, now));
-        hoy.forEach((s: any) => {
-            if (!isEventShift(s)) return;
-            if (s.isFranco) return;
-            const key = getEventGroupKey(s);
-            if (!map.has(key)) {
-                map.set(key, {
-                    eventKey: key,
-                    label: getEventGroupLabel(s),
-                    objectiveName: s.objectiveName || '—',
-                    client: s.clientName || '',
-                    clientId: s.clientId || '',
-                    active: 0, absent: 0, vacant: 0, retention: 0, plan: 0, total: 0,
-                    criticalShift: null as any,
-                    shifts: [] as any[],
-                });
-            }
-            const ev = map.get(key)!;
-            ev.total++;
-            ev.shifts.push(s);
-            if (s.isRetention || s.isPendingRetention)     ev.retention++;
-            else if (s.isPresent && !s.isCompleted)        ev.active++;
-            else if (s.isAbsent || s.isPotentialAbsence) { ev.absent++; if (!ev.criticalShift) ev.criticalShift = s; }
-            else if (isActionableOpsVacancy(s))           { ev.vacant++; if (!ev.criticalShift) ev.criticalShift = s; }
-            else if (s.isFuture || s.isImminent)           ev.plan++;
-        });
         const clientFilter = logic.selectedClientId;
-        return Array.from(map.values())
+        return buildEventoGroups(hoy, now)
+            .map((ev) => ({ ...ev, objectiveName: ev.lugar || '—' }))
             .filter(ev => !clientFilter || ev.clientId === clientFilter)
-            .sort((a, b) => {
-                const scoreA = a.absent * 3 + a.vacant * 2 + a.retention;
-                const scoreB = b.absent * 3 + b.vacant * 2 + b.retention;
-                return scoreB - scoreA;
-            })
             .filter(ev => (ev.active + ev.absent + ev.vacant + ev.retention + ev.plan) > 0);
     }, [logic.processedData, logic.selectedClientId]);
 
@@ -4413,7 +4387,7 @@ export default function OperacionesPage() {
                                                 borderColor={borderColor}
                                                 bgColor={bgColor}
                                                 overlayTitle={ev.label}
-                                                overlaySubtitle={ev.client}
+                                                overlaySubtitle={ev.lugar ? `${ev.client}${ev.client ? ' · ' : ''}${ev.lugar}` : ev.client}
                                                 expandedBody={
                                                     evShifts.length === 0 ? (
                                                         <p className="text-[10px] text-slate-400 text-center py-2">Sin guardias en esta categoría</p>
@@ -4444,6 +4418,12 @@ export default function OperacionesPage() {
                                                             <span className="text-xs font-black text-slate-800 truncate">{ev.label}</span>
                                                             <span className="text-[9px] text-slate-400 shrink-0">{ev.client}</span>
                                                         </div>
+                                                        {ev.lugar && (
+                                                            <div className="flex items-center gap-1 text-[9px] text-amber-700 truncate" title="Ubicación del evento">
+                                                                <MapPin size={9} className="shrink-0"/>
+                                                                <span className="truncate">{ev.lugar}</span>
+                                                            </div>
+                                                        )}
                                                         <div className="flex items-center gap-3 mt-0.5">
                                                             <div className="flex-1 h-1.5 bg-slate-200 rounded-full overflow-hidden max-w-[80px]">
                                                                 <div className="h-full rounded-full transition-all duration-500"
@@ -4597,7 +4577,7 @@ export default function OperacionesPage() {
                         {viewMode === 'lista' && logic.viewTab !== ('TRABAJARON' as any) && (
                         <div className={`p-3 ${wideOpsPanel ? objectivesLayoutClass : 'space-y-2'}`}>
                         {logic.listData.length === 0 ? <div className="text-center py-10 text-slate-400 text-xs">Sin novedades en esta categoría</div> :
-                            isGrouped ? (groupedList.filter((group: any) => { const today = new Date(); const pubKey = `${group.id}_${today.getFullYear()}_${today.getMonth()+1}`; return !!logic.publishStatusMap[pubKey]; }).map((group: any) => { const today = new Date(); const pubKey = `${group.id}_${today.getFullYear()}_${today.getMonth()+1}`; const isPublished = !!logic.publishStatusMap[pubKey]; return <ObjectiveGroup key={group.id} group={group} modals={modalSetters} isCompact={logic.isCompact} isAutoMode={opsCaps.fullAuto} onReport={handleReportPlanning} viewTab={logic.viewTab} onOpenWorkedFranco={(s:any)=>setWorkedFrancoData({isOpen:true, shift:s})} onNovedadAbsence={handleNovedadAbsence} onOpenWA={handleOpenWA} onOpenAbsenceDecision={(s:any)=>setAbsenceDecisionData({isOpen:true,shift:s})} onOpenRRHH={(s:any)=>setRrhhVacancyData({isOpen:true,shift:s})} isPublished={isPublished} layoutGrid={wideOpsPanel}/>; })) :
+                            isGrouped ? (groupedList.filter((group: any) => { if (group.isEvent) return true; const today = new Date(); const pubKey = `${group.id}_${today.getFullYear()}_${today.getMonth()+1}`; return !!logic.publishStatusMap[pubKey]; }).map((group: any) => { const today = new Date(); const pubKey = `${group.id}_${today.getFullYear()}_${today.getMonth()+1}`; const isPublished = group.isEvent ? true : !!logic.publishStatusMap[pubKey]; return <ObjectiveGroup key={group.id} group={group} modals={modalSetters} isCompact={logic.isCompact} isAutoMode={opsCaps.fullAuto} onReport={handleReportPlanning} viewTab={logic.viewTab} onOpenWorkedFranco={(s:any)=>setWorkedFrancoData({isOpen:true, shift:s})} onNovedadAbsence={handleNovedadAbsence} onOpenWA={handleOpenWA} onOpenAbsenceDecision={(s:any)=>setAbsenceDecisionData({isOpen:true,shift:s})} onOpenRRHH={(s:any)=>setRrhhVacancyData({isOpen:true,shift:s})} isPublished={isPublished} layoutGrid={wideOpsPanel}/>; })) :
                             (logic.listData.map((s:any) => <GuardCard key={s.id} shift={s} viewTab={logic.viewTab} isCompact={logic.isCompact} isAutoMode={opsCaps.fullAuto} onOpenCheckout={(s:any)=>setCheckoutData({isOpen:true, shift:s})} onOpenAttendance={(s:any)=>setAttendanceData({isOpen:true, shift:s})} onOpenHandover={(s:any)=>setHandoverData({isOpen:true, shift:s})} onOpenInterrupt={(s:any)=>setInterruptData({isOpen:true, shift:s})} onOpenCoverage={(s:any)=> { setCoverageData({isOpen:true, shift:s}); }} onReportPlanning={handleReportPlanning} onOpenWorkedFranco={(s:any)=>setWorkedFrancoData({isOpen:true, shift:s})} onNovedadAbsence={handleNovedadAbsence} onOpenWA={handleOpenWA} onOpenAbsenceDecision={(s:any)=>setAbsenceDecisionData({isOpen:true,shift:s})} onOpenRRHH={(s:any)=>setRrhhVacancyData({isOpen:true,shift:s})} onOpenManualRetention={(s:any)=>setManualRetentionData({isOpen:true,shift:s})} onRevertAbsence={handleRevertAbsence}/>))
                         }
                         </div>

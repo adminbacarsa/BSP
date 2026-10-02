@@ -16,9 +16,9 @@ import {
   FILTRO_VACIO,
   agruparPorObjetivo,
   alternarEstado,
+  claveGrupo,
   clientesParaFiltro,
   contadoresMovil,
-  esTurnoEvento,
   etiquetaAmbito,
   guardarFiltro,
   leerFiltroGuardado,
@@ -198,7 +198,8 @@ export function OperacionMovil(props: Props) {
 
   // Hoja de acciones: el turno se busca en todo lo visible (también si cambió de grupo).
   const accionesShift = accionesShiftId ? visibles.find((s) => s.id === accionesShiftId) || props.shifts.find((s) => s.id === accionesShiftId) || null : null;
-  const accionesSiblings = accionesShift ? visibles.filter((s) => s.objectiveId === accionesShift.objectiveId) : [];
+  // Hermanos = mismo grupo (objetivo o evento): el EV no mezcla relevos con el objetivo de base.
+  const accionesSiblings = accionesShift ? visibles.filter((s) => claveGrupo(s) === claveGrupo(accionesShift)) : [];
   const actorName = () => auth.currentUser?.displayName || auth.currentUser?.email?.split('@')[0] || 'Operador';
   const avisar = async (accion: GuardAccion) => {
     const kind = accion.id === 'AVISAR_RETENIDO' ? 'RETENIDO' : 'ENTRANTE';
@@ -269,7 +270,7 @@ export function OperacionMovil(props: Props) {
     if (!shift) return;
     deepAbiertoRef.current = deepShiftId;
     setFiltroState((f) => (f.estado === 'TODOS' ? f : { ...f, estado: 'TODOS' }));
-    setSelectedId(esTurnoEvento(shift) ? `ev_${String(shift.eventoId || shift.id)}` : String(shift.objectiveId || ''));
+    setSelectedId(claveGrupo(shift));
     setAccionesShiftId(shift.id);
   }, [deepShiftId, props.shifts]);
 
