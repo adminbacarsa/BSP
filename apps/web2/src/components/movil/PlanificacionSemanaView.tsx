@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { ChevronDown, ChevronLeft, ChevronRight, Search } from 'lucide-react';
-import type { TurnoMovil } from '@/lib/movil/planificacionBasica';
+import { eventoEtiqueta, type TurnoMovil } from '@/lib/movil/planificacionBasica';
 import {
   AVISO_MES_SIN_PUBLICAR,
   DIAS_CORTOS,
@@ -126,12 +126,15 @@ export function SemanaGrilla(props: {
   filas: FilaSemana[];
   celdas: CeldaSemana[][];
   licencias: TurnoMovil[];
+  /** Guardias del plantel afectados a un evento (EV del servidor): solo lectura. */
+  eventos?: TurnoMovil[];
   onAnterior: () => void;
   onSiguiente: () => void;
   onCelda: (celda: CeldaSemana) => void;
   onLicencia: (turno: TurnoMovil) => void;
   sinEstructura?: string | null;
 }) {
+  const eventos = props.eventos || [];
   const touch = useRef<{ x: number; y: number } | null>(null);
   return (
     <section
@@ -195,6 +198,36 @@ export function SemanaGrilla(props: {
                       <span className="block truncate pl-0.5 text-[9px] font-semibold leading-3 text-slate-900">{apellidoCorto(l.employeeName)}</span>
                       <span className={`block truncate pl-0.5 text-[9px] font-bold uppercase leading-3 ${l.coveredBy ? 'text-slate-500' : MOVIL_TEXT.rose}`}>{l.code}{l.coveredBy ? '' : ' · s/cubrir'}</span>
                     </button>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      {eventos.length > 0 && (
+        <div className="mt-3" data-plan-fila="eventos">
+          <p className="mb-1 px-0.5 text-[12px] font-semibold text-slate-900">Eventos</p>
+          <div className="grid grid-cols-7 gap-1">
+            {props.dias.map((fecha) => {
+              const del = eventos.filter((e) => e.date === fecha);
+              return (
+                <div key={fecha} className="flex flex-col gap-1">
+                  {del.length === 0 && <span className={`block min-h-12 rounded border ${MOVIL_BORDER} bg-[#f7f8fa]`} />}
+                  {del.map((e) => (
+                    <div
+                      key={e.id}
+                      data-plan-evento={e.id}
+                      data-plan-evento-franco={e.francoUsado ? '1' : undefined}
+                      title={eventoEtiqueta(e)}
+                      aria-label={`${e.employeeName}: evento ${eventoEtiqueta(e)}${e.francoUsado ? ' (franco usado)' : ''}`}
+                      className={`relative flex min-h-12 flex-col justify-center overflow-hidden rounded border ${MOVIL_BORDER} bg-white px-1 text-left`}
+                    >
+                      <span aria-hidden="true" className={`absolute inset-y-0 left-0 w-[3px] ${MOVIL_FILETE.amber}`} />
+                      <span className="block truncate pl-0.5 text-[9px] font-semibold leading-3 text-slate-900">{apellidoCorto(e.employeeName)}</span>
+                      <span className={`block truncate pl-0.5 text-[9px] font-bold uppercase leading-3 ${MOVIL_TEXT.amber}`}>EV{e.francoUsado ? ' · F usado' : ''}</span>
+                      <span className="block truncate pl-0.5 text-[8px] font-medium leading-3 text-slate-500">{e.evento?.nombre}</span>
+                    </div>
                   ))}
                 </div>
               );

@@ -324,6 +324,38 @@ export function licenciasSemana(dias: string[], turnos: readonly TurnoMovil[], o
   return turnos.filter((t) => t.objectiveId === objectiveId && dias.includes(t.date) && t.licencia);
 }
 
+/**
+ * Plantel del objetivo para la semana: quien tiene objetivo preferido ahí o algún turno propio
+ * (no EV) en ese objetivo entre los turnos cargados.
+ */
+export function plantelDe(
+  turnos: readonly TurnoMovil[],
+  objectiveId: string,
+  empleados: readonly { id: string; preferredObjectiveId?: string }[] = [],
+): Set<string> {
+  const ids = new Set<string>();
+  for (const e of empleados) if (e.id && e.preferredObjectiveId === objectiveId) ids.add(e.id);
+  for (const t of turnos) {
+    if (t.objectiveId === objectiveId && !t.evento && !t.vacante && t.employeeId) ids.add(t.employeeId);
+  }
+  return ids;
+}
+
+/**
+ * Guardias del plantel afectados a un EVENTO esa semana (fila aparte, solo lectura). El EV vive en
+ * el objetivo del evento, por eso se busca por guardia y no por objetivo. `francoUsado` = ese día
+ * también tenía franco (fue al evento desde el franco).
+ */
+export function eventosSemana(dias: string[], turnos: readonly TurnoMovil[], plantel: ReadonlySet<string>): TurnoMovil[] {
+  return turnos
+    .filter((t) => t.evento && !t.vacante && dias.includes(t.date) && plantel.has(t.employeeId))
+    .map((t) => ({
+      ...t,
+      francoUsado: t.francoUsado || turnos.some((f) => f.franco && f.employeeId === t.employeeId && f.date === t.date),
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date) || a.start.localeCompare(b.start) || a.employeeName.localeCompare(b.employeeName, 'es'));
+}
+
 export function huecosSemana(celdas: CeldaSemana[][], licencias: readonly TurnoMovil[]): number {
   return celdas.flat().reduce((acc, c) => acc + c.faltan, 0) + licencias.filter((l) => !l.coveredBy).length;
 }
