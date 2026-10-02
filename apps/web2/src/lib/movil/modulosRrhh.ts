@@ -10,7 +10,7 @@ export function esAlertaDeRrhh(alerta: MovilAlerta): boolean {
 
 export function esAlertaDeEventuales(alerta: MovilAlerta): boolean {
   const type = tipoAlerta(alerta);
-  return /^(ARCA_|ALTA_ARCA_|BAJA_ARCA_|CONTRATO_|MARCO_|EVENTUAL_)/.test(type);
+  return /^(ARCA_|ALTA_ARCA_|BAJA_ARCA_|CONTRATO_|MARCO_|EVENTUAL_|ESCALA_)/.test(type);
 }
 
 registrarModuloMovil({
@@ -31,7 +31,7 @@ registrarModuloMovil({
 registrarModuloMovil({
   id: 'eventuales',
   label: 'Eventuales',
-  desc: 'Bolsa, ARCA y altas',
+  desc: 'Bolsa, ARCA, altas y escala salarial',
   href: '/admin/rrhh/eventuales/',
   path: '/admin/rrhh/eventuales',
   moduleKeys: ['EVENTUALES', 'RRHH'],
@@ -39,6 +39,7 @@ registrarModuloMovil({
     { id: 'bolsa', label: 'Bolsa', href: '/admin/rrhh/eventuales/', icono: 'bolsa', panel: '' },
     { id: 'arca', label: 'ARCA', href: '/admin/rrhh/eventuales/?panel=arca', icono: 'arca', panel: 'arca' },
     { id: 'alta', label: 'Alta', href: '/admin/rrhh/eventuales/?panel=alta', icono: 'alta', panel: 'alta' },
+    { id: 'escala', label: 'Escala', href: '/admin/rrhh/eventuales/?panel=escala', icono: 'escala', panel: 'escala' },
   ],
   esAlertaDelModulo: esAlertaDeEventuales,
 });

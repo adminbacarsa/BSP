@@ -3812,6 +3812,25 @@ export { gestionarEventual, crearAccesoEventual, listarTurnosEventual } from './
 export { gestionarMarcoEventual, pedirCodigoAnexoEventual, confirmarAnexoEventual } from './eventuales/marcoAnexoCall';
 export { subirMarcosLote } from './marcosLote/subirMarcosLote';
 export { acusarReciboContrato } from './eventuales/acusarReciboContrato';
+export { extraerEscalaCct422 } from './escalas/extraerEscalaCct422';
+// Escala salarial del anexo (Eventuales → Escala salarial): editar con motivo, aprobar (escribe escalas_salariales), rechazar, importar.
+export { gestionarEscalaCct } from './escalas/gestionarEscalaCct';
+/**
+ * 09:30 AR, diario: busca una disposición/escala nueva del CCT 422/05 en las fuentes (SUVICO, argentina.gob.ar),
+ * la lee con Gemini y la deja como PROPUESTA + novedad/push a Eventuales. Sin red o sin clave no rompe: anota y sigue.
+ */
+export const scheduledEscalaCct422 = (functionsEmulator
+  ? functions.runWith({ timeoutSeconds: 300, memory: '512MB' })
+  : functions.runWith({ secrets: ['GEMINI_API_KEY'], timeoutSeconds: 300, memory: '512MB' }))
+  .pubsub.schedule('30 9 * * *')
+  .timeZone('America/Argentina/Cordoba')
+  .onRun(async () => {
+    const { runEscalaCct422Job, firestoreEscalaJobStore, lectorGemini } = await import('./escalas/escalaCct422Job');
+    const leerPdf = await lectorGemini(process.env.GEMINI_API_KEY);
+    const r = await runEscalaCct422Job({ store: firestoreEscalaJobStore(admin.firestore()), leerPdf });
+    if (r.propuestas.length || r.errores.length) console.log(`[scheduledEscalaCct422] propuestas=${r.propuestas.length} errores=${r.errores.map((e) => `${e.fuenteId}:${e.error}`).join(' | ')}`);
+    return null;
+  });
 // Eventuales en Planificación/Eventos: candidatos de la bolsa, asignación, sustitución y contrato por turnos.
 // `convocarEventualEvento`: desde el evento se convoca (acepta en la app → turno EV + contrato + AT + anexo).
 export {

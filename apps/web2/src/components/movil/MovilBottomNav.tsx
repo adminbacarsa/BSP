@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import {
-  Bell, CalendarDays, CalendarRange, ClipboardList, FileText, FolderOpen, Grid2x2, LayoutGrid, ListChecks, Radio, Send, Sun, UserPlus, Users,
+  Bell, CalendarDays, CalendarRange, ClipboardList, FileText, FolderOpen, Grid2x2, LayoutGrid, ListChecks, Radio, ScrollText, Send, Sun, UserPlus, Users,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { barraDelModulo, moduloMovilDe, modulosMovil, seccionActiva, type MovilIcono } from '@/lib/movil/movilModulos';
@@ -20,6 +20,7 @@ const ICONS: Record<MovilIcono, typeof Radio> = {
   bolsa: FolderOpen,
   arca: Send,
   alta: UserPlus,
+  escala: ScrollText,
   lista: ListChecks,
   menu: LayoutGrid,
 };

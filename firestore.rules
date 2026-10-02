@@ -967,6 +967,25 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // Escala salarial del anexo (Eventuales → Escala salarial): propuestas, aprobadas y versiones.
+    // Lectura tenant admin; escritura solo servidor (`extraerEscalaCct422`, `gestionarEscalaCct`, job diario). SIN PUBLICAR: las publica Mauro.
+    match /escalas_cct/{propuestaId} {
+      allow read: if isSuperAdmin() || isAdmin();
+      allow write: if false;
+    }
+
+    // Estado del chequeo diario de fuentes (hash visto, último error). Solo servidor.
+    match /escalas_cct_fuentes/{fuenteId} {
+      allow read: if isSuperAdmin() || isAdmin();
+      allow write: if false;
+    }
+
+    // Fuentes del job de escalas (pisa las por defecto). Solo SuperAdmin.
+    match /config/escalas_cct {
+      allow read: if isSuperAdmin() || isAdmin();
+      allow write: if isSuperAdmin();
+    }
+
     match /config/eventuales {
       allow read: if isSuperAdmin() || isAdmin();
       allow write: if false;
