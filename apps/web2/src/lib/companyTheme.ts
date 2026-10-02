@@ -20,6 +20,8 @@ export const COMPANY_THEME_VARS = [
  * el texto blanco encima no llega a AA y el celular usa el tono oscuro.
  */
 export const MOVIL_LIGHT_L = 58;
+/** Saturación HSL por debajo de la cual el color de la empresa es «gris». */
+export const MOVIL_GRAY_S = 20;
 
 export function companyColorIsLight(hex: string): boolean {
   return hexToHsl(hex)[2] > MOVIL_LIGHT_L;
@@ -34,9 +36,11 @@ export function companyColorIsLight(hex: string): boolean {
  */
 export function buildMovilTheme(hex: string): { '--movil-topbar': string; '--movil-primary': string; '--movil-primary-text': string } {
   const theme = buildCompanyTheme(hex);
+  // Un color casi gris como primario se confunde con un botón deshabilitado: ahí va casi negro.
+  const gris = hexToHsl(hex)[1] < MOVIL_GRAY_S;
   return {
     '--movil-topbar': theme['--topbar-bg'],
-    '--movil-primary': companyColorIsLight(hex) ? theme['--company-primary-darker'] : hex,
+    '--movil-primary': gris ? '#111827' : companyColorIsLight(hex) ? theme['--company-primary-darker'] : hex,
     '--movil-primary-text': '#ffffff',
   };
 }

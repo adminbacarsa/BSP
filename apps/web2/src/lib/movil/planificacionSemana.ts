@@ -8,12 +8,15 @@ import {
   filterSlasForPlanningTenant,
   getEffectiveShiftQuantityOnDate,
   isPlanningPositionExcludedOnDate,
+  isPlanningShiftExcludedOnDate,
   pickClosedSlaForPlanningMonth,
   pickSlaForPlanningMonth,
   planningMonthHasActiveSla,
   type PlanningPositionRow,
   type SlaPlanningRow,
 } from '@/lib/slaPlanningMatch';
+import type { PlanningPositionShiftRow } from '@/lib/planningPositionDays';
+import { hoursBetweenClockTimes } from '@/lib/planificacion/planningScheduledHours';
 import { buscarClientes, clientesParaFiltro, type OpsClienteMovil } from '@/lib/movil/operacionFiltros';
 import { bandaDe, sumarDias, type FranjaMovil, type TurnoMovil } from '@/lib/movil/planificacionBasica';
 
@@ -155,38 +158,110 @@ export type FilaSemana = {
   hours: number;
   qty: number;
   pos: PlanningPositionRow;
+  shift: PlanningPositionShiftRow;
 };
 
+const NO_LABORAL = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'E', 'A', 'AA', 'PG', 'ART', 'SUS', 'SGS']);
+
+function hhmmSla(raw: unknown): string | null {
+  const m = String(raw ?? '').trim().match(/^(\d{1,2}):(\d{2})/);
+  return m ? `${m[1].padStart(2, '0')}:${m[2]}` : null;
+}
+
 /**
- * Filas = puesto × franja vendida. La estructura de escritorio agrega D12/N12 a los puestos
- * 24 h para el modal; si el SLA ya vende M/T/N esas dos sin horario propio no son filas.
+ * Turnos que el SLA vende en el puesto. La estructura de escritorio agrega D12/N12 sin horario
+ * a los puestos 24 h para el modal: si el puesto ya define turnos con horario (o vende M/T/N),
+ * esos dos genéricos no son turnos propios.
  */
+export function turnosPropiosDelPuesto(pos: PlanningPositionRow): PlanningPositionShiftRow[] {
+  const codes = new Set(pos.shifts.map((s) => String(s.code || '').toUpperCase()));
+  const vendeMtn = codes.has('M') && codes.has('T') && codes.has('N');
+  const conHorario = pos.shifts.some((s) => hhmmSla(s.startTime) != null);
+  return pos.shifts.filter((s) => {
+    const code = String(s.code || '').toUpperCase();
+    if (!code || NO_LABORAL.has(code)) return false;
+    if (code !== 'D12' && code !== 'N12') return true;
+    if (!vendeMtn && !conHorario) return true;
+    return hhmmSla(s.startTime) != null;
+  });
+}
+
+/**
+ * Mismo criterio que el selector de turno de la grilla (bloqueo por turno): exclusión del puesto
+ * o de la banda ese día, `specificDates` manda sobre `days`, y `days` (L M X J V S D) limita el día.
+ */
+export function turnoHabilitadoEnFecha(pos: PlanningPositionRow, shift: PlanningPositionShiftRow, fecha: string): boolean {
+  const code = String(shift.code || '').toUpperCase();
+  if (isPlanningPositionExcludedOnDate(pos, fecha)) return false;
+  if (isPlanningShiftExcludedOnDate(pos, fecha, code)) return false;
+  if (Array.isArray(shift.specificDates) && shift.specificDates.length > 0) return shift.specificDates.includes(fecha);
+  const letra = DIA_LETRA[diaSemanaUtc(fecha)];
+  if (Array.isArray(shift.days) && shift.days.length > 0) return shift.days.includes(letra);
+  return !pos.activeDays?.length || pos.activeDays.includes(letra);
+}
+
+export type OpcionTurno = { id: string; code: string; start: string; end: string; hours: number; label: string };
+
+function opcionDe(code: string, startRaw: unknown, endRaw: unknown, hoursRaw: unknown): OpcionTurno | null {
+  const banda = bandaDe(code);
+  const start = hhmmSla(startRaw) || banda?.start || '';
+  const end = hhmmSla(endRaw) || banda?.end || '';
+  if (!start || !end) return null;
+  const hours = hoursBetweenClockTimes(start, end) ?? (Number(hoursRaw) > 0 ? Number(hoursRaw) : banda?.hours ?? 8);
+  return { id: `${code}|${start}|${end}`, code, start, end, hours, label: `${code} ${start}–${end}` };
+}
+
+export const OPCIONES_GENERICAS: OpcionTurno[] = ['M', 'T', 'N', 'D12', 'N12']
+  .map((code) => opcionDe(code, null, null, null))
+  .filter((o): o is OpcionTurno => o != null);
+
+/**
+ * Turnos habilitados del SLA para ese puesto y ese día («M2 11:00–15:00»). Los genéricos
+ * M/T/N/D12/N12 solo si el puesto no tiene SLA o el SLA no define turnos.
+ */
+export function opcionesTurnoDelDia(pos: PlanningPositionRow | null | undefined, fecha: string): OpcionTurno[] {
+  if (!pos) return OPCIONES_GENERICAS;
+  const propios = turnosPropiosDelPuesto(pos);
+  if (propios.length === 0) return OPCIONES_GENERICAS;
+  const out: OpcionTurno[] = [];
+  for (const s of propios) {
+    if (!turnoHabilitadoEnFecha(pos, s, fecha)) continue;
+    const op = opcionDe(String(s.code).toUpperCase(), s.startTime, s.endTime, s.hours);
+    if (op && !out.some((o) => o.id === op.id)) out.push(op);
+  }
+  return out.sort((a, b) => a.start.localeCompare(b.start) || a.code.localeCompare(b.code));
+}
+
+export function puestoDe(estructura: PlanningPositionRow[] | null | undefined, positionName: string): PlanningPositionRow | null {
+  if (!estructura?.length) return null;
+  return estructura.find((p) => p.positionName === positionName) || (estructura.length === 1 ? estructura[0] : null);
+}
+
+/** Opción que corresponde al turno actual (mismo código y horario; si no, mismo código). */
+export function opcionDelTurno(opciones: OpcionTurno[], t: { code: string; start: string; end: string }): OpcionTurno | null {
+  return opciones.find((o) => o.code === t.code && o.start === t.start && o.end === t.end)
+    || opciones.find((o) => o.start === t.start && o.end === t.end)
+    || opciones.find((o) => o.code === t.code)
+    || null;
+}
+
+/** Filas = puesto × turno propio del SLA, con su horario. */
 export function filasSemana(estructura: PlanningPositionRow[]): FilaSemana[] {
   const filas: FilaSemana[] = [];
   for (const pos of estructura) {
-    const codes = new Set(pos.shifts.map((s) => String(s.code || '').toUpperCase()));
-    const vendeMtn = codes.has('M') && codes.has('T') && codes.has('N');
-    const lista = pos.shifts.filter((s) => {
+    for (const s of turnosPropiosDelPuesto(pos)) {
       const code = String(s.code || '').toUpperCase();
-      if (!vendeMtn || (code !== 'D12' && code !== 'N12')) return true;
-      return typeof s.startTime === 'string' && s.startTime.length > 0;
-    });
-    for (const s of lista) {
-      const code = String(s.code || '').toUpperCase();
-      if (!code) continue;
-      const banda = bandaDe(code);
-      const start = typeof s.startTime === 'string' && /^\d{1,2}:\d{2}/.test(s.startTime) ? s.startTime.slice(0, 5).padStart(5, '0') : banda?.start || '';
-      const end = typeof s.endTime === 'string' && /^\d{1,2}:\d{2}/.test(s.endTime) ? s.endTime.slice(0, 5).padStart(5, '0') : banda?.end || '';
-      const hours = Number(s.hours) > 0 ? Number(s.hours) : banda?.hours || 8;
+      const op = opcionDe(code, s.startTime, s.endTime, s.hours);
       filas.push({
         id: `${pos.positionName}|${code}`,
         positionName: pos.positionName,
         code,
-        start,
-        end,
-        hours,
+        start: op?.start || '',
+        end: op?.end || '',
+        hours: op?.hours || 8,
         qty: Math.max(1, Number(s.quantity) || pos.qty || 1),
         pos,
+        shift: s,
       });
     }
   }
@@ -203,16 +278,10 @@ export type CeldaSemana = {
   kind: 'ok' | 'hueco' | 'sin-servicio';
 };
 
-function diaActivo(pos: PlanningPositionRow, fecha: string): boolean {
-  if (isPlanningPositionExcludedOnDate(pos, fecha)) return false;
-  const letra = DIA_LETRA[diaSemanaUtc(fecha)];
-  return !pos.activeDays?.length || pos.activeDays.includes(letra);
-}
-
 export function celdaSemana(fila: FilaSemana, fecha: string, turnos: readonly TurnoMovil[], objectiveId: string): CeldaSemana {
   const guardias = turnos.filter((t) => t.objectiveId === objectiveId && t.date === fecha && !t.licencia && !t.franco
     && t.code === fila.code && (t.positionName || 'General') === fila.positionName);
-  const activo = diaActivo(fila.pos, fecha);
+  const activo = turnoHabilitadoEnFecha(fila.pos, fila.shift, fecha);
   const cupo = activo ? getEffectiveShiftQuantityOnDate(fila.pos, fecha, fila.code, fila.qty) : 0;
   const cubiertos = guardias.filter((g) => !g.vacante).length;
   const faltan = Math.max(0, cupo - cubiertos);

@@ -87,7 +87,7 @@ export async function escribirCambio(cambio: CambioLocal, originales: TurnoMovil
     return;
   }
   if (cambio.kind === 'asignar') {
-    const banda = bandaParaCubrir({ ...origen, kind: origen.vacante ? 'vacante' : origen.licencia ? 'licencia' : 'ok' });
+    const banda = cambio.banda ?? bandaParaCubrir({ ...origen, kind: origen.vacante ? 'vacante' : origen.licencia ? 'licencia' : 'ok' });
     if (origen.licencia) {
       if (idReal) await updateDoc(doc(db, 'turnos', idReal), stampEmpresaId({ coveredBy: cambio.employeeName, draft, actorName }, empresaId));
       await addDoc(collection(db, 'turnos'), stampEmpresaId(payloadTurno({
@@ -116,6 +116,7 @@ export async function escribirCambio(cambio: CambioLocal, originales: TurnoMovil
       type: banda.code,
       startTime: Timestamp.fromDate(inst.start),
       endTime: Timestamp.fromDate(inst.end),
+      hours: banda.hours,
       isUnassigned: false,
       isFranco: false,
       isFrancoTrabajado: cambio.ft,

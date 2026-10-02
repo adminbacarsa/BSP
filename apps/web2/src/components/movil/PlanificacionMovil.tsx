@@ -21,9 +21,9 @@ import { runCallableOnline, movilCallableGate } from '@/lib/movil/callableOnline
 import { enqueueFirestoreWrite, movilWriteQueue } from '@/lib/movil/writeQueue';
 import {
   aplicarCambios,
-  bandaDe,
   bandaParaCubrir,
   candidatosParaHueco,
+  companerosCompatibles,
   conflictosDeHorario,
   conflictosDePermuta,
   franjasDe,
@@ -31,6 +31,7 @@ import {
   hoyArgentina,
   proximosDias,
   turnoMovilDesdeDoc,
+  type BandaCobertura,
   type CambioLocal,
   type EmpleadoMovil,
   type FranjaMovil,
@@ -52,11 +53,15 @@ import {
   lunesDe,
   mesDeSemana,
   mesesDeSemana,
+  opcionDelTurno,
+  opcionesTurnoDelDia,
+  puestoDe,
   semanaAnterior,
   semanaDe,
   semanaSiguiente,
   type CeldaSemana,
   type ClienteCatalogo,
+  type OpcionTurno,
   type SeleccionPlan,
 } from '@/lib/movil/planificacionSemana';
 import { canAssignFrancoTrabajado } from '@/lib/planificacion/francoTrabajadoAccess';
@@ -110,6 +115,7 @@ export function PlanificacionMovil() {
   const [tab, setTab] = useState<TabCandidato | 'eventuales'>('plantel');
   const [elegido, setElegido] = useState<string | null>(null);
   const [codigo, setCodigo] = useState<string | null>(null);
+  const [opcionCubrir, setOpcionCubrir] = useState<string | null>(null);
   const [companeroId, setCompaneroId] = useState<string | null>(null);
   const [eventuales, setEventuales] = useState<EventualMovil[]>([]);
   const [hoy] = useState(() => hoyArgentina());
@@ -299,6 +305,24 @@ export function PlanificacionMovil() {
   }, [sheet, visibles]);
   const objetivo = objetivos.find((o) => o.id === franjaAbierta?.objectiveId);
 
+  // Turnos del SLA de ese puesto y ese día: la misma estructura que arma la semana (y la grilla).
+  const opcionesFranja: OpcionTurno[] = useMemo(() => {
+    if (!franjaAbierta) return [];
+    const ym = franjaAbierta.date.slice(0, 7);
+    const obj = objetivos.find((o) => o.id === franjaAbierta.objectiveId);
+    const estr = estructura && objetivoSel?.id === franjaAbierta.objectiveId && ym === ymSemana
+      ? estructura.estructura
+      : obj
+        ? estructuraSlaDelMes({ slas, empresaId, scopeEmpresa, clientes: clientesCat, clientId: franjaAbierta.clientId || obj.clientId, objectiveId: obj.id, ym }).estructura
+        : null;
+    return opcionesTurnoDelDia(puestoDe(estr, franjaAbierta.positionName), franjaAbierta.date);
+  }, [franjaAbierta, objetivos, estructura, objetivoSel, ymSemana, slas, empresaId, scopeEmpresa, clientesCat]);
+  const opcionActual = franjaAbierta && !franjaAbierta.licencia ? opcionDelTurno(opcionesFranja, franjaAbierta) : null;
+  const opcionCubrirSel = opcionesFranja.find((o) => o.id === opcionCubrir) || opcionActual || opcionesFranja[0] || null;
+  const bandaCubrir: BandaCobertura | null = sheet?.tipo === 'cubrir' && opcionCubrirSel
+    ? { code: opcionCubrirSel.code, start: opcionCubrirSel.start, end: opcionCubrirSel.end, hours: opcionCubrirSel.hours }
+    : null;
+
   const candidatos = useMemo(() => {
     if (!franjaAbierta || franjaAbierta.kind === 'ok') return [];
     const ym = franjaAbierta.date.slice(0, 7);
@@ -309,16 +333,16 @@ export function PlanificacionMovil() {
       turnos: base,
       objLat: objetivo?.lat,
       objLng: objetivo?.lng,
+      banda: bandaCubrir,
       empleados: empleados.map((emp) => ({ ...emp, monthHours: horasMesEmpleado(emp.id, ym, base) })),
     }).filter((c) => !(sheet?.tipo === 'cubrir' && sheet.reemplazo && c.employeeId === franjaAbierta.employeeId));
-  }, [franjaAbierta, visibles, empleados, objetivo, sheet]);
+  }, [franjaAbierta, visibles, empleados, objetivo, sheet, bandaCubrir?.code, bandaCubrir?.start, bandaCubrir?.end]);
 
-  const companeros = franjaAbierta
-    ? visibles.filter((f) => f.date === franjaAbierta.date && f.objectiveId === franjaAbierta.objectiveId && !f.vacante && !f.licencia && !f.franco && f.id !== franjaAbierta.id)
-    : [];
-  const bandaElegida = codigo ? bandaDe(codigo) : null;
+  // Permuta: compañeros del mismo objetivo ese día con los que el cambio no rompe tope, solape ni descanso.
+  const companeros = franjaAbierta ? companerosCompatibles(franjaAbierta, visibles) : [];
+  const bandaElegida = opcionesFranja.find((o) => o.id === codigo) || null;
   const avisoHorario = franjaAbierta && bandaElegida
-    ? conflictosDeHorario(franjaAbierta, codigo!, bandaElegida.start, bandaElegida.end, bandaElegida.hours, visibles).reason
+    ? conflictosDeHorario(franjaAbierta, bandaElegida.code, bandaElegida.start, bandaElegida.end, bandaElegida.hours, visibles).reason
     : null;
   const companero = companeros.find((c) => c.id === companeroId) || null;
   const avisoPermuta = franjaAbierta && companero
@@ -330,6 +354,7 @@ export function PlanificacionMovil() {
     setSheet(null);
     setElegido(null);
     setCodigo(null);
+    setOpcionCubrir(null);
     setCompaneroId(null);
     setTab('plantel');
     setEventuales([]);
@@ -358,13 +383,13 @@ export function PlanificacionMovil() {
   const confirmarCandidato = async () => {
     if (!franjaAbierta || !elegido || !exigirEdicion()) return;
     const sintetico = esSlotSintetico(franjaAbierta.id);
+    const banda = bandaCubrir ?? bandaParaCubrir(franjaAbierta);
     const emitir = (employeeId: string, employeeName: string, ft: boolean, bolsaCuil?: string) => {
-      if (sintetico) stage({ kind: 'nuevo', franja: franjaAbierta, employeeId, employeeName, ft, bolsaCuil });
-      else stage({ kind: 'asignar', franjaId: franjaAbierta.id, employeeId, employeeName, ft, bolsaCuil });
+      if (sintetico) stage({ kind: 'nuevo', franja: { ...franjaAbierta, ...banda }, employeeId, employeeName, ft, bolsaCuil });
+      else stage({ kind: 'asignar', franjaId: franjaAbierta.id, employeeId, employeeName, ft, bolsaCuil, banda });
     };
     if (tab === 'eventuales') {
       const ev = eventuales.find((row) => row.cuil === elegido);
-      const banda = bandaParaCubrir(franjaAbierta);
       try {
         const res = await runCallableOnline('Asignar eventual', () => asignarEventualPlanificacion({
           empresaId,
@@ -395,7 +420,7 @@ export function PlanificacionMovil() {
 
   useEffect(() => {
     if (tab !== 'eventuales' || !franjaAbierta || !puedeEventuales) return;
-    const banda = bandaParaCubrir(franjaAbierta);
+    const banda = bandaCubrir ?? bandaParaCubrir(franjaAbierta);
     let alive = true;
     void runCallableOnline('Bolsa de eventuales', async () => {
       const call = httpsCallable<Record<string, unknown>, { candidatos: EventualMovil[] }>(functions, 'listarCandidatosEventuales');
@@ -411,7 +436,8 @@ export function PlanificacionMovil() {
       if (alive) toast.error(error instanceof Error ? error.message : 'La bolsa requiere conexión.');
     });
     return () => { alive = false; };
-  }, [tab, franjaAbierta, puedeEventuales, empresaId, objetivo]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, franjaAbierta, puedeEventuales, empresaId, objetivo, opcionCubrirSel?.id]);
 
   /** Guarda el lote: borrador si el mes no está publicado; corrección (`draft:false`, con aviso al guardia) si lo está. */
   const guardarCambios = async () => {
@@ -517,7 +543,14 @@ export function PlanificacionMovil() {
                   sinEstructura={sinEstructura}
                   onAnterior={() => setLunes((l) => semanaAnterior(l))}
                   onSiguiente={() => setLunes((l) => semanaSiguiente(l))}
-                  onCelda={(celda) => setSheet({ tipo: 'celda', filaId: celda.fila.id, fecha: celda.fecha })}
+                  onCelda={(celda) => {
+                    // Hueco sin nadie asignado: directo a los candidatos con la franja del SLA ya elegida.
+                    if (celda.kind === 'hueco' && celda.guardias.every((g) => g.vacante) && objetivoSel) {
+                      if (exigirEdicion()) setSheet({ tipo: 'cubrir', franja: huecoDeCelda(celda, objetivoSel), reemplazo: false });
+                      return;
+                    }
+                    setSheet({ tipo: 'celda', filaId: celda.fila.id, fecha: celda.fecha });
+                  }}
                   onLicencia={(turno) => {
                     if (!exigirEdicion()) return;
                     if (turno.coveredBy) return;
@@ -578,9 +611,12 @@ export function PlanificacionMovil() {
           />
         )}
       </BottomSheet>
-      <BottomSheet open={sheet?.tipo === 'cubrir'} title={franjaAbierta ? `${sheet?.tipo === 'cubrir' && sheet.reemplazo ? 'Cambiar guardia' : 'Cubrir'} ${franjaAbierta.code} ${franjaAbierta.start}` : 'Cubrir'} onClose={cerrar}>
+      <BottomSheet open={sheet?.tipo === 'cubrir'} title={franjaAbierta ? `${sheet?.tipo === 'cubrir' && sheet.reemplazo ? 'Cambiar guardia' : 'Cubrir'} · ${franjaAbierta.positionName} ${franjaAbierta.date.slice(8, 10)}/${franjaAbierta.date.slice(5, 7)}` : 'Cubrir'} onClose={cerrar}>
         {franjaAbierta && (
           <CandidatosHueco
+            opciones={sheet?.tipo === 'cubrir' && sheet.reemplazo ? undefined : opcionesFranja}
+            opcionId={opcionCubrirSel?.id ?? null}
+            onOpcion={(id) => { setOpcionCubrir(id); setElegido(null); }}
             tab={tab}
             onTab={setTab}
             candidatos={candidatos}
@@ -595,6 +631,8 @@ export function PlanificacionMovil() {
       </BottomSheet>
       <BottomSheet open={sheet?.tipo === 'cambiar'} title={franjaAbierta ? `${franjaAbierta.employeeName} · ${franjaAbierta.code}` : 'Cambiar'} onClose={cerrar}>
         <CambioPuntual
+          opciones={opcionesFranja}
+          actualId={opcionActual?.id ?? null}
           codigo={codigo}
           onCodigo={setCodigo}
           companeros={companeros.map((c) => ({ id: c.id, nombre: c.employeeName, detalle: `${c.code} ${c.start}–${c.end}` }))}
@@ -607,8 +645,8 @@ export function PlanificacionMovil() {
             setSheet({ tipo: 'cubrir', franja: { ...franjaAbierta, kind: 'vacante' }, reemplazo: true });
           }}
           onHorario={() => {
-            if (!franjaAbierta || !bandaElegida || !codigo || avisoHorario || !exigirEdicion()) return;
-            stage({ kind: 'horario', franjaId: franjaAbierta.id, code: codigo, start: bandaElegida.start, end: bandaElegida.end, hours: bandaElegida.hours });
+            if (!franjaAbierta || !bandaElegida || avisoHorario || !exigirEdicion()) return;
+            stage({ kind: 'horario', franjaId: franjaAbierta.id, code: bandaElegida.code, start: bandaElegida.start, end: bandaElegida.end, hours: bandaElegida.hours });
           }}
           onPermuta={() => {
             if (!franjaAbierta || !companero || avisoPermuta || !exigirEdicion()) return;

@@ -1,6 +1,7 @@
 import React, { useState, type ReactNode } from 'react';
 import { CalendarX2, Check, ChevronDown, ChevronUp } from 'lucide-react';
 import type { CandidatoMovil, FranjaMovil, TabCandidato } from '@/lib/movil/planificacionBasica';
+import type { OpcionTurno } from '@/lib/movil/planificacionSemana';
 import type { CronogramaGrupo, CronogramaItem } from '@/lib/movil/cronogramaAlertas';
 import { MovilTopBar } from './ui/MovilTopBar';
 import { MovilBadge } from './ui/MovilBadge';
@@ -214,8 +215,13 @@ export function CandidatosHueco(props: {
   puedeEventuales: boolean;
   onElegir: (id: string) => void;
   onConfirmar: () => void;
+  /** Turno del SLA que se cubre: con más de una opción el operador puede cambiarlo. */
+  opciones?: OpcionTurno[];
+  opcionId?: string | null;
+  onOpcion?: (id: string) => void;
 }) {
   const lista = props.candidatos.filter((c) => c.tab === props.tab);
+  const opcion = props.opciones?.find((o) => o.id === props.opcionId) || null;
   const fila = (on: boolean, disabled: boolean, onClick: () => void, key: string, children: ReactNode, attrs: Record<string, string>) => (
     <button key={key} type="button" disabled={disabled} onClick={onClick} aria-pressed={on} {...attrs} className={`mb-2 flex min-h-14 w-full items-center gap-2 rounded border bg-white px-3 text-left ${on ? MOVIL_PRIMARY_BORDER : MOVIL_BORDER} disabled:opacity-60`}>
       <span className="min-w-0 flex-1">{children}</span>
@@ -223,6 +229,19 @@ export function CandidatosHueco(props: {
   );
   return (
     <div data-plan-candidatos={props.tab}>
+      {opcion && (
+        <p className="mb-2 flex items-center gap-2 text-[12px] font-semibold text-slate-900" data-plan-turno-cubrir={opcion.label}>
+          <span className="rounded border border-slate-300 px-1.5 text-[11px] font-bold leading-5">{opcion.code}</span>
+          <span className="tabular-nums">{opcion.start}–{opcion.end}</span>
+          <span className="font-medium text-slate-500">· {opcion.hours} h</span>
+        </p>
+      )}
+      {props.opciones && props.opciones.length > 1 && props.onOpcion && (
+        <details className="mb-3">
+          <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-wide text-slate-500">Otro turno del SLA</summary>
+          <div className="mt-2"><OpcionesTurno opciones={props.opciones} elegidaId={props.opcionId ?? null} onElegir={props.onOpcion} /></div>
+        </details>
+      )}
       <div className="mb-3 flex gap-1">
         {TABS.map((tab) => <Chip key={tab.id} on={props.tab === tab.id} onClick={() => props.onTab(tab.id)} attrs={{ 'data-plan-tab': tab.id }}>{tab.label}</Chip>)}
       </div>
@@ -251,11 +270,43 @@ export function CandidatosHueco(props: {
   );
 }
 
-const BANDAS_UI = ['M', 'T', 'N', 'D12', 'N12'] as const;
+/** Turnos del SLA del puesto ese día («M2 11:00–15:00»), en lista vertical de toque grande. */
+export function OpcionesTurno({ opciones, elegidaId, onElegir, actualId }: {
+  opciones: OpcionTurno[];
+  elegidaId: string | null;
+  onElegir: (id: string) => void;
+  actualId?: string | null;
+}) {
+  if (opciones.length === 0) return <p className="text-[12px] font-medium text-slate-400">El SLA no habilita turnos ese día.</p>;
+  return (
+    <div className="grid grid-cols-2 gap-1.5" data-plan-opciones={opciones.length}>
+      {opciones.map((op) => {
+        const on = elegidaId === op.id;
+        return (
+          <button
+            key={op.id}
+            type="button"
+            onClick={() => onElegir(op.id)}
+            aria-pressed={on}
+            data-plan-opcion={op.label}
+            className={`flex min-h-11 items-center gap-1.5 rounded border px-2 text-left ${on ? `${MOVIL_PRIMARY_BG} border-transparent` : `${MOVIL_BTN_SECONDARY}`}`}
+          >
+            <span className="text-[12px] font-bold">{op.code}</span>
+            <span className="text-[12px] font-medium tabular-nums">{op.start}–{op.end}</span>
+            {actualId === op.id && <span className="ml-auto text-[9px] font-bold uppercase tracking-wide">Actual</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 export function CambioPuntual(props: {
+  /** Turnos habilitados del SLA para ese puesto y día (genéricos solo si el SLA no define). */
+  opciones: OpcionTurno[];
+  actualId?: string | null;
   codigo: string | null;
-  onCodigo: (code: string) => void;
+  onCodigo: (opcionId: string) => void;
   companeros: { id: string; nombre: string; detalle: string }[];
   companeroId: string | null;
   onCompanero: (id: string) => void;
@@ -279,11 +330,9 @@ export function CambioPuntual(props: {
       )}
       <div>
         <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Código y horario</p>
-        <div className="flex gap-1">
-          {BANDAS_UI.map((code) => <Chip key={code} on={props.codigo === code} onClick={() => props.onCodigo(code)} attrs={{ 'data-plan-codigo': code }}>{code}</Chip>)}
-        </div>
-        <button type="button" disabled={!props.codigo || props.bloqueado} onClick={props.onHorario} data-plan-horario="1" className={`mt-2 min-h-12 w-full rounded text-sm font-semibold ${MOVIL_BTN_PRIMARY} disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-500`}>
-          Cambiar horario
+        <OpcionesTurno opciones={props.opciones} elegidaId={props.codigo} onElegir={props.onCodigo} actualId={props.actualId} />
+        <button type="button" disabled={!props.codigo || props.codigo === props.actualId || props.bloqueado} onClick={props.onHorario} data-plan-horario="1" className={`mt-2 min-h-12 w-full rounded text-sm font-semibold ${MOVIL_BTN_PRIMARY} disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-500`}>
+          Cambiar código y horario
         </button>
       </div>
       <div>

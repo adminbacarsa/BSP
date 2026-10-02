@@ -257,17 +257,32 @@ export function candidatosParaHueco(input: {
   turnos: TurnoMovil[];
   objLat?: number | null;
   objLng?: number | null;
+  /** Turno del SLA elegido para cubrir (código + horario); sin él se usa la banda del hueco. */
+  banda?: BandaCobertura | null;
 }): CandidatoMovil[] {
   const cap = topeHorasMes();
-  const banda = bandaParaCubrir(input.hueco);
+  const banda = input.banda ?? bandaParaCubrir(input.hueco);
   const delDia = input.turnos.filter((t) => t.date === input.hueco.date);
+  const propio = intervalo(input.hueco.date, banda.start, banda.end);
   const out: CandidatoMovil[] = [];
   for (const emp of input.empleados) {
     if (!emp.id || emp.id === input.hueco.employeeId) continue;
     const franco = delDia.find((t) => t.employeeId === emp.id && t.franco);
+    const licencia = delDia.find((t) => t.employeeId === emp.id && t.licencia);
     const enObjetivo = emp.preferredObjectiveId === input.hueco.objectiveId;
     const tab: TabCandidato = franco ? 'ft' : (enObjetivo ? 'plantel' : 'otros');
-    if (!franco && delDia.some((t) => t.employeeId === emp.id && !t.licencia && !t.vacante)) continue;
+    // Quien ya trabaja a esa hora no es candidato; un turno del mismo día que no se pisa sí (lo valida el descanso).
+    const pisa = delDia.some((t) => {
+      if (t.employeeId !== emp.id || t.licencia || t.vacante || t.franco || t.id === input.hueco.id) return false;
+      const o = intervalo(t.date, t.start, t.end);
+      return propio.desde < o.hasta && o.desde < propio.hasta;
+    });
+    if (pisa) continue;
+    const km = haversineKm(Number(emp.lat), Number(emp.lng), Number(input.objLat), Number(input.objLng));
+    if (licencia) {
+      out.push({ employeeId: emp.id, name: emp.name, tab, monthHours: emp.monthHours, cap, km: km == null ? null : Math.round(km * 10) / 10, blocked: true, reason: `Tiene licencia ${licencia.code} ese día.` });
+      continue;
+    }
     const conflicto = conflictosDeAsignacion({
       employeeId: emp.id,
       employeeName: emp.name,
@@ -281,7 +296,6 @@ export function candidatosParaHueco(input: {
       monthHours: emp.monthHours,
       otrosTurnos: input.turnos.filter((t) => t.id !== input.hueco.id),
     });
-    const km = haversineKm(Number(emp.lat), Number(emp.lng), Number(input.objLat), Number(input.objLng));
     out.push({
       employeeId: emp.id,
       name: emp.name,
@@ -305,8 +319,10 @@ export function bandaDe(code: string): { start: string; end: string; hours: numb
   return BANDAS[String(code || '').toUpperCase()] || null;
 }
 
+export type BandaCobertura = { code: string; start: string; end: string; hours: number };
+
 /** El hueco a cubrir: la vacante conserva su banda; la licencia usa esa banda si el horario coincide, si no M. */
-export function bandaParaCubrir(hueco: FranjaMovil): { code: string; start: string; end: string; hours: number } {
+export function bandaParaCubrir(hueco: FranjaMovil): BandaCobertura {
   if (!hueco.licencia && hueco.start && hueco.end) {
     return { code: hueco.code, start: hueco.start, end: hueco.end, hours: hueco.hours };
   }
@@ -339,7 +355,7 @@ export function instantesJornada(fecha: string, start: string, end: string, fran
 }
 
 export type CambioLocal =
-  | { kind: 'asignar'; franjaId: string; employeeId: string; employeeName: string; ft: boolean; bolsaCuil?: string }
+  | { kind: 'asignar'; franjaId: string; employeeId: string; employeeName: string; ft: boolean; bolsaCuil?: string; banda?: BandaCobertura }
   | { kind: 'horario'; franjaId: string; code: string; start: string; end: string; hours: number }
   | { kind: 'franco'; franjaId: string }
   | { kind: 'permuta'; franjaId: string; otroId: string }
@@ -366,7 +382,7 @@ export function aplicarCambios(turnos: TurnoMovil[], cambios: CambioLocal[]): Tu
     } else if (cambio.kind === 'asignar') {
       const franja = byId(cambio.franjaId);
       if (!franja) continue;
-      const banda = bandaParaCubrir({ ...franja, kind: franja.vacante ? 'vacante' : franja.licencia ? 'licencia' : 'ok' });
+      const banda = cambio.banda ?? bandaParaCubrir({ ...franja, kind: franja.vacante ? 'vacante' : franja.licencia ? 'licencia' : 'ok' });
       if (franja.licencia) {
         franja.coveredBy = cambio.employeeName;
         next.push({
@@ -452,6 +468,19 @@ export function conflictosDeHorario(franja: TurnoMovil, code: string, start: str
     monthHours: horasMesEmpleado(franja.employeeId, franja.date.slice(0, 7), turnos.filter((t) => t.id !== franja.id)),
     otrosTurnos: turnos.filter((t) => t.id !== franja.id),
   });
+}
+
+/**
+ * Permuta: compañeros del mismo objetivo ese día (otro guardia, otro turno) con los que el
+ * intercambio no rompe tope, solape ni descanso. Primero los del mismo puesto.
+ */
+export function companerosCompatibles(franja: TurnoMovil, turnos: TurnoMovil[]): TurnoMovil[] {
+  return turnos
+    .filter((f) => f.date === franja.date && f.objectiveId === franja.objectiveId && !f.vacante && !f.licencia && !f.franco
+      && f.id !== franja.id && f.employeeId !== franja.employeeId
+      && !(f.code === franja.code && f.start === franja.start && f.end === franja.end))
+    .filter((f) => !conflictosDePermuta(franja, f, turnos).blocked)
+    .sort((a, b) => Number(b.positionName === franja.positionName) - Number(a.positionName === franja.positionName) || a.start.localeCompare(b.start));
 }
 
 export function conflictosDePermuta(a: TurnoMovil, b: TurnoMovil, turnos: TurnoMovil[]): { blocked: boolean; reason: string | null } {
