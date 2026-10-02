@@ -8,8 +8,9 @@
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import { httpsCallable } from 'firebase/functions';
-import { AlertTriangle, Loader2, MapPin, Phone, Search, ShieldCheck, UserCheck, UserX } from 'lucide-react';
+import { AlertTriangle, Loader2, MapPin, Phone, RotateCcw, Search, ShieldCheck, UserCheck, UserX } from 'lucide-react';
 import { functions } from '@/lib/firebase';
+import { mensajeErrorCallable } from '@/lib/eventos/convocatoriaPlan';
 
 export type JornadaEventual = { fecha: string; horaInicio: string; horaFin: string; horas: number };
 
@@ -56,6 +57,8 @@ export default function EventualesCandidatosPanel({
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [search, setSearch] = useState('');
+    /** Sube con «Reintentar» para volver a pedir la bolsa con los mismos parámetros. */
+    const [intento, setIntento] = useState(0);
     const key = jornadasKey(jornadas);
 
     useEffect(() => {
@@ -66,11 +69,11 @@ export default function EventualesCandidatosPanel({
         const call = httpsCallable<Record<string, unknown>, { candidatos: CandidatoEventual[] }>(functions, 'listarCandidatosEventuales');
         call({ empresaId, objectiveId: objectiveId || null, clientId: clientId || null, objetivoGeo: objetivoGeo || null, jornadas, excluirTurnoIds: excluirTurnoIds || [] })
             .then(res => { if (alive) setRows((res.data?.candidatos || []).filter(c => c.cuil !== excluirCuil)); })
-            .catch((e: unknown) => { if (alive) setError((e as Error)?.message || 'No se pudo leer la bolsa.'); })
+            .catch((e: unknown) => { if (alive) setError(mensajeErrorCallable(e, 'No se pudo cargar la bolsa de eventuales.')); })
             .finally(() => { if (alive) setLoading(false); });
         return () => { alive = false; };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [empresaId, objectiveId, key, canConvocar, excluirCuil, (excluirTurnoIds || []).join(',')]);
+    }, [empresaId, objectiveId, key, canConvocar, excluirCuil, (excluirTurnoIds || []).join(','), intento]);
 
     const filtered = useMemo(() => {
         const s = search.trim().toLowerCase();
@@ -105,7 +108,18 @@ export default function EventualesCandidatosPanel({
                     <div className="flex justify-center py-8"><Loader2 size={20} className="animate-spin text-slate-400"/></div>
                 )}
                 {!loading && error && (
-                    <p className="text-[11px] font-bold text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">{error}</p>
+                    <div role="alert" className="flex items-start gap-2 text-[11px] font-bold text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
+                        <AlertTriangle size={12} className="shrink-0 mt-0.5"/>
+                        <span className="flex-1">{error}</span>
+                        <button
+                            type="button"
+                            onClick={() => setIntento(n => n + 1)}
+                            className="inline-flex items-center gap-1 rounded-md border border-rose-300 bg-white px-2 py-0.5 text-[10px] font-bold text-rose-700 hover:bg-rose-100"
+                        >
+                            <RotateCcw size={10}/>
+                            Reintentar
+                        </button>
+                    </div>
                 )}
                 {!loading && !error && filtered.length === 0 && (
                     <p className="text-center text-[11px] text-slate-400 py-8">

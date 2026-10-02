@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
     X, Calendar, Users, MapPin, Search, Send,
-    CheckCircle, Clock,
+    CheckCircle,
     UserCheck, UserX, ClipboardCheck, UserMinus,
 } from 'lucide-react';
 import { collection, addDoc, deleteDoc, getDocs, getDoc, query, where, serverTimestamp, onSnapshot, updateDoc, doc, Timestamp } from 'firebase/firestore';
@@ -16,7 +16,26 @@ import { useAuth } from '@/context/AuthContext';
 import { aptitudTypeService } from '@/services/aptitudTypeService';
 import { type AptitudType, type EmpleadoAptitud } from '@/lib/rrhh/aptitudTypes';
 import EventualesCandidatosPanel from '@/components/eventuales/EventualesCandidatosPanel';
-import { asignarEventualPlanificacion, canConvocarEventuales, eventualErrorMessage } from '@/services/eventualesPlanificacionService';
+import { asignarEventualPlanificacion, canConvocarEventuales } from '@/services/eventualesPlanificacionService';
+import {
+    AccionChip,
+    ConvocatoriaResumen,
+    ErrorCallableBox,
+    EstadoSolicitudChip,
+    SituacionAccionBadges,
+} from '@/components/servicios/EventoConvocarResumen';
+import {
+    armarPlanConvocatoria,
+    CON_TURNO_CODES,
+    DISPONIBLE_CODES,
+    FRANCO_CODES,
+    horarioCorto,
+    mensajeErrorCallable,
+    resumenEnvio,
+    situacionDelDia,
+    textoAvisoGuardia,
+    type PlanConvocatoria,
+} from '@/lib/eventos/convocatoriaPlan';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -40,32 +59,15 @@ function calcHorasServicio(horaInicio: string, horaFin: string): number {
     return Math.max(1, Math.round(mins / 60));
 }
 
-// Códigos que se consideran "disponibles" (sin turno productivo)
-const DISPONIBLE_CODES = new Set(['libre', 'RET', 'F', 'FF', 'FP', 'ESC']);
-const FRANCO_CODES     = new Set(['F', 'FF', 'FP']);
-const CON_TURNO_CODES  = new Set(['M', 'T', 'N', 'D12', 'N12', 'ESC', 'REF']);
-
-const AVAIL_LABELS: Record<string, { label: string; cls: string }> = {
-    libre:  { label: 'Libre',         cls: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' },
-    RET:    { label: 'Retén',          cls: 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400' },
-    F:      { label: 'Franco',         cls: 'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400' },
-    FF:     { label: 'Franco Fer.',    cls: 'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400' },
-    FP:     { label: 'Franco Perm.',   cls: 'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400' },
-    ESC:    { label: 'Escuela',        cls: 'bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400' },
-    M:      { label: 'Mañana',         cls: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' },
-    T:      { label: 'Tarde',          cls: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' },
-    N:      { label: 'Noche',          cls: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400' },
-    D12:    { label: 'Diurno 12h',     cls: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' },
-    N12:    { label: 'Nocturno 12h',   cls: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400' },
-    V:      { label: 'Vacaciones',     cls: 'bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400' },
-    L:      { label: 'Licencia',       cls: 'bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400' },
-    E:      { label: 'Enfermedad',     cls: 'bg-rose-100 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400' },
-    A:      { label: 'Autorizada',     cls: 'bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400' },
-    EV:     { label: 'Evento',         cls: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' },
-};
-
-function getAvail(code: string) {
-    return AVAIL_LABELS[code] || { label: code, cls: 'bg-slate-100 text-slate-500' };
+/** `HH:MM` local de un startTime/endTime (Timestamp o ISO string). */
+function horaDeTurno(value: unknown): string {
+    if (!value) return '';
+    if (typeof (value as { toDate?: () => Date }).toDate === 'function') {
+        const d = (value as { toDate: () => Date }).toDate();
+        return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    }
+    const s = String(value);
+    return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(s) ? s.slice(11, 16) : '';
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -100,10 +102,15 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
     const [selectedSrvId, setSelectedSrvId] = useState<string>(evento.servicios?.[0]?.id || '');
     const [empleados, setEmpleados] = useState<EmpRow[]>([]);
     const [availMap, setAvailMap] = useState<Record<string, string>>({});   // empleadoId → código turno | 'libre'
+    const [horarioMap, setHorarioMap] = useState<Record<string, string>>({}); // empleadoId → «07–15» del turno de ese día
     const [solicitudes, setSolicitudes] = useState<SolicitudEvento[]>([]);
     const [search, setSearch] = useState('');
     const [selected, setSelected] = useState<Set<string>>(new Set());
     const [sending, setSending] = useState(false);
+    /** Paso de resumen (dos grupos) antes de enviar. */
+    const [revisando, setRevisando] = useState(false);
+    const [eventualError, setEventualError] = useState<string | null>(null);
+    const [ultimoEventual, setUltimoEventual] = useState<{ cuil: string; nombre: string } | null>(null);
     const [loadingAvail, setLoadingAvail] = useState(false);
     const [tab, setTab] = useState<'convocar' | 'estado' | 'cronograma'>('convocar');
     const [aptitudCatalog, setAptitudCatalog] = useState<AptitudType[]>([]);
@@ -117,6 +124,7 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
 
     useEffect(() => {
         setSelectedCronoTurnos(new Set());
+        setRevisando(false);
     }, [selectedSrvId, tab, evento.id]);
 
     // Cargar empleados activos una vez
@@ -201,7 +209,7 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
             // Revertir/eliminar solicitud si existe
             const sol = solicitudes.find(s => s.empleadoId === turno.employeeId && s.servicioId === turno.servicioId);
             if (sol) {
-                if ((sol as any).tipo === 'admin_asigna') {
+                if (sol.tipo === 'admin_asigna') {
                     await deleteDoc(doc(db, 'solicitudes_evento', sol.id));
                 } else {
                     await updateDoc(doc(db, 'solicitudes_evento', sol.id), { status: 'convocado' });
@@ -329,6 +337,7 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
             }));
 
             const map: Record<string, string> = {};
+            const horarios: Record<string, string> = {};
             allDocs.forEach(d3 => {
                 const t = d3.data();
                 if (!t.employeeId || t.draft) return;
@@ -339,27 +348,35 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                     map[t.employeeId] = restored;
                 } else {
                     map[t.employeeId] = t.code || 'ocupado';
+                    horarios[t.employeeId] = horarioCorto(horaDeTurno(t.startTime), horaDeTurno(t.endTime));
                 }
             });
             setAvailMap(map);
+            setHorarioMap(horarios);
         }).catch(console.error).finally(() => setLoadingAvail(false));
     }, [selectedSrvId, empresaId, selectedSrv?.fecha, evento.id]);
 
-    // Convocar guardias seleccionados
+    /** Plan de la selección actual: quién se asigna directo (libre/RET) y quién tiene que aceptar. */
+    function planActual(): PlanConvocatoria {
+        const empMap = Object.fromEntries(empleados.map(e => [e.id, e]));
+        const pendingIds = Array.from(selected).filter((empId) => !yaEnviadosIds.has(empId) && empMap[empId]);
+        const availableSlots = cupo > 0 ? Math.max(0, cupo - totalConfirmados) : Number.POSITIVE_INFINITY;
+        return armarPlanConvocatoria(
+            pendingIds.map((empId) => ({ id: empId, nombre: empMap[empId].name, code: availMap[empId] || 'libre', horario: horarioMap[empId] || '' })),
+            availableSlots,
+        );
+    }
+
+    // Enviar: asignación directa + aviso para libre/RET, convocatoria con aceptar/rechazar para el resto
     async function handleConvocar() {
         if (!selectedSrv || selected.size === 0) return;
         setSending(true);
         const convocadoPor = getAuth().currentUser?.uid || '';
         const empMap = Object.fromEntries(empleados.map(e => [e.id, e]));
-        const pendingIds = Array.from(selected).filter((empId) => !yaEnviadosIds.has(empId));
-        const availableSlots = cupo > 0 ? Math.max(0, cupo - totalConfirmados) : Number.POSITIVE_INFINITY;
-        const selectedWithinCapacity = pendingIds.slice(0, availableSlots);
-        const overflow = pendingIds.length - selectedWithinCapacity.length;
-        const toAssignDirect = selectedWithinCapacity.filter((empId) => {
-            const code = String(availMap[empId] || 'libre').trim().toUpperCase();
-            return code === 'RET' || code === 'LIBRE';
-        });
-        const toConvocar = selectedWithinCapacity.filter((empId) => !toAssignDirect.includes(empId));
+        const plan = planActual();
+        const toAssignDirect = plan.notificar.map((p) => p.id);
+        const toConvocar = plan.convocar.map((p) => p.id);
+        const avisoCtx = { evento: evento.nombre, servicio: selectedSrv.nombre, fecha: fmtFecha(selectedSrv.fecha), horario: horarioBadge(selectedSrv) };
         try {
             for (const empId of toAssignDirect) {
                 const emp = empMap[empId];
@@ -404,14 +421,15 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                     solicitudId: solicitudRef.id,
                     respondidoPor: convocadoPor,
                 });
+                const avisoAsignado = textoAvisoGuardia('NOTIFICAR', avisoCtx);
                 await addDoc(collection(db, 'user_notifications'), {
                     empresaId,
                     uid: emp.uid || null,
                     employeeId: empId,
                     type: 'EVENTO_CONFIRMADO',
                     target: 'employee',
-                    title: `Asignación directa: ${evento.nombre}`,
-                    body: `${selectedSrv.nombre} · ${fmtFecha(selectedSrv.fecha)} · ${horarioBadge(selectedSrv)}.`,
+                    title: avisoAsignado.title,
+                    body: avisoAsignado.body,
                     eventoId: evento.id,
                     eventoNombre: evento.nombre,
                     servicioId: selectedSrv.id,
@@ -436,14 +454,15 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                     empleadoNombre: emp.name,
                     convocadoPor,
                 });
+                const avisoConvocado = textoAvisoGuardia('CONVOCAR', avisoCtx);
                 await addDoc(collection(db, 'user_notifications'), {
                     empresaId,
                     uid: emp.uid || null,
                     employeeId: empId,
                     type: 'CONVOCATORIA_EVENTO',
                     target: 'employee',
-                    title: `Convocatoria: ${evento.nombre}`,
-                    body: `${selectedSrv.nombre} · ${fmtFecha(selectedSrv.fecha)} · ${horarioBadge(selectedSrv)}`,
+                    title: avisoConvocado.title,
+                    body: avisoConvocado.body,
                     eventoId: evento.id,
                     eventoNombre: evento.nombre,
                     servicioId: selectedSrv.id,
@@ -453,16 +472,13 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                     createdAt: serverTimestamp(),
                 });
             }));
-            const msgs: string[] = [];
-            if (toAssignDirect.length > 0) msgs.push(`${toAssignDirect.length} asignado(s) directo (RET/sin turno)`);
-            if (toConvocar.length > 0) msgs.push(`${toConvocar.length} convocado(s)`);
-            if (overflow > 0) msgs.push(`${overflow} omitido(s) por cupo`);
-            addToast(msgs.join(' · ') || 'Sin cambios', 'success');
+            addToast(resumenEnvio(plan), 'success');
             setSelected(new Set());
+            setRevisando(false);
             setTab('estado');
         } catch (e) {
             console.error(e);
-            addToast('Error al enviar convocatoria', 'error');
+            addToast(mensajeErrorCallable(e, 'No se pudo enviar la convocatoria.'), 'error');
         } finally {
             setSending(false);
         }
@@ -470,7 +486,10 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
 
     // Derivados del servicio seleccionado (selectedSrvId='' = todos los servicios)
     const srvSols = selectedSrvId ? solicitudes.filter(s => s.servicioId === selectedSrvId) : solicitudes;
-    const aceptaron = srvSols.filter(s => s.status === 'aprobada');
+    const aprobadas = srvSols.filter(s => s.status === 'aprobada');
+    /** Asignación directa (libre/RET): no es una aceptación. */
+    const asignadosDirecto = aprobadas.filter(s => s.tipo === 'admin_asigna');
+    const aceptaron = aprobadas.filter(s => s.tipo !== 'admin_asigna');
     const pendientes = srvSols.filter(s => s.status === 'convocado' || s.status === 'pendiente');
     const rechazaron = srvSols.filter(s => s.status === 'rechazada');
     const yaEnviadosIds = new Set(srvSols.map(s => s.empleadoId));
@@ -479,7 +498,7 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
     const srvEvTurnos = evTurnos.filter(t => selectedSrvId ? t.servicioId === selectedSrvId : true);
     const solsEmpleadoIds = new Set(srvSols.map(s => s.empleadoId));
     const turnosDirectos = srvEvTurnos.filter(t => !solsEmpleadoIds.has(t.employeeId));
-    const totalConfirmados = aceptaron.length + turnosDirectos.length;
+    const totalConfirmados = aprobadas.length + turnosDirectos.length;
 
     const cupo = selectedSrv?.cupo || 0;
     const cupoLleno = cupo > 0 && totalConfirmados >= cupo;
@@ -678,7 +697,7 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                         <div className="m-4 flex flex-col items-center justify-center gap-2 py-10 rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 text-center">
                                             <CheckCircle size={28} className="text-emerald-500"/>
                                             <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-300">Cupo completo</p>
-                                            <p className="text-xs text-emerald-600 dark:text-emerald-400">{aceptaron.length}/{cupo} guardias aceptaron este servicio.</p>
+                                            <p className="text-xs text-emerald-600 dark:text-emerald-400">{totalConfirmados}/{cupo} guardias confirmados ({asignadosDirecto.length} asignados y notificados, {aceptaron.length} aceptaron).</p>
                                             <p className="text-[10px] text-slate-400 mt-1">Para agregar más, editá el cupo del servicio.</p>
                                         </div>
                                     ) : (
@@ -702,11 +721,43 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                             {fuente === 'eventuales' && selectedSrv && (() => {
                                                 const horas = selectedSrv.tipoTurno === '3x8' ? 8 : selectedSrv.tipoTurno === '2x12' ? 12 : calcHorasServicio(selectedSrv.horaInicio, selectedSrv.horaFin);
                                                 const jornada = { fecha: selectedSrv.fecha, horaInicio: selectedSrv.horaInicio || '08:00', horaFin: selectedSrv.horaFin || '16:00', horas };
+                                                const asignarEventual = async (candidato: { cuil: string; nombre: string }) => {
+                                                    setEventualBusy(true);
+                                                    setEventualError(null);
+                                                    try {
+                                                        await asignarEventualPlanificacion({
+                                                            empresaId,
+                                                            cuil: candidato.cuil,
+                                                            objectiveId: null,
+                                                            clientId: evento.clienteId || null,
+                                                            clientName: evento.clienteNombre || null,
+                                                            positionName: selectedSrv.nombre || 'Evento',
+                                                            turnos: [{ ...jornada, code: 'EV', name: 'Evento', positionName: selectedSrv.nombre || 'Evento' }],
+                                                            modo: 'TURNOS',
+                                                            evento: { eventoId: evento.id!, eventoNombre: evento.nombre, servicioId: selectedSrv.id, servicioNombre: selectedSrv.nombre },
+                                                        });
+                                                        setUltimoEventual(null);
+                                                        addToast(`${candidato.nombre.split(',')[0]} (eventual) asignado a ${selectedSrv.nombre} y notificado`, 'success');
+                                                    } catch (e) {
+                                                        setUltimoEventual(candidato);
+                                                        setEventualError(mensajeErrorCallable(e, `No se pudo asignar a ${candidato.nombre.split(',')[0]} (eventual).`));
+                                                    } finally {
+                                                        setEventualBusy(false);
+                                                    }
+                                                };
                                                 return (
                                                     <div className="flex-1 overflow-hidden flex flex-col px-3 py-3">
                                                         <p className="text-[9px] font-bold text-fuchsia-800 bg-fuchsia-50 border border-fuchsia-100 rounded-lg px-3 py-1.5 mb-2 shrink-0">
-                                                            {selectedSrv.nombre} · {fmtFecha(selectedSrv.fecha)} · {jornada.horaInicio}–{jornada.horaFin} ({horas}h). El eventual queda asignado con turno EV; el contrato de la empresa se confirma y entra al lote AT.
+                                                            {selectedSrv.nombre} · {fmtFecha(selectedSrv.fecha)} · {jornada.horaInicio}–{jornada.horaFin} ({horas}h). El eventual se asigna directo (se notifica); el contrato de la empresa se confirma y entra al lote AT.
                                                         </p>
+                                                        {eventualError && (
+                                                            <div className="mb-2 shrink-0">
+                                                                <ErrorCallableBox
+                                                                    mensaje={eventualError}
+                                                                    onReintentar={ultimoEventual ? () => { void asignarEventual(ultimoEventual); } : undefined}
+                                                                />
+                                                            </div>
+                                                        )}
                                                         <EventualesCandidatosPanel
                                                             empresaId={empresaId}
                                                             objectiveId={null}
@@ -714,27 +765,7 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                                             jornadas={[jornada]}
                                                             canConvocar={canConvocarEventual}
                                                             busy={eventualBusy}
-                                                            onSelect={async (candidato) => {
-                                                                setEventualBusy(true);
-                                                                try {
-                                                                    await asignarEventualPlanificacion({
-                                                                        empresaId,
-                                                                        cuil: candidato.cuil,
-                                                                        objectiveId: null,
-                                                                        clientId: evento.clienteId || null,
-                                                                        clientName: evento.clienteNombre || null,
-                                                                        positionName: selectedSrv.nombre || 'Evento',
-                                                                        turnos: [{ ...jornada, code: 'EV', name: 'Evento', positionName: selectedSrv.nombre || 'Evento' }],
-                                                                        modo: 'TURNOS',
-                                                                        evento: { eventoId: evento.id!, eventoNombre: evento.nombre, servicioId: selectedSrv.id, servicioNombre: selectedSrv.nombre },
-                                                                    });
-                                                                    addToast(`${candidato.nombre.split(',')[0]} (eventual) asignado a ${selectedSrv.nombre}`, 'success');
-                                                                } catch (e) {
-                                                                    addToast(eventualErrorMessage(e), 'error');
-                                                                } finally {
-                                                                    setEventualBusy(false);
-                                                                }
-                                                            }}
+                                                            onSelect={(candidato) => { void asignarEventual(candidato); }}
                                                         />
                                                     </div>
                                                 );
@@ -758,17 +789,42 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                                         Solo cumplen requisitos
                                                     </button>
                                                 )}
-                                                <button
-                                                    onClick={() => void handleConvocar()}
-                                                    disabled={selected.size === 0 || sending}
-                                                    className="flex items-center gap-2 px-4 py-2 bg-slate-800 dark:bg-slate-200 hover:bg-slate-700 dark:hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed text-white dark:text-slate-900 rounded-lg text-xs font-medium transition-colors shrink-0"
-                                                >
-                                                    <Send size={11}/>
-                                                    {sending ? 'Enviando…' : `Convocar${selected.size > 0 ? ` (${selected.size})` : ''}`}
-                                                </button>
+                                                {(() => {
+                                                    const plan = selected.size > 0 ? planActual() : null;
+                                                    const n = plan?.notificar.length || 0;
+                                                    const m = plan?.convocar.length || 0;
+                                                    return (
+                                                        <div className="flex items-center gap-2 shrink-0">
+                                                            {plan && (n > 0 || m > 0) && (
+                                                                <span className="hidden sm:flex items-center gap-1" data-plan-contadores={`${n}/${m}`}>
+                                                                    {n > 0 && <span className="text-[9px] font-bold text-emerald-700 dark:text-emerald-400">{n} se notifica{n === 1 ? '' : 'n'}</span>}
+                                                                    {n > 0 && m > 0 && <span className="text-[9px] text-slate-300">·</span>}
+                                                                    {m > 0 && <span className="text-[9px] font-bold text-amber-700 dark:text-amber-400">{m} se convoca{m === 1 ? '' : 'n'}</span>}
+                                                                </span>
+                                                            )}
+                                                            <button
+                                                                onClick={() => setRevisando(true)}
+                                                                disabled={selected.size === 0 || sending || revisando}
+                                                                className="flex items-center gap-2 px-4 py-2 bg-slate-800 dark:bg-slate-200 hover:bg-slate-700 dark:hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed text-white dark:text-slate-900 rounded-lg text-xs font-medium transition-colors shrink-0"
+                                                            >
+                                                                <Send size={11}/>
+                                                                {sending ? 'Enviando…' : `Revisar y enviar${selected.size > 0 ? ` (${selected.size})` : ''}`}
+                                                            </button>
+                                                        </div>
+                                                    );
+                                                })()}
                                             </div>
+                                            {revisando && selectedSrv && fuente === 'nomina' && (
+                                                <ConvocatoriaResumen
+                                                    plan={planActual()}
+                                                    servicio={{ nombre: selectedSrv.nombre, fecha: fmtFecha(selectedSrv.fecha), horario: horarioBadge(selectedSrv) }}
+                                                    sending={sending}
+                                                    onCancelar={() => setRevisando(false)}
+                                                    onConfirmar={() => void handleConvocar()}
+                                                />
+                                            )}
                                             {/* Filtros de disponibilidad */}
-                                            {!loadingAvail && fuente === 'nomina' && (
+                                            {!loadingAvail && fuente === 'nomina' && !revisando && (
                                                 <div className="px-4 py-2 flex items-center gap-1.5 flex-wrap border-b border-slate-100 dark:border-slate-800 shrink-0">
                                                     {([
                                                         { key: 'todos',    label: 'Todos' },
@@ -789,15 +845,20 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                                             </button>
                                                         );
                                                     })}
+                                                    <span className="ml-auto flex items-center gap-1.5 text-[9px] text-slate-400">
+                                                        <AccionChip accion="NOTIFICAR" size="xs" /> libre / RET: asignación directa
+                                                        <AccionChip accion="CONVOCAR" size="xs" /> tiene que aceptar
+                                                    </span>
                                                 </div>
                                             )}
-                                            <div className={`flex-1 overflow-y-auto px-4 py-3 space-y-1.5 ${fuente === 'eventuales' ? 'hidden' : ''}`}>
+                                            <div className={`flex-1 overflow-y-auto px-4 py-3 space-y-1.5 ${fuente === 'eventuales' || revisando ? 'hidden' : ''}`}>
                                                 {loadingAvail && (
                                                     <p className="text-[11px] text-slate-400 text-center py-4">Cargando disponibilidad…</p>
                                                 )}
                                                 {!loadingAvail && filteredEmps.map(emp => {
                                                     const code = availMap[emp.id] || 'libre';
-                                                    const avCfg = getAvail(code);
+                                                    const situacion = situacionDelDia(code, horarioMap[emp.id] || '');
+                                                    const solPrevia = srvSols.find((s) => s.empleadoId === emp.id);
                                                     const yaEnviado = yaEnviadosIds.has(emp.id);
                                                     const isChecked = selected.has(emp.id);
                                                     const disponible = DISPONIBLE_CODES.has(code);
@@ -846,12 +907,11 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                                                     )}
                                                                 </div>
                                                             )}
-                                                            {/* Badge disponibilidad / ya convocado */}
-                                                            {yaEnviado ? (
-                                                                <span className="text-[9px] text-slate-500 dark:text-slate-400 shrink-0">Convocado</span>
-                                                            ) : (
-                                                                <span className={`text-[9px] px-1.5 py-0.5 rounded font-medium shrink-0 ${avCfg.cls}`}>{avCfg.label}</span>
-                                                            )}
+                                                            {/* Situación del día + qué va a pasar (Se notifica / Se convoca) */}
+                                                            <SituacionAccionBadges
+                                                                situacion={situacion}
+                                                                yaEnviado={yaEnviado ? (solPrevia?.tipo === 'admin_asigna' ? 'ASIGNADO' : 'CONVOCADO') : null}
+                                                            />
                                                         </div>
                                                     );
                                                 })}
@@ -1007,11 +1067,8 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                                     <div className="space-y-1">
                                                         {sSols.map(sol => (
                                                             <div key={sol.id} className="flex items-center gap-3 px-3 py-2.5 bg-white dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-lg">
-                                                                {sol.status === 'aprobada' ? <CheckCircle size={12} className="text-emerald-500 shrink-0"/> : <Clock size={12} className="text-slate-400 shrink-0"/>}
                                                                 <p className="text-xs font-medium text-slate-700 dark:text-slate-200 flex-1">{sol.empleadoNombre}</p>
-                                                                <span className={`text-[10px] shrink-0 ${sol.status === 'aprobada' ? 'text-emerald-600 dark:text-emerald-400' : sol.status === 'rechazada' ? 'text-rose-400' : 'text-slate-400'}`}>
-                                                                    {sol.status === 'aprobada' ? 'Aceptada' : sol.status === 'rechazada' ? 'Rechazó' : 'Pendiente'}
-                                                                </span>
+                                                                <EstadoSolicitudChip sol={sol} />
                                                             </div>
                                                         ))}
                                                         {sTurnDir.map(t => (
@@ -1029,15 +1086,30 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                         })
                                     ) : (
                                         <>
+                                            {asignadosDirecto.length > 0 && (
+                                                <section>
+                                                    <p className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-2 uppercase tracking-wider">Asignados (notificados) — {asignadosDirecto.length}</p>
+                                                    <div className="space-y-1">
+                                                        {asignadosDirecto.map(sol => (
+                                                            <div key={sol.id} className="flex items-center gap-3 px-3 py-2.5 bg-white dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-lg">
+                                                                <div className="flex-1 min-w-0">
+                                                                    <p className="text-xs font-medium text-slate-700 dark:text-slate-200">{sol.empleadoNombre}</p>
+                                                                    <p className="text-[9px] text-slate-400">Libre o RET: asignación directa, no tenía que aceptar</p>
+                                                                </div>
+                                                                <EstadoSolicitudChip sol={sol} />
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </section>
+                                            )}
                                             {aceptaron.length > 0 && (
                                                 <section>
                                                     <p className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-2 uppercase tracking-wider">Aceptaron — {aceptaron.length}</p>
                                                     <div className="space-y-1">
                                                         {aceptaron.map(sol => (
                                                             <div key={sol.id} className="flex items-center gap-3 px-3 py-2.5 bg-white dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-lg">
-                                                                <CheckCircle size={12} className="text-emerald-500 shrink-0"/>
                                                                 <p className="text-xs font-medium text-slate-700 dark:text-slate-200 flex-1">{sol.empleadoNombre}</p>
-                                                                <span className="text-[10px] text-emerald-600 dark:text-emerald-400">Aceptada</span>
+                                                                <EstadoSolicitudChip sol={sol} />
                                                             </div>
                                                         ))}
                                                     </div>
@@ -1065,12 +1137,11 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                                     <div className="space-y-1">
                                                         {pendientes.map(sol => (
                                                             <div key={sol.id} className="flex items-center gap-3 px-3 py-2.5 bg-white dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-lg">
-                                                                <Clock size={12} className="text-slate-400 shrink-0"/>
                                                                 <div className="flex-1 min-w-0">
                                                                     <p className="text-xs font-medium text-slate-700 dark:text-slate-200">{sol.empleadoNombre}</p>
-                                                                    <p className="text-[9px] text-slate-400">{sol.tipo === 'admin_convoca' ? 'Convocado por admin' : 'Solicitó participar'}</p>
+                                                                    <p className="text-[9px] text-slate-400">{sol.tipo === 'admin_convoca' ? 'Convocado, tiene que aceptar desde la app' : 'Solicitó participar'}</p>
                                                                 </div>
-                                                                <span className="text-[10px] text-slate-400 dark:text-slate-500 shrink-0">Pendiente</span>
+                                                                <EstadoSolicitudChip sol={sol} />
                                                             </div>
                                                         ))}
                                                     </div>
@@ -1083,7 +1154,7 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                                         {rechazaron.map(sol => (
                                                             <div key={sol.id} className="flex items-center gap-3 px-3 py-2.5 bg-white dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-lg">
                                                                 <p className="text-xs font-medium text-slate-700 dark:text-slate-200 flex-1">{sol.empleadoNombre}</p>
-                                                                <span className="text-[10px] text-rose-400 dark:text-rose-500 shrink-0">Rechazó</span>
+                                                                <EstadoSolicitudChip sol={sol} />
                                                             </div>
                                                         ))}
                                                     </div>

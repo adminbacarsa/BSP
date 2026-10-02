@@ -13,7 +13,8 @@ import {
 import { stampEmpresaId } from '@/lib/multiempresa';
 
 export type EstadoSolicitudEvento = 'pendiente' | 'convocado' | 'aprobada' | 'rechazada' | 'cerrada' | 'reserva';
-export type TipoSolicitudEvento = 'guardia_solicita' | 'admin_convoca';
+/** `admin_asigna` = asignación directa desde Eventos (libre/RET): nace `aprobada`, no es una aceptación. */
+export type TipoSolicitudEvento = 'guardia_solicita' | 'admin_convoca' | 'admin_asigna';
 
 export interface SolicitudEvento {
     id?: string;
