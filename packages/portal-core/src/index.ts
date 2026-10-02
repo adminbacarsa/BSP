@@ -8,7 +8,27 @@ export type { PortalCallableName } from './callables/names';
 export { resolveEmpDocId, resolveEmpDocIdWithRetry } from './empleado/resolveEmpDocId';
 export { toDate, formatDateAr, formatTimeAr, formatDateTimeAr } from './utils/dates';
 export { haversineKm, isWithinCheckInRadius, CHECK_IN_MAX_DISTANCE_KM } from './geo/haversine';
-export { loadObjectivesMap, getObjectiveForShift } from './objectives/loadObjectivesMap';
+export {
+  loadObjectivesMap,
+  loadObjectivesMapDetailed,
+  getObjectiveForShift,
+  buildObjectivesMap,
+  findEmbeddedObjective,
+  firestoreObjectiveReader,
+  resolveObjectiveLocationForShift,
+  objectiveEntryFromDoc,
+  objectiveEntryFromEmbedded,
+  OBJECTIVE_LOCATION_LOAD_ERROR,
+  OBJECTIVE_NOT_FOUND_MESSAGE,
+} from './objectives/loadObjectivesMap';
+export type {
+  LoadObjectivesMapOptions,
+  LoadObjectivesMapResult,
+  ObjectiveDocLike,
+  ObjectiveReader,
+  ObjectiveLocationLookup,
+  ShiftObjectiveRef,
+} from './objectives/loadObjectivesMap';
 export {
   PENDING_CHECKINS_STORAGE_KEY,
   buildCheckInPayload,

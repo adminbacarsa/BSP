@@ -2,6 +2,7 @@ import type { ObjectiveLocation, Shift } from '@cosp/portal-types';
 import { toDate } from '../utils/dates';
 import { haversineKm, isWithinCheckInRadius } from '../geo/haversine';
 import { isAbsentLikeShift } from '../shifts/isAbsentLikeShift';
+import { OBJECTIVE_NOT_FOUND_MESSAGE } from '../objectives/objectiveMessages';
 import {
   checkInRejectMessage,
   convocadoPunchAnchorMs,
@@ -405,7 +406,8 @@ export function validateCheckInDistance(
     return { ok: true };
   }
   if (!objective) {
-    return { ok: false, message: 'Objetivo sin ubicación configurada' };
+    // El objetivo no está en ninguna fuente: no es «sin ubicación», es «no encontrado».
+    return { ok: false, message: OBJECTIVE_NOT_FOUND_MESSAGE };
   }
   const remoteAllowed = objective.allowRemoteCheckIn === true;
   if (remoteAllowed) {

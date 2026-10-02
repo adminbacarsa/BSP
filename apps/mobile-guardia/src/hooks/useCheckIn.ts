@@ -5,9 +5,11 @@ import { Platform } from 'react-native';
 import type { Shift, ObjectiveLocation } from '@cosp/portal-types';
 import {
   buildCheckInPayload,
+  firestoreObjectiveReader,
   flushPendingCheckins,
-  getObjectiveForShift,
+  resolveObjectiveLocationForShift,
   validateCheckInDistance,
+  OBJECTIVE_NOT_FOUND_MESSAGE,
   type PendingCheckInItem,
 } from '@cosp/portal-core';
 import { getPortalCallables, getPortalFirebase } from '../lib/portal';
@@ -116,6 +118,8 @@ export function useCheckIn() {
         previewAsEmployeeId?: string | null;
         /** Legajo con fichadaRemota: sin radio de 80 m. */
         fichadaRemota?: boolean;
+        /** Empresa del legajo: último recurso para buscar el objetivo en `clients`. */
+        empresaId?: string | null;
       },
     ): Promise<{ ok: true; message: string } | { ok: false; message: string }> => {
       setBusyShiftId(shift.id);
@@ -138,11 +142,32 @@ export function useCheckIn() {
           };
         }
 
-        const objective = getObjectiveForShift(
+        // El mapa puede venir incompleto (reglas, red): el objetivo del turno se resuelve
+        // leyendo solo su cliente / su doc. Un error de lectura se informa como tal.
+        const { db } = getPortalFirebase();
+        const lookup = await resolveObjectiveLocationForShift(
+          firestoreObjectiveReader(db),
+          {
+            objectiveId: shift.objectiveId,
+            objectiveName: shift.objectiveName,
+            clientId: shift.clientId,
+            empresaId: shift.empresaId || owner?.empresaId || null,
+          },
           objectivesMap,
-          shift.objectiveId,
-          shift.objectiveName,
         );
+        if (lookup.status === 'error') {
+          lookup.errors.forEach((err) =>
+            console.warn('[checkIn] objetivo', shift.objectiveId, err instanceof Error ? err.message : String(err)),
+          );
+          if (owner?.fichadaRemota !== true) {
+            return { ok: false, message: lookup.message };
+          }
+        }
+        const objective = lookup.status === 'found' ? lookup.location : null;
+        if (!objective && lookup.status === 'not_found' && owner?.fichadaRemota !== true) {
+          console.warn('[checkIn] objetivo no encontrado', shift.objectiveId, shift.objectiveName, shift.clientId);
+          return { ok: false, message: OBJECTIVE_NOT_FOUND_MESSAGE };
+        }
         const remoteAllowed = objective?.allowRemoteCheckIn === true || owner?.fichadaRemota === true;
         const hasCoords =
           !!objective &&

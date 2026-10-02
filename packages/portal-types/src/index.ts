@@ -15,6 +15,8 @@ export type Shift = {
   endTime?: FirestoreTimestampLike;
   objectiveId?: string;
   objectiveName?: string;
+  /** Cliente dueño del objetivo: `clients/{clientId}.objetivos[]` tiene la ubicación. */
+  clientId?: string;
   clientName?: string;
   positionName?: string;
   code?: string;
