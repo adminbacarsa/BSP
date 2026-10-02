@@ -43,6 +43,7 @@ export function GuardAccionesSheetBody({
   onCerrar,
   onNota,
   confirmandoInicial = null,
+  soloDetalle = false,
 }: {
   shift: GuardShift;
   siblings?: readonly GuardShift[];
@@ -53,6 +54,8 @@ export function GuardAccionesSheetBody({
   onNota?: (texto: string) => void | Promise<void>;
   /** Tests: arrancar con una acción en confirmación. */
   confirmandoInicial?: GuardAccionId | null;
+  /** Supervisión: la misma hoja, solo el detalle, sin botones sobre el turno. */
+  soloDetalle?: boolean;
 }) {
   const nowMs = now ?? Date.now();
   const acciones = accionesParaTurno(shift as never, nowMs, siblings as never);
@@ -91,7 +94,7 @@ export function GuardAccionesSheetBody({
   };
   const visual = toneForGuard(guardTone(shift));
   return (
-    <div data-movil-sheet="acciones" data-movil-acciones-shift={shift.id}>
+    <div data-movil-sheet={soloDetalle ? 'detalle' : 'acciones'} data-movil-acciones-shift={shift.id}>
       <div className={`relative mb-3 ${MOVIL_CARD} p-3 pl-4`}>
         <span aria-hidden="true" className={`absolute inset-y-0 left-0 w-[3px] rounded-l-lg ${MOVIL_FILETE[visual]}`} />
         <div className="flex items-center gap-2">
@@ -103,7 +106,7 @@ export function GuardAccionesSheetBody({
         </div>
         <GuardDetalleLines shift={shift} siblings={siblings} now={nowMs} />
       </div>
-      {pendiente ? (
+      {soloDetalle ? null : pendiente ? (
         <div className={`${MOVIL_CARD} p-3`} data-movil-confirmar={pendiente.id}>
           <p className="text-sm font-semibold text-slate-900">{pendiente.label}</p>
           <p className="mt-1 text-[12px] font-medium text-slate-700">{pendiente.confirm}</p>
@@ -562,7 +565,7 @@ export function GuardCard({
   const c = guardCompacto(shift, siblings, now ?? Date.now());
   const visual = c.estado.kind === 'cierra' ? 'slate' : toneForGuard(c.tone);
   const EstadoIcon = ESTADO_ICON[c.estado.kind];
-  const abrir = readOnly ? null : (onAcciones ?? onProtocolo ?? null);
+  const abrir = onAcciones ?? (readOnly ? null : onProtocolo ?? null);
   const Fila = abrir ? 'button' : 'div';
   return (
     <article
@@ -579,6 +582,7 @@ export function GuardCard({
         <span className="flex items-center gap-1.5">
           <strong className={`truncate text-[13px] font-semibold leading-5 ${c.esVacante ? 'text-rose-600' : 'text-slate-900'}`}>{c.nombre}</strong>
           <span className="shrink-0 rounded border border-slate-300 px-1 text-[10px] font-bold leading-4 text-slate-700" data-movil-code={c.code}>{c.code}</span>
+          {c.extra && <span className="shrink-0 rounded border border-slate-300 px-1 text-[10px] font-bold leading-4 text-slate-700" data-movil-extra={c.extra}>{c.extra}</span>}
           <span className={`ml-auto flex shrink-0 items-center gap-1 text-[10px] font-bold leading-4 tabular-nums ${MOVIL_TEXT[visual]}`} data-movil-estado={c.estado.kind}>
             <EstadoIcon size={11} strokeWidth={1.75} aria-hidden="true" />
             {c.estado.texto}

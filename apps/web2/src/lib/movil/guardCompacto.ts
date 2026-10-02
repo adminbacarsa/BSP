@@ -29,6 +29,8 @@ export interface GuardCompacto {
   nota: string | null;
   /** Fin vencido sin franja siguiente: texto gris, no es retención. */
   cierre: string | null;
+  /** Marca del escritorio que no es el código (TURA anexado al turno del guardia). */
+  extra: string | null;
   /** Chip de estado a la derecha de la fila 1. */
   estado: { kind: GuardEstadoCompacto; texto: string };
   tone: GuardTone;
@@ -179,9 +181,17 @@ export function guardCompacto(shift: GuardDetalleShift, siblings: readonly Guard
   }
   const notaRaw = shift.opsNota && typeof shift.opsNota === 'object' ? normalizarNota((shift.opsNota as { texto?: unknown }).texto) : null;
 
+  const code = String(shift.code || shift.vacancyBand || '').trim().toUpperCase() || '—';
+  const type = String(shift.type || '').trim().toUpperCase();
+  const extra = (shift.turaContiguous || shift.isTuraCutSegment) && code !== 'TURA'
+    ? 'TURA'
+    : (type === 'TURA' || type === 'RFZ') && type !== code
+      ? type
+      : null;
+
   return {
     nombre,
-    code: String(shift.code || shift.vacancyBand || '').trim().toUpperCase() || '—',
+    code,
     puesto: puestoCompacto(shift.positionName),
     horario: horarioPlanificado(shift),
     ingreso,
@@ -190,6 +200,7 @@ export function guardCompacto(shift: GuardDetalleShift, siblings: readonly Guard
     nota: notaRaw,
     cierre,
     relevo: cierre ? null : relevo,
+    extra,
     estado: estadoDe(shift, tone, nowMs),
     tone,
     telefono: String(shift.phone || '').trim() || null,

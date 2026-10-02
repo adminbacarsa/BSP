@@ -304,21 +304,22 @@ export function OperacionMovil(props: Props) {
         onSalida={readOnly ? noop : (shift) => { void salida(shift, 'Salida desde el celular'); }}
         onProtocolo={readOnly ? noop : props.onProtocolo}
         onRetencion={readOnly ? noop : props.onRetencion}
-        onAcciones={readOnly ? undefined : (shift) => setAccionesShiftId(shift.id)}
+        onAcciones={(shift) => setAccionesShiftId(shift.id)}
         onSala={readOnly ? noop : () => setSalaOpen(true)}
         proximas={proximas}
         onProximas={() => setProximasOpen(true)}
         pieLabel={pieLabel}
       />
-      <BottomSheet open={!!accionesShift && !readOnly} title="Acciones del turno" onClose={() => setAccionesShiftId(null)}>
+      <BottomSheet open={!!accionesShift} title={readOnly ? 'Detalle del turno' : 'Acciones del turno'} onClose={() => setAccionesShiftId(null)}>
         {accionesShift && (
           <GuardAccionesSheetBody
             shift={accionesShift}
             siblings={accionesSiblings}
             now={nowMs}
+            soloDetalle={readOnly}
             onEjecutar={(id, accion) => ejecutarAccion(accionesShift, id, accion)}
             onCerrar={() => setAccionesShiftId(null)}
-            onNota={(texto) => guardarNota(accionesShift, texto)}
+            onNota={readOnly ? undefined : (texto) => guardarNota(accionesShift, texto)}
           />
         )}
       </BottomSheet>

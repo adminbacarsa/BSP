@@ -1,3 +1,5 @@
+import { isOperationalOriginShift } from '@cosp/ops-core';
+
 function arYearMonthOf(d: Date): { year: number; month: number } {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/Argentina/Cordoba',
@@ -19,12 +21,15 @@ function publishKey(objectiveId: unknown, year: number, month: number): string {
  * Un N 23–07 que sigue en servicio el 01/10 cuenta aunque octubre no esté publicado.
  */
 export function shiftCountsInOpsHeader(s: any, publishStatusMap: Record<string, boolean>): boolean {
+  // Mismo universo que el monitor: operativo (EVENTO, cobertura, RETEN) siempre;
+  // REF/ESC/TURA planificados cuando el mes del turno está publicado.
+  if (isOperationalOriginShift(s) || s?.isVirtual === true) return true;
   const d = s?.shiftDateObj instanceof Date ? s.shiftDateObj : null;
   if (d) {
     const { year, month } = arYearMonthOf(d);
     if (publishStatusMap[publishKey(s.objectiveId, year, month)]) return true;
   }
-  return s?.origin === 'RETEN' || s?.origin === 'SLA_VIRTUAL' || s?.isReten === true || s?.resolvedBy === 'OPERACIONES' || s?.isVirtual === true;
+  return false;
 }
 
 /** Arrancó en un mes publicado y termina en uno que no: fin de servicio, no retención. */

@@ -107,7 +107,7 @@ check('barra de Servicios', barras((key) => key === 'SERVICES', '/admin/servicio
 const opsNav = movilNavForPermissions((key) => key === 'OPERATIONS', '/admin/operaciones');
 check('Sala abre con ?panel=sala y Menú va al selector', opsNav.find((item) => item.label === 'Sala').href === '/admin/operaciones/?panel=sala' && opsNav.find((item) => item.label === 'Menú').href === '/admin/movil/');
 check('un operador sin RRHH no lo ve', !movilModulesForPermissions((key) => key === 'OPERATIONS').some((item) => item.id === 'rrhh' || item.id === 'eventuales'));
-check('ALTA_ARCA_PENDIENTE es de Operación (Supervisión ya no mira turnos)', alertaDelModulo('operacion', 'ALTA_ARCA_PENDIENTE') && !alertaDelModulo('supervision', 'ALTA_ARCA_PENDIENTE') && alertaDelModulo('supervision', 'SUPERVISION_NOVEDAD') && !alertaDelModulo('operacion', 'SUPERVISION_NOVEDAD'));
+check('ALTA_ARCA_PENDIENTE es del CC (Operación y Supervisión)', alertaDelModulo('operacion', 'ALTA_ARCA_PENDIENTE') && alertaDelModulo('supervision', 'ALTA_ARCA_PENDIENTE') && !alertaDelModulo('operacion', 'SUPERVISION_NOVEDAD') && !alertaDelModulo('supervision', 'SUPERVISION_NOVEDAD'));
 check('el resto de ARCA es de Eventuales', alertaDelModulo('eventuales', 'ARCA_BAJA_PENDIENTE') && !alertaDelModulo('operacion', 'ARCA_BAJA_PENDIENTE') && !alertaDelModulo('operacion', 'ARCA_PENDIENTE'));
 check('novedad de RRHH no entra en Operación', !alertaDelModulo('operacion', 'CERTIFICADO_VENCIDO') && alertaDelModulo('rrhh', 'CERTIFICADO_VENCIDO'));
 check('cronograma sin publicar es solo de Planificación (Operación no la lista)', alertaDelModulo('planificacion', 'CRONOGRAMA_SIN_PUBLICAR') && !alertaDelModulo('operacion', 'CRONOGRAMA_SIN_PUBLICAR') && !alertaDelModulo('supervision', 'CRONOGRAMA_SIN_PUBLICAR') && !alertaDelModulo('eventuales', 'CRONOGRAMA_SIN_PUBLICAR'));
@@ -115,7 +115,7 @@ const saModules = movilModulesForPermissions(() => true);
 check('SuperAdmin ve los 6 módulos', saModules.map((item) => item.label).join(',') === 'Operación,Supervisión,Planificación,Eventuales,RRHH,Servicios');
 check('solo SUPERVISION ve Supervisión y nada más', movilModulesForPermissions((key) => key === 'SUPERVISION').map((item) => item.id).join(',') === 'supervision');
 check('RRHH ve Eventuales y RRHH', movilModulesForPermissions((key) => key === 'RRHH').map((item) => item.id).join(',') === 'eventuales,rrhh');
-check('Supervisión es módulo propio en /admin/movil/supervision', movilModuleForPath('/admin/movil/supervision')?.id === 'supervision' && movilModuleForPath('/admin/operaciones', { modo: 'supervision' })?.id === 'operacion');
+check('Supervisión es el CC en solo lectura', movilModuleForPath('/admin/operaciones', { modo: 'supervision' })?.id === 'supervision' && movilModuleForPath('/admin/operaciones')?.id === 'operacion' && movilModuleForPath('/admin/movil/supervision')?.id !== 'supervision');
 check('eventuales gana sobre rrhh en la ruta', movilModuleForPath('/admin/rrhh/eventuales')?.id === 'eventuales');
 check('planificación apunta a /admin/movil/planificacion', moduloMovilDe('/admin/planificacion')?.href === '/admin/movil/planificacion/' && movilRouteHasMobileVersion('/admin/movil/planificacion') && movilRouteHasMobileVersion('/admin/planificacion'));
 check('configuración y reportes sin versión celular', movilRouteHasMobileVersion('/admin/configuracion') === false && movilRouteHasMobileVersion('/admin/reportes') === false);
@@ -334,6 +334,21 @@ const supervisionDetalle = render(OperacionScreens, {
   panel: 'objetivo', alerts: [], objectives: [objetivoEstados], objective: objetivoEstados, ...noops,
 });
 check('supervisión: mismas tarjetas compactas y teléfono, sin tocar ni acciones', supervisionDetalle.includes('RET 20m') && supervisionDetalle.includes('tope 19:59') && supervisionDetalle.includes('data-movil-llamar="1"') && !supervisionDetalle.includes('data-movil-tap') && !supervisionDetalle.includes('Llegó?') && !supervisionDetalle.includes('Protocolo'));
+const supCodigos = render(OperacionScreens, {
+  empresa: 'Pruebas S.A.', modeLabel: 'Auto', online: true, pendingLabel: null, readOnly: true, now: AHORA,
+  stats: { activos: 4, retenidos: 0, ausentes: 0, vacantes: 0, plan: 0 },
+  panel: 'objetivo', alerts: [], objectives: [], onAcciones: () => {},
+  objective: { objectiveId: 'peaje', name: 'Peaje 9 Norte', client: 'Ruta 9', active: 4, retention: 0, absent: 0, vacant: 0, plan: 0, shifts: [
+    base({ id: 'r', employeeName: 'Rios, Ana', code: 'REF', isPresent: true, realStartTime: ar('15:00'), shiftDateObj: ar('15:00'), endDateObj: ar('23:00') }),
+    base({ id: 'e', employeeName: 'Solis, Bea', code: 'ESC', isPresent: true, realStartTime: ar('15:00'), shiftDateObj: ar('15:00'), endDateObj: ar('23:00') }),
+    base({ id: 'u', employeeName: 'Baez, Juan', code: 'M', turaContiguous: true, isPresent: true, realStartTime: ar('07:00'), shiftDateObj: ar('07:00'), endDateObj: ar('15:00') }),
+    base({ id: 'v', employeeName: 'Paz, Noé', code: 'EV', origin: 'EVENTO', isPresent: true, realStartTime: ar('15:00'), shiftDateObj: ar('15:00'), endDateObj: ar('23:00') }),
+  ] },
+  ...noops,
+});
+check('supervisión muestra REF, ESC, TURA y EV y la tarjeta abre el detalle', supCodigos.includes('data-movil-code="REF"') && supCodigos.includes('data-movil-code="ESC"') && supCodigos.includes('data-movil-extra="TURA"') && supCodigos.includes('data-movil-code="EV"') && supCodigos.includes('data-movil-tap="r"') && !supCodigos.includes('data-movil-accion='));
+const hojaSup = render(HojaDetalle, { shift: base({ id: 'r', employeeName: 'Rios, Ana', code: 'REF', isPresent: true, shiftDateObj: ar('15:00'), endDateObj: ar('23:00') }), siblings: [], now: AHORA, soloDetalle: true, onEjecutar: () => {}, onCerrar: () => {} });
+check('hoja de supervisión: detalle sin acciones', hojaSup.includes('data-movil-sheet="detalle"') && hojaSup.includes('REF') && !hojaSup.includes('data-movil-accion=') && !hojaSup.includes('Marcar ingreso') && !hojaSup.includes('data-movil-nota='));
 
 // ── Contadores como filtros + cliente/objetivo (paridad con las solapas del escritorio) ──
 const F = await importFront('lib/movil/operacionFiltros.ts');
@@ -368,6 +383,16 @@ const fixture = [
 ];
 const visiblesF = F.turnosVisiblesMovil(fixture, pruebasSaPublicado);
 check('universo = encabezado del escritorio (sin mes sin publicar ni francos, con el evento)', visiblesF.length === 13 && !visiblesF.some((s) => s.id === 'x1' || s.id === 'f1') && visiblesF.some((s) => s.id === 'ev1'));
+const extras = [
+  fx({ id: 'ref1', ...ruta9, objectiveId: 'peaje', objectiveName: 'Peaje 9 Norte', employeeName: 'Rios, Ana', code: 'REF', isPresent: true, realStartTime: ar('15:00') }),
+  fx({ id: 'esc1', ...ruta9, objectiveId: 'peaje', objectiveName: 'Peaje 9 Norte', employeeName: 'Solis, Bea', code: 'ESC', isPresent: true, realStartTime: ar('15:00') }),
+  fx({ id: 'tura1', ...ruta9, objectiveId: 'peaje', objectiveName: 'Peaje 9 Norte', employeeName: 'Baez, Juan', code: 'TURA', origin: 'CLIENT_REQUEST', isPresent: true, realStartTime: ar('15:00') }),
+  fx({ id: 'turaFuera', ...ruta9, objectiveId: 'sinpub', objectiveName: 'Sin publicar', employeeName: 'Nadie', code: 'TURA', origin: 'CLIENT_REQUEST', isPresent: true }),
+  fx({ id: 'ev2', ...malag, objectiveId: 'sinpub', objectiveName: 'Sin publicar', employeeName: 'Paz, Noé', code: 'EV', origin: 'EVENTO', eventoId: 'ev2', eventoNombre: 'Cumpleaños', isPresent: true, realStartTime: ar('15:00') }),
+  fx({ id: 'cov1', ...ruta9, objectiveId: 'sinpub', objectiveName: 'Sin publicar', employeeName: 'Sosa, Carla', code: 'REF', origin: 'OPERATIONS_COVERAGE', isPresent: true, realStartTime: ar('15:00') }),
+];
+const visExtras = F.turnosVisiblesMovil(extras, pruebasSaPublicado);
+check('REF, ESC, TURA publicado, EV y cobertura entran como el escritorio', ['ref1', 'esc1', 'tura1', 'ev2', 'cov1'].every((id) => visExtras.some((s) => s.id === id)) && !visExtras.some((s) => s.id === 'turaFuera') && visExtras.filter((s) => shiftCountsInOpsHeader(s, pruebasSaPublicado)).length === visExtras.length);
 // Paridad: el escritorio cuenta hoy ∧ shiftCountsInOpsHeader por solapa (useOperacionesMonitor.stats)
 const escritorio = fixture.filter((s) => shiftCountsInOpsHeader(s, pruebasSaPublicado));
 const statsEscritorio = Object.fromEntries(['ACTIVOS', 'PLAN', 'AUSENTES', 'VACANTES', 'RETENIDOS', 'NO_LLEGO'].map((tab) => [tab, escritorio.filter((s) => shiftMatchesOpsViewTab(s, tab, NOW_F)).length]));
@@ -686,7 +711,7 @@ const ocho = Array.from({ length: 8 }, (_, i) => ({ ...baezM, id: `k${i}`, emplo
 const ochoHtml = render(OperacionScreens, { empresa: 'P', modeLabel: 'Manual', online: true, pendingLabel: null, now: AHORA, stats: { activos: 8, retenidos: 0, ausentes: 0, vacantes: 0, plan: 0 }, panel: 'objetivo', alerts: [], objectives: [], objective: { ...objetivoDetalle, shifts: ocho }, onAcciones: () => {}, ...noops });
 check('8 tarjetas compactas en el objetivo, cada una con una sola zona de toque', (ochoHtml.match(/data-movil-card="compacta"/g) || []).length === 8 && (ochoHtml.match(/data-movil-tap="/g) || []).length === 8 && (ochoHtml.match(/data-movil-detalle=/g) || []).length === 8);
 const soloLectura = render(GuardCard, { shift: baezM, siblings: peaje, now: AHORA, readOnly: true, onAcciones: () => {} });
-check('solo lectura: la tarjeta no se toca y conserva el teléfono', !soloLectura.includes('<button') && !soloLectura.includes('data-movil-tap') && soloLectura.includes('data-movil-llamar="1"'));
+check('solo lectura: la tarjeta abre el detalle y conserva el teléfono', soloLectura.includes('data-movil-tap') && soloLectura.includes('data-movil-llamar="1"') && !soloLectura.includes('data-movil-accion'));
 const chips = [...todosHtml.matchAll(/<button[^>]*data-movil-contador="[^"]+"[\s\S]*?<\/button>/g)].map((m) => m[0]);
 check('contadores: 6 chips en una fila (grid, alto 32, texto 11, sin ícono ni scroll) y entran a 360 px', todosHtml.includes('grid-cols-6') && !todosHtml.includes('overflow-x-auto') && chips.length === 6 && chips.every((b) => b.includes('h-8') && b.includes('text-[11px]') && !b.includes('<svg')) && ['ACT', 'PLA', 'TAR', 'AUS', 'VAC', 'RET'].every((c) => todosHtml.includes(`>${c}<`)) && F.contadoresCabenEnFila(360) && F.contadoresCabenEnFila(390) && !F.contadoresCabenEnFila(200));
 check('contador activo relleno con el color de la empresa (negro por defecto); los demás blancos con borde', ausHtml.includes('data-movil-contador="AUSENTES" data-movil-filtro-activo="1"') && ausHtml.includes('bg-[var(--movil-primary,#111827)]') && ausHtml.includes('aria-pressed="true"') && ausHtml.includes('border-[#eceef1] bg-white text-slate-700') && !ausHtml.includes('ring-2'));

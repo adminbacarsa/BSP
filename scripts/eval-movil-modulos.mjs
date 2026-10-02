@@ -29,15 +29,15 @@ const solo = (...keys) => (key) => keys.includes(key);
 
 check('seis módulos registrados', m.modulosRegistrados().map((x) => x.id).join(',') === 'operacion,supervision,planificacion,eventuales,rrhh,servicios');
 check('Operación: Objetivos · Alertas · Sala · Menú', labels(m.barraDelModulo(m.moduloMovilDe('/admin/operaciones/'))) === 'Objetivos · Alertas · Sala · Menú');
-check('Supervisión es módulo propio: Objetivos · Alertas · Menú en /admin/movil/supervision/', m.moduloMovilDe('/admin/movil/supervision/').id === 'supervision' && labels(m.barraDelModulo(m.moduloMovilDe('/admin/movil/supervision/'))) === 'Objetivos · Alertas · Menú' && m.moduloMovilDe('/admin/movil/supervision/').href === '/admin/movil/supervision/' && m.rutaTieneVersionMovil('/admin/movil/supervision'));
-check('Supervisión ya no es Operación en solo lectura', m.moduloMovilDe('/admin/operaciones/', { modo: 'supervision' }).id === 'operacion' && !m.modulosRegistrados().find((x) => x.id === 'supervision').query);
+check('Supervisión es el CC en solo lectura: Objetivos · Alertas · Menú', m.moduloMovilDe('/admin/operaciones/', { modo: 'supervision' }).id === 'supervision' && labels(m.barraDelModulo(m.moduloMovilDe('/admin/operaciones/', { modo: 'supervision' }))) === 'Objetivos · Alertas · Menú' && m.moduloMovilDe('/admin/operaciones/', { modo: 'supervision' }).href === '/admin/operaciones/?modo=supervision' && m.moduloMovilDe('/admin/operaciones/').id === 'operacion');
+check('la ronda de visitas no está en el menú', m.moduloMovilDe('/admin/movil/supervision/')?.id !== 'supervision');
 check('Planificación: Semana · Próximos días · Menú', labels(m.barraDelModulo(m.moduloMovilDe('/admin/movil/planificacion/'))) === 'Semana · Próximos días · Menú' && labels(m.barraDelModulo(m.moduloMovilDe('/admin/planificacion/'))) === 'Semana · Próximos días · Menú');
 check('Planificación apunta a la pantalla celular', m.moduloMovilDe('/admin/planificacion/').href === '/admin/movil/planificacion/' && m.rutaTieneVersionMovil('/admin/movil/planificacion') && !m.rutaTieneVersionMovil('/admin/reportes'));
 check('Servicios también con CLIENTS; Supervisión solo con SUPERVISION', m.modulosMovil(solo('CLIENTS')).map((x) => x.id).join(',') === 'servicios' && m.modulosMovil(solo('SUPERVISION')).map((x) => x.id).join(',') === 'supervision');
 check('RRHH: Hoy · Cargar · Novedades · Menú', labels(m.barraDelModulo(m.moduloMovilDe('/admin/rrhh/movil/'))) === 'Hoy · Cargar · Novedades · Menú');
 check('Eventuales: Bolsa · ARCA · Alta · Menú', labels(m.barraDelModulo(m.moduloMovilDe('/admin/rrhh/eventuales/'))) === 'Bolsa · ARCA · Alta · Menú');
 check('Servicios: Lista · Menú', labels(m.barraDelModulo(m.moduloMovilDe('/admin/servicios/'))) === 'Lista · Menú');
-check('sección activa por panel', m.seccionActiva(m.moduloMovilDe('/admin/rrhh/movil/'), { panel: 'ausencia' }) === 'cargar' && m.seccionActiva(m.moduloMovilDe('/admin/operaciones/'), {}) === 'objetivos' && m.seccionActiva(m.moduloMovilDe('/admin/movil/supervision/'), { panel: 'alertas' }) === 'alertas');
+check('sección activa por panel', m.seccionActiva(m.moduloMovilDe('/admin/rrhh/movil/'), { panel: 'ausencia' }) === 'cargar' && m.seccionActiva(m.moduloMovilDe('/admin/operaciones/'), {}) === 'objetivos' && m.seccionActiva(m.moduloMovilDe('/admin/operaciones/', { modo: 'supervision', panel: 'alertas' }), { panel: 'alertas' }) === 'alertas');
 
 const operador = m.modulosMovil(solo('OPERATIONS'));
 check('operador sin RRHH nunca lo ve', operador.map((x) => x.id).join(',') === 'operacion' && m.menuMovil(operador).unico?.id === 'operacion' && !m.menuMovil(operador).mostrarModulos);
@@ -55,7 +55,7 @@ const alertas = [
   { type: 'SUPERVISION_NOVEDAD', source: 'SUPERVISION' },
 ];
 check('Operación filtra ARCA salvo la fichada y no lista cronograma ni supervisión', m.filtrarAlertasDelModulo(ops, alertas).map((a) => a.type).join(',') === 'AUSENCIA_OPERATIVA,ALTA_ARCA_PENDIENTE');
-check('Supervisión ve solo sus novedades', m.filtrarAlertasDelModulo(m.moduloMovilDe('/admin/movil/supervision/'), alertas).map((a) => a.type).join(',') === 'SUPERVISION_NOVEDAD');
+check('Supervisión ve las mismas alertas que Operación', m.filtrarAlertasDelModulo(m.moduloMovilDe('/admin/operaciones/', { modo: 'supervision' }), alertas).map((a) => a.type).join(',') === m.filtrarAlertasDelModulo(ops, alertas).map((a) => a.type).join(',') && !m.filtrarAlertasDelModulo(ops, alertas).some((a) => a.type === 'SUPERVISION_NOVEDAD'));
 check('Eventuales ve ARCA', m.filtrarAlertasDelModulo(m.moduloMovilDe('/admin/rrhh/eventuales/'), alertas).map((a) => a.type).join(',') === 'ALTA_ARCA_PENDIENTE,ARCA_BAJA_PENDIENTE');
 check('RRHH ve licencias', m.filtrarAlertasDelModulo(m.moduloMovilDe('/admin/rrhh/movil/'), alertas).map((a) => a.type).join(',') === 'AUSENCIA_OPERATIVA,Enfermedad');
 check('Planificación ve cronograma y licencias', m.filtrarAlertasDelModulo(m.moduloMovilDe('/admin/planificacion/'), alertas).map((a) => a.type).join(',') === 'CRONOGRAMA_SIN_PUBLICAR,Enfermedad');
@@ -129,7 +129,7 @@ const menuBase = {
 const todos = m.modulosMovil(() => false, true);
 const menuSa = renderToStaticMarkup(createElement(MovilMenuScreens, { ...menuBase, modulos: todos, unico: null, alertas: { operacion: 3, rrhh: 1 } }));
 const tilesSa = (menuSa.match(/data-movil-tile="flex"/g) || []).length;
-check('menú superadmin 390 con seis módulos', menuSa.includes('data-viewport="390x844"') && ['Operación', 'Supervisión', 'Planificación', 'Eventuales', 'RRHH', 'Servicios'].every((l) => menuSa.includes(l)) && tilesSa === 6 && menuSa.includes('Recorrida y visitas'));
+check('menú superadmin 390 con seis módulos', menuSa.includes('data-viewport="390x844"') && ['Operación', 'Supervisión', 'Planificación', 'Eventuales', 'RRHH', 'Servicios'].every((l) => menuSa.includes(l)) && tilesSa === 6 && menuSa.includes('Centro de Control, solo lectura'));
 check('menú sin encabezado grande ni bloque de empresa', !menuSa.includes('>Módulos<') && !menuSa.includes('Empresa activa') && !menuSa.includes('Cambiar a ') && !menuSa.includes('empresas<') && menuSa.includes('data-movil-fecha="1"'));
 check('menú: píldora de empresa es botón que abre la hoja', menuSa.includes('aria-label="Empresa Pruebas S.A.. Cambiar"') && menuSa.includes('data-movil-topbar="Menú"'));
 check('menú: grilla 2x3 que ocupa la pantalla, alertas en la línea de estado', menuSa.includes('grid-cols-2') && menuSa.includes('data-movil-tiles="6"') && menuSa.includes('>3 alertas<') && menuSa.includes('data-movil-estado="rojo"') && !menuSa.includes('data-movil-alertas=') && !menuSa.includes('MovilIconBox') && !/bg-(emerald|indigo|violet|amber|blue)-(50|100)/.test(menuSa));
