@@ -38,8 +38,12 @@ export function buildInternalCoverageCandidates(
     now,
     sessionBusy: [...crossSessionBusy],
   });
-  const byKnowledge = (a: InternalCoverageCandidate, b: InternalCoverageCandidate) =>
-    (b.knowsObjective ? 1 : 0) - (a.knowsObjective ? 1 : 0);
+  const byKnowledge = (a: InternalCoverageCandidate & { puntaje?: number }, b: InternalCoverageCandidate & { puntaje?: number }) => {
+    const know = (b.knowsObjective ? 1 : 0) - (a.knowsObjective ? 1 : 0);
+    if (know !== 0) return know;
+    if (typeof a.puntaje === 'number' && typeof b.puntaje === 'number' && a.puntaje !== b.puntaje) return b.puntaje - a.puntaje;
+    return 0;
+  };
   const ret = [...view.ret].sort(byKnowledge);
   const ref = [...view.ref].sort(byKnowledge);
   const esc = [...view.esc].sort(byKnowledge);

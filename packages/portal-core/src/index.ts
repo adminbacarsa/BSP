@@ -109,6 +109,7 @@ export {
   createSolicitudEventoGuardia,
   rejectConvocatoriaEvento,
   assignGuardToEvent,
+  puedeNoAsistirEventual,
 } from './eventos/eventoPortal';
 export type { AssignGuardToEventParams } from './eventos/eventoPortal';
 export {

@@ -23,7 +23,8 @@ const db = admin.firestore();
 const Timestamp = admin.firestore.Timestamp;
 
 const { convocarEventualEvento, vencerConvocatoriasEventualesEvento } = requireFn('./lib/eventuales/planificacionEventuales.js');
-const { respondEventoConvocatoria } = requireFn('./lib/eventos/eventoPortalCallables.js');
+const { respondEventoConvocatoria, noPuedoAsistirEventual } = requireFn('./lib/eventos/eventoPortalCallables.js');
+const { markShiftAbsent } = requireFn('./lib/attendance/markShiftAbsent.js');
 const { confirmarAnexoEventual } = requireFn('./lib/eventuales/marcoAnexoCall.js');
 const { gestionarEventual } = requireFn('./lib/eventuales/gestionarEventual.js');
 const { evaluateServerCheckInWindow } = requireFn('./lib/fichajes/checkInWindow.js');
@@ -219,6 +220,86 @@ async function main() {
   report('volver a ON deja la bolsa sin marcas de pruebas', swBack.ok && bolsaB2.exigirMarco === true && bolsaB2.exigirAltaArca === true, swBack.message || '');
   const swMal = await intentar(() => gestionarEventual.run({ accion: 'switchesPruebas', cuil: cuilB, exigirMarco: 'no' }, ctxSuper('uid-rrhh')));
   report('valor no booleano se rechaza', !swMal.ok, swMal.message || '');
+
+  // ── Eventual que no va: antes del AT, después del AT, falta sin aviso ──
+  const cuilSig = '20999999991';
+  const cuilAntes = '20555555555';
+  const cuilDespues = '20666666664';
+  const cuilFalta = '20777777773';
+  await db.collection('eventuales_bolsa').doc(cuilSig).set({ ...bolsa(cuilSig, { nombre: 'Siguiente, Max', uid: 'uid-ev-sig' }), confiabilidad: 100 });
+  await db.collection('eventuales_bolsa').doc(cuilAntes).set(bolsa(cuilAntes, { nombre: 'Antes, Ana', uid: 'uid-ev-antes' }));
+  await db.collection('eventuales_bolsa').doc(cuilDespues).set(bolsa(cuilDespues, { nombre: 'Despues, Leo', uid: 'uid-ev-despues' }));
+  await db.collection('eventuales_bolsa').doc(cuilFalta).set(bolsa(cuilFalta, { nombre: 'Falta, Rui', uid: 'uid-ev-falta' }));
+  const evento2 = { eventoId: 'evento-2', eventoNombre: 'Feria', servicioId: 'srv-feria', servicioNombre: 'Puerta' };
+
+  async function aceptar(cuil, uid, jornada) {
+    const conv = await convocarEventualEvento.run({ empresaId, evento: evento2, jornada, clientName: 'Cliente', positionName: 'Puerta', cuil }, ctxSuper());
+    const acep = await respondEventoConvocatoria.run({ solicitudId: conv.solicitudId, accept: true }, ctxEventual(uid, cuil));
+    const sol = (await db.collection('solicitudes_evento').doc(conv.solicitudId).get()).data() || {};
+    const turno = (await docsDe('turnos', cuil))[0] || {};
+    return { conv, acep, sol, turno };
+  }
+  async function confirmarAt(cuil) {
+    const at = (await docsDe('arca_envios', cuil)).find((e) => e.tipo === 'AT' && !e.quitadoDelLote);
+    const nro = `TX-${cuil.slice(-4)}`;
+    await db.collection('arca_envios').doc(at.id).update({ estado: 'CONFIRMADO', nroTransaccion: nro, origen: 'MANUAL' });
+    const luego = (await db.collection('arca_envios').doc(at.id).get()).data() || {};
+    return { at, luego };
+  }
+  async function convocatoriaDelHueco(shiftId, cuil) {
+    const snap = await db.collection('convocatorias_cobertura').where('shiftId', '==', shiftId).get();
+    return snap.docs.map((d) => d.data()).find((c) => c.status === 'PENDING' && c.type === 'EVENTUAL' && c.bolsaCuil !== cuil) || null;
+  }
+
+  const antes = await aceptar(cuilAntes, 'uid-ev-antes', jornadaDesde(Date.now() + 48 * 3600000, 6));
+  const noVaAntes = await intentar(() => noPuedoAsistirEventual.run({ solicitudId: antes.conv.solicitudId }, ctxEventual('uid-ev-antes', cuilAntes)));
+  const solAntes = (await db.collection('solicitudes_evento').doc(antes.conv.solicitudId).get()).data() || {};
+  const turnoAntes = (await db.collection('turnos').doc(antes.turno.id).get()).data() || {};
+  const atAntes = (await docsDe('arca_envios', cuilAntes)).find((e) => e.tipo === 'AT') || {};
+  const anulaAntes = (await docsDe('arca_envios', cuilAntes)).some((e) => e.tipo === 'ANULACION');
+  const desemAntes = (await db.collection('guardia_desempeno_eventos').doc(`CANCELACION_ANTICIPADA_${antes.turno.id}_${cuilAntes}`).get()).data() || {};
+  const sigAntes = await convocatoriaDelHueco(antes.turno.id, cuilAntes);
+  report(
+    'no puedo asistir antes del AT: cancela alta, anexo sin efecto, reconvoca',
+    noVaAntes.ok && solAntes.status === 'cancelada' && solAntes.anexoEstado === 'SIN_EFECTO' && atAntes.quitadoDelLote === true && !anulaAntes
+      && turnoAntes.employeeId === 'VACANTE' && turnoAntes.pagaJornada === false && desemAntes.tipo === 'CANCELACION_ANTICIPADA' && desemAntes.bolsaCuil === cuilAntes
+      && sigAntes?.bolsaCuil === cuilSig,
+    noVaAntes.ok ? `anexo=${solAntes.anexoEstado} sig=${sigAntes?.bolsaCuil}` : noVaAntes.message,
+  );
+
+  const despues = await aceptar(cuilDespues, 'uid-ev-despues', jornadaDesde(Date.now() + 2 * 3600000, 6));
+  const confDespues = await confirmarAt(cuilDespues);
+  const noVaDespues = await intentar(() => noPuedoAsistirEventual.run({ solicitudId: despues.conv.solicitudId }, ctxEventual('uid-ev-despues', cuilDespues)));
+  const anula = (await docsDe('arca_envios', cuilDespues)).find((e) => e.tipo === 'ANULACION') || {};
+  const solDespues = (await db.collection('solicitudes_evento').doc(despues.conv.solicitudId).get()).data() || {};
+  const desemDespues = (await db.collection('guardia_desempeno_eventos').doc(`CANCELACION_TARDIA_${despues.turno.id}_${cuilDespues}`).get()).data() || {};
+  const sigDespues = await convocatoriaDelHueco(despues.turno.id, cuilDespues);
+  report(
+    'no puedo asistir con AT ya subido: anulación urgente sin remuneración',
+    confDespues.luego.estado === 'CONFIRMADO' && noVaDespues.ok && anula.tipo === 'ANULACION' && anula.canal === 'URGENTE' && anula.movimiento === 'NA' && anula.bruto === 0
+      && anula.lote === 'BT' && String(anula.txt || '').slice(2, 4) === 'NA' && String(anula.txt || '').slice(57, 72) === '000000000000000'
+      && solDespues.anexoEstado === 'SIN_EFECTO' && desemDespues.tipo === 'CANCELACION_TARDIA' && sigDespues?.bolsaCuil === cuilSig,
+    noVaDespues.ok ? `mov=${anula.movimiento} canal=${anula.canal}` : noVaDespues.message,
+  );
+
+  const falta = await aceptar(cuilFalta, 'uid-ev-falta', jornadaDesde(Date.now() - 30 * 3600000, 6));
+  const confFalta = await confirmarAt(cuilFalta);
+  const noVaTarde = await intentar(() => noPuedoAsistirEventual.run({ solicitudId: falta.conv.solicitudId }, ctxEventual('uid-ev-falta', cuilFalta)));
+  const marcada = await markShiftAbsent(db, falta.turno.id, { reason: 'AUTO_T30', by: 'SYSTEM_SCHEDULER' });
+  const turnoFalta = (await db.collection('turnos').doc(falta.turno.id).get()).data() || {};
+  const baja = (await docsDe('arca_envios', cuilFalta)).find((e) => e.tipo === 'BAJA_NO_PRESENTACION') || {};
+  const novedad = (await db.collection('novedades').where('shiftId', '==', falta.turno.id).get()).docs.map((d) => d.data()).find((n) => n.type === 'AUSENCIA_EVENTUAL');
+  const desemFalta = (await db.collection('guardia_desempeno_eventos').doc(`FALTA_SIN_AVISO_${falta.turno.id}_${cuilFalta}`).get()).data() || {};
+  const sigFalta = await convocatoriaDelHueco(falta.turno.id, cuilFalta);
+  const fechaInicio = String(turnoFalta.scheduleDate || '');
+  report(
+    'falta sin aviso: no se paga, baja el día de inicio, aviso a RRHH',
+    noVaTarde.ok === false && confFalta.luego.estado === 'CONFIRMADO' && marcada.applied === true && turnoFalta.isAbsent === true && turnoFalta.pagaJornada === false
+      && baja.tipo === 'BAJA_NO_PRESENTACION' && baja.canal === 'URGENTE' && baja.fechaBaja === fechaInicio && baja.revista === '30'
+      && String(baja.txt || '').slice(2, 4) === 'BT' && String(baja.txt || '').slice(45, 47) === '30'
+      && !!novedad && desemFalta.tipo === 'FALTA_SIN_AVISO' && desemFalta.empleadoId === falta.turno.employeeId && sigFalta?.bolsaCuil === cuilSig,
+    `tarde=${noVaTarde.message || ''} baja=${baja.tipo} fecha=${baja.fechaBaja} nov=${novedad ? 'si' : 'no'} sig=${sigFalta?.bolsaCuil}`,
+  );
 
   const failed = results.filter((r) => !r.ok);
   console.log(failed.length ? `FALLARON ${failed.length}/${results.length}` : `OK ${results.length}/${results.length}`);

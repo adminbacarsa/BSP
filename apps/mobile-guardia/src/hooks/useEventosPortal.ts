@@ -249,6 +249,27 @@ export function useEventosPortal(
     [empDocId, isPreviewMode],
   );
 
+  const noPuedoAsistir = useCallback(
+    async (sol: SolicitudEvento) => {
+      if (!sol.id) return { ok: false as const, message: 'Solicitud inválida' };
+      const asId = String(sol.empleadoId || empDocId || '').trim();
+      setBusyId(sol.id);
+      try {
+        const callables = getPortalCallables();
+        await callables.noPuedoAsistirEventual({
+          solicitudId: sol.id,
+          ...(isPreviewMode && asId ? { asEmployeeId: asId } : {}),
+        });
+        return { ok: true as const, message: 'Avisamos que no podés asistir. El lugar queda libre.' };
+      } catch (e) {
+        return { ok: false as const, message: mapPortalCallableError(e) };
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [empDocId, isPreviewMode],
+  );
+
   return {
     eventos,
     solicitudes,
@@ -260,5 +281,6 @@ export function useEventosPortal(
     reload,
     solicitar,
     responderConvocatoria,
+    noPuedoAsistir,
   };
 }

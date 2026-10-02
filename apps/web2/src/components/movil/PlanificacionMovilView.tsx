@@ -7,6 +7,7 @@ import { MovilTopBar } from './ui/MovilTopBar';
 import { MovilBadge } from './ui/MovilBadge';
 import { MOVIL_BORDER, MOVIL_BTN_PRIMARY, MOVIL_BTN_SECONDARY, MOVIL_CARD, MOVIL_FILETE, MOVIL_FONT, MOVIL_PRIMARY_BG, MOVIL_PRIMARY_BORDER, MOVIL_TEXT } from './ui/tones';
 import { PestanasPlanificacion, type PanelPlanificacion } from './PlanificacionSemanaView';
+import { PuntajeChip } from '@/components/desempeno/PuntajeChip';
 
 const TABS: { id: TabCandidato | 'eventuales'; label: string }[] = [
   { id: 'plantel', label: 'Plantel' },
@@ -175,7 +176,7 @@ export function PlanificacionMovilView(props: {
                     {f.kind !== 'ok' && <span aria-hidden="true" className={`absolute inset-y-2 left-0 w-[3px] ${MOVIL_FILETE.rose}`} />}
                     <MovilBadge outline>{f.code}</MovilBadge>
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-semibold text-slate-900">{f.kind === 'vacante' ? 'Vacante' : f.employeeName}</span>
+                      <span className="flex items-center gap-1"><span className="block truncate text-sm font-semibold text-slate-900">{f.kind === 'vacante' ? 'Vacante' : f.employeeName}</span>{f.kind !== 'vacante' && <PuntajeChip sujetoId={f.employeeId} />}</span>
                       <span className="block text-[11px] font-medium tabular-nums text-slate-500">{f.start}–{f.end}{f.kind === 'licencia' ? ' · sin cubrir' : ''}</span>
                     </span>
                     <span className={`text-[10px] font-bold uppercase tracking-wide ${f.kind === 'ok' ? 'text-slate-500' : MOVIL_TEXT.rose}`}>
@@ -249,14 +250,14 @@ export function CandidatosHueco(props: {
       {props.tab === 'eventuales' && !props.puedeEventuales && <p className="text-xs font-medium text-slate-500">Hace falta el permiso para convocar eventuales.</p>}
       {props.tab === 'eventuales' && props.puedeEventuales && props.eventuales.map((ev) => fila(props.elegidoId === ev.cuil, !ev.elegible, () => props.onElegir(ev.cuil), ev.cuil, (
         <>
-          <span className="block text-sm font-semibold text-slate-900">{ev.nombre}</span>
+          <span className="flex items-center gap-1 text-sm font-semibold text-slate-900">{ev.nombre}<PuntajeChip sujetoId={ev.cuil} /></span>
           <span className="block text-[11px] font-medium tabular-nums text-slate-500">{ev.distanciaKm != null ? `${ev.distanciaKm} km` : 'sin distancia'} · bolsa</span>
           {ev.motivo && <span className={`block text-[11px] font-semibold ${MOVIL_TEXT.rose}`}>{ev.motivo}</span>}
         </>
       ), { 'data-plan-candidato': ev.cuil }))}
       {props.tab !== 'eventuales' && lista.map((c) => fila(props.elegidoId === c.employeeId, c.blocked || (props.tab === 'ft' && !props.puedeFt), () => props.onElegir(c.employeeId), c.employeeId, (
         <>
-          <span className="block text-sm font-semibold text-slate-900">{c.name}</span>
+          <span className="flex items-center gap-1 text-sm font-semibold text-slate-900">{c.name}<PuntajeChip sujetoId={c.employeeId} /></span>
           <span className="block text-[11px] font-medium tabular-nums text-slate-500">{Math.round(c.monthHours)}/{c.cap} h{c.km != null ? ` · ${c.km} km` : ''}</span>
           {c.reason && <span className={`block text-[11px] font-semibold ${MOVIL_TEXT.rose}`} data-plan-conflicto={c.employeeId}>{c.reason}</span>}
         </>

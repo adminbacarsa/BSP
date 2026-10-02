@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 
 import { PlanificacionMovil } from '@/components/movil/PlanificacionMovil';
+import { PuntajeChip } from '@/components/desempeno/PuntajeChip';
 import { useMovilMode } from '@/lib/movil/useMovilMode';
 import { canAccessAutoLab } from '@/lib/planificacion/autoLabAccess';
 import { canAssignFrancoTrabajado } from '@/lib/planificacion/francoTrabajadoAccess';
@@ -10378,7 +10379,7 @@ function PlanificacionDesktop() {
                                         {(() => {
                                             if (compareCompact) {
                                                 return (
-                                                    <span className="text-[9px] font-bold truncate text-slate-700 dark:text-slate-200" title={emp.name}>{emp.name}</span>
+                                                    <span className="inline-flex min-w-0 items-center gap-1"><span className="truncate text-[9px] font-bold text-slate-700 dark:text-slate-200" title={emp.name}>{emp.name}</span><PuntajeChip sujetoId={String(emp.bolsaCuil || emp.id || '')} /></span>
                                                 );
                                             }
                                             const empLat = Number(emp.lat ?? emp.latitude ?? 0);
@@ -10405,6 +10406,7 @@ function PlanificacionDesktop() {
                                                     <div className="flex items-center gap-1 min-w-0 overflow-hidden">
                                                         <Grip size={8} className="shrink-0 text-slate-200 group-hover:text-slate-400 transition-colors mr-0.5" />
                                                         <span className="text-[9px] font-bold truncate text-slate-700 dark:text-slate-200" title={emp.name}>{emp.name}</span>
+                                                        <PuntajeChip sujetoId={String(emp.bolsaCuil || emp.id || '')} />
                                                         {isVolante && (<div className="shrink-0 px-1.5 py-0.5 rounded bg-violet-500 text-white text-[8px] font-black uppercase flex items-center gap-1 cursor-help shadow-sm" title={`Volante — base: ${homeObjectiveName}`}><Shuffle size={8} /> VOL</div>)}
                                         {isGuest && !isVolante && (esLegajoEventual(emp)
                                             ? (<div className="shrink-0 px-1.5 py-0.5 rounded bg-violet-600 text-white text-[8px] font-black uppercase flex items-center gap-1 cursor-help shadow-sm" title={`Eventual de la bolsa · CUIL ${emp.bolsaCuil || '—'}`}><Briefcase size={8} /> EVENTUAL</div>)
@@ -10678,7 +10680,7 @@ function PlanificacionDesktop() {
                             {isSnapshotView && snapshotData && (
                                 <tr className="hover:bg-slate-50 dark:hover:bg-slate-700/40">
                                     <td className="sticky left-0 z-20 bg-white dark:bg-slate-800 p-2 border-r border-b shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)] h-8" style={{ width: nameColWidth, minWidth: nameColWidth }}>
-                                        <span className="text-[9px] font-bold truncate text-slate-700 dark:text-slate-200" title={emp.name}>{emp.name}</span>
+                                        <span className="inline-flex min-w-0 items-center gap-1"><span className="truncate text-[9px] font-bold text-slate-700 dark:text-slate-200" title={emp.name}>{emp.name}</span><PuntajeChip sujetoId={String(emp.bolsaCuil || emp.id || '')} /></span>
                                     </td>
                                     {daysInMonth.map((day) => {
                                         const key = `${emp.id}_${getDateKey(day)}`;

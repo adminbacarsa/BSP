@@ -19,6 +19,8 @@ export type EventualCandidato = {
   uid?: string;
   distanceKm: number | null;
   confiabilidad: number;
+  /** Desempate después de la distancia y la confiabilidad. */
+  puntaje?: number;
   elegible?: boolean;
   motivo?: string;
   /** Ficha con «Exigir contrato marco y habilitación» en OFF: convocable sin marco ni empresa habilitada. */
@@ -34,6 +36,7 @@ export type EventualBolsaRow = {
   aptoPsicofisico?: { estado?: string; vencimiento?: string };
   domicilioGeo?: { lat?: number; lng?: number } | null;
   confiabilidad?: number;
+  puntaje?: number;
   uid?: string;
   legajos?: { employeeId?: string; empresaId?: string }[];
   marcos?: Record<string, { firmado?: boolean; vencimiento?: string; estado?: string; fechaFirma?: string }>;
@@ -163,6 +166,7 @@ export function eventualesParaHueco(input?: EventualesHuecoInput | null): Eventu
       ...(row.uid ? { uid: String(row.uid) } : {}),
       distanceKm,
       confiabilidad: Number(row.confiabilidad) || 0,
+      ...(typeof row.puntaje === 'number' ? { puntaje: row.puntaje } : {}),
       elegible: marcoOk,
       ...(marcoOk ? {} : { motivo: 'Sin contrato marco' }),
       ...(exigeMarco ? {} : { pruebasSinMarco: true, motivo: 'Pruebas: sin exigir marco' }),
@@ -173,25 +177,44 @@ export function eventualesParaHueco(input?: EventualesHuecoInput | null): Eventu
     const db = b.distanceKm == null ? Number.POSITIVE_INFINITY : b.distanceKm;
     if (da !== db) return da - db;
     if (a.confiabilidad !== b.confiabilidad) return b.confiabilidad - a.confiabilidad;
+    if (typeof a.puntaje === 'number' && typeof b.puntaje === 'number' && a.puntaje !== b.puntaje) return b.puntaje - a.puntaje;
     return a.employeeName.localeCompare(b.employeeName, 'es');
   });
   return out;
 }
 
 /**
- * Eventual que no se presentó. Diseño, sin alta/baja ARCA.
- * La AA queda en el legajo de la empresa que lo dio de alta, se descuenta de la liquidación
- * y baja su confiabilidad en la bolsa. Si nunca fichó, RRHH tiene pendiente anular el alta.
+ * Qué hacer con ARCA cuando el eventual no va a trabajar.
+ * NA y el plazo salen del manual de carga masiva, pero la tabla no define NA/NB:
+ * quedan en constante hasta que el contador los confirme (`empresa.arcaEventuales` los pisa).
  */
+export type EventualAusenteArca = {
+  accion: 'CANCELAR_AT' | 'ANULACION' | 'BAJA';
+  tipo: 'ANULACION' | 'BAJA_NO_PRESENTACION' | null;
+  movimiento: string | null;
+  canal: 'URGENTE' | null;
+  /** Anulación: sin remuneración. */
+  bruto: number | null;
+  fechaBaja: string | null;
+  revista: string | null;
+  motivo: string | null;
+};
+
+export type DesempenoEventualTipo = 'CANCELACION_ANTICIPADA' | 'CANCELACION_TARDIA' | 'FALTA_SIN_AVISO';
+
 export type EventualAusentePlan = {
   employeeId: string;
   empresaAltaId: string;
   eventoId: string;
   shiftId: string;
   neverStarted: boolean;
+  /** No se paga la jornada (AA / turno cancelado). */
   descuentaLiquidacion: true;
   confiabilidadDelta: -1;
   arcaBajaPendiente: boolean;
+  aviso: boolean;
+  desempeno: DesempenoEventualTipo;
+  arca: EventualAusenteArca;
 };
 
 export function planEventualAusente(input: {
@@ -201,12 +224,49 @@ export function planEventualAusente(input: {
   shiftId?: string;
   isEventual?: boolean;
   punched?: boolean;
+  /** Avisó que no va (app), antes del inicio. Sin esto es falta sin aviso. */
+  aviso?: boolean;
+  /** El AT ya se subió (SUBIENDO o CONFIRMADO). */
+  atSubido?: boolean;
+  inicioMs?: number;
+  ahoraMs?: number;
+  /** YYYY-MM-DD del inicio fijado. La baja usa este día, no el fin del contrato. */
+  fechaInicio?: string;
+  /** Default 24. Configurable en `arcaEventuales.anulacionAltaMaxHoras`. */
+  plazoAnulacionHoras?: number;
+  /** Default NA. TODO confirmar con el contador. */
+  movimientoAnulacion?: string;
+  /** Default 30 (el de la baja habitual). TODO: la tabla no tiene «no inicio efectivo». */
+  revistaNoInicio?: string;
 }): EventualAusentePlan | null {
   if (input.isEventual !== true) return null;
   const employeeId = String(input.employeeId || '').trim();
   const empresaAltaId = String(input.empresaAltaId || '').trim();
   if (!employeeId || !empresaAltaId) return null;
   const neverStarted = input.punched !== true;
+  const aviso = input.aviso === true;
+  const inicioMs = Number(input.inicioMs) || 0;
+  const ahoraMs = Number(input.ahoraMs) || 0;
+  const plazoHoras = Number(input.plazoAnulacionHoras) > 0 ? Number(input.plazoAnulacionHoras) : 24;
+  const dentroDePlazo = !inicioMs || ahoraMs - inicioMs < plazoHoras * 3600000;
+  const arca: EventualAusenteArca = input.atSubido !== true
+    ? { accion: 'CANCELAR_AT', tipo: null, movimiento: null, canal: null, bruto: null, fechaBaja: null, revista: null, motivo: null }
+    : dentroDePlazo
+      ? { accion: 'ANULACION', tipo: 'ANULACION', movimiento: String(input.movimientoAnulacion || 'NA'), canal: 'URGENTE', bruto: 0, fechaBaja: null, revista: null, motivo: null }
+      : {
+        accion: 'BAJA',
+        tipo: 'BAJA_NO_PRESENTACION',
+        movimiento: 'BT',
+        canal: 'URGENTE',
+        bruto: null,
+        fechaBaja: String(input.fechaInicio || ''),
+        revista: String(input.revistaNoInicio || '30'),
+        motivo: 'no inicio efectivo de prestación',
+      };
+  const horasAntes = inicioMs > 0 ? (inicioMs - ahoraMs) / 3600000 : 0;
+  const desempeno: DesempenoEventualTipo = aviso
+    ? (horasAntes >= 24 ? 'CANCELACION_ANTICIPADA' : 'CANCELACION_TARDIA')
+    : 'FALTA_SIN_AVISO';
   return {
     employeeId,
     empresaAltaId,
@@ -216,5 +276,8 @@ export function planEventualAusente(input: {
     descuentaLiquidacion: true,
     confiabilidadDelta: -1,
     arcaBajaPendiente: neverStarted,
+    aviso,
+    desempeno,
+    arca,
   };
 }

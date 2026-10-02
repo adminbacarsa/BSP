@@ -59,6 +59,7 @@
     "seed": "node scripts/seed-lab.js",
     "test:migrate-fixes": "node scripts/test-empresa-migrate-fixes.mjs",
     "eval:planning-agent": "node scripts/eval-planning-agent.mjs",
+    "eval:puntaje-guardia": "node --experimental-strip-types scripts/eval-puntaje-guardia.mjs",
     "eval:guard-capacity": "npx tsx apps/web2/scripts/eval-guard-capacity.ts",
     "eval:service-capacity-viability": "npx tsx apps/web2/scripts/eval-service-capacity-viability.ts",
     "eval:custom-cover": "npx tsx apps/web2/scripts/eval-custom-cover-cycle.ts",

@@ -9,6 +9,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { httpsCallable } from 'firebase/functions';
 import { AlertTriangle, Loader2, MapPin, Phone, RotateCcw, Search, ShieldCheck, UserCheck, UserX } from 'lucide-react';
+import { PuntajeChip } from '@/components/desempeno/PuntajeChip';
 import { functions } from '@/lib/firebase';
 import { mensajeErrorCallable } from '@/lib/eventos/convocatoriaPlan';
 import { PruebasBadge } from '@/components/servicios/EventoConvocarResumen';
@@ -151,7 +152,7 @@ export default function EventualesCandidatosPanel({
                                         ? <UserCheck size={14} className="text-emerald-600 shrink-0"/>
                                         : <UserX size={14} className="text-rose-500 shrink-0"/>}
                                     <div className="min-w-0">
-                                        <div className="text-[11px] font-black text-slate-800 truncate">{c.nombre}</div>
+                                        <div className="flex items-center gap-1 text-[11px] font-black text-slate-800"><span className="truncate">{c.nombre}</span><PuntajeChip sujetoId={c.cuil} /></div>
                                         <div className="text-[9px] font-mono text-slate-400">{c.cuil}{c.employeeId ? ' · legajo en esta empresa' : ''}</div>
                                     </div>
                                 </div>

@@ -100,11 +100,15 @@ export function withinCoverageRadius(
   return geo.distanceKm <= maxKm;
 }
 
-export function sortByDistanceAsc<T extends CoverageGeoFields>(list: T[]): T[] {
+export function sortByDistanceAsc<T extends CoverageGeoFields & { puntaje?: number | null }>(list: T[]): T[] {
   return [...list].sort((a, b) => {
     const da = a.distanceKm ?? 99999;
     const db = b.distanceKm ?? 99999;
-    return da - db;
+    if (da !== db) return da - db;
+    const pa = a.puntaje;
+    const pb = b.puntaje;
+    if (typeof pa === "number" && typeof pb === "number" && pa !== pb) return pb - pa;
+    return 0;
   });
 }
 

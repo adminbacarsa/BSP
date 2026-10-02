@@ -83,6 +83,8 @@ export function solicitudEventoStatusLabel(status: string): string {
       return 'Confirmado';
     case 'rechazada':
       return 'Rechazado';
+    case 'cancelada':
+      return 'Avisaste que no podés asistir';
     case 'cerrada':
       return 'Cerrado';
     case 'reserva':

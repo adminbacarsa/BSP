@@ -71,6 +71,7 @@ export function turnoAJornada(turno) {
     horaInicio = String(turno.startTime || '');
     horaFin = String(turno.endTime || '');
   }
+  if (turno.noSePresento === true || String(turno.status || '').toUpperCase() === 'CANCELADO') return null;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha) || !/^\d{1,2}:\d{2}$/.test(horaInicio) || !/^\d{1,2}:\d{2}$/.test(horaFin)) return null;
   const base = { fecha, horaInicio, horaFin, horas: Number(turno.hours) > 0 ? Number(turno.hours) : 0 };
   const horas = base.horas || horasDeJornada(base);
@@ -184,6 +185,7 @@ export function ordenarCandidatos(lista) {
     if (a.distanciaKm != null && b.distanciaKm != null && a.distanciaKm !== b.distanciaKm) return a.distanciaKm - b.distanciaKm;
     if ((a.distanciaKm == null) !== (b.distanciaKm == null)) return a.distanciaKm == null ? 1 : -1;
     if ((a.confiabilidad ?? -1) !== (b.confiabilidad ?? -1)) return (b.confiabilidad ?? -1) - (a.confiabilidad ?? -1);
+    if (typeof a.puntaje === 'number' && typeof b.puntaje === 'number' && a.puntaje !== b.puntaje) return b.puntaje - a.puntaje;
     return String(a.nombre).localeCompare(String(b.nombre), 'es');
   });
 }

@@ -16,6 +16,8 @@ import {
   getDocs, limit, query, where,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { PuntajeChip } from '@/components/desempeno/PuntajeChip';
+import { useGuardiaPuntaje } from '@/context/guardiaPuntajeStore';
 import { setAppBusy } from '@/lib/appBusyState';
 import { stampEmpresaId } from '@/lib/multiempresa';
 import {
@@ -465,6 +467,7 @@ interface PanelProps {
 }
 
 function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinimize, unsubRefs, dock = 'corner' }: PanelProps) {
+  const { totalDe } = useGuardiaPuntaje();
   const [loading, setLoading] = React.useState<string | null>(null);
   const [search, setSearch] = React.useState('');
   /** 15 km (default CCT) → ampliar a 30 km si no hay candidatos cercanos. */
@@ -500,7 +503,12 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
           where('disponibilidad', '==', 'DISPONIBLE'),
           limit(200),
         ));
-        const bolsa = snap.docs.map((d) => ({ cuil: d.id, ...(d.data() as Record<string, unknown>) }));
+        const bolsa = snap.docs.map((d) => {
+          const data = d.data() as Record<string, unknown>;
+          const cuil = String(data.cuil || d.id);
+          const puntaje = totalDe(cuil);
+          return { cuil, ...data, ...(puntaje == null ? {} : { puntaje }) };
+        });
         const start = toDate(absenceShift.shiftDateObj).getTime();
         const end = toDate(absenceShift.endDateObj).getTime();
         const coords = resolveObjectiveCoords(absenceForGeo as Record<string, unknown>);
@@ -523,7 +531,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
       }
     })();
     return () => { cancel = true; };
-  }, [step?.key, tid, absenceShift, absenceForGeo]);
+  }, [step?.key, tid, absenceShift, absenceForGeo, totalDe]);
   const now = new Date();
   const absenceEnd = toDate(absenceShift.endDateObj);
   const hiStart = fmtTime(absenceShift.shiftDateObj);
@@ -580,20 +588,26 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
     (row: Record<string, unknown>) => {
       const eid = String(row.employeeId || '').trim();
       const emp = eid ? empById.get(eid) : undefined;
+      const puntaje = totalDe(eid);
       return {
         ...row,
         ...coverageGeoForEmployee(absenceForGeo, emp, row),
+        ...(puntaje == null ? {} : { puntaje }),
       };
     },
-    [absenceForGeo, empById],
+    [absenceForGeo, empById, totalDe],
   );
 
   const attachInternalGeo = React.useCallback(
-    (c: InternalCoverageCandidate): InternalCoverageCandidate & WithGeo => ({
-      ...c,
-      ...coverageGeoForEmployee(absenceForGeo, empById.get(c.employeeId), c.shiftRow as Record<string, unknown>),
-    }),
-    [absenceForGeo, empById],
+    (c: InternalCoverageCandidate): InternalCoverageCandidate & WithGeo & { puntaje?: number } => {
+      const puntaje = totalDe(c.employeeId);
+      return {
+        ...c,
+        ...coverageGeoForEmployee(absenceForGeo, empById.get(c.employeeId), c.shiftRow as Record<string, unknown>),
+        ...(puntaje == null ? {} : { puntaje }),
+      };
+    },
+    [absenceForGeo, empById, totalDe],
   );
 
   function applyDistanceTier<T extends WithGeo>(list: T[]): T[] {
@@ -615,6 +629,12 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
       ].filter(Boolean) as string[])
   );
 
+  const puntajePorEmpleado: Record<string, number> = {};
+  for (const emp of logic.employees || []) {
+    const id = String(emp?.id || '');
+    const n = totalDe(id);
+    if (id && n != null) puntajePorEmpleado[id] = n;
+  }
   const candidateView = buildOpsCandidateView({
     absenceShift,
     processedData: logic.processedData || [],
@@ -623,6 +643,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
     absences: rrhhAbsences,
     sessionBusy: [...crossSessionBusy],
     now,
+    puntajePorEmpleado,
   });
   const internalGroups = {
     ret: sortByDistanceAsc(candidateView.ret.map(attachInternalGeo)),
@@ -1373,6 +1394,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
           <div className="flex-1 min-w-0">
             <div className={`text-xs font-bold truncate ${isSelected ? 'text-indigo-700' : 'text-slate-800'}`}>
               {name}
+              <PuntajeChip sujetoId={String(empId || '')} />
               {cand.otherPosition ? <span className="ml-1 text-[9px] font-black uppercase text-amber-700">otro puesto</span> : null}
             </div>
             {sub && <div className="text-[10px] font-semibold text-slate-600 truncate">{sub}</div>}
@@ -1480,6 +1502,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-bold text-slate-800 truncate">
                     {c.fullName}
+                    <PuntajeChip sujetoId={c.employeeId} />
                     {c.otherPosition ? <span className="ml-1 text-[9px] font-black uppercase text-amber-700">otro puesto</span> : null}
                   </div>
                   <div className="text-[10px] text-slate-500 truncate">
@@ -1637,7 +1660,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
                             className={`flex items-center justify-between gap-2 px-3 py-2.5 rounded-2xl border shadow-sm text-left ${row.elegible === false ? 'border-slate-100 bg-slate-50 text-slate-400' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
                           >
                             <span className="min-w-0">
-                              <span className="block text-sm font-black text-slate-800 truncate">{row.employeeName}</span>
+                              <span className="flex items-center gap-1"><span className="block truncate text-sm font-black text-slate-800">{row.employeeName}</span><PuntajeChip sujetoId={row.cuil || row.employeeId} /></span>
                               <span className="block text-[10px] text-slate-500">
                                 {row.distanceKm == null ? 'Sin geo' : `${row.distanceKm} km`} · confiabilidad {row.confiabilidad}
                                 {row.pruebasSinMarco && <span data-pruebas="sin-marco" className="ml-1 rounded-full border border-fuchsia-200 bg-fuchsia-50 px-1.5 py-0.5 text-[8px] font-black uppercase text-fuchsia-800">Pruebas: sin exigir marco</span>}
@@ -1726,6 +1749,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
                                 <div className="flex-1 min-w-0">
                                   <div className="text-sm font-bold truncate">
                                     {name}
+                                    <PuntajeChip sujetoId={String(empId || '')} />
                                     {c.otherPosition ? <span className="ml-1 text-[9px] font-black uppercase text-amber-700">otro puesto</span> : null}
                                   </div>
                                   <CoverageDistanceLine geo={c as WithGeo} />

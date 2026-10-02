@@ -7,6 +7,7 @@ import DashboardLayout from '@/components/layout/DashboardLayout';
 import { OperacionMovil } from '@/components/movil/OperacionMovil';
 import { useMovilMode } from '@/lib/movil/useMovilMode';
 import { CronogramaAvisoLinea } from '@/components/operaciones/CronogramaAvisoLinea';
+import { PuntajeChip } from '@/components/desempeno/PuntajeChip';
 import { useCronogramaSinPublicar } from '@/hooks/useCronogramaSinPublicar';
 import { 
     Radio, Search, Layers, Maximize2, Minimize2, MonitorUp, Building2, Shield,
@@ -1225,6 +1226,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
             <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5 leading-tight">
                     <span className={`text-[11px] font-black truncate ${isActionableOpsVacancy(shift) ? 'text-rose-600' : 'text-slate-800'}`}>{name}</span>
+                    {!shift.isUnassigned && <PuntajeChip sujetoId={String((shift as { bolsaCuil?: string }).bolsaCuil || shift.employeeId || '')} />}
                     <ShiftCodeBadge shift={shift} />
                     {dayTagEl}
                     {badge}
@@ -1305,6 +1307,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                         <div className="min-w-0">
                             <span className={`text-[13px] font-black truncate ${shift.isUnassigned ? 'text-rose-600' : 'text-slate-800'} inline-flex items-center gap-1.5 max-w-full`}>
                                 <span className="truncate">{name}</span>
+                                {!shift.isUnassigned && <PuntajeChip sujetoId={String((shift as { bolsaCuil?: string }).bolsaCuil || shift.employeeId || '')} />}
                             </span>
                             <span className="text-[10px] text-slate-400">{shift.clientName || shift.objectiveName}</span>
                         </div>

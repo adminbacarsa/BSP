@@ -310,6 +310,28 @@ const conDom = geo.coverageGeoForEmployee(
 report('p9e-geo-domicilio', conDom.hasGeo === true && conDom.distanceKm > 1 && conDom.etaMinutes > 0,
   conDom.distanceKm != null ? `${conDom.distanceKm.toFixed(1)} km` : 'sin');
 
+function advP(id, name) {
+  return {
+    id, employeeId: id, employeeName: name, code: 'T', objectiveId: 'obj', positionName: 'Recepción',
+    startMs: hm('2026-09-28T15:00:00-03:00'), endMs: hm('2026-09-28T23:00:00-03:00'),
+    isPresent: false, isCompleted: false,
+  };
+}
+const tie = core.buildCoverageCandidates({
+  nowMs, gap: gap(), shifts: [advP('ana', 'Ana'), advP('zoe', 'Zoe')],
+  puntajePorEmpleado: { ana: 40, zoe: 90 },
+});
+const tieFn = fn.buildCoverageCandidates({
+  nowMs, gap: gap(), shifts: [advP('ana', 'Ana'), advP('zoe', 'Zoe')],
+  puntajePorEmpleado: { ana: 40, zoe: 90 },
+});
+report('puntaje-desempate', core.pickBestCandidate(tie, 'ADVANCE')?.employeeId === 'zoe'
+  && JSON.stringify(tie) === JSON.stringify(tieFn),
+  core.pickBestCandidate(tie, 'ADVANCE')?.employeeId || 'nadie');
+const tieSin = core.buildCoverageCandidates({ nowMs, gap: gap(), shifts: [advP('ana', 'Ana'), advP('zoe', 'Zoe')] });
+report('puntaje-ausente', core.pickBestCandidate(tieSin, 'ADVANCE')?.employeeId === 'ana',
+  core.pickBestCandidate(tieSin, 'ADVANCE')?.employeeId || 'nadie');
+
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} OK`);
 if (failed.length) process.exitCode = 1;

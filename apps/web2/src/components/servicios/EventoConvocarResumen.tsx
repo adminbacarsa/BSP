@@ -178,10 +178,10 @@ export function EstadoSolicitudChip({ sol }: { sol: { status?: string; tipo?: st
       ? 'text-emerald-600 dark:text-emerald-400'
       : ui.key === 'RECHAZO'
         ? 'text-rose-500'
-        : ui.key === 'VENCIO'
+        : ui.key === 'VENCIO' || ui.key === 'NO_VA'
           ? 'text-amber-600 dark:text-amber-400'
           : 'text-slate-400 dark:text-slate-500';
-  const Icon = ui.key === 'ASIGNADO' ? UserCheck : ui.key === 'ACEPTO' ? CheckCircle : ui.key === 'RECHAZO' ? XCircle : ui.key === 'VENCIO' ? TimerOff : Clock;
+  const Icon = ui.key === 'ASIGNADO' ? UserCheck : ui.key === 'ACEPTO' ? CheckCircle : ui.key === 'RECHAZO' ? XCircle : ui.key === 'VENCIO' || ui.key === 'NO_VA' ? TimerOff : Clock;
   return (
     <span data-estado={ui.key} title={ui.detalle} className={`inline-flex items-center gap-1 text-[10px] shrink-0 ${cls}`}>
       <Icon size={11} />

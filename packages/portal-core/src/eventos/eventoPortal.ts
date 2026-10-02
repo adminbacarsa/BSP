@@ -267,3 +267,17 @@ export async function assignGuardToEvent(db: Firestore, params: AssignGuardToEve
 
   await batch.commit();
 }
+
+/** El eventual puede avisar que no va solo después de aceptar y antes del inicio (hora AR). */
+export function puedeNoAsistirEventual(
+  sol: { status?: string; esEventual?: boolean; servicioFecha?: string; jornada?: { fecha?: string; horaInicio?: string } | null },
+  ahoraMs = Date.now(),
+): boolean {
+  if (sol.esEventual !== true || sol.status !== 'aprobada') return false;
+  const fecha = String(sol.jornada?.fecha || sol.servicioFecha || '');
+  const hora = String(sol.jornada?.horaInicio || '00:00');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha) || !/^\d{1,2}:\d{2}$/.test(hora)) return false;
+  const [h, m] = hora.split(':').map(Number);
+  const inicio = new Date(`${fecha}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00.000-03:00`).getTime();
+  return Number.isFinite(inicio) && ahoraMs < inicio;
+}

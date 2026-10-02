@@ -800,6 +800,20 @@ service cloud.firestore {
       }
     }
 
+    // Puntaje de desempeño. Lectura admin del tenant. Escritura solo Admin SDK. Sin publicar hasta que Mauro lo confirme.
+    match /guardia_puntaje/{docId} {
+      allow read: if tenantAdminRead();
+      allow write: if false;
+    }
+    match /guardia_puntaje_dirty/{docId} {
+      allow read: if false;
+      allow write: if false;
+    }
+    match /guardia_desempeno_eventos/{docId} {
+      allow read: if tenantAdminRead();
+      allow write: if false;
+    }
+
     match /grupos_objetivos/{grupoId} {
       allow read:   if tenantAdminRead();
       allow create: if tenantAdminCreate();

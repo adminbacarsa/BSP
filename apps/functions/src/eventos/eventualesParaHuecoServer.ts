@@ -8,6 +8,7 @@ import {
   type EventualCandidato,
   type EventualJornadaOcupada,
 } from './eventoCoverage';
+import { puntajesPorClave } from '../desempeno/puntajeGuardiaJob';
 
 function msOf(value: unknown): number {
   if (value instanceof Timestamp) return value.toMillis();
@@ -68,6 +69,12 @@ export async function loadEventualesParaHueco(
         endMs: e,
       });
     }
+  }
+
+  const scores = await puntajesPorClave(db, bolsa.map((b) => b.cuil));
+  for (const row of bolsa) {
+    const n = scores.get(row.cuil);
+    if (typeof n === 'number') row.puntaje = n;
   }
 
   const lat = Number(shift.lat ?? shift.latitude);

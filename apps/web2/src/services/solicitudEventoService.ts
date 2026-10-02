@@ -13,7 +13,7 @@ import {
 import { stampEmpresaId } from '@/lib/multiempresa';
 
 /** `vencida` = convocatoria de eventual sin respuesta en el plazo (`venceAt`): no generó nada, el lugar quedó libre. */
-export type EstadoSolicitudEvento = 'pendiente' | 'convocado' | 'aprobada' | 'rechazada' | 'cerrada' | 'reserva' | 'vencida';
+export type EstadoSolicitudEvento = 'pendiente' | 'convocado' | 'aprobada' | 'rechazada' | 'cerrada' | 'reserva' | 'vencida' | 'cancelada';
 /** `admin_asigna` = asignación directa desde Eventos (libre/RET): nace `aprobada`, no es una aceptación. */
 export type TipoSolicitudEvento = 'guardia_solicita' | 'admin_convoca' | 'admin_asigna';
 
