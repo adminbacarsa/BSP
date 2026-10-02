@@ -25,6 +25,19 @@ service cloud.firestore {
       );
     }
 
+    function isEventualClaim() {
+      return request.auth != null && (
+        request.auth.token.role == 'EVENTUAL' ||
+        request.auth.token.role == 'eventual' ||
+        request.auth.token.type == 'eventual' ||
+        request.auth.token.type == 'EVENTUAL'
+      );
+    }
+
+    function isPortalGuardia() {
+      return isEmployeeClaim() || isEventualClaim();
+    }
+
     function roleValueIsSuperAdmin(role) {
       return role == 'SuperAdmin' ||
         role == 'SUPERADMIN' ||
@@ -47,15 +60,15 @@ service cloud.firestore {
       );
     }
 
-    function isAdmin() {
-      return request.auth != null && (
-        request.auth.token.role == 'admin' ||
+    function isStaffRole() {
+      return request.auth.token.role == 'admin' ||
         request.auth.token.role == 'Admin' ||
         request.auth.token.role == 'ADMIN' ||
         request.auth.token.role == 'SuperAdmin' ||
         request.auth.token.role == 'SUPERADMIN' ||
         request.auth.token.role == 'SUPER_ADMIN' ||
         request.auth.token.role == 'SP' ||
+        request.auth.token.role == 'superadmin' ||
         request.auth.token.role == 'Manager' ||
         request.auth.token.role == 'MANAGER' ||
         request.auth.token.role == 'Scheduler' ||
@@ -64,11 +77,28 @@ service cloud.firestore {
         request.auth.token.role == 'SUPERVISOR' ||
         request.auth.token.role == 'Operator' ||
         request.auth.token.role == 'OPERATOR' ||
+        request.auth.token.role == 'Operador' ||
+        request.auth.token.role == 'operador' ||
+        request.auth.token.role == 'OPERADOR' ||
+        request.auth.token.role == 'OPERADOR_CC' ||
         request.auth.token.role == 'HR_Manager' ||
         request.auth.token.role == 'HR_MANAGER' ||
+        request.auth.token.role == 'ADMIN_EMPRESA' ||
+        request.auth.token.role == 'ADMIN_PRUEBA' ||
+        request.auth.token.role == 'ADMIN_CAPACITACION' ||
+        request.auth.token.role == 'SEGP' ||
+        request.auth.token.role == 'SOPORTE' ||
+        request.auth.token.role == 'PLANIFICACION' ||
+        request.auth.token.role == 'PLANIFICADOR' ||
+        request.auth.token.role == 'RRHH' ||
+        request.auth.token.role == 'SUPERVISION';
+    }
+
+    function isAdmin() {
+      return request.auth != null && (
+        isStaffRole() ||
         isSystemUser() ||
-        isSystemUserDoc() ||
-        !isEmployeeClaim()
+        isSystemUserDoc()
       );
     }
 
@@ -288,29 +318,29 @@ service cloud.firestore {
 
     match /empleados/{employeeId} {
       allow read: if tenantAdminRead()
-        || (request.auth != null && !isAdmin())
+        || isPortalGuardia()
         || clientUserMatchesEmpleado(resource.data);
       allow create: if tenantAdminCreate();
-      allow update: if tenantAdminUpdate() || request.auth != null;
+      allow update: if tenantAdminUpdate() || isPortalGuardia();
       allow delete: if tenantAdminDelete();
     }
 
     match /ausencias/{absenceId} {
-      allow read: if tenantAdminRead() || request.auth != null;
-      allow create: if tenantAdminCreate() || request.auth != null;
-      allow update: if tenantAdminUpdate() || request.auth != null;
+      allow read: if tenantAdminRead() || isPortalGuardia();
+      allow create: if tenantAdminCreate() || isPortalGuardia();
+      allow update: if tenantAdminUpdate() || isPortalGuardia();
       allow delete: if tenantAdminDelete();
     }
 
     match /objetivos/{objectiveId} {
-      allow read: if tenantAdminRead() || (request.auth != null && !isAdmin());
+      allow read: if tenantAdminRead() || isPortalGuardia();
       allow create: if tenantAdminCreate();
       allow update: if tenantAdminUpdate();
       allow delete: if tenantAdminDelete();
     }
 
     match /clientes/{clientId} {
-      allow read: if tenantAdminRead() || (request.auth != null && !isAdmin());
+      allow read: if tenantAdminRead() || isPortalGuardia();
       allow create: if tenantAdminCreate();
       allow update: if tenantAdminUpdate();
       allow delete: if tenantAdminDelete();
@@ -318,7 +348,7 @@ service cloud.firestore {
 
     match /clients/{clientId} {
       allow read: if tenantAdminRead()
-        || (request.auth != null && !isAdmin())
+        || isPortalGuardia()
         || (isClientUser() && clientUserClientId() == clientId);
       allow create: if tenantAdminCreate();
       allow update: if tenantAdminUpdate();
@@ -417,7 +447,7 @@ service cloud.firestore {
     }
 
     match /empresas/{empresaId} {
-      allow read: if isAdmin() || isEmployeeClaim();
+      allow read: if isAdmin() || isEmployeeClaim() || isEventualClaim() || isClientUser();
       allow create, delete: if isSuperAdmin();
       allow update: if isSuperAdmin() || (
         isAdmin() && empresaId == userEmpresaId()
@@ -441,7 +471,7 @@ service cloud.firestore {
     }
 
     match /feriados/{holidayId} {
-      allow read: if request.auth != null && (isAdmin() ? feriadoReadable(resource.data) : true);
+      allow read: if (isAdmin() && feriadoReadable(resource.data)) || isEmployeeClaim() || (isEventualClaim() && docEmpresaId(resource.data) == '');
       allow create: if isSuperAdmin() || (
         isAdmin() && (
           docEmpresaId(request.resource.data) == '' ||
@@ -575,8 +605,8 @@ service cloud.firestore {
     }
 
     match /novedades/{novedadId} {
-      allow read: if request.auth != null && (isAdmin() ? tenantAdminRead() : true);
-      allow create: if request.auth != null && (isAdmin() ? tenantAdminCreate() : true);
+      allow read: if tenantAdminRead() || isEmployeeClaim();
+      allow create: if tenantAdminCreate() || isEmployeeClaim();
       allow update: if tenantAdminUpdate() || (
         request.auth != null && isAdmin() && tenantMatches(resource.data)
       );
@@ -584,8 +614,8 @@ service cloud.firestore {
     }
 
     match /audit_logs/{logId} {
-      allow read: if request.auth != null && (isAdmin() ? tenantAdminRead() : true);
-      allow create: if request.auth != null && (isAdmin() ? tenantAdminCreate() : true);
+      allow read: if tenantAdminRead() || isEmployeeClaim();
+      allow create: if tenantAdminCreate() || isEmployeeClaim();
       allow update, delete: if tenantAdminDelete();
     }
 
