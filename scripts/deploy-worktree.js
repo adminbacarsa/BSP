@@ -114,6 +114,27 @@ function syncEnvLocal() {
   console.log('✓ .env.local copiado al worktree de deploy (solo credenciales de build, USE_EMULATOR=false en build).');
 }
 
+// apps/functions/.env no está en git: sin copiarlo, las functions se publican sin GMAIL_*/MAIL_*/DRIVE_*.
+// Las claves declaradas como secrets no pueden ir también como variable: se filtran.
+const FUNCTIONS_SECRET_KEYS = new Set(['GEMINI_API_KEY', 'ARCA_ROBOT_KEY', 'GITHUB_DISPATCH_TOKEN']);
+
+function syncFunctionsEnv() {
+  const src = path.join(LAB_ROOT, 'apps', 'functions', '.env');
+  const dest = path.join(DEPLOY_DIR, 'apps', 'functions', '.env');
+  if (!fs.existsSync(src)) {
+    console.warn('\n⚠ No hay apps/functions/.env en el lab — las functions se publican sin variables (mail, Drive).');
+    return;
+  }
+  const lines = fs.readFileSync(src, 'utf8').split(/\r?\n/);
+  const kept = lines.filter((line) => {
+    const key = line.split('=')[0].trim();
+    return !FUNCTIONS_SECRET_KEYS.has(key);
+  });
+  fs.writeFileSync(dest, kept.join('\n'));
+  const keys = kept.map((l) => l.split('=')[0].trim()).filter((k) => k && !k.startsWith('#'));
+  console.log(`✓ apps/functions/.env copiado al worktree de deploy (${keys.join(', ')}; sin secrets).`);
+}
+
 console.log('═══════════════════════════════════════════════════════');
 console.log(' COSP — Deploy aislado (worktree)');
 console.log(` Lab:    ${LAB_ROOT}`);
@@ -168,6 +189,7 @@ if (deployFunctions) {
 }
 
 syncEnvLocal();
+syncFunctionsEnv();
 process.env.COSP_LAB_ROOT = LAB_ROOT;
 console.log('\n▶ Compilando packages/hours-core antes de web2 y functions ...');
 const buildHours = spawnSync(process.execPath, [path.join(DEPLOY_DIR, 'scripts', 'build-hours-core.mjs')], {
