@@ -4,7 +4,9 @@ import {
   absenceVacancyClosePatch,
   buildRestoreSourceShiftAfterCoveragePatch,
   findOpenAbsenceVacancyDocs,
+  isActiveOpsCoverageDoc,
 } from '../coverage/syncAusenciaCobertura';
+import { isEventoShift } from '../eventos/eventoCoverage';
 import { isReliefEligibleShift } from '../common/reliefEligibility';
 import { findPresentOutgoingAlignedToGapStart } from '../fichajes/relevoOutgoingMatch';
 import { buildAutoClosePatch, clearRetentionOnReliefClose } from '../scheduling/shiftClose';
@@ -35,14 +37,15 @@ export async function revertirAusenciaShift(
     return { success: false, reason: 'PAST_T60' };
   }
 
+  // La cobertura de un hueco de evento se escribe con origin EVENTO (mismo shape que el EV):
+  // se filtra por vínculo y estado, no por origin.
   const activeCovSnap = await db
     .collection('turnos')
     .where('absenceShiftId', '==', shiftId)
-    .where('origin', '==', 'OPERATIONS_COVERAGE')
-    .limit(5)
+    .limit(10)
     .get();
   const activeCov = activeCovSnap.docs.filter(
-    (d) => d.data().coverageSuperseded !== true && String(d.data().status || '').toUpperCase() !== 'CANCELLED',
+    (d) => isActiveOpsCoverageDoc(d.data()) && String(d.data().status || '').toUpperCase() !== 'CANCELLED',
   );
 
   if (activeCov.length > 0 && input.cancelCoverage !== true) {
@@ -50,6 +53,7 @@ export async function revertirAusenciaShift(
   }
 
   const now = Timestamp.now();
+  const lateMinutes = startMs ? Math.max(0, Math.round((nowMs - startMs) / 60000)) : 0;
 
   await ref.update({
     isAbsent: false,
@@ -62,11 +66,31 @@ export async function revertirAusenciaShift(
     checkInTime: now,
     checkInAt: now,
     isLate: true,
-    lateMinutes: startMs ? Math.max(0, Math.round((nowMs - startMs) / 60000)) : 0,
+    lateMinutes,
     absenceRevertedAt: now,
     absenceRevertedBy: input.operatorUid || 'OPERACIONES',
     presenciaSource: 'OPERATIONS',
+    // La escalada «sin cobertura» ya no aplica: el titular está en el puesto.
+    isSinCobertura: false,
+    vacanteEscalada: false,
+    isUnassigned: false,
+    isDescubierto: FieldValue.delete(),
   });
+
+  // Eventual en un evento: la falta sin aviso (T+30) ya corrió `aplicarEventualNoSePresento`. Se deshace.
+  if (isEventoShift(shift) && shift.esEventual === true && shift.eventualNoSePresentoAt) {
+    try {
+      const { deshacerEventualNoSePresento } = await import('../eventuales/eventualNoSePresento');
+      await deshacerEventualNoSePresento(db, {
+        shiftId,
+        actorUid: input.operatorUid || 'OPERACIONES',
+        lateMinutes,
+        ahoraMs: nowMs,
+      });
+    } catch (err) {
+      console.warn('[revertirAusencia] deshacer eventual no se presentó:', (err as Error)?.message);
+    }
+  }
 
   // Misma serie que una fichada: el saliente cierra ya, en max(inicio planificado, ahora).
   if (isReliefEligibleShift(shift) && startMs > 0 && shift.objectiveId && shift.positionName) {
@@ -135,7 +159,20 @@ export async function revertirAusenciaShift(
         status: 'CANCELLED',
         cancelledAt: FieldValue.serverTimestamp(),
       });
-      const srcId = String(cov.data().sourceShiftId || '').trim();
+      // El reemplazo era otro eventual convocado por la cascada: su AT urgente no viaja.
+      const covData = cov.data();
+      if (covData.esEventual === true && covData.arcaEnvioId) {
+        const envioRef = db.collection('arca_envios').doc(String(covData.arcaEnvioId));
+        const envioSnap = await envioRef.get();
+        if (envioSnap.exists && !['SUBIENDO', 'CONFIRMADO'].includes(String(envioSnap.data()?.estado || ''))) {
+          await envioRef.update({
+            quitadoDelLote: true,
+            quitadoMotivo: 'COBERTURA_CANCELADA',
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+        }
+      }
+      const srcId = String(covData.sourceShiftId || '').trim();
       if (srcId) {
         const srcSnap = await db.collection('turnos').doc(srcId).get();
         if (srcSnap.exists) {
