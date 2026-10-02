@@ -2,7 +2,7 @@
  * Puntaje de guardias: fixtures del cálculo y desempate dentro del escalón.
  *   node --experimental-strip-types scripts/eval-puntaje-guardia.mjs
  */
-import { calcularPuntajeDeFuentes } from '../apps/functions/src/desempeno/puntajeGuardia.ts';
+import { calcularPuntaje, calcularPuntajeDeFuentes, PUNTAJE_FUENTES } from '../apps/functions/src/desempeno/puntajeGuardia.ts';
 import { buildCoverageCandidates, pickBestCandidate } from '../packages/ops-core/src/coverageCandidates.ts';
 import { eventualesParaHueco } from '../packages/ops-core/src/eventoCoverage.ts';
 import { ordenarCandidatos } from '../apps/web2/src/lib/eventuales/planificacion.mjs';
@@ -139,6 +139,26 @@ const orden = ordenarCandidatos([
   { elegible: true, distanciaKm: 3, confiabilidad: 5, nombre: 'Zoe', puntaje: 90, cuil: 'zoe' },
 ]);
 report('ordenar', orden[0].cuil === 'zoe', orden.map((r) => r.cuil).join(','));
+
+const hechosFuturos = [
+  { tipo: 'FALTA_SIN_AVISO', fechaMs: dia(2), ref: 't1', esEventual: false },
+  { tipo: 'SUPERVISION_EVALUACION', fechaMs: dia(1), ref: 'v1', esEventual: false },
+  { tipo: 'JORNADA_CUMPLIDA', fechaMs: dia(1), ref: 'j1', esEventual: false },
+];
+const futurasApagadas = calcularPuntaje(hechosFuturos, ahora);
+const futurasEncendidas = calcularPuntaje(hechosFuturos, ahora, {
+  ...PUNTAJE_FUENTES,
+  SUPERVISION_EVALUACION: { ...PUNTAJE_FUENTES.SUPERVISION_EVALUACION, peso: 10 },
+  JORNADA_CUMPLIDA: { ...PUNTAJE_FUENTES.JORNADA_CUMPLIDA, peso: 5 },
+});
+report('fuentes-futuras',
+  PUNTAJE_FUENTES.SUPERVISION_EVALUACION.peso === 0
+  && PUNTAJE_FUENTES.JORNADA_CUMPLIDA.peso === 0
+  && futurasApagadas.total === 71
+  && futurasEncendidas.cumplimiento === 90
+  && futurasEncendidas.disposicion === 60
+  && futurasEncendidas.total > futurasApagadas.total,
+  `apagadas ${futurasApagadas.total} con peso ${futurasEncendidas.total}`);
 
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} OK`);
