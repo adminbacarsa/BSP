@@ -108,17 +108,21 @@ describe('contrato desde turnos', () => {
     assert.deepEqual(r.patchesEnvios[0], { id: 'at1', patch: { fechaAlta: '2026-10-05', fechaBaja: '2026-10-08', regenerarTxt: true } });
   });
 
-  it('quitar todos los turnos: AT sin subir sale del lote; subido → NA en 24 h, BT después', () => {
+  it('quitar todos los turnos: AT sin subir sale del lote; subido → anulación el mismo día, baja después', () => {
     const confirmado = planContratoDesdeTurnos({ empresaId: 'bacarsa', bolsa, turnos: [turno({ draft: false })], ahoraMs: ahora }).contrato;
     const pend = planContratoDesdeTurnos({ empresaId: 'bacarsa', bolsa, turnos: [], contratoActual: confirmado, enviosActuales: [{ id: 'at1', tipo: 'AT', estado: 'PENDIENTE' }], ahoraMs: ahora });
     assert.equal(pend.contrato.estado, 'ANULADO');
     assert.equal(pend.patchesEnvios[0].patch.quitadoDelLote, true);
     assert.equal(armarLote({ empresaId: 'bacarsa', tipo: 'AT', envios: [{ id: 'at1', empresaId: 'bacarsa', tipo: 'AT', estado: 'PENDIENTE', quitadoDelLote: true }] }).lineas, 0);
     const na = planContratoDesdeTurnos({ empresaId: 'bacarsa', bolsa, turnos: [], contratoActual: confirmado, enviosActuales: [{ id: 'at1', tipo: 'AT', estado: 'CONFIRMADO' }], ahoraMs: Date.parse('2026-10-05T12:00:00.000Z') });
-    assert.equal(na.envios[0].tipo, 'NA');
+    assert.equal(na.envios[0].tipo, 'ANULACION');
+    assert.equal(na.envios[0].motivo, null);
+    assert.equal(na.envios[0].lote, 'ANULACION');
     assert.equal(na.contrato.estado, 'ANULADO');
     const bt = planContratoDesdeTurnos({ empresaId: 'bacarsa', bolsa, turnos: [], contratoActual: confirmado, enviosActuales: [{ id: 'at1', tipo: 'AT', estado: 'CONFIRMADO' }], ahoraMs: Date.parse('2026-10-07T12:00:00.000Z') });
-    assert.equal(bt.envios[0].tipo, 'BT');
+    assert.equal(bt.envios[0].tipo, 'BAJA_NO_PRESENTACION');
+    assert.equal(bt.envios[0].fechaBaja, '2026-10-05');
+    assert.equal(bt.envios[0].motivo, 'desistimiento / sin efectivización de tareas');
     assert.equal(bt.contrato.estado, 'FINALIZADO');
   });
 

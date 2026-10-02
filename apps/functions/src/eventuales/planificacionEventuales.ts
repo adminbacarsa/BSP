@@ -195,6 +195,35 @@ async function auditar(action: string, actorUid: string, empresaId: string, cuil
 
 // ── Contrato ──────────────────────────────────────────────────────────────────
 
+async function txtBajaDesistimiento(empresaId: string, contrato: Record<string, unknown>, cuil: string, bolsa: Record<string, unknown>, envio: Record<string, unknown>) {
+  try {
+    const { lineaMovimientoArca, brutoParaTxt } = await import('../eventuales-shared/arcaTxt.mjs') as {
+      lineaMovimientoArca: (i: Record<string, unknown>) => { linea: string; advertencias: string[]; enviable: boolean };
+      brutoParaTxt: (i: Record<string, unknown>) => { ok: boolean; bruto: number };
+    };
+    const empresa = { id: empresaId, ...((await db().collection('empresas').doc(empresaId).get()).data() || {}) };
+    const escalasSnap = await db().collection('escalas_salariales').where('status', '==', 'ACTIVE').get();
+    const bruto = brutoParaTxt({ contrato, escalas: escalasSnap.docs.map((d) => d.data()) });
+    const fechaBaja = String(envio.fechaBaja || envio.fechaInicio || contrato.fechaAlta || '');
+    const out = lineaMovimientoArca({
+      contrato: { ...contrato, fechaAlta: envio.fechaInicio || contrato.fechaAlta },
+      cuil,
+      bruto: bruto.bruto,
+      obraSocial: bolsa.obraSocialRnos || '',
+      empresa,
+      movimiento: 'BT',
+      revista: envio.revista || '30',
+      fechaBaja,
+    });
+    const advertencias = [...out.advertencias];
+    if (!bruto.ok) advertencias.push('RETRIBUCION_PENDIENTE');
+    if (envio.avisoFeriados) advertencias.push(String(envio.avisoFeriados));
+    return { txt: out.linea, advertencias, enviable: out.enviable && bruto.ok, bruto: bruto.bruto };
+  } catch (e) {
+    return { txt: null, advertencias: ['TXT_NO_GENERADO', (e as Error)?.message || ''], enviable: false, bruto: 0 };
+  }
+}
+
 async function txtDe(empresaId: string, contrato: Record<string, unknown>, cuil: string, bolsa: Record<string, unknown>, tipo: 'AT' | 'BT') {
   try {
     const { lineasCargaMasiva, brutoParaTxt } = await import('../eventuales-shared/arcaTxt.mjs') as {
@@ -229,6 +258,8 @@ export async function sincronizarContratoEventual(empresaId: string, cuil: strin
   const bolsa = { cuil, ...(bolsaSnap.data() || {}) } as Record<string, unknown> & { cuil: string };
   const turnos = (await turnosDelCuil(cuil, `${periodo}-01`, `${periodo}-31`)).filter((t) => String(t.empresaId || '') === empresaId);
   const contratoRef = db().collection('contratos_eventuales').doc(contratoId);
+  const { vencerAnulacionesPendientes } = await import('./eventualNoSePresento');
+  await vencerAnulacionesPendientes(db(), Date.now());
   const [contratoSnap, enviosSnap] = await Promise.all([
     contratoRef.get(),
     db().collection('arca_envios').where('contratoIds', 'array-contains', contratoId).get(),
@@ -238,7 +269,13 @@ export async function sincronizarContratoEventual(empresaId: string, cuil: strin
   const legajo = ((bolsa.legajos || []) as { empresaId?: string; employeeId?: string }[]).find((l) => l.empresaId === empresaId);
   const employeeId = legajo?.employeeId || (turnos[0]?.employeeId as string | undefined) || null;
 
-  const plan = planContratoDesdeTurnos({ empresaId, bolsa, employeeId, turnos, contratoActual, enviosActuales, ahoraMs: Date.now() });
+  const feriadosSnap = await db().collection('feriados').get();
+  const empresaSnap = await db().collection('empresas').doc(empresaId).get();
+  const plan = planContratoDesdeTurnos({
+    empresaId, bolsa, employeeId, turnos, contratoActual, enviosActuales, ahoraMs: Date.now(),
+    feriados: feriadosSnap.docs.map((d) => d.data()),
+    arcaEventuales: (empresaSnap.data() || {}).arcaEventuales || null,
+  });
   const estado = (plan.contrato?.estado as string | undefined) || null;
   if (plan.accion === 'SIN_CAMBIOS') {
     await marcarTurnosConContrato(turnos, contratoId, enviosActuales);
@@ -259,7 +296,13 @@ export async function sincronizarContratoEventual(empresaId: string, cuil: strin
   }, { merge: true });
   for (const envio of plan.envios) {
     const tipo = String(envio.tipo);
-    const txt = tipo === 'AT' || tipo === 'BT' ? await txtDe(empresaId, plan.contrato || {}, cuil, bolsa, tipo) : { txt: null, advertencias: ['MOVIMIENTO_A_CONFIRMAR_CON_CONTADOR'], enviable: false, bruto: 0 };
+    const txt = tipo === 'ANULACION'
+      ? { txt: null, advertencias: envio.avisoFeriados ? [String(envio.avisoFeriados)] : [], enviable: true, bruto: 0 }
+      : tipo === 'BAJA_NO_PRESENTACION'
+        ? await txtBajaDesistimiento(empresaId, plan.contrato || {}, cuil, bolsa, envio)
+        : tipo === 'AT' || tipo === 'BT'
+          ? await txtDe(empresaId, plan.contrato || {}, cuil, bolsa, tipo as 'AT' | 'BT')
+          : { txt: null, advertencias: ['MOVIMIENTO_A_CONFIRMAR_CON_CONTADOR'], enviable: false, bruto: 0 };
     batch.set(db().collection('arca_envios').doc(), {
       ...envio,
       contratoIds: [contratoId],

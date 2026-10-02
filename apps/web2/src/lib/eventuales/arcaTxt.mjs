@@ -20,16 +20,16 @@ export const ARCA_EVENTUALES_DEFAULT = {
   puesto: '5414',
   rectificacion: '00',
   /**
-   * TODO confirmar con el contador: el manual lista NA entre los movimientos, pero la tabla
-   * no define NA/NB. Hipótesis = anulación de alta. `empresa.arcaEventuales.movimientoAnulacion` lo pisa.
+   * La anulación de alta no usa un movimiento de baja: va por el módulo de Anulación de
+   * Incorporaciones (`plazoAnulacion.mjs`). NA queda solo como código histórico del manual.
    */
   movimientoAnulacion: 'NA',
-  /** Horas desde el inicio en las que ARCA deja anular (rechazo BTU pasado el plazo). Configurable. */
-  anulacionAltaMaxHoras: 24,
   /**
-   * TODO confirmar con el contador: la tabla de revista no tiene «no inicio efectivo de prestación».
-   * 30 es el de la baja habitual (vencimiento art. 250) hasta que indiquen otro.
+   * Revista de la baja cuando venció la anulación (desistimiento / sin efectivización de tareas).
+   * 30 es el de la baja habitual hasta que la empresa cargue el que indique el contador.
+   * `empresas.arcaEventuales.situacionRevistaDesistimiento` lo pisa. `situacionRevistaNoInicio` es el alias viejo.
    */
+  situacionRevistaDesistimiento: '30',
   situacionRevistaNoInicio: '30',
   cctCodigo: '',
   categoria: '',

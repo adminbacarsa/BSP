@@ -44,13 +44,17 @@ report('cruce espejo', fn.eventualesParaHueco({ bolsa: [cruce], hueco, otrasJorn
 const plan = core.planEventualAusente({ employeeId: 'e', empresaAltaId: 'emp', eventoId: 'ev', shiftId: 's', isEventual: true, punched: false });
 report('eventual sin fichar', plan?.arcaBajaPendiente === true && plan.descuentaLiquidacion === true && plan.confiabilidadDelta === -1 && plan.desempeno === 'FALTA_SIN_AVISO' && plan.arca.accion === 'CANCELAR_AT', JSON.stringify(plan));
 report('no eventual', core.planEventualAusente({ employeeId: 'e', empresaAltaId: 'emp', isEventual: false }) === null, '');
+const { plazoAnulacionAlta } = await import('../apps/web2/src/lib/eventuales/plazoAnulacion.mjs');
 const inicio = Date.parse('2026-10-05T08:00:00-03:00');
-const anula = core.planEventualAusente({ employeeId: 'e', empresaAltaId: 'emp', isEventual: true, aviso: true, atSubido: true, inicioMs: inicio, ahoraMs: inicio - 2 * 3600000, fechaInicio: '2026-10-05' });
-report('aviso con AT subido dentro del plazo → ANULACION sin remuneración', anula?.arca.accion === 'ANULACION' && anula.arca.tipo === 'ANULACION' && anula.arca.movimiento === 'NA' && anula.arca.bruto === 0 && anula.arca.canal === 'URGENTE' && anula.desempeno === 'CANCELACION_TARDIA', anula?.desempeno || '');
+const feriados = [{ date: '2026-01-01', type: 'Nacional' }];
+const dentro = plazoAnulacionAlta({ fechaInicio: '2026-10-05', horaInicio: '08:00', ahoraMs: inicio - 2 * 3600000, feriados });
+const anula = core.planEventualAusente({ employeeId: 'e', empresaAltaId: 'emp', isEventual: true, aviso: true, atSubido: true, inicioMs: inicio, ahoraMs: inicio - 2 * 3600000, fechaInicio: '2026-10-05', puedeAnular: dentro.puedeAnular });
+report('aviso con AT subido dentro del plazo → ANULACION sin motivo', anula?.arca.accion === 'ANULACION' && anula.arca.tipo === 'ANULACION' && anula.arca.movimiento == null && anula.arca.motivo == null && anula.arca.modulo === 'ANULACION_INCORPORACIONES' && anula.arca.bruto === 0 && anula.arca.canal === 'URGENTE' && anula.desempeno === 'CANCELACION_TARDIA', anula?.desempeno || '');
 const anticipo = core.planEventualAusente({ employeeId: 'e', empresaAltaId: 'emp', isEventual: true, aviso: true, atSubido: false, inicioMs: inicio, ahoraMs: inicio - 30 * 3600000 });
 report('aviso con más de 24 h y AT sin subir → cancela el AT', anticipo?.arca.accion === 'CANCELAR_AT' && anticipo.desempeno === 'CANCELACION_ANTICIPADA', anticipo?.desempeno || '');
-const baja = core.planEventualAusente({ employeeId: 'e', empresaAltaId: 'emp', isEventual: true, aviso: false, atSubido: true, inicioMs: inicio, ahoraMs: inicio + 30 * 3600000, fechaInicio: '2026-10-05' });
-report('fuera de plazo → BAJA el día de inicio, revista 30, lote urgente', baja?.arca.tipo === 'BAJA_NO_PRESENTACION' && baja.arca.movimiento === 'BT' && baja.arca.fechaBaja === '2026-10-05' && baja.arca.revista === '30' && baja.arca.canal === 'URGENTE' && baja.arca.motivo === 'no inicio efectivo de prestación' && baja.desempeno === 'FALTA_SIN_AVISO' && baja.descuentaLiquidacion === true, baja?.arca.tipo || '');
+const fuera = plazoAnulacionAlta({ fechaInicio: '2026-10-05', horaInicio: '08:00', ahoraMs: inicio + 30 * 3600000, feriados });
+const baja = core.planEventualAusente({ employeeId: 'e', empresaAltaId: 'emp', isEventual: true, aviso: false, atSubido: true, inicioMs: inicio, ahoraMs: inicio + 30 * 3600000, fechaInicio: '2026-10-05', puedeAnular: fuera.puedeAnular });
+report('fuera de plazo → BAJA el día de inicio, desistimiento', baja?.arca.tipo === 'BAJA_NO_PRESENTACION' && baja.arca.movimiento === 'BT' && baja.arca.fechaBaja === '2026-10-05' && baja.arca.revista === '30' && baja.arca.canal === 'URGENTE' && baja.arca.motivo === 'desistimiento / sin efectivización de tareas' && baja.arca.constanciaInterna === 'NO_SE_PRESENTO' && baja.desempeno === 'FALTA_SIN_AVISO' && baja.descuentaLiquidacion === true && fuera.puedeAnular === false, baja?.arca.tipo || '');
 
 const failed = results.filter((r) => !r.ok);
 console.log(failed.length ? `FALLARON ${failed.length}/${results.length}` : `OK ${results.length}/${results.length}`);

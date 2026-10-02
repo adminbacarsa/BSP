@@ -1626,6 +1626,14 @@ export const checkConvocatoriaTimeouts = onSchedule(
       console.error('[checkConvocatoriaTimeouts] eventos eventuales:', (e as Error).message);
     }
 
+    try {
+      const { vencerAnulacionesPendientes } = await import('../eventuales/eventualNoSePresento');
+      const pasadas = await vencerAnulacionesPendientes(db, Date.now());
+      if (pasadas) console.log(`[checkConvocatoriaTimeouts] ${pasadas} anulación/es de alta pasada/s a baja`);
+    } catch (e) {
+      console.error('[checkConvocatoriaTimeouts] anulación de alta:', (e as Error).message);
+    }
+
     const timedOut = await db.collection('convocatorias_cobertura')
       .where('status', '==', 'PENDING')
       .where('timeoutAt', '<=', now)

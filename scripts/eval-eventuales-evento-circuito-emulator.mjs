@@ -276,8 +276,8 @@ async function main() {
   const sigDespues = await convocatoriaDelHueco(despues.turno.id, cuilDespues);
   report(
     'no puedo asistir con AT ya subido: anulación urgente sin remuneración',
-    confDespues.luego.estado === 'CONFIRMADO' && noVaDespues.ok && anula.tipo === 'ANULACION' && anula.canal === 'URGENTE' && anula.movimiento === 'NA' && anula.bruto === 0
-      && anula.lote === 'BT' && String(anula.txt || '').slice(2, 4) === 'NA' && String(anula.txt || '').slice(57, 72) === '000000000000000'
+    confDespues.luego.estado === 'CONFIRMADO' && noVaDespues.ok && anula.tipo === 'ANULACION' && anula.canal === 'URGENTE' && anula.movimiento == null && anula.bruto === 0
+      && anula.lote === 'ANULACION' && anula.modulo === 'ANULACION_INCORPORACIONES' && anula.motivo == null && anula.revista == null
       && solDespues.anexoEstado === 'SIN_EFECTO' && desemDespues.tipo === 'CANCELACION_TARDIA' && sigDespues?.bolsaCuil === cuilSig,
     noVaDespues.ok ? `mov=${anula.movimiento} canal=${anula.canal}` : noVaDespues.message,
   );
@@ -296,6 +296,7 @@ async function main() {
     'falta sin aviso: no se paga, baja el día de inicio, aviso a RRHH',
     noVaTarde.ok === false && confFalta.luego.estado === 'CONFIRMADO' && marcada.applied === true && turnoFalta.isAbsent === true && turnoFalta.pagaJornada === false
       && baja.tipo === 'BAJA_NO_PRESENTACION' && baja.canal === 'URGENTE' && baja.fechaBaja === fechaInicio && baja.revista === '30'
+      && baja.motivo === 'desistimiento / sin efectivización de tareas' && baja.constanciaInterna === 'NO_SE_PRESENTO'
       && String(baja.txt || '').slice(2, 4) === 'BT' && String(baja.txt || '').slice(45, 47) === '30'
       && !!novedad && desemFalta.tipo === 'FALTA_SIN_AVISO' && desemFalta.empleadoId === falta.turno.employeeId && sigFalta?.bolsaCuil === cuilSig,
     `tarde=${noVaTarde.message || ''} baja=${baja.tipo} fecha=${baja.fechaBaja} nov=${novedad ? 'si' : 'no'} sig=${sigFalta?.bolsaCuil}`,
