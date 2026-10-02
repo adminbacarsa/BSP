@@ -39,8 +39,9 @@ import {
   type TabCandidato,
   type TurnoMovil,
 } from '@/lib/movil/planificacionBasica';
-import { escribirLote, publicarMes } from '@/lib/movil/planificacionEscritura';
+import { escribirLote } from '@/lib/movil/planificacionEscritura';
 import {
+  AVISO_MES_SIN_PUBLICAR,
   celdasSemana,
   clientesParaSelector,
   estructuraSlaDelMes,
@@ -53,9 +54,11 @@ import {
   licenciasSemana,
   lunesDe,
   mesDeSemana,
+  mesPublicadoDe,
   mesesDeSemana,
   opcionDelTurno,
   opcionesTurnoDelDia,
+  puedeCorregirEnCelular,
   puestoDe,
   semanaAnterior,
   semanaDe,
@@ -130,9 +133,8 @@ export function PlanificacionMovil() {
   const migracionCompleta = (empresa as { migracionCompleta?: boolean } | null)?.migracionCompleta === true;
   const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
   const puedeLeer = isSuperAdmin || canReadModule('PLANNING');
-  const puedeEditar = isSuperAdmin || (rolePermissions.PLANNING || []).some((a) => a === 'create' || a === 'update');
+  // El celular no publica meses ni guarda borradores: solo corrige un mes publicado (permiso `correct`).
   const puedeCorregir = isSuperAdmin || (rolePermissions.PLANNING || []).includes('correct');
-  const puedePublicarMes = isSuperAdmin || (rolePermissions.PLANNING || []).includes('publish');
   const puedeFt = canAssignFrancoTrabajado(isSuperAdmin, rolePermissions);
   const puedeEventuales = canConvocarEventuales(isSuperAdmin, rolePermissions);
   const actorName = user?.displayName || user?.email || 'Planificación celular';
@@ -267,6 +269,8 @@ export function PlanificacionMovil() {
   const huecos = useMemo(() => huecosSemana(celdas, licencias), [celdas, licencias]);
   const keyMes = objetivoSel ? `${objetivoSel.id}|${ymSemana}` : null;
   const estadoMes = keyMes ? publicado[keyMes] ?? null : null;
+  /** Semana en solo lectura hasta que el mes figure publicado (sin estado = sin publicar). */
+  const semanaSoloLectura = estadoMes?.publishedAt !== true;
 
   useEffect(() => {
     const keys = new Set(turnos.map((t) => `${t.objectiveId}|${t.date.slice(0, 7)}`).filter((key) => key.split('|')[0]));
@@ -365,16 +369,23 @@ export function PlanificacionMovil() {
     setEventuales([]);
   };
 
-  const exigirEdicion = () => {
-    if (puedeEditar) return true;
-    toast.error('No tenés permiso para modificar la planificación.');
+  /**
+   * Solo se corrige un mes publicado y con permiso `correct`. Sin franja se evalúa el mes de la
+   * semana abierta; con franja (Próximos días), el mes de esa franja.
+   */
+  const exigirEdicion = (franja?: Pick<FranjaMovil, 'objectiveId' | 'date'> | null) => {
+    const publicadoMes = franja ? mesPublicadoDe(publicado, franja.objectiveId, franja.date) : (estadoMes ? estadoMes.publishedAt : null);
+    const gate = puedeCorregirEnCelular(publicadoMes, puedeCorregir);
+    if (gate.ok) return true;
+    if (gate.motivo === AVISO_MES_SIN_PUBLICAR) toast.message(gate.motivo);
+    else toast.error(gate.motivo || 'No tenés permiso para modificar la planificación.');
     return false;
   };
 
   const stage = (cambio: CambioLocal) => {
     setCambios((prev) => [...prev, cambio]);
     cerrar();
-    toast.message(estadoMes?.publishedAt ? 'Quedó para publicar la corrección' : 'Quedó en el borrador');
+    toast.message('Quedó para publicar la corrección');
   };
 
   const elegirObjetivo = useCallback((clientId: string, objectiveId: string) => {
@@ -386,7 +397,7 @@ export function PlanificacionMovil() {
   }, [empresaId, router]);
 
   const confirmarCandidato = async () => {
-    if (!franjaAbierta || !elegido || !exigirEdicion()) return;
+    if (!franjaAbierta || !elegido || !exigirEdicion(franjaAbierta)) return;
     const sintetico = esSlotSintetico(franjaAbierta.id);
     const banda = bandaCubrir ?? bandaParaCubrir(franjaAbierta);
     const emitir = (employeeId: string, employeeName: string, ft: boolean, bolsaCuil?: string) => {
@@ -444,61 +455,38 @@ export function PlanificacionMovil() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, franjaAbierta, puedeEventuales, empresaId, objetivo, opcionCubrirSel?.id]);
 
-  /** Guarda el lote: borrador si el mes no está publicado; corrección (`draft:false`, con aviso al guardia) si lo está. */
+  /**
+   * Publica la corrección (`draft:false`, con aviso al guardia). Se vuelve a verificar en el servidor
+   * de estados que cada mes afectado siga publicado: el celular nunca guarda borradores ni publica meses.
+   */
   const guardarCambios = async () => {
     if (cambios.length === 0) return;
+    if (!puedeCorregir) {
+      toast.error('Falta el permiso para publicar la corrección.');
+      return;
+    }
     const afectados = new Set<string>();
     for (const cambio of cambios) {
       const franja = cambio.kind === 'nuevo' ? cambio.franja : turnos.find((t) => t.id === cambio.franjaId) || visibles.find((t) => t.id === cambio.franjaId);
       if (franja?.objectiveId) afectados.add(`${franja.objectiveId}|${franja.date.slice(0, 7)}`);
     }
-    let algunoPublicado = false;
-    let algunoBorrador = false;
     for (const key of afectados) {
       const [objectiveId, ym] = key.split('|');
       const [year, month] = ym.split('-').map(Number);
       const status = await fetchPlanificacionPublishStatus(empresaId, objectiveId, year, month);
-      if (status?.publishedAt) algunoPublicado = true;
-      else algunoBorrador = true;
-    }
-    if (algunoPublicado && !puedeCorregir) {
-      toast.error('Falta el permiso para publicar la corrección.');
-      return;
-    }
-    if (algunoBorrador && !puedeEditar) {
-      toast.error('No tenés permiso para modificar la planificación.');
-      return;
+      if (!status?.publishedAt) {
+        toast.error(`${AVISO_MES_SIN_PUBLICAR} (${mesLabelDe(ym)}). Los cambios no se guardaron.`);
+        setPublicado((prev) => ({ ...prev, [key]: { publishedAt: false, publishedBy: null } }));
+        return;
+      }
     }
     const lote = cambios;
     const base = turnos;
-    const borrador = !algunoPublicado;
-    const label = borrador ? `Borrador · ${lote.length} cambio${lote.length === 1 ? '' : 's'}` : `Corrección de ${lote.length} cambio${lote.length === 1 ? '' : 's'}`;
-    const result = await enqueueFirestoreWrite(label, () => escribirLote(lote, base, { empresaId, actorName, borrador }));
+    const label = `Corrección de ${lote.length} cambio${lote.length === 1 ? '' : 's'}`;
+    const result = await enqueueFirestoreWrite(label, () => escribirLote(lote, base, { empresaId, actorName }));
     setCambios([]);
     if (result === 'queued') toast.message('Pendiente de enviar');
-    else if (borrador) toast.success('Borrador guardado. Publicá el mes para avisar a los guardias.');
     else toast.success('Corrección publicada. El guardia recibe el aviso.');
-  };
-
-  const publicarElMes = async () => {
-    if (!objetivoSel || !puedePublicarMes) {
-      toast.error('Falta el permiso para publicar el cronograma.');
-      return;
-    }
-    if (cambios.length > 0) {
-      toast.error('Guardá primero los cambios pendientes.');
-      return;
-    }
-    const ym = ymSemana;
-    const result = await enqueueFirestoreWrite(`Publicar ${mesLabelDe(ym)} · ${objetivoSel.name}`, async () => {
-      await publicarMes({ empresaId, objectiveId: objetivoSel.id, objectiveName: objetivoSel.name, clientId: objetivoSel.clientId, ym, migracionCompleta });
-    });
-    if (result === 'queued') {
-      toast.message('Pendiente de enviar');
-      return;
-    }
-    setPublicado((prev) => ({ ...prev, [`${objetivoSel.id}|${ym}`]: { publishedAt: true, publishedBy: actorName } }));
-    toast.success(`Cronograma de ${mesLabelDe(ym)} publicado. Los guardias reciben el aviso.`);
   };
 
   const irAPanel = (p: PanelPlanificacion) => {
@@ -549,6 +537,11 @@ export function PlanificacionMovil() {
                   onAnterior={() => setLunes((l) => semanaAnterior(l))}
                   onSiguiente={() => setLunes((l) => semanaSiguiente(l))}
                   onCelda={(celda) => {
+                    // Mes sin publicar: la celda se abre en solo lectura con el aviso.
+                    if (semanaSoloLectura) {
+                      setSheet({ tipo: 'celda', filaId: celda.fila.id, fecha: celda.fecha });
+                      return;
+                    }
                     // Hueco sin nadie asignado: directo a los candidatos con la franja del SLA ya elegida.
                     if (celda.kind === 'hueco' && celda.guardias.every((g) => g.vacante) && objetivoSel) {
                       if (exigirEdicion()) setSheet({ tipo: 'cubrir', franja: huecoDeCelda(celda, objetivoSel), reemplazo: false });
@@ -572,7 +565,7 @@ export function PlanificacionMovil() {
         dia={dias.includes(dia) ? dia : dias[0]}
         franjas={franjas}
         porPublicar={panel === 'dias' ? cambios.length : 0}
-        puedePublicar={mesesPublicados ? puedeCorregir : puedeEditar}
+        puedeCorregir={puedeCorregir}
         mesPublicado={mesesPublicados || !readyTurnos}
         cronograma={cronograma.gruposPlanificacion}
         onCronogramaVista={(ids) => {
@@ -580,28 +573,25 @@ export function PlanificacionMovil() {
             .then((n) => { if (n > 0) toast.success(n === 1 ? 'Alerta marcada como vista' : `${n} alertas marcadas como vistas`); })
             .catch(() => toast.error('No se pudo marcar como vista'));
         }}
-        onCronogramaPublicar={(item) => {
-          // Abre ese objetivo y mes en la semana; desde ahí se publica con el permiso `publish`.
+        onCronogramaAbrir={(item) => {
+          // Abre ese objetivo y mes en la semana, en solo lectura: se publica desde la computadora.
           const obj = objetivos.find((o) => o.id === item.objectiveId);
           elegirObjetivo(item.clientId || obj?.clientId || '', item.objectiveId);
           setLunes(lunesDe(`${item.year}-${String(item.month).padStart(2, '0')}-01`));
           if (panel !== 'semana') irAPanel('semana');
+          toast.message(AVISO_MES_SIN_PUBLICAR);
         }}
         onDia={setDia}
-        onHueco={(franja) => { if (exigirEdicion()) setSheet({ tipo: 'cubrir', franja, reemplazo: false }); }}
-        onAsignado={(franja) => { if (exigirEdicion()) setSheet({ tipo: 'cambiar', franjaId: franja.id }); }}
+        onHueco={(franja) => { if (exigirEdicion(franja)) setSheet({ tipo: 'cubrir', franja, reemplazo: false }); }}
+        onAsignado={(franja) => { if (exigirEdicion(franja)) setSheet({ tipo: 'cambiar', franjaId: franja.id }); }}
         onPublicar={() => { void guardarCambios(); }}
       />
       {panel === 'semana' && objetivoSel && (
         <BarraPublicar
           cambios={cambios.length}
-          publicado={estadoMes ? estadoMes.publishedAt : null}
-          puedeEditar={puedeEditar}
+          publicado={!semanaSoloLectura}
           puedeCorregir={puedeCorregir}
-          puedePublicar={puedePublicarMes}
-          mesLabel={mesLabelDe(ymSemana)}
           onGuardar={() => { void guardarCambios(); }}
-          onPublicarMes={() => { void publicarElMes(); }}
         />
       )}
       <BottomSheet open={sheet?.tipo === 'selector'} title="Cliente y objetivo" onClose={cerrar}>
@@ -611,6 +601,7 @@ export function PlanificacionMovil() {
         {celdaAbierta && objetivoSel && (
           <CeldaSheetBody
             celda={celdaAbierta}
+            soloLectura={semanaSoloLectura}
             onGuardia={(turno) => { if (exigirEdicion()) setSheet({ tipo: 'cambiar', franjaId: turno.id }); }}
             onCubrir={() => { if (exigirEdicion()) setSheet({ tipo: 'cubrir', franja: huecoDeCelda(celdaAbierta, objetivoSel), reemplazo: false }); }}
           />
@@ -646,23 +637,23 @@ export function PlanificacionMovil() {
           aviso={aviso}
           bloqueado={Boolean(aviso)}
           onCambiarGuardia={() => {
-            if (!franjaAbierta || !exigirEdicion()) return;
+            if (!franjaAbierta || !exigirEdicion(franjaAbierta)) return;
             setSheet({ tipo: 'cubrir', franja: { ...franjaAbierta, kind: 'vacante' }, reemplazo: true });
           }}
           onHorario={() => {
-            if (!franjaAbierta || !bandaElegida || avisoHorario || !exigirEdicion()) return;
+            if (!franjaAbierta || !bandaElegida || avisoHorario || !exigirEdicion(franjaAbierta)) return;
             stage({ kind: 'horario', franjaId: franjaAbierta.id, code: bandaElegida.code, start: bandaElegida.start, end: bandaElegida.end, hours: bandaElegida.hours });
           }}
           onPermuta={() => {
-            if (!franjaAbierta || !companero || avisoPermuta || !exigirEdicion()) return;
+            if (!franjaAbierta || !companero || avisoPermuta || !exigirEdicion(franjaAbierta)) return;
             stage({ kind: 'permuta', franjaId: franjaAbierta.id, otroId: companero.id });
           }}
           onFranco={() => {
-            if (!franjaAbierta || !exigirEdicion()) return;
+            if (!franjaAbierta || !exigirEdicion(franjaAbierta)) return;
             stage({ kind: 'franco', franjaId: franjaAbierta.id });
           }}
           onBorrar={() => {
-            if (!franjaAbierta || !exigirEdicion()) return;
+            if (!franjaAbierta || !exigirEdicion(franjaAbierta)) return;
             stage({ kind: 'borrar', franjaId: franjaAbierta.id });
           }}
         />

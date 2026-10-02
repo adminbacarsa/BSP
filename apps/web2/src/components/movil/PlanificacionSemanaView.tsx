@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react';
 import { ChevronDown, ChevronLeft, ChevronRight, Search } from 'lucide-react';
 import type { TurnoMovil } from '@/lib/movil/planificacionBasica';
 import {
+  AVISO_MES_SIN_PUBLICAR,
   DIAS_CORTOS,
   apellidoCorto,
   direccionSwipe,
@@ -216,7 +217,7 @@ export function SemanaEncabezado(props: {
   cambios: number;
   mesLabel: string;
 }) {
-  const estado = props.publicado === null ? null : props.publicado ? 'Publicado' : 'Borrador';
+  const estado = props.publicado === null ? null : props.publicado ? 'Publicado' : 'Sin publicar';
   return (
     <div className="px-3 pt-3">
       <button
@@ -244,66 +245,82 @@ export function SemanaEncabezado(props: {
   );
 }
 
-/** Barra fija de acción: guardar borrador / publicar corrección / publicar el mes. */
+/** Aviso fijo de solo lectura: el mes no está publicado y el celular no publica ni guarda borradores. */
+export function AvisoSoloLectura({ fijo = true }: { fijo?: boolean }) {
+  return (
+    <div className={fijo ? 'fixed bottom-16 left-0 right-0 z-40 mx-auto w-full max-w-[390px] px-3' : ''} data-plan-solo-lectura="1">
+      <p className={`relative overflow-hidden px-3 py-2.5 pl-4 text-[12px] font-semibold ${MOVIL_CARD} ${MOVIL_TEXT.amber}`}>
+        <span aria-hidden="true" className={`absolute inset-y-0 left-0 w-[3px] ${MOVIL_FILETE.amber}`} />
+        {AVISO_MES_SIN_PUBLICAR}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Barra fija de acción. El celular no publica meses: con el mes publicado y cambios pendientes
+ * ofrece «Publicar corrección» (permiso `correct`); con el mes sin publicar muestra el aviso de solo lectura.
+ */
 export function BarraPublicar(props: {
   cambios: number;
   publicado: boolean | null;
-  puedeEditar: boolean;
   puedeCorregir: boolean;
-  puedePublicar: boolean;
-  mesLabel: string;
   onGuardar: () => void;
-  onPublicarMes: () => void;
 }) {
   if (props.publicado === null) return null;
-  const hayCambios = props.cambios > 0;
+  if (!props.publicado) return <AvisoSoloLectura />;
+  if (props.cambios === 0) return null;
   const n = `${props.cambios} cambio${props.cambios === 1 ? '' : 's'}`;
-  let primario: { label: string; onClick: () => void; disabled: boolean; attr: string } | null = null;
-  if (hayCambios && props.publicado) {
-    primario = { label: props.puedeCorregir ? `Publicar corrección · ${n}` : 'Falta permiso para corregir', onClick: props.onGuardar, disabled: !props.puedeCorregir, attr: 'correccion' };
-  } else if (hayCambios) {
-    primario = { label: props.puedeEditar ? `Guardar borrador · ${n}` : 'Falta permiso para editar', onClick: props.onGuardar, disabled: !props.puedeEditar, attr: 'borrador' };
-  } else if (!props.publicado && props.puedePublicar) {
-    primario = { label: `Publicar ${props.mesLabel}`, onClick: props.onPublicarMes, disabled: false, attr: 'publicar' };
-  }
-  if (!primario) return null;
   return (
     <div className="fixed bottom-16 left-0 right-0 z-40 mx-auto w-full max-w-[390px] px-3">
-      <button type="button" disabled={primario.disabled} onClick={primario.onClick} data-plan-publicar={primario.attr} className={`min-h-12 w-full rounded text-[13px] font-semibold ${MOVIL_BTN_PRIMARY} disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-500`}>
-        {primario.label}
+      <button type="button" disabled={!props.puedeCorregir} onClick={props.onGuardar} data-plan-publicar="correccion" className={`min-h-12 w-full rounded text-[13px] font-semibold ${MOVIL_BTN_PRIMARY} disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-500`}>
+        {props.puedeCorregir ? `Publicar corrección · ${n}` : 'Falta permiso para corregir'}
       </button>
     </div>
   );
 }
 
-/** Hoja de la celda: guardias asignados (toque = acciones) y botón para cubrir el hueco. */
+/**
+ * Hoja de la celda: guardias asignados (toque = acciones) y botón para cubrir el hueco.
+ * Con `soloLectura` (mes sin publicar) solo lista y muestra el aviso: nada se toca desde el celular.
+ */
 export function CeldaSheetBody(props: {
   celda: CeldaSemana;
+  soloLectura?: boolean;
   onGuardia: (turno: TurnoMovil) => void;
   onCubrir: () => void;
 }) {
   const asignados = props.celda.guardias.filter((g) => !g.vacante);
+  const fila = (g: TurnoMovil) => (
+    <>
+      <MovilBadge outline>{g.code}</MovilBadge>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[13px] font-semibold text-slate-900">{g.employeeName}</span>
+        <span className="block text-[11px] font-medium tabular-nums text-slate-500">{g.start}–{g.end} · {g.hours} h</span>
+      </span>
+      {!props.soloLectura && <ChevronRight size={15} strokeWidth={1.75} className="text-slate-400" aria-hidden="true" />}
+    </>
+  );
   return (
-    <div data-plan-celda-hoja="1">
+    <div data-plan-celda-hoja="1" data-plan-celda-solo-lectura={props.soloLectura ? '1' : undefined}>
       <p className="mb-2 text-[11px] font-medium text-slate-500">
         {props.celda.fila.positionName} · {props.celda.fila.code} {props.celda.fila.start}–{props.celda.fila.end} · {props.celda.cupo} lugar{props.celda.cupo === 1 ? '' : 'es'}
       </p>
-      {asignados.map((g) => (
-        <button key={g.id} type="button" onClick={() => props.onGuardia(g)} data-plan-guardia={g.id} className={`mb-2 flex min-h-12 w-full items-center gap-2 px-3 text-left ${MOVIL_CARD}`}>
-          <MovilBadge outline>{g.code}</MovilBadge>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-[13px] font-semibold text-slate-900">{g.employeeName}</span>
-            <span className="block text-[11px] font-medium tabular-nums text-slate-500">{g.start}–{g.end} · {g.hours} h</span>
-          </span>
-          <ChevronRight size={15} strokeWidth={1.75} className="text-slate-400" aria-hidden="true" />
-        </button>
-      ))}
-      {props.celda.faltan > 0 && (
+      {asignados.map((g) => (props.soloLectura ? (
+        <div key={g.id} data-plan-guardia={g.id} className={`mb-2 flex min-h-12 w-full items-center gap-2 px-3 text-left ${MOVIL_CARD}`}>{fila(g)}</div>
+      ) : (
+        <button key={g.id} type="button" onClick={() => props.onGuardia(g)} data-plan-guardia={g.id} className={`mb-2 flex min-h-12 w-full items-center gap-2 px-3 text-left ${MOVIL_CARD}`}>{fila(g)}</button>
+      )))}
+      {props.celda.faltan > 0 && !props.soloLectura && (
         <button type="button" onClick={props.onCubrir} data-plan-cubrir="1" className={`min-h-12 w-full rounded text-[13px] font-semibold ${MOVIL_BTN_PRIMARY}`}>
           Cubrir {props.celda.faltan > 1 ? `${props.celda.faltan} huecos` : 'el hueco'}
         </button>
       )}
+      {props.celda.faltan > 0 && props.soloLectura && (
+        <p className={`text-[12px] font-medium ${MOVIL_TEXT.rose}`}>{props.celda.faltan > 1 ? `${props.celda.faltan} huecos` : 'Un hueco'} sin cubrir.</p>
+      )}
       {props.celda.faltan === 0 && asignados.length === 0 && <p className="text-[12px] font-medium text-slate-400">Sin lugares vendidos ese día.</p>}
+      {props.soloLectura && <div className="mt-2"><AvisoSoloLectura fijo={false} /></div>}
     </div>
   );
 }

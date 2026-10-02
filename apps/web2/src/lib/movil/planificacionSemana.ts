@@ -26,6 +26,32 @@ const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', '
 const DIA_LETRA = ['D', 'L', 'M', 'X', 'J', 'V', 'S'];
 export const DIAS_CORTOS = ['LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB', 'DOM'];
 
+/**
+ * El celular no publica ni guarda borradores: un mes sin `publishedAt` se ve en solo lectura
+ * y se planifica y publica desde la computadora. Solo un mes publicado admite «Publicar corrección».
+ */
+export const AVISO_MES_SIN_PUBLICAR = 'Mes sin publicar: se planifica y publica desde la computadora';
+
+export type EstadoPublicacion = { publishedAt: boolean; publishedBy: string | null };
+
+/** `null` = todavía no se consultó `planificacion_estados` de ese objetivo-mes. */
+export function mesPublicadoDe(
+  publicado: Readonly<Record<string, EstadoPublicacion | undefined>>,
+  objectiveId: string | null | undefined,
+  fecha: string | null | undefined,
+): boolean | null {
+  if (!objectiveId || !fecha) return null;
+  const estado = publicado[`${objectiveId}|${fecha.slice(0, 7)}`];
+  return estado ? estado.publishedAt === true : null;
+}
+
+/** Desde el celular solo se toca un mes publicado (y con permiso `correct`). */
+export function puedeCorregirEnCelular(publicadoMes: boolean | null, puedeCorregir: boolean): { ok: boolean; motivo: string | null } {
+  if (publicadoMes !== true) return { ok: false, motivo: AVISO_MES_SIN_PUBLICAR };
+  if (!puedeCorregir) return { ok: false, motivo: 'Falta el permiso para publicar la corrección.' };
+  return { ok: true, motivo: null };
+}
+
 function diaSemanaUtc(fecha: string): number {
   const [y, m, d] = fecha.split('-').map(Number);
   return new Date(Date.UTC(y, m - 1, d)).getUTCDay();

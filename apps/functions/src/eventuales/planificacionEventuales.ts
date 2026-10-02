@@ -6,13 +6,17 @@
  *  - sustituirEventualPlanificacion: pasa los turnos futuros del titular al sustituto (baja/alta automáticas).
  *  - onTurnoEventualWrite: cada turno `esEventual` recalcula el contrato de (empresa, CUIL, mes).
  *
- * Reglas puras en apps/web2/src/lib/eventuales/planificacion.mjs. El contrato queda BORRADOR mientras
- * los turnos son `draft`; al publicar (draft:false) pasa a CONFIRMADO y nace el envío AT.
+ * Candidatura: el ÚNICO motor es `eventualesParaHueco` (`eventos/eventoCoverage.ts`, espejo de
+ * ops-core) vía `evaluarEventualesServer`; el mismo que usan el CC, la cascada y la convocatoria de
+ * evento. Contrato: reglas puras en apps/web2/src/lib/eventuales/planificacion.mjs. El contrato queda
+ * BORRADOR mientras los turnos son `draft`; al publicar (draft:false) pasa a CONFIRMADO y nace el envío AT.
  */
 import * as admin from 'firebase-admin';
 import * as functions from 'firebase-functions/v1';
 import { CONVOCATORIA_TIMEOUT_MINUTES } from '../coverage/convocatoriaTimeout';
 import { escribirTurnoEvento } from '../eventos/turnoEvento';
+import type { EventualBolsaRow, EventualCandidato, EventualTramo } from '../eventos/eventoCoverage';
+import { evaluarEventualesServer } from '../eventos/eventualesParaHuecoServer';
 
 const SUPER = ['SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP'];
 const AR_OFFSET = '-03:00';
@@ -21,8 +25,6 @@ type Jornada = { fecha: string; horaInicio: string; horaFin: string; horas: numb
 type TurnoIn = { fecha: string; code: string; horaInicio: string; horaFin: string; horas: number; name?: string; positionName?: string };
 
 type LibPlanificacion = {
-  evaluarCandidato: (i: Record<string, unknown>) => Record<string, unknown> & { elegible: boolean; motivo: string | null; motivoCodigo: string | null };
-  ordenarCandidatos: (l: unknown[]) => Record<string, unknown>[];
   jornadasDeTurnos: (t: unknown[]) => (Jornada & { objectiveId?: string | null; turnoId?: string | null })[];
   planContratoDesdeTurnos: (i: Record<string, unknown>) => {
     accion: 'SIN_CAMBIOS' | 'CREAR' | 'ACTUALIZAR' | 'CERRAR';
@@ -89,12 +91,70 @@ async function turnosDelCuil(cuil: string, desde: string, hasta: string) {
   return snap.docs.map((d) => ({ id: d.id, ...d.data() } as Record<string, unknown> & { id: string }));
 }
 
-async function otrasJornadasDe(cuil: string, jornadas: Jornada[], excluirTurnoIds: Set<string> = new Set()) {
-  const { jornadasDeTurnos } = await lib();
+/** Jornada AR (fecha + HH:MM) → tramo en ms. Fin ≤ inicio = cruza la medianoche. */
+function tramoDe(j: Jornada): EventualTramo {
+  const startMs = tsAr(j.fecha, j.horaInicio).toMillis();
+  let endMs = tsAr(j.fecha, j.horaFin).toMillis();
+  if (endMs <= startMs) endMs += 24 * 3600000;
+  return { startMs, endMs };
+}
+
+/** Ventana de turnos ocupados: ±2 días alrededor de las jornadas (la misma de siempre en Planificación). */
+function ventanaDe(jornadas: Jornada[]): { desde: string; hasta: string } {
   const fechas = jornadas.map((j) => j.fecha).sort();
-  const turnos = (await turnosDelCuil(cuil, sumarDias(fechas[0], -2), sumarDias(fechas[fechas.length - 1], 2)))
-    .filter((t) => !excluirTurnoIds.has(t.id));
-  return jornadasDeTurnos(turnos).map((j) => ({ ...j, empresaId: j.empresaId || 'grupo' }));
+  return { desde: sumarDias(fechas[0], -2), hasta: sumarDias(fechas[fechas.length - 1], 2) };
+}
+
+/**
+ * Candidatos de Planificación con el motor único. `bolsa` acotada = evaluar una ficha (asignar,
+ * convocar, aceptar, sustituir); sin `bolsa` = toda la bolsa DISPONIBLE (listar).
+ */
+async function candidatosEventuales(p: {
+  empresaId: string;
+  jornadas: Jornada[];
+  objetivoGeo: { lat: number; lng: number } | null;
+  bolsa?: EventualBolsaRow[];
+  excluirTurnoIds?: Set<string>;
+}): Promise<EventualCandidato[]> {
+  return evaluarEventualesServer(db(), {
+    empresaId: p.empresaId,
+    tramos: p.jornadas.map(tramoDe),
+    lat: p.objetivoGeo?.lat ?? null,
+    lng: p.objetivoGeo?.lng ?? null,
+    hoyYmd: hoyAr(),
+    bolsa: p.bolsa,
+    excluirTurnoIds: p.excluirTurnoIds,
+    incluirNoElegibles: true,
+    ventana: ventanaDe(p.jornadas),
+  });
+}
+
+/** Evalúa una ficha para esas jornadas; lanza `failed-precondition` con el motivo si no es elegible. */
+async function exigirElegible(bolsa: Record<string, unknown> & { cuil: string }, empresaId: string, jornadas: Jornada[], objetivoGeo: { lat: number; lng: number } | null): Promise<EventualCandidato> {
+  const [evaluacion] = await candidatosEventuales({ empresaId, jornadas, objetivoGeo, bolsa: [bolsa as unknown as EventualBolsaRow] });
+  if (!evaluacion) throw new functions.https.HttpsError('failed-precondition', 'NO_ELEGIBLE');
+  if (!evaluacion.elegible) throw new functions.https.HttpsError('failed-precondition', evaluacion.motivo || evaluacion.motivoCodigo || 'NO_ELEGIBLE');
+  return evaluacion;
+}
+
+/** Forma que consumen `EventualesCandidatosPanel` (escritorio) y `PlanificacionMovil` (celular). */
+function candidatoParaPanel(c: EventualCandidato, empresaId: string) {
+  const legajo = (c.legajos || []).find((l) => String(l.empresaId || '') === empresaId && String(l.employeeId || '').trim());
+  return {
+    cuil: c.cuil,
+    nombre: c.nombre,
+    telefono: c.telefono,
+    distanciaKm: c.distanciaKm,
+    confiabilidad: c.confiabilidadInformada ? c.confiabilidad : null,
+    vencimientos: c.vencimientos,
+    alertas: c.alertas,
+    elegible: c.elegible,
+    motivoCodigo: c.motivoCodigo,
+    motivo: c.motivo,
+    ...(typeof c.puntaje === 'number' ? { puntaje: c.puntaje } : {}),
+    ...(c.pruebasSinMarco ? { pruebasSinMarco: true } : {}),
+    employeeId: legajo?.employeeId || null,
+  };
 }
 
 async function objetivoGeoDe(empresaId: string, clientId: string | null, objectiveId: string | null, geoIn: unknown) {
@@ -363,31 +423,16 @@ async function marcarTurnosConContrato(turnos: (Record<string, unknown> & { id: 
 
 export const listarCandidatosEventuales = functions.https.onCall(async (data, context) => {
   await exigirConvocar(context);
-  const { evaluarCandidato, ordenarCandidatos } = await lib();
   const empresaId = String(data?.empresaId || '');
   const jornadas = ((data?.jornadas || []) as Partial<Jornada>[]).filter(validarJornada).map((j) => ({ ...j, horas: Number(j.horas) || 0 }));
   if (!empresaId || !jornadas.length) throw new functions.https.HttpsError('invalid-argument', 'Faltan empresa o jornadas.');
   const objetivoGeo = await objetivoGeoDe(empresaId, data?.clientId ? String(data.clientId) : null, data?.objectiveId ? String(data.objectiveId) : null, data?.objetivoGeo);
-  const hoy = hoyAr();
   const excluir = new Set<string>(((data?.excluirTurnoIds || []) as unknown[]).map(String));
-  const snap = await db().collection('eventuales_bolsa').where('empresasHabilitadas', 'array-contains', empresaId).get();
-  const candidatos = [];
-  for (const d of snap.docs) {
-    const bolsa = { cuil: d.id, ...d.data() } as Record<string, unknown> & { cuil: string };
-    if (bolsa.disponibilidad === 'NO_DISPONIBLE') continue;
-    const otrasJornadas = await otrasJornadasDe(bolsa.cuil, jornadas, excluir);
-    candidatos.push(evaluarCandidato({ bolsa, empresaId, jornadas, otrasJornadas, hoy, objetivoGeo }));
-  }
-  const { puntajesPorClave } = await import('../desempeno/puntajeGuardiaJob');
-  const scores = await puntajesPorClave(db(), candidatos.map((c) => String((c as { cuil?: string }).cuil || '')));
-  for (const c of candidatos) {
-    const n = scores.get(String((c as { cuil?: string }).cuil || ''));
-    if (typeof n === 'number') (c as { puntaje?: number }).puntaje = n;
-  }
-  const lista = ordenarCandidatos(candidatos).map((c) => {
-    const { legajos, ...resto } = c as Record<string, unknown> & { legajos?: { empresaId?: string; employeeId?: string }[] };
-    return { ...resto, employeeId: (legajos || []).find((l) => l.empresaId === empresaId)?.employeeId || null } as Record<string, unknown>;
-  });
+  // Toda la bolsa DISPONIBLE pasa por el motor; la lista oculta a quien no está habilitado en la
+  // empresa (antes ni se consultaba) y muestra el resto con su motivo (marco, vencimientos, cruce).
+  const lista = (await candidatosEventuales({ empresaId, jornadas, objetivoGeo, excluirTurnoIds: excluir }))
+    .filter((c) => c.motivoCodigo !== 'EMPRESA_NO_HABILITADA' && c.motivoCodigo !== 'NO_DISPONIBLE')
+    .map((c) => candidatoParaPanel(c, empresaId));
   return { candidatos: lista, total: lista.length, elegibles: lista.filter((c) => c.elegible === true).length };
 });
 
@@ -397,7 +442,6 @@ export const listarCandidatosEventuales = functions.https.onCall(async (data, co
  */
 export const asignarEventualPlanificacion = functions.https.onCall(async (data, context) => {
   const auth = await exigirConvocar(context);
-  const { evaluarCandidato, periodoDe } = await lib();
   const empresaId = String(data?.empresaId || '');
   const cuil = String(data?.cuil || '');
   const modo = data?.modo === 'LEGAJO' ? 'LEGAJO' : 'TURNOS';
@@ -406,11 +450,9 @@ export const asignarEventualPlanificacion = functions.https.onCall(async (data, 
   if (!turnosIn.length) throw new functions.https.HttpsError('invalid-argument', 'No hay turnos para asignar.');
   const bolsa = await bolsaDe(cuil);
   const jornadas: Jornada[] = turnosIn.map((t) => ({ fecha: t.fecha, horaInicio: t.horaInicio, horaFin: t.horaFin, horas: Number(t.horas) || 0 }));
-  const otrasJornadas = await otrasJornadasDe(cuil, jornadas);
   const objectiveId = data?.objectiveId ? String(data.objectiveId) : null;
   const objetivoGeo = await objetivoGeoDe(empresaId, data?.clientId ? String(data.clientId) : null, objectiveId, data?.objetivoGeo);
-  const evaluacion = evaluarCandidato({ bolsa, empresaId, jornadas, otrasJornadas, hoy: hoyAr(), objetivoGeo });
-  if (!evaluacion.elegible) throw new functions.https.HttpsError('failed-precondition', evaluacion.motivo || evaluacion.motivoCodigo || 'NO_ELEGIBLE');
+  await exigirElegible(bolsa, empresaId, jornadas, objetivoGeo);
 
   const employeeId = await asegurarLegajo(bolsa, empresaId, auth.uid);
   if (modo === 'LEGAJO') {
@@ -567,7 +609,6 @@ function jornadaDeSolicitud(sol: Record<string, unknown>): Jornada | null {
  */
 export const convocarEventualEvento = functions.https.onCall(async (data, context) => {
   const auth = await exigirConvocar(context);
-  const { evaluarCandidato } = await lib();
   const { exigeMarco, exigeAltaArca, etiquetasPruebas } = await import('../eventuales-shared/pruebasSwitch.mjs') as LibPruebas;
   const empresaId = String(data?.empresaId || '');
   const cuil = String(data?.cuil || '').replace(/\D/g, '');
@@ -579,10 +620,8 @@ export const convocarEventualEvento = functions.https.onCall(async (data, contex
   const jornada: Jornada = { fecha: jornadaIn.fecha, horaInicio: jornadaIn.horaInicio, horaFin: jornadaIn.horaFin, horas: Number(jornadaIn.horas) || 0 };
 
   const bolsa = await bolsaDe(cuil);
-  const otrasJornadas = await otrasJornadasDe(cuil, [jornada]);
   const objetivoGeo = await objetivoGeoDe(empresaId, data?.clientId ? String(data.clientId) : null, null, data?.objetivoGeo);
-  const evaluacion = evaluarCandidato({ bolsa, empresaId, jornadas: [jornada], otrasJornadas, hoy: hoyAr(), objetivoGeo });
-  if (!evaluacion.elegible) throw new functions.https.HttpsError('failed-precondition', evaluacion.motivo || evaluacion.motivoCodigo || 'NO_ELEGIBLE');
+  await exigirElegible(bolsa, empresaId, [jornada], objetivoGeo);
 
   const employeeId = await asegurarLegajo(bolsa, empresaId, auth.uid);
   const abiertas = await db().collection('solicitudes_evento')
@@ -651,7 +690,6 @@ export async function aceptarConvocatoriaEventualEvento(
   sol: Record<string, unknown>,
   actor: { uid: string; email?: string | null },
 ): Promise<AceptacionEventual> {
-  const { evaluarCandidato } = await lib();
   const { exigeMarco } = await import('../eventuales-shared/pruebasSwitch.mjs') as LibPruebas;
   const cuil = String(sol.bolsaCuil || '').replace(/\D/g, '');
   const empresaId = String(sol.empresaId || '');
@@ -666,9 +704,7 @@ export async function aceptarConvocatoriaEventualEvento(
   const bolsa = await bolsaDe(cuil);
   const jornada = jornadaDeSolicitud(sol);
   if (!jornada) throw new functions.https.HttpsError('failed-precondition', 'La convocatoria no tiene horario.');
-  const otrasJornadas = await otrasJornadasDe(cuil, [jornada]);
-  const evaluacion = evaluarCandidato({ bolsa, empresaId, jornadas: [jornada], otrasJornadas, hoy: hoyAr(), objetivoGeo: null });
-  if (!evaluacion.elegible) throw new functions.https.HttpsError('failed-precondition', evaluacion.motivo || evaluacion.motivoCodigo || 'NO_ELEGIBLE');
+  await exigirElegible(bolsa, empresaId, [jornada], null);
 
   const employeeId = String(sol.empleadoId || '') || await asegurarLegajo(bolsa, empresaId, actor.uid);
   const evento: EventoRef = {
@@ -754,7 +790,7 @@ export async function vencerConvocatoriasEventualesEvento(now = admin.firestore.
 /** Los turnos del titular desde `desdeFecha` (objetivo opcional) pasan al sustituto. Contratos de ambos se recalculan. */
 export const sustituirEventualPlanificacion = functions.https.onCall(async (data, context) => {
   const auth = await exigirConvocar(context);
-  const { evaluarCandidato, jornadasDeTurnos, periodoDe } = await lib();
+  const { jornadasDeTurnos, periodoDe } = await lib();
   const empresaId = String(data?.empresaId || '');
   const cuilTitular = String(data?.cuilTitular || '');
   const cuilSustituto = String(data?.cuilSustituto || '');
@@ -770,10 +806,8 @@ export const sustituirEventualPlanificacion = functions.https.onCall(async (data
     .filter((t) => String(t.empresaId || '') === empresaId && (!objectiveId || t.objectiveId === objectiveId) && t.isCompleted !== true && t.isPresent !== true);
   const jornadas = jornadasDeTurnos(turnos);
   if (!jornadas.length) throw new functions.https.HttpsError('failed-precondition', 'El titular no tiene turnos por sustituir en ese rango.');
-  const otrasJornadas = await otrasJornadasDe(cuilSustituto, jornadas);
   const objetivoGeo = await objetivoGeoDe(empresaId, data?.clientId ? String(data.clientId) : null, objectiveId, data?.objetivoGeo);
-  const evaluacion = evaluarCandidato({ bolsa: sustituto, empresaId, jornadas, otrasJornadas, hoy: hoyAr(), objetivoGeo });
-  if (!evaluacion.elegible) throw new functions.https.HttpsError('failed-precondition', evaluacion.motivo || evaluacion.motivoCodigo || 'NO_ELEGIBLE');
+  await exigirElegible(sustituto, empresaId, jornadas, objetivoGeo);
 
   const employeeId = await asegurarLegajo(sustituto, empresaId, auth.uid);
   const batch = db().batch();

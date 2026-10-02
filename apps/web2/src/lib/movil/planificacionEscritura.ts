@@ -1,22 +1,20 @@
 /**
  * Escritura de los cambios del celular en `turnos`, con los mismos campos que guarda la
- * grilla (`turnoPayload` del planificador) y la misma publicación (`planificacion_estados`
- * + `draft:false` + `audit_logs`). `draft` sigue la regla del escritorio: borrador si el mes
- * no está publicado; corrección (`draft:false`, dispara el push `onTurnoWrite`) si lo está.
+ * grilla (`turnoPayload` del planificador). El celular NO publica meses ni guarda borradores:
+ * solo corrige un mes ya publicado, así que todo se escribe `draft:false` (dispara el push
+ * `onTurnoWrite`, igual que «Publicar corrección» del escritorio). Un mes sin publicar se ve en
+ * solo lectura (`AVISO_MES_SIN_PUBLICAR`) y se planifica desde la computadora.
  */
-import { getAuth } from 'firebase/auth';
 import {
-  Timestamp, addDoc, collection, deleteDoc, doc, getDocs, query, serverTimestamp, setDoc, updateDoc, where, writeBatch,
+  Timestamp, addDoc, collection, deleteDoc, doc, serverTimestamp, setDoc, updateDoc,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { belongsToEmpresaView, buildPlanificacionEstadoDocId, stampEmpresaId } from '@/lib/multiempresa';
+import { stampEmpresaId } from '@/lib/multiempresa';
 import { aplicarCambios, bandaParaCubrir, instantesJornada, type CambioLocal, type TurnoMovil } from '@/lib/movil/planificacionBasica';
 
 export type ContextoEscritura = {
   empresaId: string;
   actorName: string;
-  /** true = el mes sigue en borrador: los turnos nacen `draft:true` (sin push). */
-  borrador: boolean;
 };
 
 function payloadTurno(input: TurnoMovil & { ft: boolean; actorName: string; comments: string; bolsaCuil?: string; draft: boolean }) {
@@ -59,7 +57,8 @@ export async function escribirLote(lote: CambioLocal[], base: TurnoMovil[], ctx:
 
 export async function escribirCambio(cambio: CambioLocal, originales: TurnoMovil[], aplicados: TurnoMovil[], ctx: ContextoEscritura, creados: Map<string, string>): Promise<void> {
   const { empresaId, actorName } = ctx;
-  const draft = ctx.borrador;
+  // Corrección de un mes publicado: nunca borrador desde el celular.
+  const draft = false;
   if (cambio.kind === 'nuevo') {
     const ref = doc(collection(db, 'turnos'));
     await setDoc(ref, stampEmpresaId(payloadTurno({
@@ -183,63 +182,4 @@ export async function escribirCambio(cambio: CambioLocal, originales: TurnoMovil
   }, empresaId);
   await updateDoc(doc(db, 'turnos', idReal), patch(a));
   await updateDoc(doc(db, 'turnos', otro.id), patch(b));
-}
-
-/**
- * Publicación del mes (misma secuencia que `executePublish` de la grilla): marca
- * `planificacion_estados.publishedAt`, pasa a `draft:false` los turnos del objetivo en el mes
- * y deja el `audit_logs`. El push a cada guardia lo manda `onCronogramaPublished` en el servidor.
- */
-export async function publicarMes(input: {
-  empresaId: string;
-  objectiveId: string;
-  objectiveName: string;
-  clientId: string;
-  ym: string;
-  migracionCompleta: boolean;
-}): Promise<number> {
-  const [year, month] = input.ym.split('-').map(Number);
-  const auth = getAuth();
-  const actorName = auth.currentUser?.displayName || auth.currentUser?.email || 'Sistema';
-  const publishDocId = buildPlanificacionEstadoDocId(input.empresaId, input.objectiveId, year, month);
-  await setDoc(doc(db, 'planificacion_estados', publishDocId), {
-    objetivoId: input.objectiveId,
-    objectiveId: input.objectiveId,
-    año: year,
-    mes: month,
-    year,
-    month,
-    publishedAt: serverTimestamp(),
-    publishedBy: actorName,
-    lastModifiedAt: serverTimestamp(),
-    lastModifiedBy: actorName,
-    empresaId: input.empresaId,
-  }, { merge: true });
-  const firstDay = new Date(year, month - 1, 1);
-  const lastDay = new Date(year, month, 0, 23, 59, 59);
-  const draftsSnap = await getDocs(query(
-    collection(db, 'turnos'),
-    where('objectiveId', '==', input.objectiveId),
-    where('draft', '==', true),
-    where('startTime', '>=', Timestamp.fromDate(firstDay)),
-    where('startTime', '<=', Timestamp.fromDate(lastDay)),
-  ));
-  const docs = draftsSnap.docs.filter((d) => belongsToEmpresaView(d.data(), input.empresaId, input.migracionCompleta));
-  for (let i = 0; i < docs.length; i += 400) {
-    const batch = writeBatch(db);
-    for (const d of docs.slice(i, i + 400)) batch.update(d.ref, { draft: false });
-    await batch.commit();
-  }
-  await addDoc(collection(db, 'audit_logs'), stampEmpresaId({
-    action: 'PUBLICACION_CRONOGRAMA',
-    module: 'PLANIFICADOR',
-    details: `Cronograma publicado desde el celular — ${input.objectiveName} · ${String(month).padStart(2, '0')}/${year} · ${docs.length} turno(s) notificado(s)`,
-    timestamp: serverTimestamp(),
-    actorName,
-    actorUid: auth.currentUser?.uid || null,
-    objectiveId: input.objectiveId,
-    objectiveName: input.objectiveName,
-    clientId: input.clientId || undefined,
-  }, input.empresaId));
-  return docs.length;
 }

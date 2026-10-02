@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { evaluarCandidato } from './planificacion.mjs';
 import {
   canalCodigo, CUENTA_DRIVE_EVENTUALES, datosTrabajador, destinoGuardado, DRIVE_ROOT_EVENTUALES_DEFAULT, hashCodigo,
   MENSAJE_SIN_CANAL, mensajeEnvioCodigo,
@@ -23,13 +22,6 @@ async function extraerPdf(buf) {
 }
 
 const hoy = '2026-10-01';
-const bolsa = {
-  cuil: '20999999991', nombre: 'PEREZ, JUAN', disponibilidad: 'DISPONIBLE', empresasHabilitadas: ['bacarsa'],
-  credencialVencimiento: '2027-01-01', aptoPsicofisico: { vencimiento: '2027-01-01' },
-  habilitacion9236: { vencimiento: '2027-06-01' },
-  marcos: { bacarsa: { firmado: true, fechaFirma: '2026-01-01', vigenciaDias: 365 } },
-};
-const jornada = { fecha: '2026-10-05', horaInicio: '07:00', horaFin: '15:00', horas: 8 };
 
 describe('contrato marco y anexo', () => {
   it('el marco dura un año, avisa a los 30 días y vence', () => {
@@ -42,18 +34,7 @@ describe('contrato marco y anexo', () => {
     assert.equal(planMarco({ firmado: false, hoy }).estado, 'SIN_MARCO');
   });
 
-  it('sin marco vigente no es candidato', () => {
-    const ok = evaluarCandidato({ bolsa, empresaId: 'bacarsa', jornadas: [jornada], hoy });
-    assert.equal(ok.elegible, true);
-    const sin = evaluarCandidato({ bolsa: { ...bolsa, marcos: {} }, empresaId: 'bacarsa', jornadas: [jornada], hoy });
-    assert.equal(sin.elegible, false);
-    assert.equal(sin.motivo, MOTIVO_SIN_MARCO);
-    const vencido = evaluarCandidato({
-      bolsa: { ...bolsa, marcos: { bacarsa: { firmado: true, fechaFirma: '2025-01-01' } } },
-      empresaId: 'bacarsa', jornadas: [jornada], hoy,
-    });
-    assert.equal(vencido.motivo, MOTIVO_SIN_MARCO);
-  });
+  // «Sin marco vigente no es candidato» vive en candidatosUnificados.test.mjs (motor único `eventualesParaHueco`).
 
   it('el PDF del marco trae las 12 cláusulas, con acentos, y los datos de las partes', async () => {
     const datos = {

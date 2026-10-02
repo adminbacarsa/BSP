@@ -1,17 +1,16 @@
 /**
- * Eventuales en Planificación: candidatos de la bolsa para un hueco y
- * sincronización del contrato con los turnos del eventual en una empresa.
+ * Eventuales en Planificación: sincronización del contrato con los turnos del eventual en una
+ * empresa y vencimientos de la ficha. La candidatura (marco, vencimientos, cruce 12 h, distancia,
+ * orden) vive en el motor único `eventualesParaHueco` (packages/ops-core/src/eventoCoverage.ts,
+ * espejo apps/functions/src/eventos/eventoCoverage.ts).
  *
  * Funciones puras. El servidor (apps/functions/src/eventuales/planificacionEventuales.ts)
  * las alimenta con Firestore y escribe el resultado.
  */
-import { bloqueoCruce, clasificarAlta, habilitadoEnEmpresa, TANDA_DEFAULT } from './flujo.mjs';
+import { clasificarAlta, TANDA_DEFAULT } from './flujo.mjs';
 import {
   CONSTANCIA_NO_SE_PRESENTO, MODULO_ANULACION_INCORPORACIONES, MOTIVO_BAJA_SIN_EFECTIVIZACION, plazoAnulacionAlta, revistaDesistimientoDe,
 } from './plazoAnulacion.mjs';
-import { MOTIVO_SIN_MARCO } from './marcoAnexoConst.mjs';
-import { ETIQUETA_PRUEBAS_SIN_MARCO, exigeMarco } from './pruebasSwitch.mjs';
-import { marcoDeBolsa } from './marcoTexto.mjs';
 import { fechaAltaDeJornadas, fechaBajaDeJornadas, horasDeJornada } from './jornadas.mjs';
 import { vencePronto } from './ficha.mjs';
 
@@ -94,31 +93,6 @@ export function jornadasDeTurnos(turnos) {
     .sort((a, b) => a.fecha.localeCompare(b.fecha) || a.horaInicio.localeCompare(b.horaInicio));
 }
 
-/** Haversine en km. Acepta {lat, lon} o {lat, lng} (números o strings). */
-export function distanciaKm(a, b) {
-  const la1 = Number(a?.lat);
-  const lo1 = Number(a?.lon ?? a?.lng);
-  const la2 = Number(b?.lat);
-  const lo2 = Number(b?.lon ?? b?.lng);
-  if (![la1, lo1, la2, lo2].every(Number.isFinite) || (la1 === 0 && lo1 === 0) || (la2 === 0 && lo2 === 0)) return null;
-  const R = 6371;
-  const dLat = ((la2 - la1) * Math.PI) / 180;
-  const dLon = ((lo2 - lo1) * Math.PI) / 180;
-  const s = Math.sin(dLat / 2) ** 2 + Math.cos((la1 * Math.PI) / 180) * Math.cos((la2 * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
-  return Math.round(R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s)) * 10) / 10;
-}
-
-/** Confiabilidad 0–100 desde la ficha (número directo) o desde contratos/ausencias. `null` sin datos. */
-export function confiabilidadDe(bolsa) {
-  if (Number.isFinite(Number(bolsa?.confiabilidad)) && bolsa?.confiabilidad !== null && bolsa?.confiabilidad !== '') {
-    return Math.max(0, Math.min(100, Math.round(Number(bolsa.confiabilidad))));
-  }
-  const contratos = Number(bolsa?.estadisticas?.contratos ?? bolsa?.contratosCumplidos ?? 0);
-  const ausencias = Number(bolsa?.estadisticas?.ausencias ?? bolsa?.ausenciasInjustificadas ?? 0);
-  if (!(contratos > 0)) return null;
-  return Math.max(0, Math.min(100, Math.round(100 - (ausencias / contratos) * 100)));
-}
-
 const TIPOS_VENCIMIENTO = [
   ['credencial', (b) => b?.credencialVencimiento],
   ['apto', (b) => b?.aptoPsicofisico?.vencimiento ?? b?.aptoVencimiento],
@@ -132,64 +106,6 @@ export function vencimientosDe(bolsa, hoy, dias = 30) {
     if (fecha < hoy) return { tipo, fecha, estado: 'VENCIDO' };
     if (vencePronto(fecha, hoy, dias)) return { tipo, fecha, estado: 'PRONTO' };
     return { tipo, fecha, estado: 'OK' };
-  });
-}
-
-const MOTIVOS = {
-  SIN_MARCO: MOTIVO_SIN_MARCO,
-  NO_DISPONIBLE: 'No está disponible en la bolsa.',
-  EMPRESA_NO_HABILITADA: 'No está habilitado para esta empresa.',
-  CREDENCIAL_VENCIDA: 'Credencial vencida.',
-  APTO_VENCIDO: 'Apto psicofísico vencido.',
-  HABILITACION_VENCIDA: 'Habilitación 9236 vencida.',
-};
-
-/**
- * Evalúa un eventual de la bolsa para un hueco (jornadas nuevas) en la empresa del objetivo.
- * `otrasJornadas` = lo que ya tiene asignado en cualquier empresa del grupo.
- */
-export function evaluarCandidato({ bolsa, empresaId, jornadas, otrasJornadas = [], hoy, objetivoGeo = null, diasAviso = 30 }) {
-  const vencimientos = vencimientosDe(bolsa, hoy, diasAviso);
-  const base = {
-    cuil: bolsa?.cuil || null,
-    nombre: bolsa?.nombre || '',
-    telefono: bolsa?.telefono || '',
-    distanciaKm: distanciaKm(bolsa?.domicilioGeo, objetivoGeo),
-    confiabilidad: confiabilidadDe(bolsa),
-    vencimientos,
-    alertas: vencimientos.filter((v) => v.estado === 'PRONTO').map((v) => `${v.tipo} vence ${v.fecha}`),
-    legajos: bolsa?.legajos || [],
-  };
-  const bloquear = (codigo, mensaje) => ({ ...base, elegible: false, motivoCodigo: codigo, motivo: mensaje || MOTIVOS[codigo] || codigo });
-  if (bolsa?.disponibilidad === 'NO_DISPONIBLE') return bloquear('NO_DISPONIBLE');
-  // Switch de pruebas: con `exigirMarco: false` no se exige empresa habilitada ni marco vigente.
-  const conMarco = exigeMarco(bolsa);
-  base.pruebasSinMarco = !conMarco;
-  if (!conMarco) base.alertas.push(ETIQUETA_PRUEBAS_SIN_MARCO);
-  if (conMarco && !habilitadoEnEmpresa(bolsa, empresaId)) return bloquear('EMPRESA_NO_HABILITADA');
-  const marco = marcoDeBolsa(bolsa, empresaId, hoy);
-  if (conMarco && marco.estado !== 'MARCO_VIGENTE') return bloquear('SIN_MARCO');
-  if (conMarco && marco.avisar) base.alertas.push(`contrato marco vence ${marco.vencimiento}`);
-  const vencido = vencimientos.find((v) => v.estado === 'VENCIDO');
-  if (vencido) {
-    const codigo = vencido.tipo === 'credencial' ? 'CREDENCIAL_VENCIDA' : vencido.tipo === 'apto' ? 'APTO_VENCIDO' : 'HABILITACION_VENCIDA';
-    return bloquear(codigo);
-  }
-  const nuevas = (jornadas || []).map((j) => ({ ...j, empresaId }));
-  const cruce = bloqueoCruce(nuevas, otrasJornadas);
-  if (!cruce.ok) return bloquear(cruce.codigo, cruce.mensaje);
-  return { ...base, elegible: true, motivoCodigo: null, motivo: null };
-}
-
-/** Elegibles primero; después distancia (sin dato al final), confiabilidad y nombre. */
-export function ordenarCandidatos(lista) {
-  return [...(lista || [])].sort((a, b) => {
-    if (a.elegible !== b.elegible) return a.elegible ? -1 : 1;
-    if (a.distanciaKm != null && b.distanciaKm != null && a.distanciaKm !== b.distanciaKm) return a.distanciaKm - b.distanciaKm;
-    if ((a.distanciaKm == null) !== (b.distanciaKm == null)) return a.distanciaKm == null ? 1 : -1;
-    if ((a.confiabilidad ?? -1) !== (b.confiabilidad ?? -1)) return (b.confiabilidad ?? -1) - (a.confiabilidad ?? -1);
-    if (typeof a.puntaje === 'number' && typeof b.puntaje === 'number' && a.puntaje !== b.puntaje) return b.puntaje - a.puntaje;
-    return String(a.nombre).localeCompare(String(b.nombre), 'es');
   });
 }
 
