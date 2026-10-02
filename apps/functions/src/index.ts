@@ -552,7 +552,11 @@ export const manageAgreements = functions.https.onCall(async (data, context) => 
 // 12. DIAGNÓSTICO DE SISTEMA (HEALTH CHECK)
 // =========================================================
 
-export const platformHealthCheck = functions.https.onCall(async (_data, context) => {
+// Con el .env publicado, GEMINI_API_KEY solo llega como secreto: el chequeo de salud tiene que montarlo.
+export const platformHealthCheck = (process.env.FUNCTIONS_EMULATOR === 'true'
+  ? functions
+  : functions.runWith({ secrets: ['GEMINI_API_KEY'] })
+).https.onCall(async (_data, context) => {
   if (!context.auth) {
     throw new functions.https.HttpsError('unauthenticated', 'Requiere autenticaciÃ³n.');
   }
