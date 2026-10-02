@@ -73,11 +73,15 @@ check('sin switch no hay chip', renderToStaticMarkup(h(UI.ChipPruebas, { ficha: 
 
 // ── Guía del panel derecho ──
 const guia = L.pasosGuia({ fichas, empresaId: 'bacarsa', hoy });
-const htmlGuia = renderToStaticMarkup(h(UI.GuiaEventuales, { guia, nombreEmpresa: 'Bacar SA', onFiltrar: () => {}, onAlta: () => {} }));
+const htmlGuia = renderToStaticMarkup(h(UI.GuiaEventuales, { guia, nombreEmpresa: 'Bacar SA', onFiltrar: () => {} }));
 check('título de la guía', htmlGuia.includes('Cómo dejar listo a un eventual') && htmlGuia.includes('2 de 3 disponibles están listos para convocar.'));
 check('4 pasos en orden', ['Datos de contacto y domicilio', 'Contrato marco firmado y cargado', 'Empresa habilitada', 'Acceso a la app'].map((t) => htmlGuia.indexOf(t)).every((i, k, arr) => i >= 0 && (k === 0 || i > arr[k - 1])));
 check('cuántos en cada paso y botón para filtrar', htmlGuia.includes('data-guia-paso="CONTACTO" data-pendientes="1"') && htmlGuia.includes('data-guia-filtrar="FALTA_CONTACTO"') && htmlGuia.includes('data-guia-paso="EMPRESA" data-pendientes="0"') && htmlGuia.includes('Nadie tiene este paso pendiente.') && !htmlGuia.includes('data-guia-filtrar="FALTA_EMPRESA"'));
-check('botón de alta en la guía', htmlGuia.includes('Alta de eventual'));
+check('con eventuales la guía no repite el alta', !htmlGuia.includes('Alta de eventual') && !htmlGuia.includes('data-guia-alta'));
+check('sin eventuales: texto al alta de la barra, sin botón', (() => {
+  const vacia = renderToStaticMarkup(h(UI.GuiaEventuales, { guia: L.pasosGuia({ fichas: [], empresaId: 'bacarsa', hoy }), nombreEmpresa: 'Bacar SA', onFiltrar: () => {} }));
+  return vacia.includes('data-guia-alta') && vacia.includes('Usá Alta de eventual arriba') && !/<button/.test(vacia);
+})());
 check('voseo', htmlGuia.includes('Elegí una persona'));
 
 // ── Ficha con checklist ──
@@ -97,7 +101,10 @@ check('habilitar en la empresa activa desde la ficha', renderToStaticMarkup(h(UI
 // ── La página no deja íconos sueltos ni la sigla ──
 const pagina = readFileSync(join(root, 'pages/admin/rrhh/eventuales.tsx'), 'utf8');
 check('la página ya no usa EstadoIcono ni siglaEmpresa', !pagina.includes('EstadoIcono') && !pagina.includes('siglaEmpresa'));
-check('acciones con texto', ['Alta de eventual', 'Importar planilla', 'Plantilla', 'ARCA pendientes', 'Escala salarial'].every((t) => pagina.includes(t)));
+check('acciones de la barra, una sola vez', ['Alta de eventual', 'Importar planilla', 'Plantilla', 'Escala salarial'].every((t) => pagina.includes(t)) && (pagina.match(/Alta de eventual/g) || []).length === 1);
+check('ARCA solo como tarjeta: la barra no tiene el botón', !pagina.includes('data-arca-toggle') && !pagina.includes('<Landmark'));
+const guiaSrc = readFileSync(join(root, 'components/eventuales/EventualesUx.tsx'), 'utf8');
+check('la guía no imprime ni sube marcos', !guiaSrc.includes('Imprimir') && !guiaSrc.includes('Subir marcos'));
 check('toggle con texto explicativo', pagina.includes('TEXTO_TODA_LA_BOLSA') && pagina.includes('data-toda-la-bolsa'));
 const marcos = readFileSync(join(root, 'components/eventuales/MarcosLotePanel.tsx'), 'utf8');
 check('imprimir marcos con texto y cantidad', marcos.includes('textoImprimirMarcos') && marcos.includes('Subir marcos firmados'));

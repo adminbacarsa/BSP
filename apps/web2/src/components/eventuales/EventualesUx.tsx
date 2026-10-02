@@ -1,4 +1,4 @@
-import { CheckCircle2, ChevronRight, CircleDashed, ClipboardList, FlaskConical, UserPlus } from 'lucide-react';
+import { CheckCircle2, ChevronRight, CircleDashed, ClipboardList, FlaskConical } from 'lucide-react';
 import { chipPruebas, textoListos } from '@/lib/eventuales/listoUx.mjs';
 
 export type TarjetaResumen = { id: string; titulo: string; ayuda: string; tono: string; n: number | null };
@@ -72,20 +72,14 @@ export function ChipPruebas({ ficha }: { ficha: { exigirMarco?: boolean } }) {
   );
 }
 
-/** Panel derecho sin selección: la guía con los pasos y cuántos están en cada uno. */
-export function GuiaEventuales({ guia, nombreEmpresa, onFiltrar, onAlta }: { guia: GuiaVista; nombreEmpresa: string; onFiltrar: (filtro: string) => void; onAlta?: () => void }) {
+/** Panel derecho sin selección: la guía con los pasos y cuántos están en cada uno. El alta vive solo en la barra. */
+export function GuiaEventuales({ guia, nombreEmpresa, onFiltrar }: { guia: GuiaVista; nombreEmpresa: string; onFiltrar: (filtro: string) => void }) {
   return (
     <section data-guia-eventuales className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="flex items-center gap-2 text-base font-black text-slate-800"><ClipboardList size={18} className="text-indigo-600" /> Cómo dejar listo a un eventual</h2>
-          <p className="mt-1 text-xs text-slate-500">{nombreEmpresa ? `${nombreEmpresa} · ` : ''}{textoListos(guia)}</p>
-        </div>
-        {onAlta && (
-          <button type="button" onClick={onAlta} className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-2 text-xs font-bold text-white shadow-sm hover:bg-indigo-700 active:scale-95">
-            <UserPlus size={14} /> Alta de eventual
-          </button>
-        )}
+      <div>
+        <h2 className="flex items-center gap-2 text-base font-black text-slate-800"><ClipboardList size={18} className="text-indigo-600" /> Cómo dejar listo a un eventual</h2>
+        <p className="mt-1 text-xs text-slate-500">{nombreEmpresa ? `${nombreEmpresa} · ` : ''}{textoListos(guia)}</p>
+        {guia.disponibles === 0 && <p data-guia-alta className="mt-2 text-xs font-bold text-slate-700">Usá Alta de eventual arriba</p>}
       </div>
       <ol className="mt-4 space-y-2">
         {guia.pasos.map((p) => (

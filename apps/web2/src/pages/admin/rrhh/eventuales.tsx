@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { collection, getDocs, onSnapshot, query, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import {
-  ArrowLeft, Building2, Download, FileSpreadsheet, Landmark, MapPin, Plus, ScrollText, Search, UserPlus, Users, X,
+  ArrowLeft, Building2, Download, FileSpreadsheet, MapPin, Plus, ScrollText, Search, UserPlus, Users, X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import DashboardLayout from '@/components/layout/DashboardLayout';
@@ -376,15 +376,6 @@ export default function EventualesPage() {
                   </span>
                 )}
                 <MarcosLotePanel compacto empresaId={empresaActivaId} nombreEmpresa={nombreEmpresaActiva} fichas={fichas} seleccionados={seleccion} puedeEditar={puede('update')} llamar={llamar} />
-                <button
-                  type="button"
-                  data-arca-toggle
-                  onClick={() => setMostrarArca((v) => !v)}
-                  title="Altas y bajas sin número de transacción, y anulaciones por acusar en la web de ARCA"
-                  className={`inline-flex h-9 items-center gap-1.5 rounded-xl border px-3 text-xs font-bold shadow-sm ${mostrarArca ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}>
-                  <Landmark size={15} />
-                  ARCA pendientes{arcaPendientes != null ? ` (${arcaPendientes})` : ''}
-                </button>
                 <Link
                   href="/admin/rrhh/eventuales/escala"
                   title="Escala salarial CCT 422/05: de ahí sale el bruto del anexo del eventual"
@@ -502,7 +493,7 @@ export default function EventualesPage() {
 
             <div className={!elegida ? 'hidden lg:block' : ''}>
               {!ficha && (
-                <GuiaEventuales guia={guia} nombreEmpresa={todaLaBolsa ? 'Toda la bolsa del grupo' : nombreEmpresaActiva} onFiltrar={filtrarDesdeGuia} onAlta={puede('create') ? abrirAlta : undefined} />
+                <GuiaEventuales guia={guia} nombreEmpresa={todaLaBolsa ? 'Toda la bolsa del grupo' : nombreEmpresaActiva} onFiltrar={filtrarDesdeGuia} />
               )}
               {ficha && (
                 <FichaEventual
