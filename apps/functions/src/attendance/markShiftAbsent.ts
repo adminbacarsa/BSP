@@ -53,7 +53,12 @@ export async function markShiftAbsent(
   const shift = snap.data() as Record<string, unknown>;
 
   if (shift.isAbsent === true || String(shift.status || '').toUpperCase() === 'ABSENT') {
-    if (shift.absenceDetectedAt) return { applied: false, alreadyAbsent: true };
+    if (shift.absenceDetectedAt) {
+      if (isEventoShift(shift) && shift.esEventual === true && !shift.eventualNoSePresentoAt) {
+        await aplicarNoSePresento(db, sid, opts.by || 'SYSTEM');
+      }
+      return { applied: false, alreadyAbsent: true };
+    }
   }
   // Un guardia que ya fichó no queda ausente por un proceso automático; solo el operador puede decidirlo.
   if ((shift.isPresent === true || shift.isCompleted === true) && opts.reason !== 'MANUAL_OPS') {
@@ -142,5 +147,18 @@ export async function markShiftAbsent(
     });
   }
 
+  if (eventGap && shift.esEventual === true) {
+    await aplicarNoSePresento(db, sid, actorBy);
+  }
+
   return { applied: true };
+}
+
+async function aplicarNoSePresento(db: Firestore, shiftId: string, actorUid: string): Promise<void> {
+  try {
+    const { aplicarEventualNoSePresento } = await import('../eventuales/eventualNoSePresento');
+    await aplicarEventualNoSePresento(db, { shiftId, aviso: false, actorUid });
+  } catch (err) {
+    console.warn('[markShiftAbsent] eventual no se presentó:', (err as Error)?.message);
+  }
 }

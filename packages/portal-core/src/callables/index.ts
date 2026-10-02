@@ -88,6 +88,10 @@ export function createPortalCallables(functions: Functions) {
       { solicitudId: string; accept: boolean; asEmployeeId?: string },
       { success?: boolean; status?: string }
     >(functions, PORTAL_CALLABLES.respondEventoConvocatoria),
+    noPuedoAsistirEventual: httpsCallable<
+      { solicitudId: string; asEmployeeId?: string },
+      { success?: boolean; status?: string }
+    >(functions, PORTAL_CALLABLES.noPuedoAsistirEventual),
     listarTurnosEventual: httpsCallable<{ bolsaCuil?: string } | undefined, ListarTurnosEventualResponse>(
       functions,
       PORTAL_CALLABLES.listarTurnosEventual,

@@ -6,6 +6,7 @@ import type { Evento, ServicioEvento, SolicitudEvento } from '@cosp/portal-types
 import {
   formatDateAr,
   horarioBadgeServicio,
+  puedeNoAsistirEventual,
   servicioUbicacionLabel,
   solicitudEventoStatusLabel,
 } from '@cosp/portal-core';
@@ -49,6 +50,7 @@ function EventosScreenContent() {
     reload,
     solicitar,
     responderConvocatoria,
+    noPuedoAsistir,
   } = useEventosPortal(employee?.empresaId, empDocId, displayName, {
     isPreviewMode,
   });
@@ -71,6 +73,11 @@ function EventosScreenContent() {
   async function onSolicitar(evento: Evento, servicio: ServicioEvento) {
     const result = await solicitar(evento, servicio);
     appAlert(result.ok ? 'Enviada' : 'Error', result.message);
+  }
+
+  async function onNoPuedoAsistir(sol: SolicitudEvento) {
+    const result = await noPuedoAsistir(sol);
+    appAlert(result.ok ? 'Listo' : 'Error', result.message);
   }
 
   async function onResponder(sol: SolicitudEvento, acepta: boolean) {
@@ -150,6 +157,14 @@ function EventosScreenContent() {
                   <Text style={{ color: palette.primary, fontSize: 12, marginTop: 4, fontWeight: '700' }}>
                     {solicitudEventoStatusLabel(sol.status)}
                   </Text>
+                  {puedeNoAsistirEventual(sol) ? (
+                    <CommandButton
+                      label={busyId === sol.id ? 'Enviando…' : 'No puedo asistir'}
+                      variant="secondary"
+                      onPress={() => void onNoPuedoAsistir(sol)}
+                      disabled={busyId === sol.id}
+                    />
+                  ) : null}
                 </View>
               ))}
             </CommandCard>

@@ -495,6 +495,7 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
     const rechazaron = srvSols.filter(s => s.status === 'rechazada');
     /** Eventuales que no respondieron en el plazo: no generaron nada, el lugar quedó libre. */
     const vencieron = srvSols.filter(s => s.status === 'vencida');
+    const noVan = srvSols.filter(s => s.status === 'cancelada');
     const yaEnviadosIds = new Set(srvSols.map(s => s.empleadoId));
     /** Turno EV del eventual que aceptó (anexo/ARCA en «Estado convocatoria»). */
     const turnoEvDe = (sol: SolicitudEvento) => evTurnos.find(t => t.servicioId === sol.servicioId && (t.employeeId === sol.empleadoId || (sol.bolsaCuil && t.bolsaCuil === sol.bolsaCuil))) || null;
@@ -1167,6 +1168,23 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                                                 <div className="flex-1 min-w-0">
                                                                     <p className="text-xs font-medium text-slate-700 dark:text-slate-200">{sol.empleadoNombre}</p>
                                                                     <EventualEstadoLinea sol={sol} />
+                                                                </div>
+                                                                <EstadoSolicitudChip sol={sol} />
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </section>
+                                            )}
+                                            {noVan.length > 0 && (
+                                                <section>
+                                                    <p className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-2 uppercase tracking-wider">Avisaron que no pueden asistir — {noVan.length}</p>
+                                                    <div className="space-y-1">
+                                                        {noVan.map(sol => (
+                                                            <div key={sol.id} className="flex items-center gap-3 px-3 py-2.5 bg-white dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-lg">
+                                                                <div className="flex-1 min-w-0">
+                                                                    <p className="text-xs font-medium text-slate-700 dark:text-slate-200">{sol.empleadoNombre}</p>
+                                                                    <p className="text-[9px] text-slate-400">Canceló antes del inicio. El anexo quedó sin efecto y se reconvocó el lugar.</p>
+                                                                    <EventualEstadoLinea sol={sol} turno={turnoEvDe(sol)} />
                                                                 </div>
                                                                 <EstadoSolicitudChip sol={sol} />
                                                             </div>

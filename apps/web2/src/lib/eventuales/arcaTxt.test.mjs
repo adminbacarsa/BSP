@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { LARGO_REGISTRO_ARCA, brutoParaTxt, lineasCargaMasiva } from './arcaTxt.mjs';
+import { LARGO_REGISTRO_ARCA, brutoParaTxt, lineaMovimientoArca, lineasCargaMasiva } from './arcaTxt.mjs';
 import { calcularRemuneracionContrato, escalaVigente } from './remuneracion.mjs';
 import { aprobarEscala, parsearEscalaSuvico, planJobEscalaSuvico } from './escalaPropuesta.mjs';
 
@@ -37,6 +37,25 @@ describe('TXT ARCA posiciones fijas', () => {
     assert.equal(baja.slice(45, 47), '30');
     assert.equal(out.enviable, true);
     assert.equal(out.advertencias.includes('PUESTO_A_VERIFICAR'), true);
+  });
+
+  it('anulación NA sin remuneración y baja por no inicio el día fijado', () => {
+    const empresa = { arcaEventuales: { cctCodigo: '42205', categoriaProfesional: '000001', situacionRevistaNoInicio: '30' } };
+    const anula = lineaMovimientoArca({ contrato, cuil, bruto: 0, obraSocial: '123456', empresa, movimiento: 'NA', revista: '01', fechaBaja: '' });
+    assert.equal(anula.linea.length, LARGO_REGISTRO_ARCA);
+    assert.equal(anula.linea.slice(2, 4), 'NA');
+    assert.equal(anula.linea.slice(29, 39), '          ');
+    assert.equal(anula.linea.slice(45, 47), '01');
+    assert.equal(anula.linea.slice(57, 72), '000000000000000');
+    assert.equal(anula.advertencias.includes('ANULACION_A_CONFIRMAR_CON_CONTADOR'), true);
+    const baja = lineaMovimientoArca({
+      contrato, cuil, bruto: 8000, obraSocial: '123456', empresa, movimiento: 'BT', revista: '30', fechaBaja: '2026-10-02',
+    });
+    assert.equal(baja.linea.slice(2, 4), 'BT');
+    assert.equal(baja.linea.slice(19, 29), '2026/10/02');
+    assert.equal(baja.linea.slice(29, 39), '2026/10/02');
+    assert.equal(baja.linea.slice(45, 47), '30');
+    assert.equal(baja.enviable, true);
   });
 
   it('no se envía si faltan el código de convenio y la categoría', () => {

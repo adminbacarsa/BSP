@@ -42,8 +42,15 @@ const lista = core.eventualesParaHueco({
 report('orden distancia', lista.map((r) => r.cuil).join(',') === '20111111111,20222222222' && !lista.some((r) => r.cuil === '20333333333'), lista.map((r) => r.nombre).join(','));
 report('cruce espejo', fn.eventualesParaHueco({ bolsa: [cruce], hueco, otrasJornadas: [{ cuil: cruce.cuil, empresaId: 'e2', startMs: hueco.startMs - 8 * 3600000, endMs: hueco.startMs - 6 * 3600000 }] }).length === 0, '');
 const plan = core.planEventualAusente({ employeeId: 'e', empresaAltaId: 'emp', eventoId: 'ev', shiftId: 's', isEventual: true, punched: false });
-report('eventual sin fichar', plan?.arcaBajaPendiente === true && plan.descuentaLiquidacion === true && plan.confiabilidadDelta === -1, JSON.stringify(plan));
+report('eventual sin fichar', plan?.arcaBajaPendiente === true && plan.descuentaLiquidacion === true && plan.confiabilidadDelta === -1 && plan.desempeno === 'FALTA_SIN_AVISO' && plan.arca.accion === 'CANCELAR_AT', JSON.stringify(plan));
 report('no eventual', core.planEventualAusente({ employeeId: 'e', empresaAltaId: 'emp', isEventual: false }) === null, '');
+const inicio = Date.parse('2026-10-05T08:00:00-03:00');
+const anula = core.planEventualAusente({ employeeId: 'e', empresaAltaId: 'emp', isEventual: true, aviso: true, atSubido: true, inicioMs: inicio, ahoraMs: inicio - 2 * 3600000, fechaInicio: '2026-10-05' });
+report('aviso con AT subido dentro del plazo → ANULACION sin remuneración', anula?.arca.accion === 'ANULACION' && anula.arca.tipo === 'ANULACION' && anula.arca.movimiento === 'NA' && anula.arca.bruto === 0 && anula.arca.canal === 'URGENTE' && anula.desempeno === 'CANCELACION_TARDIA', anula?.desempeno || '');
+const anticipo = core.planEventualAusente({ employeeId: 'e', empresaAltaId: 'emp', isEventual: true, aviso: true, atSubido: false, inicioMs: inicio, ahoraMs: inicio - 30 * 3600000 });
+report('aviso con más de 24 h y AT sin subir → cancela el AT', anticipo?.arca.accion === 'CANCELAR_AT' && anticipo.desempeno === 'CANCELACION_ANTICIPADA', anticipo?.desempeno || '');
+const baja = core.planEventualAusente({ employeeId: 'e', empresaAltaId: 'emp', isEventual: true, aviso: false, atSubido: true, inicioMs: inicio, ahoraMs: inicio + 30 * 3600000, fechaInicio: '2026-10-05' });
+report('fuera de plazo → BAJA el día de inicio, revista 30, lote urgente', baja?.arca.tipo === 'BAJA_NO_PRESENTACION' && baja.arca.movimiento === 'BT' && baja.arca.fechaBaja === '2026-10-05' && baja.arca.revista === '30' && baja.arca.canal === 'URGENTE' && baja.arca.motivo === 'no inicio efectivo de prestación' && baja.desempeno === 'FALTA_SIN_AVISO' && baja.descuentaLiquidacion === true, baja?.arca.tipo || '');
 
 const failed = results.filter((r) => !r.ok);
 console.log(failed.length ? `FALLARON ${failed.length}/${results.length}` : `OK ${results.length}/${results.length}`);

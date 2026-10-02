@@ -15,6 +15,7 @@ export const PORTAL_CALLABLES = {
   deleteMyTokens: 'deleteMyTokens',
   sendTestNotification: 'sendTestNotification',
   respondEventoConvocatoria: 'respondEventoConvocatoria',
+  noPuedoAsistirEventual: 'noPuedoAsistirEventual',
   /** Eventuales (docs/EVENTUALES-DISENO.md §7). */
   listarTurnosEventual: 'listarTurnosEventual',
   /** Acuse de recibo del contrato (§3.3). Pendiente en el servidor. */

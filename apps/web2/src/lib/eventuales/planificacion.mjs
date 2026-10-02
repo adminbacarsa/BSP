@@ -71,6 +71,7 @@ export function turnoAJornada(turno) {
     horaInicio = String(turno.startTime || '');
     horaFin = String(turno.endTime || '');
   }
+  if (turno.noSePresento === true || String(turno.status || '').toUpperCase() === 'CANCELADO') return null;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha) || !/^\d{1,2}:\d{2}$/.test(horaInicio) || !/^\d{1,2}:\d{2}$/.test(horaFin)) return null;
   const base = { fecha, horaInicio, horaFin, horas: Number(turno.hours) > 0 ? Number(turno.hours) : 0 };
   const horas = base.horas || horasDeJornada(base);

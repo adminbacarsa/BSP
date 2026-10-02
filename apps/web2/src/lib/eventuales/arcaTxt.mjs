@@ -19,6 +19,18 @@ export const ARCA_EVENTUALES_DEFAULT = {
   actividad: '801000',
   puesto: '5414',
   rectificacion: '00',
+  /**
+   * TODO confirmar con el contador: el manual lista NA entre los movimientos, pero la tabla
+   * no define NA/NB. Hipótesis = anulación de alta. `empresa.arcaEventuales.movimientoAnulacion` lo pisa.
+   */
+  movimientoAnulacion: 'NA',
+  /** Horas desde el inicio en las que ARCA deja anular (rechazo BTU pasado el plazo). Configurable. */
+  anulacionAltaMaxHoras: 24,
+  /**
+   * TODO confirmar con el contador: la tabla de revista no tiene «no inicio efectivo de prestación».
+   * 30 es el de la baja habitual (vencimiento art. 250) hasta que indiquen otro.
+   */
+  situacionRevistaNoInicio: '30',
   cctCodigo: '',
   categoria: '',
   categoriaProfesional: '',
@@ -118,6 +130,36 @@ export function brutoParaTxt({ contrato, escalas }) {
   });
   if (!r.ok || !(Number(r.bruto) > 0)) return { ok: false, codigo: 'RETRIBUCION_PENDIENTE', bruto: 0 };
   return { ok: true, bruto: r.bruto };
+}
+
+/**
+ * Una línea suelta (anulación NA o baja por no presentación).
+ * La anulación va con bruto 0. La baja por no inicio usa la revista configurable y la fecha de inicio.
+ */
+export function lineaMovimientoArca({ contrato, cuil, bruto, obraSocial, empresa, movimiento, revista, fechaBaja }) {
+  const cfg = arcaEventualesDe(empresa);
+  const armada = armarLinea({
+    movimiento,
+    revista: revista || cfg.situacionRevistaBaja,
+    cuil,
+    fechaAlta: contrato?.fechaAlta,
+    fechaBaja: fechaBaja == null ? contrato?.fechaBaja : fechaBaja,
+    bruto,
+    obraSocial,
+    cfg,
+  });
+  const advertencias = [];
+  if (armada.faltaCct) advertencias.push('CCT_CODIGO_PENDIENTE');
+  if (armada.faltaCategoria) advertencias.push('CATEGORIA_PROFESIONAL_PENDIENTE');
+  if (armada.faltaObraSocial) advertencias.push('RNOS_PENDIENTE');
+  if (String(cfg.puesto) === '5414') advertencias.push('PUESTO_A_VERIFICAR');
+  if (movimiento === cfg.movimientoAnulacion) advertencias.push('ANULACION_A_CONFIRMAR_CON_CONTADOR');
+  return {
+    linea: armada.linea,
+    advertencias,
+    enviable: advertencias.filter((c) => c !== 'PUESTO_A_VERIFICAR' && c !== 'ANULACION_A_CONFIRMAR_CON_CONTADOR').length === 0
+      && armada.linea.length === LARGO_REGISTRO_ARCA,
+  };
 }
 
 /**

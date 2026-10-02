@@ -171,7 +171,12 @@ export async function convocarEventual(
     lat: titularGeo.lat ?? titularGeo.latitude,
     lng: titularGeo.lng ?? titularGeo.longitude,
   });
-  const first = pool[0];
+  const excluir = new Set(
+    (Array.isArray(titularGeo.excluirBolsaCuils) ? titularGeo.excluirBolsaCuils : [])
+      .map((c: unknown) => String(c || '').replace(/\D/g, ''))
+      .filter(Boolean),
+  );
+  const first = pool.find((p) => p.employeeId && !excluir.has(String(p.cuil || '').replace(/\D/g, '')));
   if (!first?.employeeId) return false;
   const order = isEventoShift({ code: base.shiftCode })
     ? EVENT_COVERAGE_CASCADE_ORDER

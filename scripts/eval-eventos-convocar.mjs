@@ -128,6 +128,7 @@ check('panel eventuales: mensaje entendible + Reintentar', panel.includes("mensa
 
 // ── Circuito eventual en evento: convocar → aceptar; estados Venció / anexo / ARCA; switch de pruebas ──
 check('estado: vencida → Venció', P.estadoSolicitudUi({ status: 'vencida' }).key === 'VENCIO' && chip({ status: 'vencida' }).includes('data-estado="VENCIO"') && chip({ status: 'vencida' }).includes('Venció'));
+check('estado: cancelada → No puede asistir', P.estadoSolicitudUi({ status: 'cancelada' }).key === 'NO_VA' && chip({ status: 'cancelada' }).includes('No puede asistir'));
 const detPend = P.detalleEventualUi({ esEventual: true, status: 'aprobada', anexoEstado: 'PENDIENTE_ACEPTACION', arcaCanal: 'URGENTE' }, { eventualAltaArcaConfirmada: false });
 check('detalle eventual: anexo pendiente + ARCA pendiente urgente', detPend.anexo?.label === 'Anexo pendiente' && /ARCA pendiente/.test(detPend.arca?.label || '') && /urgente/i.test(detPend.arca?.label || '') && detPend.pruebas === null);
 const detOk = P.detalleEventualUi({ esEventual: true, status: 'aprobada', anexoEstado: 'FIRMADO' }, { eventualAltaArcaConfirmada: true, nroTransaccion: 'TX-1' });

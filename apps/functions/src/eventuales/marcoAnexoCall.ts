@@ -437,6 +437,9 @@ export const confirmarAnexoEventual = callable.onCall(async (data, context) => {
   const snap = await ref.get();
   if (!snap.exists) throw new functions.https.HttpsError('not-found', 'No hay un código pedido.');
   const guardado = snap.data() || {};
+  if (guardado.sinEfecto === true) {
+    throw new functions.https.HttpsError('failed-precondition', 'El anexo quedó sin efecto: esa prestación no se va a cumplir.');
+  }
   const plan = m.planConfirmarAnexo({
     codigo: data?.codigo, salt: guardado.salt, hash: guardado.hash, usado: guardado.usado === true,
     venceMs: guardado.venceMs, ahoraMs: Date.now(),

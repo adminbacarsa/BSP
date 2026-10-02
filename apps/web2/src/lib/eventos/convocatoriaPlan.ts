@@ -182,7 +182,7 @@ export function textoAvisoGuardia(
 }
 
 export type EstadoConvocatoriaUi = {
-  key: 'ASIGNADO' | 'ACEPTO' | 'PENDIENTE' | 'RECHAZO' | 'VENCIO' | 'OTRO';
+  key: 'ASIGNADO' | 'ACEPTO' | 'PENDIENTE' | 'RECHAZO' | 'VENCIO' | 'NO_VA' | 'OTRO';
   label: string;
   detalle: string;
 };
@@ -199,6 +199,7 @@ export function estadoSolicitudUi(sol: { status?: string; tipo?: string; esEvent
   if (status === 'aprobada') return { key: 'ACEPTO', label: 'Aceptó', detalle: tipo === 'guardia_solicita' ? 'Pidió participar y fue aprobado' : 'Aceptó la convocatoria' };
   if (status === 'rechazada') return { key: 'RECHAZO', label: 'Rechazó', detalle: 'Rechazó la convocatoria' };
   if (status === 'vencida') return { key: 'VENCIO', label: 'Venció', detalle: 'No respondió en el plazo: no se generó nada y el lugar quedó libre' };
+  if (status === 'cancelada') return { key: 'NO_VA', label: 'No puede asistir', detalle: 'Avisó antes del inicio: se canceló su aceptación y se reconvocó' };
   if (status === 'convocado' || status === 'pendiente') return { key: 'PENDIENTE', label: 'Pendiente', detalle: tipo === 'admin_convoca' ? (sol.esEventual ? 'Eventual convocado, tiene que aceptar desde la app' : 'Convocado, todavía no respondió') : 'Solicitó participar' };
   return { key: 'OTRO', label: status || '—', detalle: '' };
 }

@@ -1716,7 +1716,7 @@ export {
   checkConvocatoriaTimeouts,
 } from './coverage/convocatoriasCobertura';
 
-export { respondEventoConvocatoria } from './eventos/eventoPortalCallables';
+export { respondEventoConvocatoria, noPuedoAsistirEventual } from './eventos/eventoPortalCallables';
 
 // =========================================================
 // 13. ENVÃO DE ACCESO AL PORTAL DE EMPLEADOS

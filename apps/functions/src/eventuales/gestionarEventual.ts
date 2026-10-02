@@ -117,7 +117,7 @@ export const gestionarEventual = functions.https.onCall(async (data, context) =>
     const empresaId = String(data?.empresaId || '');
     if (!empresaId) throw new functions.https.HttpsError('invalid-argument', 'Falta la empresa.');
     const snap = await db().collection('arca_envios').where('empresaId', '==', empresaId).limit(80).get();
-    const abiertos = snap.docs.filter((doc) => ['PENDIENTE', 'ERROR', 'MANUAL', 'SUBIENDO'].includes(String(doc.data().estado || '')));
+    const abiertos = snap.docs.filter((doc) => ['PENDIENTE', 'ERROR', 'MANUAL', 'SUBIENDO'].includes(String(doc.data().estado || '')) && doc.data().quitadoDelLote !== true);
     const fichaCache = new Map<string, Promise<admin.firestore.DocumentSnapshot | null>>();
     const fichaDe = (cuil: string): Promise<admin.firestore.DocumentSnapshot | null> => {
       if (!cuil) return Promise.resolve(null);

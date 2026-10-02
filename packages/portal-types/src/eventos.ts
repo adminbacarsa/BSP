@@ -18,7 +18,9 @@ export type EstadoSolicitudEvento =
   | 'cerrada'
   | 'reserva'
   /** Convocatoria de eventual sin respuesta en el plazo: no generó nada. */
-  | 'vencida';
+  | 'vencida'
+  /** Aceptó y después avisó que no puede asistir, antes del inicio. */
+  | 'cancelada';
 
 export type TipoSolicitudEvento = 'guardia_solicita' | 'admin_convoca' | 'admin_asigna';
 
@@ -85,7 +87,8 @@ export interface SolicitudEvento {
   esEventual?: boolean;
   bolsaCuil?: string;
   pruebasSinMarco?: boolean;
-  anexoEstado?: 'PENDIENTE_ACEPTACION' | 'PENDIENTE' | 'FIRMADO' | 'SIN_CANAL' | 'NO_EXIGIDO';
+  anexoEstado?: 'PENDIENTE_ACEPTACION' | 'PENDIENTE' | 'FIRMADO' | 'SIN_CANAL' | 'NO_EXIGIDO' | 'SIN_EFECTO';
+  jornada?: { fecha?: string; horaInicio?: string; horaFin?: string; horas?: number };
   contratoId?: string | null;
   venceAt?: unknown;
 }

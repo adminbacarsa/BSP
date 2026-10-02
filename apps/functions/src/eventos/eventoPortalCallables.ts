@@ -227,3 +227,26 @@ export const respondEventoConvocatoria = functions.https.onCall(async (data, con
 
   return { success: true, status: 'aprobada' };
 });
+
+/** El eventual avisa que no va, hasta el inicio del servicio. Cancela aceptación, anexo y ARCA, y reconvoca. */
+export const noPuedoAsistirEventual = functions.https.onCall(async (data, context) => {
+  const solicitudId = String(data?.solicitudId || '').trim();
+  const asEmployeeId = String(data?.asEmployeeId || data?.empleadoId || '').trim();
+  if (!solicitudId) throw new functions.https.HttpsError('invalid-argument', 'solicitudId requerido.');
+  const { empId } = await assertPortalEmployee(context, asEmployeeId);
+  const db = admin.firestore();
+  const snap = await db.collection('solicitudes_evento').doc(solicitudId).get();
+  if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Solicitud no encontrada.');
+  const sol = snap.data() || {};
+  if (sol.esEventual !== true) throw new functions.https.HttpsError('failed-precondition', 'Esta convocatoria no es de un eventual.');
+  if (String(sol.empleadoId) !== empId) {
+    const esSuya = await legajoEsDelUid(db, String(sol.empleadoId), String(sol.bolsaCuil || ''), context.auth!.uid);
+    if (!esSuya) throw new functions.https.HttpsError('permission-denied', 'La convocatoria no es tuya.');
+  }
+  if (sol.status !== 'aprobada') {
+    throw new functions.https.HttpsError('failed-precondition', 'Solo podés cancelar una asistencia que ya aceptaste.');
+  }
+  const { aplicarEventualNoSePresento } = await import('../eventuales/eventualNoSePresento');
+  const out = await aplicarEventualNoSePresento(db, { solicitudId, aviso: true, actorUid: context.auth!.uid });
+  return { success: true, status: 'cancelada', ...out };
+});
