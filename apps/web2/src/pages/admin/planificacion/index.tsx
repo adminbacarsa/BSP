@@ -25,6 +25,8 @@ import { useMovilMode } from '@/lib/movil/useMovilMode';
 import { canAccessAutoLab } from '@/lib/planificacion/autoLabAccess';
 import { canAssignFrancoTrabajado } from '@/lib/planificacion/francoTrabajadoAccess';
 import { SwapSupervisorQueue } from '@/components/planificacion/SwapSupervisorQueue';
+import { ToolbarFloatMenu } from '@/components/planificacion/ToolbarFloatMenu';
+import { placeToolbarMenu } from '@/lib/planificacion/toolbarFloatMenu';
 import { db, getDocsOnce, functions, onSnapshotFresh } from '@/lib/firebase';
 import { httpsCallable } from 'firebase/functions';
 import { eventoService, eventosParaFecha, serviciosParaFecha, calcHorasEvento, type Evento, type ServicioEvento } from '@/services/eventoService';
@@ -1261,16 +1263,19 @@ function PlanificacionDesktop() {
     } | null>(null);
     const [notifications, setNotifications] = useState<any[]>([]);
     const [showNotifications, setShowNotifications] = useState(false);
-    const [notifPanelTop, setNotifPanelTop] = useState(0);
-    const [contextDropPanelPos, setContextDropPanelPos] = useState<{ top: number; left: number; minWidth: number } | null>(null);
+    const [notifPanelPos, setNotifPanelPos] = useState<{ top: number; left: number; maxHeight: number } | null>(null);
+    const [contextDropPanelPos, setContextDropPanelPos] = useState<{ top: number; left: number; minWidth: number; maxHeight: number } | null>(null);
     const notifBtnRef = useRef<HTMLButtonElement>(null);
     const clientDropBtnRef = useRef<HTMLButtonElement>(null);
     const grupoDropBtnRef = useRef<HTMLButtonElement>(null);
     const objectiveDropBtnRef = useRef<HTMLButtonElement>(null);
     const diagnosticBtnRef = useRef<HTMLButtonElement>(null);
     const coverageDiagnosticBtnRef = useRef<HTMLButtonElement>(null);
-    const [diagnosticPanelPos, setDiagnosticPanelPos] = useState<{ x: number; y: number } | null>(null);
-    const [coveragePanelPos, setCoveragePanelPos] = useState<{ x: number; y: number } | null>(null);
+    const toolbarMoreBtnRef = useRef<HTMLButtonElement>(null);
+    const sortBtnRef = useRef<HTMLButtonElement>(null);
+    const bandBtnRef = useRef<HTMLButtonElement>(null);
+    const [diagnosticPanelPos, setDiagnosticPanelPos] = useState<{ x: number; y: number; maxHeight?: number } | null>(null);
+    const [coveragePanelPos, setCoveragePanelPos] = useState<{ x: number; y: number; maxHeight?: number } | null>(null);
     const [hasUnread, setHasUnread] = useState(false);
     
     const [operatorName, setOperatorName] = useState('Cargando...');
@@ -1657,33 +1662,59 @@ function PlanificacionDesktop() {
 
     const repositionDiagnosticPanel = useCallback(() => {
         const rect = diagnosticBtnRef.current?.getBoundingClientRect();
-        if (rect) setDiagnosticPanelPos({ x: rect.left, y: rect.bottom + 4 });
+        if (!rect) return;
+        const placed = placeToolbarMenu({
+            anchor: rect, menuWidth: 320, menuHeight: 360,
+            viewportWidth: window.innerWidth, viewportHeight: window.innerHeight, align: 'start',
+        });
+        setDiagnosticPanelPos({ x: placed.left, y: placed.top, maxHeight: placed.maxHeight });
     }, []);
 
     const repositionCoveragePanel = useCallback(() => {
         const rect = coverageDiagnosticBtnRef.current?.getBoundingClientRect();
-        if (rect) setCoveragePanelPos({ x: rect.left, y: rect.bottom + 4 });
+        if (!rect) return;
+        const placed = placeToolbarMenu({
+            anchor: rect, menuWidth: 340, menuHeight: 360,
+            viewportWidth: window.innerWidth, viewportHeight: window.innerHeight, align: 'start',
+        });
+        setCoveragePanelPos({ x: placed.left, y: placed.top, maxHeight: placed.maxHeight });
     }, []);
 
     useEffect(() => {
         if (!showDiagnostic) return;
         repositionDiagnosticPanel();
-        window.addEventListener('scroll', repositionDiagnosticPanel, true);
+        const onScroll = (e: Event) => {
+            const node = e.target;
+            if (node instanceof Element && node.closest('[data-toolbar-menu]')) return;
+            setShowDiagnostic(false);
+        };
+        const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setShowDiagnostic(false); };
+        window.addEventListener('scroll', onScroll, true);
         window.addEventListener('resize', repositionDiagnosticPanel);
+        window.addEventListener('keydown', onKey);
         return () => {
-            window.removeEventListener('scroll', repositionDiagnosticPanel, true);
+            window.removeEventListener('scroll', onScroll, true);
             window.removeEventListener('resize', repositionDiagnosticPanel);
+            window.removeEventListener('keydown', onKey);
         };
     }, [showDiagnostic, repositionDiagnosticPanel]);
 
     useEffect(() => {
         if (!showCoverageDiagnostic) return;
         repositionCoveragePanel();
-        window.addEventListener('scroll', repositionCoveragePanel, true);
+        const onScroll = (e: Event) => {
+            const node = e.target;
+            if (node instanceof Element && node.closest('[data-toolbar-menu]')) return;
+            setShowCoverageDiagnostic(false);
+        };
+        const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setShowCoverageDiagnostic(false); };
+        window.addEventListener('scroll', onScroll, true);
         window.addEventListener('resize', repositionCoveragePanel);
+        window.addEventListener('keydown', onKey);
         return () => {
-            window.removeEventListener('scroll', repositionCoveragePanel, true);
+            window.removeEventListener('scroll', onScroll, true);
             window.removeEventListener('resize', repositionCoveragePanel);
+            window.removeEventListener('keydown', onKey);
         };
     }, [showCoverageDiagnostic, repositionCoveragePanel]);
 
@@ -5891,7 +5922,11 @@ function PlanificacionDesktop() {
 
     const repositionNotifPanel = useCallback(() => {
         const rect = notifBtnRef.current?.getBoundingClientRect();
-        if (rect) setNotifPanelTop(rect.bottom + 8);
+        if (!rect) return;
+        setNotifPanelPos(placeToolbarMenu({
+            anchor: rect, menuWidth: 384, menuHeight: 360,
+            viewportWidth: window.innerWidth, viewportHeight: window.innerHeight, align: 'end',
+        }));
     }, []);
 
     const repositionContextDropPanel = useCallback(() => {
@@ -5906,21 +5941,34 @@ function PlanificacionDesktop() {
             return;
         }
         const minWidth = openDrop === 'grupo' ? 260 : 220;
+        const placed = placeToolbarMenu({
+            anchor: rect, menuWidth: Math.max(rect.width, minWidth), menuHeight: 320,
+            viewportWidth: window.innerWidth, viewportHeight: window.innerHeight, align: 'start',
+        });
         setContextDropPanelPos({
-            top: rect.bottom + 6,
-            left: rect.left,
+            top: placed.top,
+            left: placed.left,
             minWidth: Math.max(rect.width, minWidth),
+            maxHeight: placed.maxHeight,
         });
     }, [openDrop]);
 
     useEffect(() => {
         if (!showNotifications) return;
         repositionNotifPanel();
-        window.addEventListener('scroll', repositionNotifPanel, true);
+        const onScroll = (e: Event) => {
+            const node = e.target;
+            if (node instanceof Element && node.closest('[data-toolbar-menu]')) return;
+            setShowNotifications(false);
+        };
+        const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setShowNotifications(false); };
+        window.addEventListener('scroll', onScroll, true);
         window.addEventListener('resize', repositionNotifPanel);
+        window.addEventListener('keydown', onKey);
         return () => {
-            window.removeEventListener('scroll', repositionNotifPanel, true);
+            window.removeEventListener('scroll', onScroll, true);
             window.removeEventListener('resize', repositionNotifPanel);
+            window.removeEventListener('keydown', onKey);
         };
     }, [showNotifications, repositionNotifPanel]);
 
@@ -5934,11 +5982,19 @@ function PlanificacionDesktop() {
 
     useEffect(() => {
         if (openDrop !== 'client' && openDrop !== 'grupo' && openDrop !== 'objective') return;
-        window.addEventListener('scroll', repositionContextDropPanel, true);
+        const onScroll = (e: Event) => {
+            const node = e.target;
+            if (node instanceof Element && node.closest('[data-toolbar-menu]')) return;
+            setOpenDrop(null);
+        };
+        const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpenDrop(null); };
+        window.addEventListener('scroll', onScroll, true);
         window.addEventListener('resize', repositionContextDropPanel);
+        window.addEventListener('keydown', onKey);
         return () => {
-            window.removeEventListener('scroll', repositionContextDropPanel, true);
+            window.removeEventListener('scroll', onScroll, true);
             window.removeEventListener('resize', repositionContextDropPanel);
+            window.removeEventListener('keydown', onKey);
         };
     }, [openDrop, repositionContextDropPanel]);
     const handleTransferEmployee = async (emp: any) => { if (!selectedObjective) return; if (!confirm(`¿Transferir a ${emp.name} a este objetivo?`)) return; try { await updateDoc(doc(db, 'empleados', emp.id), { preferredObjectiveId: selectedObjective }); await addDoc(collection(db, 'audit_logs'), stampEmpresaId({ action: 'TRANSFERENCIA_OBJETIVO', module: 'PLANIFICADOR', details: `Transfirió a ${emp.name} al objetivo ${getObjectiveName(selectedObjective)}`, timestamp: serverTimestamp(), actorName: activeActorName, actorUid: getAuth().currentUser?.uid, objectiveId: selectedObjective, objectiveName: getObjectiveName(selectedObjective) }, empresaId)); toast.success("Transferencia exitosa"); } catch (e) { toast.error("Error al transferir"); } };
@@ -11438,12 +11494,13 @@ function PlanificacionDesktop() {
                                         </button>
                                     </div>
                                 )}
-                                {showNotifications && typeof document !== 'undefined' && createPortal(
+                                {showNotifications && notifPanelPos && typeof document !== 'undefined' && createPortal(
                                     <>
                                         <div className="fixed inset-0 z-[9998]" aria-hidden onClick={() => setShowNotifications(false)} />
                                         <div
+                                            data-toolbar-menu="alertas"
                                             className="fixed z-[9999] w-96 max-w-[calc(100vw-2rem)] bg-white rounded-xl shadow-2xl border overflow-hidden animate-in zoom-in-95"
-                                            style={{ top: notifPanelTop, right: 16 }}
+                                            style={{ top: notifPanelPos.top, left: notifPanelPos.left, maxHeight: notifPanelPos.maxHeight }}
                                             onClick={e => e.stopPropagation()}
                                         >
                                             <div className="p-3 bg-slate-50 border-b flex justify-between items-center">
@@ -11488,11 +11545,13 @@ function PlanificacionDesktop() {
                                     <>
                                         <div className="fixed inset-0 z-[9998]" aria-hidden onClick={() => setOpenDrop(null)} />
                                         <div
+                                            data-toolbar-menu="contexto"
                                             className="fixed z-[9999] bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-xl shadow-2xl max-h-[min(70vh,320px)] overflow-y-auto custom-scrollbar animate-in zoom-in-95"
                                             style={{
                                                 top: contextDropPanelPos.top,
                                                 left: contextDropPanelPos.left,
                                                 minWidth: contextDropPanelPos.minWidth,
+                                                maxHeight: contextDropPanelPos.maxHeight,
                                             }}
                                             onClick={(e) => e.stopPropagation()}
                                         >
@@ -11731,18 +11790,24 @@ function PlanificacionDesktop() {
                                         <button onClick={loadHistory} className="p-2 bg-slate-100 rounded-lg hover:bg-indigo-50 hover:text-indigo-600 transition-colors" title="Ver Historial" disabled={!selectedObjective}><History size={18}/></button>
 
                                         {/* ⋯ MENÚ: Ventana externa + Ajustar + Equilibrar + Puestos */}
-                                        <div className="relative" onClick={e => e.stopPropagation()}>
+                                        <div onClick={e => e.stopPropagation()}>
                                             <button
+                                                ref={toolbarMoreBtnRef}
                                                 onClick={() => setToolbarMoreOpen(v => !v)}
                                                 className={`p-2 rounded-xl transition-colors border ${toolbarMoreOpen ? 'bg-slate-200 border-slate-300 text-slate-700' : 'bg-slate-100 border-transparent hover:bg-slate-200 text-slate-500'}`}
                                                 title="Más acciones"
                                             >
                                                 <MoreHorizontal size={18}/>
                                             </button>
-                                            {toolbarMoreOpen && (
-                                                <>
-                                                    <div className="fixed inset-0 z-40" onClick={() => setToolbarMoreOpen(false)}/>
-                                                    <div className="absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-50 py-1.5 min-w-[210px]">
+                                            <ToolbarFloatMenu
+                                                open={toolbarMoreOpen}
+                                                anchorRef={toolbarMoreBtnRef}
+                                                onClose={() => setToolbarMoreOpen(false)}
+                                                align="end"
+                                                minWidth={210}
+                                                menuKey="mas"
+                                                className="bg-white border border-slate-200 rounded-xl shadow-xl py-1.5 min-w-[210px]"
+                                            >
                                                         {canAutoLab && (
                                                             <a
                                                                 href="/admin/planificacion/auto-lab"
@@ -11801,9 +11866,7 @@ function PlanificacionDesktop() {
                                                                 </button>
                                                             </>
                                                         )}
-                                                    </div>
-                                                </>
-                                            )}
+                                            </ToolbarFloatMenu>
                                         </div>
 
                                         {/* SORT */}
@@ -11822,6 +11885,7 @@ function PlanificacionDesktop() {
                                                     return (
                                                         <>
                                                             <button
+                                                                ref={sortBtnRef}
                                                                 type="button"
                                                                 onClick={() => {
                                                                     setBandDropOpen(false);
@@ -11833,8 +11897,16 @@ function PlanificacionDesktop() {
                                                                 <ActiveIcon size={18}/>
                                                                 <ChevronDown size={12} className={sortDropOpen ? 'rotate-180 transition-transform' : 'transition-transform'}/>
                                                             </button>
-                                                            {sortDropOpen && (
-                                                                <div className="absolute top-full right-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg z-50 py-1 min-w-[168px]">
+                                                            <ToolbarFloatMenu
+                                                                open={sortDropOpen}
+                                                                anchorRef={sortBtnRef}
+                                                                onClose={() => setSortDropOpen(false)}
+                                                                align="end"
+                                                                minWidth={168}
+                                                                estimatedHeight={240}
+                                                                menuKey="orden"
+                                                                className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg py-1 min-w-[168px]"
+                                                            >
                                                                     <p className="px-3 py-1.5 text-[9px] font-black uppercase tracking-wider text-slate-400 border-b border-slate-100 dark:border-slate-700 mb-1">
                                                                         Ordenar por
                                                                     </p>
@@ -11856,8 +11928,7 @@ function PlanificacionDesktop() {
                                                                             </button>
                                                                         );
                                                                     })}
-                                                                </div>
-                                                            )}
+                                                            </ToolbarFloatMenu>
                                                         </>
                                                     );
                                                 })()}
@@ -11879,14 +11950,23 @@ function PlanificacionDesktop() {
                                                 const activeCls = bandFilter ? BAND_COLORS[bandFilter] : 'text-slate-600 border-slate-300 bg-slate-100';
                                                 return (<>
                                                     <button
+                                                        ref={bandBtnRef}
                                                         onClick={() => { setSortDropOpen(false); setBandDropOpen(p => !p); }}
                                                         className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase border transition-colors flex items-center gap-1 ${activeCls}`}
                                                     >
                                                         {bandFilter ?? 'ALL'}
                                                         <ChevronDown size={10}/>
                                                     </button>
-                                                    {bandDropOpen && (
-                                                        <div className="absolute top-full right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 py-1 min-w-[72px]">
+                                                    <ToolbarFloatMenu
+                                                        open={bandDropOpen}
+                                                        anchorRef={bandBtnRef}
+                                                        onClose={() => setBandDropOpen(false)}
+                                                        align="end"
+                                                        minWidth={72}
+                                                        estimatedHeight={220}
+                                                        menuKey="banda"
+                                                        className="bg-white border border-slate-200 rounded-lg shadow-lg py-1 min-w-[72px]"
+                                                    >
                                                             {[null,'M','T','N','D12','N12','RET'].map(b => {
                                                                 const label = b ?? 'ALL';
                                                                 const active = bandFilter === b;
@@ -11898,8 +11978,7 @@ function PlanificacionDesktop() {
                                                                     >{label}</button>
                                                                 );
                                                             })}
-                                                        </div>
-                                                    )}
+                                                    </ToolbarFloatMenu>
                                                 </>);
                                             })()}
                                         </div>
@@ -17976,8 +18055,9 @@ function PlanificacionDesktop() {
                 <>
                     <div className="fixed inset-0 z-[9998]" aria-hidden onClick={() => setShowDiagnostic(false)} />
                     <div
+                        data-toolbar-menu="estructura"
                         className="fixed z-[9999] bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-600 shadow-2xl min-w-[280px] max-w-[min(420px,calc(100vw-2rem))] p-3 animate-in zoom-in-95 max-h-[min(70vh,520px)] overflow-y-auto custom-scrollbar"
-                        style={{ left: diagnosticPanelPos.x, top: diagnosticPanelPos.y }}
+                        style={{ left: diagnosticPanelPos.x, top: diagnosticPanelPos.y, maxHeight: diagnosticPanelPos.maxHeight }}
                         onClick={(e) => e.stopPropagation()}
                     >
                         <p className="text-[9px] font-black text-slate-400 uppercase mb-2 tracking-widest">Estructura del Servicio</p>
@@ -18058,8 +18138,9 @@ function PlanificacionDesktop() {
                 <>
                     <div className="fixed inset-0 z-[9998]" aria-hidden onClick={() => setShowCoverageDiagnostic(false)} />
                     <div
+                        data-toolbar-menu="cobertura"
                         className="fixed z-[9999] bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-600 shadow-2xl min-w-[320px] max-w-[min(420px,calc(100vw-2rem))] p-3 animate-in zoom-in-95 max-h-[min(70vh,520px)] overflow-y-auto custom-scrollbar"
-                        style={{ left: coveragePanelPos.x, top: coveragePanelPos.y }}
+                        style={{ left: coveragePanelPos.x, top: coveragePanelPos.y, maxHeight: coveragePanelPos.maxHeight }}
                         onClick={(e) => e.stopPropagation()}
                     >
                         <p className="text-[9px] font-black text-slate-400 uppercase mb-2 tracking-widest">Qué falta para cerrar el SLA</p>
