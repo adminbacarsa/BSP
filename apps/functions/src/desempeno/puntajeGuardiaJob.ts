@@ -6,6 +6,7 @@
 import * as admin from 'firebase-admin';
 import type { Firestore } from 'firebase-admin/firestore';
 import {
+  ausenciaSinEfecto,
   calcularPuntajeDeFuentes,
   tiempoMs,
   type FuenteAusencia,
@@ -75,12 +76,12 @@ export async function fuentesDePersona(db: Firestore, clave: ClavePuntaje, desde
       avisoLlegada: avisoLlegada(row),
       completionReason: row.completionReason ? String(row.completionReason) : null,
       earlyWithdrawReason: row.earlyWithdrawReason ? String(row.earlyWithdrawReason) : null,
+      absenceReverted: !!row.absenceRevertedAt,
     }];
   });
   const ausencias: FuenteAusencia[] = ausRaw.flatMap((row) => {
     const fechaMs = tiempoMs(row.date || row.startDate || row.createdAt || row.fecha);
     if (!enVentana(fechaMs)) return [];
-    const status = String(row.status || '').toUpperCase();
     return [{
       id: String(row.id),
       employeeId: empleadoId,
@@ -89,7 +90,7 @@ export async function fuentesDePersona(db: Firestore, clave: ClavePuntaje, desde
       code: row.code ? String(row.code) : row.type ? String(row.type) : null,
       origin: row.origin ? String(row.origin) : null,
       fechaMs,
-      reverted: !!(row.revertedAt || row.revertidaAt || status === 'REVERTIDA' || status === 'REVERTED'),
+      reverted: ausenciaSinEfecto(row),
     }];
   });
   const vistos = new Set<string>();

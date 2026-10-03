@@ -2,7 +2,7 @@
  * Puntaje de guardias: fixtures del cálculo y desempate dentro del escalón.
  *   node --experimental-strip-types scripts/eval-puntaje-guardia.mjs
  */
-import { calcularPuntaje, calcularPuntajeDeFuentes, PUNTAJE_FUENTES } from '../apps/functions/src/desempeno/puntajeGuardia.ts';
+import { ausenciaSinEfecto, calcularPuntaje, calcularPuntajeDeFuentes, PUNTAJE_FUENTES } from '../apps/functions/src/desempeno/puntajeGuardia.ts';
 import { buildCoverageCandidates, pickBestCandidate } from '../packages/ops-core/src/coverageCandidates.ts';
 import { eventualesParaHueco, ordenarEventuales } from '../packages/ops-core/src/eventoCoverage.ts';
 
@@ -27,6 +27,21 @@ const revertida = calcularPuntajeDeFuentes({
   ausencias: [{ id: 'a2', shiftId: 't2', code: 'AA', origin: 'AUTO_T30', fechaMs: dia(2), reverted: true }],
 }, ahora);
 report('revertida', revertida.total === 80, `t ${revertida.total}`);
+
+// Auditoría 02/10: revertirAusencia escribe status 'Anulada' + anuladaAt (no revertedAt). No tiene que restar.
+const anuladaDoc = { status: 'Anulada', anuladaAt: new Date(dia(1)), code: 'AA', origin: 'AUTO_T30' };
+report('anulada-doc', ausenciaSinEfecto(anuladaDoc) === true && ausenciaSinEfecto({ status: 'Confirmada', code: 'AA' }) === false
+  && ausenciaSinEfecto({ type: 'Llegada Tarde', status: 'Confirmada' }) === true && ausenciaSinEfecto({ revertedAt: new Date() }) === true,
+  `anulada=${ausenciaSinEfecto(anuladaDoc)} confirmada=${ausenciaSinEfecto({ status: 'Confirmada', code: 'AA' })}`);
+
+const turnoRevertido = calcularPuntajeDeFuentes({
+  ausencias: [{ id: 'a-rev', shiftId: 't-rev', code: 'AA', origin: 'AUTO_T30', fechaMs: dia(1), reverted: false }],
+  eventos: [{ id: 'FALTA_SIN_AVISO_t-rev_x', tipo: 'FALTA_SIN_AVISO', fechaMs: dia(1), turnoId: 't-rev' }],
+  turnos: [{ id: 't-rev', startMs: dia(1), isPresent: true, lateMinutes: 41, absenceReverted: true }],
+}, ahora);
+report('turno-revertido-sin-falta', !turnoRevertido.detalle.some((d) => d.tipo === 'FALTA_SIN_AVISO')
+  && turnoRevertido.detalle.some((d) => d.tipo === 'LLEGADA_TARDE_SIN_AVISO'),
+  turnoRevertido.detalle.map((d) => d.tipo).join(',') || 'sin hechos');
 
 const licencia = calcularPuntajeDeFuentes({
   ausencias: [{ id: 'a3', code: 'E', fechaMs: dia(1) }],

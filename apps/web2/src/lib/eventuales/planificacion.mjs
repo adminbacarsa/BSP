@@ -129,6 +129,20 @@ function atSubido(envio) {
  *
  * Devuelve `{ accion, contrato, envios: [nuevo...], patchesEnvios: [{id, patch}] }`.
  */
+/**
+ * Id determinístico del envío ARCA que nace de un contrato: `{contratoId}_{tipo}_{fechaAlta}` (+ `_n` si ya hubo
+ * uno quitado con ese nombre). Dos sincronizaciones concurrentes (callable + trigger `onTurnoEventualWrite`)
+ * escriben el mismo doc: una sola AT por contrato y jornada de alta.
+ */
+export function arcaEnvioIdDe(contratoId, envio, enviosActuales = []) {
+  const limpio = (v) => String(v || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const base = `${limpio(contratoId)}_${limpio(envio?.tipo || 'ENVIO')}_${limpio(envio?.fechaAlta || 'sf')}`;
+  const ids = new Set((enviosActuales || []).map((e) => String(e?.id || '')));
+  let id = base;
+  for (let n = 2; ids.has(id); n += 1) id = `${base}_${n}`;
+  return id;
+}
+
 export function planContratoDesdeTurnos({
   empresaId, bolsa, employeeId = null, turnos, contratoActual = null, enviosActuales = [], ahoraMs = Date.now(), tanda = TANDA_DEFAULT, feriados = [], arcaEventuales = null,
 }) {

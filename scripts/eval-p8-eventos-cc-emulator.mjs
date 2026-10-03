@@ -28,6 +28,7 @@ const { iniciarCascadaCobertura } = requireFn('./lib/coverage/convocatoriasCober
 const { applyCoverage } = requireFn('./lib/coverage/syncAusenciaCobertura.js');
 const { runShiftArrivalNotices } = requireFn('./lib/attendance/arrivalNotices.js');
 const { loadCentroControlState } = requireFn('./lib/ops/centroControlGuard.js');
+const { aplicarEventualNoSePresento } = requireFn('./lib/eventuales/eventualNoSePresento.js');
 
 const results = [];
 function report(name, ok, detail) {
@@ -200,6 +201,37 @@ async function main() {
     'aviso T-5 solo el evento',
     !!evNotice.preStartArrivalNoticeAt && !puesto.preStartArrivalNoticeAt,
     `ev=${!!evNotice.preStartArrivalNoticeAt} puesto=${!!puesto.preStartArrivalNoticeAt}`,
+  );
+
+  // Auditoría 02/10: la falta del eventual relanzaba la cascada aunque la sala estuviera en Manual.
+  const evFalta = (id, employeeId, cuil) => ({
+    empresaId, objectiveId, objectiveName: 'Plaza', positionName: 'Molinete',
+    code: 'EV', origin: 'EVENTO', eventoId: 'ev_noche', eventoNombre: 'Los Pumas', servicioId: 'srv1', servicioNombre: 'Molinete',
+    employeeId, employeeName: `Eventual ${id}`, esEventual: true, bolsaCuil: cuil, scheduleDate: '2026-10-02',
+    startTime: absStart, endTime: absEnd, status: 'PENDING', isPresent: false, isAbsent: true,
+  });
+  await db.collection('turnos').doc('p8_ev_manual').set(evFalta('p8_ev_manual', 'p8_evm', '20111111110'));
+  await db.collection('sesiones_operador').doc('p8_sala').set({
+    empresaId, status: 'ACTIVO', role: 'PILOTO', uid: 'operador', expiresAt: Timestamp.fromMillis(Date.now() + 3600000),
+  });
+  const manual = await aplicarEventualNoSePresento(db, { shiftId: 'p8_ev_manual', aviso: false, actorUid: 'SYSTEM_SCHEDULER' });
+  const evManual = (await db.collection('turnos').doc('p8_ev_manual').get()).data();
+  const convManual = await db.collection('convocatorias_cobertura').where('shiftId', '==', 'p8_ev_manual').get();
+  report(
+    'falta eventual en Manual no cascada',
+    manual.reconvocado === false && evManual.cascadeSkippedReason === 'MANUAL' && !evManual.cascadeLockAt && convManual.size === 0
+      && evManual.pagaJornada === false && evManual.noSePresento === true,
+    `reconvocado=${manual.reconvocado} skip=${evManual.cascadeSkippedReason} conv=${convManual.size}`,
+  );
+
+  await db.collection('sesiones_operador').doc('p8_sala').update({ status: 'CERRADA' });
+  await db.collection('turnos').doc('p8_ev_auto').set(evFalta('p8_ev_auto', 'p8_eva', '20222222220'));
+  const auto = await aplicarEventualNoSePresento(db, { shiftId: 'p8_ev_auto', aviso: false, actorUid: 'SYSTEM_SCHEDULER' });
+  const evAuto = (await db.collection('turnos').doc('p8_ev_auto').get()).data();
+  report(
+    'falta eventual en Auto cascada',
+    auto.reconvocado === true && !evAuto.cascadeSkippedReason && !!evAuto.cascadeLockAt,
+    `reconvocado=${auto.reconvocado} lock=${!!evAuto.cascadeLockAt}`,
   );
 
   const failed = results.filter((r) => !r.ok);

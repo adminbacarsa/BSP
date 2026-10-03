@@ -300,6 +300,38 @@ const descanso = core.buildCoverageCandidates({
 const descRow = descanso.byType.FT.find((r) => r.employeeId === 'bazan');
 report('p9e-descanso', descRow?.eligible === false && descRow.rejectReason === 'DESCANSO', descRow?.rejectReason || 'elegible');
 
+// Auditoría 02/10: SANCHEZ tenía F (carga masiva) y un EV 12–20 del mismo evento; se le ofreció FT para el hueco del eventual.
+const gapPumas = gap({
+  titularShiftId: 'ev-aballay',
+  absentEmployeeId: 'aballay',
+  objectiveId: 'plaza',
+  positionName: 'puerta campus',
+  startMs: hm('2026-10-02T12:35:00-03:00'),
+  endMs: hm('2026-10-02T20:00:00-03:00'),
+  band: 'EV',
+});
+const sanchezF = { ...franco('f-sanchez', '29'), employeeId: 'sanchez', employeeName: 'SANCHEZ, LAURA', objectiveId: 'general',
+  startMs: hm('2026-10-02T00:00:00-03:00'), endMs: hm('2026-10-02T23:59:59-03:00') };
+const sanchezEv = { id: 'ev-sanchez', employeeId: 'sanchez', employeeName: 'SANCHEZ, LAURA', code: 'EV', objectiveId: 'plaza',
+  positionName: 'puerta campus', startMs: hm('2026-10-02T12:00:00-03:00'), endMs: hm('2026-10-02T20:00:00-03:00') };
+const evSolapa = core.buildCoverageCandidates({ nowMs: gapPumas.startMs, gap: gapPumas, shifts: [sanchezF, sanchezEv] });
+const evRow = evSolapa.byType.FT.find((r) => r.employeeId === 'sanchez');
+report('ev-solapa-ft', evRow?.eligible === false && evRow.rejectReason === 'SOLAPA_TURNO', evRow?.rejectReason || 'elegible');
+
+const evMadrugada = { ...sanchezEv, id: 'ev-madrugada', startMs: hm('2026-10-02T02:00:00-03:00'), endMs: hm('2026-10-02T06:00:00-03:00') };
+const evDesc = core.buildCoverageCandidates({ nowMs: gapPumas.startMs, gap: gapPumas, shifts: [sanchezF, evMadrugada] });
+const evDescRow = evDesc.byType.FT.find((r) => r.employeeId === 'sanchez');
+report('ev-descanso-ft', evDescRow?.eligible === false && evDescRow.rejectReason === 'DESCANSO', evDescRow?.rejectReason || 'elegible');
+
+const evAyer = { ...sanchezEv, id: 'ev-ayer', startMs: hm('2026-10-01T12:00:00-03:00'), endMs: hm('2026-10-01T20:00:00-03:00') };
+const evLibre = core.buildCoverageCandidates({ nowMs: gapPumas.startMs, gap: gapPumas, shifts: [sanchezF, evAyer] });
+const evLibreRow = evLibre.byType.FT.find((r) => r.employeeId === 'sanchez');
+report('ev-ayer-ft-ok', evLibreRow?.eligible === true, evLibreRow?.rejectReason || 'elegible');
+
+const evBorrador = { ...sanchezEv, id: 'ev-borrador', draft: true };
+const evDraft = core.buildCoverageCandidates({ nowMs: gapPumas.startMs, gap: gapPumas, shifts: [sanchezF, evBorrador] });
+report('ev-borrador-no-cuenta', evDraft.byType.FT.find((r) => r.employeeId === 'sanchez')?.eligible === true, 'borrador no bloquea');
+
 const geo = await import('../apps/web2/src/lib/operaciones/coverageGeo.ts');
 const sinObj = geo.coverageGeoForEmployee({ objectiveId: 'obrador' }, { lat: '-31.3867', lng: '-64.1670' });
 report('p9e-geo-objetivo', sinObj.hasGeo === false && sinObj.geoMiss === 'objetivo', sinObj.geoMiss || 'geo');

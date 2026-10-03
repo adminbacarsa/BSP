@@ -60,6 +60,7 @@
     "test:migrate-fixes": "node scripts/test-empresa-migrate-fixes.mjs",
     "eval:planning-agent": "node scripts/eval-planning-agent.mjs",
     "eval:puntaje-guardia": "node --experimental-strip-types scripts/eval-puntaje-guardia.mjs",
+    "eval:vacantes-virtuales": "node --experimental-strip-types scripts/eval-virtual-vacancy-stability.mjs",
     "eval:eventuales-ux": "node scripts/eval-eventuales-ux.mjs",
     "eval:escalas-cct": "node --experimental-strip-types scripts/escalas-cct/eval-escala-422.mjs",
     "eval:escalas-job": "npx tsx scripts/escalas-cct/eval-escala-job.mjs",
