@@ -26,6 +26,11 @@ export type EventualMovil = {
   estadoTexto?: string;
   /** 'ok' | 'falta' | 'baja' */
   estadoTono?: string;
+  /** `32/50 h este mes`. aviso = ámbar desde el 80%. */
+  horasMes?: string;
+  horasAviso?: boolean;
+  /** «Tope alcanzado» / «Cerca del tope»: visible en la bolsa, no se ofrece en los selectores. */
+  chipTope?: 'Tope alcanzado' | 'Cerca del tope' | null;
 };
 
 export type ArcaMovil = {
@@ -206,6 +211,7 @@ export function EventualesScreens(props: {
                       <span className="truncate text-[15px] font-semibold leading-tight text-slate-900">{persona.nombre}</span>
                       <span className="flex shrink-0 flex-wrap justify-end gap-1">
                         {persona.exigirMarco === false && <MovilBadge tone="slate" outline>Pruebas: sin exigir marco</MovilBadge>}
+                        {persona.chipTope && <span data-chip-tope={persona.chipTope === 'Tope alcanzado' ? 'alcanzado' : 'cerca'}><MovilBadge tone={persona.chipTope === 'Tope alcanzado' ? 'rose' : 'amber'} outline>{persona.chipTope}</MovilBadge></span>}
                         {!persona.estadoTexto && <MovilBadge tone={MARCO_TONE[persona.marcoEstado] || 'slate'}>{persona.marco}</MovilBadge>}
                       </span>
                     </div>
@@ -226,6 +232,9 @@ export function EventualesScreens(props: {
                         <dd className="text-[13px] font-semibold tabular-nums text-slate-900">{persona.cuil}</dd>
                       </div>
                     </dl>
+                    {persona.horasMes && (
+                      <p data-horas-mes className={`mt-1.5 text-[12px] font-semibold tabular-nums ${persona.horasAviso ? 'text-amber-700' : 'text-slate-500'}`}>{persona.horasMes}</p>
+                    )}
                   </button>
                 </li>
               ))}
@@ -245,6 +254,12 @@ export function EventualesScreens(props: {
                   {props.elegido.legajo ? ` · Legajo ${props.elegido.legajo}` : ' · Sin legajo'}
                   {props.elegido.primerIngreso ? ` · 1º ingreso ${props.elegido.primerIngreso}` : ''}
                 </p>
+                {props.elegido.horasMes && (
+                  <p data-horas-mes className={`mt-2 flex flex-wrap items-center gap-2 text-sm font-semibold tabular-nums ${props.elegido.horasAviso ? 'text-amber-700' : 'text-slate-600'}`}>
+                    {props.elegido.horasMes}
+                    {props.elegido.chipTope && <MovilBadge tone={props.elegido.chipTope === 'Tope alcanzado' ? 'rose' : 'amber'} outline>{props.elegido.chipTope}</MovilBadge>}
+                  </p>
+                )}
                 {(props.elegido.exigirMarco === false || props.elegido.exigirAltaArca === false) && (
                   <div className="mt-2 flex flex-wrap gap-1" data-pruebas="sin-marco">
                     {props.elegido.exigirMarco === false && <MovilBadge tone="slate" outline>Pruebas: sin exigir marco</MovilBadge>}

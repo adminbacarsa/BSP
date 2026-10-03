@@ -73,11 +73,12 @@ const rrhhBase = {
 };
 
 const personas = [
-  { id: '1', nombre: 'Sosa, Carla', cuil: '20-11111111-2', marco: 'Marco vigente', marcoEstado: 'MARCO_VIGENTE', telefono: '3515550101', legajo: '148', primerIngreso: '15/02/2024', estadoTexto: 'Listo para convocar', estadoTono: 'ok' },
-  { id: '2', nombre: 'Ruiz, Pedro', cuil: '20-22222222-3', marco: 'Sin marco', marcoEstado: 'SIN_MARCO', telefono: '', legajo: '203', primerIngreso: '01/03/2025', estadoTexto: 'Falta: mail, contrato marco', estadoTono: 'falta' },
+  { id: '1', nombre: 'Sosa, Carla', cuil: '20-11111111-2', marco: 'Marco vigente', marcoEstado: 'MARCO_VIGENTE', telefono: '3515550101', legajo: '148', primerIngreso: '15/02/2024', estadoTexto: 'Listo para convocar', estadoTono: 'ok', horasMes: '32/50 h este mes', horasAviso: false, chipTope: null },
+  { id: '2', nombre: 'Ruiz, Pedro', cuil: '20-22222222-3', marco: 'Sin marco', marcoEstado: 'SIN_MARCO', telefono: '', legajo: '203', primerIngreso: '01/03/2025', estadoTexto: 'Falta: mail, contrato marco', estadoTono: 'falta', horasMes: '49/50 h este mes', horasAviso: true, chipTope: 'Cerca del tope' },
+  { id: '3', nombre: 'Molina, Ana', cuil: '20-55555555-9', marco: 'Marco vigente', marcoEstado: 'MARCO_VIGENTE', telefono: '3515550155', legajo: '311', primerIngreso: '10/06/2023', estadoTexto: 'Listo para convocar', estadoTono: 'ok', horasMes: '50/50 h este mes', horasAviso: true, chipTope: 'Tope alcanzado' },
 ];
 const evBase = {
-  online: true, pendingLabel: null, buscar: '', onBuscar: noop, totalEmpresa: 2, personas, onElegir: noop, onCerrarAlta: noop,
+  online: true, pendingLabel: null, buscar: '', onBuscar: noop, totalEmpresa: personas.length, personas, onElegir: noop, onCerrarAlta: noop,
   cuil: '20-33333333-4', onCuil: noop, cuilEstado: '20-33333333-4 válido', nombre: 'Paz, Lucía', onNombre: noop,
   mail: '', onMail: noop, telefono: '', onTelefono: noop, genero: '', onGenero: noop, onGuardarAlta: noop, onCrearAcceso: noop,
   arca: [

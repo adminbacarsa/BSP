@@ -191,6 +191,23 @@ export function EventualesMovil() {
     [empresaId, fichas],
   );
 
+  const [horasMes, setHorasMes] = useState<Record<string, { texto: string; aviso: boolean; chip: 'Tope alcanzado' | 'Cerca del tope' | null }>>({});
+
+  useEffect(() => {
+    if (!empresaId) return;
+    let vivo = true;
+    void runCallableOnline('Horas del mes', async () => {
+      const fn = httpsCallable(functions, 'gestionarEventual');
+      const res = await fn({ accion: 'horasMes', empresaId });
+      const data = res.data as { filas?: { cuil: string; texto: string; aviso: boolean; chip?: 'Tope alcanzado' | 'Cerca del tope' | null }[] };
+      if (!vivo) return;
+      const map: Record<string, { texto: string; aviso: boolean; chip: 'Tope alcanzado' | 'Cerca del tope' | null }> = {};
+      for (const fila of data.filas || []) map[fila.cuil] = { texto: fila.texto, aviso: fila.aviso, chip: fila.chip || null };
+      setHorasMes(map);
+    }).catch(() => { /* la bolsa se ve igual sin las horas */ });
+    return () => { vivo = false; };
+  }, [empresaId]);
+
   const personas = useMemo(() => {
     const lista = filtrarFichas({ fichas, empresaId: empresaId || '', todaLaBolsa: false, filtro: 'TODOS', buscar, hoy: hoy() }) as Ficha[];
     return lista
@@ -212,9 +229,12 @@ export function EventualesMovil() {
           primerIngreso: fmtFechaAr(ficha.primerIngreso),
           exigirMarco: ficha.exigirMarco,
           exigirAltaArca: ficha.exigirAltaArca,
+          horasMes: horasMes[ficha.id]?.texto,
+          horasAviso: horasMes[ficha.id]?.aviso,
+          chipTope: horasMes[ficha.id]?.chip || null,
         };
       });
-  }, [buscar, empresaId, fichas]);
+  }, [buscar, empresaId, fichas, horasMes]);
 
   // Switches de pruebas: solo con EVENTUALES.update (o SuperAdmin); el servidor vuelve a exigirlo y escribe audit_logs.
   const puedeSwitch = isSuperAdmin || (rolePermissions?.EVENTUALES || []).includes('update');

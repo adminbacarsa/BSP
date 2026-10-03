@@ -21,8 +21,16 @@ export type EventualMovil = {
   nombre: string;
   distanciaKm: number | null;
   motivo: string | null;
+  motivoCodigo?: string | null;
   elegible: boolean;
+  horasMes?: { usadas: number; tope: number; texto: string; aviso: boolean; cerca?: boolean; alcanzado?: boolean } | null;
 };
+
+/** Igual a `esOcultoPorTope` del motor: cerca del tope o lo pasa con este turno → no se ofrece. */
+export function eventualOcultoPorTope(ev: Pick<EventualMovil, 'motivoCodigo'>): boolean {
+  return ev.motivoCodigo === 'TOPE_HORAS' || ev.motivoCodigo === 'TOPE_CERCA';
+}
+export const textoOcultosPorTopeMovil = (n: number) => (n === 1 ? '1 eventual oculto por tope de horas' : `${n} eventuales ocultos por tope de horas`);
 
 function diaCorto(fecha: string): { n: string; lab: string } {
   const [y, m, d] = fecha.split('-').map(Number);
@@ -229,6 +237,9 @@ export function CandidatosHueco(props: {
 }) {
   const lista = props.candidatos.filter((c) => c.tab === props.tab);
   const opcion = props.opciones?.find((o) => o.id === props.opcionId) || null;
+  const [verOcultosTope, setVerOcultosTope] = useState(false);
+  const ocultosTope = props.eventuales.filter(eventualOcultoPorTope);
+  const eventualesVisibles = verOcultosTope ? props.eventuales : props.eventuales.filter((ev) => !eventualOcultoPorTope(ev));
   const fila = (on: boolean, disabled: boolean, onClick: () => void, key: string, children: ReactNode, attrs: Record<string, string>) => (
     <button key={key} type="button" disabled={disabled} onClick={onClick} aria-pressed={on} {...attrs} className={`mb-2 flex min-h-14 w-full items-center gap-2 rounded border bg-white px-3 text-left ${on ? MOVIL_PRIMARY_BORDER : MOVIL_BORDER} disabled:opacity-60`}>
       <span className="min-w-0 flex-1">{children}</span>
@@ -254,13 +265,25 @@ export function CandidatosHueco(props: {
       </div>
       {props.tab === 'ft' && !props.puedeFt && <p className="text-xs font-medium text-slate-500">Hace falta el permiso de franco trabajado.</p>}
       {props.tab === 'eventuales' && !props.puedeEventuales && <p className="text-xs font-medium text-slate-500">Hace falta el permiso para convocar eventuales.</p>}
-      {props.tab === 'eventuales' && props.puedeEventuales && props.eventuales.map((ev) => fila(props.elegidoId === ev.cuil, !ev.elegible, () => props.onElegir(ev.cuil), ev.cuil, (
+      {props.tab === 'eventuales' && props.puedeEventuales && eventualesVisibles.map((ev) => fila(props.elegidoId === ev.cuil, !ev.elegible, () => props.onElegir(ev.cuil), ev.cuil, (
         <>
           <span className="flex items-center gap-1 text-sm font-semibold text-slate-900">{ev.nombre}<PuntajeChip sujetoId={ev.cuil} /></span>
           <span className="block text-[11px] font-medium tabular-nums text-slate-500">{ev.distanciaKm != null ? `${ev.distanciaKm} km` : 'sin distancia'} · bolsa</span>
+          {ev.horasMes && (
+            <span data-horas-mes className={`block text-[11px] font-semibold tabular-nums ${ev.horasMes.aviso ? 'text-amber-700' : 'text-slate-500'}`}>
+              {ev.horasMes.texto}
+              {eventualOcultoPorTope(ev) && <span data-chip-tope={ev.horasMes.alcanzado ? 'alcanzado' : 'cerca'} className={`ml-1 ${ev.horasMes.alcanzado ? MOVIL_TEXT.rose : MOVIL_TEXT.amber}`}>· {ev.horasMes.alcanzado ? 'Tope alcanzado' : 'Cerca del tope'}</span>}
+            </span>
+          )}
           {ev.motivo && <span className={`block text-[11px] font-semibold ${MOVIL_TEXT.rose}`}>{ev.motivo}</span>}
         </>
       ), { 'data-plan-candidato': ev.cuil }))}
+      {props.tab === 'eventuales' && props.puedeEventuales && ocultosTope.length > 0 && (
+        <div data-ocultos-tope={ocultosTope.length} className={`mb-2 flex min-h-10 items-center justify-between gap-2 rounded border bg-white px-3 text-[11px] font-semibold ${MOVIL_BORDER} ${MOVIL_TEXT.amber}`}>
+          <span>{textoOcultosPorTopeMovil(ocultosTope.length)}</span>
+          <button type="button" data-ocultos-tope-ver onClick={() => setVerOcultosTope((v) => !v)} className={`rounded border px-2 py-1 text-[11px] font-semibold ${MOVIL_BTN_SECONDARY}`}>{verOcultosTope ? 'Ocultar' : 'Ver'}</button>
+        </div>
+      )}
       {props.tab !== 'eventuales' && lista.map((c) => fila(props.elegidoId === c.employeeId, c.blocked || (props.tab === 'ft' && !props.puedeFt), () => props.onElegir(c.employeeId), c.employeeId, (
         <>
           <span className="flex items-center gap-1 text-sm font-semibold text-slate-900">{c.name}<PuntajeChip sujetoId={c.employeeId} /></span>

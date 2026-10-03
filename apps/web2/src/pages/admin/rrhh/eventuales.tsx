@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { collection, getDocs, onSnapshot, query, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import {
-  ArrowLeft, Building2, Download, FileSpreadsheet, MapPin, Plus, ScrollText, Search, UserPlus, Users, X,
+  ArrowLeft, Building2, Download, FileSpreadsheet, MapPin, Plus, ScrollText, Search, SlidersHorizontal, UserPlus, Users, X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import DashboardLayout from '@/components/layout/DashboardLayout';
@@ -72,6 +72,12 @@ const VISTA_NOMINA: Record<string, { texto: string; tono: string }> = {
   FECHA_INVALIDA: { texto: 'Fecha inválida', tono: 'bg-rose-50 text-rose-800' },
 };
 
+type HorasMesFila = {
+  cuil: string; usadas: number; tope: number; texto: string; aviso: boolean;
+  margen?: number; cerca?: boolean; alcanzado?: boolean; chip?: 'Tope alcanzado' | 'Cerca del tope' | null;
+  excepcion?: boolean; motivo?: string | null; topeEmpresa?: number;
+};
+
 type VistaNomina = { cuil: string; nombre: string; codigo: string; motivo: string };
 type ResumenNomina = {
   nuevo: number; actualizar: number; sinCambio: number; cuilInvalido: number; duplicado: number;
@@ -103,6 +109,14 @@ export default function EventualesPage() {
   const [empresasAsignar, setEmpresasAsignar] = useState<string[]>([]);
   const [importando, setImportando] = useState(false);
   const [habilitando, setHabilitando] = useState('');
+  const [horasMes, setHorasMes] = useState<Record<string, HorasMesFila>>({});
+  const [topeEmpresa, setTopeEmpresa] = useState<{ tope: number; periodo: string; margen: number }>({ tope: 50, periodo: 'CALENDARIO', margen: 2 });
+  const [margenDraft, setMargenDraft] = useState('2');
+  const [parametrosAbierto, setParametrosAbierto] = useState(false);
+  const [horasTick, setHorasTick] = useState(0);
+  const [guardandoTope, setGuardandoTope] = useState(false);
+  const [topeDraft, setTopeDraft] = useState('50');
+  const [periodoDraft, setPeriodoDraft] = useState('CALENDARIO');
   const [arcaPendientes, setArcaPendientes] = useState<number | null>(null);
   const [reporteNomina, setReporteNomina] = useState<{
     dryRun: boolean;
@@ -110,6 +124,51 @@ export default function EventualesPage() {
     vista: VistaNomina[];
     filas: Record<string, unknown>[];
   } | null>(null);
+
+  useEffect(() => {
+    if (!empresaActivaId) return;
+    let vivo = true;
+    void httpsCallable(functions, 'gestionarEventual')({ accion: 'horasMes', empresaId: empresaActivaId })
+      .then((res) => {
+        if (!vivo) return;
+        const data = res.data as { filas?: HorasMesFila[]; tope?: number; periodo?: string; margen?: number };
+        const map: Record<string, HorasMesFila> = {};
+        for (const fila of data.filas || []) map[fila.cuil] = fila;
+        setHorasMes(map);
+        setTopeEmpresa({ tope: Number(data.tope) || 50, periodo: data.periodo || 'CALENDARIO', margen: Number.isFinite(Number(data.margen)) ? Number(data.margen) : 2 });
+      })
+      .catch(() => { /* la lista sigue sin las horas */ });
+    return () => { vivo = false; };
+  }, [empresaActivaId, horasTick]);
+
+  const guardarTopeEmpresa = async () => {
+    if (!empresaActivaId) return;
+    setGuardandoTope(true);
+    try {
+      await httpsCallable(functions, 'gestionarEventual')({
+        accion: 'guardarTopeEmpresa',
+        empresaId: empresaActivaId,
+        horas: Number(String(topeDraft).replace(',', '.')),
+        periodo: periodoDraft,
+        margen: Number(String(margenDraft).replace(',', '.')),
+      });
+      toast.success('Tope de horas guardado.');
+      setParametrosAbierto(false);
+      setHorasTick((n) => n + 1);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo guardar el tope.');
+    } finally {
+      setGuardandoTope(false);
+    }
+  };
+
+  const guardarTopeExcepcion = async (cuil: string, horas: number | null, motivo: string) => {
+    await httpsCallable(functions, 'gestionarEventual')({
+      accion: 'guardarTopeExcepcion', empresaId: empresaActivaId, cuil, horas, motivo,
+    });
+    toast.success(horas ? 'Excepción de tope guardada.' : 'Se quitó la excepción.');
+    setHorasTick((n) => n + 1);
+  };
 
   const nombreEmpresaActiva = empresaActiva?.name || empresas.find((e) => e.id === empresaActivaId)?.nombre || 'la empresa';
   const nombreEmpresa = (id: string) => empresas.find((e) => e.id === id)?.nombre || (id === empresaActivaId ? nombreEmpresaActiva : 'Empresa');
@@ -383,6 +442,17 @@ export default function EventualesPage() {
                   <ScrollText size={15} />
                   Escala salarial
                 </Link>
+                {puede('update') && (
+                  <button
+                    type="button"
+                    data-parametros-tope
+                    title="Tope de horas por mes por eventual"
+                    onClick={() => { setTopeDraft(String(topeEmpresa.tope)); setPeriodoDraft(topeEmpresa.periodo); setMargenDraft(String(topeEmpresa.margen)); setParametrosAbierto(true); }}
+                    className="inline-flex h-9 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50">
+                    <SlidersHorizontal size={16} />
+                    Parámetros
+                  </button>
+                )}
               </div>
             )}
           />
@@ -442,7 +512,9 @@ export default function EventualesPage() {
               </p>
               <ul className="flex-1 overflow-auto p-1.5" data-lista-eventuales>
                 {visibles.map((f) => {
-                  const estado = estadoFila(f, hoy(), todaLaBolsa ? '' : empresaActivaId) as { tono: string; texto: string };
+                  const estadoBase = estadoFila(f, hoy(), todaLaBolsa ? '' : empresaActivaId) as { tono: string; texto: string };
+                  const horas = horasMes[f.id];
+                  const estado = horas ? { ...estadoBase, texto: `${estadoBase.texto} · ${horas.texto.replace(/ este mes$/, '')}` } : estadoBase;
                   const habilitadaAca = f.empresasHabilitadas.includes(empresaActivaId);
                   const activo = elegida === f.id;
                   return (
@@ -463,6 +535,10 @@ export default function EventualesPage() {
                           </span>
                           <span className="mt-1 flex flex-wrap items-center gap-1">
                             <EstadoFilaChip estado={estado} />
+                            {horas && <span data-horas-mes className="sr-only">{horas.texto}</span>}
+                            {horas?.chip && (
+                              <span data-chip-tope={horas.alcanzado ? 'alcanzado' : 'cerca'} className={`rounded-full px-1.5 py-0.5 text-[10px] font-black ${horas.alcanzado ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-800'}`}>{horas.chip}</span>
+                            )}
                             <ChipPruebas ficha={f} />
                             {todaLaBolsa && !habilitadaAca && f.disponibilidad !== 'NO_DISPONIBLE' && (
                               <span className="text-[10px] text-slate-500" title={f.empresasHabilitadas.length ? `Habilitado en ${f.empresasHabilitadas.map(nombreEmpresa).join(', ')}` : 'Sin empresa habilitada'}>
@@ -512,6 +588,8 @@ export default function EventualesPage() {
                   onBaja={darBaja}
                   onReactivar={reactivar}
                   onVolver={() => setElegida(null)}
+                  horasMes={horasMes[ficha.id] || null}
+                  onGuardarTope={puede('update') ? (horas, motivo) => guardarTopeExcepcion(ficha.id, horas, motivo) : undefined}
                 />
               )}
             </div>
@@ -537,6 +615,39 @@ export default function EventualesPage() {
               <div className="mt-4 flex justify-end gap-2">
                 <button type="button" onClick={() => setAsignarAbierto(false)} className="rounded-xl px-3 py-2 text-sm text-slate-500">Cancelar</button>
                 <button type="button" onClick={confirmarAsignar} disabled={!empresasAsignar.length} className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">Asignar</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {parametrosAbierto && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" data-parametros-modal>
+            <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-lg">
+              <h2 className="flex items-center gap-2 text-lg font-black text-slate-800"><SlidersHorizontal size={18} /> Parámetros de eventuales</h2>
+              <p className="mt-1 text-xs text-slate-500">Vale para {nombreEmpresaActiva}. Una excepción por persona se carga en su ficha.</p>
+              <label className="mt-4 block text-[10px] font-black uppercase tracking-wider text-slate-500">Tope de horas por mes por eventual
+                <input value={topeDraft} onChange={(e) => setTopeDraft(e.target.value)} inputMode="decimal" className="mt-1 block w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold normal-case text-slate-800" />
+              </label>
+              <label className="mt-3 block text-[10px] font-black uppercase tracking-wider text-slate-500">Margen antes del tope (h)
+                <input value={margenDraft} onChange={(e) => setMargenDraft(e.target.value)} inputMode="decimal" data-margen-tope className="mt-1 block w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold normal-case text-slate-800" />
+                <span className="mt-1 block text-[11px] font-medium normal-case tracking-normal text-slate-500">
+                  Con tope {topeDraft || '—'} h y margen {margenDraft || '0'} h, no se ofrece a quien ya tiene {Math.max(0, (Number(String(topeDraft).replace(',', '.')) || 0) - (Number(String(margenDraft).replace(',', '.')) || 0))} h o más. En la bolsa sigue visible con «Cerca del tope».
+                </span>
+              </label>
+              <fieldset className="mt-3 space-y-2">
+                <legend className="text-[10px] font-black uppercase tracking-wider text-slate-500">Período que cuenta</legend>
+                <label className="flex items-center gap-2 text-sm text-slate-700">
+                  <input type="radio" name="periodo-tope" checked={periodoDraft !== 'CICLO_26_25'} onChange={() => setPeriodoDraft('CALENDARIO')} />
+                  Mes calendario (1 → fin de mes)
+                </label>
+                <label className="flex items-center gap-2 text-sm text-slate-700">
+                  <input type="radio" name="periodo-tope" checked={periodoDraft === 'CICLO_26_25'} onChange={() => setPeriodoDraft('CICLO_26_25')} />
+                  Ciclo de liquidación (26 → 25)
+                </label>
+              </fieldset>
+              <div className="mt-4 flex justify-end gap-2">
+                <button type="button" onClick={() => setParametrosAbierto(false)} className="rounded-xl px-3 py-2 text-sm text-slate-500">Cancelar</button>
+                <button type="button" disabled={guardandoTope} onClick={() => void guardarTopeEmpresa()} className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{guardandoTope ? 'Guardando…' : 'Guardar'}</button>
               </div>
             </div>
           </div>

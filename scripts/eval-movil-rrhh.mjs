@@ -198,6 +198,17 @@ const bolsaPalabras = renderToStaticMarkup(createElement(EventualesScreens, {
 check('bolsa: estado en palabras con filete', bolsaPalabras.includes('data-estado-fila="Listo para convocar"') && bolsaPalabras.includes('Falta: mail, contrato marco') && bolsaPalabras.includes('w-[3px]') && bolsaPalabras.includes('text-emerald-600') && bolsaPalabras.includes('text-amber-600') && !/bg-emerald-50(?!\d)/.test(bolsaPalabras));
 check('la bolsa del celular usa estadoFila', readFileSync(join(root, 'components/movil/EventualesMovil.tsx'), 'utf8').includes('estadoFila'));
 
+const bolsaTope = renderToStaticMarkup(createElement(EventualesScreens, {
+  ...evProps,
+  panel: 'bolsa',
+  elegido: null,
+  personas: [
+    { ...evProps.personas[0], estadoTexto: 'Listo para convocar', estadoTono: 'ok', horasMes: '32/50 h este mes', horasAviso: false, chipTope: null },
+    { id: '20888888887', nombre: 'Ruiz, Pedro', cuil: '20-88888888-7', marco: 'Marco vigente', marcoEstado: 'MARCO_VIGENTE', telefono: '', legajo: '203', primerIngreso: '01/03/2025', estadoTexto: 'Listo para convocar', estadoTono: 'ok', horasMes: '49/50 h este mes', horasAviso: true, chipTope: 'Cerca del tope' },
+  ],
+}));
+check('bolsa: estado en palabras y horas contra el tope conviven', bolsaTope.includes('data-estado-fila="Listo para convocar"') && bolsaTope.includes('32/50 h este mes') && bolsaTope.includes('49/50 h este mes') && bolsaTope.includes('data-chip-tope="cerca"') && bolsaTope.includes('data-horas-mes'));
+
 const hoyAa = renderToStaticMarkup(createElement(RrhhScreens, {
   ...{
     empresa: 'Pruebas S.A.', online: true, pendingLabel: null, panel: 'dia', hoyLabel: 'viernes 2 de octubre',

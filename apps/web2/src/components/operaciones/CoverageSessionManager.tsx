@@ -15,7 +15,8 @@ import {
   collection, doc, addDoc, writeBatch, serverTimestamp, Timestamp, onSnapshot, getDoc,
   getDocs, limit, query, where,
 } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { httpsCallable } from 'firebase/functions';
+import { db, functions } from '@/lib/firebase';
 import { PuntajeChip } from '@/components/desempeno/PuntajeChip';
 import { useGuardiaPuntaje } from '@/context/guardiaPuntajeStore';
 import { setAppBusy } from '@/lib/appBusyState';
@@ -43,8 +44,10 @@ import {
   COVERAGE_REJECT_LABEL,
   coverageWizardStepKeys,
   EVENT_COVERAGE_CASCADE_ORDER,
+  esOcultoPorTope,
   eventualesParaHueco,
   isEventoShift,
+  textoOcultosPorTope,
   type CoverageWizardStepKey,
   type EventualCandidato,
 } from '@cosp/ops-core';
@@ -493,6 +496,8 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
   const steps = stepsForShift(absenceShift);
   const step = steps[s.currentStep];
   const [eventualRows, setEventualRows] = React.useState<EventualCandidato[]>([]);
+  const [eventualOcultosTope, setEventualOcultosTope] = React.useState<EventualCandidato[]>([]);
+  const [verOcultosTope, setVerOcultosTope] = React.useState(false);
   React.useEffect(() => {
     if (step?.key !== 'EVENTUAL' || !tid) return undefined;
     let cancel = false;
@@ -513,8 +518,44 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
         const end = toDate(absenceShift.endDateObj).getTime();
         const coords = resolveObjectiveCoords(absenceForGeo as Record<string, unknown>);
         const hoy = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString().slice(0, 10);
+        const fechaHueco = new Date(start - 3 * 60 * 60 * 1000).toISOString().slice(0, 10);
+        const horasTurno = Math.round(((end - start) / 3600000) * 100) / 100;
+        const horasPorCuil = new Map<string, { usadas: number; tope: number; margen: number }>();
+        try {
+          const fn = httpsCallable(functions, 'gestionarEventual');
+          const res = await fn({
+            accion: 'horasMes',
+            empresaId: String(tid),
+            cuils: bolsa.map((b) => String((b as { cuil?: string }).cuil || '')).filter((c) => c.length === 11),
+            fecha: fechaHueco,
+          });
+          const data = res.data as { filas?: { cuil: string; usadas: number; tope: number; margen?: number }[] };
+          for (const fila of data.filas || []) horasPorCuil.set(fila.cuil, { usadas: fila.usadas, tope: fila.tope, margen: Number(fila.margen) || 0 });
+        } catch { /* sin tope cargado el motor no limita */ }
+        const bolsaConTope = bolsa.map((row) => {
+          const cuil = String((row as { cuil?: string }).cuil || '');
+          const horas = horasPorCuil.get(cuil);
+          return horas ? { ...row, topeHoras: { usadas: horas.usadas, tope: horas.tope, horasTurno, margen: horas.margen } } : row;
+        });
+        // Se piden también los no elegibles para contar los ocultos por tope; el resto se filtra como siempre
+        // (el CC solo lista elegibles y «Sin contrato marco» sin otro bloqueo).
+        const todos = eventualesParaHueco({
+          bolsa: bolsaConTope,
+          hueco: {
+            empresaId: String(tid),
+            startMs: start,
+            endMs: end,
+            lat: coords.lat,
+            lng: coords.lng,
+            hoyYmd: hoy,
+          },
+          otrasJornadas: [],
+          incluirNoElegibles: true,
+        });
+        const ocultos = todos.filter(esOcultoPorTope);
+        if (!cancel) setEventualOcultosTope(ocultos);
         const rows = eventualesParaHueco({
-          bolsa,
+          bolsa: bolsaConTope,
           hueco: {
             empresaId: String(tid),
             startMs: start,
@@ -527,7 +568,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
         });
         if (!cancel) setEventualRows(rows);
       } catch {
-        if (!cancel) setEventualRows([]);
+        if (!cancel) { setEventualRows([]); setEventualOcultosTope([]); }
       }
     })();
     return () => { cancel = true; };
@@ -1642,16 +1683,15 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
               : step.isDual
                 ? renderDual()
                 : step.key === 'EVENTUAL'
-                  ? eventualRows.length === 0
-                    ? (
-                      <div className="flex flex-col items-center gap-3 py-8 text-center">
-                        <Users size={36} className="text-slate-200" />
-                        <div className="text-sm font-bold text-slate-400">Sin eventuales habilitados para este hueco</div>
-                      </div>
-                    )
-                    : (
+                  ? (
                       <div className="flex flex-col gap-2">
-                        {eventualRows.map((row) => (
+                        {eventualRows.length === 0 && (
+                          <div className="flex flex-col items-center gap-3 py-8 text-center">
+                            <Users size={36} className="text-slate-200" />
+                            <div className="text-sm font-bold text-slate-400">{eventualOcultosTope.length > 0 ? 'Los eventuales habilitados están cerca del tope de horas' : 'Sin eventuales habilitados para este hueco'}</div>
+                          </div>
+                        )}
+                        {[...eventualRows, ...(verOcultosTope ? eventualOcultosTope : [])].map((row) => (
                           <button
                             key={row.cuil}
                             type="button"
@@ -1663,12 +1703,22 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
                               <span className="flex items-center gap-1"><span className="block truncate text-sm font-black text-slate-800">{row.employeeName}</span><PuntajeChip sujetoId={row.cuil || row.employeeId} /></span>
                               <span className="block text-[10px] text-slate-500">
                                 {row.distanceKm == null ? 'Sin geo' : `${row.distanceKm} km`} · confiabilidad {row.confiabilidad}
+                                {row.horasMes && <span data-horas-mes className={`ml-1 font-black ${row.horasMes.aviso ? 'text-amber-700' : 'text-slate-500'}`}>{row.horasMes.texto}</span>}
+                                {esOcultoPorTope(row) && <span data-chip-tope={row.horasMes?.alcanzado ? 'alcanzado' : 'cerca'} className={`ml-1 rounded-full px-1.5 py-0.5 text-[8px] font-black uppercase ${row.horasMes?.alcanzado ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-800'}`}>{row.horasMes?.alcanzado ? 'Tope alcanzado' : 'Cerca del tope'}</span>}
                                 {row.pruebasSinMarco && <span data-pruebas="sin-marco" className="ml-1 rounded-full border border-fuchsia-200 bg-fuchsia-50 px-1.5 py-0.5 text-[8px] font-black uppercase text-fuchsia-800">Pruebas: sin exigir marco</span>}
                               </span>
                             </span>
                             <span className={`text-[10px] font-black shrink-0 ${row.elegible === false ? 'text-slate-400' : 'text-indigo-700'}`}>{row.elegible === false ? (row.motivo || 'Sin contrato marco') : 'Convocar'}</span>
                           </button>
                         ))}
+                        {eventualOcultosTope.length > 0 && (
+                          <div data-ocultos-tope={eventualOcultosTope.length} className="flex items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-1.5 text-[10px] font-bold text-amber-800">
+                            <span>{textoOcultosPorTope(eventualOcultosTope.length)}</span>
+                            <button type="button" data-ocultos-tope-ver onClick={() => setVerOcultosTope((v) => !v)} className="rounded-md border border-amber-300 bg-white px-2 py-0.5 text-[10px] font-black text-amber-800 hover:bg-amber-100">
+                              {verOcultosTope ? 'Ocultar' : 'Ver'}
+                            </button>
+                          </div>
+                        )}
                       </div>
                     )
                 : step.key === 'INTERNO'

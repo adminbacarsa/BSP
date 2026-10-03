@@ -33,7 +33,13 @@ export type CandidatoEventual = {
     pruebasSinMarco?: boolean;
     /** 'M' | 'F' | '' (sin especificar) — cupo por género de los eventos. */
     genero?: string;
+    horasMes?: { usadas: number; tope: number; texto: string; aviso: boolean; margen?: number; cerca?: boolean; alcanzado?: boolean } | null;
 };
+
+const MOTIVOS_TOPE = new Set(['TOPE_HORAS', 'TOPE_CERCA']);
+/** Igual a `esOcultoPorTope` del motor: no se ofrece, se cuenta en «N eventuales ocultos por tope de horas». */
+export const esOcultoPorTopeUi = (c: { motivoCodigo?: string | null }) => MOTIVOS_TOPE.has(String(c.motivoCodigo || ''));
+export const textoOcultosPorTopeUi = (n: number) => (n === 1 ? '1 eventual oculto por tope de horas' : `${n} eventuales ocultos por tope de horas`);
 
 /** Cupo por género del servicio de evento: la lista se muestra en grupos (Hombres n/X · Mujeres n/Y). */
 export type CupoPanelEventuales = {
@@ -74,6 +80,8 @@ export default function EventualesCandidatosPanel({
     const [search, setSearch] = useState('');
     /** Sube con «Reintentar» para volver a pedir la bolsa con los mismos parámetros. */
     const [intento, setIntento] = useState(0);
+    /** «Ver» los ocultos por tope: solo lectura, no se pueden elegir. */
+    const [verOcultosTope, setVerOcultosTope] = useState(false);
     const key = jornadasKey(jornadas);
 
     useEffect(() => {
@@ -90,10 +98,12 @@ export default function EventualesCandidatosPanel({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [empresaId, objectiveId, key, canConvocar, excluirCuil, (excluirTurnoIds || []).join(','), intento]);
 
+    const ocultosTope = useMemo(() => rows.filter(esOcultoPorTopeUi), [rows]);
     const filtered = useMemo(() => {
         const s = search.trim().toLowerCase();
-        return s ? rows.filter(r => `${r.nombre} ${r.cuil}`.toLowerCase().includes(s)) : rows;
-    }, [rows, search]);
+        const base = verOcultosTope ? rows : rows.filter((r) => !esOcultoPorTopeUi(r));
+        return s ? base.filter(r => `${r.nombre} ${r.cuil}`.toLowerCase().includes(s)) : base;
+    }, [rows, search, verOcultosTope]);
 
     if (!canConvocar) {
         return (
@@ -138,7 +148,7 @@ export default function EventualesCandidatosPanel({
                 )}
                 {!loading && !error && filtered.length === 0 && (
                     <p className="text-center text-[11px] text-slate-400 py-8">
-                        {rows.length === 0 ? 'No hay eventuales disponibles habilitados para esta empresa.' : 'Sin coincidencias.'}
+                        {rows.length === 0 ? 'No hay eventuales disponibles habilitados para esta empresa.' : ocultosTope.length === rows.length && !search.trim() ? 'Todos los eventuales están cerca del tope de horas.' : 'Sin coincidencias.'}
                     </p>
                 )}
                 {!loading && (() => {
@@ -169,6 +179,12 @@ export default function EventualesCandidatosPanel({
                                     <div className="min-w-0">
                                         <div className="flex items-center gap-1 text-[11px] font-black text-slate-800"><span className="truncate">{c.nombre}</span><PuntajeChip sujetoId={c.cuil} /></div>
                                         <div className="text-[9px] font-mono text-slate-400">{c.cuil}{c.employeeId ? ' · legajo en esta empresa' : ''}</div>
+                                        {c.horasMes && (
+                                          <div data-horas-mes className={`text-[9px] font-black ${c.horasMes.aviso ? 'text-amber-700' : 'text-slate-500'}`}>
+                                            {c.horasMes.texto}
+                                            {esOcultoPorTopeUi(c) && <span data-chip-tope={c.horasMes.alcanzado ? 'alcanzado' : 'cerca'} className={`ml-1 rounded px-1 ${c.horasMes.alcanzado ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-800'}`}>{c.horasMes.alcanzado ? 'Tope alcanzado' : 'Cerca del tope'}</span>}
+                                          </div>
+                                        )}
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-1.5 shrink-0">
@@ -238,6 +254,14 @@ export default function EventualesCandidatosPanel({
                     );
                 })()}
             </div>
+            {!loading && ocultosTope.length > 0 && (
+                <div data-ocultos-tope={ocultosTope.length} className="mx-1 mt-2 flex items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[10px] font-bold text-amber-800 shrink-0">
+                    <span>{textoOcultosPorTopeUi(ocultosTope.length)}</span>
+                    <button type="button" onClick={() => setVerOcultosTope((v) => !v)} data-ocultos-tope-ver className="rounded-md border border-amber-300 bg-white px-2 py-0.5 text-[10px] font-black text-amber-800 hover:bg-amber-100">
+                        {verOcultosTope ? 'Ocultar' : 'Ver'}
+                    </button>
+                </div>
+            )}
             <div className="px-1 pt-2 text-[9px] font-bold text-slate-400 shrink-0">
                 {loading ? 'Consultando bolsa…' : `${elegibles} de ${rows.length} elegibles · sin superposición ni descanso < 12 h en el grupo`}
             </div>
