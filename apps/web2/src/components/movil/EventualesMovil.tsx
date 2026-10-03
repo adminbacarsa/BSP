@@ -13,6 +13,7 @@ import { useEmpresa } from '@/context/EmpresaContext';
 import { db, functions } from '@/lib/firebase';
 import { normalizeCuil } from '@/lib/eventuales/cuil.mjs';
 import { filtrarFichas, fmtFechaAr } from '@/lib/eventuales/fichaUx.mjs';
+import { estadoFila } from '@/lib/eventuales/listoUx.mjs';
 import { marcoDeBolsa } from '@/lib/eventuales/marcoTexto.mjs';
 import { GRUPO_EVENTUALES_ID } from '@/lib/eventuales/grupo.mjs';
 import { movilCallableGate, runCallableOnline } from '@/lib/movil/callableOnline';
@@ -32,6 +33,9 @@ type Ficha = {
   nombre: string;
   mail: string;
   telefono: string;
+  domicilio: string;
+  credencialVencimiento: string;
+  aptoPsicofisico: { vencimiento?: string } | null;
   legajoPlanilla: string;
   primerIngreso: string;
   disponibilidad: string;
@@ -135,6 +139,9 @@ export function EventualesMovil() {
           nombre: String(data.nombre || ''),
           mail: String(data.mail || ''),
           telefono: String(data.telefono || ''),
+          domicilio: String(data.domicilio || ''),
+          credencialVencimiento: String(data.credencialVencimiento || ''),
+          aptoPsicofisico: data.aptoPsicofisico && typeof data.aptoPsicofisico === 'object' ? data.aptoPsicofisico as Ficha['aptoPsicofisico'] : null,
           legajoPlanilla: String(data.legajoPlanilla || ''),
           primerIngreso: String(data.primerIngreso || ''),
           disponibilidad: String(data.disponibilidad || ''),
@@ -208,12 +215,15 @@ export function EventualesMovil() {
       .map((ficha): EventualMovil => {
         const marco = marcoDeBolsa(ficha, empresaId || '', hoy()) as { estado?: string };
         const estado = marco.estado || 'SIN_MARCO';
+        const palabras = estadoFila(ficha, hoy(), empresaId || '') as { texto: string; tono: string };
         return {
           id: ficha.id,
           nombre: ficha.nombre,
           cuil: formatoCuil(ficha.id),
           marco: MARCO[estado] || 'Sin marco',
           marcoEstado: estado,
+          estadoTexto: palabras.texto,
+          estadoTono: palabras.tono,
           telefono: ficha.telefono,
           legajo: ficha.legajoPlanilla,
           primerIngreso: fmtFechaAr(ficha.primerIngreso),

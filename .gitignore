@@ -37,6 +37,7 @@ apps/mobile-guardia/GoogleService-Info.plist
 *.pdf
 *.png
 !docs/play/**/*.png
+!docs/movil/capturas-1003/**/*.png
 !apps/mobile-guardia/assets/**
 !apps/mobile-guardia/assets/**/*.png
 !apps/mobile-guardia/public/icons/**

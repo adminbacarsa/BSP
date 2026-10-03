@@ -3,7 +3,7 @@ import { cuentaRegresivaAnulacion, PASOS_ANULACION_MANUAL } from '@/lib/eventual
 import { BottomSheet } from './BottomSheet';
 import { MovilBadge } from './ui/MovilBadge';
 import { MovilTopBar } from './ui/MovilTopBar';
-import { MOVIL_BTN_PRIMARY, MOVIL_BTN_SECONDARY, MOVIL_CARD, type MovilTone } from './ui/tones';
+import { MOVIL_BTN_PRIMARY, MOVIL_BTN_SECONDARY, MOVIL_CARD, MOVIL_FILETE, MOVIL_FONT, type MovilTone } from './ui/tones';
 
 export type EventualesPanel = 'bolsa' | 'arca' | 'alta' | 'escala';
 
@@ -22,6 +22,10 @@ export type EventualMovil = {
   /** Switches de pruebas de la ficha (default true). */
   exigirMarco?: boolean;
   exigirAltaArca?: boolean;
+  /** `estadoFila` del escritorio: «Listo para convocar» / «Falta: …» / «No disponible». */
+  estadoTexto?: string;
+  /** 'ok' | 'falta' | 'baja' */
+  estadoTono?: string;
   /** `32/50 h este mes`. aviso = ámbar desde el 80%. */
   horasMes?: string;
   horasAviso?: boolean;
@@ -53,6 +57,14 @@ const MARCO_TONE: Record<string, MovilTone> = {
   MARCO_VIGENTE: 'emerald',
   VENCIDO: 'rose',
   SIN_MARCO: 'slate',
+};
+
+/** Mismo tono que `estadoFila` del escritorio: listo verde, falta ámbar, no disponible gris. */
+const ESTADO_RING: Record<string, MovilTone> = { ok: 'emerald', falta: 'amber', baja: 'slate' };
+const ESTADO_TEXT: Record<string, string> = {
+  ok: 'text-emerald-600',
+  falta: 'text-amber-600',
+  baja: 'text-slate-500',
 };
 
 const ARCA_ESTADO_TONE: Record<string, MovilTone> = {
@@ -116,7 +128,7 @@ function AnulacionManualMovil(props: {
   );
 }
 
-const INPUT = 'min-h-12 w-full rounded-lg border border-slate-200 bg-white px-3 font-semibold text-slate-900 placeholder:font-medium placeholder:text-slate-400';
+const INPUT = 'min-h-12 w-full rounded-lg border border-slate-200 bg-white px-3 font-semibold text-slate-900 outline-none placeholder:font-medium placeholder:text-slate-400 focus:border-[var(--movil-primary,#111827)]';
 const BTN = 'flex min-h-12 w-full items-center justify-center rounded-lg text-sm font-semibold active:scale-[0.99]';
 
 export function EventualesScreens(props: {
@@ -172,7 +184,7 @@ export function EventualesScreens(props: {
   const pendientes = props.arca.filter((envio) => envio.estado !== 'CONFIRMADO' && envio.estado !== 'ANULADO');
   const confirmados = props.arca.filter((envio) => envio.estado === 'CONFIRMADO' || envio.estado === 'ANULADO');
   return (
-    <div data-movil-screen={props.panel} data-viewport="390x844" className="mx-auto flex min-h-[844px] w-full max-w-[390px] flex-col touch-manipulation overflow-x-hidden bg-[#f7f8fa] pb-24">
+    <div data-movil-screen={props.panel} data-viewport="390x844" className={`mx-auto flex min-h-[844px] w-full max-w-[390px] flex-col touch-manipulation overflow-x-hidden bg-[#f7f8fa] pb-24 ${MOVIL_FONT}`}>
       <MovilTopBar modulo="Eventuales" empresa={props.empresa} onEmpresa={props.onEmpresa} online={props.online} pendingLabel={props.pendingLabel} />
       <div className="flex flex-1 flex-col gap-3 px-3 py-3">
         {props.panel === 'escala' && (props.escala || <p className={`${MOVIL_CARD} p-4 text-sm font-semibold text-slate-500`}>Escala salarial · solo lectura en el celular.</p>)}
@@ -189,16 +201,23 @@ export function EventualesScreens(props: {
                     type="button"
                     onClick={() => props.onElegir(persona.id)}
                     data-eventual={persona.id}
-                    className={`${MOVIL_CARD} w-full p-3 text-left active:bg-slate-50 ${props.elegido?.id === persona.id ? 'border-slate-400' : ''}`}
+                    data-estado-fila={persona.estadoTexto || undefined}
+                    className={`relative ${MOVIL_CARD} w-full p-3 text-left active:bg-slate-50 ${persona.estadoTexto ? 'pl-4' : ''} ${props.elegido?.id === persona.id ? 'border-slate-400' : ''}`}
                   >
+                    {persona.estadoTexto && (
+                      <span aria-hidden="true" className={`absolute inset-y-0 left-0 w-[3px] rounded-l-lg ${MOVIL_FILETE[ESTADO_RING[persona.estadoTono || ''] || 'slate']}`} />
+                    )}
                     <div className="flex items-start justify-between gap-2">
                       <span className="truncate text-[15px] font-semibold leading-tight text-slate-900">{persona.nombre}</span>
                       <span className="flex shrink-0 flex-wrap justify-end gap-1">
-                        {persona.exigirMarco === false && <MovilBadge tone="violet" outline>Pruebas: sin exigir marco</MovilBadge>}
+                        {persona.exigirMarco === false && <MovilBadge tone="slate" outline>Pruebas: sin exigir marco</MovilBadge>}
                         {persona.chipTope && <span data-chip-tope={persona.chipTope === 'Tope alcanzado' ? 'alcanzado' : 'cerca'}><MovilBadge tone={persona.chipTope === 'Tope alcanzado' ? 'rose' : 'amber'} outline>{persona.chipTope}</MovilBadge></span>}
-                        <MovilBadge tone={MARCO_TONE[persona.marcoEstado] || 'slate'}>{persona.marco}</MovilBadge>
+                        {!persona.estadoTexto && <MovilBadge tone={MARCO_TONE[persona.marcoEstado] || 'slate'}>{persona.marco}</MovilBadge>}
                       </span>
                     </div>
+                    {persona.estadoTexto && (
+                      <p className={`mt-0.5 text-[12px] font-semibold leading-snug ${ESTADO_TEXT[persona.estadoTono || ''] || 'text-slate-500'}`}>{persona.estadoTexto}</p>
+                    )}
                     <dl className="mt-1.5 grid grid-cols-3 gap-2 text-[11px] font-medium text-slate-500">
                       <div>
                         <dt className="uppercase tracking-wide">Legajo</dt>
@@ -225,8 +244,11 @@ export function EventualesScreens(props: {
               <section className={`${MOVIL_CARD} p-4`} data-movil-ficha={props.elegido.id}>
                 <div className="flex items-start justify-between gap-2">
                   <h2 className="text-base font-semibold text-slate-900">{props.elegido.nombre}</h2>
-                  <MovilBadge tone={MARCO_TONE[props.elegido.marcoEstado] || 'slate'}>{props.elegido.marco}</MovilBadge>
+                  {!props.elegido.estadoTexto && <MovilBadge tone={MARCO_TONE[props.elegido.marcoEstado] || 'slate'}>{props.elegido.marco}</MovilBadge>}
                 </div>
+                {props.elegido.estadoTexto && (
+                  <p data-estado-ficha={props.elegido.estadoTexto} className={`mt-1 border-l-[3px] pl-2 text-[13px] font-semibold ${ESTADO_TEXT[props.elegido.estadoTono || ''] || 'text-slate-500'} ${props.elegido.estadoTono === 'ok' ? 'border-emerald-500' : props.elegido.estadoTono === 'falta' ? 'border-amber-500' : 'border-slate-300'}`}>{props.elegido.estadoTexto}</p>
+                )}
                 <p className="mt-1 text-sm font-medium tabular-nums text-slate-600">
                   {props.elegido.cuil}
                   {props.elegido.legajo ? ` · Legajo ${props.elegido.legajo}` : ' · Sin legajo'}
@@ -240,8 +262,8 @@ export function EventualesScreens(props: {
                 )}
                 {(props.elegido.exigirMarco === false || props.elegido.exigirAltaArca === false) && (
                   <div className="mt-2 flex flex-wrap gap-1" data-pruebas="sin-marco">
-                    {props.elegido.exigirMarco === false && <MovilBadge tone="violet" outline>Pruebas: sin exigir marco</MovilBadge>}
-                    {props.elegido.exigirAltaArca === false && <MovilBadge tone="violet" outline>Pruebas: sin exigir alta ARCA</MovilBadge>}
+                    {props.elegido.exigirMarco === false && <MovilBadge tone="slate" outline>Pruebas: sin exigir marco</MovilBadge>}
+                    {props.elegido.exigirAltaArca === false && <MovilBadge tone="slate" outline>Pruebas: sin exigir alta ARCA</MovilBadge>}
                   </div>
                 )}
                 {props.puedeSwitch && props.onSwitch && (
@@ -260,10 +282,10 @@ export function EventualesScreens(props: {
                         data-on={sw.on ? '1' : '0'}
                         disabled={!props.online || props.switchGuardando === sw.campo}
                         onClick={() => props.onSwitch?.(sw.campo, !sw.on)}
-                        className={`flex min-h-12 w-full items-center justify-between gap-3 rounded-lg border px-3 text-left text-sm font-semibold disabled:opacity-50 ${sw.on ? 'border-slate-200 bg-white text-slate-900' : 'border-violet-300 bg-white text-violet-800'}`}
+                        className={`flex min-h-12 w-full items-center justify-between gap-3 rounded-lg border px-3 text-left text-sm font-semibold disabled:opacity-50 ${sw.on ? 'border-slate-200 bg-white text-slate-900' : 'border-slate-300 bg-white text-slate-600'}`}
                       >
                         <span>{sw.label}</span>
-                        <span className={`shrink-0 text-[11px] font-bold uppercase ${sw.on ? 'text-emerald-700' : 'text-violet-700'}`}>{sw.on ? 'ON' : 'OFF · pruebas'}</span>
+                        <span className={`shrink-0 text-[11px] font-bold uppercase ${sw.on ? 'text-emerald-700' : 'text-slate-500'}`}>{sw.on ? 'Sí' : 'No · pruebas'}</span>
                       </button>
                     ))}
                   </div>
