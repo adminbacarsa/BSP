@@ -11,6 +11,7 @@ import { shouldScopeQueriesToEmpresa, belongsToEmpresaView, updateDocForEmpresa,
 import { combinedContiguousRangeLabel, isTuraContiguousToParent, findParentShiftForTura } from '@/lib/refuerzo/turaContiguity';
 import { planningMonthHasActiveSla } from '@/lib/slaPlanningMatch';
 import { isFinServicioSinCronograma, shiftCountsInOpsHeader } from '@/lib/operaciones/opsHeaderCounts';
+import { stableVirtualVacancies } from '@/lib/operaciones/virtualVacancyStability';
 import { buildEventosMap, buildObjetivoGeoMap, eventServicioLabel, eventoEnrichFields, isEventShift, type EventoDocLite } from '@/lib/operaciones/eventoCc';
 import {
   classifyOpsShift,
@@ -275,6 +276,9 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
     const staleBuild = useStaleBuild();
     const [now, setNow] = useState(new Date());
     const [rawShifts, setRawShifts] = useState<any[]>([]);
+    // Vacantes virtuales: solo con malla del servidor y tras 60 s estables (anti-fantasma, auditoría 02/10).
+    const [shiftsFromServer, setShiftsFromServer] = useState(false);
+    const virtualVacancySeenAt = useRef(new Map<string, number>());
     // RFZ/TURA se guardan con startTime/endTime como string ISO (no Timestamp), por lo que el
     // listener principal de `turnos` (que filtra por rango Timestamp) NO los devuelve. Se traen
     // en un listener aparte filtrando por `code` y se mergean en mergedRawShifts.
@@ -424,10 +428,12 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             where('startTime', '>=', Timestamp.fromDate(start)),
             where('startTime', '<=', Timestamp.fromDate(end)),
         );
-        const unsub = onSnapshot(turnosBase, (snap) => {
+        setShiftsFromServer(false);
+        const unsub = onSnapshot(turnosBase, { includeMetadataChanges: true }, (snap) => {
             setRawShifts(snap.docs
                 .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
                 .map(d => ({ id: d.id, ...d.data(), shiftDateObj: getSafeDate(d.data().startTime), endDateObj: getSafeDate(d.data().endTime) })));
+            setShiftsFromServer(!snap.metadata.fromCache);
             readyFlags.current.shifts = true; checkReady();
         }, (err) => {
             console.warn('[useOperacionesMonitor] turnos listener error, forzando reconexión:', err.code);
@@ -999,7 +1005,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
 
         // ── Suprimir vacantes virtuales solo si están CUBIERTAS (no suprimir por ausencias)
         // Un ausente sigue generando una vacante — la posición necesita cobertura
-        const filteredVirtualVacancies = virtualVacancies.filter(v => {
+        const candidateVirtualVacancies = virtualVacancies.filter(v => {
             if (!v.shiftDateObj || !v.endDateObj) return true;
             // Auto-expirar: slot de un día anterior que ya terminó → no mostrar
             const vacancyIsToday = isSameDay(v.shiftDateObj, now);
@@ -1031,6 +1037,11 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             ).length;
             if (coveringCount >= cap) return false;
             return true;
+        });
+        const filteredVirtualVacancies = stableVirtualVacancies(candidateVirtualVacancies, {
+            nowMs: now.getTime(),
+            shiftsFromServer,
+            seenAt: virtualVacancySeenAt.current,
         }).map(v => ({
             ...v,
             isDescubierto: isVacancyDescubierto(v, now),
@@ -1127,7 +1138,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         });
 
         return [...visibleRealShifts, ...filteredVirtualVacancies].sort((a:any, b:any) => a.shiftDateObj - b.shiftDateObj);
-    }, [mergedRawShifts, now, employees, objectives, servicesSLA, publishStatusMap, empresaId, eventos]);
+    }, [mergedRawShifts, shiftsFromServer, now, employees, objectives, servicesSLA, publishStatusMap, empresaId, eventos]);
 
     const filteredObjectives = useMemo(() => {
         let list = selectedClientId ? objectives.filter((o: any) => o.clientId === selectedClientId) : objectives;

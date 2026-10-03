@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { jornadasDeTurnos, planContratoDesdeTurnos, turnoAJornada, vencimientosDe } from './planificacion.mjs';
+import { arcaEnvioIdDe, jornadasDeTurnos, planContratoDesdeTurnos, turnoAJornada, vencimientosDe } from './planificacion.mjs';
 import { armarLote } from './flujo.mjs';
 
 // Los casos de candidatos (motor único `eventualesParaHueco`) están en candidatosUnificados.test.mjs.
@@ -121,5 +121,32 @@ describe('contrato desde turnos', () => {
     const r = planContratoDesdeTurnos({ empresaId: 'bacarsa', bolsa, turnos: [turno({ empresaId: 'grupos_bacar_sa', draft: false })], ahoraMs: ahora });
     assert.equal(r.accion, 'SIN_CAMBIOS');
     assert.equal(r.contrato, null);
+  });
+});
+
+describe('envíos ARCA idempotentes (auditoría 02/10: dos AT URGENTE el mismo segundo)', () => {
+  const contratoId = 'pruebas_sa_20334141463_2026-10';
+  const at = { tipo: 'AT', estado: 'PENDIENTE', canal: 'URGENTE', fechaAlta: '2026-10-02', fechaBaja: '2026-10-02' };
+
+  it('la callable y el trigger calculan el mismo id para la misma AT', () => {
+    assert.equal(arcaEnvioIdDe(contratoId, at, []), 'pruebas_sa_20334141463_2026-10_AT_2026-10-02');
+    assert.equal(arcaEnvioIdDe(contratoId, at, []), arcaEnvioIdDe(contratoId, { ...at, canal: 'LOTE' }, []));
+  });
+
+  it('una AT ya quitada con ese nombre no se pisa: sufijo determinístico', () => {
+    const quitada = { id: 'pruebas_sa_20334141463_2026-10_AT_2026-10-02', tipo: 'AT', quitadoDelLote: true };
+    const id2 = arcaEnvioIdDe(contratoId, at, [quitada]);
+    assert.equal(id2, 'pruebas_sa_20334141463_2026-10_AT_2026-10-02_2');
+    assert.equal(arcaEnvioIdDe(contratoId, at, [quitada, { id: id2 }]), 'pruebas_sa_20334141463_2026-10_AT_2026-10-02_3');
+  });
+
+  it('dos sincronizaciones desde el mismo estado producen una sola AT', () => {
+    const turnos = [{ id: 't1', empresaId: 'e1', bolsaCuil: '20334141463', scheduleDate: '2026-10-02', code: 'EV', startTime: '2026-10-02T15:00:00.000Z', endTime: '2026-10-02T23:00:00.000Z', hours: 8, draft: false }];
+    const bolsa = { cuil: '20334141463' };
+    const planA = planContratoDesdeTurnos({ empresaId: 'e1', bolsa, turnos, contratoActual: null, enviosActuales: [], ahoraMs: Date.parse('2026-10-02T12:55:00.000Z') });
+    const planB = planContratoDesdeTurnos({ empresaId: 'e1', bolsa, turnos, contratoActual: null, enviosActuales: [], ahoraMs: Date.parse('2026-10-02T12:55:00.500Z') });
+    const ids = new Set([...planA.envios, ...planB.envios].filter((e) => e.tipo === 'AT').map((e) => arcaEnvioIdDe(contratoId, e, [])));
+    assert.equal(planA.envios.filter((e) => e.tipo === 'AT').length, 1);
+    assert.equal(ids.size, 1);
   });
 });

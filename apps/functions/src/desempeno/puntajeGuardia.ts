@@ -99,6 +99,8 @@ export interface FuenteTurno {
   avisoLlegada?: boolean;
   completionReason?: string | null;
   earlyWithdrawReason?: string | null;
+  /** El operador revirtió la ausencia (LLEGÓ? / REVERTIR): la falta de ese turno no cuenta. */
+  absenceReverted?: boolean;
 }
 
 export interface FuenteAusencia {
@@ -111,6 +113,21 @@ export interface FuenteAusencia {
   origin?: string | null;
   fechaMs: number;
   reverted?: boolean;
+}
+
+const AUSENCIA_ESTADOS_SIN_EFECTO = new Set(['REVERTIDA', 'REVERTED', 'ANULADA', 'ANULADO', 'CANCELADA', 'CANCELLED', 'RECHAZADA']);
+const AUSENCIA_TIPOS_SIN_FALTA = new Set(['LLEGADA TARDE', 'TARDANZA']);
+
+/**
+ * Una ausencia revertida o anulada no resta. `revertirAusencia` escribe `status: 'Anulada'` + `anuladaAt`
+ * (o la reconvierte a «Llegada Tarde» con `revertedAt`); el turno queda con `absenceRevertedAt`.
+ */
+export function ausenciaSinEfecto(row: Record<string, unknown>): boolean {
+  if (row.revertedAt || row.revertidaAt || row.anuladaAt || row.anuladoAt || row.absenceRevertedAt) return true;
+  const status = String(row.status || '').trim().toUpperCase();
+  if (AUSENCIA_ESTADOS_SIN_EFECTO.has(status)) return true;
+  const tipo = String(row.type || row.tipo || '').trim().toUpperCase();
+  return AUSENCIA_TIPOS_SIN_FALTA.has(tipo);
 }
 
 export interface FuenteConvocatoria {
@@ -235,6 +252,7 @@ export function hechosDesdeFuentes(fuentes: FuentesDesempeno): HechoDesempeno[] 
     if (turno.draft || !turno.startMs) continue;
     const eventual = turno.esEventual === true;
     const ref = turno.id;
+    if (turno.absenceReverted === true) porClave.delete(`FALTA_SIN_AVISO|${ref}`);
     const retiro = codigo(turno.earlyWithdrawReason || turno.completionReason);
     if (retiro === 'ABANDONO') {
       poner({ tipo: 'ABANDONO', fechaMs: turno.startMs, ref, esEventual: eventual });

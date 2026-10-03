@@ -54,6 +54,7 @@ export type CoverageRejectReason =
   | 'TOPE_12_59'
   | 'YA_CONVOCADO'
   | 'SOLAPA_COBERTURA'
+  | 'SOLAPA_TURNO'
   | 'AUSENTE'
   | 'NO_PRESENTE'
   | 'COMPLETADO'
@@ -74,6 +75,7 @@ export const COVERAGE_REJECT_LABEL: Record<CoverageRejectReason, string> = {
   TOPE_12_59: 'Superaría el tope de 12:59 h',
   YA_CONVOCADO: 'Ya está convocado en otro hueco',
   SOLAPA_COBERTURA: 'Ya tiene una cobertura en ese horario',
+  SOLAPA_TURNO: 'Tiene otro turno en ese horario',
   AUSENTE: 'Figura ausente',
   NO_PRESENTE: 'No está fichado en el puesto',
   COMPLETADO: 'El turno ya está cerrado',
@@ -95,6 +97,8 @@ export function coverageRejectMessage(reason: CoverageRejectReason): string {
       return 'No se puede tomar esta cobertura: estás de licencia ese día.';
     case 'SOLAPA_COBERTURA':
       return 'No se puede tomar esta cobertura: ya tenés otra cobertura en ese horario.';
+    case 'SOLAPA_TURNO':
+      return 'No se puede tomar esta cobertura: tenés otro turno en ese horario.';
     case 'YA_CONVOCADO':
       return 'No se puede tomar esta cobertura: ya estás convocado en otro hueco.';
     case 'TOPE_12_59':
@@ -560,7 +564,23 @@ function isRealCoverageWork(sh: CoverageShiftView): boolean {
   return !!sh.startMs && !!sh.endMs && sh.endMs > sh.startMs;
 }
 
-/** Franco ya pasado a FT: otra cobertura el mismo día solo si no solapa, cabe en 12:59 y deja 12 h (art. 197 LCT). */
+/**
+ * Turno de trabajo planificado de la persona (EV de evento, banda de puesto, REF/ESC, custom): quien lo tiene ese
+ * día no está de franco para ese horario. Francos, licencias, RET, borradores, virtuales y registros EXT/ADV no cuentan.
+ */
+function isPlannedWork(sh: CoverageShiftView): boolean {
+  if (sh.coverageSuperseded === true || sh.isDeleted === true || sh.draft === true || sh.isVirtual === true) return false;
+  if (!sh.employeeId || sh.employeeId === 'VACANTE' || sh.isUnassigned === true) return false;
+  if (norm(sh.origin) === 'OPERATIONS_COVERAGE' || sh.coverageHoursOnSource === true) return false;
+  const code = norm(sh.code);
+  if (sh.isFranco === true || FRANCO_CODES.has(code) || code === 'FT' || code === 'RET' || isLicenseCode(code)) return false;
+  return !!sh.startMs && !!sh.endMs && sh.endMs > sh.startMs;
+}
+
+/**
+ * Franco ya pasado a FT u otro turno de trabajo el mismo día: solo si no solapa, cabe en 12:59 y deja 12 h
+ * (art. 197 LCT). Un EV del evento o una banda de puesto que pisa el hueco descarta el FT (`SOLAPA_TURNO`).
+ */
 function ftAlreadyWorked(
   shift: CoverageShiftView,
   input: BuildCoverageCandidatesInput,
@@ -571,10 +591,12 @@ function ftAlreadyWorked(
   const gapDay = arMidnight(gap.startMs);
   let worked = 0;
   for (const sh of input.shifts) {
-    if (sh.employeeId !== shift.employeeId || sh.id === shift.id) continue;
-    if (!isRealCoverageWork(sh)) continue;
-    if (sh.absenceShiftId && sh.absenceShiftId === gap.titularShiftId) return 'SOLAPA_COBERTURA';
-    if (rangesOverlap(sh.startMs, sh.endMs, gap.startMs, gap.endMs)) return 'SOLAPA_COBERTURA';
+    if (sh.employeeId !== shift.employeeId || sh.id === shift.id || sh.id === gap.titularShiftId) continue;
+    const coverage = isRealCoverageWork(sh);
+    const planned = !coverage && isPlannedWork(sh);
+    if (!coverage && !planned) continue;
+    if (coverage && sh.absenceShiftId && sh.absenceShiftId === gap.titularShiftId) return 'SOLAPA_COBERTURA';
+    if (rangesOverlap(sh.startMs, sh.endMs, gap.startMs, gap.endMs)) return coverage ? 'SOLAPA_COBERTURA' : 'SOLAPA_TURNO';
     if (sh.endMs <= gap.startMs && gap.startMs - sh.endMs < COVERAGE_MIN_REST_MS) return 'DESCANSO';
     if (gap.endMs <= sh.startMs && sh.startMs - gap.endMs < COVERAGE_MIN_REST_MS) return 'DESCANSO';
     const touchesGapDay = arMidnight(sh.startMs) === gapDay || arMidnight(sh.endMs - 1) === gapDay;

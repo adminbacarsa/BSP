@@ -34,6 +34,7 @@ type LibPlanificacion = {
     patchesEnvios: { id: string; patch: Record<string, unknown> }[];
   };
   contratoIdDe: (e: string, c: string, p: string) => string;
+  arcaEnvioIdDe: (contratoId: string, envio: Record<string, unknown>, enviosActuales?: { id?: string }[]) => string;
   periodoDe: (f: string) => string;
 };
 
@@ -341,7 +342,7 @@ async function txtDe(empresaId: string, contrato: Record<string, unknown>, cuil:
  * Único escritor de `contratos_eventuales` origen PLANIFICADOR y de sus `arca_envios`.
  */
 export async function sincronizarContratoEventual(empresaId: string, cuil: string, periodo: string, actorUid = 'SYSTEM'): Promise<{ accion: string; contratoId: string; estado: string | null }> {
-  const { planContratoDesdeTurnos, contratoIdDe } = await lib();
+  const { planContratoDesdeTurnos, contratoIdDe, arcaEnvioIdDe } = await lib();
   const contratoId = contratoIdDe(empresaId, cuil, periodo);
   const bolsaSnap = await db().collection('eventuales_bolsa').doc(cuil).get();
   const bolsa = { cuil, ...(bolsaSnap.data() || {}) } as Record<string, unknown> & { cuil: string };
@@ -392,7 +393,8 @@ export async function sincronizarContratoEventual(empresaId: string, cuil: strin
         : tipo === 'AT' || tipo === 'BT'
           ? await txtDe(empresaId, plan.contrato || {}, cuil, bolsa, tipo as 'AT' | 'BT')
           : { txt: null, advertencias: ['MOVIMIENTO_A_CONFIRMAR_CON_CONTADOR'], enviable: false, bruto: 0 };
-    batch.set(db().collection('arca_envios').doc(), {
+    // Id determinístico: la callable y el trigger `onTurnoEventualWrite` corren a la vez y escriben el mismo doc.
+    batch.set(db().collection('arca_envios').doc(arcaEnvioIdDe(contratoId, envio, enviosActuales)), {
       ...envio,
       contratoIds: [contratoId],
       bolsaCuil: cuil,

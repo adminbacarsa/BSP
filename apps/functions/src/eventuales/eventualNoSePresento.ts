@@ -202,6 +202,8 @@ export async function vencerAnulacionesPendientes(db: admin.firestore.Firestore,
   return n;
 }
 
+class ManualModeSkip extends Error {}
+
 export async function aplicarEventualNoSePresento(
   db: admin.firestore.Firestore,
   opts: { shiftId?: string; solicitudId?: string; aviso: boolean; actorUid: string; ahoraMs?: number },
@@ -480,9 +482,16 @@ export async function aplicarEventualNoSePresento(
     novedadId = novRef.id;
   }
 
+  // Misma regla que el trigger y `gestionarVacantes`: con la sala del CC en Manual el operador cubre el hueco, no la cascada.
   let reconvocado = false;
+  let cascadaOmitida: 'MANUAL' | null = null;
   try {
     const fresco = (await shiftRef.get()).data() || {};
+    const { isEmpresaManualMode } = await import('../ops/opsManualMode');
+    if (await isEmpresaManualMode(db, empresaId)) {
+      cascadaOmitida = 'MANUAL';
+      throw new ManualModeSkip();
+    }
     const { iniciarCascadaCobertura } = await import('../coverage/convocatoriasCobertura');
     await iniciarCascadaCobertura(db, {
       id: shiftId,
@@ -498,7 +507,10 @@ export async function aplicarEventualNoSePresento(
     }, opts.aviso ? 'EVENTUAL_NO_PUEDE' : 'EVENTUAL_AUSENTE');
     reconvocado = true;
   } catch (err) {
-    console.warn('[eventualNoSePresento] cascada:', (err as Error)?.message);
+    if (!(err instanceof ManualModeSkip)) console.warn('[eventualNoSePresento] cascada:', (err as Error)?.message);
+  }
+  if (cascadaOmitida) {
+    await shiftRef.update({ cascadeSkippedReason: cascadaOmitida, cascadeSkippedAt: FieldValue.serverTimestamp() });
   }
 
   const auditRef = await db.collection('audit_logs').add({
@@ -507,7 +519,7 @@ export async function aplicarEventualNoSePresento(
     actorUid: opts.actorUid,
     empresaId,
     bolsaCuil: cuil || null,
-    details: `${opts.aviso ? 'Avisó que no va' : 'Faltó sin avisar'}. ARCA ${plan.arca.accion}. Desempeño ${plan.desempeno}.`,
+    details: `${opts.aviso ? 'Avisó que no va' : 'Faltó sin avisar'}. ARCA ${plan.arca.accion}. Desempeño ${plan.desempeno}.${cascadaOmitida ? ' Cascada omitida: sala en Manual.' : ''}`,
     turnoId: shiftId,
     solicitudId: solicitudSnap?.id || null,
     envioId,
