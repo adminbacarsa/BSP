@@ -5,12 +5,12 @@ Tres workflows para importar. No traen claves. La clave fiscal se carga en COSP 
 | Archivo | Dónde | Qué hace |
 |---|---|---|
 | `arca-local-lotes.json` | n8n local `https://192.168.0.8:5678` (alias `https://autbacar.dnsalias.com`) | 18:00 altas AT, 09:00 bajas BT (hora Argentina) y webhook `urgente` |
-| `arca-local-robot.json` | el mismo n8n local | Playwright: login, Simplificación Registral, carga masiva, número de transacción, confirma en COSP |
+| `arca-local-robot.json` | el mismo n8n local | Playwright: carga masiva y, de a una, anulación (`--modo anular --envio ID`) |
 | `arca-cloud-respaldo-urgente.json` | `https://bacarit.app.n8n.cloud/` | si un AT/BT urgente no se confirmó en N minutos, mail a RRHH con el link de carga manual |
 
 Los JSON viejos `arca-local-playwright.json` y `arca-cloud-link-mágico.json` quedan de referencia. El que se importa para el aviso es el de respaldo: el link mágico lo emite COSP (`link-emitir`), igual que ese borrador.
 
-COSP llama al webhook cuando un AT o BT pasa a canal URGENTE (`onArcaEnvioUrgente`). Cloud Functions no llega a `192.168.0.8`: la URL tiene que ser el alias público.
+COSP llama al webhook cuando un AT o BT pasa a canal URGENTE, y cuando una anulación entra en `PENDIENTE` (`onArcaEnvioUrgente`, tipo `ANULACION`). El flujo de lotes, en ese caso, no arma TXT: llama al robot con `--modo anular --envio ID`. Cloud Functions no llega a `192.168.0.8`: la URL tiene que ser el alias público.
 
 ## Instalar en la PC del n8n
 
@@ -91,7 +91,7 @@ x-arca-key: LA_MISMA_QUE_ARCA_ROBOT_KEY
 {"empresaId":"ID_DE_LA_EMPRESA","tipo":"AT","canal":"URGENTE"}
 ```
 
-4. El flujo de lotes pide `GET ?action=lote`, guarda el TXT en `ARCA_TXT_DIR` y llama al robot. El robot **no entra a ARCA** y confirma en COSP con un número `SIM-...` y origen ROBOT.
+4. El flujo de lotes pide `GET ?action=lote`, guarda el TXT en `ARCA_TXT_DIR` y llama al robot. El robot **no entra a ARCA** y confirma en COSP con un número `SIM-...` y origen ROBOT. Una anulación en simulación confirma con `SIM-ANUL-...` y tampoco pide la clave.
 5. Revisar en `arca_envios` que el lote quedó `CONFIRMADO` con ese número. No tiene que haber login a AFIP.
 6. Para el respaldo: un urgente que siga `PENDIENTE` más de N minutos. Cloud pide `GET ?action=vencidos`. COSP emite el link (y el push a quien tenga el aviso `ARCA_ALTA_PENDIENTE` o `ARCA_BAJA_PENDIENTE`) y el nodo Gmail manda el estado y el link. Un envío se avisa una sola vez.
 
@@ -105,13 +105,18 @@ Los horarios 18:00 (AT, canal LOTE) y 09:00 (BT, canal LOTE) ya estan en el JSON
 4. Si falla, reintenta (`ARCA_ROBOT_REINTENTOS`, default 3), guarda una captura en `ARCA_SHOTS_DIR` y marca el lote `ERROR` con el detalle. Esos envios vuelven a entrar en el próximo lote.
 5. Un `SUBIENDO` de más de 20 minutos (el proceso murio) también vuelve al lote.
 
-La primera corrida real puede pedir un ajuste de selector si AFIP cambio la pantalla. La captura del error muestra donde se corto. No hace falta tocar COSP para eso: es `scripts/arca-robot/subir.mjs`.
+La primera corrida real puede pedir un ajuste de selector si AFIP cambio la pantalla. La captura del error muestra donde se corto. Los selectores de la anulación están en `scripts/arca-robot/selectores.json`. Con credenciales reales y `ARCA_SIMULACION=0`, `node scripts/arca-robot/subir.mjs --modo explorar --envio ID --empresa EMPRESA` recorre hasta la búsqueda y **no confirma**.
+
+## Anulación automática
+
+Al entrar en `PENDIENTE`, COSP avisa el webhook urgente. El robot busca el alta por CUIL y fecha (AAAAMMDD) o por el número de transacción, anula, lee el acuse y hace `POST ?action=resultado` con `estado: ANULADO` y origen ROBOT. Si falla 2 veces, o faltan menos de 2 horas para el plazo RG 2988, el envío queda `MANUAL` en ARCA pendientes y se avisa a RRHH. Si el plazo vence, sigue la baja código 30.
 
 ## Endpoints (header `x-arca-key`)
 
 | Accion | Uso |
 |---|---|
 | `GET ?action=lote&tipo=AT\|BT&canal=LOTE\|URGENTE[&empresaId=]` | TXT unico por empresa. Pasa esos envios a `SUBIENDO` y les pone `loteId`. No incluye `enviable: false` ni los quitados del lote. |
+| `GET ?action=anulacion&envioId=` | Datos de una anulación: CUIL, fecha AAAAMMDD, nro de transacción del alta y `cuitRepresentado`. Si faltan menos de 2 h o el robot ya falló 2 veces, responde `MANUAL` y no hay que entrar a ARCA. |
 | `POST ?action=resultado` | `{ loteId o envioId, estado, nroTransaccion?, nrosTransaccion?, constanciaUrl?, error? }`. Confirmar exige número. Un lote confirmado comparte el mismo número. |
 | `GET ?action=vencidos&minutos=N` | AT/BT urgentes sin confirmar hace más de N minutos. No devuelve el TXT. |
 | `POST ?action=link-emitir` | `{ envioId, marcarRespaldo: true }` link de un solo uso. El push lo manda COSP. |

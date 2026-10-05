@@ -1,0 +1,12 @@
+{
+  "_nota": "Textos y roles de la web de ARCA. No hay capturas reales: ajustar con --modo explorar (no confirma).",
+  "simplificacionRegistral": { "role": "link", "name": "Simplificaci[oó]n Registral" },
+  "relacionesLaborales": { "role": "link", "name": "Relaciones [Ll]aborales" },
+  "anularRegistro": { "role": "link", "name": "Anular" },
+  "cuil": { "label": "CUIL" },
+  "fechaInicio": { "label": "Fecha" },
+  "nroTransaccion": { "label": "Transacci" },
+  "buscar": { "role": "button", "name": "Buscar" },
+  "anular": { "role": "button", "name": "Anular" },
+  "confirmar": { "role": "button", "name": "Confirmar|Aceptar" }
+}

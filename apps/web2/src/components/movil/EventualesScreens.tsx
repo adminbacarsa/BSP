@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { cuentaRegresivaAnulacion, PASOS_ANULACION_MANUAL } from '@/lib/eventuales/plazoAnulacion.mjs';
+import { cuentaRegresivaAnulacion, PASOS_ANULACION_MANUAL, textoEstadoAnulacion } from '@/lib/eventuales/plazoAnulacion.mjs';
 import { BottomSheet } from './BottomSheet';
 import { MovilBadge } from './ui/MovilBadge';
 import { MovilTopBar } from './ui/MovilTopBar';
@@ -43,11 +43,13 @@ export type ArcaMovil = {
   estado: string;
   fecha: string;
   nroTransaccion: string;
-  /** Anulación manual: CUIL de 11 dígitos, fecha AAAAMMDD y transacción del alta. */
+  /** Anulación: CUIL de 11 dígitos, fecha AAAAMMDD y transacción del alta. */
   cuil11?: string;
   fechaInicioArca?: string;
   nroTransaccionAlta?: string;
   venceAnulacionMs?: number;
+  acuseAnulacion?: string;
+  manualMotivo?: string;
   pasos?: string[];
   observacionesInternas?: string;
   revista?: string;
@@ -94,18 +96,23 @@ function AnulacionManualMovil(props: {
   enviando?: boolean;
 }) {
   const plazo = cuentaRegresivaAnulacion(props.envio.venceAnulacionMs, props.ahoraMs ?? Date.now());
+  const manual = props.envio.estado === 'MANUAL';
   const pasos = props.envio.pasos?.length ? props.envio.pasos : PASOS_ANULACION_MANUAL;
   return (
-    <div data-anulacion-manual="1" className="mt-2 space-y-2">
-      <p className="text-[12px] font-medium text-slate-500">Tarea manual en la web de ARCA. No se arma TXT por lote.</p>
+    <div data-anulacion-estado={props.envio.estado} className="mt-2 space-y-2">
+      <p className="text-[12px] font-semibold text-slate-800" data-anula-estado="1">{textoEstadoAnulacion(props.envio)}</p>
       <dl className="space-y-1 text-[13px] font-semibold tabular-nums text-slate-900">
         <div className="flex justify-between gap-2"><dt className="font-medium text-slate-500">CUIL</dt><dd data-anula-cuil="1">{props.envio.cuil11 || '—'}</dd></div>
         <div className="flex justify-between gap-2"><dt className="font-medium text-slate-500">Fecha de inicio</dt><dd data-anula-fecha="1">{props.envio.fechaInicioArca || '—'}</dd></div>
         <div className="flex justify-between gap-2"><dt className="font-medium text-slate-500">Transacción del alta</dt><dd data-anula-nro="1">{props.envio.nroTransaccionAlta || '—'}</dd></div>
       </dl>
-      <p data-anula-plazo={plazo.vencido ? 'vencido' : 'abierto'} className={`text-[12px] font-semibold ${plazo.vencido ? 'text-rose-700' : 'text-slate-700'}`}>
-        Plazo RG 2988 · {plazo.texto}
-      </p>
+      {props.envio.estado !== 'ANULADO' && (
+        <p data-anula-plazo={plazo.vencido ? 'vencido' : 'abierto'} className={`text-[12px] font-semibold ${plazo.vencido ? 'text-rose-700' : 'text-slate-700'}`}>
+          Plazo RG 2988 · {plazo.texto}
+        </p>
+      )}
+      {manual && (
+      <div data-anulacion-manual="1" className="space-y-2">
       <ol className="list-decimal space-y-1 pl-4 text-[12px] font-medium text-slate-600">
         {pasos.map((paso) => <li key={paso}>{paso}</li>)}
       </ol>
@@ -124,6 +131,8 @@ function AnulacionManualMovil(props: {
       >
         {plazo.vencido ? 'Plazo vencido' : props.enviando ? 'Guardando…' : 'Registrar acuse'}
       </button>
+      </div>
+      )}
     </div>
   );
 }
@@ -166,7 +175,7 @@ export function EventualesScreens(props: {
   arcaId: string;
   onArca: (id: string) => void;
   onConfirmarArca: () => void;
-  /** Acuse de la anulación hecha a mano en la web de ARCA. */
+  /** Acuse si la anulación quedó para cargar a mano. */
   acuse?: string;
   onAcuse?: (value: string) => void;
   onRegistrarAcuse?: () => void;
@@ -345,7 +354,7 @@ export function EventualesScreens(props: {
               )}
               {pendientes.length === 0 && props.arcaCargando && <li className={`${MOVIL_CARD} p-4 text-sm font-semibold text-slate-500`}>Buscando envíos…</li>}
             </ul>
-            <section className={`${MOVIL_CARD} p-4`} data-movil-arca-form={envioElegido ? envioElegido.id : 'sin-envio'} data-arca-tarea={envioElegido?.tipo === 'ANULACION' ? 'manual' : 'transaccion'}>
+            <section className={`${MOVIL_CARD} p-4`} data-movil-arca-form={envioElegido ? envioElegido.id : 'sin-envio'} data-arca-tarea={envioElegido?.tipo === 'ANULACION' ? (envioElegido.estado === 'MANUAL' ? 'manual' : 'robot') : 'transaccion'}>
               <h2 className="text-sm font-semibold text-slate-900">
                 {envioElegido ? `${arcaTipoTexto(envioElegido.tipo)} ${envioElegido.tipo} · ${envioElegido.nombre}` : 'Elegí un envío de la lista'}
               </h2>
@@ -389,7 +398,7 @@ export function EventualesScreens(props: {
                       </div>
                       <p className="mt-1 text-[12px] font-medium tabular-nums text-slate-500">
                         <span className="font-semibold text-slate-900">{arcaTipoTexto(envio.tipo)} {envio.tipo}</span>
-                        {envio.nroTransaccion ? ` · Transacción ${envio.nroTransaccion}` : ''}
+                        {envio.tipo === 'ANULACION' && envio.acuseAnulacion ? ` · Anulada (acuse ${envio.acuseAnulacion})` : envio.nroTransaccion ? ` · Transacción ${envio.nroTransaccion}` : ''}
                       </p>
                     </li>
                   ))}

@@ -121,7 +121,13 @@ export const gestionarEventual = functions.https.onCall(async (data, context) =>
     const { vencerAnulacionesPendientes } = await import('./eventualNoSePresento');
     await vencerAnulacionesPendientes(db(), Date.now());
     const snap = await db().collection('arca_envios').where('empresaId', '==', empresaId).limit(80).get();
-    const abiertos = snap.docs.filter((doc) => ['PENDIENTE', 'ERROR', 'MANUAL', 'SUBIENDO'].includes(String(doc.data().estado || '')) && doc.data().quitadoDelLote !== true);
+    const abiertos = snap.docs.filter((doc) => {
+      const row = doc.data();
+      if (row.quitadoDelLote === true) return false;
+      const estado = String(row.estado || '');
+      if (['PENDIENTE', 'ERROR', 'MANUAL', 'SUBIENDO'].includes(estado)) return true;
+      return row.tipo === 'ANULACION' && estado === 'ANULADO';
+    });
     const fichaCache = new Map<string, Promise<admin.firestore.DocumentSnapshot | null>>();
     const fichaDe = (cuil: string): Promise<admin.firestore.DocumentSnapshot | null> => {
       if (!cuil) return Promise.resolve(null);
@@ -171,7 +177,9 @@ export const gestionarEventual = functions.https.onCall(async (data, context) =>
         carga: String(row.carga || ''),
         observacionesInternas: String(row.observacionesInternas || ''),
         revista: String(row.revista || ''),
-        pasos: row.tipo === 'ANULACION' ? PASOS_ANULACION_MANUAL : [],
+        pasos: row.tipo === 'ANULACION' && row.estado === 'MANUAL' ? PASOS_ANULACION_MANUAL : [],
+        acuseAnulacion: String(row.acuseAnulacion || ''),
+        manualMotivo: String(row.manualMotivo || ''),
       };
     }));
     envios.sort((a, b) => (a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : 0));

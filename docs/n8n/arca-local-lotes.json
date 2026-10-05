@@ -137,7 +137,7 @@
       "parameters": {
         "mode": "runOnceForAllItems",
         "language": "javaScript",
-        "jsCode": "const item = $input.first().json;\nconst body = item.body && typeof item.body === 'object' ? item.body : item;\nconst headers = item.headers || {};\nconst key = String(headers['x-arca-key'] || headers['X-Arca-Key'] || '');\nconst expected = String($env.ARCA_ROBOT_KEY || '');\nif (!expected || key !== expected) throw new Error('NO_AUTORIZADO');\nconst tipo = String(body.tipo || 'AT').toUpperCase() === 'BT' ? 'BT' : 'AT';\nreturn [{ json: { tipo, canal: 'URGENTE', empresaId: String(body.empresaId || '') } }];"
+        "jsCode": "const item = $input.first().json;\nconst body = item.body && typeof item.body === 'object' ? item.body : item;\nconst headers = item.headers || {};\nconst key = String(headers['x-arca-key'] || headers['X-Arca-Key'] || '');\nconst expected = String($env.ARCA_ROBOT_KEY || '');\nif (!expected || key !== expected) throw new Error('NO_AUTORIZADO');\nconst tipoRaw = String(body.tipo || 'AT').toUpperCase();\nif (tipoRaw === 'ANULACION') {\n  const ids = Array.isArray(body.envioIds) ? body.envioIds.map((id) => String(id || '').trim()).filter(Boolean) : [];\n  if (!ids.length) throw new Error('FALTA_ENVIO');\n  return ids.map((envioId) => ({ json: { modo: 'anular', envioId, empresaId: String(body.empresaId || ''), tipo: 'ANULACION' } }));\n}\nconst tipo = tipoRaw === 'BT' ? 'BT' : 'AT';\nreturn [{ json: { modo: 'lote', tipo, canal: 'URGENTE', empresaId: String(body.empresaId || '') } }];"
       },
       "id": "ver-wh",
       "name": "Verificar clave y normalizar",
@@ -278,6 +278,68 @@
         960,
         80
       ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "anul",
+              "leftValue": "={{ $json.modo }}",
+              "rightValue": "anular",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "es-anul",
+      "name": "Es anulacion",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -140,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_ROBOT_WEBHOOK }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-arca-key",
+              "value": "={{ $env.ARCA_ROBOT_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ modo: 'anular', envioId: $json.envioId, empresaId: $json.empresaId }) }}",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "id": "disp-anul",
+      "name": "Disparar anulacion",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        80,
+        360
+      ]
     }
   ],
   "connections": {
@@ -340,7 +402,7 @@
       "main": [
         [
           {
-            "node": "GET lote por empresa",
+            "node": "Es anulacion",
             "type": "main",
             "index": 0
           }
@@ -397,6 +459,24 @@
         [
           {
             "node": "Disparar robot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Es anulacion": {
+      "main": [
+        [
+          {
+            "node": "Disparar anulacion",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "GET lote por empresa",
             "type": "main",
             "index": 0
           }

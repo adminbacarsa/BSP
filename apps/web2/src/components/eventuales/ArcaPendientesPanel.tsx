@@ -3,7 +3,7 @@ import { httpsCallable } from 'firebase/functions';
 import { Landmark } from 'lucide-react';
 import { toast } from 'sonner';
 import { functions } from '@/lib/firebase';
-import { cuentaRegresivaAnulacion, PASOS_ANULACION_MANUAL } from '@/lib/eventuales/plazoAnulacion.mjs';
+import { cuentaRegresivaAnulacion, PASOS_ANULACION_MANUAL, textoEstadoAnulacion } from '@/lib/eventuales/plazoAnulacion.mjs';
 
 type Envio = {
   id: string;
@@ -19,6 +19,8 @@ type Envio = {
   pasos: string[];
   observacionesInternas: string;
   revista: string;
+  acuseAnulacion?: string;
+  manualMotivo?: string;
 };
 
 function etiqueta(tipo: string): string {
@@ -123,22 +125,27 @@ export default function ArcaPendientesPanel(props: { empresaId: string; empresaN
         </ul>
       </div>
       <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
-        {!envio && <p className="text-sm text-slate-500">Elegí un envío. La anulación de alta se hace a mano en ARCA y el acuse se carga acá.</p>}
+        {!envio && <p className="text-sm text-slate-500">Elegí un envío.</p>}
         {envio && envio.tipo === 'ANULACION' && (
-          <div data-anulacion-manual="1" className="space-y-3">
-            <h3 className="text-sm font-black text-slate-800">Anulación manual · {envio.nombre}</h3>
-            <p className="text-xs text-slate-500">Simplificación Registral → Relaciones Laborales → Anular Registro. No se genera TXT por lote.</p>
+          <div data-anulacion-estado={envio.estado} className="space-y-3">
+            <h3 className="text-sm font-black text-slate-800" data-anula-estado="1">{textoEstadoAnulacion(envio)} · {envio.nombre}</h3>
+            {envio.estado === 'MANUAL' && <p className="text-xs text-slate-500">Simplificación Registral → Relaciones Laborales → Anular Registro.</p>}
+            {envio.estado !== 'MANUAL' && envio.estado !== 'ANULADO' && <p className="text-xs text-slate-500">El robot la está cargando en ARCA.</p>}
             <dl className="grid grid-cols-2 gap-2 text-sm">
               <div className="rounded-xl bg-white px-3 py-2"><dt className="text-[10px] font-bold uppercase text-slate-400">CUIL</dt><dd className="font-bold tabular-nums" data-anula-cuil="1">{envio.cuil || '—'}</dd></div>
               <div className="rounded-xl bg-white px-3 py-2"><dt className="text-[10px] font-bold uppercase text-slate-400">Fecha de inicio</dt><dd className="font-bold tabular-nums" data-anula-fecha="1">{envio.fechaInicioArca || '—'}</dd></div>
               <div className="col-span-2 rounded-xl bg-white px-3 py-2"><dt className="text-[10px] font-bold uppercase text-slate-400">Transacción del alta</dt><dd className="font-bold tabular-nums" data-anula-nro="1">{envio.nroTransaccionAlta || '—'}</dd></div>
             </dl>
-            <p data-anula-plazo={plazo?.vencido ? 'vencido' : 'abierto'} className={`text-sm font-bold ${plazo?.vencido ? 'text-rose-700' : 'text-slate-700'}`}>Plazo RG 2988 · {plazo?.texto}</p>
-            <ol className="list-decimal space-y-1 pl-4 text-xs font-medium text-slate-600">{pasos.map((paso) => <li key={paso}>{paso}</li>)}</ol>
-            <input value={acuse} onChange={(e) => setAcuse(e.target.value)} placeholder="Acuse de anulación" disabled={plazo?.vencido === true || !props.puedeConfirmar} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm disabled:bg-slate-100" />
-            <button type="button" onClick={registrarAcuse} disabled={plazo?.vencido === true || acuse.trim().length < 3 || enviando || !props.puedeConfirmar} className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-40">
-              {plazo?.vencido ? 'Plazo vencido' : enviando ? 'Guardando…' : 'Registrar acuse'}
-            </button>
+            {envio.estado !== 'ANULADO' && <p data-anula-plazo={plazo?.vencido ? 'vencido' : 'abierto'} className={`text-sm font-bold ${plazo?.vencido ? 'text-rose-700' : 'text-slate-700'}`}>Plazo RG 2988 · {plazo?.texto}</p>}
+            {envio.estado === 'MANUAL' && (
+              <div data-anulacion-manual="1" className="space-y-3">
+                <ol className="list-decimal space-y-1 pl-4 text-xs font-medium text-slate-600">{pasos.map((paso) => <li key={paso}>{paso}</li>)}</ol>
+                <input value={acuse} onChange={(e) => setAcuse(e.target.value)} placeholder="Acuse de anulación" disabled={plazo?.vencido === true || !props.puedeConfirmar} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm disabled:bg-slate-100" />
+                <button type="button" onClick={registrarAcuse} disabled={plazo?.vencido === true || acuse.trim().length < 3 || enviando || !props.puedeConfirmar} className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-40">
+                  {plazo?.vencido ? 'Plazo vencido' : enviando ? 'Guardando…' : 'Registrar acuse'}
+                </button>
+              </div>
+            )}
           </div>
         )}
         {envio && envio.tipo !== 'ANULACION' && (
