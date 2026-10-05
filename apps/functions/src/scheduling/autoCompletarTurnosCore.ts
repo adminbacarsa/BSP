@@ -92,6 +92,27 @@ function shiftStartMs(data: FirebaseFirestore.DocumentData): number {
   return data.startTime?.toMillis?.() ?? 0;
 }
 
+/** Hay un turno del mismo puesto y la misma serie que ocupa la franja del ausente. */
+function assignmentCoversAbsent(
+  docs: QueryDocumentSnapshot[],
+  absent: QueryDocumentSnapshot,
+): boolean {
+  const code = seriesCodeOf(absent.data() as Record<string, unknown>);
+  const start = shiftStartMs(absent.data());
+  return docs.some((docSnap) => {
+    if (docSnap.id === absent.id) return false;
+    const row = docSnap.data() as Record<string, unknown>;
+    if (row.isAbsent === true || String(row.status || '').toUpperCase() === 'ABSENT') return false;
+    if (row.isCompleted === true || !isReliefEligibleShift(row)) return false;
+    const employeeId = String(row.employeeId || '').trim();
+    if (!employeeId || employeeId === 'VACANTE' || row.isUnassigned === true) return false;
+    const their = seriesCodeOf(row);
+    if (code && their && their !== code) return false;
+    const st = shiftStartMs(docSnap.data());
+    return st > 0 && start > 0 && Math.abs(st - start) <= RELEVO_ALIGN_MS;
+  });
+}
+
 /**
  * Relevo válido: turno que toma la franja del puesto (no ESC/REF/RET ni francos/licencias),
  * mismo puesto, start en [end−30m, end+2h], no compañero en curso (empezó antes de end−30m).
@@ -701,6 +722,29 @@ export async function runAutoCompletarTurnosPass(
       continue;
     }
 
+    const linkedEarly = String(shift.retentionAbsenceShiftId || '').trim();
+    if (linkedEarly && (shift.isRetention === true || shift.retentionPlannedFor) && !shift.manualRetentionType) {
+      const gapSnap = await db.collection('turnos').doc(linkedEarly).get();
+      if (!gapSnap.exists) {
+        if (!dryRun) {
+          await docSnap.ref.update({
+            isRetention: false,
+            retentionReleasedAt: Timestamp.now(),
+            releasedBy: 'VINCULO_HUERFANO',
+            retentionReason: admin.firestore.FieldValue.delete(),
+            retentionKind: admin.firestore.FieldValue.delete(),
+            retentionAbsenceShiftId: admin.firestore.FieldValue.delete(),
+            retentionPlannedFor: admin.firestore.FieldValue.delete(),
+            retentionPlannedKind: admin.firestore.FieldValue.delete(),
+          }).catch(() => undefined);
+        }
+        shift.isRetention = false;
+        shift.retentionAbsenceShiftId = null;
+        shift.retentionPlannedFor = null;
+        actions.push(describe(docSnap.id, shift, 'WAIT', 'VINCULO_HUERFANO', { gapShiftId: linkedEarly }));
+      }
+    }
+
     if (shift.isRetention === true) {
       // El hueco que motivó la retención ya terminó y el puesto no sigue (sin franja siguiente
       // ±30 min): el retenido cierra al fin del hueco. Auditoría 29/09: FARIAS (Peaje, M3 12–16)
@@ -752,7 +796,7 @@ export async function runAutoCompletarTurnosPass(
         close(docSnap, shift, endTimeMs, 'SIN_CONTINUIDAD_SLA');
         continue;
       }
-      if (relieveAbsent) {
+      if (relieveAbsent && !assignmentCoversAbsent(relieveDocs, relieveAbsent)) {
         const absentData = relieveAbsent.data();
         if (isGapCovered(absentData)) {
           // Hueco ya cubierto (cubridor en camino): espera sin re-notificar la retención.
@@ -770,7 +814,7 @@ export async function runAutoCompletarTurnosPass(
             await retainOutgoingForGap(
               db,
               { ...absentData, id: relieveAbsent.id },
-              { sendPush: true, reportedBy: 'AUTO' },
+              { sendPush: true, reportedBy: 'AUTO', nowMs },
             );
           }
           actions.push(describe(docSnap.id, shift, 'RETAIN', 'AUSENCIA_RELEVO', { gapShiftId: relieveAbsent.id }));

@@ -2756,17 +2756,21 @@ async function run() {
         recordedAt: new Date(gap - 13 * 60 * 1000).toISOString(),
       });
       const baezAfter = (await db.collection('turnos').doc(baez).get()).data();
-      const ret = await retainOutgoingForGap(db, {
-        id: guerrero, ...(await db.collection('turnos').doc(guerrero).get()).data(),
-      }, { sendPush: false });
+      const titular = { id: guerrero, ...(await db.collection('turnos').doc(guerrero).get()).data() };
+      const planned = await retainOutgoingForGap(db, titular, { sendPush: false, nowMs: gap - 13 * 60 * 1000 });
+      const baezPlan = (await db.collection('turnos').doc(baez).get()).data();
+      const ret = await retainOutgoingForGap(db, titular, { sendPush: false, nowMs: gap + 1000 });
       const baezRet = (await db.collection('turnos').doc(baez).get()).data();
       const ok = !fichada.relieved
         && !baezAfter?.relievedBy
+        && planned.planned === true
+        && planned.shiftIds.includes(baez)
+        && baezPlan?.isRetention !== true
+        && !!baezPlan?.retentionPlannedFor
         && ret.applied === true
-        && ret.shiftIds.includes(baez)
         && baezRet?.isRetention === true;
-      report(71, ok, ok ? 'Farias M3 no releva a Baez M; Baez queda retenido por Guerrero T'
-        : `relieved=${fichada.relieved?.employeeName} by=${baezAfter?.relievedBy} ret=${ret.shiftIds?.join(',') || ret.skippedReason}`);
+      report(71, ok, ok ? 'Farias M3 no releva a Baez M; retención de Guerrero recién a T+0'
+        : `relieved=${fichada.relieved?.employeeName} by=${baezAfter?.relievedBy} plan=${planned.planned} ret=${baezRet?.isRetention} ${ret.skippedReason || ''}`);
     }
 
     // Caso 72 — Fantini M2 lo releva Fontana T2, no un T de otra serie

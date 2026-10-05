@@ -1,5 +1,5 @@
 import { isReliefEligibleShift } from './reliefEligibility';
-import { SHIFT_SERIES_ALIGN_MS, relieverFor, reliefPositionsMatch, seriesBoundMs, type SeriesShift } from './shiftSeries';
+import { SHIFT_SERIES_ALIGN_MS, relieverFor, reliefPositionsMatch, seriesBoundMs, seriesCodeOf, seriesHandoffKind, type SeriesShift } from './shiftSeries';
 
 /** Espejo de `SHIFT_HARD_CAP_MS` (apps/functions/src/scheduling/shiftClose.ts). */
 export const RETENTION_HARD_CAP_MS = (12 * 60 + 59) * 60 * 1000;
@@ -86,13 +86,85 @@ type WaitShift = SeriesShift & {
   employeeId?: unknown;
   employeeName?: unknown;
   code?: unknown;
+  positionName?: unknown;
   isPresent?: unknown;
   isCompleted?: unknown;
   isAbsent?: unknown;
   status?: unknown;
   isUnassigned?: unknown;
+  manualRetentionType?: unknown;
+  operacionallyCovered?: unknown;
+  plannedOperativelyCovered?: unknown;
+  coverageStatus?: unknown;
   retentionAbsenceShiftId?: unknown;
 };
+
+function rowIsAbsent(row: WaitShift): boolean {
+  return row.isAbsent === true || String(row.status || '').toUpperCase() === 'ABSENT';
+}
+
+function rowIsCovered(row: WaitShift): boolean {
+  return row.operacionallyCovered === true
+    || row.plannedOperativelyCovered === true
+    || String(row.coverageStatus || '').toUpperCase() === 'COVERED';
+}
+
+function apellidoDe(name: unknown): string {
+  const raw = String(name || '').trim();
+  const head = raw.split(',')[0]?.trim() || raw;
+  return head || 'relevo';
+}
+
+/**
+ * Antes del fin del saliente, si el relevo de la serie está ausente y nadie
+ * ocupa esa franja: «Relevo ausente: VENENCIA (T3 16:00) · sin cubrir».
+ * Con el hueco cubierto, o pasada la hora, no dice nada (ahí ya es RETENIDO).
+ */
+export function relevoAusenteAviso(
+  shift: WaitShift,
+  sameObjectiveShifts: readonly WaitShift[],
+  now: Date | number,
+): string | null {
+  if (shift.isPresent !== true || shift.isCompleted === true || shift.manualRetentionType) return null;
+  const nowMs = typeof now === 'number' ? now : now.getTime();
+  const endMs = seriesBoundMs(shift, 'end');
+  if (!endMs || nowMs >= endMs) return null;
+  const oid = String(shift.objectiveId || '').trim();
+  const pool = sameObjectiveShifts.filter((row) => {
+    if (!row || row === shift) return false;
+    if (row.id && shift.id && String(row.id) === String(shift.id)) return false;
+    if (oid && String(row.objectiveId || '').trim() !== oid) return false;
+    return true;
+  });
+  const absent = pool.filter((row) => {
+    if (!rowIsAbsent(row) || rowIsCovered(row)) return false;
+    if (!reliefPositionsMatch(row.positionName, shift.positionName)) return false;
+    const start = seriesBoundMs(row, 'start');
+    if (!start || Math.abs(start - endMs) > SHIFT_SERIES_ALIGN_MS) return false;
+    if (seriesHandoffKind(seriesCodeOf(shift), seriesCodeOf(row)) === 'REJECT') return false;
+    const coveredByAssignment = pool.some((other) => {
+      if (other === row || String(other.id || '') === String(row.id || '')) return false;
+      if (rowIsAbsent(other) || other.isCompleted === true || other.isUnassigned === true) return false;
+      const employeeId = String(other.employeeId || '').trim();
+      if (!employeeId || employeeId === 'VACANTE') return false;
+      if (!isReliefEligibleShift(other)) return false;
+      if (!reliefPositionsMatch(other.positionName, row.positionName)) return false;
+      const their = seriesCodeOf(other);
+      const gapCode = seriesCodeOf(row);
+      if (gapCode && their && their !== gapCode) return false;
+      const otherStart = seriesBoundMs(other, 'start');
+      return otherStart > 0 && Math.abs(otherStart - start) <= SHIFT_SERIES_ALIGN_MS;
+    });
+    return !coveredByAssignment;
+  });
+  const linkedId = String(shift.retentionAbsenceShiftId || '').trim();
+  const picked = (linkedId ? absent.find((row) => String(row.id || '') === linkedId) : undefined) ?? absent[0];
+  if (!picked) return null;
+  const code = String(picked.code || seriesCodeOf(picked) || '').trim().toUpperCase();
+  const hm = formatHmAR(seriesBoundMs(picked, 'start'));
+  const slot = [code, hm].filter(Boolean).join(' ');
+  return `Relevo ausente: ${apellidoDe(picked.employeeName)} (${slot}) · sin cubrir`;
+}
 
 function workStartMs(shift: WaitShift): number {
   return readMs(shift.realStartTime) || readMs(shift.checkInTime) || readMs(shift.checkInAt) || seriesBoundMs(shift, 'start');

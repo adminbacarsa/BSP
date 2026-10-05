@@ -605,6 +605,7 @@ export function GuardCard({
           {c.tope && <MiniItem icon={Hourglass} attr="tope" className="text-orange-600">{c.tope}</MiniItem>}
           {c.cierre && <MiniItem icon={Clock} attr="cierre" className="text-slate-500">{c.cierre}</MiniItem>}
           {c.relevo && <MiniItem icon={ArrowRightLeft} attr="relevo" className="text-slate-600">{c.relevo.apellido} {c.relevo.hhmm}</MiniItem>}
+          {c.avisoRelevo && <span className="truncate text-slate-600" data-relevo-ausente="1">{c.avisoRelevo}</span>}
           {c.respuesta && <MiniItem icon={MessageSquare} attr="respuesta" className="text-amber-600">resp. {c.respuesta.hhmm}{c.respuesta.eta ? ` ~${c.respuesta.eta}` : ''}</MiniItem>}
           {c.nota && <MiniItem icon={StickyNote} attr="nota" className="text-slate-600">{c.nota}</MiniItem>}
         </span>
