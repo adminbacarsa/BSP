@@ -1,4 +1,4 @@
-import { isActionableOpsVacancy, shiftMatchesOpsViewTab } from '@cosp/ops-core';
+import { addShiftToOpsBucket, shiftMatchesOpsViewTab } from '@cosp/ops-core';
 import { shiftCountsInOpsHeader } from '@/lib/operaciones/opsHeaderCounts';
 import { eventClientId, eventClientName, eventGroupKey, eventGroupLabel, isEventShift } from '@/lib/operaciones/eventoCc';
 import type { GuardDetalleShift } from '@/lib/movil/guardDetalle';
@@ -165,11 +165,7 @@ export function agruparPorObjetivo<T extends OpsShiftMovil>(shifts: readonly T[]
       grupo.lugar = String(s.eventoLugar || s.eventoObjectiveName || '').trim() || null;
     }
     grupo.shifts.push(s);
-    if (s.isRetention || s.isPendingRetention) grupo.retention++;
-    else if (s.isPresent && !s.isCompleted) grupo.active++;
-    else if (s.isAbsent || s.isPotentialAbsence) grupo.absent++;
-    else if (isActionableOpsVacancy(s as never, now)) grupo.vacant++;
-    else if (s.isFuture || s.isImminent) grupo.plan++;
+    addShiftToOpsBucket(grupo, s as never, now);
   }
   return Array.from(map.values()).sort((a, b) => {
     const scoreA = a.absent * 3 + a.vacant * 2 + a.retention;

@@ -1,4 +1,4 @@
-import { isActionableOpsVacancy } from '@cosp/ops-core';
+import { addShiftToOpsBucket, shiftMatchesOpsViewTab } from '@cosp/ops-core';
 
 /**
  * Eventos en el Centro de Control (lista, celular y mapa).
@@ -417,11 +417,10 @@ export function buildEventoGroups<T extends EventoCcShift & ShiftEstadoFlags & {
     }
     g.total++;
     g.shifts.push(s);
-    if (s.isRetention || s.isPendingRetention) g.retention++;
-    else if (s.isPresent && !s.isCompleted) g.active++;
-    else if (s.isAbsent || s.isPotentialAbsence) { g.absent++; if (!g.criticalShift) g.criticalShift = s; }
-    else if (isActionableOpsVacancy(s as never, now)) { g.vacant++; if (!g.criticalShift) g.criticalShift = s; }
-    else if (s.isFuture || s.isImminent) g.plan++;
+    const vacantBefore = g.vacant;
+    addShiftToOpsBucket(g, s as never, now);
+    if (g.vacant > vacantBefore && g.vacant === 1) g.criticalShift = s;
+    else if (!g.criticalShift && shiftMatchesOpsViewTab(s as never, 'AUSENTES', now)) g.criticalShift = s;
     if (!s.isPresent && !s.isAbsent && !s.isPotentialAbsence && !s.isUnassigned && !s.isCompleted && estadoGuardiaEvento(s, now).estado === 'TARDE') g.late++;
   }
   return Array.from(map.values()).sort((a, b) => {
