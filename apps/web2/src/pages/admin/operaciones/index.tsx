@@ -79,7 +79,7 @@ import { formatIngresoLine } from '@/lib/operaciones/ingresoLabel';
 import { convocadoEnCaminoLabel } from '@/lib/operaciones/convocadoVentana';
 import { formatOpsNotaLine } from '@/lib/operaciones/opsNota';
 import { ConvocatoriaTimeline } from '@/components/operaciones/ConvocatoriaTimeline';
-import { isExtraNonReliefShift, isReliefEligibleShift, formatRetentionDuration, formatRetentionLine } from '@cosp/ops-core';
+import { isExtraNonReliefShift, isReliefEligibleShift, formatRetentionDuration, formatRetentionLine, addShiftToOpsBucket, objectiveVisibleOnOpsTab, opsObjectiveHasActivity } from '@cosp/ops-core';
 import {
     isEventShift,
     eventGroupKey as getEventGroupKey,
@@ -3565,11 +3565,10 @@ export default function OperacionesPage() {
             const obj = map.get(key)!;
             obj.total++;
             obj.shifts.push(s);
-            if (s.isRetention || s.isPendingRetention)       obj.retention++;
-            else if (s.isPresent && !s.isCompleted)          obj.active++;
-            else if (s.isAbsent || s.isPotentialAbsence)   { obj.absent++;  if (!obj.criticalShift) obj.criticalShift = s; }
-            else if (isActionableOpsVacancy(s))            { obj.vacant++;  if (!obj.criticalShift) obj.criticalShift = s; }
-            else if (s.isFuture || s.isImminent)             obj.plan++;
+            const vacantBefore = obj.vacant;
+            addShiftToOpsBucket(obj, s, now);
+            if (obj.vacant > vacantBefore && obj.vacant === 1) obj.criticalShift = s;
+            else if (!obj.criticalShift && shiftMatchesOpsViewTab(s, 'AUSENTES', now)) obj.criticalShift = s;
         });
         // Aplicar filtro de cliente si está activo
         const clientFilter = logic.selectedClientId;
@@ -3582,7 +3581,7 @@ export default function OperacionesPage() {
                 return scoreB - scoreA;
             })
             // Excluir objetivos sin actividad real (evita mostrar cronogramas no publicados)
-            .filter(o => (o.active + o.absent + o.vacant + o.retention + o.plan) > 0);
+            .filter(o => opsObjectiveHasActivity(o));
     }, [logic.processedData, logic.selectedClientId]);
 
     // Celular: todos los turnos de hoy (objetivos y eventos); el corte del encabezado lo aplica OperacionMovil.
@@ -3602,26 +3601,12 @@ export default function OperacionesPage() {
         return buildEventoGroups(hoy, now)
             .map((ev) => ({ ...ev, objectiveName: ev.lugar || '—' }))
             .filter(ev => !clientFilter || ev.clientId === clientFilter)
-            .filter(ev => (ev.active + ev.absent + ev.vacant + ev.retention + ev.plan) > 0);
+            .filter(ev => opsObjectiveHasActivity(ev));
     }, [logic.processedData, logic.selectedClientId]);
 
     /** Sidebar objetivos/eventos: respeta tab (ACT/VAC/…) y búsqueda por nombre/cliente/guardia. */
-    const objectiveMatchesTab = (o: { active: number; absent: number; vacant: number; retention: number; plan: number; shifts?: any[] }) => {
-        switch (logic.viewTab) {
-            case 'ACTIVOS':   return o.active > 0;
-            case 'RETENIDOS': return o.retention > 0;
-            case 'AUSENTES':  return o.absent > 0;
-            case 'VACANTES':  return o.vacant > 0;
-            case 'PLAN':      return o.plan > 0;
-            case 'FRANCOS':   return (o.shifts || []).some((s: any) => s.isFranco);
-            case 'PRIORIDAD':
-            case 'NO_LLEGO':
-            case 'TODOS':
-                return (o.shifts || []).some((s: any) => matchesViewTabForShift(s));
-            default:
-                return true;
-        }
-    };
+    const objectiveMatchesTab = (o: { shifts?: any[] }) =>
+        objectiveVisibleOnOpsTab(o.shifts || [], logic.viewTab);
     const foldQ = (v: unknown) => String(v ?? '').trim().toLowerCase()
         .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     const objectiveMatchesSearch = (o: { name?: string; client?: string; objectiveName?: string; label?: string; shifts?: any[] }) => {

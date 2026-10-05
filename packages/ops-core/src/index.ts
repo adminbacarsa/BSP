@@ -100,6 +100,15 @@ export type { ClassifyOpsShiftInput, ClassifyOpsShiftResult } from './classifyOp
 export { shiftMatchesOpsViewTab } from './shiftMatchesOpsViewTab';
 export type { OpsViewTabShift } from './shiftMatchesOpsViewTab';
 export {
+  addShiftToOpsBucket,
+  emptyOpsObjectiveBucket,
+  objectiveVisibleOnOpsTab,
+  opsObjectiveHasActivity,
+  opsTabShiftIds,
+  OPS_OBJECTIVE_PARITY_TABS,
+} from './opsObjectiveTab';
+export type { OpsObjectiveBucket, OpsParityShift } from './opsObjectiveTab';
+export {
   EVENT_COVERAGE_CASCADE_ORDER,
   OBJECTIVE_COVERAGE_WITH_EVENTUAL,
   isEventoShift,
