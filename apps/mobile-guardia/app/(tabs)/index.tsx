@@ -542,6 +542,9 @@ function HoyScreenContent() {
               highlightedId={
                 focusCobertura ? highlightConvocatoriaId || coberturaPendientes[0]?.id : null
               }
+              firstName={employee?.firstName}
+              shifts={allShifts ?? shifts}
+              objectivesMap={objectivesMap}
               onAccept={(c) => void onResponderCobertura(c, true)}
               onReject={(c) => void onResponderCobertura(c, false)}
             />
@@ -556,7 +559,13 @@ function HoyScreenContent() {
             />
           ) : null}
 
-          {retencionAvisos.length > 0 ? <RetencionAvisoCard avisos={retencionAvisos} /> : null}
+          {retencionAvisos.length > 0 ? (
+            <RetencionAvisoCard
+              avisos={retencionAvisos}
+              shifts={allShifts ?? shifts}
+              objectivesMap={objectivesMap}
+            />
+          ) : null}
 
           {llegadaTardePendientes.length > 0 ? (
             <LlegadaTardeVenisBanner
@@ -565,6 +574,7 @@ function HoyScreenContent() {
               objectivesMap={objectivesMap}
               busyId={coberturaBusyId}
               bodyByConvocatoriaId={avisoBodyById}
+              firstName={employee?.firstName}
               onSiVoy={(c, eta) => void onSiVoyLlegadaTarde(c, eta)}
               onNoVoy={(c) => void onNoVoyLlegadaTarde(c)}
             />
@@ -574,6 +584,8 @@ function HoyScreenContent() {
             <ConvocatoriasBanner
               convocatorias={convocatoriasPendientes}
               busyId={convocatoriaBusyId}
+              firstName={employee?.firstName}
+              eventosMap={eventosMap}
               onAccept={(sol) => void onResponderConvocatoria(sol, true)}
               onReject={(sol) => void onResponderConvocatoria(sol, false)}
             />

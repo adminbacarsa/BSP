@@ -1,38 +1,33 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { formatTimeAr, toDate } from '@cosp/portal-core';
-import { CommandButton } from './ui/CommandButton';
+import type { ObjectiveLocation, Shift } from '@cosp/portal-types';
 import { radius, spacing } from '../theme/tokens';
 import { useTheme } from '../theme/ThemeContext';
-import {
-  convocatoriaCoberturaTypeLabel,
-  type ConvocatoriaCobertura,
-} from '../lib/convocatoriasCobertura';
+import type { ConvocatoriaCobertura } from '../lib/convocatoriasCobertura';
 import { resolveAlertaCard } from '../lib/alertaCardState';
+import { buildCoberturaCardModel } from '../lib/convocatoriaCard';
+import { ConvocatoriaCard } from './ConvocatoriaCard';
 
 type Props = {
   convocatorias: ConvocatoriaCobertura[];
   busyId?: string | null;
   highlightedId?: string | null;
+  /** Primer nombre del guardia para el mensaje («Laura, ¿nos das una mano?…»). */
+  firstName?: string | null;
+  shifts?: Shift[];
+  objectivesMap?: Record<string, ObjectiveLocation>;
   onAccept: (c: ConvocatoriaCobertura) => void;
   onReject: (c: ConvocatoriaCobertura) => void;
 };
 
-function remainingLabel(timeoutAt: ConvocatoriaCobertura['timeoutAt'], now: Date): string {
-  const end = toDate(timeoutAt);
-  if (!end) return '';
-  const sec = Math.max(0, Math.floor((end.getTime() - now.getTime()) / 1000));
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  if (m <= 0 && s <= 0) return 'Tiempo agotado (aún podés responder)';
-  if (m <= 0) return `${s}s restantes`;
-  return `${m}:${String(s).padStart(2, '0')} restantes`;
-}
-
+/** Convocatorias de cobertura pendientes en Hoy: una `ConvocatoriaCard` por cada una. */
 export function CoberturaConvocatoriasBanner({
   convocatorias,
   busyId,
   highlightedId,
+  firstName,
+  shifts = [],
+  objectivesMap = {},
   onAccept,
   onReject,
 }: Props) {
@@ -44,35 +39,18 @@ export function CoberturaConvocatoriasBanner({
     return () => clearInterval(id);
   }, []);
 
-  const list = useMemo(() => convocatorias, [convocatorias]);
-  if (list.length === 0) return null;
+  if (convocatorias.length === 0) return null;
 
   return (
-    <View
-      style={[
-        styles.wrap,
-        {
-          backgroundColor: palette.card,
-          borderColor: palette.primary,
-        },
-      ]}
-    >
+    <View style={[styles.wrap, { backgroundColor: palette.card, borderColor: palette.primary }]}>
       <View style={styles.headerRow}>
         <Text style={[styles.kicker, { color: palette.primary }]}>Cobertura</Text>
         <View style={[styles.countPill, { backgroundColor: palette.primary }]}>
-          <Text style={styles.countText}>{list.length}</Text>
+          <Text style={styles.countText}>{convocatorias.length}</Text>
         </View>
       </View>
 
-      {list.map((c) => {
-        const busy = busyId === c.id;
-        const typeLabel = convocatoriaCoberturaTypeLabel(c.type);
-        const obj = (c.objectiveName || c.clientName || 'Objetivo').trim();
-        const start = formatTimeAr(c.startTime);
-        const end = c.endTime ? formatTimeAr(c.endTime) : '';
-        const horario = start && end ? `${start} – ${end}` : start || 'Horario a confirmar';
-        const remain = remainingLabel(c.timeoutAt, now);
-        const highlight = highlightedId === c.id;
+      {convocatorias.map((c) => {
         const card = resolveAlertaCard({
           type: 'CONVOCATORIA_COBERTURA',
           conv: c,
@@ -80,59 +58,19 @@ export function CoberturaConvocatoriasBanner({
           timeoutAt: c.timeoutAt,
           nowMs: now.getTime(),
         });
-
+        const model = buildCoberturaCardModel({ conv: c, firstName, shifts, objectivesMap });
         return (
-          <View
+          <ConvocatoriaCard
             key={c.id}
-            style={[
-              styles.item,
-              {
-                borderColor: highlight ? palette.primary : palette.cardBorder,
-                backgroundColor: highlight ? 'rgba(79, 70, 229, 0.08)' : palette.inputBg,
-              },
-            ]}
-          >
-            <View style={styles.typeRow}>
-              <View style={[styles.typePill, { backgroundColor: palette.primary }]}>
-                <Text style={styles.typePillText}>{typeLabel}</Text>
-              </View>
-              {remain ? (
-                <Text style={[styles.remain, { color: palette.warning }]}>{remain}</Text>
-              ) : null}
-            </View>
-            <Text style={[styles.title, { color: palette.onSurface }]} numberOfLines={2}>
-              {obj}
-            </Text>
-            <Text style={[styles.sub, { color: palette.onSurfaceMuted }]} numberOfLines={2}>
-              {c.positionName ? `${c.positionName} · ` : ''}
-              {horario}
-              {c.shiftCode ? ` · ${String(c.shiftCode).toUpperCase()}` : ''}
-            </Text>
-            {card.showCoverageButtons ? (
-              <View style={styles.rowBtns}>
-                <CommandButton
-                  label={busy ? 'Enviando…' : 'Acepto'}
-                  variant="success"
-                  onPress={() => onAccept(c)}
-                  disabled={!!busyId}
-                  loading={busy}
-                  style={styles.btnFlex}
-                />
-                <CommandButton
-                  label={busy ? 'Enviando…' : 'No puedo'}
-                  variant="secondary"
-                  onPress={() => onReject(c)}
-                  disabled={!!busyId}
-                  loading={busy}
-                  style={styles.btnFlex}
-                />
-              </View>
-            ) : (
-              <Text style={[styles.sub, { color: palette.onSurface, fontWeight: '800' }]}>
-                {card.label || 'Vencida'}
-              </Text>
-            )}
-          </View>
+            model={model}
+            nowMs={now.getTime()}
+            busy={busyId === c.id}
+            disabled={!!busyId}
+            highlighted={highlightedId === c.id}
+            closedLabel={card.showCoverageButtons ? null : card.label || 'Vencida'}
+            onAccept={() => onAccept(c)}
+            onReject={() => onReject(c)}
+          />
         );
       })}
     </View>
@@ -169,47 +107,5 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 11,
     fontWeight: '900',
-  },
-  item: {
-    borderRadius: radius.md,
-    borderWidth: 1,
-    padding: spacing.sm,
-    gap: 6,
-  },
-  typeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  typePill: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: radius.pill,
-  },
-  typePillText: {
-    color: '#fff',
-    fontSize: 11,
-    fontWeight: '900',
-  },
-  remain: {
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  title: {
-    fontSize: 16,
-    fontWeight: '900',
-  },
-  sub: {
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  rowBtns: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 4,
-  },
-  btnFlex: {
-    flex: 1,
   },
 });

@@ -32,6 +32,14 @@ import { appAlert } from '@/lib/appAlert';
 import { ALERTAS_PAGE_SIZE, paginateAlertItems } from '../../src/lib/alertasPagination';
 import { respondCoberturaConvocatoria } from '../../src/lib/respondCoberturaConvocatoria';
 import { buildCoberturaRespondFeedback } from '../../src/lib/coberturaRespondFeedback';
+import { ConvocatoriaCard } from '../../src/components/ConvocatoriaCard';
+import {
+  buildInboxCardModel,
+  formatFechaAr,
+  formatHorario24,
+  inboxItemIsConvocatoria,
+} from '../../src/lib/convocatoriaCard';
+import { useObjectivesMap } from '../../src/hooks/useObjectivesMap';
 
 const DOMAIN_FILTERS = ['Todas', 'Cobertura', 'Planificación', 'Operaciones', 'Eventos', 'Permutas'] as const;
 type DomainFilter = (typeof DOMAIN_FILTERS)[number];
@@ -43,25 +51,9 @@ function formatShiftWindow(n: PortalInboxItem): string | null {
   const parts: string[] = [];
   if (n.shiftCode) parts.push(`Código ${n.shiftCode}`);
   if (start) {
-    const day = start.toLocaleDateString('es-AR', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      timeZone: 'America/Argentina/Buenos_Aires',
-    });
-    const hi = start.toLocaleTimeString('es-AR', {
-      hour: '2-digit',
-      minute: '2-digit',
-      timeZone: 'America/Argentina/Buenos_Aires',
-    });
-    const hf = end
-      ? end.toLocaleTimeString('es-AR', {
-          hour: '2-digit',
-          minute: '2-digit',
-          timeZone: 'America/Argentina/Buenos_Aires',
-        })
-      : '';
-    parts.push(hf ? `${day} ${hi}–${hf}` : `${day} ${hi}`);
+    const day = formatFechaAr(start);
+    const horario = formatHorario24(start, end);
+    parts.push([day, horario].filter(Boolean).join(' '));
   }
   return parts.join(' · ');
 }
@@ -120,7 +112,8 @@ export default function AlertasScreen() {
 
 function AlertasScreenContent() {
   const router = useRouter();
-  const { user, previewEmpDocId, isPreviewMode, isSuperAdmin } = usePortalAuth();
+  const { user, previewEmpDocId, isPreviewMode, isSuperAdmin, employee } = usePortalAuth();
+  const { objectivesMap } = useObjectivesMap();
   const { palette } = useTheme();
   const { contentMaxWidth, horizontalPadding, isCompact } = useResponsiveLayout();
   const { items, loading, coberturaById, markRead, acknowledge, respond, dismiss, markAllUnreadRead, dismissAll } =
@@ -385,6 +378,56 @@ function AlertasScreenContent() {
     [respond, busyId, router, pinLocal, clearLocal],
   );
 
+  /** ¿Venís?: 10/15/30 → ACCEPTED con ETA; «Tengo un problema» → REJECTED. Igual que el banner de Hoy. */
+  const onVenis = useCallback(
+    (n: PortalInboxItem, etaMinutes: number | null) => {
+      if (busyId) return;
+      void (async () => {
+        const convId = String(n.convocatoriaId || '').trim();
+        if (!convId) {
+          appAlert('Llegada tarde', 'No encontramos el id de la convocatoria. Abrí Hoy y respondé desde ahí.');
+          return;
+        }
+        const response = etaMinutes ? 'ACCEPTED' : 'REJECTED';
+        pinLocal(n.id, response);
+        setBusyId(n.id);
+        try {
+          const asEmployeeId = isPreviewMode
+            ? String(coberturaById[convId]?.candidateEmployeeId || '').trim()
+            : '';
+          const result = await respondCoberturaConvocatoria({
+            convocatoriaId: convId,
+            response,
+            responseChannel: 'ALERTAS',
+            ...(etaMinutes ? { etaMinutes } : { rejectionReason: 'Tengo un problema' }),
+            ...(asEmployeeId ? { asEmployeeId } : {}),
+          });
+          if (result.ok) {
+            try {
+              await respond(n.id, response);
+            } catch {
+              /* la tarjeta ya muestra el resultado */
+            }
+            appAlert(
+              'Listo',
+              etaMinutes ? `Avisaste que llegás en ${etaMinutes} min` : 'Avisamos a operaciones que tenés un problema',
+            );
+            return;
+          }
+          appAlert('Llegada tarde', result.message);
+          if (result.dismissInbox) pinLocal(n.id, staleLocalKind(result.message));
+          else clearLocal(n.id);
+        } catch {
+          clearLocal(n.id);
+          appAlert('Error', 'No se pudo enviar la respuesta. Reintentá.');
+        } finally {
+          setBusyId(null);
+        }
+      })();
+    },
+    [busyId, coberturaById, isPreviewMode, respond, pinLocal, clearLocal],
+  );
+
   const onDismiss = useCallback(
     (n: PortalInboxItem) => {
       const needsAck = alertNeedsAck(n);
@@ -620,6 +663,64 @@ function AlertasScreenContent() {
                   style={styles.quitarCompact}
                 />
               </View>
+            );
+          }
+
+          const convModel = inboxItemIsConvocatoria(n)
+            ? buildInboxCardModel({
+                item: n,
+                conv: n.convocatoriaId ? coberturaById[n.convocatoriaId] ?? null : null,
+                firstName: employee?.firstName,
+                objectivesMap,
+              })
+            : null;
+
+          if (convModel) {
+            const canRespond = card.showCoverageButtons && convModel.actions === 'ACCEPT_REJECT';
+            const canVenis = card.showVenisButton || (card.showCoverageButtons && convModel.actions === 'VENIS');
+            return (
+              <ConvocatoriaCard
+                model={convModel}
+                nowMs={now.getTime()}
+                busy={busy}
+                disabled={!!busyId && !busy}
+                highlighted
+                metaLine={receivedAt ? `Recibida ${receivedAt}` : null}
+                closedLabel={canRespond || canVenis || convModel.actions === 'NONE' ? null : card.label || 'Vencida'}
+                onAccept={canRespond ? () => onRespond(n, 'ACCEPTED') : undefined}
+                onReject={canRespond ? () => onRespond(n, 'REJECTED') : undefined}
+                onSiVoy={canVenis ? (mins) => onVenis(n, mins) : undefined}
+                onNoVoy={canVenis ? () => onVenis(n, null) : undefined}
+                extraActions={
+                  <>
+                    {card.showAckButton ? (
+                      <CommandButton
+                        label={busy ? '…' : 'Me enteré'}
+                        variant="success"
+                        onPress={() => void onAck(n)}
+                        disabled={busy}
+                        style={styles.btnFlex}
+                      />
+                    ) : null}
+                    {!isCoverage && route ? (
+                      <CommandButton
+                        label={notificationActionLabel(n.type)}
+                        variant="secondary"
+                        onPress={() => openInboxItem(n)}
+                        disabled={busy}
+                        style={styles.btnFlex}
+                      />
+                    ) : null}
+                    <CommandButton
+                      label="Quitar"
+                      variant="ghost"
+                      onPress={() => onDismiss(n)}
+                      disabled={busy}
+                      style={styles.btnFlex}
+                    />
+                  </>
+                }
+              />
             );
           }
 

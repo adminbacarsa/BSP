@@ -1,6 +1,7 @@
 import * as admin from 'firebase-admin';
 import * as functions from 'firebase-functions/v1';
 import { venisBody } from '../attendance/arrivalNoticeWindow';
+import { coberturaBody, formatHoraAr24 } from './coberturaPushText';
 import { clampLateEtaMinutes } from '../attendance/lateAbsenceWindow';
 import { guardFirstName } from '../common/pushGreeting';
 import { markShiftAbsent } from '../attendance/markShiftAbsent';
@@ -103,30 +104,30 @@ export async function crearNotifConvocatoria(
     conv.endTime instanceof Timestamp
       ? conv.endTime.toDate()
       : null;
-  const horaInicio = startDate
-    ? startDate.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: tz })
-    : '--:--';
-  const horaFin = endDate
-    ? endDate.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: tz })
-    : '';
+  // Siempre 24 h (h23): sin él, es-AR devuelve «05:00 p. m.» y el texto queda «16:00 a 05:00 p. m.».
+  const horaInicio = startDate ? formatHoraAr24(startDate, tz) : '--:--';
+  const horaFin = endDate ? formatHoraAr24(endDate, tz) : '';
   const lugar = [conv.clientName, conv.objectiveName, conv.positionName]
     .map((s) => String(s || '').trim())
     .filter(Boolean)
     .join(' · ');
-  const lugarTxt = lugar || 'el puesto';
   const codigo = String(conv.shiftCode || '').trim();
 
   const isLlegadaTarde = conv.type === 'LLEGADA_TARDE';
   const name = guardFirstName({ employeeName: conv.candidateEmployeeName });
   const title = isLlegadaTarde ? '¿Venís?' : '¿Nos das una mano?';
-  const rango = horaFin ? `${horaInicio} a ${horaFin}` : horaInicio;
   const body = override?.body
     ? override.body
     : isLlegadaTarde
       ? venisBody(codigo, lugar, horaInicio, name)
-      : name
-        ? `${name}, ¿nos das una mano? Necesitamos cubrir ${lugar || lugarTxt} de ${rango}.`
-        : `¿Nos das una mano? Necesitamos cubrir ${lugar || lugarTxt} de ${rango}.`;
+      : coberturaBody({
+          name,
+          objectiveName: conv.objectiveName,
+          positionName: conv.positionName,
+          clientName: conv.clientName,
+          horaInicio,
+          horaFin,
+        });
 
   await db.collection('user_notifications').add({
     uid: conv.candidateUid || null,

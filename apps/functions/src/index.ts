@@ -2626,7 +2626,7 @@ export const detectarAusencias = functions
         const tokens = await getEmployeeTokens(db, shift.employeeId);
         if (tokens.length > 0) {
           const startStr = shift.startTime?.toDate
-            ? shift.startTime.toDate().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' })
+            ? shift.startTime.toDate().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'America/Argentina/Cordoba' })
             : '';
           const absName = guardFirstName({ employeeName: shift.employeeName });
           const absWhere = shift.objectiveName ? ` en ${shift.objectiveName}` : '';
@@ -2691,7 +2691,7 @@ export const detectarAusencias = functions
               if (fixData.startDate !== fixDateStr || fixData.endDate !== fixDateStr) {
                 const st = shift.startTime?.toDate ? shift.startTime.toDate() : new Date(startMs);
                 const et = shift.endTime?.toMillis ? new Date(shift.endTime.toMillis()) : null;
-                const fmtT = (d: Date) => d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' });
+                const fmtT = (d: Date) => d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'America/Argentina/Cordoba' });
                 const horario = et ? `${fmtT(st)} - ${fmtT(et)}` : fmtT(st);
                 await fixSnap.docs[0].ref.update({
                   startDate: fixDateStr,

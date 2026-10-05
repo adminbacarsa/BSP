@@ -232,7 +232,7 @@ export const onTurnoWrite = functions
         const aaDoc = ausSnap.docs.find(d => d.data().absenceType === 'AA');
         if (aaDoc) {
           const ausData = aaDoc.data();
-          const fmtT = (d: Date) => d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' });
+          const fmtT = (d: Date) => d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'America/Argentina/Cordoba' });
           const st = after.startTime?.toDate ? after.startTime.toDate() : null;
           const et = after.endTime?.toDate ? after.endTime.toDate() : null;
           const horario = st ? (et ? `${fmtT(st)} - ${fmtT(et)}` : fmtT(st)) : '';
