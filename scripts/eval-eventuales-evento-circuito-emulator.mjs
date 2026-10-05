@@ -7,6 +7,7 @@
 import { createRequire } from 'module';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { plazoAnulacionAlta } from '../apps/web2/src/lib/eventuales/plazoAnulacion.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const requireFn = createRequire(path.join(__dirname, '../apps/functions/package.json'));
@@ -52,6 +53,20 @@ function jornadaDesde(startMs, horas) {
   const i = arParts(startMs);
   const f = arParts(startMs + horas * 3600000);
   return { fecha: i.fecha, horaInicio: i.hora, horaFin: f.hora, horas };
+}
+
+/**
+ * Inicio pasado cuyo plazo de anulación (RG 2988 art. 9) ya venció hoy, sea el día que sea.
+ * Un domingo o un viernes de noche corren el vencimiento al lunes 12:00: se retrocede de a 24 h
+ * hasta que `plazoAnulacionAlta` dice que ya no se puede anular (sin feriados, igual que el servidor en el test).
+ */
+function inicioConAnulacionVencida(ahoraMs, horas) {
+  for (let atras = 30; atras <= 30 + 24 * 7; atras += 24) {
+    const startMs = ahoraMs - atras * 3600000;
+    const j = jornadaDesde(startMs, horas);
+    if (!plazoAnulacionAlta({ fechaInicio: j.fecha, horaInicio: j.horaInicio, ahoraMs }).puedeAnular) return { startMs, jornada: j };
+  }
+  throw new Error('No se encontró un inicio con la anulación vencida.');
 }
 
 function bolsa(cuil, extra) {
@@ -282,7 +297,8 @@ async function main() {
     noVaDespues.ok ? `mov=${anula.movimiento} canal=${anula.canal}` : noVaDespues.message,
   );
 
-  const falta = await aceptar(cuilFalta, 'uid-ev-falta', jornadaDesde(Date.now() - 30 * 3600000, 6));
+  const inicioFalta = inicioConAnulacionVencida(Date.now(), 6);
+  const falta = await aceptar(cuilFalta, 'uid-ev-falta', inicioFalta.jornada);
   const confFalta = await confirmarAt(cuilFalta);
   const noVaTarde = await intentar(() => noPuedoAsistirEventual.run({ solicitudId: falta.conv.solicitudId }, ctxEventual('uid-ev-falta', cuilFalta)));
   const marcada = await markShiftAbsent(db, falta.turno.id, { reason: 'AUTO_T30', by: 'SYSTEM_SCHEDULER' });
@@ -299,7 +315,7 @@ async function main() {
       && baja.motivo === 'desistimiento / sin efectivización de tareas' && baja.constanciaInterna === 'NO_SE_PRESENTO'
       && String(baja.txt || '').slice(2, 4) === 'BT' && String(baja.txt || '').slice(45, 47) === '30'
       && !!novedad && desemFalta.tipo === 'FALTA_SIN_AVISO' && desemFalta.empleadoId === falta.turno.employeeId && sigFalta?.bolsaCuil === cuilSig,
-    `tarde=${noVaTarde.message || ''} baja=${baja.tipo} fecha=${baja.fechaBaja} nov=${novedad ? 'si' : 'no'} sig=${sigFalta?.bolsaCuil}`,
+    `inicio=${inicioFalta.jornada.fecha} ${inicioFalta.jornada.horaInicio} tarde=${noVaTarde.message || ''} baja=${baja.tipo} fecha=${baja.fechaBaja} nov=${novedad ? 'si' : 'no'} sig=${sigFalta?.bolsaCuil}`,
   );
 
   const failed = results.filter((r) => !r.ok);

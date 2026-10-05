@@ -1,4 +1,9 @@
-import { arcaEventualesDe, lineasCargaMasiva } from './arcaTxt.mjs';
+import { arcaEventualesDe, lineasCargaMasiva } from './arcaLinea.mjs';
+
+/**
+ * Lo importa el front (Parámetros → ARCA): solo módulos puros. Nada de `remuneracion.mjs`
+ * ni `marcoPdf.mjs`, que tiran de `node:module`.
+ */
 
 /** Se muestra cuando el convenio sigue vacío: el TXT se arma y queda no enviable. */
 export const AVISO_CCT_PENDIENTE = 'Pendiente: consultar al contador';
