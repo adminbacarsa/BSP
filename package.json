@@ -34,6 +34,7 @@
     "deploy:all": "node scripts/deploy.js --all",
     "check:mojibake": "node scripts/check-mojibake.mjs",
     "check:functions-standalone": "node scripts/check-functions-standalone.mjs",
+    "eval:arca-n8n": "node --experimental-strip-types scripts/eval-arca-n8n.mjs",
     "sync:eventuales-functions": "node scripts/sync-eventuales-to-functions.mjs",
     "start": "npm run serve:final",
     "test": "echo \"Error: Los tests se ejecutan en las subcarpetas: npm run test --workspace=functions\" && exit 1",

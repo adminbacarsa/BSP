@@ -3817,6 +3817,8 @@ export {
   onTurnoEventualWrite,
 } from './eventuales/planificacionEventuales';
 
+export { onArcaEnvioUrgente } from './arca/notificarUrgenteN8n';
+
 export const getMobileAppConfig = functions.https.onCall(getMobileAppConfigHandler);
 export const saveMobileAppConfig = functions.https.onCall(saveMobileAppConfigHandler);
 export const syncMobileAppEasEnv = functions.https.onCall(syncMobileAppEasEnvHandler);

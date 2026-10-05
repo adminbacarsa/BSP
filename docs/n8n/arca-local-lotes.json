@@ -1,0 +1,407 @@
+{
+  "name": "COSP — ARCA lotes (LOCAL)",
+  "_nota": "Importar en el n8n LOCAL. Sin secretos: ARCA_ENVIOS_URL, ARCA_ROBOT_KEY, ARCA_TXT_DIR, N8N_ROBOT_WEBHOOK y COSP_REPO son variables del proceso n8n. La clave fiscal no esta en este JSON.",
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Argentina/Buenos_Aires"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 18 * * *"
+            }
+          ]
+        }
+      },
+      "id": "sch-at",
+      "name": "Altas 18:00 AR",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -640,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * *"
+            }
+          ]
+        }
+      },
+      "id": "sch-bt",
+      "name": "Bajas 09:00 AR",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -640,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "urgente",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "wh",
+      "name": "Webhook urgente",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -640,
+        260
+      ],
+      "webhookId": "cosp-arca-urgente"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "t",
+              "name": "tipo",
+              "value": "AT",
+              "type": "string"
+            },
+            {
+              "id": "c",
+              "name": "canal",
+              "value": "LOTE",
+              "type": "string"
+            },
+            {
+              "id": "e",
+              "name": "empresaId",
+              "value": "",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "set-at",
+      "name": "Pedido AT lote",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -400,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "t",
+              "name": "tipo",
+              "value": "BT",
+              "type": "string"
+            },
+            {
+              "id": "c",
+              "name": "canal",
+              "value": "LOTE",
+              "type": "string"
+            },
+            {
+              "id": "e",
+              "name": "empresaId",
+              "value": "",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "set-bt",
+      "name": "Pedido BT lote",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -400,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const item = $input.first().json;\nconst body = item.body && typeof item.body === 'object' ? item.body : item;\nconst headers = item.headers || {};\nconst key = String(headers['x-arca-key'] || headers['X-Arca-Key'] || '');\nconst expected = String($env.ARCA_ROBOT_KEY || '');\nif (!expected || key !== expected) throw new Error('NO_AUTORIZADO');\nconst tipo = String(body.tipo || 'AT').toUpperCase() === 'BT' ? 'BT' : 'AT';\nreturn [{ json: { tipo, canal: 'URGENTE', empresaId: String(body.empresaId || '') } }];"
+      },
+      "id": "ver-wh",
+      "name": "Verificar clave y normalizar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -400,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.ARCA_ENVIOS_URL }}?action=lote&tipo={{ $json.tipo }}&canal={{ $json.canal }}{{ $json.empresaId ? '&empresaId=' + $json.empresaId : '' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-arca-key",
+              "value": "={{ $env.ARCA_ROBOT_KEY }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "get-lote",
+      "name": "GET lote por empresa",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -140,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ ($json.lotes || []).length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "hay",
+      "name": "Hay lotes",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        80,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "lotes",
+        "options": {}
+      },
+      "id": "split",
+      "name": "Un lote por item",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        300,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "language": "javaScript",
+        "jsCode": "const dir = String($env.ARCA_TXT_DIR || '').replace(/\\\\/g, '/').replace(/\\/$/, '');\nif (!dir) throw new Error('FALTA_ARCA_TXT_DIR');\nconst archivo = dir + '/' + $json.loteId + '.txt';\nconst txt = String($json.txt || '').replace(/\\s*$/, '\\n');\nreturn {\n  json: { ...$json, archivo },\n  binary: { data: { data: Buffer.from(txt, 'utf8').toString('base64'), mimeType: 'text/plain', fileName: $json.loteId + '.txt', fileExtension: 'txt' } },\n};"
+      },
+      "id": "prep",
+      "name": "Preparar TXT",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "write",
+        "fileName": "={{ $json.archivo }}",
+        "options": {}
+      },
+      "id": "write",
+      "name": "Guardar TXT",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        740,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_ROBOT_WEBHOOK }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-arca-key",
+              "value": "={{ $env.ARCA_ROBOT_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ archivo: $('Preparar TXT').item.json.archivo, loteId: $('Preparar TXT').item.json.loteId, cuit: $('Preparar TXT').item.json.cuit, tipo: $('Preparar TXT').item.json.tipo, empresaId: $('Preparar TXT').item.json.empresaId, canal: $('Preparar TXT').item.json.canal }) }}",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "id": "disp",
+      "name": "Disparar robot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        80
+      ]
+    }
+  ],
+  "connections": {
+    "Altas 18:00 AR": {
+      "main": [
+        [
+          {
+            "node": "Pedido AT lote",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bajas 09:00 AR": {
+      "main": [
+        [
+          {
+            "node": "Pedido BT lote",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook urgente": {
+      "main": [
+        [
+          {
+            "node": "Verificar clave y normalizar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pedido AT lote": {
+      "main": [
+        [
+          {
+            "node": "GET lote por empresa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pedido BT lote": {
+      "main": [
+        [
+          {
+            "node": "GET lote por empresa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verificar clave y normalizar": {
+      "main": [
+        [
+          {
+            "node": "GET lote por empresa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET lote por empresa": {
+      "main": [
+        [
+          {
+            "node": "Hay lotes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hay lotes": {
+      "main": [
+        [
+          {
+            "node": "Un lote por item",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Un lote por item": {
+      "main": [
+        [
+          {
+            "node": "Preparar TXT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar TXT": {
+      "main": [
+        [
+          {
+            "node": "Guardar TXT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar TXT": {
+      "main": [
+        [
+          {
+            "node": "Disparar robot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

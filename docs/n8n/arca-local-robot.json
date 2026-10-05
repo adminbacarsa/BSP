@@ -1,0 +1,121 @@
+{
+  "name": "COSP — ARCA robot (LOCAL, Playwright)",
+  "_nota": "Importar en el n8n LOCAL, junto con el de lotes. ARCA_SIMULACION=1 no sube nada a ARCA. La clave fiscal esta en ARCA_CLAVES_PATH, fuera del repo y fuera de este JSON.",
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Argentina/Buenos_Aires"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "cosp-arca-robot",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "wh",
+      "name": "Webhook robot",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -420,
+        0
+      ],
+      "webhookId": "cosp-arca-robot"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const item = $input.first().json;\nconst body = item.body && typeof item.body === 'object' ? item.body : item;\nconst headers = item.headers || {};\nconst key = String(headers['x-arca-key'] || headers['X-Arca-Key'] || '');\nconst expected = String($env.ARCA_ROBOT_KEY || '');\nif (!expected || key !== expected) throw new Error('NO_AUTORIZADO');\nif (!body.loteId || !body.archivo) throw new Error('FALTA_LOTE');\nreturn [{ json: { archivo: String(body.archivo), loteId: String(body.loteId), cuit: String(body.cuit || ''), tipo: String(body.tipo || 'AT'), empresaId: String(body.empresaId || ''), canal: String(body.canal || '') } }];"
+      },
+      "id": "norm",
+      "name": "Normalizar robot",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -180,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "command": "=node \"{{ $env.COSP_REPO }}/scripts/arca-robot/subir.mjs\" --archivo \"{{ $json.archivo }}\" --lote \"{{ $json.loteId }}\" --cuit \"{{ $json.cuit }}\" --tipo \"{{ $json.tipo }}\" --empresa \"{{ $json.empresaId }}\""
+      },
+      "id": "exe",
+      "name": "Ejecutar Playwright",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        80,
+        0
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ARCA_ENVIOS_URL }}?action=resultado",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-arca-key",
+              "value": "={{ $env.ARCA_ROBOT_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ loteId: $('Normalizar robot').item.json.loteId, estado: 'ERROR', error: String($json.error || $json.message || 'ROBOT_FALLO').slice(0, 500) }) }}",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "id": "err",
+      "name": "POST ERROR si el proceso murio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        360,
+        160
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook robot": {
+      "main": [
+        [
+          {
+            "node": "Normalizar robot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar robot": {
+      "main": [
+        [
+          {
+            "node": "Ejecutar Playwright",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ejecutar Playwright": {
+      "main": [
+        [],
+        [
+          {
+            "node": "POST ERROR si el proceso murio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
