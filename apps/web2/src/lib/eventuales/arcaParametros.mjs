@@ -1,4 +1,11 @@
-import { arcaEventualesDe, lineasCargaMasiva } from './arcaLinea.mjs';
+import {
+  ACTIVIDAD_DOMICILIO_DEFAULT,
+  CCT_CODIGO_VIGILADOR,
+  PUESTO_VIGILADOR,
+  TIPO_SERVICIO_DEFAULT,
+  arcaEventualesDe,
+  lineasCargaMasiva,
+} from './arcaLinea.mjs';
 
 /**
  * Lo importa el front (Parámetros → ARCA): solo módulos puros. Nada de `remuneracion.mjs`
@@ -7,20 +14,23 @@ import { arcaEventualesDe, lineasCargaMasiva } from './arcaLinea.mjs';
 
 /** Se muestra cuando el convenio sigue vacío: el TXT se arma y queda no enviable. */
 export const AVISO_CCT_PENDIENTE = 'Pendiente: consultar al contador';
+export const AVISO_ACTIVIDAD_DOMICILIO = 'La actividad (posiciones 79-84) tiene que ser la del domicilio de explotación en ARCA, no la CIIU genérica de seguridad.';
 
 /**
  * Lo que RRHH edita en Eventuales → Parámetros → ARCA.
  * `tipo: digitos` exige exactamente `len` dígitos (se conservan los ceros).
  * `alfa` admite hasta `max` caracteres imprimibles. Vacío solo si `opcional`.
+ * `cct` exige NNNN/NN (ej. 0422/05) o vacío.
  */
 export const CAMPOS_ARCA = Object.freeze([
   {
     id: 'cctCodigo',
     etiqueta: 'Código de convenio CCT',
-    ayuda: 'Hasta 10 caracteres. Posiciones 91-100 del TXT de carga masiva. Sale de la tabla de convenios de ARCA; el de CCT 422/05 todavía no está confirmado.',
-    tipo: 'alfa',
+    ayuda: 'Formato NNNN/NN (ej. 0422/05), alineado a la izquierda en posiciones 91-100. Sale de Datos del Empleador → Convenios registrados.',
+    tipo: 'cct',
     max: 10,
     opcional: true,
+    defecto: CCT_CODIGO_VIGILADOR,
   },
   {
     id: 'categoria',
@@ -57,7 +67,7 @@ export const CAMPOS_ARCA = Object.freeze([
   {
     id: 'situacionRevistaBaja',
     etiqueta: 'Motivo de baja',
-    ayuda: '2 dígitos. Revista del BT de fin de contrato, posiciones 46-47. Default 30 (vencimiento art. 250).',
+    ayuda: '2 dígitos. Revista del BT de fin de contrato, posiciones 46-47. Default 30 (vencimiento art. 250). En el AT va en blanco.',
     tipo: 'digitos',
     len: 2,
     defecto: '30',
@@ -65,26 +75,41 @@ export const CAMPOS_ARCA = Object.freeze([
   {
     id: 'puesto',
     etiqueta: 'Puesto',
-    ayuda: 'Hasta 4 caracteres. Posiciones 85-88. 5414 es el puesto cargado hoy; hay que verificarlo en la tabla de puestos.',
+    ayuda: 'Hasta 4 caracteres. Posiciones 85-88. Default 5169 (servicios de protección y seguridad); el contador tiene que confirmarlo en la tabla de puestos.',
     tipo: 'alfa',
     max: 4,
-    defecto: '5414',
+    defecto: PUESTO_VIGILADOR,
   },
   {
     id: 'sucursal',
-    etiqueta: 'Sucursal',
-    ayuda: '5 dígitos. Posiciones 74-78, domicilio de desempeño. 00000 = casa central.',
+    etiqueta: 'Domicilio de desempeño',
+    ayuda: '5 dígitos. Posiciones 74-78. Código del domicilio de explotación en ARCA (en Bacar Transportadora: 00000).',
     tipo: 'digitos',
     len: 5,
     defecto: '00000',
   },
   {
     id: 'actividad',
-    etiqueta: 'Actividad CIIU',
-    ayuda: '6 dígitos. Posiciones 79-84. 801000 = servicios de seguridad.',
+    etiqueta: 'Actividad en el domicilio de desempeño',
+    ayuda: '6 dígitos. Posiciones 79-84. Tiene que coincidir con la actividad registrada en ese domicilio (Bacar Transportadora: 749210).',
     tipo: 'digitos',
     len: 6,
-    defecto: '801000',
+    defecto: ACTIVIDAD_DOMICILIO_DEFAULT,
+  },
+  {
+    id: 'tipoServicio',
+    etiqueta: 'Tipo de servicio',
+    ayuda: '3 dígitos. Posiciones 107-109. 500 = Servicios comunes discontinuos.',
+    tipo: 'digitos',
+    len: 3,
+    defecto: TIPO_SERVICIO_DEFAULT,
+  },
+  {
+    id: 'agropecuario',
+    etiqueta: 'Trabajador agropecuario',
+    ayuda: 'Posición 16. Solo S o N. Default N.',
+    tipo: 'sn',
+    defecto: 'N',
   },
   {
     id: 'nocturnoPct',
@@ -97,7 +122,8 @@ export const CAMPOS_ARCA = Object.freeze([
 
 const MUESTRA = {
   contrato: { fechaAlta: '2026-10-02', fechaBaja: '2026-10-03' },
-  cuil: '20999999991',
+  /** CUIL con dígito verificador válido (solo para la vista previa). */
+  cuil: '20111111112',
   bruto: 1000,
 };
 
@@ -149,6 +175,25 @@ export function validarParametrosArca(input) {
       }
       continue;
     }
+    if (campo.tipo === 'cct') {
+      if (!/^\d{4}\/\d{2}$/.test(texto)) {
+        errores.push({ id: campo.id, mensaje: `${campo.etiqueta}: formato NNNN/NN (ej. 0422/05).` });
+      } else if (texto.length > campo.max) {
+        errores.push({ id: campo.id, mensaje: `${campo.etiqueta}: hasta ${campo.max} caracteres.` });
+      } else {
+        doc[campo.id] = texto;
+      }
+      continue;
+    }
+    if (campo.tipo === 'sn') {
+      const v = texto.toUpperCase();
+      if (v !== 'S' && v !== 'N') {
+        errores.push({ id: campo.id, mensaje: `${campo.etiqueta}: solo S o N.` });
+      } else {
+        doc[campo.id] = v;
+      }
+      continue;
+    }
     if (texto.length > campo.max || /[^\x20-\x7E]/.test(texto)) {
       errores.push({ id: campo.id, mensaje: `${campo.etiqueta}: hasta ${campo.max} caracteres, sin tildes ni símbolos raros.` });
     } else {
@@ -177,6 +222,7 @@ export function vistaPreviaArca(doc) {
     enviable: out.enviable,
     advertencias: out.advertencias,
     avisoCct: cct ? '' : AVISO_CCT_PENDIENTE,
+    avisoActividad: AVISO_ACTIVIDAD_DOMICILIO,
   };
 }
 

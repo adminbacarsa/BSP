@@ -718,6 +718,7 @@ export default function EventualesPage() {
                     <pre data-arca-preview className="mt-1 overflow-x-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed text-slate-800">{arcaPrevia.linea}</pre>
                     <p className={`mt-1 text-[11px] font-bold ${arcaPrevia.enviable ? 'text-emerald-700' : 'text-amber-800'}`} data-arca-enviable={arcaPrevia.enviable ? 'si' : 'no'}>
                       {arcaPrevia.enviable ? 'Con estos códigos el TXT se puede enviar.' : `El TXT queda no enviable${arcaPrevia.avisoCct ? ` · ${arcaPrevia.avisoCct}` : ''}.`}
+                      {arcaPrevia.avisoActividad ? ` ${arcaPrevia.avisoActividad}` : ''}
                     </p>
                   </div>
                 )}

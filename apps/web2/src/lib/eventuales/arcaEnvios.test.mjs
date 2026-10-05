@@ -25,10 +25,10 @@ const base = {
   contrato,
   contratoId: 'ctr_1',
   empresaId: 'bacarsa',
-  cuil: '20999999991',
+  cuil: '20111111112',
   bruto: 16000,
   obraSocial: '123456',
-  empresa: { arcaEventuales: { cctCodigo: '42205', categoriaProfesional: '000001' } },
+  empresa: { arcaEventuales: { cctCodigo: '0422/05', categoriaProfesional: '000001' } },
 };
 
 describe('envíos ARCA', () => {

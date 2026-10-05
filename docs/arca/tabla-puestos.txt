@@ -1,0 +1,9 @@
+# Puestos ARCA (Carga masiva — tablas informativas)
+# La tabla completa vive detrás de clave fiscal en:
+# CargaMasiva_tablasInformativas.aspx
+# Códigos relevantes para eventuales de seguridad (propuesta 05/10/2026; pendiente de confirmación del contador):
+
+5169 | Personal de los servicios de protección y seguridad, no clasificado bajo otros epígrafes
+9152 | Porteros y guardianes y afines
+
+# 5414 | (inexistente en ARCA — no usar)
