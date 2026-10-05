@@ -102,7 +102,7 @@ export const gestionarEventual = functions.https.onCall(async (data, context) =>
       contratos: contratos.docs.map((d) => ({ id: d.id, ...d.data() })),
       arca: envios.docs.map((d) => {
         const e = d.data();
-        return { id: d.id, tipo: e.tipo, estado: e.estado, fechaAlta: e.fechaAlta, fechaBaja: e.fechaBaja, nroTransaccion: e.nroTransaccion || null };
+        return { id: d.id, tipo: e.tipo, estado: e.estado, fechaAlta: e.fechaAlta, fechaBaja: e.fechaBaja, nroTransaccion: e.nroTransaccion || null, constanciaUrl: e.constanciaUrl || null, codigoControl: e.codigoControl || null, nroVerificador: e.nroVerificador || null };
       }),
       historial: historial.docs.map((d) => {
         const h = d.data();
@@ -170,6 +170,9 @@ export const gestionarEventual = functions.https.onCall(async (data, context) =>
         canal: String(row.canal || ''),
         fecha: fechaDe(row),
         nroTransaccion: String(row.nroTransaccion || ''),
+        constanciaUrl: String(row.constanciaUrl || ''),
+        codigoControl: String(row.codigoControl || ''),
+        nroVerificador: String(row.nroVerificador || ''),
         fechaInicio,
         fechaInicioArca: fechaAaaammdd(fechaInicio),
         nroTransaccionAlta: nroAlta,

@@ -5,7 +5,7 @@
  *   portal → Simplificación Registral Empleadores → select CUIT empleador → (DatosBasicos Continuar)
  *   → CargaMasiva listado → Nuevo | editar si código del lote | error si abierta ajena
  *   → principal (guardar Código) → Cargar Archivo → file + Cargar → validar Registros
- *   → Presentar (por confirmar) → leer Nro. Transacción del listado por Código
+ *   → Volver → Enviar → listado Enviado (Nro.) → acuse SETI (codigoControl/nroVerificador)
  *
  *   node scripts/arca-robot/subir.mjs --archivo C:\arca-txt\lote.txt --lote lote_x --cuit 30668134978 --tipo AT --empresa bacarsa
  *   node scripts/arca-robot/subir.mjs --modo explorar --archivo ...  → hasta después de Cargar, sin presentar
@@ -36,10 +36,13 @@ import {
   contarLineasTxt,
   decidirNovedadAbierta,
   extraerCodigoPrincipal,
+  extraerDatosConstancia,
+  extraerErroresLinea,
   leerEstadoCarga,
   nroDesdeFilaListado,
   parseFilasListado,
-  validarRegistrosVsTxt,
+  urlConstanciaSeti,
+  validarCargaOk,
 } from './cargaMasiva.mjs';
 
 const LOGIN_URL = 'https://auth.afip.gob.ar/contribuyente_/login.xhtml';
@@ -270,41 +273,105 @@ async function subirYValidar(sr, archivo) {
   await sr.waitForLoadState('domcontentloaded', { timeout: 60000 });
   const texto = await sr.locator('body').innerText();
   const estado = leerEstadoCarga(texto);
-  const validacion = validarRegistrosVsTxt({ registros: estado.registros, lineasTxt });
-  console.log(JSON.stringify({ carga: estado, lineasTxt, validacion }));
+  const erroresLinea = extraerErroresLinea(texto);
+  const validacion = validarCargaOk({ estadoCarga: estado, lineasTxt });
+  console.log(JSON.stringify({ carga: estado, lineasTxt, validacion, erroresLinea }));
   if (!validacion.ok) {
-    const detalle = texto.slice(0, 800);
-    console.error(JSON.stringify({ detalleErrores: detalle }));
-    throw new Error(validacion.error);
+    const detalle = [...erroresLinea, texto.slice(0, 600)].filter(Boolean).join(' | ');
+    console.error(JSON.stringify({ detalleErrores: detalle.slice(0, 800) }));
+    throw new Error((erroresLinea.join('; ') || validacion.error).slice(0, 500));
   }
   return { estado, lineasTxt, texto };
 }
 
-/** Presentar: selectores por confirmar. Tras presentar, nro desde listado por código. */
-async function presentarYLeerNro(sr, codigo, explorar) {
+async function volverYEnviar(sr, explorar) {
+  const volver = sr.getByRole('button', { name: /^Volver$/i });
+  if (await volver.count()) {
+    await volver.first().click();
+    await sr.waitForLoadState('domcontentloaded', { timeout: 45000 });
+  }
   if (explorar) {
-    console.log(JSON.stringify({ explorar: true, presentar: 'omitido', arcaCodigoNovedad: codigo }));
-    return { nros: [], explorar: true };
+    console.log(JSON.stringify({ explorar: true, enviar: 'omitido' }));
+    return { explorar: true };
   }
-  const presentar = sr.getByRole('button', { name: /Presentar|Enviar|Cerrar/i })
-    .or(sr.getByRole('link', { name: /Presentar|Enviar/i }));
-  if (!(await presentar.count())) {
-    throw new Error('PRESENTAR_POR_CONFIRMAR');
-  }
-  await presentar.first().click();
+  const enviar = sr.getByRole('button', { name: /^Enviar$/i });
+  await enviar.first().waitFor({ timeout: 20000 });
+  await enviar.first().click();
   await sr.waitForLoadState('domcontentloaded', { timeout: 60000 });
+  return { explorar: false };
+}
+
+/** Tras Enviar: listado Estado Enviado → Nro. Transacción → acuse SETI. */
+async function leerNroYConstancia(sr, codigo, loteId, explorar) {
+  if (explorar) {
+    return { nros: [], explorar: true, constanciaUrl: '', codigoControl: '', nroVerificador: '', constanciaBase64: '' };
+  }
   try {
     await sr.goto(URLS_CARGA.cargaMasiva, { waitUntil: 'domcontentloaded', timeout: 45000 });
   } catch {
-    /* puede haber quedado en listado */
+    /* ya en listado */
   }
+  await sr.getByText(/LISTADO DE NOVEDADES/i).first().waitFor({ timeout: 20000 }).catch(() => {});
   const filas = await leerFilasListado(sr);
-  const nro = nroDesdeFilaListado(filas, codigo);
-  if (nro) return { nros: [nro], explorar: false };
-  const texto = await sr.locator('body').innerText();
-  const nros = extraerNros(texto);
-  if (!nros.length) throw new Error('SIN_NRO_TRANSACCION');
-  return { nros, explorar: false };
+  let nro = nroDesdeFilaListado(filas, codigo);
+  if (!nro) {
+    const texto = await sr.locator('body').innerText();
+    nro = extraerNros(texto)[0] || '';
+  }
+  if (!nro) throw new Error('SIN_NRO_TRANSACCION');
+
+  const constanciaUrl = urlConstanciaSeti(nro);
+  let codigoControl = '';
+  let nroVerificador = '';
+  let constanciaBase64 = '';
+  try {
+    const link = sr.locator('a').filter({ hasText: new RegExp(`^\\s*${nro}\\s*$`) }).first();
+    if (await link.count()) {
+      const popupWait = sr.context().waitForEvent('page', { timeout: 15000 }).catch(() => null);
+      await link.click();
+      const popup = await popupWait;
+      const ticket = popup || sr;
+      await ticket.waitForTimeout(2500);
+      try {
+        await ticket.goto(constanciaUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      } catch {
+        /* hash SPA */
+      }
+      await ticket.waitForTimeout(2000);
+      const body = await ticket.locator('body').innerText().catch(() => '');
+      const datos = extraerDatosConstancia(body);
+      codigoControl = datos.codigoControl;
+      nroVerificador = datos.nroVerificador;
+      const shot = await capturar(ticket, loteId || codigo, 1, 'constancia');
+      if (shot && fs.existsSync(shot)) {
+        constanciaBase64 = fs.readFileSync(shot).toString('base64');
+      }
+      if (popup) await popup.close().catch(() => {});
+    } else {
+      const page = await sr.context().newPage();
+      await page.goto(constanciaUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+      await page.waitForTimeout(2500);
+      const body = await page.locator('body').innerText().catch(() => '');
+      const datos = extraerDatosConstancia(body);
+      codigoControl = datos.codigoControl;
+      nroVerificador = datos.nroVerificador;
+      const shot = await capturar(page, loteId || codigo, 1, 'constancia');
+      if (shot && fs.existsSync(shot)) {
+        constanciaBase64 = fs.readFileSync(shot).toString('base64');
+      }
+      await page.close().catch(() => {});
+    }
+  } catch (e) {
+    console.error(JSON.stringify({ constanciaError: String(e && e.message ? e.message : e).slice(0, 200) }));
+  }
+  return {
+    nros: [nro],
+    explorar: false,
+    constanciaUrl,
+    codigoControl,
+    nroVerificador,
+    constanciaBase64,
+  };
 }
 
 async function subirReal({ archivo, acceso, loteId, envioId, codigoLote, intento, explorar }) {
@@ -337,10 +404,20 @@ async function subirReal({ archivo, acceso, loteId, envioId, codigoLote, intento
     const codigo = await leerYGuardarCodigo(sr, { loteId, envioId });
     await clickCargarArchivo(sr);
     await subirYValidar(sr, archivo);
-    const presentado = await presentarYLeerNro(sr, codigo, explorar);
-    const hrefs = await sr.locator('a').evaluateAll((as) => as.map((a) => a.href || ''));
-    const constanciaUrl = hrefs.find((h) => /constancia|acuse|comprobante/i.test(h)) || '';
-    return { nros: presentado.nros, constanciaUrl, arcaCodigoNovedad: codigo, explorar: presentado.explorar };
+    const envioPaso = await volverYEnviar(sr, explorar);
+    if (envioPaso.explorar) {
+      return { nros: [], constanciaUrl: '', arcaCodigoNovedad: codigo, explorar: true };
+    }
+    const presentado = await leerNroYConstancia(sr, codigo, loteId || envioId, explorar);
+    return {
+      nros: presentado.nros,
+      constanciaUrl: presentado.constanciaUrl,
+      codigoControl: presentado.codigoControl,
+      nroVerificador: presentado.nroVerificador,
+      constanciaBase64: presentado.constanciaBase64,
+      arcaCodigoNovedad: codigo,
+      explorar: presentado.explorar,
+    };
   } catch (e) {
     await capturar(sr || page, loteId || envioId, intento).catch(() => {});
     throw e;
@@ -413,13 +490,17 @@ async function main() {
         process.exit(0);
       }
       console.log(JSON.stringify({ ok: true, nros: subido.nros, arcaCodigoNovedad: subido.arcaCodigoNovedad, intento: i }));
-      await terminar(bodyResultado({
+      const body = bodyResultado({
         ...baseBody,
         estado: 'CONFIRMADO',
         nroTransaccion: subido.nros.join(','),
         constanciaUrl: subido.constanciaUrl,
         arcaCodigoNovedad: subido.arcaCodigoNovedad,
-      }));
+        codigoControl: subido.codigoControl,
+        nroVerificador: subido.nroVerificador,
+      });
+      if (subido.constanciaBase64) body.constanciaBase64 = subido.constanciaBase64;
+      await terminar(body);
     } catch (e) {
       last = sanitizarTexto(String(e && e.message ? e.message : e), acceso && acceso.clave).slice(0, 500);
       console.error(JSON.stringify({ intento: i, error: last }));

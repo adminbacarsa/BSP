@@ -6,7 +6,7 @@
  *    GET  ?action=lote&tipo=AT|BT&canal=LOTE|URGENTE[&empresaId=]
  *                                             → un TXT por empresa (reclama: SUBIENDO + loteId)
  *    GET  ?action=vencidos&minutos=N          → AT/BT urgentes sin confirmar hace más de N min (sin TXT)
- *    POST ?action=resultado                   → { envioId | loteId, estado, nroTransaccion?, constanciaUrl?, error?, arcaCodigoNovedad? }
+ *    POST ?action=resultado                   → { envioId | loteId, estado, nroTransaccion?, constanciaUrl?, error?, arcaCodigoNovedad?, codigoControl?, nroVerificador?, constanciaBase64? }
  *    POST ?action=arca-codigo                 → { loteId | envioId, arcaCodigoNovedad } guarda Código de Carga Masiva (sin cambiar estado)
  *    GET  ?action=credencial&empresaId=       -> CUIT de ingreso, CUIT representado y clave (solo HTTPS, no se loguea)
  *    GET  ?action=anulacion&envioId=          -> CUIL, fecha AAAAMMDD, nro del alta y cuitRepresentado
@@ -75,6 +75,9 @@ export async function aplicarTransicion(
     actor: string;
     marcarTokenUsado?: boolean;
     arcaCodigoNovedad?: string;
+    codigoControl?: string;
+    nroVerificador?: string;
+    constanciaBase64?: string;
   },
 ): Promise<{ status: number; body: Record<string, unknown> }> {
   const ref = db().collection(COLL).doc(envioId);
@@ -91,6 +94,20 @@ export async function aplicarTransicion(
   const patch: Record<string, unknown> = { ...out.patch, updatedAt: FieldValue.serverTimestamp() };
   if (input.marcarTokenUsado) patch.tokenUsadoAt = FieldValue.serverTimestamp();
   if (input.arcaCodigoNovedad) patch.arcaCodigoNovedad = String(input.arcaCodigoNovedad);
+  if (input.codigoControl) patch.codigoControl = String(input.codigoControl).slice(0, 40);
+  if (input.nroVerificador) patch.nroVerificador = String(input.nroVerificador).slice(0, 40);
+  if (input.constanciaBase64) {
+    try {
+      const buf = Buffer.from(String(input.constanciaBase64), 'base64');
+      if (buf.length > 0 && buf.length < 8_000_000) {
+        const path = `arca-constancias/${envioId}.png`;
+        await admin.storage().bucket().file(path).save(buf, { contentType: 'image/png', resumable: false });
+        patch.constanciaStoragePath = path;
+      }
+    } catch (e) {
+      console.error('[arcaEnviosApi] constancia storage', (e as Error)?.message || e);
+    }
+  }
   const trasError = input.estado === 'ERROR' && envio.tipo === 'ANULACION'
     ? planTrasError(envio, Date.now(), Number(input.fallosRobot || 0))
     : null;
@@ -502,6 +519,9 @@ export const arcaEnviosApi = onRequest(
           fallosRobot: Number(body.fallosRobot || 0) || undefined,
           actor: 'n8n-local',
           arcaCodigoNovedad: arcaCodigoNovedad || undefined,
+          codigoControl: String(body.codigoControl || '').trim().slice(0, 40) || undefined,
+          nroVerificador: String(body.nroVerificador || '').trim().slice(0, 40) || undefined,
+          constanciaBase64: String(body.constanciaBase64 || '') || undefined,
         };
         if (loteId && !envioId) {
           const snap = await db().collection(COLL).where('loteId', '==', loteId).get();
