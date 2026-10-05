@@ -3,13 +3,14 @@
  *
  *  Robot (header `x-arca-key` = secreto ARCA_ROBOT_KEY):
  *    GET  ?action=pendientes[&empresaId=]     → envíos PENDIENTE/ERROR con su TXT
- *    POST ?action=resultado                   → { envioId, estado, nroTransaccion?, constanciaUrl?, error? }
+ *    GET  ?action=lote&tipo=AT|BT&canal=LOTE|URGENTE[&empresaId=]
+ *                                             → un TXT por empresa (reclama: SUBIENDO + loteId)
+ *    GET  ?action=vencidos&minutos=N          → AT/BT urgentes sin confirmar hace más de N min (sin TXT)
+ *    POST ?action=resultado                   → { envioId | loteId, estado, nroTransaccion?, constanciaUrl?, error? }
  *
  *  Link mágico (sin login, token de un solo uso):
  *    GET  ?action=link&token=                 → resumen + TXT
  *    POST ?action=link-resultado&token=       → { nroTransaccion, constanciaUrl? }
- *
- * No se despliega hasta que Mauro cree el secreto.
  */
 import * as admin from 'firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
@@ -18,6 +19,9 @@ import { defineSecret } from 'firebase-functions/params';
 import {
   ESTADOS_ENVIO,
   type EstadoEnvio,
+  type FilaLote,
+  armarLotes,
+  esUrgenteVencido,
   nuevoToken,
   rateLimitHit,
   transicionEnvio,
@@ -97,6 +101,7 @@ export async function aplicarTransicion(
         await doc.ref.update({
           estado: 'CONFIRMADO',
           nroTransaccion: String(input.nroTransaccion || '').trim(),
+          constanciaUrl: String(input.constanciaUrl || '').trim() || null,
           origen: input.origen,
           updatedAt: FieldValue.serverTimestamp(),
         });
@@ -244,7 +249,12 @@ export const arcaEnviosApi = onRequest(
           return;
         }
         const t = nuevoToken(nowMs);
-        await ref.update({ ...t, updatedAt: FieldValue.serverTimestamp() });
+        const marcarRespaldo = (req.body as Record<string, unknown>)?.marcarRespaldo === true;
+        await ref.update({
+          ...t,
+          updatedAt: FieldValue.serverTimestamp(),
+          ...(marcarRespaldo ? { respaldoAvisadoAt: FieldValue.serverTimestamp() } : {}),
+        });
         await auditar('ARCA_ENVIO_LINK_EMITIDO', `Link de un solo uso para el envío ${envioId}`, {
           empresaId: snap.data()?.empresaId || null,
           envioId,
@@ -264,22 +274,110 @@ export const arcaEnviosApi = onRequest(
         return;
       }
 
-      if (action === 'resultado' && req.method === 'POST') {
-        const body = (req.body || {}) as Record<string, unknown>;
-        const envioId = String(body.envioId || '');
-        const estado = String(body.estado || '') as EstadoEnvio;
-        if (!envioId || !ESTADOS_ENVIO.includes(estado)) {
+      if (action === 'lote' && req.method === 'GET') {
+        const tipo = String(req.query.tipo || '');
+        const canal = String(req.query.canal || 'LOTE');
+        const empresaId = String(req.query.empresaId || '');
+        if ((tipo !== 'AT' && tipo !== 'BT') || (canal !== 'LOTE' && canal !== 'URGENTE')) {
           res.status(400).json({ error: 'PARAMETROS' });
           return;
         }
-        const out = await aplicarTransicion(envioId, {
+        const docs = await enviosAbiertos();
+        const filas = docs.map(filaDe);
+        const armados = armarLotes(filas, { tipo, canal, empresaId: empresaId || undefined }, nowMs);
+        const lotes = [];
+        for (const lote of armados) {
+          const reclamado = await reclamarLote(lote, nowMs);
+          if (!reclamado) continue;
+          const empresa = await db().collection('empresas').doc(lote.empresaId).get();
+          const data = empresa.data() || {};
+          lotes.push({
+            ...lote,
+            loteId: reclamado,
+            cuit: String(data.cuit || '').replace(/\D/g, ''),
+            empresaNombre: String(data.nombre || data.razonSocial || ''),
+          });
+        }
+        res.status(200).json({ lotes });
+        return;
+      }
+
+      if (action === 'vencidos' && req.method === 'GET') {
+        const minutos = Number(req.query.minutos || 30);
+        const docs = await enviosAbiertos();
+        const envios = docs
+          .map((d) => ({ id: d.id, data: d.data() || {} }))
+          .filter((d) => esUrgenteVencido({
+            canal: String(d.data.canal || ''),
+            tipo: String(d.data.tipo || ''),
+            estado: String(d.data.estado || ''),
+            createdAtMs: createdAtMs(d.data),
+            respaldoAvisadoAt: d.data.respaldoAvisadoAt,
+            quitadoDelLote: d.data.quitadoDelLote === true,
+          }, nowMs, minutos))
+          .map((d) => ({
+            envioId: d.id,
+            empresaId: d.data.empresaId || null,
+            tipo: d.data.tipo,
+            estado: d.data.estado,
+            canal: d.data.canal || 'URGENTE',
+            minutos: Math.round((nowMs - createdAtMs(d.data)) / 60000),
+            fechaAlta: d.data.fechaAlta || null,
+            fechaBaja: d.data.fechaBaja || null,
+            enviable: d.data.enviable !== false,
+            ultimoError: d.data.ultimoError || null,
+          }));
+        res.status(200).json({ minutos: Math.min(1440, Math.max(1, Number(minutos) || 30)), envios });
+        return;
+      }
+
+      if (action === 'resultado' && req.method === 'POST') {
+        const body = (req.body || {}) as Record<string, unknown>;
+        const envioId = String(body.envioId || '').trim();
+        const loteId = String(body.loteId || '').trim();
+        const estado = String(body.estado || '') as EstadoEnvio;
+        if ((!envioId && !loteId) || !ESTADOS_ENVIO.includes(estado)) {
+          res.status(400).json({ error: 'PARAMETROS' });
+          return;
+        }
+        const input = {
           estado,
-          origen: 'ROBOT',
-          nroTransaccion: String(body.nroTransaccion || '') || undefined,
-          constanciaUrl: String(body.constanciaUrl || '') || undefined,
-          error: String(body.error || '') || undefined,
+          origen: 'ROBOT' as const,
+          nroTransaccion: nroDeBody(body) || undefined,
+          constanciaUrl: String(body.constanciaUrl || '').slice(0, 500) || undefined,
+          error: String(body.error || '').slice(0, 500) || undefined,
           actor: 'n8n-local',
-        });
+        };
+        if (loteId && !envioId) {
+          const snap = await db().collection(COLL).where('loteId', '==', loteId).get();
+          if (snap.empty) {
+            res.status(404).json({ error: 'NO_EXISTE' });
+            return;
+          }
+          const pendientes = snap.docs.filter((d) => d.data().estado !== 'CONFIRMADO');
+          if (!pendientes.length) {
+            res.status(409).json({ error: 'YA_CONFIRMADO', loteId });
+            return;
+          }
+          if (estado === 'CONFIRMADO') {
+            const primero = pendientes.find((d) => d.data().enviable !== false) || pendientes[0];
+            const out = await aplicarTransicion(primero.id, input);
+            res.status(out.status).json({ ...out.body, loteId, envios: snap.size });
+            return;
+          }
+          const resultados = [];
+          for (const doc of pendientes) {
+            resultados.push(await aplicarTransicion(doc.id, input));
+          }
+          const fallo = resultados.find((r) => r.status >= 400);
+          res.status(fallo ? fallo.status : 200).json({
+            ok: !fallo,
+            loteId,
+            resultados: resultados.map((r) => r.body),
+          });
+          return;
+        }
+        const out = await aplicarTransicion(envioId, input);
         res.status(out.status).json(out.body);
         return;
       }
@@ -291,6 +389,72 @@ export const arcaEnviosApi = onRequest(
     }
   },
 );
+
+
+const ESTADOS_ABIERTOS = ['PENDIENTE', 'ERROR', 'SUBIENDO', 'MANUAL'];
+const MAX_ABIERTOS = 200;
+
+function createdAtMs(data: Record<string, unknown>): number {
+  const c = data.createdAt as { toMillis?: () => number } | string | undefined;
+  if (c && typeof c === 'object' && typeof c.toMillis === 'function') return c.toMillis();
+  const n = Number(data.createdAtMs);
+  if (Number.isFinite(n) && n > 0) return n;
+  const p = Date.parse(String(c || ''));
+  return Number.isFinite(p) ? p : 0;
+}
+
+function filaDe(doc: { id: string; data: () => Record<string, unknown> }): FilaLote {
+  const data = doc.data() || {};
+  return {
+    id: doc.id,
+    empresaId: data.empresaId ? String(data.empresaId) : undefined,
+    tipo: data.tipo ? String(data.tipo) : undefined,
+    estado: data.estado ? String(data.estado) : undefined,
+    canal: data.canal ? String(data.canal) : undefined,
+    txt: data.txt ? String(data.txt) : undefined,
+    enviable: data.enviable !== false,
+    quitadoDelLote: data.quitadoDelLote === true,
+    loteReclamadoAtMs: Number(data.loteReclamadoAtMs || 0) || undefined,
+  };
+}
+
+async function enviosAbiertos() {
+  const snap = await db().collection(COLL).where('estado', 'in', ESTADOS_ABIERTOS).limit(MAX_ABIERTOS).get();
+  return snap.docs;
+}
+
+function nroDeBody(body: Record<string, unknown>): string {
+  const extra = Array.isArray(body.nrosTransaccion) ? body.nrosTransaccion.map((n) => String(n).trim()) : [];
+  return [...new Set([String(body.nroTransaccion || '').trim(), ...extra].filter(Boolean))].join(',');
+}
+
+async function reclamarLote(lote: { empresaId: string; tipo: string; envioIds: string[] }, ahora: number): Promise<string | null> {
+  const loteId = `lote_${lote.empresaId}_${lote.tipo}_${ahora}_${Math.random().toString(16).slice(2, 8)}`.replace(/[^a-zA-Z0-9_]/g, '_');
+  try {
+    await db().runTransaction(async (tx) => {
+      const snaps = [];
+      for (const id of lote.envioIds) snaps.push(await tx.get(db().collection(COLL).doc(id)));
+      for (const snap of snaps) {
+        const estado = String(snap.data()?.estado || '');
+        if (!['PENDIENTE', 'ERROR', 'SUBIENDO'].includes(estado)) throw new Error('LOTE_CAMBIO');
+        tx.update(snap.ref, {
+          loteId,
+          estado: 'SUBIENDO',
+          loteReclamadoAtMs: ahora,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+      }
+    });
+  } catch (e) {
+    console.error('[arcaEnviosApi] lote', lote.empresaId, (e as Error)?.message || e);
+    return null;
+  }
+  await auditar('ARCA_LOTE_RECLAMADO', `Lote ${loteId} ${lote.tipo} (${lote.envioIds.length})`, {
+    empresaId: lote.empresaId,
+    loteId,
+  });
+  return loteId;
+}
 
 type AvisoResuelto = { pushes: { uid: string; token: string }[]; mails: string[]; whatsapps: string[] };
 

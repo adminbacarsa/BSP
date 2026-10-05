@@ -137,3 +137,88 @@ export function rateLimitHit(clave: string, nowMs: number, max = 30, ventanaMs =
   hits.set(clave, previos);
   return true;
 }
+
+/** Un SUBIENDO mas viejo que esto vuelve al lote: el robot no llego a confirmar ni a errar. */
+export const LOTE_RECLAMO_STALE_MS = 20 * 60 * 1000;
+
+export type FilaLote = {
+  id: string;
+  empresaId?: string;
+  tipo?: string;
+  estado?: string;
+  canal?: string;
+  txt?: string;
+  enviable?: boolean;
+  quitadoDelLote?: boolean;
+  loteReclamadoAtMs?: number;
+};
+
+export type FiltroLote = { tipo: string; canal: string; empresaId?: string };
+
+/** Lote programado o urgente: misma empresa, mismo tipo, TXT enviable, sin los que ya salieron del lote. */
+export function entraEnLote(envio: FilaLote, filtro: FiltroLote, nowMs: number): boolean {
+  if (!envio?.id || !envio.empresaId) return false;
+  if (filtro.empresaId && envio.empresaId !== filtro.empresaId) return false;
+  if (String(envio.tipo || '') !== filtro.tipo) return false;
+  if (String(envio.canal || 'LOTE') !== filtro.canal) return false;
+  if (envio.quitadoDelLote === true || envio.enviable === false) return false;
+  if (!String(envio.txt || '').trim()) return false;
+  const estado = String(envio.estado || '');
+  if (estado === 'PENDIENTE' || estado === 'ERROR') return true;
+  if (estado === 'SUBIENDO') {
+    const en = Number(envio.loteReclamadoAtMs || 0);
+    return en > 0 && nowMs - en >= LOTE_RECLAMO_STALE_MS;
+  }
+  return false;
+}
+
+/** Un TXT por empresa: una linea por envio. El urgente no entra en el lote de las 18:00. */
+export function armarLotes(envios: FilaLote[], filtro: FiltroLote, nowMs: number): Array<{
+  empresaId: string;
+  tipo: string;
+  canal: string;
+  envioIds: string[];
+  lineas: number;
+  txt: string;
+}> {
+  const grupos = new Map<string, FilaLote[]>();
+  for (const envio of envios || []) {
+    if (!entraEnLote(envio, filtro, nowMs)) continue;
+    const key = String(envio.empresaId);
+    const lista = grupos.get(key) || [];
+    lista.push(envio);
+    grupos.set(key, lista);
+  }
+  return [...grupos.entries()].map(([empresaId, filas]) => ({
+    empresaId,
+    tipo: filtro.tipo,
+    canal: filtro.canal,
+    envioIds: filas.map((f) => f.id),
+    lineas: filas.length,
+    txt: filas.map((f) => String(f.txt).trim()).join('\n'),
+  }));
+}
+
+/** AT/BT urgente sin confirmar, pasado N minutos, y que el respaldo no aviso todavia. */
+export function esUrgenteVencido(
+  envio: {
+    canal?: string;
+    tipo?: string;
+    estado?: string;
+    createdAtMs?: number;
+    respaldoAvisadoAt?: unknown;
+    quitadoDelLote?: boolean;
+  },
+  nowMs: number,
+  minutos: number,
+): boolean {
+  if (envio?.quitadoDelLote === true) return false;
+  if (String(envio?.canal || '') !== 'URGENTE') return false;
+  if (envio?.tipo !== 'AT' && envio?.tipo !== 'BT') return false;
+  if (String(envio?.estado || '') === 'CONFIRMADO') return false;
+  if (envio?.respaldoAvisadoAt) return false;
+  const created = Number(envio?.createdAtMs || 0);
+  if (!created) return false;
+  const umbral = Math.min(1440, Math.max(1, Number(minutos) || 30));
+  return nowMs - created >= umbral * 60_000;
+}

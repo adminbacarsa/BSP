@@ -1,0 +1,273 @@
+{
+  "name": "COSP — ARCA respaldo urgente (CLOUD)",
+  "_nota": "Importar en n8n Cloud. Si un AT/BT URGENTE no se confirmo en N minutos, COSP emite el link magico (push a RRHH) y este flujo manda el mail. Sin clave fiscal.",
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Argentina/Buenos_Aires"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/5 * * * *"
+            }
+          ]
+        }
+      },
+      "id": "sch",
+      "name": "Cada 5 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -520,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.ARCA_ENVIOS_URL }}?action=vencidos&minutos={{ $env.ARCA_URGENTE_MINUTOS || 30 }}&canal=URGENTE",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-arca-key",
+              "value": "={{ $env.ARCA_ROBOT_KEY }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "id": "get",
+      "name": "GET urgentes vencidos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -280,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ ($json.envios || []).length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "hay",
+      "name": "Hay vencidos",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -40,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "envios",
+        "options": {}
+      },
+      "id": "split",
+      "name": "Un envio",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        180,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ARCA_ENVIOS_URL }}?action=link-emitir",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-arca-key",
+              "value": "={{ $env.ARCA_ROBOT_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ envioId: $json.envioId, marcarRespaldo: true }) }}",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "id": "link",
+      "name": "Pedir link",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.ARCA_ENVIOS_URL }}?action=config-avisos&empresaId={{ $('Un envio').item.json.empresaId }}&tipo={{ $('Un envio').item.json.estado === 'ERROR' ? 'ARCA_ERROR' : ($('Un envio').item.json.tipo === 'BT' ? 'ARCA_BAJA_PENDIENTE' : 'ARCA_ALTA_PENDIENTE') }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-arca-key",
+              "value": "={{ $env.ARCA_ROBOT_KEY }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "id": "cfg",
+      "name": "GET config-avisos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        620,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "language": "javaScript",
+        "jsCode": "const prev = $('Un envio').item.json;\nconst link = $('Pedir link').item.json;\nconst filas = [];\nfor (const mail of $json.mails || []) {\n  filas.push({ json: { mail, linkUrl: link.linkUrl || '', tipo: prev.tipo, estado: prev.estado, minutos: prev.minutos, empresaId: prev.empresaId, envioId: prev.envioId, ultimoError: prev.ultimoError || '', enviable: prev.enviable } });\n}\nreturn filas;"
+      },
+      "id": "mails",
+      "name": "Mails de RRHH",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        840,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.mail }}",
+        "subject": "=ARCA {{ $json.tipo }} urgente sin confirmar ({{ $json.estado }})",
+        "message": "=Un alta o baja urgente de ARCA no se confirmo.\n\nEmpresa: {{ $json.empresaId }}\nEnvio: {{ $json.envioId }}\nEstado: {{ $json.estado }}\nMinutos sin confirmar: {{ $json.minutos }}\nEnviable: {{ $json.enviable }}\nDetalle: {{ $json.ultimoError }}\n\nCarga manual, un solo uso, vence a las 48 h:\n{{ $json.linkUrl }}\n",
+        "options": {}
+      },
+      "id": "mail",
+      "name": "Mail a RRHH",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1060,
+        0
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REEMPLAZAR",
+          "name": "Gmail RRHH"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Cada 5 min": {
+      "main": [
+        [
+          {
+            "node": "GET urgentes vencidos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET urgentes vencidos": {
+      "main": [
+        [
+          {
+            "node": "Hay vencidos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hay vencidos": {
+      "main": [
+        [
+          {
+            "node": "Un envio",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Un envio": {
+      "main": [
+        [
+          {
+            "node": "Pedir link",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pedir link": {
+      "main": [
+        [
+          {
+            "node": "GET config-avisos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET config-avisos": {
+      "main": [
+        [
+          {
+            "node": "Mails de RRHH",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mails de RRHH": {
+      "main": [
+        [
+          {
+            "node": "Mail a RRHH",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
