@@ -68,3 +68,31 @@ export function clavesPathSeguro(clavesPath, repoRoot) {
   }
   return p;
 }
+
+export function soloDigitosCuit(valor) {
+  return String(valor || '').replace(/\D/g, '');
+}
+
+export function formatearCuit(cuit) {
+  const d = soloDigitosCuit(cuit);
+  if (d.length !== 11) return d;
+  return `${d.slice(0, 2)}-${d.slice(2, 10)}-${d.slice(10)}`;
+}
+
+/** Mismo CUIT: entra directo. Distinto: hay que elegir la empresa representada. */
+export function planAcceso(acceso) {
+  const cuitLogin = soloDigitosCuit(acceso && acceso.cuitLogin);
+  const cuitRepresentado = soloDigitosCuit((acceso && acceso.cuitRepresentado) || cuitLogin);
+  return {
+    cuitLogin,
+    cuitRepresentado,
+    elegirRepresentado: Boolean(cuitLogin && cuitRepresentado && cuitLogin !== cuitRepresentado),
+  };
+}
+
+export function sanitizarTexto(texto, secreto) {
+  const s = String(secreto || '');
+  const base = String(texto || '');
+  if (!s) return base;
+  return base.split(s).join('***');
+}

@@ -449,7 +449,10 @@ service cloud.firestore {
     match /empresas/{empresaId} {
       allow read: if isAdmin() || isEmployeeClaim() || isEventualClaim() || isClientUser();
       allow create, delete: if isSuperAdmin();
-      allow update: if isSuperAdmin() || (
+      allow update: if (
+        isSuperAdmin()
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['arcaRobotAcceso'])
+      ) || (
         isAdmin() && empresaId == userEmpresaId()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['avisos', 'arcaTandas'])
       );

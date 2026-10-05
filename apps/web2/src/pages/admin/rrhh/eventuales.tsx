@@ -13,6 +13,7 @@ import { useMovilMode } from '@/lib/movil/useMovilMode';
 import { PageHeader, PageShell } from '@/components/ui';
 import FichaEventual, { type DocumentoVista, type EmpresaPlataforma, type FichaEventualData, type MarcoVista } from '@/components/eventuales/FichaEventual';
 import ArcaPendientesPanel from '@/components/eventuales/ArcaPendientesPanel';
+import ArcaClaveFiscalPanel from '@/components/eventuales/ArcaClaveFiscalPanel';
 import MarcosLotePanel from '@/components/eventuales/MarcosLotePanel';
 import {
   ChipPruebas, EstadoFilaChip, GuiaEventuales, TarjetasResumen, type GuiaVista, type PasoChecklist, type TarjetaResumen,
@@ -714,6 +715,9 @@ export default function EventualesPage() {
                       {arcaPrevia.enviable ? 'Con estos códigos el TXT se puede enviar.' : `El TXT queda no enviable${arcaPrevia.avisoCct ? ` · ${arcaPrevia.avisoCct}` : ''}.`}
                     </p>
                   </div>
+                )}
+                {isSuperAdmin && (
+                  <ArcaClaveFiscalPanel empresaId={empresaActivaId || ''} cuitEmpresa={empresaActiva?.cuit || ''} />
                 )}
               </section>
 
