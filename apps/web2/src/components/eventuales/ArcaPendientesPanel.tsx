@@ -16,6 +16,7 @@ type Envio = {
   constanciaUrl?: string;
   codigoControl?: string;
   nroVerificador?: string;
+  verificacionPendiente?: boolean;
   fechaInicioArca: string;
   nroTransaccionAlta: string;
   venceAnulacionMs: number;
@@ -59,6 +60,8 @@ export default function ArcaPendientesPanel(props: { empresaId: string; empresaN
         constanciaUrl: String((row as { constanciaUrl?: string }).constanciaUrl || ''),
         codigoControl: String((row as { codigoControl?: string }).codigoControl || ''),
         nroVerificador: String((row as { nroVerificador?: string }).nroVerificador || ''),
+        verificacionPendiente: (row as { verificacionPendiente?: boolean }).verificacionPendiente === true
+          || row.estado === 'ENVIADO' || row.estado === 'VERIFICAR',
         fechaInicioArca: String(row.fechaInicioArca || ''),
         nroTransaccionAlta: String(row.nroTransaccionAlta || ''),
         venceAnulacionMs: Number(row.venceAnulacionMs) || 0,
@@ -123,7 +126,7 @@ export default function ArcaPendientesPanel(props: { empresaId: string; empresaN
             <li key={row.id}>
               <button type="button" onClick={() => { setElegido(row.id); setNro(''); setAcuse(''); }} data-arca={row.id} className={`w-full rounded-xl border px-3 py-2 text-left ${elegido === row.id ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200 bg-white hover:bg-slate-50'}`}>
                 <span className="block truncate text-sm font-bold text-slate-800">{row.nombre}</span>
-                <span className="mt-0.5 block text-[11px] font-semibold tabular-nums text-slate-500">{etiqueta(row.tipo)} {row.tipo} · {row.estado}{row.fecha ? ` · ${row.fecha}` : ''}</span>
+                <span className="mt-0.5 block text-[11px] font-semibold tabular-nums text-slate-500">{etiqueta(row.tipo)} {row.tipo} · {row.estado}{row.verificacionPendiente ? ' · verificación pendiente' : ''}{row.fecha ? ` · ${row.fecha}` : ''}</span>
               </button>
             </li>
           ))}
@@ -163,7 +166,10 @@ export default function ArcaPendientesPanel(props: { empresaId: string; empresaN
         )}
         {envio && envio.tipo !== 'ANULACION' && (
           <div className="space-y-3">
-            <h3 className="text-sm font-black text-slate-800">{etiqueta(envio.tipo)} {envio.tipo} · {envio.nombre}</h3>
+            <h3 className="text-sm font-black text-slate-800">{etiqueta(envio.tipo)} {envio.tipo} · {envio.nombre}{envio.verificacionPendiente ? ' · verificación pendiente' : ''}</h3>
+            {envio.verificacionPendiente && (
+              <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">Enviado a ARCA (nro {envio.nroTransaccion || '—'}). Fichada habilitada. Verificación de relación 012 pendiente.</p>
+            )}
             {envio.observacionesInternas && <p className="text-xs font-semibold text-slate-600">{envio.observacionesInternas}{envio.revista ? ` · motivo ${envio.revista}` : ''}</p>}
             <p className="text-xs text-slate-500">Cargá el número de transacción que devolvió ARCA.</p>
             <input value={nro} onChange={(e) => setNro(e.target.value)} placeholder="Número de transacción" disabled={!props.puedeConfirmar} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" />

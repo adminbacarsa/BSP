@@ -326,6 +326,28 @@ async function txtDe(empresaId: string, contrato: Record<string, unknown>, cuil:
     const out = lineasCargaMasiva({ contrato, cuil, bruto: bruto.bruto, obraSocial: bolsa.obraSocialRnos || '', empresa });
     const advertencias = [...out.advertencias];
     if (!bruto.ok) advertencias.push('RETRIBUCION_PENDIENTE');
+    if (tipo === 'AT') {
+      try {
+        const { advertenciaRelacionActivaEmpleador } = await import('../eventuales-shared/verificacionAlta.mjs') as {
+          advertenciaRelacionActivaEmpleador: (i: Record<string, unknown>) => string | null;
+        };
+        const empSnap = await db().collection('empleados').where('cuil', '==', cuil).limit(20).get();
+        const empSnap2 = empSnap.empty
+          ? await db().collection('empleados').where('cuit', '==', cuil).limit(20).get()
+          : empSnap;
+        const empresasSnap = await db().collection('empresas').limit(80).get();
+        const rel = advertenciaRelacionActivaEmpleador({
+          cuil,
+          empresaId,
+          empresaCuit: (empresa as { cuit?: string }).cuit || '',
+          empleados: empSnap2.docs.map((d) => ({ id: d.id, ...d.data() })),
+          empresas: empresasSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+        });
+        if (rel) advertencias.push(rel);
+      } catch (e) {
+        console.warn('[planificacionEventuales] advertencia relación activa', (e as Error)?.message || e);
+      }
+    }
     return {
       txt: tipo === 'AT' ? out.lineas[0] : out.lineas[1],
       advertencias,

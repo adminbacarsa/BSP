@@ -45,7 +45,7 @@ describe('envíos ARCA', () => {
     const sinAlta = planEnvioBaja({ ...base, enviosDelContrato: [alta.envio] });
     assert.equal(sinAlta.codigo, 'ALTA_NO_CONFIRMADA');
 
-    const confirmada = { ...alta.envio, estado: 'CONFIRMADO' };
+    const confirmada = { ...alta.envio, estado: 'CONFIRMADO', nroTransaccion: '1197638458' };
     const baja = planEnvioBaja({ ...base, enviosDelContrato: [confirmada] });
     assert.equal(baja.ok, true);
     assert.equal(baja.envio.tipo, 'BT');

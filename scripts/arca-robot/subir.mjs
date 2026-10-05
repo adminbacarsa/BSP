@@ -430,6 +430,18 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const modo = String(args.modo || '');
   const explorarCarga = modo === 'explorar-carga' || (modo === 'explorar' && args.archivo);
+  if (modo === 'verificar') {
+    const { correrVerificacion } = await import('./verificar.mjs');
+    await correrVerificacion({
+      args,
+      terminar,
+      resolverAcceso,
+      login,
+      elegirRepresentado,
+      elegirEmpleadorSimplificacion,
+    });
+    return;
+  }
   if ((modo === 'anular' || modo === 'explorar') && !explorarCarga) {
     const { correrAnulacion } = await import('./anular.mjs');
     await correrAnulacion({
@@ -455,7 +467,7 @@ async function main() {
   if (esSimulacion()) {
     const nro = nroSimulado(loteId || envioId);
     console.log(JSON.stringify({ simulacion: true, nroTransaccion: nro, tipo }));
-    await terminar(bodyResultado({ ...baseBody, estado: 'CONFIRMADO', nroTransaccion: nro }));
+    await terminar(bodyResultado({ ...baseBody, estado: 'ENVIADO', nroTransaccion: nro }));
   }
 
   let acceso = null;
@@ -492,7 +504,7 @@ async function main() {
       console.log(JSON.stringify({ ok: true, nros: subido.nros, arcaCodigoNovedad: subido.arcaCodigoNovedad, intento: i }));
       const body = bodyResultado({
         ...baseBody,
-        estado: 'CONFIRMADO',
+        estado: 'ENVIADO',
         nroTransaccion: subido.nros.join(','),
         constanciaUrl: subido.constanciaUrl,
         arcaCodigoNovedad: subido.arcaCodigoNovedad,

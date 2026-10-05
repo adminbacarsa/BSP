@@ -92,7 +92,7 @@ await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
 const baseEnv = { ARCA_ENVIOS_URL: `http://127.0.0.1:${port}`, ARCA_ROBOT_KEY: 'robot-test', ARCA_SIMULACION: '1' };
 const sim = await runRobot(baseEnv, ['--lote', 'lote_demo_1', '--tipo', 'AT', '--empresa', 'bacarsa', '--cuit', '30111111118']);
-check('simulacion confirma sin abrir ARCA', sim.code === 0 && server.last.body.estado === 'CONFIRMADO' && String(server.last.body.nroTransaccion).startsWith('SIM-') && server.last.key === 'robot-test');
+check('simulacion deja ENVIADO sin abrir ARCA', sim.code === 0 && server.last.body.estado === 'ENVIADO' && String(server.last.body.nroTransaccion).startsWith('SIM-') && server.last.key === 'robot-test');
 
 const fuera = path.join(os.tmpdir(), `arca-claves-test-${process.pid}.json`);
 fs.writeFileSync(fuera, JSON.stringify({ '30999999990': 'no-usar' }));

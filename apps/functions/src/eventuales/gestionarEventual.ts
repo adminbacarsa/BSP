@@ -125,7 +125,7 @@ export const gestionarEventual = functions.https.onCall(async (data, context) =>
       const row = doc.data();
       if (row.quitadoDelLote === true) return false;
       const estado = String(row.estado || '');
-      if (['PENDIENTE', 'ERROR', 'MANUAL', 'SUBIENDO'].includes(estado)) return true;
+      if (['PENDIENTE', 'ERROR', 'MANUAL', 'SUBIENDO', 'ENVIADO', 'VERIFICAR'].includes(estado)) return true;
       return row.tipo === 'ANULACION' && estado === 'ANULADO';
     });
     const fichaCache = new Map<string, Promise<admin.firestore.DocumentSnapshot | null>>();
@@ -173,6 +173,7 @@ export const gestionarEventual = functions.https.onCall(async (data, context) =>
         constanciaUrl: String(row.constanciaUrl || ''),
         codigoControl: String(row.codigoControl || ''),
         nroVerificador: String(row.nroVerificador || ''),
+        verificacionPendiente: row.verificacionPendiente === true || row.estado === 'ENVIADO' || row.estado === 'VERIFICAR',
         fechaInicio,
         fechaInicioArca: fechaAaaammdd(fechaInicio),
         nroTransaccionAlta: nroAlta,

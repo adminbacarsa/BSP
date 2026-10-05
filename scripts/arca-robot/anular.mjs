@@ -8,6 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bodyResultado, esSimulacion, extraerNros, planAcceso, sanitizarTexto } from './flujo.mjs';
+import { decidirTarjetaAnulacion, parseTarjetasRelacion } from './verificacionAlta.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -87,8 +88,26 @@ async function navegar(page, datos, selectores, envioId, explorar) {
   await capturaPaso(page, envioId, 'formulario');
   await clickPor(page, selectores.buscar);
   await capturaPaso(page, envioId, 'busqueda');
+  const tarjetas = parseTarjetasRelacion(await page.locator('body').innerText());
+  const eleccion = decidirTarjetaAnulacion({
+    tarjetas,
+    fechaInicio: datos.fechaInicio || datos.fechaAlta,
+    modalidad: '012',
+  });
+  console.log(JSON.stringify({ eleccion, tarjetas }));
+  if (eleccion.accion !== 'ANULAR') {
+    throw new Error(`ANULACION_MANUAL:${eleccion.motivo || 'SIN_TARJETA_012'}`);
+  }
   if (explorar) return '';
-  await clickPor(page, selectores.anular);
+  // Ícono tacho (anular) de la tarjeta elegida — no el lápiz ni la baja.
+  const fila = page.locator('tr, .card, div').filter({
+    hasText: new RegExp(String(eleccion.tarjeta.fechaInicio || '').replace(/\//g, '\\/')),
+  }).filter({ hasText: /012|Mod/i }).first();
+  const anularIcon = fila.locator('[title*="Anul" i], a[title*="Anul" i], img[alt*="Anul" i]').or(
+    page.getByRole('button', { name: /Anular/i }),
+  );
+  if (await anularIcon.count()) await anularIcon.first().click({ timeout: 15000 });
+  else await clickPor(page, selectores.anular);
   await capturaPaso(page, envioId, 'anular');
   await clickPor(page, selectores.confirmar);
   await capturaPaso(page, envioId, 'acuse');
@@ -174,6 +193,10 @@ export async function correrAnulacion(deps) {
     } finally {
       if (browser) await browser.close().catch(() => {});
     }
+  }
+  if (String(last).startsWith('ANULACION_MANUAL:')) {
+    await deps.terminar(bodyResultado({ envioId, estado: 'MANUAL', error: last }));
+    return;
   }
   await deps.terminar(bodyResultado({ envioId, estado: 'ERROR', error: last, fallosRobot: tope }));
 }

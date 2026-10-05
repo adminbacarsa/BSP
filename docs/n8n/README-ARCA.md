@@ -107,6 +107,16 @@ Los horarios 18:00 (AT, canal LOTE) y 09:00 (BT, canal LOTE) ya estan en el JSON
 
 Selectores reales (capturas 05/10) en `scripts/arca-robot/selectores.json`. Tras Cargar válido: **Volver → Enviar**; Nro. desde listado (Estado Enviado); constancia SETI (`codigoControl`, `nroVerificador`). Anulación: **por confirmar** (`--modo explorar` / `--modo explorar-carga`). Con archivo: `node scripts/arca-robot/subir.mjs --modo explorar --archivo TXT --lote …` llega hasta después de Cargar y no presenta. Anulación: `node scripts/arca-robot/subir.mjs --modo explorar --envio ID --empresa EMPRESA`.
 
+
+## Verificación post-envío (ENVIADO ≠ CONFIRMADO)
+
+Tras **Enviar**, el robot confirma el lote como `ENVIADO` (con `nroTransaccion`). La fichada queda habilitada. Un paso `--modo verificar` (n8n: día siguiente o cada pocas horas hasta 48 h) consulta por CUIL: si hay tarjeta con Fecha de Inicio = fecha del alta y Mod. Contrato **012** → `CONFIRMADO`; si no aparece en 48 h → `VERIFICAR` + novedad `ARCA_ALTA_VERIFICAR` (revisar Domicilio Fiscal Electrónico).
+
+| Extra | Uso |
+|---|---|
+| `GET ?action=verificacion&envioId=` | Datos para el robot de verificación |
+| `GET ?action=verificacion-pendientes` | Listado de AT en `ENVIADO` |
+
 ## Anulación automática
 
 Al entrar en `PENDIENTE`, COSP avisa el webhook urgente. El robot busca el alta por CUIL y fecha (AAAAMMDD) o por el número de transacción, anula, lee el acuse y hace `POST ?action=resultado` con `estado: ANULADO` y origen ROBOT. Si falla 2 veces, o faltan menos de 2 horas para el plazo RG 2988, el envío queda `MANUAL` en ARCA pendientes y se avisa a RRHH. Si el plazo vence, sigue la baja código 30.

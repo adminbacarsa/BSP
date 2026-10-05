@@ -115,7 +115,7 @@ function jornadaLimpia(j) {
 }
 
 function atSubido(envio) {
-  return !!envio && ['SUBIENDO', 'CONFIRMADO'].includes(envio.estado);
+  return !!envio && ['SUBIENDO', 'ENVIADO', 'VERIFICAR', 'CONFIRMADO'].includes(envio.estado);
 }
 
 /**

@@ -4,16 +4,20 @@
  * Espejo servidor: apps/functions/src/arca/arcaEnviosCore.ts.
  */
 import { lineasCargaMasiva } from './arcaTxt.mjs';
+import { advertenciaRelacionActivaEmpleador, AVISO_RELACION_ACTIVA_EMPLEADOR } from './verificacionAlta.mjs';
+export { AVISO_RELACION_ACTIVA_EMPLEADOR };
 
-export const ESTADOS_ENVIO = ['PENDIENTE', 'SUBIENDO', 'CONFIRMADO', 'ERROR', 'MANUAL', 'ANULADO'];
+export const ESTADOS_ENVIO = ['PENDIENTE', 'SUBIENDO', 'ENVIADO', 'VERIFICAR', 'CONFIRMADO', 'ERROR', 'MANUAL', 'ANULADO'];
 export const TOKEN_VIGENCIA_MS = 48 * 60 * 60 * 1000;
 export const ALERTA_ALTA_PENDIENTE_MS = 2 * 60 * 60 * 1000;
 
 const TRANSICIONES = {
-  PENDIENTE: ['SUBIENDO', 'MANUAL', 'ERROR', 'CONFIRMADO', 'ANULADO'],
-  SUBIENDO: ['CONFIRMADO', 'ERROR', 'MANUAL', 'ANULADO'],
-  ERROR: ['PENDIENTE', 'SUBIENDO', 'MANUAL', 'CONFIRMADO', 'ANULADO'],
-  MANUAL: ['CONFIRMADO', 'ERROR', 'ANULADO'],
+  PENDIENTE: ['SUBIENDO', 'MANUAL', 'ERROR', 'ENVIADO', 'CONFIRMADO', 'ANULADO'],
+  SUBIENDO: ['ENVIADO', 'CONFIRMADO', 'ERROR', 'MANUAL', 'ANULADO'],
+  ENVIADO: ['CONFIRMADO', 'VERIFICAR', 'ERROR', 'MANUAL'],
+  VERIFICAR: ['CONFIRMADO', 'MANUAL', 'ERROR'],
+  ERROR: ['PENDIENTE', 'SUBIENDO', 'MANUAL', 'ENVIADO', 'CONFIRMADO', 'ANULADO'],
+  MANUAL: ['CONFIRMADO', 'ENVIADO', 'ERROR', 'ANULADO'],
   CONFIRMADO: [],
   ANULADO: [],
 };
@@ -52,9 +56,19 @@ export function planEnvioAlta(input) {
     return { ok: false, codigo: 'SIN_JORNADAS' };
   }
   const { alta, advertencias, enviable } = txtDeContrato(input);
+  const adv = [...advertencias];
+  const rel = advertenciaRelacionActivaEmpleador({
+    cuil: input.cuil,
+    empresaId: input.empresaId,
+    empresaCuit: input.empresa?.cuit || input.empresaCuit,
+    empleados: input.empleadosPlantilla || input.empleados || [],
+    empresas: input.empresas || [input.empresa].filter(Boolean),
+  });
+  if (rel) adv.push(rel);
   return {
     ok: true,
-    envio: envioBase({ ...input, tipo: 'AT', txt: alta, advertencias, enviable }),
+    envio: envioBase({ ...input, tipo: 'AT', txt: alta, advertencias: adv, enviable }),
+    avisoRelacionActiva: rel ? AVISO_RELACION_ACTIVA_EMPLEADOR : null,
   };
 }
 
@@ -76,7 +90,7 @@ export function transicionEnvio(envio, { estado, origen, nroTransaccion, constan
   if (!(TRANSICIONES[actual] || []).includes(estado)) {
     return { ok: false, codigo: 'TRANSICION_INVALIDA', desde: actual, hacia: estado };
   }
-  if (estado === 'CONFIRMADO' && !String(nroTransaccion || '').trim()) {
+  if ((estado === 'CONFIRMADO' || estado === 'ENVIADO') && !String(nroTransaccion || '').trim()) {
     return { ok: false, codigo: 'FALTA_NRO_TRANSACCION' };
   }
   const intento = {
@@ -91,10 +105,22 @@ export function transicionEnvio(envio, { estado, origen, nroTransaccion, constan
     origen: intento.origen,
     intentos: [...(envio.intentos || []), intento],
   };
-  if (estado === 'CONFIRMADO') {
-    patch.nroTransaccion = String(nroTransaccion).trim();
+  if (estado === 'CONFIRMADO' || estado === 'ENVIADO') {
+    patch.nroTransaccion = String(nroTransaccion || envio.nroTransaccion || '').trim();
     patch.constanciaUrl = constanciaUrl || envio.constanciaUrl || null;
     patch.token = null;
+  }
+  if (estado === 'ENVIADO') {
+    patch.enviadaAtMs = Date.now();
+    patch.verificacionPendiente = true;
+  }
+  if (estado === 'CONFIRMADO') {
+    patch.verificacionPendiente = false;
+    patch.verificadaAtMs = Date.now();
+  }
+  if (estado === 'VERIFICAR') {
+    patch.verificacionPendiente = true;
+    patch.ultimoError = error || 'SIN_TARJETA_EN_48H';
   }
   if (estado === 'ANULADO') {
     if (envio?.tipo !== 'ANULACION') return { ok: false, codigo: 'NO_ES_ANULACION' };
@@ -141,7 +167,10 @@ export function vistaPublicaEnvio(envio) {
 }
 
 export function altaConfirmada(envios) {
-  return (envios || []).some((e) => e.tipo === 'AT' && e.estado === 'CONFIRMADO');
+  return (envios || []).some((e) => e.tipo === 'AT'
+    && ['CONFIRMADO', 'ENVIADO', 'VERIFICAR'].includes(e.estado)
+    && e.quitadoDelLote !== true
+    && String(e.nroTransaccion || '').trim());
 }
 
 /**

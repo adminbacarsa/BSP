@@ -74,6 +74,8 @@ const ESTADO_TEXT: Record<string, string> = {
 
 const ARCA_ESTADO_TONE: Record<string, MovilTone> = {
   CONFIRMADO: 'emerald',
+  ENVIADO: 'amber',
+  VERIFICAR: 'rose',
   ERROR: 'rose',
   MANUAL: 'amber',
   SUBIENDO: 'amber',

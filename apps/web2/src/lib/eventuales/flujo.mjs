@@ -157,7 +157,7 @@ export function confirmarLote(envios, lote, nroTransaccion) {
  * dentro del plazo de la RG 2988/2010 art. 9; vencido, baja por desistimiento.
  */
 export function planSustitucion({ envioTitular, contratoTitular, sustituto, turnos, ahoraMs = Date.now(), tanda = TANDA_DEFAULT, feriados = [], revistaDesistimiento = '30' }) {
-  const subido = envioTitular && ['SUBIENDO', 'CONFIRMADO'].includes(envioTitular.estado);
+  const subido = envioTitular && ['SUBIENDO', 'ENVIADO', 'VERIFICAR', 'CONFIRMADO'].includes(envioTitular.estado);
   const jornada = (contratoTitular?.jornadas || [])[0] || {};
   const plazo = plazoAnulacionAlta({
     fechaInicio: jornada.fecha || contratoTitular?.fechaAlta,

@@ -4,7 +4,7 @@
  */
 import { randomBytes } from 'crypto';
 
-export const ESTADOS_ENVIO = ['PENDIENTE', 'SUBIENDO', 'CONFIRMADO', 'ERROR', 'MANUAL', 'ANULADO'] as const;
+export const ESTADOS_ENVIO = ['PENDIENTE', 'SUBIENDO', 'ENVIADO', 'VERIFICAR', 'CONFIRMADO', 'ERROR', 'MANUAL', 'ANULADO'] as const;
 export type EstadoEnvio = (typeof ESTADOS_ENVIO)[number];
 export type OrigenEnvio = 'ROBOT' | 'MANUAL' | 'LINK';
 
@@ -12,10 +12,12 @@ export const TOKEN_VIGENCIA_MS = 48 * 60 * 60 * 1000;
 export const ALERTA_ALTA_PENDIENTE_MS = 2 * 60 * 60 * 1000;
 
 const TRANSICIONES: Record<EstadoEnvio, EstadoEnvio[]> = {
-  PENDIENTE: ['SUBIENDO', 'MANUAL', 'ERROR', 'CONFIRMADO', 'ANULADO'],
-  SUBIENDO: ['CONFIRMADO', 'ERROR', 'MANUAL', 'ANULADO'],
-  ERROR: ['PENDIENTE', 'SUBIENDO', 'MANUAL', 'CONFIRMADO', 'ANULADO'],
-  MANUAL: ['CONFIRMADO', 'ERROR', 'ANULADO'],
+  PENDIENTE: ['SUBIENDO', 'MANUAL', 'ERROR', 'ENVIADO', 'CONFIRMADO', 'ANULADO'],
+  SUBIENDO: ['ENVIADO', 'CONFIRMADO', 'ERROR', 'MANUAL', 'ANULADO'],
+  ENVIADO: ['CONFIRMADO', 'VERIFICAR', 'ERROR', 'MANUAL'],
+  VERIFICAR: ['CONFIRMADO', 'MANUAL', 'ERROR'],
+  ERROR: ['PENDIENTE', 'SUBIENDO', 'MANUAL', 'ENVIADO', 'CONFIRMADO', 'ANULADO'],
+  MANUAL: ['CONFIRMADO', 'ENVIADO', 'ERROR', 'ANULADO'],
   CONFIRMADO: [],
   ANULADO: [],
 };
@@ -59,7 +61,7 @@ export function transicionEnvio(
   if (!(TRANSICIONES[actual] || []).includes(input.estado)) {
     return { ok: false, codigo: 'TRANSICION_INVALIDA' };
   }
-  if (input.estado === 'CONFIRMADO' && !String(input.nroTransaccion || '').trim()) {
+  if ((input.estado === 'CONFIRMADO' || input.estado === 'ENVIADO') && !String(input.nroTransaccion || '').trim()) {
     return { ok: false, codigo: 'FALTA_NRO_TRANSACCION' };
   }
   const intento = {
@@ -74,10 +76,22 @@ export function transicionEnvio(
     origen: intento.origen,
     intentos: [...(envio.intentos || []), intento],
   };
-  if (input.estado === 'CONFIRMADO') {
-    patch.nroTransaccion = String(input.nroTransaccion).trim();
+  if (input.estado === 'CONFIRMADO' || input.estado === 'ENVIADO') {
+    patch.nroTransaccion = String(input.nroTransaccion || envio.nroTransaccion || '').trim();
     patch.constanciaUrl = input.constanciaUrl || envio.constanciaUrl || null;
     patch.token = null;
+  }
+  if (input.estado === 'ENVIADO') {
+    patch.enviadaAtMs = Date.now();
+    patch.verificacionPendiente = true;
+  }
+  if (input.estado === 'CONFIRMADO') {
+    patch.verificacionPendiente = false;
+    patch.verificadaAtMs = Date.now();
+  }
+  if (input.estado === 'VERIFICAR') {
+    patch.verificacionPendiente = true;
+    patch.ultimoError = input.error || 'SIN_TARJETA_EN_48H';
   }
   if (input.estado === 'ANULADO') {
     if (envio?.tipo !== 'ANULACION') return { ok: false, codigo: 'NO_ES_ANULACION' };
@@ -96,7 +110,9 @@ export function validarToken(envio: EnvioDoc | null, token: string, nowMs: numbe
   if (!envio) return { ok: false, codigo: 'NO_EXISTE' };
   if (!envio.token || !token || envio.token !== token) return { ok: false, codigo: 'TOKEN_INVALIDO' };
   if (envio.tokenUsadoAt) return { ok: false, codigo: 'TOKEN_USADO' };
-  if (envio.estado === 'CONFIRMADO') return { ok: false, codigo: 'YA_CONFIRMADO' };
+  if (envio.estado === 'CONFIRMADO' || envio.estado === 'ENVIADO' || envio.estado === 'VERIFICAR') {
+    return { ok: false, codigo: 'YA_CONFIRMADO' };
+  }
   const vence = Date.parse(envio.tokenExpiraAt || '');
   if (!Number.isFinite(vence) || nowMs > vence) return { ok: false, codigo: 'TOKEN_VENCIDO' };
   return { ok: true };

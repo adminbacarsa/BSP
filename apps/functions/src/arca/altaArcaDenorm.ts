@@ -56,7 +56,10 @@ export async function altaConfirmadaDelContrato(
 ): Promise<{ confirmada: boolean; nroTransaccion: string | null }> {
   if (!contratoId) return { confirmada: false, nroTransaccion: null };
   const snap = await db.collection('arca_envios').where('contratoIds', 'array-contains', contratoId).get();
-  const alta = snap.docs.map((d) => d.data()).find((e) => e.tipo === 'AT' && e.estado === 'CONFIRMADO' && e.quitadoDelLote !== true);
+  const alta = snap.docs.map((d) => d.data()).find((e) => e.tipo === 'AT'
+    && ['CONFIRMADO', 'ENVIADO', 'VERIFICAR'].includes(String(e.estado || ''))
+    && e.quitadoDelLote !== true
+    && String(e.nroTransaccion || '').trim());
   if (!alta) return { confirmada: false, nroTransaccion: null };
   return { confirmada: true, nroTransaccion: String(alta.nroTransaccion || '') || null };
 }

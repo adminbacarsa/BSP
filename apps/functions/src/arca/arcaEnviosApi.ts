@@ -87,7 +87,7 @@ export async function aplicarTransicion(
 
   const out = transicionEnvio(envio, input);
   if (!out.ok) return { status: 409, body: { error: out.codigo } };
-  if (input.estado === 'CONFIRMADO' && envio.enviable === false) {
+  if ((input.estado === 'CONFIRMADO' || input.estado === 'ENVIADO') && envio.enviable === false) {
     return { status: 409, body: { error: 'NO_ENVIABLE' } };
   }
 
@@ -142,7 +142,7 @@ export async function aplicarTransicion(
     return { status: 200, body: { ok: true, estado: trasError.estado, motivo: trasError.motivo || null } };
   }
 
-  if (input.estado === 'CONFIRMADO') {
+  if (input.estado === 'CONFIRMADO' || input.estado === 'ENVIADO') {
     const contratoIds = Array.isArray(envio.contratoIds) ? envio.contratoIds.map(String) : [];
     const encender = envio.tipo === 'AT';
     if (envio.tipo === 'AT' || envio.tipo === 'BT' || envio.tipo === 'NA') {
@@ -155,13 +155,16 @@ export async function aplicarTransicion(
     if (envio.loteId) {
       const hermanos = await db().collection(COLL).where('loteId', '==', envio.loteId).get();
       for (const doc of hermanos.docs) {
-        if (doc.id === envioId || doc.data().estado === 'CONFIRMADO' || doc.data().enviable === false) continue;
+        const estHermano = String(doc.data().estado || '');
+        if (doc.id === envioId || estHermano === 'CONFIRMADO' || estHermano === input.estado || doc.data().enviable === false) continue;
         const data = doc.data();
         await doc.ref.update({
-          estado: 'CONFIRMADO',
+          estado: input.estado,
           nroTransaccion: String(input.nroTransaccion || '').trim(),
           constanciaUrl: String(input.constanciaUrl || '').trim() || null,
           origen: input.origen,
+          enviadaAtMs: input.estado === 'ENVIADO' ? Date.now() : (data.enviadaAtMs || null),
+          verificacionPendiente: input.estado === 'ENVIADO',
           updatedAt: FieldValue.serverTimestamp(),
         });
         await propagarAltaEnTurnos(db(), {
@@ -173,7 +176,26 @@ export async function aplicarTransicion(
     }
   }
 
-  if (input.estado === 'CONFIRMADO' && !envio.driveFileId && envio.txt) {
+  if (input.estado === 'VERIFICAR') {
+    try {
+      await db().collection('novedades').add({
+        empresaId: envio.empresaId || null,
+        type: 'ARCA_ALTA_VERIFICAR',
+        priority: 'ALTA',
+        title: 'Alta ARCA sin relación visible',
+        body: `Envío ${envioId}: pasado 48 h no aparece la relación eventual (mod 012). Revisar Domicilio Fiscal Electrónico.`,
+        envioId,
+        bolsaCuil: envio.bolsaCuil || null,
+        nroTransaccion: envio.nroTransaccion || input.nroTransaccion || null,
+        createdAt: FieldValue.serverTimestamp(),
+        status: 'OPEN',
+      });
+    } catch (e) {
+      console.error('[arcaEnviosApi] novedad VERIFICAR', (e as Error)?.message || e);
+    }
+  }
+
+  if ((input.estado === 'CONFIRMADO' || input.estado === 'ENVIADO') && !envio.driveFileId && envio.txt) {
     try {
       const { subirTxtADrive } = await import('./arcaEnvioDrive');
       const drive = await subirTxtADrive({
@@ -496,6 +518,59 @@ export const arcaEnviosApi = onRequest(
           envioId: envioId || null,
         });
         res.status(200).json({ ok: true, arcaCodigoNovedad: codigo, actualizados: refs.length });
+        return;
+      }
+
+
+
+      if (action === 'verificacion' && req.method === 'GET') {
+        const envioId = String(req.query.envioId || '').trim();
+        if (!envioId) {
+          res.status(400).json({ error: 'PARAMETROS' });
+          return;
+        }
+        const snap = await db().collection(COLL).doc(envioId).get();
+        if (!snap.exists) {
+          res.status(404).json({ error: 'NO_EXISTE' });
+          return;
+        }
+        const data = snap.data() || {};
+        if (!['ENVIADO', 'VERIFICAR'].includes(String(data.estado || ''))) {
+          res.status(409).json({ error: 'NO_ENVIADO', estado: data.estado || null });
+          return;
+        }
+        const empresa = await db().collection('empresas').doc(String(data.empresaId || '')).get();
+        const emp = empresa.data() || {};
+        const meta = (emp.arcaRobotAcceso || {}) as { cuitRepresentado?: string };
+        res.status(200).json({
+          envioId,
+          empresaId: data.empresaId || null,
+          cuil: String(data.bolsaCuil || '').replace(/\D/g, ''),
+          bolsaCuil: data.bolsaCuil || null,
+          fechaAlta: data.fechaAlta || null,
+          nroTransaccion: data.nroTransaccion || null,
+          enviadaAtMs: Number(data.enviadaAtMs || 0) || null,
+          cuitRepresentado: String(meta.cuitRepresentado || emp.cuit || '').replace(/\D/g, ''),
+        });
+        return;
+      }
+
+      if (action === 'verificacion-pendientes' && req.method === 'GET') {
+        const empresaId = String(req.query.empresaId || '');
+        const snap = await db().collection(COLL).where('estado', '==', 'ENVIADO').limit(80).get();
+        const envios = snap.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .filter((d) => d.tipo === 'AT' && (!empresaId || d.empresaId === empresaId))
+          .map((d) => ({
+            envioId: d.id,
+            empresaId: d.empresaId || null,
+            bolsaCuil: d.bolsaCuil || null,
+            fechaAlta: d.fechaAlta || null,
+            nroTransaccion: d.nroTransaccion || null,
+            enviadaAtMs: Number(d.enviadaAtMs || 0) || null,
+            cuitRepresentado: null,
+          }));
+        res.status(200).json({ envios });
         return;
       }
 

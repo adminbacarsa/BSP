@@ -12,7 +12,10 @@
     "220": "CargaMasiva_upload — Informado SI · Estado Válido · Archivo cargado correctamente",
     "221": "principal tras Volver — Estado Válido + botón Enviar",
     "222": "Listado — Estado Enviado + Nro. Transacción (link)",
-    "223": "SETI acuse Presentación DJ — nroVerificador + codigoControl"
+    "223": "SETI acuse Presentación DJ — nroVerificador + codigoControl",
+    "224": "Modificaciones y Bajas — tarjeta relación + íconos lápiz/baja/anular",
+    "225": "Consulta por CUIL (si distinta)",
+    "226": "Detalle consulta"
   },
   "portalServicioSimplificacion": {
     "role": "link",
@@ -129,8 +132,8 @@
   "anularRegistro": {
     "role": "link",
     "name": "Modificaciones y Bajas|Anular",
-    "estado": "por confirmar",
-    "nota": "Anulación: sin capturas — solo --modo explorar"
+    "estado": "parcial",
+    "nota": "Anulación: elegir tarjeta por Fecha de Inicio + modalidad 012 (nunca la primera del CUIL). Íconos: lápiz=modificar, documento rojo=baja, tacho=anular (gris=no disponible). Si hay varias o ninguna → MANUAL."
   },
   "cuil": {
     "label": "CUIL",
@@ -188,5 +191,33 @@
       "MD5"
     ],
     "captura": "223"
+  },
+  "consultaModificaciones": {
+    "role": "link",
+    "name": "Modificaciones y Bajas|Consultas",
+    "captura": "224"
+  },
+  "tarjetaModContrato": {
+    "texto": "Mod. Contrato",
+    "captura": "224"
+  },
+  "tarjetaFechaInicio": {
+    "texto": "Fecha de Inicio",
+    "captura": "224"
+  },
+  "tarjetaIconoModificar": {
+    "title": "Modificar|Editar",
+    "nota": "lápiz",
+    "captura": "224"
+  },
+  "tarjetaIconoBaja": {
+    "title": "Baja",
+    "nota": "documento rojo",
+    "captura": "224"
+  },
+  "tarjetaIconoAnular": {
+    "title": "Anular",
+    "nota": "tacho; gris = no disponible. Elegir por fecha+012, nunca la primera del CUIL",
+    "captura": "224"
   }
 }

@@ -97,7 +97,10 @@ check('Enviar confirmado', sel.principalEnviar?.name === '^Enviar$' || sel.prese
 check('nro listado confirmado', sel.nroTransaccionListado?.estado === 'confirmado');
 check('constancia SETI en selectores', !!sel.constanciaSeti?.url);
 check('borrar prohibido', sel.listadoBorrar?.prohibido === true);
-check('anulación por confirmar', sel.anularRegistro?.estado === 'por confirmar');
+check('anulación parcial (tarjeta fecha+012)', sel.anularRegistro?.estado === 'parcial');
+check('icono lápiz modificar', /lápiz|lapiz/i.test(sel.tarjetaIconoModificar?.nota || ''));
+check('icono documento baja', /documento/i.test(sel.tarjetaIconoBaja?.nota || ''));
+check('icono tacho anular', /tacho/i.test(sel.tarjetaIconoAnular?.nota || ''));
 
 console.log(failed ? `FALLARON ${failed}` : 'OK arca-carga-masiva');
 process.exit(failed ? 1 : 0);

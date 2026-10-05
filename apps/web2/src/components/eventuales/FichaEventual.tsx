@@ -535,6 +535,7 @@ export default function FichaEventual({ ficha, detalle, marcos, documentos, empr
             {arca.map((a) => (
               <p key={a.id} className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
                 <span className="font-bold text-slate-800">{humanizar(a.tipo)}</span> · {humanizar(a.estado)} · {fmtFechaAr(a.fechaAlta) || '—'} {a.nroTransaccion ? `· Nº ${a.nroTransaccion}` : ''}{a.nroVerificador ? ` · Verif. ${a.nroVerificador}` : ''}{a.codigoControl ? ` · Ctrl ${a.codigoControl}` : ''}{a.constanciaUrl ? ' · constancia' : ''}
+                {(a.advertencias || []).includes('RELACION_ACTIVA_EMPLEADOR') && <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-black text-amber-800"><ShieldAlert size={11} /> ya tiene relación activa con este empleador; ARCA puede rechazar el alta eventual</span>}
                 {(a.advertencias || []).includes('RETRIBUCION_PENDIENTE') && <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-black text-amber-800"><ShieldAlert size={11} /> Retribución pendiente: no se envía hasta aprobar la escala</span>}
               </p>
             ))}
