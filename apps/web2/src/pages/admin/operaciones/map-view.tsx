@@ -1336,6 +1336,7 @@ export default function TacticalMapView() {
                                                     <p className="text-[10px] font-bold text-amber-700" title={ALTA_ARCA_AVISO_TITLE}>{ALTA_ARCA_AVISO_TEXTO}</p>
                                                 )}
                                                 {s.isPresent && s.retentionWait && !s.cierreSinFranja ? <p className="text-[10px] font-bold text-orange-700">{formatRetentionLine(s.retentionWait)}</p> : null}
+                                                {s.relevoAusenteAviso ? <p className="text-[10px] font-bold text-slate-600" data-relevo-ausente="1">{s.relevoAusenteAviso}</p> : null}
                                                 {s.isPresent && formatIngresoLine(s) ? <p className="text-[10px] font-bold text-emerald-700">{formatIngresoLine(s)}</p> : null}
                                             </div>
                                             <div className="flex gap-1 shrink-0">

@@ -10,7 +10,7 @@ await register(new URL('./ts-ext-hook.mjs', import.meta.url).href);
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const load = (rel) => import(pathToFileURL(path.join(root, rel)).href);
-const { formatRetentionDuration, buildRetentionWaitInfo, formatRetentionLine, retentionPendingReason: uiReason } = await load('packages/ops-core/src/retentionDisplay.ts');
+const { formatRetentionDuration, buildRetentionWaitInfo, formatRetentionLine, relevoAusenteAviso, retentionPendingReason: uiReason } = await load('packages/ops-core/src/retentionDisplay.ts');
 const { retentionPendingReason: srvReason } = await load('apps/functions/src/scheduling/retentionPendingReason.ts');
 const { classifyOpsShift } = await load('packages/ops-core/src/classifyOpsShift.ts');
 const { shiftMatchesOpsViewTab } = await load('packages/ops-core/src/shiftMatchesOpsViewTab.ts');
@@ -92,6 +92,26 @@ const rows = [pending, held, active];
 report('RET cuenta vencido + retenido', count(rows, 'RETENIDOS') === 2, `ret=${count(rows, 'RETENIDOS')}`);
 report('ACT los mantiene a los tres', count(rows, 'ACTIVOS') === 3, `act=${count(rows, 'ACTIVOS')}`);
 report('minutos en vivo', pending.retentionMinutes === 12 && held.retentionMinutes === 12, `${pending.retentionMinutes}/${held.retentionMinutes}`);
+
+const antes = at(12, 17);
+const fariasAnt = classify(farias, { isRetention: true, isPresent: true, retentionAbsenceShiftId: 'venencia' });
+const fariasAntes = classifyOpsShift({
+  shift: { ...farias, isRetention: true, isPresent: true, shiftDateObj: farias.shiftDateObj, endDateObj: farias.endDateObj },
+  now: antes,
+  isValidEmployee: true,
+  isFranco: false,
+  shiftCode: 'M3',
+  effectiveEndDateObj: farias.endDateObj,
+});
+report('antes del fin no es RETENIDO', fariasAntes.isRetention === false && fariasAntes.isPendingRetention === false, `ret=${fariasAntes.isRetention}`);
+const venAbs = { ...venencia, isAbsent: true, status: 'ABSENT' };
+const aviso = relevoAusenteAviso({ ...farias, isPresent: true }, [farias, venAbs], antes);
+report('línea relevo ausente sin cubrir', aviso === 'Relevo ausente: VENENCIA (T3 16:00) · sin cubrir', aviso);
+const cubierto = { ...venencia, id: 'quiroga', employeeName: 'QUIROGA', isAbsent: false, status: 'PENDING' };
+const avisoCub = relevoAusenteAviso({ ...farias, isPresent: true }, [farias, venAbs, cubierto], antes);
+report('cubierto en planificación: sin línea', avisoCub === null, String(avisoCub));
+report('pasado el fin no usa la línea', relevoAusenteAviso({ ...ferrero, isPresent: true }, [ferrero, { ...lopez, isAbsent: true }], now) === null, 'fin vencido');
+void fariasAnt;
 
 const failed = results.filter((r) => !r.ok).length;
 console.log(`P9b ${results.length - failed}/${results.length}`);

@@ -79,6 +79,7 @@ export {
   formatRetentionDuration,
   buildRetentionWaitInfo,
   formatRetentionLine,
+  relevoAusenteAviso,
 } from './retentionDisplay';
 export {
   SHIFT_HARD_CAP_MS,
