@@ -1801,6 +1801,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
                                     {name}
                                     <PuntajeChip sujetoId={String(empId || '')} />
                                     {c.otherPosition ? <span className="ml-1 text-[9px] font-black uppercase text-amber-700">otro puesto</span> : null}
+                                    {c.requiereAutorizacion ? <span className="ml-1 text-[9px] font-black uppercase text-amber-800">requiere autorización</span> : null}
                                   </div>
                                   <CoverageDistanceLine geo={c as WithGeo} />
                                   <div className="text-[11px] font-mono text-slate-500 mt-0.5">{phone}</div>

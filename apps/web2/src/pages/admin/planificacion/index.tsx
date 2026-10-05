@@ -160,7 +160,7 @@ import {
     planToastSaving,
     planToastWarnMany,
 } from '@/lib/planificacion/planToast';
-import { checkRestBetweenShifts, getAgreementRestConfig } from '@/lib/planificacion/restBetweenShifts';
+import { checkRestBetweenShifts, checkRestBetweenShiftsDetail, getAgreementRestConfig } from '@/lib/planificacion/restBetweenShifts';
 import { findLctRestGaps, type LctShiftInput } from '@/lib/planificacion/lctRestGap';
 import { eventoAssignBlock, eventoCellOverlay, eventoTooltip, isEventoTurno, pickShiftForRest } from '@/lib/planificacion/planningEventoCell';
 import { applyServiceExcludedDays } from '@/lib/planificacion/absenceFrancoUtils';
@@ -259,12 +259,14 @@ import {
     emptyDays,
     evaluateCoverageDayGuards,
     mergeCoverages,
+    type CoverageAuthRequest,
     nextMarkedDay,
     previousMarkedDay,
     savedCoverage,
     templateDayForRemaining,
     type ProposedGuardShift,
 } from '@/lib/planificacion/vacancyCoverageWizard';
+import { classifyRestViolation, stampShiftAuthMarks, type ShiftAuthMark } from '@/lib/planificacion/supervisorAuth';
 import { VacancyCoberturaAcciones, VacancyCoberturaLista } from '@/components/planificacion/VacancyCoberturaDia';
 import { alignVacancyGapBand } from '@/lib/planificacion/vacancySplitBands';
 import {
@@ -1361,8 +1363,11 @@ function PlanificacionDesktop() {
         description?: React.ReactNode;
         auditAction?: string;
         auditDetails?: string;
+        requireReason?: boolean;
     }>({ pendingFn: null, employees: [] });
     const [authPin, setAuthPin] = useState('');
+    const [authReason, setAuthReason] = useState('');
+    const authReasonRef = React.useRef('');
     const [authError, setAuthError] = useState('');
     const [authLoading, setAuthLoading] = useState(false);
 
@@ -1609,6 +1614,7 @@ function PlanificacionDesktop() {
     const [vacancySplitAdelId, setVacancySplitAdelId] = useState('');
     /** Último día al que se le guardó cobertura: plantilla de «completar los que faltan». */
     const [vacancyTemplateDay, setVacancyTemplateDay] = useState<string | null>(null);
+    const [vacancyAuthMarks, setVacancyAuthMarks] = useState<Record<string, ShiftAuthMark>>({});
     const [vacancyFrancoAuthApproved, setVacancyFrancoAuthApproved] = useState(false);
     const [vacancyGapBandOverride, setVacancyGapBandOverride] = useState<string | null>(null);
     const [vacancySplitExtExtraHours, setVacancySplitExtExtraHours] = useState<number | null>(null);
@@ -1620,6 +1626,7 @@ function PlanificacionDesktop() {
             setVacancyActiveDates(new Set());
             setVacancyDayCoverages({});
             setVacancyTemplateDay(null);
+            setVacancyAuthMarks({});
             return;
         }
         const all = listDateRangeInclusive(vacancyData.startDate, vacancyData.endDate || vacancyData.startDate);
@@ -1628,6 +1635,7 @@ function PlanificacionDesktop() {
         setVacancyActiveDates(new Set(initialDates.length ? initialDates : all));
         setVacancyDayCoverages({});
         setVacancyTemplateDay(null);
+        setVacancyAuthMarks({});
         const activeCount = (initialDates.length ? initialDates : all).length;
         if (activeCount > 1) {
             setVacancyEditingDay(null);
@@ -2721,12 +2729,13 @@ function PlanificacionDesktop() {
                 if (!sh || sh.isDeleted) continue;
                 const code = String(sh.code || '').toUpperCase();
                 if (NON_WORK.has(code)) continue;
-                const violation = checkRestBetweenShifts({
+                const violation = checkRestBetweenShiftsDetail({
                     empId: emp.id, targetDateStr: dateStr,
                     proposed: { code, startTime: sh.startTime || undefined, hours: Number(sh.hours) || undefined },
                     getShift, cfg,
                 });
-                if (violation) violated.add(`${emp.id}_${dateStr}`);
+                const band = classifyRestViolation(violation);
+                if (band === 'blocked' || (band === 'pin' && !sh.descansoReducido)) violated.add(`${emp.id}_${dateStr}`);
             }
         }
         return violated;
@@ -4374,14 +4383,19 @@ function PlanificacionDesktop() {
                 }
                 return fromPending || pickShiftForRest(shiftsMap[k2] || null, cellTurnosMap[k2]);
             };
-            const restMsg = checkRestBetweenShifts({
+            const restDetail = checkRestBetweenShiftsDetail({
                 empId,
                 targetDateStr: dateKey,
                 proposed: proposedForRest,
                 getShift: getMergedForRest,
                 cfg: restCfg,
             });
-            if (restMsg) return restMsg;
+            const restBand = classifyRestViolation(restDetail);
+            if (restDetail && restBand === 'blocked') return `ALERTA CRÍTICA: ${restDetail.message}`;
+            if (restDetail && restBand === 'pin') {
+                const gap = restDetail.gapHours != null ? restDetail.gapHours.toFixed(1) : '';
+                return `AUTORIZAR_DESCANSO:${gap}|${restDetail.message}`;
+            }
         }
 
         return null;
@@ -6070,12 +6084,18 @@ function PlanificacionDesktop() {
         if (authPin.length !== 4 || authLoading || !authModal.pendingFn) return;
         setAuthLoading(true);
         const result = await verifySupervisorPin(authPin);
+        if (authModal.requireReason && !authReason.trim()) {
+            setAuthError('El motivo es obligatorio.');
+            setAuthLoading(false);
+            return;
+        }
         if (!result.ok) {
             setAuthError('PIN incorrecto. Intentá de nuevo.');
             setAuthPin('');
             setAuthLoading(false);
             return;
         }
+        authReasonRef.current = authReason.trim();
         try {
             await authModal.pendingFn();
             if (authModal.isSaveFlow) {
@@ -6088,7 +6108,7 @@ function PlanificacionDesktop() {
                     action: 'OVERRIDE_200H',
                     module: 'PLANIFICADOR',
                     actorName: result.name,
-                    details: `${authModal.operatorName || 'Operador'} asignó turno a ${authModal.employees.map(e => `${e.name} (${e.hours}h)`).join(', ')} superando 200hs — autorizó: ${result.name}`,
+                    details: `${authModal.operatorName || 'Operador'} asignó turno a ${authModal.employees.map(e => `${e.name} (${e.hours}h)`).join(', ')} superando 200hs — motivo: ${authReasonRef.current} — autorizó: ${result.name}`,
                     objectiveId: selectedObjective || undefined,
                     objectiveName: selectedObjective ? getObjectiveName(selectedObjective) : undefined,
                 }, empresaId));
@@ -6099,7 +6119,7 @@ function PlanificacionDesktop() {
                     module: 'PLANIFICADOR',
                     actorName: result.name,
                     actorUid: getAuth().currentUser?.uid || null,
-                    details: authModal.auditDetails || authModal.employees.map(e => e.name).join(', '),
+                    details: `${authModal.auditDetails || authModal.employees.map(e => `${e.name} (${e.hours}h${e.detail ? ` ${e.detail}` : ''})`).join(', ')}${authReasonRef.current ? ` — motivo: ${authReasonRef.current}` : ''} — autorizó: ${result.name}`,
                     objectiveId: selectedObjective || undefined,
                     objectiveName: selectedObjective ? getObjectiveName(selectedObjective) : undefined,
                 }, empresaId));
@@ -6107,6 +6127,8 @@ function PlanificacionDesktop() {
         } finally {
             setAuthModal({ pendingFn: null, employees: [] });
             setAuthPin('');
+            setAuthReason('');
+            authReasonRef.current = '';
             setAuthLoading(false);
         }
     };
@@ -6140,6 +6162,38 @@ function PlanificacionDesktop() {
         });
     };
 
+    const requestSupervisorLaborAuth = (
+        items: CoverageAuthRequest[],
+        onAuthorized: () => void | Promise<void>,
+    ) => {
+        if (items.length === 0) {
+            void onAuthorized();
+            return;
+        }
+        const descanso = items.filter((i) => i.kind === 'DESCANSO');
+        const tope = items.filter((i) => i.kind === 'TOPE');
+        setAuthModal({
+            pendingFn: async () => { await onAuthorized(); },
+            employees: items.map((i) => ({
+                name: i.name,
+                hours: i.kind === 'TOPE' ? (i.monthHours || 0) : Math.round((i.restHours || 0) * 10) / 10,
+                detail: i.kind === 'TOPE' ? `tope ${i.cap} h` : 'descanso reducido',
+            })),
+            description: (
+                <>
+                    {descanso.length > 0 && <>Descanso entre <strong>8 y 12 h</strong>. </>}
+                    {tope.length > 0 && <>Supera el tope de <strong>{tope[0].cap} h</strong>. </>}
+                    Hace falta PIN de supervisor y un motivo.
+                </>
+            ),
+            requireReason: true,
+            auditAction: descanso.length && tope.length
+                ? 'AUTORIZACION_DESCANSO_TOPE'
+                : descanso.length ? 'AUTORIZACION_DESCANSO' : 'AUTORIZACION_TOPE',
+            auditDetails: items.map((i) => `${i.dateStr} · ${i.name} · ${i.shiftCode || ''} · ${i.message}`).join(' | '),
+        });
+    };
+
     const handleSaveAll = async () => {
         if (isServiceLocked) { toast.error(activeServiceStatus.msg); return; }
         const count = Object.keys(pendingChanges).length;
@@ -6165,6 +6219,21 @@ function PlanificacionDesktop() {
 
         const doSave = () => {
             const jobPending = { ...pendingChanges };
+            const motivoTope = authReasonRef.current.trim();
+            if (overCap.length && motivoTope) {
+                const ids = new Set(overCap.map((e) => e.empId));
+                const hoursById = new Map(overCap.map((e) => [e.empId, e.hours]));
+                for (const key of Object.keys(jobPending)) {
+                    const empId = key.split('_')[0];
+                    if (!ids.has(empId) || jobPending[key]?.isDeleted) continue;
+                    jobPending[key] = {
+                        ...jobPending[key],
+                        topeExcedido: true,
+                        horasMes: hoursById.get(empId),
+                        autorizacionMotivo: motivoTope,
+                    };
+                }
+            }
             const jobKeys = Object.keys(jobPending);
             if (jobKeys.length === 0) return;
 
@@ -6563,6 +6632,16 @@ function PlanificacionDesktop() {
                             isExtended: change.isExtended || false,
                             isEarlyStart: change.isEarlyStart || false,
                             plannedNovedad: change.plannedNovedad || null,
+                            ...(change.descansoReducido ? {
+                                descansoReducido: true,
+                                descansoHoras: change.descansoHoras ?? null,
+                                autorizacionMotivo: change.autorizacionMotivo || null,
+                            } : {}),
+                            ...(change.topeExcedido ? {
+                                topeExcedido: true,
+                                horasMes: change.horasMes ?? null,
+                                autorizacionMotivo: change.autorizacionMotivo || null,
+                            } : {}),
                             positionName: safePositionName,
                             coveredBy: change.coveredBy || null,
                             draft: correctionMode ? false : !isPublished,
@@ -6826,7 +6905,7 @@ function PlanificacionDesktop() {
         };
 
         if (overCap.length > 0) {
-            setAuthModal({ pendingFn: doSave, employees: overCap, operatorName: activeActorName || operatorName, isSaveFlow: true });
+            setAuthModal({ pendingFn: doSave, employees: overCap, operatorName: activeActorName || operatorName, isSaveFlow: true, requireReason: true });
             setAuthPin('');
             setAuthError('');
             return;
@@ -7107,6 +7186,7 @@ function PlanificacionDesktop() {
         setVacancySplitExtId('');
         setVacancySplitAdelId('');
         setVacancyTemplateDay(null);
+        setVacancyAuthMarks({});
     };
 
     const handleProcessVacancy = () => {
@@ -7206,7 +7286,7 @@ function PlanificacionDesktop() {
 
         const runApplyVacancy = (authorizeFranco: boolean) => {
             try {
-                const { changes, count, covered, splitCovered, cleared } = applyVacancyCoverageToChanges(pendingChanges, {
+                const applied = applyVacancyCoverageToChanges(pendingChanges, {
                     vacancyData,
                     days,
                     selectedObjective,
@@ -7227,6 +7307,8 @@ function PlanificacionDesktop() {
                     authorizeFrancoTrabajado: authorizeFranco,
                     fallbackGapBand: (vacancyGapBandOverride ? vacancyGapBandOverride.split('__')[0] : null) || resolveSuggestedGapBandForPosition(activeDays[0] || '', activePosition || '') || undefined,
                 });
+                const { count, covered, splitCovered, cleared } = applied;
+                const changes = stampShiftAuthMarks(applied.changes, vacancyAuthMarks);
                 const vd = vacancyData;
                 const absCode = days.length ? (changes[`${vd.employeeId}_${days[0].dateStr}`]?.code || '—') : '—';
                 setPendingChanges(changes);
@@ -8199,6 +8281,35 @@ function PlanificacionDesktop() {
             });
             if (warning) {
                 if (warning.includes('CRÍTICA')) { toast.error(warning); return; }
+                if (warning.startsWith('AUTORIZAR_DESCANSO:')) {
+                    const body = warning.slice('AUTORIZAR_DESCANSO:'.length);
+                    const sep = body.indexOf('|');
+                    const gap = Number(body.slice(0, sep));
+                    const msg = body.slice(sep + 1);
+                    const empName = employees.find((e: any) => e.id === selectedCell.empId)?.name || 'Empleado';
+                    setAuthModal({
+                        pendingFn: async () => {
+                            applyToPending({
+                                ...shiftConfig,
+                                positionName,
+                                isFrancoTrabajado: isFT,
+                                isFrancoCompensatorio: false,
+                                isExtended: false,
+                                isEarlyStart: false,
+                                plannedNovedad: modifiers.plannedNovedad,
+                                descansoReducido: true,
+                                descansoHoras: Number.isFinite(gap) ? Math.round(gap * 10) / 10 : undefined,
+                                autorizacionMotivo: authReasonRef.current,
+                            });
+                        },
+                        employees: [{ name: empName, hours: Number.isFinite(gap) ? Math.round(gap * 10) / 10 : 0, detail: 'descanso reducido' }],
+                        description: <>Descanso de <strong>{Number.isFinite(gap) ? `${gap} h` : 'entre 8 y 12 h'}</strong> entre jornadas. Hace falta PIN de supervisor y un motivo.</>,
+                        requireReason: true,
+                        auditAction: 'AUTORIZACION_DESCANSO',
+                        auditDetails: `${empName} · ${selectedCell.dateStr} · ${shiftConfig.code || ''} · ${msg}`,
+                    });
+                    return;
+                }
                 if (warning.startsWith('ALERTA MENSUAL')) {
                     applyToPending({ ...shiftConfig, positionName, isFrancoTrabajado: isFT, isFrancoCompensatorio: false, isExtended: false, isEarlyStart: false, plannedNovedad: modifiers.plannedNovedad });
                     const empName = employees.find((e: any) => e.id === selectedCell.empId)?.name || 'Empleado';
@@ -10798,11 +10909,12 @@ function PlanificacionDesktop() {
                                         const _billHint = _billBr && _billBr.gross > 0
                                             ? `\n📊 ${_billBr.base}h base${_billBr.extra > 0 ? ` + ${_billBr.extra}h cobertura = ${_billBr.gross}h` : ` (${_billBr.gross}h)`}`
                                             : '';
+                                        const _authHint = `${_cellShift?.descansoReducido ? `\n⚠ Descanso reducido autorizado${_cellShift.descansoHoras != null ? ` (${_cellShift.descansoHoras} h)` : ''}` : ''}${_cellShift?.topeExcedido ? `\n⚠ Tope 200 h autorizado${_cellShift.horasMes != null ? ` (${_cellShift.horasMes} h)` : ''}` : ''}`;
                                         return <td key={key} data-testid="grilla-celda" onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={(e) => { if (!isSnapshotView && isDragging && allowPlanningMultiSelect) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); if (isLeaveCell) { const absType = absence?.type || activeShift?.name || LEGEND_DESCRIPTIONS[leaveCellCode] || leaveCellCode; const reason = absence?.reason || activeShift?.comments || p?.comments || ''; const covered = resolveTitularCoverageName(emp.id, emp.name || '', cellDateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell, cellTurnosMap); setShiftTooltip({ label: buildLeaveCellTooltipLabel({ absenceType: absType, reason, coveredBy: covered }), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else if ((s || p || rfzOnCell || _evOverlay) && !absence) { const shiftLabel = _evOverlay?.mode === 'EV'
                                                     ? _evOverlay.tooltip
                                                     : (cellCode === 'EV' && (activeShift?.eventoNombre || activeShift?.servicioNombre))
                                                     ? eventoTooltip(activeShift)
-                                                    : cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : (rfzOnCell ? 'Refuerzo cliente (RFZ)' : null); const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; const _exclHint = cellPosExcluded ? `\n⚠ Puesto excluido por SLA este día` : ''; const _otherObjHint = isOtherObjectiveShift && activeShift?.objectiveId ? `\n📍 Otro objetivo: ${getObjectiveName(activeShift.objectiveId)}` : ''; const _rfzHint = rfzOnCell ? `\n🔴 RFZ ${formatTime(rfzOnCell.startTime)}–${formatTime(rfzOnCell.endTime)}${rfzOnCell.positionName ? ` · ${rfzOnCell.positionName}` : ''}` : ''; const _linkedTura = activeShift?.id ? turaMap[activeShift.id] : null; const _turaHint = _linkedTura ? `\n🟣 TURA ${isTuraContiguousToParent(activeShift, _linkedTura) ? 'seguido' : 'cortado'} ${formatShiftClockRange(_linkedTura)}${_linkedTura.positionName ? ` → ${_linkedTura.positionName}` : ''}` : ''; const _tipLabel = isOpsCoverageCell ? buildOpsCoverageCellTooltip(opsTooltipShift, opsCoverageTooltipCtxFor(opsTooltipShift, emp.name || '')) : (shiftLabel ? `${shiftLabel}${_exclHint}${_otherObjHint}${_rfzHint}${_turaHint}${_covHint}${_billHint}${_lctRest ? `\n⚠ ${_lctRest}` : ''}` : (_exclHint || _otherObjHint || _rfzHint || _turaHint || _covHint || _billHint || _lctRest || null)); setShiftTooltip({ label: _tipLabel, readOnlyOps: isOpsCoverageCell, pos: _isRet ? null : (cellPosName || rfzOnCell?.positionName || null), range: _isRet ? null : (cellRange || (rfzOnCell ? `${formatTime(rfzOnCell.startTime)} - ${formatTime(rfzOnCell.endTime)}` : null)), x: e.clientX, y: e.clientY, restHours: _restHrs }); } else if (isExclusionCol) { setShiftTooltip({ label: excludedPositionsTooltip(excludedOnDay, cellDateStr), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked && !isOpsCoverageCell ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`} data-evento={_evOverlay ? _evOverlay.mode : undefined} title={isOpsCoverageCell ? undefined : _evOverlay ? (_evOverlay.mode === 'EV' ? _evOverlay.tooltip : `${_evOverlay.mode === 'FRANCO_USADO' ? 'Franco usado en evento' : 'También afectado al evento'}: ${_evOverlay.tooltip}`) : isExclusionCol && !s && !p ? excludedPositionsTooltip(excludedOnDay, cellDateStr) : isOtherObjectiveShift && activeShift?.objectiveId ? `Turno en ${getObjectiveName(activeShift.objectiveId)}` : undefined}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style} ${_lctRest ? 'ring-2 ring-amber-400' : cellPosExcluded ? 'ring-1 ring-rose-400/70' : ''}`}>{_evOverlay && _evOverlay.mode !== 'EV' && (<div className="absolute -bottom-0.5 right-0 text-[6.5px] font-black bg-yellow-400 text-yellow-900 px-0.5 rounded z-10" title={_evOverlay.tooltip}>EV</div>)}{_lctRest ? (<span className="absolute top-0 left-0 w-1.5 h-1.5 rounded-full bg-amber-500 border border-white" title={_lctRest}/>) : null}{content}{isExclusionCol && !content && (<span className="absolute bottom-0 left-0 w-1.5 h-1.5 rounded-full bg-rose-400/80" title="Día con puesto(s) excluido(s)"/>)}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly || isCoverageSplitCell) && <div className="absolute -top-1 -right-1 text-[8px] bg-red-900 text-white px-1 rounded-full border border-white/40">+</div>}{covRole === 'LIBERATED' && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-emerald-600 text-white px-0.5 rounded">RET</div>}{isCoverageSourceUsed && <div className="absolute -top-1 -left-1 text-[7px] font-black bg-violet-600 text-white px-0.5 rounded z-10" title="Turno usado en cobertura operativa">U</div>}{(covRole === 'TARGET' || isLeaveCell) && coveredByCell && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-orange-500 text-white px-0.5 rounded" title={coveredByCell ? `Cubierto por ${coveredByCell}` : 'Cubierto'}>✓</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && !isOtherObjectiveShift && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}{isOtherObjectiveShift && content && (<div className="absolute bottom-0 left-0"><MapPin size={7} className="text-slate-300 drop-shadow-sm"/></div>)}{selectedGrupo && grupoUnifiedMode && content && !isOtherObjectiveShift && activeShift?.objectiveId && selectedGrupo.objectiveIds.includes(activeShift.objectiveId) && (() => {
+                                                    : cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : (rfzOnCell ? 'Refuerzo cliente (RFZ)' : null); const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; const _exclHint = cellPosExcluded ? `\n⚠ Puesto excluido por SLA este día` : ''; const _otherObjHint = isOtherObjectiveShift && activeShift?.objectiveId ? `\n📍 Otro objetivo: ${getObjectiveName(activeShift.objectiveId)}` : ''; const _rfzHint = rfzOnCell ? `\n🔴 RFZ ${formatTime(rfzOnCell.startTime)}–${formatTime(rfzOnCell.endTime)}${rfzOnCell.positionName ? ` · ${rfzOnCell.positionName}` : ''}` : ''; const _linkedTura = activeShift?.id ? turaMap[activeShift.id] : null; const _turaHint = _linkedTura ? `\n🟣 TURA ${isTuraContiguousToParent(activeShift, _linkedTura) ? 'seguido' : 'cortado'} ${formatShiftClockRange(_linkedTura)}${_linkedTura.positionName ? ` → ${_linkedTura.positionName}` : ''}` : ''; const _tipLabel = isOpsCoverageCell ? buildOpsCoverageCellTooltip(opsTooltipShift, opsCoverageTooltipCtxFor(opsTooltipShift, emp.name || '')) : (shiftLabel ? `${shiftLabel}${_exclHint}${_otherObjHint}${_rfzHint}${_turaHint}${_covHint}${_billHint}${_authHint}${_lctRest ? `\n⚠ ${_lctRest}` : ''}` : (_exclHint || _otherObjHint || _rfzHint || _turaHint || _covHint || _billHint || _lctRest || null)); setShiftTooltip({ label: _tipLabel, readOnlyOps: isOpsCoverageCell, pos: _isRet ? null : (cellPosName || rfzOnCell?.positionName || null), range: _isRet ? null : (cellRange || (rfzOnCell ? `${formatTime(rfzOnCell.startTime)} - ${formatTime(rfzOnCell.endTime)}` : null)), x: e.clientX, y: e.clientY, restHours: _restHrs }); } else if (isExclusionCol) { setShiftTooltip({ label: excludedPositionsTooltip(excludedOnDay, cellDateStr), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked && !isOpsCoverageCell ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`} data-evento={_evOverlay ? _evOverlay.mode : undefined} title={isOpsCoverageCell ? undefined : _evOverlay ? (_evOverlay.mode === 'EV' ? _evOverlay.tooltip : `${_evOverlay.mode === 'FRANCO_USADO' ? 'Franco usado en evento' : 'También afectado al evento'}: ${_evOverlay.tooltip}`) : isExclusionCol && !s && !p ? excludedPositionsTooltip(excludedOnDay, cellDateStr) : isOtherObjectiveShift && activeShift?.objectiveId ? `Turno en ${getObjectiveName(activeShift.objectiveId)}` : undefined}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style} ${_lctRest ? 'ring-2 ring-amber-400' : cellPosExcluded ? 'ring-1 ring-rose-400/70' : ''}`}>{_evOverlay && _evOverlay.mode !== 'EV' && (<div className="absolute -bottom-0.5 right-0 text-[6.5px] font-black bg-yellow-400 text-yellow-900 px-0.5 rounded z-10" title={_evOverlay.tooltip}>EV</div>)}{_lctRest ? (<span className="absolute top-0 left-0 w-1.5 h-1.5 rounded-full bg-amber-500 border border-white" title={_lctRest}/>) : null}{content}{isExclusionCol && !content && (<span className="absolute bottom-0 left-0 w-1.5 h-1.5 rounded-full bg-rose-400/80" title="Día con puesto(s) excluido(s)"/>)}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly || isCoverageSplitCell) && <div className="absolute -top-1 -right-1 text-[8px] bg-red-900 text-white px-1 rounded-full border border-white/40">+</div>}{covRole === 'LIBERATED' && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-emerald-600 text-white px-0.5 rounded">RET</div>}{isCoverageSourceUsed && <div className="absolute -top-1 -left-1 text-[7px] font-black bg-violet-600 text-white px-0.5 rounded z-10" title="Turno usado en cobertura operativa">U</div>}{_cellShift?.descansoReducido && <div className="absolute -top-1 left-0 text-[7px] font-black bg-amber-500 text-white px-0.5 rounded z-10" title="Descanso reducido autorizado">8–12</div>}{_cellShift?.topeExcedido && <div className="absolute -bottom-0.5 right-0 text-[7px] font-black bg-rose-600 text-white px-0.5 rounded z-10" title="Tope de 200 h autorizado">200</div>}{(covRole === 'TARGET' || isLeaveCell) && coveredByCell && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-orange-500 text-white px-0.5 rounded" title={coveredByCell ? `Cubierto por ${coveredByCell}` : 'Cubierto'}>✓</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && !isOtherObjectiveShift && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}{isOtherObjectiveShift && content && (<div className="absolute bottom-0 left-0"><MapPin size={7} className="text-slate-300 drop-shadow-sm"/></div>)}{selectedGrupo && grupoUnifiedMode && content && !isOtherObjectiveShift && activeShift?.objectiveId && selectedGrupo.objectiveIds.includes(activeShift.objectiveId) && (() => {
                                                     const _oi = selectedGrupo.objectiveIds.indexOf(activeShift.objectiveId!);
                                                     const _clr = GRUPO_COLOR_HEX[_oi % GRUPO_COLOR_HEX.length];
                                                     const _nm = (selectedGrupo.objectiveNames[_oi] || '').trim().split(/\s+/).filter((w: string) => w.length > 1).pop()?.slice(0, 6).toUpperCase() || (selectedGrupo.objectiveNames[_oi] || '').slice(0, 5).toUpperCase();
@@ -15169,15 +15281,15 @@ function PlanificacionDesktop() {
                             },
                         };
                     };
-                    const blockedOnDay = (dateStr: string, coverage: VacancyDayCoverage): string[] => {
-                        if (!vacancyDayHasCoverage(coverage)) return [];
+                    const guardOnDay = (dateStr: string, coverage: VacancyDayCoverage) => {
+                        if (!vacancyDayHasCoverage(coverage)) return { blocked: [] as string[], authorizations: [] as CoverageAuthRequest[] };
                         return evaluateCoverageDayGuards({
                             dateStr,
                             proposedByEmp: proposedForCoverage(dateStr, coverage),
                             shiftOf: shiftOfGuard,
                             monthHoursOf: getEmpMonthHours,
                             nameOf: (id) => String(vacancyEmployeesById[id]?.name || id),
-                        }).blocked;
+                        });
                     };
                     const leaveEditor = () => {
                         setVacancyReplacementOpen(false);
@@ -15197,8 +15309,16 @@ function PlanificacionDesktop() {
                         const overwritten = daysOverwritten(vacancyDayCoverages, incoming);
                         if (overwritten.length > 0 && !confirm(`Esto pisa la cobertura distinta de ${overwritten.map(formatShortDay).join(', ')}. ¿Seguir?`)) return;
                         const blocked: string[] = [];
+                        const auths: CoverageAuthRequest[] = [];
                         for (const [day, cov] of Object.entries(incoming)) {
-                            for (const msg of blockedOnDay(day, cov)) blocked.push(`${formatShortDay(day)}: ${msg}`);
+                            const guard = guardOnDay(day, cov);
+                            for (const msg of guard.blocked) blocked.push(`${formatShortDay(day)}: ${msg}`);
+                            for (const auth of guard.authorizations) {
+                                const prev = vacancyAuthMarks[`${auth.employeeId}_${auth.dateStr}`];
+                                if (auth.kind === 'TOPE' && prev?.topeExcedido) continue;
+                                if (auth.kind === 'DESCANSO' && prev?.descansoReducido) continue;
+                                auths.push(auth);
+                            }
                         }
                         if (blocked.length) {
                             toast.error(blocked.slice(0, 4).join(' · '), { duration: 9000 });
@@ -15216,21 +15336,46 @@ function PlanificacionDesktop() {
                                 }, pendingChanges));
                             }
                         }
-                        const commit = () => {
+                        const commit = (extraMarks?: Record<string, ShiftAuthMark>) => {
                             setVacancyDayCoverages((prev) => mergeCoverages(prev, incoming));
+                            if (extraMarks) setVacancyAuthMarks((prev) => ({ ...prev, ...extraMarks }));
                             if (templateDay) setVacancyTemplateDay(templateDay);
                             toast.success(toastMsg);
                             after?.();
                         };
-                        if (francoConflicts.length > 0 && !vacancyFrancoAuthApproved) {
-                            requestSupervisorFrancoAuth(francoConflicts, () => {
-                                setVacancyFrancoAuthApproved(true);
-                                commit();
-                            }, 'cobertura de licencia');
+                        const finish = (extraMarks?: Record<string, ShiftAuthMark>) => {
+                            if (francoConflicts.length > 0 && !vacancyFrancoAuthApproved) {
+                                requestSupervisorFrancoAuth(francoConflicts, () => {
+                                    setVacancyFrancoAuthApproved(true);
+                                    commit(extraMarks);
+                                }, 'cobertura de licencia');
+                                return;
+                            }
+                            if (francoConflicts.length > 0) setVacancyFrancoAuthApproved(true);
+                            commit(extraMarks);
+                        };
+                        if (auths.length) {
+                            requestSupervisorLaborAuth(auths, () => {
+                                const motivo = authReasonRef.current;
+                                const marks: Record<string, ShiftAuthMark> = {};
+                                for (const auth of auths) {
+                                    const key = `${auth.employeeId}_${auth.dateStr}`;
+                                    const prev = marks[key] || {};
+                                    marks[key] = {
+                                        ...prev,
+                                        autorizacionMotivo: motivo,
+                                        ...(auth.kind === 'DESCANSO'
+                                            ? { descansoReducido: true, descansoHoras: auth.restHours != null ? Math.round(auth.restHours * 10) / 10 : undefined }
+                                            : {}),
+                                        ...(auth.kind === 'TOPE' ? { topeExcedido: true, horasMes: auth.monthHours } : {}),
+                                    };
+                                }
+                                if (francoConflicts.length > 0) setVacancyFrancoAuthApproved(true);
+                                commit(marks);
+                            });
                             return;
                         }
-                        if (francoConflicts.length > 0) setVacancyFrancoAuthApproved(true);
-                        commit();
+                        finish();
                     };
                     const applyThisDay = () => {
                         if (!vacancyEditingDay) return;
@@ -15894,18 +16039,29 @@ function PlanificacionDesktop() {
                                     />
                                     {authError && <p className="text-rose-600 text-xs font-bold text-center mt-2">{authError}</p>}
                                 </div>
+                                {authModal.requireReason && (
+                                    <div className="mb-4">
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-2">Motivo</label>
+                                        <textarea
+                                            value={authReason}
+                                            onChange={(e) => { setAuthReason(e.target.value.slice(0, 240)); setAuthError(''); }}
+                                            placeholder="Por qué se autoriza"
+                                            className="w-full border-2 border-slate-200 rounded-xl p-3 text-sm font-medium min-h-[72px]"
+                                        />
+                                    </div>
+                                )}
 
                                 <div className="flex gap-3">
                                     <button
                                         type="button"
-                                        onClick={() => { setAuthModal({ pendingFn: null, employees: [] }); setAuthPin(''); setAuthError(''); }}
+                                        onClick={() => { setAuthModal({ pendingFn: null, employees: [] }); setAuthPin(''); setAuthReason(''); authReasonRef.current = ''; setAuthError(''); }}
                                         className="flex-1 py-3 rounded-xl font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
                                     >
                                         Cancelar
                                     </button>
                                     <button
                                         type="submit"
-                                        disabled={authPin.length !== 4 || authLoading}
+                                        disabled={authPin.length !== 4 || authLoading || (!!authModal.requireReason && !authReason.trim())}
                                         className="flex-1 py-3 bg-indigo-600 disabled:bg-slate-300 text-white rounded-xl font-black uppercase text-xs hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2"
                                     >
                                         {authLoading ? <RefreshCw size={16} className="animate-spin"/> : <ShieldCheck size={16}/>}

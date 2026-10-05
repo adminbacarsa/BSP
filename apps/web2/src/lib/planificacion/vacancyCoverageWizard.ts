@@ -3,7 +3,8 @@
  * Cada día marcado tiene su cobertura; nada se copia solo al día siguiente
  * y un día ya configurado no se pisa sin que el llamador lo confirme.
  */
-import { checkRestBetweenShifts } from '@/lib/planificacion/restBetweenShifts';
+import { checkRestBetweenShiftsDetail } from '@/lib/planificacion/restBetweenShifts';
+import { classifyRestViolation, monthNeedsSupervisorPin } from '@/lib/planificacion/supervisorAuth';
 import { planningHourLimits } from '@/lib/planning/planning-rules.runtime';
 import {
   vacancyDayHasCoverage,
@@ -188,13 +189,32 @@ export type CoverageGuardInput = {
   monthlyCap?: number;
 };
 
+export type CoverageAuthRequest = {
+  kind: 'DESCANSO' | 'TOPE';
+  employeeId: string;
+  name: string;
+  dateStr: string;
+  restHours?: number;
+  monthHours?: number;
+  cap: number;
+  shiftCode?: string;
+  message: string;
+};
+
+export type CoverageGuardResult = {
+  blocked: string[];
+  authorizations: CoverageAuthRequest[];
+};
+
 /**
- * Licencia, descanso de 12 h y tope se miran con el turno de ESE guardia ESE día.
- * El franco no bloquea: lo autoriza el PIN de supervisor.
+ * Licencia, descanso y tope se miran con el turno de ESE guardia ESE día.
+ * El franco no bloquea (PIN de FT). Entre 8 y 12 h, y el tope de 200 h, salen
+ * como autorización: sin PIN el llamador no escribe. Menos de 8 h queda en blocked.
  */
-export function evaluateCoverageDayGuards(input: CoverageGuardInput): { blocked: string[] } {
+export function evaluateCoverageDayGuards(input: CoverageGuardInput): CoverageGuardResult {
   const cap = input.monthlyCap ?? planningHourLimits().monthly;
   const blocked: string[] = [];
+  const authorizations: CoverageAuthRequest[] = [];
   const cfg = { minRestBetweenShiftsHours: 12, longRestAfterWorkedHours: 48, minLongRestHours: 35 };
   for (const [empId, proposed] of Object.entries(input.proposedByEmp)) {
     const name = input.nameOf(empId) || empId;
@@ -206,7 +226,7 @@ export function evaluateCoverageDayGuards(input: CoverageGuardInput): { blocked:
       continue;
     }
     if (!franco) {
-      const rest = checkRestBetweenShifts({
+      const rest = checkRestBetweenShiftsDetail({
         empId,
         targetDateStr: input.dateStr,
         proposed: {
@@ -223,13 +243,48 @@ export function evaluateCoverageDayGuards(input: CoverageGuardInput): { blocked:
         },
         cfg,
       });
-      if (rest) blocked.push(`${name}: ${rest}`);
+      const band = classifyRestViolation(rest);
+      if (rest && band === 'blocked') blocked.push(`${name}: ${rest.message}`);
+      if (rest && band === 'pin') {
+        authorizations.push({
+          kind: 'DESCANSO',
+          employeeId: empId,
+          name,
+          dateStr: input.dateStr,
+          restHours: rest.gapHours,
+          cap,
+          shiftCode: proposed.code,
+          message: `${name}: ${rest.message}`,
+        });
+      }
     }
     const add = Number(proposed.addHours) || 0;
     const month = input.monthHoursOf(empId) + add;
-    if (add > 0 && month > cap + 0.05) {
-      blocked.push(`${name} quedaría en ${Math.round(month)} h. Tope ${cap}.`);
+    if (add > 0 && monthNeedsSupervisorPin(month, cap)) {
+      authorizations.push({
+        kind: 'TOPE',
+        employeeId: empId,
+        name,
+        dateStr: input.dateStr,
+        monthHours: Math.round(month),
+        cap,
+        shiftCode: proposed.code,
+        message: `${name} quedaría en ${Math.round(month)} h. Tope ${cap}.`,
+      });
     }
   }
-  return { blocked };
+  return { blocked, authorizations };
+}
+
+/** Sin PIN, la autorización pendiente bloquea la escritura. Con PIN, solo queda lo duro (< 8 h, licencia). */
+export function unresolvedGuardMessages(
+  result: CoverageGuardResult,
+  granted: { descanso: boolean; tope: boolean },
+): string[] {
+  const msgs = [...result.blocked];
+  for (const auth of result.authorizations) {
+    if (auth.kind === 'DESCANSO' && !granted.descanso) msgs.push(auth.message);
+    if (auth.kind === 'TOPE' && !granted.tope) msgs.push(auth.message);
+  }
+  return msgs;
 }

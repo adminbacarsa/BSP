@@ -386,12 +386,18 @@ export const checkRestBetweenShiftsDetail = (p: RestCheckParams): RestCheckViola
     if (prevCal && isWorkShift(prevCal)) {
         const prevCode = String(prevCal.code || prevCal.type || '').toUpperCase();
         if (forbiddenEveningToMorningWithoutBreak(prevCode, newCode)) {
-            const prevSchedule = describeShiftSchedule(prevCalDate, prevCal);
-            return {
-                message: `T→M consecutivo prohibido: ${prevSchedule} → ${proposedSchedule} (mín. 12h entre tarde y mañana del día siguiente).`,
-                proposedSchedule,
-                neighborBefore: prevSchedule,
-            };
+            const prevSe = getShiftStartEndAbs(prevCalDate, prevCal);
+            const gapTm = prevSe ? hoursBetween(prevSe.end, seNew.start) : null;
+            if (gapTm != null && gapTm + 1e-6 < minRest) {
+                const prevSchedule = describeShiftSchedule(prevCalDate, prevCal);
+                return {
+                    message: `T→M consecutivo: ${prevSchedule} → ${proposedSchedule}: ${gapTm.toFixed(1)}h < ${minRest}h.`,
+                    proposedSchedule,
+                    neighborBefore: prevSchedule,
+                    gapHours: gapTm,
+                    requiredRestHours: minRest,
+                };
+            }
         }
     }
 

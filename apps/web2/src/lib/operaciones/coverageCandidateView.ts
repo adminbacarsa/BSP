@@ -220,6 +220,7 @@ export function buildOpsCandidateView(args: {
       fullName: row.employeeName,
       otherPosition: row.otherPosition,
       positionRank: row.positionRank,
+      requiereAutorizacion: row.requiereAutorizacion || undefined,
     };
   };
   const mapKind = (rows: CoverageCandidateRow[], kind: InternalCoverageKind) =>
