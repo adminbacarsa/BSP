@@ -10,9 +10,11 @@ import { formatTimeAr } from '../../../../packages/portal-core/src/utils/dates.t
 import {
   advanceStartLine,
   convocadoRecordatorioRoute,
+  coberturaAceptadaLine,
   extendUntilLine,
   formatEnCaminoLine,
   isRecordatorioPendiente,
+  planConvocadoArrival,
   parseConvocadoRecordatorioPush,
   resolveExpectedArrivalAt,
 } from '../../../../packages/portal-core/src/checkIn/convocadoArrival.ts';
@@ -146,6 +148,76 @@ describe('recordatorio convocado', () => {
     const line = formatEnCaminoLine('Planta Norte', eta);
     assert.equal(line, `EN CAMINO a Planta Norte · llegada estimada ${formatTimeAr(eta)}`);
     assert.equal(line.includes('tarde'), false);
+  });
+
+  it('hueco futuro: próximo turno hasta salir, fichada desde T−15, llegada al inicio', () => {
+    const accepted = new Date('2026-10-05T13:56:00-03:00');
+    const gap = new Date('2026-10-05T16:00:00-03:00');
+    const end = new Date('2026-10-05T17:00:00-03:00');
+    const plan = planConvocadoArrival({
+      acceptedAtMs: accepted.getTime(),
+      gapStartMs: gap.getTime(),
+      etaMinutes: 10,
+    });
+    assert.equal(plan.future, true);
+    assert.equal(plan.expectedArrivalMs, gap.getTime());
+    assert.equal(plan.departAtMs, new Date('2026-10-05T15:50:00-03:00').getTime());
+    assert.equal(plan.punchOpenMs, new Date('2026-10-05T15:45:00-03:00').getTime());
+    assert.equal(plan.reminderAtMs, new Date('2026-10-05T15:40:00-03:00').getTime());
+
+    const shift = {
+      id: 'fut',
+      origin: 'OPERATIONS_COVERAGE',
+      coverageType: 'FT',
+      startTime: gap,
+      endTime: end,
+      acceptedAt: accepted,
+      etaMinutes: 10,
+      expectedArrivalAt: new Date(plan.expectedArrivalMs),
+      objectiveName: 'Peaje 9 Norte',
+      positionName: 'Puesto 1',
+    };
+    const early = getCheckInTiming(shift as never, new Date('2026-10-05T14:00:00-03:00'));
+    assert.equal(early.convocadoPhase, 'proximo');
+    assert.equal(early.canCheckIn, false);
+    const at1550 = getCheckInTiming(shift as never, new Date('2026-10-05T15:50:00-03:00'));
+    assert.equal(at1550.canCheckIn, true);
+    assert.equal(at1550.convocadoPhase, 'en_camino');
+    const ui = resolveCheckInUiStatus(shift as never, early);
+    assert.equal(ui.title, 'Cobertura aceptada');
+    assert.equal(ui.actionLabel, undefined);
+    const line = coberturaAceptadaLine({
+      gapStart: gap,
+      gapEnd: end,
+      now: accepted,
+      objectiveName: 'Peaje 9 Norte',
+      positionName: 'Puesto 1',
+    });
+    assert.equal(line, 'Cobertura aceptada · hoy 16:00–17:00 · Peaje 9 Norte · Puesto 1');
+  });
+
+  it('hueco ya empezado: llegada = aceptación + viaje y fichada desde la aceptación', () => {
+    const accepted = new Date('2026-10-05T16:10:00-03:00');
+    const gap = new Date('2026-10-05T16:00:00-03:00');
+    const plan = planConvocadoArrival({
+      acceptedAtMs: accepted.getTime(),
+      gapStartMs: gap.getTime(),
+      etaMinutes: 10,
+    });
+    assert.equal(plan.future, false);
+    assert.equal(plan.expectedArrivalMs, accepted.getTime() + 10 * 60_000);
+    assert.equal(plan.punchOpenMs, accepted.getTime());
+    const shift = {
+      id: 'ya',
+      origin: 'OPERATIONS_COVERAGE',
+      startTime: gap,
+      endTime: new Date('2026-10-05T17:00:00-03:00'),
+      acceptedAt: accepted,
+      etaMinutes: 10,
+    };
+    const t = getCheckInTiming(shift as never, new Date('2026-10-05T16:12:00-03:00'));
+    assert.equal(t.canCheckIn, true);
+    assert.equal(t.convocadoPhase, 'en_camino');
   });
 });
 

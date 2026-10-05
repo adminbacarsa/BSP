@@ -52,7 +52,7 @@ export function isCoverageHoursOnSourceDoc(
 
 /**
  * Cobertura aceptada (convocado): no es el registro EXT/ADV.
- * La fichada va desde acceptedAt hasta el fin del hueco, sin tope de 60 min.
+ * Hueco ya empezado: fichada desde acceptedAt. Hueco futuro (inicio > aceptación + viaje): desde T−15. Hasta el fin, sin tope de 60 min.
  */
 export function isConvocadoCoverageShift(
   data: Record<string, unknown> | null | undefined,
@@ -117,6 +117,17 @@ export function convocadoPunchAnchorMs(shift: Record<string, unknown>): number {
   const acc = timestampLikeToMillis(shift.acceptedAt);
   if (acc > 0) return acc;
   return createdMs(shift);
+}
+
+/** Hueco futuro: T−15. Si no, la aceptación. */
+export function convocadoPunchOpenMs(shift: Record<string, unknown>): number {
+  const gap = startMs(shift);
+  const accepted = convocadoPunchAnchorMs(shift);
+  const eta = Number(shift.etaMinutes);
+  if (gap > 0 && accepted > 0 && Number.isFinite(eta) && eta > 0 && gap > accepted + eta * 60_000) {
+    return gap - 15 * 60 * 1000;
+  }
+  return accepted;
 }
 
 /** Tope del convocado: el fin del hueco. Sin fin, ancla + 12 h. */
@@ -237,7 +248,7 @@ export function evaluateCheckInWindow(
     return { allowed: false, rejectCode: 'EXT_NO_CHECKIN' };
   }
   if (origin === 'OPERATIONS_COVERAGE') {
-    const anchor = convocadoPunchAnchorMs(shift);
+    const anchor = convocadoPunchOpenMs(shift);
     const cap = convocadoPunchCapMs(shift);
     if (anchor > 0 && nowMs < anchor) return { allowed: false, rejectCode: 'TOO_EARLY' };
     if (cap > 0 && nowMs > cap) return { allowed: false, rejectCode: 'SHIFT_ENDED' };

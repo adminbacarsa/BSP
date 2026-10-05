@@ -175,10 +175,11 @@ export function resolveCheckInUiStatus(
   }
 
   if (timing?.convocado) {
+    const proximo = timing.convocadoPhase === 'proximo';
     if (timing.canCheckIn) {
       return {
         status: 'ready',
-        title: 'En camino',
+        title: proximo ? 'Cobertura aceptada' : 'En camino',
         subtitle: 'Marcá ingreso al llegar al objetivo.',
         tone: 'info',
         actionLabel: 'Marcar ingreso al llegar',
@@ -187,8 +188,10 @@ export function resolveCheckInUiStatus(
     const ended = String(timing.rejectCode || '') === 'SHIFT_ENDED';
     return {
       status: ended ? 'shift_ended' : 'too_early',
-      title: ended ? 'Turno terminado' : 'En camino',
-      subtitle: timing.rejectMessage,
+      title: ended ? 'Turno terminado' : proximo ? 'Cobertura aceptada' : 'En camino',
+      subtitle: proximo && !ended
+        ? (timing.rejectMessage || 'El ingreso se habilita 15 min antes del inicio.')
+        : timing.rejectMessage,
       tone: 'neutral',
     };
   }

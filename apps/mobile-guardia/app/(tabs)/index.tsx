@@ -3,6 +3,7 @@ import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, Text, Vi
 import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
+  coberturaAceptadaLine,
   empresaLabelDeTurno,
   formatEnCaminoLine,
   getCheckInTiming,
@@ -365,6 +366,7 @@ function HoyScreenContent() {
     },
   );
   const convocadoHero = !!timing?.convocado && !isConfirmed && !todayAbsentShift;
+  const convocadoProximo = convocadoHero && timing?.convocadoPhase === 'proximo';
   const acceptedForHero = mainShift
     ? aceptadas.find((c) => c.shiftId === mainShift.id)
     : undefined;
@@ -379,8 +381,17 @@ function HoyScreenContent() {
         nowMs: now.getTime(),
       }) ?? toDate(mainShift?.startTime)
     : null;
-  const enCaminoLine = convocadoHero
+  const enCaminoLine = convocadoHero && !convocadoProximo
     ? formatEnCaminoLine(placement.objective, enCaminoEta && !Number.isNaN(enCaminoEta.getTime()) ? enCaminoEta : null)
+    : null;
+  const coberturaLine = convocadoProximo && mainShift && toDate(mainShift.startTime)
+    ? coberturaAceptadaLine({
+        gapStart: toDate(mainShift.startTime) as Date,
+        gapEnd: toDate(mainShift.endTime),
+        now,
+        objectiveName: placement.objective,
+        positionName: placement.position,
+      })
     : null;
   const mapsUrl = mapsSearchUrl(objective?.lat, objective?.lng, objective?.address);
   const canCheckIn =
@@ -627,7 +638,7 @@ function HoyScreenContent() {
               headline={
                 todayAbsentShift
                   ? 'HOY'
-                  : enCaminoLine || formatHeroShiftHeadline(mainShift, { isToday: isHeroToday, now })
+                  : coberturaLine || enCaminoLine || formatHeroShiftHeadline(mainShift, { isToday: isHeroToday, now })
               }
               subline={
                 todayAbsentShift
@@ -638,11 +649,15 @@ function HoyScreenContent() {
               placement={placement}
               empresaNombre={empresaNombre || 'Tu empresa'}
               sectionLabel={
-                convocadoHero
+                convocadoProximo
                   ? heroEmpresaLabel
-                    ? `EN CAMINO · ${heroEmpresaLabel}`
-                    : 'EN CAMINO'
-                  : heroSectionLabel
+                    ? `Próximo turno · ${heroEmpresaLabel}`
+                    : 'Próximo turno'
+                  : convocadoHero
+                    ? heroEmpresaLabel
+                      ? `EN CAMINO · ${heroEmpresaLabel}`
+                      : 'EN CAMINO'
+                    : heroSectionLabel
               }
               statusSlot={
                 todayAbsentShift ? (
@@ -664,7 +679,7 @@ function HoyScreenContent() {
               footer={
                 todayAbsentShift ? null : (
                   <View style={styles.heroActions}>
-                    {convocadoHero && mapsUrl ? (
+                    {convocadoHero && !convocadoProximo && mapsUrl ? (
                       <CommandButton
                         label="Cómo llegar"
                         variant="onHero"

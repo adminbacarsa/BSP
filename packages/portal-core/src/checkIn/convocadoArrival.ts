@@ -108,6 +108,67 @@ export function formatEnCaminoLine(objectiveName: string, eta: Date | null): str
   return `EN CAMINO a ${place} · llegada estimada ${formatTimeAr(eta)}`;
 }
 
+function arDay(d: Date): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Argentina/Buenos_Aires',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(d);
+}
+
+/** Antes de salir: próximo turno, no “en camino”. */
+export function coberturaAceptadaLine(input: {
+  gapStart: Date;
+  gapEnd?: Date | null;
+  now: Date;
+  objectiveName?: string;
+  positionName?: string;
+}): string {
+  const day = arDay(input.gapStart) === arDay(input.now) ? 'hoy' : arDay(input.gapStart).split('-').reverse().join('/');
+  const end = input.gapEnd ? `–${formatTimeAr(input.gapEnd)}` : '';
+  const place = [input.objectiveName, input.positionName].map((s) => String(s || '').trim()).filter(Boolean).join(' · ');
+  return `Cobertura aceptada · ${day} ${formatTimeAr(input.gapStart)}${end}${place ? ` · ${place}` : ''}`;
+}
+
+/** Espejo de `planConvocadoArrival` en functions (paridad). */
+export function planConvocadoArrival(input: {
+  acceptedAtMs: number;
+  gapStartMs: number;
+  etaMinutes: number;
+}): {
+  future: boolean;
+  expectedArrivalMs: number;
+  reminderAtMs: number;
+  departAtMs: number;
+  punchOpenMs: number;
+} {
+  const eta = Math.max(1, Math.round(Number(input.etaMinutes) || 0));
+  const travelMs = eta * 60_000;
+  const accepted = input.acceptedAtMs;
+  const gap = input.gapStartMs;
+  const future = gap > 0 && accepted > 0 && gap > accepted + travelMs;
+  if (!future) {
+    return {
+      future: false,
+      expectedArrivalMs: accepted + travelMs,
+      reminderAtMs: accepted + Math.round((eta * 2) / 3) * 60_000,
+      departAtMs: accepted,
+      punchOpenMs: accepted,
+    };
+  }
+  let reminderAtMs = gap - travelMs - 10 * 60_000;
+  const tMinus5 = gap - 5 * 60_000;
+  if (reminderAtMs <= accepted) reminderAtMs = tMinus5 > accepted ? tMinus5 : accepted + 60_000;
+  return {
+    future: true,
+    expectedArrivalMs: gap,
+    reminderAtMs,
+    departAtMs: gap - travelMs,
+    punchOpenMs: gap - 15 * 60_000,
+  };
+}
+
 export function mapsSearchUrl(
   lat?: number | null,
   lng?: number | null,

@@ -4,9 +4,9 @@ import { logConvocatoriaEvento } from './convocatoriaEventos';
 import {
   CONVOCADO_ETA_SPEED_KMH,
   CONVOCADO_ETA_WAIT_MIN,
-  convocadoReminderAtMs,
   convocadoTravelEta,
   haversineKm,
+  planConvocadoArrival,
 } from '../common/convocadoEta';
 
 export type OriginCoords = { lat?: number; lng?: number; accuracy?: number };
@@ -90,8 +90,8 @@ export async function recordConvocadoAcceptEta(
     waitMin: params.wait,
   });
   const etaMinutes = travel.etaMinutes;
-  const expectedMs = nowMs + etaMinutes * 60 * 1000;
-  const reminderMs = convocadoReminderAtMs(nowMs, etaMinutes);
+  const gapStartMs = num((tit?.startTime as Timestamp | undefined)?.toMillis?.()) ?? 0;
+  const plan = planConvocadoArrival({ acceptedAtMs: nowMs, gapStartMs, etaMinutes });
 
   const gapEndMs = num((tit?.endTime as Timestamp | undefined)?.toMillis?.()) ?? 0;
   const patch = {
@@ -99,10 +99,12 @@ export async function recordConvocadoAcceptEta(
     originSource,
     etaMinutes,
     etaTraveled: travel.traveled,
-    expectedArrivalAt: Timestamp.fromMillis(expectedMs),
-    reminderAt: Timestamp.fromMillis(reminderMs),
+    expectedArrivalAt: Timestamp.fromMillis(plan.expectedArrivalMs),
+    reminderAt: Timestamp.fromMillis(plan.reminderAtMs),
     reminderPending: true,
     delayAlertPending: true,
+    convocadoGapFuture: plan.future,
+    ...(gapStartMs > 0 ? { gapStartAt: Timestamp.fromMillis(gapStartMs) } : {}),
     ...(gapEndMs > 0 ? { gapEndAt: Timestamp.fromMillis(gapEndMs) } : {}),
     acceptedAt: conv.respondedAt || now,
   };
