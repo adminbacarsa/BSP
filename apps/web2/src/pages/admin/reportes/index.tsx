@@ -1216,6 +1216,8 @@ export default function ReportsPage() {
                                             : (s.status === 'PRESENT' || s.isPresent) ? <span className="text-[9px] bg-blue-100 text-blue-700 px-2 py-1 rounded font-bold">PRESENTE</span>
                                             : (s.isAbsent || s.status === 'ABSENT') ? <span className="text-[9px] bg-rose-100 text-rose-700 px-2 py-1 rounded font-bold">AUSENTE</span>
                                             : <span className="text-[9px] bg-slate-100 text-slate-500 px-2 py-1 rounded font-bold">PENDIENTE</span>}
+                                            {s.descansoReducido ? <span className="ml-1 text-[9px] bg-amber-100 text-amber-800 px-2 py-1 rounded font-bold border border-amber-200">DESCANSO {s.descansoHoras ?? '8–12'}h</span> : null}
+                                            {s.topeExcedido ? <span className="ml-1 text-[9px] bg-rose-100 text-rose-800 px-2 py-1 rounded font-bold border border-rose-200">TOPE {s.horasMes ?? '+200'}h</span> : null}
                                         </td>
                                     </tr>
                                 );

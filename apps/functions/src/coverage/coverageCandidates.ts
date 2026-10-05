@@ -32,8 +32,15 @@ export const COVERAGE_JOIN_TOLERANCE_MS = 30 * 60 * 1000;
 /** Mismo valor que `SHIFT_HARD_CAP_MS` en scheduling/shiftClose.ts. */
 export const COVERAGE_HARD_CAP_MS = (12 * 60 + 59) * 60 * 1000;
 
-/** Interjornada mínima (SUVICO `REST.DAILY_MIN_HOURS`). */
-const COVERAGE_MIN_REST_MS = 12 * 60 * 60 * 1000;
+/** Interjornada: ≥ 12 h pasa, 8–12 h se ofrece con autorización, < 8 h se excluye. */
+const COVERAGE_REST_OK_MS = 12 * 60 * 60 * 1000;
+const COVERAGE_REST_PIN_MS = 8 * 60 * 60 * 1000;
+
+function restGapReason(gapMs: number): 'DESCANSO' | 'DESCANSO_AUTORIZAR' | null {
+  if (gapMs + 1 >= COVERAGE_REST_OK_MS) return null;
+  if (gapMs + 1 >= COVERAGE_REST_PIN_MS) return 'DESCANSO_AUTORIZAR';
+  return 'DESCANSO';
+}
 
 const AR_OFFSET_MS = 3 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -64,7 +71,8 @@ export type CoverageRejectReason =
   | 'FALTA_APTITUD'
   | 'RESTRICCION'
   | 'EN_OTRA_SESION'
-  | 'DESCANSO';
+  | 'DESCANSO'
+  | 'DESCANSO_AUTORIZAR';
 
 export const COVERAGE_REJECT_LABEL: Record<CoverageRejectReason, string> = {
   ES_EL_AUSENTE: 'Es el ausente de esta vacante',
@@ -85,7 +93,8 @@ export const COVERAGE_REJECT_LABEL: Record<CoverageRejectReason, string> = {
   FALTA_APTITUD: 'Le falta una aptitud del puesto',
   RESTRICCION: 'Tiene restricción de objetivo o cliente',
   EN_OTRA_SESION: 'Ya está propuesto en otra vacante del CC',
-  DESCANSO: 'No cumple el descanso entre turnos (12 h)',
+  DESCANSO: 'Menos de 8 h de descanso (bloqueado)',
+  DESCANSO_AUTORIZAR: 'Requiere autorización (descanso entre 8 y 12 h)',
 };
 
 export function coverageRejectMessage(reason: CoverageRejectReason): string {
@@ -104,7 +113,9 @@ export function coverageRejectMessage(reason: CoverageRejectReason): string {
     case 'TOPE_12_59':
       return 'No se puede tomar esta cobertura: superarías el tope de 12:59 h.';
     case 'DESCANSO':
-      return 'No se puede tomar esta cobertura: no cumplís las 12 h de descanso entre turnos.';
+      return 'No se puede tomar esta cobertura: hay menos de 8 h de descanso.';
+    case 'DESCANSO_AUTORIZAR':
+      return 'Requiere autorización: el descanso queda entre 8 y 12 h.';
     case 'ZOMBI':
       return 'No se puede tomar esta cobertura: el turno está vencido.';
     case 'HUECO_CUBIERTO':
@@ -227,6 +238,8 @@ export interface CoverageCandidateRow {
   otherPosition: boolean;
   eligible: boolean;
   rejectReason?: CoverageRejectReason;
+  /** Descanso entre 8 y 12 h: se ofrece, el supervisor tiene que autorizarlo. */
+  requiereAutorizacion?: 'DESCANSO';
   /** EXT: el saliente ya retenido por este hueco va primero (ya está en el puesto). */
   retainedForGap?: boolean;
 }
@@ -418,8 +431,9 @@ function rowFrom(
     sourceShiftId: shift.id,
     positionRank: other ? 1 : 0,
     otherPosition: other,
-    eligible: !reason,
-    ...(reason ? { rejectReason: reason } : {}),
+    eligible: !reason || reason === 'DESCANSO_AUTORIZAR',
+    ...(reason && reason !== 'DESCANSO_AUTORIZAR' ? { rejectReason: reason } : {}),
+    ...(reason === 'DESCANSO_AUTORIZAR' ? { requiereAutorizacion: 'DESCANSO' as const } : {}),
     ...(retained ? { retainedForGap: true } : {}),
   };
 }
@@ -597,8 +611,14 @@ function ftAlreadyWorked(
     if (!coverage && !planned) continue;
     if (coverage && sh.absenceShiftId && sh.absenceShiftId === gap.titularShiftId) return 'SOLAPA_COBERTURA';
     if (rangesOverlap(sh.startMs, sh.endMs, gap.startMs, gap.endMs)) return coverage ? 'SOLAPA_COBERTURA' : 'SOLAPA_TURNO';
-    if (sh.endMs <= gap.startMs && gap.startMs - sh.endMs < COVERAGE_MIN_REST_MS) return 'DESCANSO';
-    if (gap.endMs <= sh.startMs && sh.startMs - gap.endMs < COVERAGE_MIN_REST_MS) return 'DESCANSO';
+    if (sh.endMs <= gap.startMs) {
+      const reason = restGapReason(gap.startMs - sh.endMs);
+      if (reason) return reason;
+    }
+    if (gap.endMs <= sh.startMs) {
+      const reason = restGapReason(sh.startMs - gap.endMs);
+      if (reason) return reason;
+    }
     const touchesGapDay = arMidnight(sh.startMs) === gapDay || arMidnight(sh.endMs - 1) === gapDay;
     if (touchesGapDay) worked += sh.endMs - sh.startMs;
   }
