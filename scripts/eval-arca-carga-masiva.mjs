@@ -6,11 +6,14 @@ import {
   contarLineasTxt,
   decidirNovedadAbierta,
   extraerCodigoPrincipal,
+  extraerDatosConstancia,
+  extraerErroresLinea,
   leerEstadoCarga,
   mensajeNovedadAjena,
   nroDesdeFilaListado,
   parseFilasListado,
-  validarRegistrosVsTxt,
+  urlConstanciaSeti,
+  validarCargaOk,
 } from './arca-robot/cargaMasiva.mjs';
 import { bodyResultado } from './arca-robot/flujo.mjs';
 import fs from 'node:fs';
@@ -58,21 +61,27 @@ check(
   extraerCodigoPrincipal('INGRESO MASIVO\nCódigo: 245548\nEstado: Abierto') === '245548',
 );
 
-const cargaTxt = `Informado: NO
-Estado: Pendiente
-Registros: 3
+const cargaOkTxt = `Informado SI
+Estado Válido
+Registros 1
+Archivo cargado correctamente
 `;
-const estado = leerEstadoCarga(cargaTxt);
-check('lee Registros=3', estado.registros === 3);
+const estadoOk = leerEstadoCarga(cargaOkTxt);
+check('carga OK = Informado SI + Válido', estadoOk.ok === true && estadoOk.registros === 1);
 check('cuenta líneas TXT', contarLineasTxt('a\nb\n\nc\n') === 3);
-check('registros = líneas OK', validarRegistrosVsTxt({ registros: 3, lineasTxt: 3 }).ok === true);
-check('registros distintos falla', validarRegistrosVsTxt({ registros: 2, lineasTxt: 3 }).ok === false);
+check('validarCargaOk registros', validarCargaOk({ estadoCarga: estadoOk, lineasTxt: 1 }).ok === true);
+check('registros distintos falla', validarCargaOk({ estadoCarga: estadoOk, lineasTxt: 3 }).ok === false);
 
-const presentadas = parseFilasListado('245548 29/09/2026 05/10/2026 987654321 Presentado');
-check(
-  'nro desde listado por código',
-  nroDesdeFilaListado(presentadas, '245548') === '987654321',
-);
+const invalida = leerEstadoCarga('Informado SI\nEstado Inválido\nRegistros 1\nLínea 1: CUIL del empleado no válida');
+check('carga inválida', invalida.ok === false);
+check('extrae errores de línea', extraerErroresLinea('Línea 1: CUIL del empleado no válida').length === 1);
+
+const enviada = parseFilasListado('245746 05/10/2026 5/10/2026 16:03:45 1197638458 Enviado');
+check('parsea Enviado + nro', enviada.length === 1 && enviada[0].estado === 'Enviado' && enviada[0].nroTransaccion === '1197638458');
+check('nro desde listado por código', nroDesdeFilaListado(enviada, '245746') === '1197638458');
+check('url SETI', urlConstanciaSeti('1197638458').includes('nroTransaccion=1197638458'));
+const acuse = extraerDatosConstancia('Nro. verificador: 737484\nCódigo de Control: r7KG1I');
+check('constancia SETI', acuse.nroVerificador === '737484' && acuse.codigoControl === 'r7KG1I');
 
 const body = bodyResultado({
   loteId: 'lote_x',
@@ -84,8 +93,9 @@ check('bodyResultado incluye arcaCodigoNovedad', body.arcaCodigoNovedad === '245
 
 const selPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'arca-robot', 'selectores.json');
 const sel = JSON.parse(fs.readFileSync(selPath, 'utf8'));
-check('presentar marcado por confirmar', sel.presentarNovedad?.estado === 'por confirmar');
-check('nro listado marcado por confirmar', sel.nroTransaccionListado?.estado === 'por confirmar');
+check('Enviar confirmado', sel.principalEnviar?.name === '^Enviar$' || sel.presentarNovedad?.estado === 'confirmado');
+check('nro listado confirmado', sel.nroTransaccionListado?.estado === 'confirmado');
+check('constancia SETI en selectores', !!sel.constanciaSeti?.url);
 check('borrar prohibido', sel.listadoBorrar?.prohibido === true);
 check('anulación por confirmar', sel.anularRegistro?.estado === 'por confirmar');
 

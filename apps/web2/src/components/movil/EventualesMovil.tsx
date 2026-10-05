@@ -54,6 +54,9 @@ type EnvioArcaServidor = {
   estado?: string;
   fecha?: string;
   nroTransaccion?: string;
+  constanciaUrl?: string;
+  codigoControl?: string;
+  nroVerificador?: string;
   fechaInicioArca?: string;
   nroTransaccionAlta?: string;
   venceAnulacionMs?: number;
@@ -83,6 +86,9 @@ function envioAMovil(row: EnvioArcaServidor): ArcaMovil {
     estado: String(row.estado || ''),
     fecha: fmtFechaAr(String(row.fecha || '')),
     nroTransaccion: String(row.nroTransaccion || ''),
+    constanciaUrl: String(row.constanciaUrl || ''),
+    codigoControl: String(row.codigoControl || ''),
+    nroVerificador: String(row.nroVerificador || ''),
     cuil11: String(row.cuil || '').replace(/\D/g, ''),
     fechaInicioArca: String(row.fechaInicioArca || ''),
     nroTransaccionAlta: String(row.nroTransaccionAlta || ''),

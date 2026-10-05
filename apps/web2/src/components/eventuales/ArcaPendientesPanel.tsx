@@ -13,6 +13,9 @@ type Envio = {
   estado: string;
   fecha: string;
   nroTransaccion: string;
+  constanciaUrl?: string;
+  codigoControl?: string;
+  nroVerificador?: string;
   fechaInicioArca: string;
   nroTransaccionAlta: string;
   venceAnulacionMs: number;
@@ -53,6 +56,9 @@ export default function ArcaPendientesPanel(props: { empresaId: string; empresaN
         estado: String(row.estado || ''),
         fecha: String(row.fecha || ''),
         nroTransaccion: String(row.nroTransaccion || ''),
+        constanciaUrl: String((row as { constanciaUrl?: string }).constanciaUrl || ''),
+        codigoControl: String((row as { codigoControl?: string }).codigoControl || ''),
+        nroVerificador: String((row as { nroVerificador?: string }).nroVerificador || ''),
         fechaInicioArca: String(row.fechaInicioArca || ''),
         nroTransaccionAlta: String(row.nroTransaccionAlta || ''),
         venceAnulacionMs: Number(row.venceAnulacionMs) || 0,
@@ -135,6 +141,13 @@ export default function ArcaPendientesPanel(props: { empresaId: string; empresaN
               <div className="rounded-xl bg-white px-3 py-2"><dt className="text-[10px] font-bold uppercase text-slate-400">CUIL</dt><dd className="font-bold tabular-nums" data-anula-cuil="1">{envio.cuil || '—'}</dd></div>
               <div className="rounded-xl bg-white px-3 py-2"><dt className="text-[10px] font-bold uppercase text-slate-400">Fecha de inicio</dt><dd className="font-bold tabular-nums" data-anula-fecha="1">{envio.fechaInicioArca || '—'}</dd></div>
               <div className="col-span-2 rounded-xl bg-white px-3 py-2"><dt className="text-[10px] font-bold uppercase text-slate-400">Transacción del alta</dt><dd className="font-bold tabular-nums" data-anula-nro="1">{envio.nroTransaccionAlta || '—'}</dd></div>
+              {(envio.codigoControl || envio.nroVerificador || envio.constanciaUrl) && (
+                <div className="col-span-2 rounded-xl bg-white px-3 py-2 text-xs">
+                  {envio.nroVerificador ? <p>Nro. verificador: <span className="font-bold tabular-nums">{envio.nroVerificador}</span></p> : null}
+                  {envio.codigoControl ? <p>Código de control: <span className="font-bold">{envio.codigoControl}</span></p> : null}
+                  {envio.constanciaUrl ? <a className="font-bold text-indigo-600 underline" href={envio.constanciaUrl} target="_blank" rel="noreferrer">Ver constancia SETI</a> : null}
+                </div>
+              )}
             </dl>
             {envio.estado !== 'ANULADO' && <p data-anula-plazo={plazo?.vencido ? 'vencido' : 'abierto'} className={`text-sm font-bold ${plazo?.vencido ? 'text-rose-700' : 'text-slate-700'}`}>Plazo RG 2988 · {plazo?.texto}</p>}
             {envio.estado === 'MANUAL' && (

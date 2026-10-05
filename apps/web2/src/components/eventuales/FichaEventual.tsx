@@ -49,7 +49,7 @@ export type FichaEventualData = {
 export type MarcoVista = { estado?: string; vencimiento?: string; avisar?: boolean };
 export type DocumentoVista = { id: string; tipo?: string; nombre?: string; link?: string | null; drivePendiente?: boolean };
 type Contrato = { id: string; empresaId?: string; estado?: string; fechaAlta?: string; fechaBaja?: string; jornadas?: { fecha: string; horaInicio: string; horaFin: string; horas: number }[] };
-type Arca = { id: string; tipo?: string; estado?: string; fechaAlta?: string; nroTransaccion?: string; advertencias?: string[] };
+type Arca = { id: string; tipo?: string; estado?: string; fechaAlta?: string; nroTransaccion?: string; constanciaUrl?: string; codigoControl?: string; nroVerificador?: string; advertencias?: string[] };
 type Historial = { id: string; action?: string; details?: string; at?: string | null };
 
 type Props = {
@@ -534,7 +534,7 @@ export default function FichaEventual({ ficha, detalle, marcos, documentos, empr
             {arca.length === 0 && (ficha.arcaHistorial || []).length === 0 && <p className="text-xs text-slate-400">Sin altas ni bajas.</p>}
             {arca.map((a) => (
               <p key={a.id} className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
-                <span className="font-bold text-slate-800">{humanizar(a.tipo)}</span> · {humanizar(a.estado)} · {fmtFechaAr(a.fechaAlta) || '—'} {a.nroTransaccion ? `· Nº ${a.nroTransaccion}` : ''}
+                <span className="font-bold text-slate-800">{humanizar(a.tipo)}</span> · {humanizar(a.estado)} · {fmtFechaAr(a.fechaAlta) || '—'} {a.nroTransaccion ? `· Nº ${a.nroTransaccion}` : ''}{a.nroVerificador ? ` · Verif. ${a.nroVerificador}` : ''}{a.codigoControl ? ` · Ctrl ${a.codigoControl}` : ''}{a.constanciaUrl ? ' · constancia' : ''}
                 {(a.advertencias || []).includes('RETRIBUCION_PENDIENTE') && <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-black text-amber-800"><ShieldAlert size={11} /> Retribución pendiente: no se envía hasta aprobar la escala</span>}
               </p>
             ))}

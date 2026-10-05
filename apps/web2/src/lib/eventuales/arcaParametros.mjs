@@ -1,5 +1,6 @@
 import {
   ACTIVIDAD_DOMICILIO_DEFAULT,
+  DOMICILIO_DESEMPENO_DEFAULT,
   CCT_CODIGO_VIGILADOR,
   PUESTO_VIGILADOR,
   TIPO_SERVICIO_DEFAULT,
@@ -83,10 +84,10 @@ export const CAMPOS_ARCA = Object.freeze([
   {
     id: 'sucursal',
     etiqueta: 'Domicilio de desempeño',
-    ayuda: '5 dígitos. Posiciones 74-78. Código del domicilio de explotación en ARCA (en Bacar Transportadora: 00000).',
+    ayuda: '5 dígitos. Posiciones 74-78. Código del domicilio de explotación en ARCA (en Bacar Transportadora: 00001).',
     tipo: 'digitos',
     len: 5,
-    defecto: '00000',
+    defecto: DOMICILIO_DESEMPENO_DEFAULT,
   },
   {
     id: 'actividad',
@@ -95,6 +96,7 @@ export const CAMPOS_ARCA = Object.freeze([
     tipo: 'digitos',
     len: 6,
     defecto: ACTIVIDAD_DOMICILIO_DEFAULT,
+  DOMICILIO_DESEMPENO_DEFAULT,
   },
   {
     id: 'tipoServicio',

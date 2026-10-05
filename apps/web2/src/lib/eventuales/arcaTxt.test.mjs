@@ -10,6 +10,25 @@ const cuil = '20111111112';
 const cuilInvalido = '20999999991';
 
 describe('TXT ARCA posiciones fijas', () => {
+
+  it('coincide con la línea exacta validada por ARCA el 05/10 (novedad 245745)', () => {
+    /** Línea de la prueba 3: solo falló CUIL inválido a propósito. */
+    const LINEA_ARCA_245745 =
+      '01AT20123456780N0122026/10/062026/10/06122807            0000000001000005000017492105169  0422/05   033104500                     ';
+    assert.equal(LINEA_ARCA_245745.length, LARGO_REGISTRO_ARCA);
+    const cuilOk = '20111111112';
+    const esperada = LINEA_ARCA_245745.slice(0, 4) + cuilOk + LINEA_ARCA_245745.slice(15);
+    const out = lineasCargaMasiva({
+      contrato: { fechaAlta: '2026-10-06', fechaBaja: '2026-10-06' },
+      cuil: cuilOk,
+      bruto: 1000,
+      obraSocial: '122807',
+      empresa: { id: 'bacarsa' },
+    });
+    assert.equal(out.lineas[0], esperada);
+    assert.equal(out.lineas[0].slice(73, 78), '00001');
+    assert.equal(out.lineas[0].slice(106, 109), '500');
+  });
   it('arma AT y BT de 130 con los códigos validados por ARCA el 05/10', () => {
     const out = lineasCargaMasiva({
       contrato,
@@ -42,7 +61,7 @@ describe('TXT ARCA posiciones fijas', () => {
     assert.equal(alta.slice(47, 57), '          ');
     assert.equal(alta.slice(57, 72), '000000000800000');
     assert.equal(alta.slice(72, 73), '5');
-    assert.equal(alta.slice(73, 78), '00000');
+    assert.equal(alta.slice(73, 78), '00001');
     assert.equal(alta.slice(78, 84), '749210');
     assert.equal(alta.slice(84, 88), '5169');
     assert.equal(alta.slice(88, 90), '  ');
@@ -126,6 +145,7 @@ describe('TXT ARCA posiciones fijas', () => {
     assert.equal(out.lineas[0].slice(78, 84), '749210');
     assert.equal(out.lineas[0].slice(84, 88), '5169');
     assert.equal(out.lineas[0].slice(106, 109), '500');
+    assert.equal(out.lineas[0].slice(73, 78), '00001');
     assert.equal(out.advertencias.includes('CCT_CODIGO_PENDIENTE'), false);
     assert.equal(out.advertencias.includes('PUESTO_A_VERIFICAR'), true);
     assert.equal(out.enviable, true);

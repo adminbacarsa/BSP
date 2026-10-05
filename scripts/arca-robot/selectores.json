@@ -1,5 +1,5 @@
 {
-  "_nota": "Selectores del recorrido real de Carga Masiva (capturas Mauro 05/10, PNGs 205-212). Anulación sin capturas: queda explorar. Presentar / Nro. Transacción: por confirmar.",
+  "_nota": "Selectores del recorrido real de Carga Masiva (capturas Mauro 05/10, PNGs 205-212 y 220-223). Anulación sin capturas: queda explorar.",
   "_capturas": {
     "205": "IndexContribuyente.aspx — select CUIT empleador + Aceptar",
     "206": "portalcf — tarjeta Simplificación Registral - Empleadores",
@@ -8,7 +8,11 @@
     "209": "CargaMasiva.aspx LISTADO DE NOVEDADES (Abierto → lápiz/borrar, sin Nuevo)",
     "210": "INGRESO DE ARCHIVO — file + Cargar + Volver",
     "211": "CargaMasiva_principal ARCHIVO A CARGAR — ícono Cargar Archivo",
-    "212": "mismo principal Código/Estado Abierto"
+    "212": "mismo principal Código/Estado Abierto",
+    "220": "CargaMasiva_upload — Informado SI · Estado Válido · Archivo cargado correctamente",
+    "221": "principal tras Volver — Estado Válido + botón Enviar",
+    "222": "Listado — Estado Enviado + Nro. Transacción (link)",
+    "223": "SETI acuse Presentación DJ — nroVerificador + codigoControl"
   },
   "portalServicioSimplificacion": {
     "role": "link",
@@ -45,7 +49,14 @@
   },
   "listadoNovedades": {
     "texto": "LISTADO DE NOVEDADES",
-    "columnas": ["Código", "Fecha Creación", "Fecha Presentación", "Nro. Transacción", "Estado", "Acción"],
+    "columnas": [
+      "Código",
+      "Fecha Creación",
+      "Fecha Presentación",
+      "Nro. Transacción",
+      "Estado",
+      "Acción"
+    ],
     "captura": "209"
   },
   "listadoNuevo": {
@@ -80,7 +91,8 @@
   "ingresoArchivo": {
     "texto": "INGRESO DE ARCHIVO",
     "file": "input[type=file]",
-    "captura": "210"
+    "url": "CargaMasiva_upload.aspx?reg=01",
+    "captura": "210/220"
   },
   "ingresoCargar": {
     "role": "button",
@@ -90,18 +102,20 @@
   "ingresoVolver": {
     "role": "button",
     "name": "^Volver$",
-    "captura": "210"
+    "captura": "220"
   },
   "presentarNovedad": {
     "role": "button",
-    "name": "Presentar|Enviar|Cerrar",
-    "estado": "por confirmar",
-    "nota": "Falta captura: botón para presentar/cerrar la novedad abierta"
+    "name": "^Enviar$",
+    "estado": "confirmado",
+    "nota": "Botón Enviar en principal (no Presentar). Captura 221.",
+    "captura": "221"
   },
   "nroTransaccionListado": {
     "columna": "Nro. Transacción",
-    "estado": "por confirmar",
-    "nota": "Tras presentar, leer por Código guardado en el lote (listado paso 5)"
+    "estado": "confirmado",
+    "nota": "Tras Enviar, fila Estado Enviado; el Nro. es un link al acuse SETI (222)",
+    "captura": "222"
   },
   "simplificacionRegistral": {
     "role": "link",
@@ -118,10 +132,61 @@
     "estado": "por confirmar",
     "nota": "Anulación: sin capturas — solo --modo explorar"
   },
-  "cuil": { "label": "CUIL", "estado": "por confirmar" },
-  "fechaInicio": { "label": "Fecha", "estado": "por confirmar" },
-  "nroTransaccion": { "label": "Transacci", "estado": "por confirmar" },
-  "buscar": { "role": "button", "name": "Buscar", "estado": "por confirmar" },
-  "anular": { "role": "button", "name": "Anular", "estado": "por confirmar" },
-  "confirmar": { "role": "button", "name": "Confirmar|Aceptar", "estado": "por confirmar" }
+  "cuil": {
+    "label": "CUIL",
+    "estado": "por confirmar"
+  },
+  "fechaInicio": {
+    "label": "Fecha",
+    "estado": "por confirmar"
+  },
+  "nroTransaccion": {
+    "label": "Transacci",
+    "estado": "por confirmar"
+  },
+  "buscar": {
+    "role": "button",
+    "name": "Buscar",
+    "estado": "por confirmar"
+  },
+  "anular": {
+    "role": "button",
+    "name": "Anular",
+    "estado": "por confirmar"
+  },
+  "confirmar": {
+    "role": "button",
+    "name": "Confirmar|Aceptar",
+    "estado": "por confirmar"
+  },
+  "cargaOk": {
+    "informado": "SI",
+    "estado": "Válido",
+    "mensaje": "Archivo cargado correctamente",
+    "captura": "220"
+  },
+  "cargaError": {
+    "estado": "Inválido",
+    "lineas": "Línea N: …",
+    "captura": "por confirmar (errores)"
+  },
+  "principalEnviar": {
+    "role": "button",
+    "name": "^Enviar$",
+    "nota": "Aparece en principal tras Cargar válido + Volver (221)",
+    "captura": "221"
+  },
+  "listadoEstadoEnviado": {
+    "texto": "Enviado",
+    "captura": "222"
+  },
+  "constanciaSeti": {
+    "url": "https://seti.afip.gob.ar/setiweb/#/presentacion/ticket?nroTransaccion={nro}",
+    "campos": [
+      "Nro. verificador",
+      "Código de Control",
+      "MD5"
+    ],
+    "captura": "223"
+  }
 }

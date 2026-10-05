@@ -34,7 +34,7 @@ Registro de posiciones fijas (una línea por movimiento):
 | Número formulario agropecuario | 120 | 129 | NUM | 10 | en AT: blanco |
 | Marca trabajo licenciado COVID / tipo contrato CCG | 130 | 130 | ALFA | 1 | **blanco** (no `0`) |
 
-## Validado contra ARCA (05/10/2026)
+## Validado por ARCA el 05/10/2026
 
 Prueba real: Bacar Transportadora de Caudales S.A. CUIT **30-66813497-8**, novedad **245743**, una línea AT de `lineasCargaMasiva` con CUIL inválido a propósito. Las posiciones del formato estaban bien (cada campo cayó en su columna). Errores del validador y corrección:
 
@@ -46,9 +46,17 @@ Prueba real: Bacar Transportadora de Caudales S.A. CUIT **30-66813497-8**, noved
 | Convenio Colectivo inexistente | Código real: **`0422/05`** (SEGURIDAD, SUVICO Córdoba). Alineado a la izquierda en 10 posiciones: `0422/05   `. |
 | Marca de trabajador agropecuario: S ó N | Posición 16 = `N` (configurable). |
 | Puesto desempeñado inexistente | `5414` no existe. Default propuesto **`5169`** (alternativa `9152`). Queda `PUESTO_A_VERIFICAR` hasta confirmación del contador. |
-| En un ALTA debe informar Remuneración Pactada y Domicilio de Desempeño | Sucursal **00000** + actividad del domicilio **749210** (no 801000). Retribución: 15 dígitos con 2 decimales implícitos (`000000000100000` → 1000,00). |
+| En un ALTA debe informar Remuneración Pactada y Domicilio de Desempeño | Sucursal / domicilio **00001** + actividad del domicilio **749210** (no 801000). Retribución: 15 dígitos con 2 decimales implícitos (`000000000100000` → 1000,00). |
 
-Valores finales que ARCA aceptó (solo quedó el error del CUIL inválido): modalidad **012**, CCT **`0422/05`**, puesto **5169**, sucursal **00000**, actividad **749210**, agropecuario **N**, categoría **033104**, RNOS **122807**, modalidad liquidación **5**, tipo de servicio **500**; en AT revista, rectificación y covid en blanco. BT: misma regla (revista **30**, rectificación en blanco, agropecuario N, covid en blanco).
+Valores finales que ARCA aceptó (solo quedó el error del CUIL inválido): modalidad **012**, CCT **`0422/05`**, puesto **5169**, sucursal / domicilio de desempeño **00001** (no 00000), actividad **749210**, agropecuario **N**, categoría **033104**, RNOS **122807**, modalidad liquidación **5**, tipo de servicio **500**; en AT revista, rectificación y covid en blanco. BT: misma regla (revista **30**, rectificación en blanco, agropecuario N, covid en blanco).
+
+
+### Prueba 3 — novedad 245745 (confirmado)
+
+Con esta línea el único error fue la CUIL inválida (a propósito). Todo lo demás validó:
+`01AT` · agropecuario `N` · modalidad `012` · fechas · RNOS `122807` · revista vacía · retribución `1000` (centavos implícitos) · liquidación `5` · domicilio **`00001`** · actividad `749210` · puesto `5169` · rectificación vacía · CCT `0422/05` · categoría `033104` · tipo servicio **`500`** · covid vacío.
+
+Primera alta real controlada (novedad **245746**, CUIL 20244722432, 2026/10/12): presentada 5/10/2026 16:03:45, Nro. Transacción **1197638458**, Estado **Enviado**. Acuse SETI: Formulario 935 v420, impuesto 351, período 2026-10.
 
 ## Tablas informativas (descargadas 29/09/2026)
 
@@ -59,5 +67,5 @@ Datos clave para eventuales:
 - Modalidad de contrato **012 = Trabajo eventual** (código 12 de la tabla, 3 posiciones). 102 = Empleado Servicio Eventual en Usuaria (Dto 762) solo si contrata una Empresa de Servicios Eventuales. El 14 que dijo el contador es Nuevo período de prueba: no se usa.
 - Movimientos: AT = alta (revista en blanco), BT = baja (revista **30**, vencimiento art. 250). Si el alta ya se subió y la persona no trabajó, no se manda un movimiento NA: va por el módulo de **Anulación de Incorporaciones** (RG 2988/2010 art. 9), sin código de motivo, dentro del plazo de `plazoAnulacionAlta`. Vencida esa ventana, la baja es BT con fecha de baja = el día de inicio previsto, motivo «desistimiento / sin efectivización de tareas» y revista `situacionRevistaDesistimiento` (default 30, por empresa). MR es modificación, no este caso.
 - Modalidad de liquidación: **5 = HORA**. Tipo de servicio: **500 = Servicios comunes discontinuos**.
-- Actividad en el domicilio de desempeño **749210** (transporte de caudales / objetos de valor en el domicilio 00000 de Bacar Transportadora). Sucursal / domicilio de explotación = **00000**. Puesto default **5169** (verificar). Categoría profesional Vigilador = **033104**. CCT = **`0422/05`**. Defaults de `empresas/{id}.arcaEventuales` en bacarsa, grupos_bacar_sa y pruebas_sa; se editan por empresa. Obra social: RNOS de cada vigilador; si no tiene, SUVICO **122807**.
+- Actividad en el domicilio de desempeño **749210** (transporte de caudales / objetos de valor en el domicilio **00001** de Bacar Transportadora). Sucursal / domicilio de explotación = **00001**. Puesto default **5169** (verificar). Categoría profesional Vigilador = **033104**. CCT = **`0422/05`**. Tipo de servicio **500**. Defaults de `empresas/{id}.arcaEventuales` en bacarsa, grupos_bacar_sa y pruebas_sa; se editan por empresa. Obra social: RNOS de cada vigilador; si no tiene, SUVICO **122807**.
 - Esos defaults viven en `empresas/{id}.arcaEventuales`. El generador es `lineasCargaMasiva`. Retribución pactada: 15 dígitos, centavos implícitos (bruto × 100). Una línea mide 130. Si faltan CCT, categoría, obra social, puesto, domicilio o actividad, o el CUIL no cierra, la línea se arma igual y `enviable` queda en false.

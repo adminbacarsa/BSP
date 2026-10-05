@@ -105,7 +105,7 @@ Los horarios 18:00 (AT, canal LOTE) y 09:00 (BT, canal LOTE) ya estan en el JSON
 4. Si falla, reintenta (`ARCA_ROBOT_REINTENTOS`, default 3), guarda una captura en `ARCA_SHOTS_DIR` y marca el lote `ERROR` con el detalle. Esos envios vuelven a entrar en el próximo lote.
 5. Un `SUBIENDO` de más de 20 minutos (el archivo murio) también vuelve al lote.
 
-Selectores reales (capturas 05/10) en `scripts/arca-robot/selectores.json`. Presentar / Nro. Transacción y anulación: **por confirmar** (`--modo explorar` / `--modo explorar-carga`). Con archivo: `node scripts/arca-robot/subir.mjs --modo explorar --archivo TXT --lote …` llega hasta después de Cargar y no presenta. Anulación: `node scripts/arca-robot/subir.mjs --modo explorar --envio ID --empresa EMPRESA`.
+Selectores reales (capturas 05/10) en `scripts/arca-robot/selectores.json`. Tras Cargar válido: **Volver → Enviar**; Nro. desde listado (Estado Enviado); constancia SETI (`codigoControl`, `nroVerificador`). Anulación: **por confirmar** (`--modo explorar` / `--modo explorar-carga`). Con archivo: `node scripts/arca-robot/subir.mjs --modo explorar --archivo TXT --lote …` llega hasta después de Cargar y no presenta. Anulación: `node scripts/arca-robot/subir.mjs --modo explorar --envio ID --empresa EMPRESA`.
 
 ## Anulación automática
 

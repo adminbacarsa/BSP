@@ -43,6 +43,9 @@ export type ArcaMovil = {
   estado: string;
   fecha: string;
   nroTransaccion: string;
+  constanciaUrl?: string;
+  codigoControl?: string;
+  nroVerificador?: string;
   /** Anulación: CUIL de 11 dígitos, fecha AAAAMMDD y transacción del alta. */
   cuil11?: string;
   fechaInicioArca?: string;
@@ -398,7 +401,7 @@ export function EventualesScreens(props: {
                       </div>
                       <p className="mt-1 text-[12px] font-medium tabular-nums text-slate-500">
                         <span className="font-semibold text-slate-900">{arcaTipoTexto(envio.tipo)} {envio.tipo}</span>
-                        {envio.tipo === 'ANULACION' && envio.acuseAnulacion ? ` · Anulada (acuse ${envio.acuseAnulacion})` : envio.nroTransaccion ? ` · Transacción ${envio.nroTransaccion}` : ''}
+                        {envio.tipo === 'ANULACION' && envio.acuseAnulacion ? ` · Anulada (acuse ${envio.acuseAnulacion})` : envio.nroTransaccion ? ` · Transacción ${envio.nroTransaccion}` : ''}{envio.codigoControl ? ` · Ctrl ${envio.codigoControl}` : ''}{envio.nroVerificador ? ` · Verif. ${envio.nroVerificador}` : ''}
                       </p>
                     </li>
                   ))}

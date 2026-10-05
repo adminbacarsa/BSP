@@ -14,7 +14,7 @@ const COMPLETO = {
   situacionRevistaDesistimiento: '30',
   situacionRevistaBaja: '30',
   puesto: '5169',
-  sucursal: '00000',
+  sucursal: '00001',
   actividad: '749210',
   tipoServicio: '500',
   agropecuario: 'N',
@@ -105,7 +105,7 @@ describe('parámetros ARCA de la empresa', () => {
     assert.equal(valores.actividad, '749210');
     assert.equal(valores.tipoServicio, '500');
     assert.equal(valores.agropecuario, 'N');
-    assert.equal(valores.sucursal, '00000');
+    assert.equal(valores.sucursal, '00001');
     assert.equal(valores.nocturnoPct, '');
   });
 

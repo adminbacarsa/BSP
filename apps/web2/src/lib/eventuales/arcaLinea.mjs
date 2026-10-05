@@ -5,12 +5,14 @@ import { normalizeCuil } from './cuil.mjs';
  * Formato puro del registro de carga masiva ARCA (130 caracteres). Sin dependencias de Node:
  * lo importan el front (vista previa en Parámetros), `arcaTxt.mjs` y el servidor.
  * Fuente: docs/arca/CARGA-MASIVA-FORMATO.md. Validado contra ARCA el 05/10/2026
- * (novedad 245743, Bacar Transportadora).
+ * (novedades 245743/245745, Bacar Transportadora).
  */
 export const CCT_CODIGO_VIGILADOR = '0422/05';
 export const PUESTO_VIGILADOR = '5169';
 export const ACTIVIDAD_DOMICILIO_DEFAULT = '749210';
 export const TIPO_SERVICIO_DEFAULT = '500';
+/** Domicilio de explotación Bacar Transportadora (74-78). Validado ARCA 05/10 novedad 245745. */
+export const DOMICILIO_DESEMPENO_DEFAULT = '00001';
 
 export const ARCA_EVENTUALES_DEFAULT = {
   tipoRegistro: '01',
@@ -23,8 +25,8 @@ export const ARCA_EVENTUALES_DEFAULT = {
   situacionRevistaAlta: '',
   situacionRevistaBaja: '30',
   modalidadLiquidacion: '5',
-  /** Domicilio de explotación (posiciones 74-78). En Bacar Transportadora: 00000. */
-  sucursal: '00000',
+  /** Domicilio de explotación (posiciones 74-78). Bacar Transportadora: 00001 (validado ARCA 05/10). */
+  sucursal: DOMICILIO_DESEMPENO_DEFAULT,
   /** Actividad del domicilio de desempeño (79-84). Tiene que coincidir con la del domicilio en ARCA. */
   actividad: ACTIVIDAD_DOMICILIO_DEFAULT,
   puesto: PUESTO_VIGILADOR,
@@ -74,6 +76,9 @@ export function arcaEventualesDe(empresa) {
   cfg.tipoServicio = 'tipoServicio' in guardada
     ? String(guardada.tipoServicio ?? '')
     : (delGrupo ? TIPO_SERVICIO_DEFAULT : String(cfg.tipoServicio || ''));
+  cfg.sucursal = 'sucursal' in guardada
+    ? String(guardada.sucursal ?? '')
+    : (delGrupo ? DOMICILIO_DESEMPENO_DEFAULT : String(cfg.sucursal || ''));
   return cfg;
 }
 

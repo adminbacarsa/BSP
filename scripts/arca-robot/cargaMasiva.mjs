@@ -1,5 +1,5 @@
 /**
- * Reglas puras del recorrido de Carga Masiva (capturas 05/10).
+ * Reglas puras del recorrido de Carga Masiva (capturas 05/10: 205-212, 220-223).
  * No abre ARCA ni toca credenciales.
  */
 
@@ -29,15 +29,15 @@ export function mensajeNovedadAjena(codigo) {
 }
 
 /**
- * Parsea filas del LISTADO DE NOVEDADES desde texto de página / tabla.
- * Columnas: Código, Fecha Creación, Fecha Presentación, Nro. Transacción, Estado.
+ * LISTADO DE NOVEDADES. Estado Enviado tras presentar (captura 222).
+ * Fecha presentación puede ser `5/10/2026 16:03:45`.
  * @param {string} texto
  * @returns {FilaNovedad[]}
  */
 export function parseFilasListado(texto) {
   const src = String(texto || '');
   const filas = [];
-  const re = /(\d{4,})\s+(\d{2}\/\d{2}\/\d{4})(?:\s+(\d{2}\/\d{2}\/\d{4}))?(?:\s+(\d{4,}))?\s+(Abierto|Presentado|Cerrado|Anulado|Confirmado)/gi;
+  const re = /(\d{4,})\s+(\d{1,2}\/\d{1,2}\/\d{4})(?:\s+(\d{1,2}\/\d{1,2}\/\d{4}(?:\s+\d{1,2}:\d{2}:\d{2})?))?(?:\s+(\d{6,}))?\s+(Abierto|Presentado|Cerrado|Anulado|Confirmado|Enviado)/gi;
   let m = re.exec(src);
   while (m) {
     filas.push({
@@ -52,29 +52,50 @@ export function parseFilasListado(texto) {
   return filas;
 }
 
-/** Código en CargaMasiva_principal: "Código: 245548". */
+/** Código en CargaMasiva_principal: "Código: 245746". */
 export function extraerCodigoPrincipal(texto) {
   const m = String(texto || '').match(/C[oó]digo\s*:\s*(\d{4,})/i);
   return m ? m[1] : '';
 }
 
 /**
- * Tabla Informado / Estado / Registros tras Cargar.
- * @returns {{ informado: string, estado: string, registros: number }}
+ * Tras Cargar (upload): Informado SI · Estado Válido | Inválido · Registros N.
+ * @returns {{ informado: string, estado: string, registros: number, ok: boolean, mensaje: string }}
  */
 export function leerEstadoCarga(texto) {
   const src = String(texto || '');
-  const informado = (src.match(/Informado\s*[:\s]\s*(S[IÍ]|NO|SI)/i) || [])[1]
-    || (src.match(/\b(NO|S[IÍ])\s+(Pendiente|Procesado|Error|OK)/i) || [])[1]
+  const informadoRaw = (src.match(/Informado\s*[:\s]?\s*(S[IÍ]|NO|SI)/i) || [])[1]
+    || (src.match(/\b(SI|S[IÍ]|NO)\s+(V[aá]lido|Inv[aá]lido|Pendiente)/i) || [])[1]
     || '';
-  const estado = (src.match(/\b(Pendiente|Procesado|Error|OK|Con\s+errores)\b/i) || [])[1] || '';
-  const regM = src.match(/Registros?\s*[:\s]\s*(\d+)/i) || src.match(/\b(\d+)\s*(?=\s*(?:Cargar|Volver|$))/i);
-  const registros = regM ? Number(regM[1]) : NaN;
+  const estadoRaw = (src.match(/\b(V[aá]lido|Inv[aá]lido|Pendiente|Procesado|Error|OK|Con\s+errores)\b/i) || [])[1] || '';
+  const regM = src.match(/Registros?\s*[:\s]?\s*(\d+)/i);
+  const registros = regM ? Number(regM[1]) : -1;
+  const informado = String(informadoRaw || '').toUpperCase().replace('Í', 'I');
+  const estado = String(estadoRaw || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  const mensajeOk = /Archivo cargado correctamente/i.test(src);
+  const ok = informado === 'SI' && /^Valido$/i.test(estado) && mensajeOk;
   return {
-    informado: String(informado || '').toUpperCase().replace('Í', 'I'),
-    estado: String(estado || ''),
+    informado,
+    estado: estadoRaw || estado,
     registros: Number.isFinite(registros) ? registros : -1,
+    ok,
+    mensaje: mensajeOk ? 'Archivo cargado correctamente' : '',
   };
+}
+
+/** Líneas de error del recuadro: "Línea N: …". */
+export function extraerErroresLinea(texto) {
+  const src = String(texto || '');
+  const found = [];
+  const re = /L[ií]nea\s+\d+\s*:[^\n\r]+/gi;
+  let m = re.exec(src);
+  while (m) {
+    found.push(m[0].trim());
+    m = re.exec(src);
+  }
+  return found;
 }
 
 /** Líneas no vacías del TXT (cada alta/baja = 1 registro). */
@@ -85,19 +106,39 @@ export function contarLineasTxt(contenido) {
     .filter(Boolean).length;
 }
 
-export function validarRegistrosVsTxt({ registros, lineasTxt }) {
-  const r = Number(registros);
+export function validarCargaOk({ estadoCarga, lineasTxt }) {
+  if (!estadoCarga || !estadoCarga.ok) {
+    const errs = [];
+    if (estadoCarga?.informado && estadoCarga.informado !== 'SI') errs.push(`INFORMADO_${estadoCarga.informado}`);
+    if (estadoCarga?.estado && !/^v[aá]lido$/i.test(estadoCarga.estado)) errs.push(`ESTADO_${estadoCarga.estado}`);
+    return { ok: false, error: errs.join('|') || 'CARGA_INVALIDA' };
+  }
+  const r = Number(estadoCarga.registros);
   const n = Number(lineasTxt);
   if (!Number.isFinite(r) || r < 0) return { ok: false, error: 'SIN_REGISTROS_ARCA' };
   if (r !== n) return { ok: false, error: `REGISTROS_DISTINTOS:${r}!=${n}` };
   return { ok: true };
 }
 
-/** Tras presentar: nro de la fila del código guardado. */
+/** Tras Enviar: nro de la fila del código guardado (Estado Enviado). */
 export function nroDesdeFilaListado(filas, codigo) {
   const c = String(codigo || '').trim();
   const fila = (filas || []).find((f) => String(f.codigo) === c);
   return fila && fila.nroTransaccion ? String(fila.nroTransaccion) : '';
+}
+
+export function urlConstanciaSeti(nroTransaccion) {
+  const nro = String(nroTransaccion || '').replace(/\D/g, '');
+  if (!nro) return '';
+  return `https://seti.afip.gob.ar/setiweb/#/presentacion/ticket?nroTransaccion=${nro}`;
+}
+
+/** Acuse SETI (captura 223): Nro. verificador + Código de Control. */
+export function extraerDatosConstancia(texto) {
+  const src = String(texto || '');
+  const nroVerificador = (src.match(/Nro\.?\s*verificador\s*[:\s]+(\d+)/i) || [])[1] || '';
+  const codigoControl = (src.match(/C[oó]digo de Control\s*[:\s]+([A-Za-z0-9]+)/i) || [])[1] || '';
+  return { nroVerificador, codigoControl };
 }
 
 export const URLS_CARGA = {
@@ -110,4 +151,6 @@ export const URLS_CARGA = {
     'https://serviciossegsoc.afip.gob.ar/tramites_con_clave_fiscal/MiSimplificacion/app/Contribuyente/RelacionLaboral/CargaMasiva.aspx?reg=01',
   cargaMasivaPrincipal:
     'https://serviciossegsoc.afip.gob.ar/tramites_con_clave_fiscal/MiSimplificacion/app/Contribuyente/RelacionLaboral/CargaMasiva_principal.aspx?reg=01',
+  cargaMasivaUpload:
+    'https://serviciossegsoc.afip.gob.ar/tramites_con_clave_fiscal/MiSimplificacion/app/Contribuyente/RelacionLaboral/CargaMasiva_upload.aspx?reg=01',
 };
