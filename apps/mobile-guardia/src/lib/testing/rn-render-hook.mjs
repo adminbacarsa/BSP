@@ -16,6 +16,8 @@ const ts = require('typescript');
 const STUBS = {
   'react-native': pathToFileURL(path.join(here, 'reactNativeStub.mjs')).href,
   '@react-native-async-storage/async-storage': pathToFileURL(path.join(here, 'asyncStorageStub.mjs')).href,
+  '@cosp/portal-core': pathToFileURL(path.join(here, 'portalCoreStub.mjs')).href,
+  '@expo/vector-icons': pathToFileURL(path.join(here, 'ioniconsStub.mjs')).href,
 };
 
 export async function resolve(specifier, context, nextResolve) {

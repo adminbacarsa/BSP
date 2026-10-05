@@ -3,19 +3,15 @@ import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, Text, Vi
 import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
-  coberturaAceptadaLine,
   empresaLabelDeTurno,
-  formatEnCaminoLine,
   getCheckInTiming,
   isExtendedDutyShift,
   isRecordatorioPendiente,
   isShiftPresent,
   mapsSearchUrl,
   timestampLikeToMillis,
-  toDate,
   resolveCheckInUiStatus,
   resolveEvShiftDisplay,
-  resolveExpectedArrivalAt,
 } from '@cosp/portal-core';
 import type { ConvocadoEtaMinutes } from '@cosp/portal-core';
 import { isEmulatorMode } from '../../src/lib/portal';
@@ -48,12 +44,10 @@ import { RetencionAvisoCard } from '../../src/components/RetencionAvisoCard';
 import { isRetencionAviso } from '../../src/lib/avisosCc';
 import { ConvocadoRecordatorioBanner } from '../../src/components/ConvocadoRecordatorioBanner';
 import { RetentionBanner } from '../../src/components/RetentionBanner';
-import { EvShiftDetails } from '../../src/components/EvShiftDetails';
 import { PreviewModeBanner } from '../../src/components/PreviewModeBanner';
 import { EnableWebPushButton } from '../../src/components/EnableWebPushButton';
 import { PendingAaCertificatesCard } from '../../src/components/PendingAaCertificatesCard';
 import {
-  formatHeroShiftHeadline,
   formatHeroTimeRange,
   HeroShiftPanel,
 } from '../../src/components/ui/HeroShiftPanel';
@@ -110,7 +104,7 @@ function HoyScreenContent() {
   const { objectivesMap } = useObjectivesMap();
   const { pendingCount, pendingShiftIds, busyShiftId, requestCheckInForShift, closeReviewShift, notifyLateArrival, lateEtaByShiftId } =
     useCheckIn();
-  const { empresaNombre } = useEmpresaBranding(employee?.empresaId);
+  const { empresaNombre, empresaColor } = useEmpresaBranding(employee?.empresaId);
   const appVersion = Constants.expoConfig?.version ?? '—';
   const headerTitle = useMemo(() => {
     if (isEventual) return `COSP · Eventual · v${appVersion}`;
@@ -337,8 +331,6 @@ function HoyScreenContent() {
   const heroEmpresaLabel = isEventual
     ? empresaLabelDeTurno((todayAbsentShift || mainShift || {}) as { empresaId?: string }, eventualLegajos, empresasNombres)
     : null;
-  const heroSectionLabel = heroEmpresaLabel ? `${heroSectionBase} · ${heroEmpresaLabel}` : heroSectionBase;
-
   const rawStatus = mainShift?.status || (mainShift?.isPresent ? 'PRESENT' : 'ASSIGNED');
   const isConfirmed =
     !!mainShift && (mainShift.isPresent || rawStatus === 'PRESENT' || rawStatus === 'InProgress');
@@ -367,33 +359,6 @@ function HoyScreenContent() {
   );
   const convocadoHero = !!timing?.convocado && !isConfirmed && !todayAbsentShift;
   const convocadoProximo = convocadoHero && timing?.convocadoPhase === 'proximo';
-  const acceptedForHero = mainShift
-    ? aceptadas.find((c) => c.shiftId === mainShift.id)
-    : undefined;
-  const enCaminoEta = convocadoHero
-    ? resolveExpectedArrivalAt({
-        expectedArrivalAt: mainShift?.expectedArrivalAt ?? acceptedForHero?.expectedArrivalAt,
-        etaMinutes: mainShift?.etaMinutes ?? acceptedForHero?.etaMinutes ?? null,
-        anchorMs:
-          timestampLikeToMillis(acceptedForHero?.acceptedAt) ||
-          timestampLikeToMillis(acceptedForHero?.respondedAt) ||
-          now.getTime(),
-        nowMs: now.getTime(),
-      }) ?? toDate(mainShift?.startTime)
-    : null;
-  const enCaminoLine = convocadoHero && !convocadoProximo
-    ? formatEnCaminoLine(placement.objective, enCaminoEta && !Number.isNaN(enCaminoEta.getTime()) ? enCaminoEta : null)
-    : null;
-  const coberturaLine = convocadoProximo && mainShift && toDate(mainShift.startTime)
-    ? coberturaAceptadaLine({
-        gapStart: toDate(mainShift.startTime) as Date,
-        gapEnd: toDate(mainShift.endTime),
-        now,
-        objectiveName: placement.objective,
-        positionName: placement.position,
-      })
-    : null;
-  const mapsUrl = mapsSearchUrl(objective?.lat, objective?.lng, objective?.address);
   const canCheckIn =
     portalFeatures.checkIn &&
     !!mainShift &&
@@ -466,19 +431,14 @@ function HoyScreenContent() {
     ]);
   }
 
-  const heroSub =
-    todayAbsentShift
-      ? 'Hoy estuviste ausente. Recordá presentar el certificado a RRHH — tenés tiempo hasta las 24:00 de hoy.'
-      : isRetentionHero
-        ? `Estás retenido en ${placement.objective} · esperá al relevo`
-        : mainShift?.isFranco
-          ? 'Día de descanso programado'
-          : mainShift
-            ? formatHeroTimeRange(mainShift)
-            : 'No hay turnos en el mes actual';
-
   const mainShiftEv =
-    mainShift && !mainShift.isFranco ? resolveEvShiftDisplay(mainShift, eventosMap) : null;
+    (todayAbsentShift || mainShift) && !(todayAbsentShift || mainShift)?.isFranco
+      ? resolveEvShiftDisplay((todayAbsentShift || mainShift) as NonNullable<typeof mainShift>, eventosMap)
+      : null;
+  const heroMapsUrl =
+    mainShiftEv?.mapsUrl ||
+    mapsSearchUrl(objective?.lat, objective?.lng, objective?.address) ||
+    null;
 
   return (
     <>
@@ -635,29 +595,30 @@ function HoyScreenContent() {
             </CommandCard>
           ) : (
             <HeroShiftPanel
-              headline={
-                todayAbsentShift
-                  ? 'HOY'
-                  : coberturaLine || enCaminoLine || formatHeroShiftHeadline(mainShift, { isToday: isHeroToday, now })
-              }
-              subline={
-                todayAbsentShift
-                  ? `${formatHeroTimeRange(todayAbsentShift)}\nHoy estuviste ausente. Recordá presentar el certificado a RRHH — tenés hasta las 24:00 de hoy.`
-                  : heroSub
-              }
               shift={todayAbsentShift || mainShift}
               placement={placement}
-              empresaNombre={empresaNombre || 'Tu empresa'}
+              isToday={!!todayAbsentShift || isHeroToday}
+              timeRange={
+                todayAbsentShift
+                  ? formatHeroTimeRange(todayAbsentShift)
+                  : mainShift && !mainShift.isFranco
+                    ? formatHeroTimeRange(mainShift)
+                    : null
+              }
+              ev={todayAbsentShift ? null : mainShiftEv}
+              mapsUrl={heroMapsUrl}
+              isRetention={isRetentionHero && !todayAbsentShift}
+              isConvocado={convocadoHero && !convocadoProximo && !todayAbsentShift}
+              empresaLabel={heroEmpresaLabel}
+              accentColor={empresaColor}
               sectionLabel={
-                convocadoProximo
-                  ? heroEmpresaLabel
-                    ? `Próximo turno · ${heroEmpresaLabel}`
-                    : 'Próximo turno'
-                  : convocadoHero
-                    ? heroEmpresaLabel
-                      ? `EN CAMINO · ${heroEmpresaLabel}`
-                      : 'EN CAMINO'
-                    : heroSectionLabel
+                todayAbsentShift
+                  ? 'Ausente'
+                  : convocadoProximo
+                    ? 'Próximo turno'
+                    : convocadoHero
+                      ? 'En camino'
+                      : heroSectionBase
               }
               statusSlot={
                 todayAbsentShift ? (
@@ -667,7 +628,6 @@ function HoyScreenContent() {
                 ) : (
                   <>
                     <CheckInStatusBanner view={checkInStatusView} onHero />
-                    {mainShiftEv ? <EvShiftDetails ev={mainShiftEv} compact /> : null}
                     {pendingCount > 0 && !pendingShiftIds.includes(mainShift?.id ?? '') ? (
                       <Text style={styles.pendingLine}>
                         {pendingCount} fichada(s) pendientes de sincronizar (otros turnos)
@@ -679,17 +639,17 @@ function HoyScreenContent() {
               footer={
                 todayAbsentShift ? null : (
                   <View style={styles.heroActions}>
-                    {convocadoHero && !convocadoProximo && mapsUrl ? (
+                    {heroMapsUrl ? (
                       <CommandButton
                         label="Cómo llegar"
-                        variant="onHero"
-                        onPress={() => void Linking.openURL(mapsUrl)}
+                        variant="secondary"
+                        onPress={() => void Linking.openURL(heroMapsUrl)}
                       />
                     ) : null}
                     {portalFeatures.checkIn && canCheckIn ? (
                       <CommandButton
                         label={checkInStatusView.actionLabel || 'Presente'}
-                        variant={checkInStatusView.actionLabel ? 'onHero' : 'success'}
+                        variant="success"
                         loading={busyShiftId === mainShift?.id}
                         onPress={onCheckIn}
                       />
@@ -697,7 +657,7 @@ function HoyScreenContent() {
                     {canCloseReview ? (
                       <CommandButton
                         label="Cerrar turno"
-                        variant="onHero"
+                        variant="secondary"
                         loading={busyShiftId === mainShift?.id}
                         onPress={onCloseReview}
                       />
@@ -705,7 +665,7 @@ function HoyScreenContent() {
                     {portalFeatures.checkIn && canLate ? (
                       <CommandButton
                         label="Voy a llegar tarde"
-                        variant="onHero"
+                        variant="secondary"
                         loading={busyShiftId === mainShift?.id}
                         onPress={onLate}
                       />
