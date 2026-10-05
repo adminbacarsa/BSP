@@ -2,6 +2,8 @@
 # Las toma de las variables de MÁQUINA que dejó instalar.ps1 (la clave del robot no se escribe acá).
 # Uso (PowerShell como administrador): powershell -ExecutionPolicy Bypass -File D:\APP\cronoapp\scripts\arca-robot\servicio-n8n-env.ps1
 $ErrorActionPreference = 'Stop'
+$admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $admin) { Write-Host 'Abrí PowerShell con clic derecho -> Ejecutar como administrador y volvé a correrlo.' -ForegroundColor Red; Read-Host 'Enter para cerrar'; exit 1 }
 $nssm = 'D:\APP\nssm\win64\nssm.exe'
 if (-not (Test-Path $nssm)) { throw "No encuentro $nssm" }
 
@@ -11,7 +13,7 @@ $claves = @(
 )
 
 # Lo que el servicio ya tenía (N8N_HOST, N8N_PROTOCOL, etc.) se conserva.
-$actual = & $nssm get n8n AppEnvironmentExtra 2>$null
+$actual = cmd /c "`"$nssm`" get n8n AppEnvironmentExtra 2>nul"
 $mapa = [ordered]@{}
 foreach ($linea in ($actual -split "`r?`n")) {
   $l = ($linea -replace "`0", '').Trim()
