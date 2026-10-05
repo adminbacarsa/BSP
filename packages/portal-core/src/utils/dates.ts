@@ -43,6 +43,7 @@ export function formatDateTimeAr(val: FirestoreTimestampLike): string {
   const time = d.toLocaleTimeString('es-AR', {
     hour: '2-digit',
     minute: '2-digit',
+    hourCycle: 'h23',
     timeZone: 'America/Argentina/Buenos_Aires',
   });
   return `${date} ${time}`;

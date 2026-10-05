@@ -22,6 +22,23 @@ import { usePortalAuth } from '../context/PortalAuthContext';
 
 export type PortalInboxItem = PortalInboxNormalized;
 
+/** Doc de `convocatorias_cobertura` visto desde la bandeja: estado + lugar/horario para la tarjeta. */
+export type InboxConvocatoriaVista = AlertaConvocatoriaVista & {
+  id?: string;
+  shiftId?: string;
+  objectiveId?: string;
+  objectiveName?: string;
+  positionName?: string;
+  clientName?: string;
+  shiftCode?: string;
+  startTime?: unknown;
+  candidateEmployeeName?: string;
+};
+
+function optStr(v: unknown): string | undefined {
+  return typeof v === 'string' && v.trim() ? v : undefined;
+}
+
 function mergeInboxBuckets(buckets: Record<string, PortalInboxItem[]>): PortalInboxItem[] {
   const merged = Object.values(buckets).flat();
   const unique = Array.from(new Map(merged.map((n) => [n.id, n])).values());
@@ -64,10 +81,10 @@ export function usePortalInbox(user: User | null, previewEmpDocId?: string | nul
   const previewLegajosKey =
     isPreviewMode && isEventual ? eventualLegajos.map((l) => l.employeeId).join('|') : '';
   const [items, setItems] = useState<PortalInboxItem[]>([]);
-  const [coberturaById, setCoberturaById] = useState<Record<string, AlertaConvocatoriaVista>>({});
+  const [coberturaById, setCoberturaById] = useState<Record<string, InboxConvocatoriaVista>>({});
   const [loading, setLoading] = useState(true);
   const bucketsRef = useRef<Record<string, PortalInboxItem[]>>({});
-  const convBucketsRef = useRef<Record<string, Array<AlertaConvocatoriaVista & { id: string }>>>({});
+  const convBucketsRef = useRef<Record<string, Array<InboxConvocatoriaVista & { id: string }>>>({});
   const fallbackRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -119,7 +136,7 @@ export function usePortalInbox(user: User | null, previewEmpDocId?: string | nul
     };
 
     const publishConv = () => {
-      const map: Record<string, AlertaConvocatoriaVista> = {};
+      const map: Record<string, InboxConvocatoriaVista> = {};
       for (const list of Object.values(convBucketsRef.current)) {
         for (const row of list) map[row.id] = row;
       }
@@ -143,6 +160,14 @@ export function usePortalInbox(user: User | null, previewEmpDocId?: string | nul
               cancelledAt: data.cancelledAt,
               candidateEmployeeId:
                 typeof data.candidateEmployeeId === 'string' ? data.candidateEmployeeId : undefined,
+              shiftId: optStr(data.shiftId),
+              objectiveId: optStr(data.objectiveId),
+              objectiveName: optStr(data.objectiveName),
+              positionName: optStr(data.positionName),
+              clientName: optStr(data.clientName),
+              shiftCode: optStr(data.shiftCode),
+              startTime: data.startTime,
+              candidateEmployeeName: optStr(data.candidateEmployeeName),
             };
           });
           publishConv();

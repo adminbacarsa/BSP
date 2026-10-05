@@ -32,7 +32,7 @@ function buildHorario(shift: Record<string, unknown>, startMs: number): string {
   const etMs = (shift.endTime as { toMillis?: () => number })?.toMillis?.() ?? 0;
   const et = etMs ? new Date(etMs) : null;
   const fmtT = (d: Date) =>
-    d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' });
+    d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'America/Argentina/Cordoba' });
   return et ? `${fmtT(st)} - ${fmtT(et)}` : fmtT(st);
 }
 
