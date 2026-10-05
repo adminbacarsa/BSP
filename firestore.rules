@@ -622,6 +622,13 @@ service cloud.firestore {
       allow update, delete: if tenantAdminDelete();
     }
 
+    match /tope_autorizaciones/{id} {
+      allow read: if tenantAdminRead();
+      allow create: if tenantAdminCreate();
+      allow update: if tenantAdminUpdate();
+      allow delete: if false;
+    }
+
     match /device_activations/{tokenId} {
       // Solo Functions (server-side) escribe; el empleado puede leer el suyo para debug
       allow read: if isSuperAdmin() || isAdmin();
