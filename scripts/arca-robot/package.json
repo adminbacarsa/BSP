@@ -1,0 +1,8 @@
+{
+  "name": "cosp-arca-robot",
+  "private": true,
+  "description": "Robot local ARCA (Playwright). Lo instala INSTALAR-ROBOT-ARCA.cmd en la PC del n8n.",
+  "dependencies": {
+    "playwright": "^1.49.1"
+  }
+}

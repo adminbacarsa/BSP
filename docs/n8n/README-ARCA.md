@@ -12,6 +12,34 @@ Los JSON viejos `arca-local-playwright.json` y `arca-cloud-link-mágico.json` qu
 
 COSP llama al webhook cuando un AT o BT pasa a canal URGENTE (`onArcaEnvioUrgente`). Cloud Functions no llega a `192.168.0.8`: la URL tiene que ser el alias público.
 
+## Instalar en la PC del n8n
+
+En la PC del n8n (`D:\APP\cronoapp`, `https://autbacar.dnsalias.com`, puerto 5678) hay una sola acción: clic derecho en `INSTALAR-ROBOT-ARCA.cmd` (raíz del repo) y **Ejecutar como administrador**. Llama a `scripts/arca-robot/instalar.ps1`. Se puede correr dos veces.
+
+Detecta cómo arranca n8n (servicio Windows nssm o WinSW, PM2, tarea programada, `n8n start` o Docker Desktop) y lo dice. Si hay más de un modo, o no puede saberlo, no cambia el arranque ni otras variables.
+
+Cuando el modo es uno solo, deja en ese arranque únicamente:
+
+```text
+ARCA_ENVIOS_URL=https://us-central1-comtroldata.cloudfunctions.net/arcaEnviosApi
+ARCA_TXT_DIR=D:\arca-txt
+ARCA_SHOTS_DIR=D:\arca-txt\shots
+COSP_REPO=D:\APP\cronoapp
+ARCA_CLAVES_PATH=D:\secretos\arca-claves.json
+ARCA_SIMULACION=1
+ARCA_ROBOT_REINTENTOS=3
+NODES_EXCLUDE=[]
+N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+```
+
+`ARCA_ROBOT_KEY` se pide por pantalla (oculta) y queda en el entorno de esa PC o servicio. No se escribe en el repo. Si ya estaba, no la vuelve a pedir.
+
+Crea `D:\arca-txt`, `D:\arca-txt\shots` y `D:\secretos` (SYSTEM, Administradores y la cuenta de n8n). Si falta, copia `arca-claves.example.json` a `arca-claves.json` y abre el Bloc de notas: ahí se completan el CUIT y la clave fiscal. No la pide por pantalla.
+
+En `D:\APP\cronoapp\scripts\arca-robot` instala Playwright y Chromium. Reinicia n8n según el modo y prueba `GET /healthz`. El log es `D:\arca-txt\instalar.log`.
+
+No setea `N8N_ROBOT_WEBHOOK`. Si falta, dejala en el mismo arranque: `https://127.0.0.1:5678/webhook/cosp-arca-robot`.
+
 ## 1. Variables (ninguna va al repo)
 
 En el **proceso** del n8n local (no en el JSON):
