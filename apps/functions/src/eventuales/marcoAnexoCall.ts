@@ -88,6 +88,13 @@ export async function brutoDelAnexo(
     ]);
     if (escalasSnap.empty) return vacio;
     const feriados = fechasFeriadosNacionales(feriadosSnap.docs.map((d) => d.data()));
+    let nocturnoPct: number | null = null;
+    const empresaId = String(contrato.empresaId || '');
+    if (empresaId) {
+      const empresa = await db().collection('empresas').doc(empresaId).get();
+      const n = empresa.data()?.arcaEventuales?.nocturnoPct;
+      if (typeof n === 'number' && Number.isFinite(n)) nocturnoPct = n;
+    }
     const r = calcularRemuneracionContrato({
       jornadas: Array.isArray(jornadas) ? jornadas : [],
       categoria: String(contrato.categoria || 'VIGILADOR_GENERAL'),
@@ -95,6 +102,7 @@ export async function brutoDelAnexo(
       feriados,
       incluirCierre: false,
       hoy,
+      nocturnoPct,
     });
     if (!r.ok || !(Number(r.bruto) > 0)) return vacio;
     return {

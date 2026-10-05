@@ -74,6 +74,10 @@ export interface ArcaEventualesConfig {
   categoria?: string;
   categoriaProfesional: string;
   obraSocialDefault?: string;
+  /** Revista del BT si no se presentó. Default 30. */
+  situacionRevistaDesistimiento?: string;
+  /** % de nocturnidad del anexo cuando la escala aprobada no lo trae. */
+  nocturnoPct?: number | null;
 }
 
 export interface ContratoEventual {

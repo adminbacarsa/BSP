@@ -182,6 +182,14 @@ function valorHoraDe(escala) {
   return { valorHora: escala.basicoMensual / divisor, divisor };
 }
 
+/** Si la escala no trae nocturnidad, el % de la empresa (`arcaEventuales.nocturnoPct`) completa el recargo. */
+function escalaConNocturnoEmpresa(escala, nocturnoPct) {
+  if (escala?.recargos?.nocturnoPct != null) return escala;
+  const n = Number(nocturnoPct);
+  if (!Number.isFinite(n)) return escala;
+  return { ...escala, recargos: { ...(escala.recargos || {}), nocturnoPct: n } };
+}
+
 export function calcularJornada(jornada, escala, feriados) {
   const { valorHora, divisor } = valorHoraDe(escala);
   const ordinaria = Number(escala.jornadaOrdinariaHoras) > 0 ? Number(escala.jornadaOrdinariaHoras) : JORNADA_ORDINARIA_HORAS;
@@ -315,7 +323,7 @@ export function calcularRemuneracionContrato(input) {
       return { ok: false, codigo: 'SIN_ESCALA', fecha: jornada.fecha, categoria: input.categoria };
     }
     if (!escalasUsadas.some((e) => escalaDocId(e) === escalaDocId(escala))) escalasUsadas.push(escala);
-    const item = calcularJornada(jornada, escala, input.feriados);
+    const item = calcularJornada(jornada, escalaConNocturnoEmpresa(escala, input.nocturnoPct), input.feriados);
     if (item.avisoNocturnoSinPorcentaje) advertencias.push({ codigo: 'RECARGO_NOCTURNO_SIN_PORCENTAJE', fecha: jornada.fecha });
     detalle.push(item);
     remunerativo += item.monto;

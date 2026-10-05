@@ -75,6 +75,7 @@ export const gestionarEventual = functions.https.onCall(async (data, context) =>
     asignarEmpresas: 'update', importarContacto: 'update', habilitarEmpresa: 'update',
     arcaPendientes: 'read', arcaConfirmar: 'update', arcaAcuseAnulacion: 'update', switchesPruebas: 'update',
     horasMes: 'read', guardarTopeEmpresa: 'update', guardarTopeExcepcion: 'update',
+    leerArcaEventuales: 'read', guardarArcaEventuales: 'update',
   };
   const permiso = mapa[accion];
   if (!permiso) throw new functions.https.HttpsError('invalid-argument', 'Acción desconocida.');
@@ -375,6 +376,49 @@ export const gestionarEventual = functions.https.onCall(async (data, context) =>
       margen: reglas.normalizarMargen(empresaSnap.data()?.eventualesTopeMargen, reglas.TOPE_MARGEN_DEFAULT, topeEmpresa),
       filas,
     };
+  }
+
+  if (accion === 'leerArcaEventuales' || accion === 'guardarArcaEventuales') {
+    const {
+      validarParametrosArca, valoresArcaDe, vistaPreviaArca, mensajeErroresArca, AVISO_CCT_PENDIENTE,
+    } = await import('../eventuales-shared/arcaParametros.mjs') as {
+      validarParametrosArca: (input: unknown) => { ok: boolean; errores: { id: string; mensaje: string }[]; doc: Record<string, unknown> | null };
+      valoresArcaDe: (empresa: unknown) => Record<string, string>;
+      vistaPreviaArca: (doc: Record<string, unknown>) => { linea: string; enviable: boolean; advertencias: string[]; avisoCct: string };
+      mensajeErroresArca: (errores: { mensaje: string }[]) => string;
+      AVISO_CCT_PENDIENTE: string;
+    };
+    const empresaId = String(data?.empresaId || '');
+    if (!empresaId) throw new functions.https.HttpsError('invalid-argument', 'Falta la empresa.');
+    const empresaRef = db().collection('empresas').doc(empresaId);
+    const empresaSnap = await empresaRef.get();
+    if (!empresaSnap.exists) throw new functions.https.HttpsError('not-found', 'No está la empresa.');
+    const empresa = { id: empresaId, ...(empresaSnap.data() || {}) };
+
+    if (accion === 'guardarArcaEventuales') {
+      const plan = validarParametrosArca(data?.valores);
+      if (!plan.ok || !plan.doc) throw new functions.https.HttpsError('invalid-argument', mensajeErroresArca(plan.errores));
+      const previo = (empresaSnap.data()?.arcaEventuales || {}) as Record<string, unknown>;
+      const next = { ...previo, ...plan.doc };
+      await empresaRef.set({
+        arcaEventuales: next,
+        arcaEventualesAt: admin.firestore.FieldValue.serverTimestamp(),
+        arcaEventualesPor: auth.uid,
+      }, { merge: true });
+      const previa = vistaPreviaArca(plan.doc);
+      await db().collection('audit_logs').add({
+        action: 'EVENTUAL_ARCA_PARAMETROS', module: 'EVENTUALES', actorUid: auth.uid, actorName: auth.uid,
+        empresaId, bolsaCuil: null,
+        details: `ARCA ${empresaId}: CCT ${plan.doc.cctCodigo || '(vacío)'} · categoría ${plan.doc.categoria} · modalidad ${plan.doc.modalidadContrato} · RNOS ${plan.doc.obraSocialDefault} · revista desistimiento ${plan.doc.situacionRevistaDesistimiento} · motivo baja ${plan.doc.situacionRevistaBaja} · puesto ${plan.doc.puesto} · sucursal ${plan.doc.sucursal} · CIIU ${plan.doc.actividad} · nocturnidad ${plan.doc.nocturnoPct == null ? 'la de la escala' : `${plan.doc.nocturnoPct}%`}.${previa.enviable ? '' : ' TXT no enviable.'}`,
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      return { ok: true, valores: valoresArcaDe({ ...empresa, arcaEventuales: next }), ...previa, avisoCct: previa.avisoCct || '' };
+    }
+
+    const valores = valoresArcaDe(empresa);
+    const plan = validarParametrosArca(valores);
+    const previa = plan.ok && plan.doc ? vistaPreviaArca(plan.doc) : { linea: '', enviable: false, advertencias: ['CCT_CODIGO_PENDIENTE'], avisoCct: AVISO_CCT_PENDIENTE };
+    return { ok: true, valores, ...previa };
   }
 
   if (accion === 'habilitarEmpresa') {

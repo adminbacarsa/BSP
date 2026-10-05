@@ -28,6 +28,9 @@ import { GRUPO_EVENTUALES_ID } from '@/lib/eventuales/grupo.mjs';
 import {
   checklistFicha, estadoFila, FILTROS_SECUNDARIOS, pasosGuia, resumenBolsa, TARJETAS_RESUMEN, TEXTO_TODA_LA_BOLSA,
 } from '@/lib/eventuales/listoUx.mjs';
+import {
+  AVISO_CCT_PENDIENTE, CAMPOS_ARCA, mensajeErroresArca, validarParametrosArca, vistaPreviaArca,
+} from '@/lib/eventuales/arcaParametros.mjs';
 
 type Ficha = FichaEventualData;
 
@@ -117,6 +120,7 @@ export default function EventualesPage() {
   const [guardandoTope, setGuardandoTope] = useState(false);
   const [topeDraft, setTopeDraft] = useState('50');
   const [periodoDraft, setPeriodoDraft] = useState('CALENDARIO');
+  const [arcaDraft, setArcaDraft] = useState<Record<string, string> | null>(null);
   const [arcaPendientes, setArcaPendientes] = useState<number | null>(null);
   const [reporteNomina, setReporteNomina] = useState<{
     dryRun: boolean;
@@ -141,8 +145,29 @@ export default function EventualesPage() {
     return () => { vivo = false; };
   }, [empresaActivaId, horasTick]);
 
+  useEffect(() => {
+    if (!parametrosAbierto || !empresaActivaId) return;
+    let vivo = true;
+    setArcaDraft(null);
+    void httpsCallable(functions, 'gestionarEventual')({ accion: 'leerArcaEventuales', empresaId: empresaActivaId })
+      .then((res) => {
+        if (!vivo) return;
+        const data = res.data as { valores?: Record<string, string> };
+        setArcaDraft(data.valores || {});
+      })
+      .catch(() => { if (vivo) setArcaDraft({}); });
+    return () => { vivo = false; };
+  }, [parametrosAbierto, empresaActivaId]);
+
+  const arcaPlan = useMemo(() => (arcaDraft ? validarParametrosArca(arcaDraft) : null), [arcaDraft]);
+  const arcaPrevia = useMemo(() => (arcaPlan?.ok && arcaPlan.doc ? vistaPreviaArca(arcaPlan.doc) : null), [arcaPlan]);
+
   const guardarTopeEmpresa = async () => {
     if (!empresaActivaId) return;
+    if (!arcaPlan?.ok) {
+      toast.error(arcaDraft ? mensajeErroresArca(arcaPlan?.errores || []) : 'Todavía se están cargando los códigos de ARCA.');
+      return;
+    }
     setGuardandoTope(true);
     try {
       await httpsCallable(functions, 'gestionarEventual')({
@@ -152,11 +177,16 @@ export default function EventualesPage() {
         periodo: periodoDraft,
         margen: Number(String(margenDraft).replace(',', '.')),
       });
-      toast.success('Tope de horas guardado.');
+      await httpsCallable(functions, 'gestionarEventual')({
+        accion: 'guardarArcaEventuales',
+        empresaId: empresaActivaId,
+        valores: arcaDraft,
+      });
+      toast.success('Parámetros guardados.');
       setParametrosAbierto(false);
       setHorasTick((n) => n + 1);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'No se pudo guardar el tope.');
+      toast.error(err instanceof Error ? err.message : 'No se pudo guardar.');
     } finally {
       setGuardandoTope(false);
     }
@@ -622,9 +652,10 @@ export default function EventualesPage() {
 
         {parametrosAbierto && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" data-parametros-modal>
-            <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-lg">
+            <div className="max-h-[90vh] w-full max-w-2xl overflow-auto rounded-2xl bg-white p-5 shadow-lg">
               <h2 className="flex items-center gap-2 text-lg font-black text-slate-800"><SlidersHorizontal size={18} /> Parámetros de eventuales</h2>
               <p className="mt-1 text-xs text-slate-500">Vale para {nombreEmpresaActiva}. Una excepción por persona se carga en su ficha.</p>
+              <h3 className="mt-4 text-[11px] font-black uppercase tracking-wider text-slate-400">Tope de horas</h3>
               <label className="mt-4 block text-[10px] font-black uppercase tracking-wider text-slate-500">Tope de horas por mes por eventual
                 <input value={topeDraft} onChange={(e) => setTopeDraft(e.target.value)} inputMode="decimal" className="mt-1 block w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold normal-case text-slate-800" />
               </label>
@@ -645,9 +676,50 @@ export default function EventualesPage() {
                   Ciclo de liquidación (26 → 25)
                 </label>
               </fieldset>
+
+              <section className="mt-5 border-t border-slate-100 pt-4" data-parametros-arca>
+                <h3 className="text-[11px] font-black uppercase tracking-wider text-slate-400">ARCA</h3>
+                <p className="mt-1 text-xs text-slate-500">Códigos de la carga masiva de {nombreEmpresaActiva}. Se guardan en la empresa; el TXT sale con estos valores.</p>
+                {!arcaDraft && <p className="mt-3 text-xs text-slate-400">Cargando códigos…</p>}
+                {arcaDraft && (
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    {CAMPOS_ARCA.map((campo) => (
+                      <label key={campo.id} className="block text-[10px] font-black uppercase tracking-wider text-slate-500">
+                        {campo.etiqueta}
+                        <input
+                          data-arca-campo={campo.id}
+                          value={arcaDraft[campo.id] ?? ''}
+                          onChange={(e) => setArcaDraft({ ...arcaDraft, [campo.id]: e.target.value })}
+                          inputMode={campo.tipo === 'alfa' ? 'text' : 'decimal'}
+                          maxLength={campo.tipo === 'pct' ? 6 : (campo.max || campo.len)}
+                          placeholder={campo.defecto || ''}
+                          className="mt-1 block w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold normal-case tracking-normal text-slate-800"
+                        />
+                        <span className="mt-1 block text-[11px] font-medium normal-case tracking-normal text-slate-500">{campo.ayuda}</span>
+                        {campo.id === 'cctCodigo' && !(arcaDraft.cctCodigo || '').trim() && (
+                          <span data-arca-aviso-cct className="mt-1 block text-[11px] font-bold normal-case tracking-normal text-amber-800">{AVISO_CCT_PENDIENTE}</span>
+                        )}
+                      </label>
+                    ))}
+                  </div>
+                )}
+                {arcaPlan && !arcaPlan.ok && (
+                  <p className="mt-3 text-xs font-bold text-rose-700">{mensajeErroresArca(arcaPlan.errores)}</p>
+                )}
+                {arcaPrevia && (
+                  <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Vista previa · línea de alta</p>
+                    <pre data-arca-preview className="mt-1 overflow-x-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed text-slate-800">{arcaPrevia.linea}</pre>
+                    <p className={`mt-1 text-[11px] font-bold ${arcaPrevia.enviable ? 'text-emerald-700' : 'text-amber-800'}`} data-arca-enviable={arcaPrevia.enviable ? 'si' : 'no'}>
+                      {arcaPrevia.enviable ? 'Con estos códigos el TXT se puede enviar.' : `El TXT queda no enviable${arcaPrevia.avisoCct ? ` · ${arcaPrevia.avisoCct}` : ''}.`}
+                    </p>
+                  </div>
+                )}
+              </section>
+
               <div className="mt-4 flex justify-end gap-2">
                 <button type="button" onClick={() => setParametrosAbierto(false)} className="rounded-xl px-3 py-2 text-sm text-slate-500">Cancelar</button>
-                <button type="button" disabled={guardandoTope} onClick={() => void guardarTopeEmpresa()} className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{guardandoTope ? 'Guardando…' : 'Guardar'}</button>
+                <button type="button" disabled={guardandoTope || !arcaDraft} onClick={() => void guardarTopeEmpresa()} className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{guardandoTope ? 'Guardando…' : 'Guardar'}</button>
               </div>
             </div>
           </div>
