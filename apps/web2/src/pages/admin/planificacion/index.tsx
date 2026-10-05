@@ -250,6 +250,22 @@ import {
     VACANCY_BAND_SCHEDULE,
     type VacancyDayCoverage,
 } from '@/lib/planificacion/vacancyCoverage';
+import {
+    clearDayCoverage,
+    coveragesDiffer,
+    daysOverwritten,
+    draftCoverage,
+    draftIsPartial,
+    emptyDays,
+    evaluateCoverageDayGuards,
+    mergeCoverages,
+    nextMarkedDay,
+    previousMarkedDay,
+    savedCoverage,
+    templateDayForRemaining,
+    type ProposedGuardShift,
+} from '@/lib/planificacion/vacancyCoverageWizard';
+import { VacancyCoberturaAcciones, VacancyCoberturaLista } from '@/components/planificacion/VacancyCoberturaDia';
 import { alignVacancyGapBand } from '@/lib/planificacion/vacancySplitBands';
 import {
     listVacancyGapBandOptions,
@@ -1591,7 +1607,8 @@ function PlanificacionDesktop() {
     const [eventualSustituirBusy, setEventualSustituirBusy] = useState(false);
     const [vacancySplitExtId, setVacancySplitExtId] = useState('');
     const [vacancySplitAdelId, setVacancySplitAdelId] = useState('');
-    const [vacancyApplyToAllSelected, setVacancyApplyToAllSelected] = useState(true);
+    /** Último día al que se le guardó cobertura: plantilla de «completar los que faltan». */
+    const [vacancyTemplateDay, setVacancyTemplateDay] = useState<string | null>(null);
     const [vacancyFrancoAuthApproved, setVacancyFrancoAuthApproved] = useState(false);
     const [vacancyGapBandOverride, setVacancyGapBandOverride] = useState<string | null>(null);
     const [vacancySplitExtExtraHours, setVacancySplitExtExtraHours] = useState<number | null>(null);
@@ -1602,6 +1619,7 @@ function PlanificacionDesktop() {
         if (!vacancyData?.startDate) {
             setVacancyActiveDates(new Set());
             setVacancyDayCoverages({});
+            setVacancyTemplateDay(null);
             return;
         }
         const all = listDateRangeInclusive(vacancyData.startDate, vacancyData.endDate || vacancyData.startDate);
@@ -1609,11 +1627,11 @@ function PlanificacionDesktop() {
         const initialDates = focus && all.includes(focus) ? [focus] : all;
         setVacancyActiveDates(new Set(initialDates.length ? initialDates : all));
         setVacancyDayCoverages({});
+        setVacancyTemplateDay(null);
         const activeCount = (initialDates.length ? initialDates : all).length;
-        setVacancyApplyToAllSelected(activeCount > 1);
         if (activeCount > 1) {
             setVacancyEditingDay(null);
-            setVacancyReplacementOpen(true);
+            setVacancyReplacementOpen(false);
         } else {
             const onlyDay = initialDates[0] || all[0] || null;
             setVacancyEditingDay(onlyDay);
@@ -7088,7 +7106,7 @@ function PlanificacionDesktop() {
         setVacancyPickerTab('substitute');
         setVacancySplitExtId('');
         setVacancySplitAdelId('');
-        setVacancyApplyToAllSelected(true);
+        setVacancyTemplateDay(null);
     };
 
     const handleProcessVacancy = () => {
@@ -7114,7 +7132,7 @@ function PlanificacionDesktop() {
         const employeesById: Record<string, any> = {};
         employees.forEach((e: any) => { if (e.id) employeesById[e.id] = e; });
         const days = activeDays.map((dateStr) => {
-            const resolved = resolveVacancyDayCoverage(dateStr, vacancyDayCoverages, selectedReplacement);
+            const resolved = resolveVacancyDayCoverage(dateStr, vacancyDayCoverages, '');
             if (resolved.mode === 'substitute') {
                 const emp = employees.find((e: any) => e.id === resolved.employeeId);
                 // Misma resolución que el modal («Cubrir: M») para que el FT herede esa banda
@@ -14778,7 +14796,7 @@ function PlanificacionDesktop() {
                         });
                     };
                     const resolveDayCoverageForUi = (dateStr: string) =>
-                        resolveVacancyDayCoverage(dateStr, vacancyDayCoverages, selectedReplacement);
+                        resolveVacancyDayCoverage(dateStr, vacancyDayCoverages, '');
                     const resolveDayCoverageLabel = (dateStr: string) =>
                         formatVacancyDayCoverageLabel(resolveDayCoverageForUi(dateStr), vacancyEmployeesById);
                     const willAssignAny = [...vacancyActiveDates].some((d) => vacancyDayHasCoverage(resolveDayCoverageForUi(d)));
@@ -14808,32 +14826,38 @@ function PlanificacionDesktop() {
                         (positionName, code) => slaBlocksForPositionShift(effectivePosStructure, positionName, code),
                         { absenceBlockStart: vacancyData?.startDate },
                     );
-                    const openDayCoveragePicker = (d: string) => {
-                        const existing = vacancyDayCoverages[d] ?? resolveVacancyDayCoverage(d, {}, selectedReplacement);
-                        const configuredCount = sortedActiveDates.filter((date) =>
-                            vacancyDayHasCoverage(vacancyDayCoverages[date] ?? { mode: 'none' }),
-                        ).length;
-                        if (sortedActiveDates.length > 1 && configuredCount === 0) {
-                            setVacancyEditingDay(null);
-                            setVacancyApplyToAllSelected(true);
-                        } else {
-                            setVacancyEditingDay(d);
-                            setVacancyApplyToAllSelected(sortedActiveDates.length > 1);
-                        }
-                        setVacancyReplacementOpen(true);
-                        if (existing.mode === 'split') {
+                    const loadPickerFields = (cov: VacancyDayCoverage | undefined) => {
+                        if (cov?.mode === 'split') {
                             setVacancyPickerTab('split');
-                            setVacancySplitExtId(existing.extEmpId);
-                            setVacancySplitAdelId(existing.adelEmpId);
-                            setVacancySplitExtExtraHours(existing.extExtraHours ?? null);
-                            setVacancySplitSecondExtraHours(existing.secondExtExtraHours ?? null);
-                        } else {
+                            setVacancySplitExtId(cov.extEmpId);
+                            setVacancySplitAdelId(cov.adelEmpId);
+                            setVacancySplitExtExtraHours(cov.extExtraHours ?? null);
+                            setVacancySplitSecondExtraHours(cov.secondExtExtraHours ?? null);
+                            setSelectedReplacement('');
+                            setVacancyGapBandOverride(cov.gapBand && cov.gapPosition ? `${cov.gapBand}__${cov.gapPosition}` : null);
+                        } else if (cov?.mode === 'substitute' && cov.employeeId) {
                             setVacancyPickerTab('substitute');
+                            setSelectedReplacement(cov.employeeId);
                             setVacancySplitExtId('');
                             setVacancySplitAdelId('');
                             setVacancySplitExtExtraHours(null);
                             setVacancySplitSecondExtraHours(null);
+                            setVacancyGapBandOverride(null);
+                        } else {
+                            setVacancyPickerTab('substitute');
+                            setSelectedReplacement('');
+                            setVacancySplitExtId('');
+                            setVacancySplitAdelId('');
+                            setVacancySplitExtExtraHours(null);
+                            setVacancySplitSecondExtraHours(null);
+                            setVacancyGapBandOverride(null);
                         }
+                    };
+                    const openDayCoveragePicker = (d: string) => {
+                        setVacancyEditingDay(d);
+                        setVacancyReplacementOpen(true);
+                        setVacancyReplacementSearch('');
+                        loadPickerFields(vacancyDayCoverages[d]);
                     };
                     const vacancyPosSla = effectivePosStructure as import('@/lib/planificacion/vacancySplitBands').VacancyPositionSla[];
                     const vacancyGapPreferredPosition =
@@ -14879,47 +14903,8 @@ function PlanificacionDesktop() {
                         resolveEffectiveTitularForDay(dateStr)
                         || (refDate ? resolveEffectiveTitularForDay(refDate) : null)
                         || (sortedActiveDates[0] ? resolveEffectiveTitularForDay(sortedActiveDates[0]) : null);
-                    const shouldApplyCoverageToAllDays = () =>
-                        isBulkCoverageMode
-                        || (vacancyApplyToAllSelected && sortedActiveDates.length > 1);
-                    const splitApplyButtonLabel = shouldApplyCoverageToAllDays()
-                        ? `Aplicar ext + adel a ${sortedActiveDates.length} días`
-                        : 'Aplicar ext + adel este día';
-                    const replicateCoverageToEmptyDays = () => {
-                        const templateDay = sortedActiveDates.find((d) =>
-                            vacancyDayHasCoverage(vacancyDayCoverages[d] ?? { mode: 'none' }),
-                        );
-                        if (!templateDay) return;
-                        const template = vacancyDayCoverages[templateDay]
-                            ?? resolveVacancyDayCoverage(templateDay, {}, selectedReplacement);
-                        if (!vacancyDayHasCoverage(template)) return;
-                        const patch: Record<string, VacancyDayCoverage> = {};
-                        for (const d of sortedActiveDates) {
-                            if (vacancyDayHasCoverage(vacancyDayCoverages[d] ?? { mode: 'none' })) continue;
-                            if (template.mode === 'substitute') {
-                                patch[d] = { mode: 'substitute', employeeId: template.employeeId };
-                            } else if (template.mode === 'split') {
-                                const tit = resolveTitularForCoverageDay(d, templateDay);
-                                if (!tit) continue;
-                                patch[d] = {
-                                    mode: 'split',
-                                    extEmpId: template.extEmpId,
-                                    adelEmpId: template.adelEmpId,
-                                    gapBand: tit.code,
-                                    gapPosition: tit.positionName,
-                                    extExtraHours: template.extExtraHours,
-                                    secondExtExtraHours: template.secondExtExtraHours,
-                                };
-                            }
-                        }
-                        const filled = Object.keys(patch).length;
-                        if (filled === 0) {
-                            toast.error('No quedan días vacíos para completar o falta inferir el turno del titular.');
-                            return;
-                        }
-                        setVacancyDayCoverages((prev) => ({ ...prev, ...patch }));
-                        toast.success(`Cobertura replicada en ${filled} día(s) restante(s).`);
-                    };
+                    // La cobertura de un día no se replica sola. El botón explícito arma el lote.
+                    const shouldApplyCoverageToAllDays = () => false;
                     // Calcular horas mensuales del mes en curso
                     const getEmpMonthHours = (empId: string): number => {
                         const yr = currentDate.getFullYear(); const mo = currentDate.getMonth();
@@ -14937,7 +14922,8 @@ function PlanificacionDesktop() {
                     };
                     // Clasificar disponibilidad en la fecha de la ausencia
                     const NON_AVAILABLE = new Set(['F','FF','FP','FT','V','L','PG','A','E','AA','PAST','LOCKED']);
-                    type VacancyDayRole = 'RETEN' | 'ESC' | 'FREE' | 'WORKING';
+                    type VacancyDayRole = 'RETEN' | 'ESC' | 'FREE' | 'WORKING' | 'LICENCIA';
+                    const LICENSE_DAY = new Set(['V', 'L', 'PG', 'A', 'E', 'AA', 'ART']);
                     const getEmpDayRole = (empId: string, dateStr: string): VacancyDayRole => {
                         const key = `${empId}_${dateStr}`;
                         const s = pendingChanges[key] ? (pendingChanges[key].isDeleted ? null : pendingChanges[key]) : shiftsMap[key];
@@ -14945,6 +14931,7 @@ function PlanificacionDesktop() {
                         const code = String(s.code || '').toUpperCase();
                         if (code === 'RET') return 'RETEN';
                         if (code === 'ESC') return 'ESC';
+                        if (LICENSE_DAY.has(code)) return 'LICENCIA';
                         if (NON_AVAILABLE.has(code)) return 'FREE';
                         return 'WORKING';
                     };
@@ -15096,122 +15083,235 @@ function PlanificacionDesktop() {
                             return rows;
                         })()
                         : [];
-                    const editingDayCov = vacancyEditingDay ? vacancyDayCoverages[vacancyEditingDay] : undefined;
-                    const editingDaySubstituteId = vacancyEditingDay
-                        ? (editingDayCov?.mode === 'substitute' ? editingDayCov.employeeId : selectedReplacement)
-                        : selectedReplacement;
-                    const selectedReplacementEmp = candidatos.find(e => e.id === editingDaySubstituteId);
-                    const applySplitCoverage = () => {
-                        if (!vacancySplitExtId || !vacancySplitAdelId) return;
-                        if (vacancySplitExtId === vacancySplitAdelId) {
-                            toast.error('Extensión y adelanto deben ser guardias distintos.');
+                    const editingDaySubstituteId = selectedReplacement;
+                    const shiftOfGuard = (empId: string, dateStr: string) => {
+                        const key = `${empId}_${dateStr}`;
+                        const pending = pendingChanges[key];
+                        const src = pending ? (pending.isDeleted ? null : pending) : shiftsMap[key];
+                        if (!src) return null;
+                        return {
+                            code: src.code,
+                            startTime: typeof src.startTime === 'string' ? src.startTime : undefined,
+                            endTime: typeof src.endTime === 'string' ? src.endTime : undefined,
+                            hours: src.hours,
+                            isFranco: src.isFranco === true,
+                        };
+                    };
+                    const segHours = (from?: string, to?: string) => {
+                        if (!from || !to) return 0;
+                        const [fh, fm] = from.split(':').map(Number);
+                        const [th, tm] = to.split(':').map(Number);
+                        let mins = (th * 60 + tm) - (fh * 60 + fm);
+                        if (mins <= 0) mins += 24 * 60;
+                        return Math.round((mins / 60) * 10) / 10;
+                    };
+                    const materializeOnDay = (day: string, base: VacancyDayCoverage, useOverride: boolean): VacancyDayCoverage | null => {
+                        if (base.mode === 'substitute') return base;
+                        if (base.mode !== 'split') return null;
+                        const tit = useOverride
+                            ? resolveEffectiveTitularForDay(day)
+                            : resolveEffectiveVacancyGapTitular(resolveTitularShiftForDay(day), null, vacancyGapBandOptions, vacancyPosSla);
+                        if (!tit) return null;
+                        return {
+                            mode: 'split',
+                            extEmpId: base.extEmpId,
+                            adelEmpId: base.adelEmpId,
+                            gapBand: tit.code,
+                            gapPosition: tit.positionName,
+                            ...(base.extExtraHours != null && base.secondExtExtraHours != null
+                                ? { extExtraHours: base.extExtraHours, secondExtExtraHours: base.secondExtExtraHours }
+                                : {}),
+                        };
+                    };
+                    const draftNow = (): VacancyDayCoverage | null => {
+                        const tit = vacancyEditingDay ? resolveEffectiveTitularForDay(vacancyEditingDay) : null;
+                        return draftCoverage(
+                            { tab: vacancyPickerTab, substituteId: selectedReplacement, extId: vacancySplitExtId, adelId: vacancySplitAdelId },
+                            tit ? { band: tit.code, position: tit.positionName, extExtraHours: vacancySplitExtExtraHours, secondExtExtraHours: vacancySplitSecondExtraHours } : undefined,
+                        );
+                    };
+                    const proposedForCoverage = (dateStr: string, coverage: VacancyDayCoverage): Record<string, ProposedGuardShift> => {
+                        if (coverage.mode === 'substitute') {
+                            const tit = resolveEffectiveTitularForDay(dateStr);
+                            const sched = String(tit?.scheduleLabel || '');
+                            const m = sched.match(/(\d{1,2}:\d{2})\s*[–-]\s*(\d{1,2}:\d{2})/);
+                            const hours = tit?.hours || 8;
+                            return { [coverage.employeeId]: { code: tit?.code || 'M', startTime: m?.[1], endTime: m?.[2], hours, addHours: hours } };
+                        }
+                        if (coverage.mode !== 'split') return {};
+                        const extShift = shiftOfGuard(coverage.extEmpId, dateStr);
+                        const adelShift = shiftOfGuard(coverage.adelEmpId, dateStr);
+                        const times = resolveVacancySplitSegmentTimes(
+                            vacancyPosSla,
+                            coverage.gapBand,
+                            coverage.gapPosition,
+                            { code: extShift?.code },
+                            { code: adelShift?.code },
+                            coverage.extExtraHours,
+                            coverage.secondExtExtraHours,
+                        );
+                        const extAdd = coverage.extExtraHours ?? segHours(times.first.from, times.first.to);
+                        const adelAdd = coverage.secondExtExtraHours ?? segHours(times.second.from, times.second.to);
+                        return {
+                            [coverage.extEmpId]: {
+                                code: String(extShift?.code || coverage.gapBand || 'M'),
+                                startTime: extShift?.startTime || times.first.from,
+                                endTime: times.first.to,
+                                hours: extAdd,
+                                addHours: extAdd,
+                            },
+                            [coverage.adelEmpId]: {
+                                code: String(adelShift?.code || coverage.gapBand || 'T'),
+                                startTime: adelShift?.startTime || times.second.from,
+                                endTime: times.second.to,
+                                hours: adelAdd,
+                                addHours: adelAdd,
+                            },
+                        };
+                    };
+                    const blockedOnDay = (dateStr: string, coverage: VacancyDayCoverage): string[] => {
+                        if (!vacancyDayHasCoverage(coverage)) return [];
+                        return evaluateCoverageDayGuards({
+                            dateStr,
+                            proposedByEmp: proposedForCoverage(dateStr, coverage),
+                            shiftOf: shiftOfGuard,
+                            monthHoursOf: getEmpMonthHours,
+                            nameOf: (id) => String(vacancyEmployeesById[id]?.name || id),
+                        }).blocked;
+                    };
+                    const leaveEditor = () => {
+                        setVacancyReplacementOpen(false);
+                        setVacancyEditingDay(null);
+                        setVacancyReplacementSearch('');
+                    };
+                    const goToDay = (day: string | null) => {
+                        if (day) openDayCoveragePicker(day);
+                        else leaveEditor();
+                    };
+                    const writeDays = (
+                        incoming: Record<string, VacancyDayCoverage>,
+                        toastMsg: string,
+                        templateDay: string | null,
+                        after?: () => void,
+                    ) => {
+                        const overwritten = daysOverwritten(vacancyDayCoverages, incoming);
+                        if (overwritten.length > 0 && !confirm(`Esto pisa la cobertura distinta de ${overwritten.map(formatShortDay).join(', ')}. ¿Seguir?`)) return;
+                        const blocked: string[] = [];
+                        for (const [day, cov] of Object.entries(incoming)) {
+                            for (const msg of blockedOnDay(day, cov)) blocked.push(`${formatShortDay(day)}: ${msg}`);
+                        }
+                        if (blocked.length) {
+                            toast.error(blocked.slice(0, 4).join(' · '), { duration: 9000 });
                             return;
                         }
-                        const applyAll = shouldApplyCoverageToAllDays();
-                        const targetDays = applyAll
-                            ? sortedActiveDates
-                            : (vacancyEditingDay ? [vacancyEditingDay] : sortedActiveDates);
-                        if (targetDays.length === 0) return;
-
-                        const commitSplitPatch = () => {
-                            const patch: Record<string, VacancyDayCoverage> = {};
-                            let applied = 0;
-                            for (const d of targetDays) {
-                                const tit = resolveTitularForCoverageDay(d, splitReferenceDate || sortedActiveDates[0] || undefined);
-                                if (!tit) continue;
-                                patch[d] = {
-                                    mode: 'split',
-                                    extEmpId: vacancySplitExtId,
-                                    adelEmpId: vacancySplitAdelId,
-                                    gapBand: tit.code,
-                                    gapPosition: tit.positionName,
-                                    ...(splitManualExtraHours
-                                        ? {
-                                            extExtraHours: vacancySplitExtExtraHours,
-                                            secondExtExtraHours: vacancySplitSecondExtraHours,
-                                        }
-                                        : {}),
-                                };
-                                applied++;
-                            }
-                            if (applied === 0) {
-                                toast.error('No se pudo inferir el turno del titular en ningún día seleccionado.');
-                                return;
-                            }
-                            setVacancyDayCoverages((prev) => ({ ...prev, ...patch }));
-                            toast.success(`Ext+adel aplicado a ${applied} día(s).`);
-                            setVacancyEditingDay(null);
-                            setVacancyReplacementOpen(false);
-                            setVacancyReplacementSearch('');
-                        };
-
                         const francoConflicts: FrancoCoverageConflict[] = [];
-                        for (const d of targetDays) {
-                            francoConflicts.push(
-                                ...collectSplitFrancoConflicts(
-                                    d,
-                                    vacancySplitExtId,
-                                    vacancySplitAdelId,
-                                    vacancyEmployeesById,
+                        for (const [day, cov] of Object.entries(incoming)) {
+                            if (cov.mode === 'split') {
+                                francoConflicts.push(...collectSplitFrancoConflicts(day, cov.extEmpId, cov.adelEmpId, vacancyEmployeesById, shiftsMap, pendingChanges));
+                            } else if (cov.mode === 'substitute') {
+                                francoConflicts.push(...collectVacancyFrancoConflicts({
+                                    days: [{ dateStr: day, coverage: { mode: 'substitute', employeeId: cov.employeeId, employeeName: vacancyEmployeesById[cov.employeeId]?.name || '' } }],
                                     shiftsMap,
-                                    pendingChanges,
-                                ),
-                            );
+                                    employeesById: vacancyEmployeesById,
+                                }, pendingChanges));
+                            }
                         }
+                        const commit = () => {
+                            setVacancyDayCoverages((prev) => mergeCoverages(prev, incoming));
+                            if (templateDay) setVacancyTemplateDay(templateDay);
+                            toast.success(toastMsg);
+                            after?.();
+                        };
                         if (francoConflicts.length > 0 && !vacancyFrancoAuthApproved) {
                             requestSupervisorFrancoAuth(francoConflicts, () => {
                                 setVacancyFrancoAuthApproved(true);
-                                commitSplitPatch();
-                            }, 'extensión + adelanto');
+                                commit();
+                            }, 'cobertura de licencia');
                             return;
                         }
                         if (francoConflicts.length > 0) setVacancyFrancoAuthApproved(true);
-                        commitSplitPatch();
+                        commit();
+                    };
+                    const applyThisDay = () => {
+                        if (!vacancyEditingDay) return;
+                        const cov = draftNow();
+                        if (!cov) {
+                            toast.error('Elegí la cobertura de este día antes de aplicar.');
+                            return;
+                        }
+                        const day = vacancyEditingDay;
+                        writeDays({ [day]: cov }, `Cobertura del ${formatShortDay(day)} guardada.`, day, () => {
+                            goToDay(nextMarkedDay(sortedActiveDates, day));
+                        });
+                    };
+                    const applyToMarkedDays = () => {
+                        if (!vacancyEditingDay) return;
+                        const base = draftNow();
+                        if (!base) {
+                            toast.error('Elegí la cobertura antes de aplicarla a los días marcados.');
+                            return;
+                        }
+                        const incoming: Record<string, VacancyDayCoverage> = {};
+                        const missing: string[] = [];
+                        for (const day of sortedActiveDates) {
+                            const cov = day === vacancyEditingDay ? base : materializeOnDay(day, base, false);
+                            if (!cov) missing.push(formatShortDay(day));
+                            else incoming[day] = cov;
+                        }
+                        if (missing.length) {
+                            toast.error(`Sin turno del titular en ${missing.join(', ')}.`);
+                            return;
+                        }
+                        writeDays(incoming, `Misma cobertura en ${sortedActiveDates.length} día(s).`, vacancyEditingDay, () => leaveEditor());
+                    };
+                    const completeRemainingDays = () => {
+                        const tplDay = templateDayForRemaining(sortedActiveDates, vacancyDayCoverages, vacancyTemplateDay);
+                        const tpl = tplDay ? vacancyDayCoverages[tplDay] : undefined;
+                        if (!tplDay || !tpl || !vacancyDayHasCoverage(tpl)) return;
+                        const incoming: Record<string, VacancyDayCoverage> = {};
+                        for (const day of emptyDays(sortedActiveDates, vacancyDayCoverages)) {
+                            const cov = materializeOnDay(day, tpl, false);
+                            if (cov) incoming[day] = cov;
+                        }
+                        const filled = Object.keys(incoming);
+                        if (filled.length === 0) {
+                            toast.error('No quedan días sin cobertura o falta inferir el turno del titular.');
+                            return;
+                        }
+                        writeDays(incoming, `Se completaron ${filled.length} día(s) sin cobertura con la de ${formatShortDay(tplDay)}.`, tplDay);
+                    };
+                    const goNextDay = () => {
+                        if (!vacancyEditingDay) return;
+                        const day = vacancyEditingDay;
+                        const draft = draftNow();
+                        const saved = savedCoverage(vacancyDayCoverages, day);
+                        const go = () => goToDay(nextMarkedDay(sortedActiveDates, day));
+                        if (draft && coveragesDiffer(saved, draft)) {
+                            writeDays({ [day]: draft }, `Cobertura del ${formatShortDay(day)} guardada.`, day, go);
+                            return;
+                        }
+                        if (draftIsPartial({ tab: vacancyPickerTab, substituteId: selectedReplacement, extId: vacancySplitExtId, adelId: vacancySplitAdelId })) {
+                            if (!confirm(`Hay cambios sin aplicar el ${formatShortDay(day)}. ¿Seguir sin guardarlos?`)) return;
+                        }
+                        go();
+                    };
+                    const copyPreviousDay = () => {
+                        if (!vacancyEditingDay) return;
+                        const prev = previousMarkedDay(sortedActiveDates, vacancyEditingDay);
+                        const cov = prev ? vacancyDayCoverages[prev] : undefined;
+                        if (!prev || !cov || !vacancyDayHasCoverage(cov)) return;
+                        loadPickerFields(cov);
+                        toast.message(`Copiada la cobertura del ${formatShortDay(prev)}. Aplicá a este día para guardarla.`);
                     };
                     const applySubstituteToActiveDays = (employeeId: string) => {
-                        const applyAll = shouldApplyCoverageToAllDays();
-                        const targetDays = applyAll
-                            ? sortedActiveDates
-                            : (vacancyEditingDay ? [vacancyEditingDay] : []);
-
-                        const commitSubstitute = () => {
-                            if (applyAll) {
-                                setSelectedReplacement(employeeId);
-                                setVacancyDayCoverages((prev) => {
-                                    const next = { ...prev };
-                                    for (const d of sortedActiveDates) {
-                                        next[d] = { mode: 'substitute', employeeId };
-                                    }
-                                    return next;
-                                });
-                                toast.success(`Suplente asignado a ${sortedActiveDates.length} día(s).`);
-                            } else if (vacancyEditingDay) {
-                                setVacancyDayCoverages((prev) => ({ ...prev, [vacancyEditingDay]: { mode: 'substitute', employeeId } }));
-                            } else {
-                                setSelectedReplacement(employeeId);
-                            }
-                            setVacancyEditingDay(null);
-                        };
-
-                        if (targetDays.length > 0) {
-                            const francoConflicts = collectVacancyFrancoConflicts({
-                                days: targetDays.map((dateStr) => ({
-                                    dateStr,
-                                    coverage: { mode: 'substitute' as const, employeeId, employeeName: vacancyEmployeesById[employeeId]?.name || '' },
-                                })),
-                                shiftsMap,
-                                employeesById: vacancyEmployeesById,
-                            }, pendingChanges);
-                            if (francoConflicts.length > 0 && !vacancyFrancoAuthApproved) {
-                                requestSupervisorFrancoAuth(francoConflicts, () => {
-                                    setVacancyFrancoAuthApproved(true);
-                                    commitSubstitute();
-                                }, 'suplencia sobre franco');
-                                return;
-                            }
-                            if (francoConflicts.length > 0) setVacancyFrancoAuthApproved(true);
-                        }
-                        commitSubstitute();
+                        setVacancyPickerTab('substitute');
+                        setSelectedReplacement(employeeId);
+                        if (!vacancyEditingDay) return;
+                        const day = vacancyEditingDay;
+                        const cov: VacancyDayCoverage = { mode: 'substitute', employeeId };
+                        writeDays({ [day]: cov }, `Cobertura del ${formatShortDay(day)} guardada.`, day, () => {
+                            goToDay(nextMarkedDay(sortedActiveDates, day));
+                        });
                     };
                     const clearCoverageForScope = () => {
                         const applyAll = shouldApplyCoverageToAllDays();
@@ -15238,8 +15338,8 @@ function PlanificacionDesktop() {
                             key={e.id}
                             type="button"
                             onClick={() => {
-                                applySubstituteToActiveDays(e.id);
-                                setVacancyReplacementOpen(false);
+                                setVacancyPickerTab('substitute');
+                                setSelectedReplacement(e.id);
                             }}
                             className={`w-full px-3 py-2.5 text-left text-sm flex items-center gap-2 hover:bg-indigo-50 rounded-lg ${editingDaySubstituteId === e.id ? 'bg-indigo-50 ring-1 ring-indigo-300' : ''}`}
                         >
@@ -15270,9 +15370,9 @@ function PlanificacionDesktop() {
                             {absenceDateRange.length > 1 && (
                                 <div className="mb-3 shrink-0">
                                     <div className="flex items-center justify-between mb-1.5">
-                                        <label className="text-[10px] font-black uppercase text-slate-400">Días a procesar</label>
+                                        <label className="text-[10px] font-black uppercase text-slate-400" data-cobertura-paso="1">Paso 1 · Días a procesar</label>
                                         <div className="flex gap-2">
-                                            <button type="button" onClick={() => { setVacancyActiveDates(new Set(absenceDateRange)); setVacancyEditingDay(null); setVacancyApplyToAllSelected(true); setVacancyReplacementOpen(true); }} className="text-[10px] font-bold text-indigo-600 hover:underline">Todos</button>
+                                            <button type="button" onClick={() => setVacancyActiveDates(new Set(absenceDateRange))} className="text-[10px] font-bold text-indigo-600 hover:underline">Todos</button>
                                             <button type="button" onClick={() => setVacancyActiveDates(new Set())} className="text-[10px] font-bold text-slate-400 hover:underline">Ninguno</button>
                                         </div>
                                     </div>
@@ -15291,93 +15391,39 @@ function PlanificacionDesktop() {
                                 </div>
                             )}
                             {vacancyActiveDates.size > 0 && (
-                                <div className="mb-3 shrink-0">
-                                    <div className="flex items-center justify-between mb-1">
-                                        <label className="text-[10px] font-black uppercase text-slate-400">Cobertura por día</label>
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                setVacancyEditingDay(null);
-                                                setVacancyApplyToAllSelected(true);
-                                                setVacancyPickerTab('substitute');
-                                                setVacancyReplacementOpen(true);
-                                            }}
-                                            className="text-[10px] font-bold text-indigo-600 hover:underline"
-                                        >
-                                            Misma cobertura para todos
-                                        </button>
-                                    </div>
-                                    {vacancyEmptyActiveDays > 0 && vacancyConfiguredDays > 0 && (
-                                        <button
-                                            type="button"
-                                            onClick={replicateCoverageToEmptyDays}
-                                            className="mb-2 w-full py-2 rounded-xl border border-violet-200 bg-violet-50 text-[10px] font-black text-violet-800 hover:bg-violet-100"
-                                        >
-                                            Completar {vacancyEmptyActiveDays} día(s) restante(s) con la misma cobertura
-                                        </button>
-                                    )}
-                                    <p className="text-[10px] font-bold text-indigo-600 mb-2">
-                                        <strong>Misma cobertura para todos</strong> aplica suplente o ext+adel a todos los días marcados. Tocá un día sólo si necesitás excepciones.
-                                    </p>
-                                    <div className="max-h-36 overflow-y-auto custom-scrollbar border rounded-xl divide-y">
-                                        {[...vacancyActiveDates].sort().map((d) => {
-                                            const cov = resolveDayCoverageForUi(d);
-                                            const isEditing = vacancyEditingDay === d;
-                                            return (
-                                                <button
-                                                    key={d}
-                                                    type="button"
-                                                    onClick={() => openDayCoveragePicker(d)}
-                                                    className={`w-full flex items-center gap-2 px-3 py-2.5 text-xs text-left transition-colors ${isEditing ? 'bg-indigo-50 ring-2 ring-inset ring-indigo-300' : 'hover:bg-slate-50'}`}
-                                                >
-                                                    <span className="font-mono font-black text-slate-700 w-14 shrink-0">{formatShortDay(d)}</span>
-                                                    <span className="flex-1 min-w-0">
-                                                        <span className="block truncate font-bold text-slate-700">{resolveDayCoverageLabel(d)}</span>
-                                                        {(() => {
-                                                            const tit = resolveEffectiveTitularForDay(d);
-                                                            return tit ? (
-                                                                <span className="block truncate text-[9px] font-bold text-amber-700 mt-0.5">
-                                                                    Cubrir: {renderTitularChipLine(tit)}
-                                                                </span>
-                                                            ) : (
-                                                                <span className="block text-[9px] font-bold text-rose-500 mt-0.5">Sin turno laboral inferido</span>
-                                                            );
-                                                        })()}
-                                                    </span>
-                                                    {cov.mode === 'split' && (
-                                                        <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-violet-100 text-violet-800 shrink-0">ext+adel</span>
-                                                    )}
-                                                    {cov.mode === 'substitute' && (
-                                                        <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-teal-100 text-teal-800 shrink-0">suplente</span>
-                                                    )}
-                                                    <ChevronRight size={14} className={`shrink-0 ${isEditing ? 'text-indigo-600' : 'text-slate-300'}`} />
-                                                </button>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
+                                <VacancyCoberturaLista
+                                    days={sortedActiveDates.map((d) => {
+                                        const cov = resolveDayCoverageForUi(d);
+                                        const tit = resolveEffectiveTitularForDay(d);
+                                        const chip = tit ? formatTitularChip(tit) : null;
+                                        return {
+                                            date: d,
+                                            label: formatShortDay(d),
+                                            coverageLabel: resolveDayCoverageLabel(d),
+                                            mode: cov.mode,
+                                            editing: vacancyEditingDay === d,
+                                            titular: chip ? [chip.code, chip.band, chip.position, chip.sched].filter(Boolean).join(' · ') : null,
+                                        };
+                                    })}
+                                    emptyCount={vacancyEmptyActiveDays}
+                                    templateLabel={(() => {
+                                        const tpl = templateDayForRemaining(sortedActiveDates, vacancyDayCoverages, vacancyTemplateDay);
+                                        return tpl ? formatShortDay(tpl) : null;
+                                    })()}
+                                    onEdit={openDayCoveragePicker}
+                                    onClear={(d) => {
+                                        setVacancyDayCoverages((prev) => clearDayCoverage(prev, d));
+                                        setVacancyTemplateDay((cur) => (cur === d ? null : cur));
+                                        if (vacancyEditingDay === d) loadPickerFields(undefined);
+                                    }}
+                                    onCompleteRemaining={completeRemainingDays}
+                                />
                             )}
-                            {(vacancyReplacementOpen && (vacancyEditingDay || vacancyActiveDates.size > 0)) && (
+                            {(vacancyReplacementOpen && vacancyEditingDay) && (
                             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 mb-4 shrink-0 space-y-3">
                                 <label className="text-[10px] font-black uppercase text-slate-400 block">
-                                    {vacancyEditingDay
-                                        ? `Configurar ${formatShortDay(vacancyEditingDay)}`
-                                        : `Cobertura para todos los días (${vacancyActiveDates.size})`}
+                                    {`Configurar ${formatShortDay(vacancyEditingDay)}`}
                                 </label>
-                                {(vacancyEditingDay || isBulkCoverageMode) && sortedActiveDates.length > 1 && (
-                                    <label className="flex items-center gap-2 cursor-pointer rounded-xl border border-indigo-100 bg-indigo-50/70 px-3 py-2.5">
-                                        <input
-                                            type="checkbox"
-                                            checked={vacancyApplyToAllSelected || isBulkCoverageMode}
-                                            disabled={isBulkCoverageMode}
-                                            onChange={(e) => setVacancyApplyToAllSelected(e.target.checked)}
-                                            className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                                        />
-                                        <span className="text-[10px] font-bold text-indigo-900">
-                                            Aplicar a los {sortedActiveDates.length} días seleccionados
-                                        </span>
-                                    </label>
-                                )}
                                 {(vacancyEditingDay || isBulkCoverageMode) && splitTitularShift && (
                                     <div className="rounded-2xl border-2 border-amber-200 bg-amber-50/90 px-3 py-3">
                                         <div className="text-[10px] font-black uppercase text-amber-900 mb-1.5 flex items-center gap-1">
@@ -15773,51 +15819,26 @@ function PlanificacionDesktop() {
                                                         </p>
                                                     </div>
                                                 )}
-                                                <div className="flex flex-col gap-2">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => applySplitCoverage()}
-                                                        disabled={!vacancySplitExtId || !vacancySplitAdelId}
-                                                        className="w-full py-3 rounded-xl bg-violet-600 text-white text-xs font-black disabled:opacity-40 hover:bg-violet-700 shadow-sm shadow-violet-200"
-                                                    >
-                                                        {splitApplyButtonLabel}
-                                                    </button>
-                                                </div>
                                             </>
                                         )}
                                     </div>
                                 )}
                                 {vacancyEditingDay && (
-                                    <div className="flex gap-2 pt-0.5 border-t border-slate-200/80">
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                const sorted = [...vacancyActiveDates].sort();
-                                                const idx = sorted.indexOf(vacancyEditingDay);
-                                                const next = sorted[idx + 1];
-                                                if (next) openDayCoveragePicker(next);
-                                                else {
-                                                    setVacancyReplacementOpen(false);
-                                                    setVacancyEditingDay(null);
-                                                    setVacancyReplacementSearch('');
-                                                }
-                                            }}
-                                            className="flex-1 py-2.5 text-xs font-bold text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded-xl transition-colors"
-                                        >
-                                            {(() => {
-                                                const sorted = [...vacancyActiveDates].sort();
-                                                const idx = sorted.indexOf(vacancyEditingDay);
-                                                return idx < sorted.length - 1 ? 'Siguiente día →' : 'Listo';
-                                            })()}
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => { setVacancyReplacementOpen(false); setVacancyReplacementSearch(''); setVacancyEditingDay(null); }}
-                                            className="px-4 py-2.5 text-xs font-bold text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-xl transition-colors"
-                                        >
-                                            Cerrar
-                                        </button>
-                                    </div>
+                                    <VacancyCoberturaAcciones
+                                        dayLabel={formatShortDay(vacancyEditingDay)}
+                                        markedCount={sortedActiveDates.length}
+                                        canApply={!!draftNow()}
+                                        isLast={nextMarkedDay(sortedActiveDates, vacancyEditingDay) == null}
+                                        hasPreviousCoverage={(() => {
+                                            const prev = previousMarkedDay(sortedActiveDates, vacancyEditingDay);
+                                            return !!(prev && vacancyDayHasCoverage(savedCoverage(vacancyDayCoverages, prev)));
+                                        })()}
+                                        onApplyThisDay={applyThisDay}
+                                        onApplyToMarked={applyToMarkedDays}
+                                        onNext={goNextDay}
+                                        onCopyPrevious={copyPreviousDay}
+                                        onClose={leaveEditor}
+                                    />
                                 )}
                             </div>
                             )}

@@ -1,0 +1,235 @@
+/**
+ * Estado por día del modal de cobertura de licencia (escritorio).
+ * Cada día marcado tiene su cobertura; nada se copia solo al día siguiente
+ * y un día ya configurado no se pisa sin que el llamador lo confirme.
+ */
+import { checkRestBetweenShifts } from '@/lib/planificacion/restBetweenShifts';
+import { planningHourLimits } from '@/lib/planning/planning-rules.runtime';
+import {
+  vacancyDayHasCoverage,
+  type VacancyDayCoverage,
+} from '@/lib/planificacion/vacancyCoverage';
+
+const LICENSE = new Set(['V', 'L', 'E', 'A', 'AA', 'PG', 'ART']);
+const FRANCO = new Set(['F', 'FF', 'FP']);
+
+export function coverageKey(coverage: VacancyDayCoverage | undefined): string {
+  if (!coverage || coverage.mode === 'none') return 'none';
+  if (coverage.mode === 'substitute') return `S:${coverage.employeeId}`;
+  return [
+    'X',
+    coverage.extEmpId,
+    coverage.adelEmpId,
+    coverage.gapBand,
+    coverage.gapPosition,
+    coverage.extExtraHours ?? '',
+    coverage.secondExtExtraHours ?? '',
+  ].join('|');
+}
+
+export function coveragesDiffer(a: VacancyDayCoverage | undefined, b: VacancyDayCoverage | undefined): boolean {
+  return coverageKey(a) !== coverageKey(b);
+}
+
+export function savedCoverage(
+  map: Record<string, VacancyDayCoverage>,
+  day: string,
+): VacancyDayCoverage {
+  return map[day] ?? { mode: 'none' };
+}
+
+export function applyCoverageToDay(
+  map: Record<string, VacancyDayCoverage>,
+  day: string,
+  coverage: VacancyDayCoverage,
+): Record<string, VacancyDayCoverage> {
+  return { ...map, [day]: coverage };
+}
+
+export function clearDayCoverage(
+  map: Record<string, VacancyDayCoverage>,
+  day: string,
+): Record<string, VacancyDayCoverage> {
+  if (!map[day]) return map;
+  const next = { ...map };
+  delete next[day];
+  return next;
+}
+
+/** Días que ya tienen cobertura y recibirían otra distinta. Los vacíos no cuentan. */
+export function daysOverwritten(
+  map: Record<string, VacancyDayCoverage>,
+  incoming: Record<string, VacancyDayCoverage>,
+): string[] {
+  return Object.keys(incoming).filter((day) => {
+    const prev = map[day];
+    if (!vacancyDayHasCoverage(prev ?? { mode: 'none' })) return false;
+    return coveragesDiffer(prev, incoming[day]);
+  }).sort();
+}
+
+export function mergeCoverages(
+  map: Record<string, VacancyDayCoverage>,
+  incoming: Record<string, VacancyDayCoverage>,
+): Record<string, VacancyDayCoverage> {
+  return { ...map, ...incoming };
+}
+
+export function emptyDays(days: readonly string[], map: Record<string, VacancyDayCoverage>): string[] {
+  return days.filter((d) => !vacancyDayHasCoverage(savedCoverage(map, d)));
+}
+
+/**
+ * Plantilla = el día que se configuró último si sigue teniendo cobertura;
+ * si no, el último de la lista que tenga.
+ */
+export function templateDayForRemaining(
+  days: readonly string[],
+  map: Record<string, VacancyDayCoverage>,
+  preferred: string | null,
+): string | null {
+  if (preferred && vacancyDayHasCoverage(savedCoverage(map, preferred))) return preferred;
+  const withCov = days.filter((d) => vacancyDayHasCoverage(savedCoverage(map, d)));
+  return withCov.length ? withCov[withCov.length - 1] : null;
+}
+
+/**
+ * Copia la plantilla solo a días sin cobertura. `adapt` puede ajustar el hueco de ese día
+ * (mismo suplente o mismos guardias, banda del día).
+ */
+export function fillEmptyDays(
+  map: Record<string, VacancyDayCoverage>,
+  days: readonly string[],
+  template: VacancyDayCoverage,
+  adapt: (day: string, template: VacancyDayCoverage) => VacancyDayCoverage | null = (_day, tpl) => tpl,
+): { next: Record<string, VacancyDayCoverage>; filled: string[] } {
+  const next = { ...map };
+  const filled: string[] = [];
+  if (!vacancyDayHasCoverage(template)) return { next, filled };
+  for (const day of emptyDays(days, map)) {
+    const cov = adapt(day, template);
+    if (!cov || !vacancyDayHasCoverage(cov)) continue;
+    next[day] = cov;
+    filled.push(day);
+  }
+  return { next, filled };
+}
+
+export function nextMarkedDay(days: readonly string[], day: string): string | null {
+  const i = days.indexOf(day);
+  if (i < 0 || i >= days.length - 1) return null;
+  return days[i + 1];
+}
+
+export function previousMarkedDay(days: readonly string[], day: string): string | null {
+  const i = days.indexOf(day);
+  if (i <= 0) return null;
+  return days[i - 1];
+}
+
+export type PickerDraft = {
+  tab: 'substitute' | 'split';
+  substituteId: string;
+  extId: string;
+  adelId: string;
+};
+
+/** Borrador listo para guardar. Split a medias o la misma persona en los dos tramos → null. */
+export function draftCoverage(draft: PickerDraft, gap?: { band: string; position: string; extExtraHours?: number | null; secondExtExtraHours?: number | null }): VacancyDayCoverage | null {
+  if (draft.tab === 'substitute') {
+    return draft.substituteId ? { mode: 'substitute', employeeId: draft.substituteId } : null;
+  }
+  if (!draft.extId || !draft.adelId || draft.extId === draft.adelId) return null;
+  if (!gap?.band || !gap.position) return null;
+  return {
+    mode: 'split',
+    extEmpId: draft.extId,
+    adelEmpId: draft.adelId,
+    gapBand: gap.band,
+    gapPosition: gap.position,
+    ...(gap.extExtraHours != null && gap.secondExtExtraHours != null
+      ? { extExtraHours: gap.extExtraHours, secondExtExtraHours: gap.secondExtExtraHours }
+      : {}),
+  };
+}
+
+/** Un tramo elegido y el otro no: hay cambios que todavía no son una cobertura. */
+export function draftIsPartial(draft: PickerDraft): boolean {
+  if (draft.tab !== 'split') return false;
+  const ext = !!draft.extId;
+  const adel = !!draft.adelId;
+  return ext !== adel;
+}
+
+export type GuardShift = {
+  code?: string;
+  startTime?: string;
+  endTime?: string;
+  hours?: number;
+  isFranco?: boolean;
+};
+
+export type ProposedGuardShift = {
+  code: string;
+  startTime?: string;
+  endTime?: string;
+  hours?: number;
+  /** Horas que se suman al mes: el hueco si está libre, solo el extra si ya trabaja. */
+  addHours: number;
+};
+
+export type CoverageGuardInput = {
+  dateStr: string;
+  /** employeeId → turno propuesto ese día. */
+  proposedByEmp: Record<string, ProposedGuardShift>;
+  shiftOf: (empId: string, dateStr: string) => GuardShift | null;
+  monthHoursOf: (empId: string) => number;
+  nameOf: (empId: string) => string;
+  monthlyCap?: number;
+};
+
+/**
+ * Licencia, descanso de 12 h y tope se miran con el turno de ESE guardia ESE día.
+ * El franco no bloquea: lo autoriza el PIN de supervisor.
+ */
+export function evaluateCoverageDayGuards(input: CoverageGuardInput): { blocked: string[] } {
+  const cap = input.monthlyCap ?? planningHourLimits().monthly;
+  const blocked: string[] = [];
+  const cfg = { minRestBetweenShiftsHours: 12, longRestAfterWorkedHours: 48, minLongRestHours: 35 };
+  for (const [empId, proposed] of Object.entries(input.proposedByEmp)) {
+    const name = input.nameOf(empId) || empId;
+    const today = input.shiftOf(empId, input.dateStr);
+    const code = String(today?.code || '').toUpperCase();
+    const franco = !!today?.isFranco || FRANCO.has(code);
+    if (LICENSE.has(code)) {
+      blocked.push(`${name} tiene licencia ${code} ese día.`);
+      continue;
+    }
+    if (!franco) {
+      const rest = checkRestBetweenShifts({
+        empId,
+        targetDateStr: input.dateStr,
+        proposed: {
+          code: proposed.code,
+          startTime: proposed.startTime,
+          endTime: proposed.endTime,
+          hours: proposed.hours,
+        },
+        getShift: (eid, ds) => {
+          if (eid === empId && ds === input.dateStr) {
+            return { code: proposed.code, startTime: proposed.startTime, endTime: proposed.endTime, hours: proposed.hours };
+          }
+          return input.shiftOf(eid, ds);
+        },
+        cfg,
+      });
+      if (rest) blocked.push(`${name}: ${rest}`);
+    }
+    const add = Number(proposed.addHours) || 0;
+    const month = input.monthHoursOf(empId) + add;
+    if (add > 0 && month > cap + 0.05) {
+      blocked.push(`${name} quedaría en ${Math.round(month)} h. Tope ${cap}.`);
+    }
+  }
+  return { blocked };
+}
