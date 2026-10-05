@@ -37,6 +37,7 @@ export type EnvioDoc = {
   fechaAlta?: string | null;
   fechaBaja?: string | null;
   advertencias?: string[];
+  nroTransaccion?: string | null;
 };
 
 /** `strictNullChecks: false` en este paquete: los resultados no son uniones discriminadas. */

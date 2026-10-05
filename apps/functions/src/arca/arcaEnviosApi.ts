@@ -559,7 +559,7 @@ export const arcaEnviosApi = onRequest(
         const empresaId = String(req.query.empresaId || '');
         const snap = await db().collection(COLL).where('estado', '==', 'ENVIADO').limit(80).get();
         const envios = snap.docs
-          .map((d) => ({ id: d.id, ...d.data() }))
+          .map((d) => ({ id: d.id, ...d.data() }) as Record<string, any>)
           .filter((d) => d.tipo === 'AT' && (!empresaId || d.empresaId === empresaId))
           .map((d) => ({
             envioId: d.id,
