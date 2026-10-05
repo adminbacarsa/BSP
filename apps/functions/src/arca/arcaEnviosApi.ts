@@ -7,6 +7,7 @@
  *                                             → un TXT por empresa (reclama: SUBIENDO + loteId)
  *    GET  ?action=vencidos&minutos=N          → AT/BT urgentes sin confirmar hace más de N min (sin TXT)
  *    POST ?action=resultado                   → { envioId | loteId, estado, nroTransaccion?, constanciaUrl?, error? }
+ *    GET  ?action=credencial&empresaId=       -> CUIT de ingreso, CUIT representado y clave (solo HTTPS, no se loguea)
  *
  *  Link mágico (sin login, token de un solo uso):
  *    GET  ?action=link&token=                 → resumen + TXT
@@ -29,6 +30,7 @@ import {
   vistaPublicaEnvio,
 } from './arcaEnviosCore';
 import { propagarAltaEnTurnos } from './altaArcaDenorm';
+import { leerCredencialParaRobot } from './arcaClaveFiscalCallable';
 
 const ARCA_ROBOT_KEY = defineSecret('ARCA_ROBOT_KEY');
 
@@ -192,11 +194,24 @@ export const arcaEnviosApi = onRequest(
       const key = String(req.headers['x-arca-key'] || '');
       if (!key || key !== ARCA_ROBOT_KEY.value()) {
         await auditar('ARCA_ENVIO_AUTH_FALLIDA', `Clave inválida desde ${ip}`);
-        res.status(401).json({ error: 'NO_AUTORIZADO' });
+        res.status(401).json(action === 'credencial'
+          ? { error: 'NO_AUTORIZADO', mensaje: 'Falta o no coincide x-arca-key.' }
+          : { error: 'NO_AUTORIZADO' });
         return;
       }
       if (!rateLimitHit(`robot:${ip}`, nowMs, 30)) {
         res.status(429).json({ error: 'RATE_LIMIT' });
+        return;
+      }
+
+      if (action === 'credencial' && req.method === 'GET') {
+        const out = await leerCredencialParaRobot({
+          key,
+          expectedKey: ARCA_ROBOT_KEY.value(),
+          empresaId: String(req.query.empresaId || ''),
+          nowMs,
+        });
+        res.status(out.status).json(out.body);
         return;
       }
 

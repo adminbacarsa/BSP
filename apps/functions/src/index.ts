@@ -26,7 +26,7 @@ import {
 } from './backup/backup-auth.util';
 import { createNestApp } from './main';
 import { iniciarCascadaCobertura, simularRespuestasConvocatorias } from './coverage/convocatoriasCobertura';
-import { retainOutgoingForGap, releaseInvalidRetentionsRun } from './coverage/coverageRetention';
+import { retainOutgoingForGap, releaseInvalidRetentionsRun, syncRetentionVinculoOnTurnoWrite } from './coverage/coverageRetention';
 import { skipAbsencePipelineForShift } from './coverage/coverageTraceShift';
 import { isEventoShift } from './eventos/eventoCoverage';
 import { ObjectiveOperationCache, simulableShiftSkipReasonResolved } from './common/simulableShift';
@@ -930,6 +930,21 @@ export const onTurnoAbsenciaDetectada = onDocumentUpdatedV2(
       console.warn('[onTurnoAbsenciaDetectada] absenceVacancyOpenedAt:', (e as Error)?.message);
     });
   }
+);
+
+// Borrado del titular ausente, o un turno nuevo que cubre la franja: suelta
+// la retención (real o programada) vinculada. También limpia el vínculo huérfano.
+export const onTurnoRetencionVinculo = onDocumentWrittenV2(
+  { document: 'turnos/{shiftId}', region: 'us-central1', timeoutSeconds: 30 },
+  async (event) => {
+    const before = event.data?.before?.exists ? (event.data.before.data() as Record<string, unknown>) : undefined;
+    const after = event.data?.after?.exists ? (event.data.after.data() as Record<string, unknown>) : undefined;
+    try {
+      await syncRetentionVinculoOnTurnoWrite(admin.firestore(), String(event.params.shiftId), before, after);
+    } catch (e) {
+      console.warn('[onTurnoRetencionVinculo]', (e as Error)?.message);
+    }
+  },
 );
 
 // =========================================================
@@ -3784,6 +3799,7 @@ export const getEmpresaAfipConfig = functions.https.onCall(getEmpresaAfipConfigH
 
 // Endpoint del n8n local y del link manual. Requiere el secreto ARCA_ROBOT_KEY: no desplegar antes de crearlo.
 export { arcaEnviosApi } from './arca/arcaEnviosApi';
+export { gestionarClaveFiscalArca } from './arca/arcaClaveFiscalCallable';
 export { gestionarEventual, crearAccesoEventual, listarTurnosEventual } from './eventuales/gestionarEventual';
 export { gestionarMarcoEventual, pedirCodigoAnexoEventual, confirmarAnexoEventual } from './eventuales/marcoAnexoCall';
 export { subirMarcosLote } from './marcosLote/subirMarcosLote';

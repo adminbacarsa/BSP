@@ -1,4 +1,4 @@
-import { outgoingFor, relieverFor, seriesBoundMs } from '@cosp/ops-core';
+import { outgoingFor, relevoAusenteAviso, relieverFor, seriesBoundMs } from '@cosp/ops-core';
 import { guardTone, type GuardTone } from '@/lib/movil/guardTone';
 import { hhmmAR, horarioPlanificado, type GuardDetalleShift } from '@/lib/movil/guardDetalle';
 import { normalizarNota } from '@/lib/operaciones/opsNota';
@@ -27,6 +27,8 @@ export interface GuardCompacto {
   respuesta: { hhmm: string; eta: string | null } | null;
   /** Última nota del operador (texto corto, StickyNote). */
   nota: string | null;
+  /** Antes del fin: «Relevo ausente: VENENCIA (T3 16:00) · sin cubrir». */
+  avisoRelevo: string | null;
   /** Fin vencido sin franja siguiente: texto gris, no es retención. */
   cierre: string | null;
   /** Marca del escritorio que no es el código (TURA anexado al turno del guardia). */
@@ -181,6 +183,7 @@ export function guardCompacto(shift: GuardDetalleShift, siblings: readonly Guard
   }
   const notaRaw = shift.opsNota && typeof shift.opsNota === 'object' ? normalizarNota((shift.opsNota as { texto?: unknown }).texto) : null;
 
+  const avisoRelevo = relevoAusenteAviso(shift, siblings, now);
   const code = String(shift.code || shift.vacancyBand || '').trim().toUpperCase() || '—';
   const type = String(shift.type || '').trim().toUpperCase();
   const extra = (shift.turaContiguous || shift.isTuraCutSegment) && code !== 'TURA'
@@ -199,7 +202,8 @@ export function guardCompacto(shift: GuardDetalleShift, siblings: readonly Guard
     respuesta,
     nota: notaRaw,
     cierre,
-    relevo: cierre ? null : relevo,
+    relevo: cierre || avisoRelevo ? null : relevo,
+    avisoRelevo,
     extra,
     estado: estadoDe(shift, tone, nowMs),
     tone,

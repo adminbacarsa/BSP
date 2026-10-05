@@ -64,14 +64,31 @@ async function employeePushTokens(db: Firestore, employeeId: string): Promise<st
 export type RetainOutgoingOpts = {
   sendPush?: boolean;
   reportedBy?: string;
+  /** Reloj de la pasada (el cron). Sin esto, la hora real. */
+  nowMs?: number;
 };
 
 export type RetainOutgoingResult = {
   applied: boolean;
+  /** Hueco en el futuro: no hay `isRetention`. El cron la activa al fin del saliente. */
+  planned?: boolean;
   shiftIds: string[];
   employeeNames: string[];
   skippedReason?: string;
 };
+
+function releasedRetentionPatch(releasedBy: string): Record<string, unknown> {
+  return {
+    isRetention: false,
+    retentionReleasedAt: FieldValue.serverTimestamp(),
+    releasedBy,
+    retentionReason: FieldValue.delete(),
+    retentionKind: FieldValue.delete(),
+    retentionAbsenceShiftId: FieldValue.delete(),
+    retentionPlannedFor: FieldValue.delete(),
+    retentionPlannedKind: FieldValue.delete(),
+  };
+}
 
 /**
  * Retiene al(los) saliente(s) del puesto para cubrir el hueco del titular ausente.
@@ -106,19 +123,49 @@ export async function retainOutgoingForGap(
     return { applied: false, shiftIds: [], employeeNames: [], skippedReason: 'INVALID_TITULAR' };
   }
 
+  const nowMs = typeof opts.nowMs === 'number' && Number.isFinite(opts.nowMs) ? opts.nowMs : Date.now();
+  const gapInFuture = gapStartMs > nowMs;
+
   const existing = await db
     .collection('turnos')
     .where('retentionAbsenceShiftId', '==', absenceShiftId)
-    .where('isRetention', '==', true)
     .limit(5)
     .get();
-  const activeRetained = existing.docs.filter((d) => d.data().isCompleted !== true);
-  if (activeRetained.length) {
+  const activeLinked = existing.docs.filter((d) => d.data().isCompleted !== true);
+  const activeRetained = activeLinked.filter((d) => d.data().isRetention === true && !d.data().manualRetentionType);
+  if (activeRetained.length && !gapInFuture) {
     return {
       applied: false,
       shiftIds: activeRetained.map((d) => d.id),
       employeeNames: activeRetained.map((d) => String(d.data().employeeName || '')),
       skippedReason: 'ALREADY_RETAINED_FOR_GAP',
+    };
+  }
+  if (gapInFuture && activeRetained.length) {
+    for (const docSnap of activeRetained) {
+      await docSnap.ref.update({
+        isRetention: false,
+        retentionPlannedFor: Timestamp.fromMillis(gapStartMs),
+        retentionPlannedKind: 'AUSENCIA_RELEVO',
+        retentionReason: FieldValue.delete(),
+        retentionKind: FieldValue.delete(),
+      });
+    }
+    return {
+      applied: true,
+      planned: true,
+      shiftIds: activeRetained.map((d) => d.id),
+      employeeNames: activeRetained.map((d) => String(d.data().employeeName || '')),
+    };
+  }
+  const alreadyPlanned = activeLinked.filter((d) => d.data().retentionPlannedFor && d.data().isRetention !== true);
+  if (gapInFuture && alreadyPlanned.length) {
+    return {
+      applied: false,
+      planned: true,
+      shiftIds: alreadyPlanned.map((d) => d.id),
+      employeeNames: alreadyPlanned.map((d) => String(d.data().employeeName || '')),
+      skippedReason: 'ALREADY_PLANNED_FOR_GAP',
     };
   }
 
@@ -137,41 +184,55 @@ export async function retainOutgoingForGap(
   }
 
   const linked = String(pick.data.retentionAbsenceShiftId || '').trim();
-  if (pick.data.isRetention === true && linked && linked !== absenceShiftId) {
+  if ((pick.data.isRetention === true || pick.data.retentionPlannedFor) && linked && linked !== absenceShiftId) {
     return { applied: false, shiftIds: [], employeeNames: [], skippedReason: 'NO_OUTGOING' };
   }
 
   const toRetain = [{ id: pick.id, data: pick.data }];
-  const now = Timestamp.now();
-  const nowMs = now.toMillis();
   const retainedIds: string[] = [];
   const retainedNames: string[] = [];
 
-  for (const pick of toRetain) {
-    const retEnd = endMs(pick.data);
-    const autoAt = Timestamp.fromMillis(Math.max(nowMs, retEnd || nowMs));
+  for (const row of toRetain) {
+    const retEnd = endMs(row.data);
+    const holdFromMs = retEnd || gapStartMs;
     const adopt =
-      pick.data.isRetention === true && !String(pick.data.retentionAbsenceShiftId || '').trim();
-    if (adopt) {
-      await db.collection('turnos').doc(pick.id).update({
+      !gapInFuture
+      && row.data.isRetention === true
+      && !String(row.data.retentionAbsenceShiftId || '').trim();
+    if (gapInFuture) {
+      await db.collection('turnos').doc(row.id).update({
+        isRetention: false,
+        retentionPlannedFor: Timestamp.fromMillis(gapStartMs),
+        retentionPlannedKind: 'AUSENCIA_RELEVO',
         retentionAbsenceShiftId: absenceShiftId,
-        retentionKind: pick.data.retentionKind || 'AUSENCIA_RELEVO',
+        retentionReason: FieldValue.delete(),
+        retentionKind: FieldValue.delete(),
+      });
+    } else if (adopt) {
+      await db.collection('turnos').doc(row.id).update({
+        retentionAbsenceShiftId: absenceShiftId,
+        retentionKind: row.data.retentionKind || 'AUSENCIA_RELEVO',
+        retentionPlannedFor: FieldValue.delete(),
+        retentionPlannedKind: FieldValue.delete(),
       });
     } else {
-      await db.collection('turnos').doc(pick.id).update({
+      await db.collection('turnos').doc(row.id).update({
         isRetention: true,
         retentionReason: 'AUSENCIA_RELEVO',
         retentionKind: 'AUSENCIA_RELEVO',
         retentionAbsenceShiftId: absenceShiftId,
-        autoRetentionAt: autoAt,
+        retentionStartedAt: Timestamp.fromMillis(holdFromMs),
+        autoRetentionAt: Timestamp.fromMillis(holdFromMs),
+        retentionPlannedFor: FieldValue.delete(),
+        retentionPlannedKind: FieldValue.delete(),
         ...(retEnd ? { retentionEndTime: Timestamp.fromMillis(retEnd) } : {}),
       });
     }
-    retainedIds.push(pick.id);
-    retainedNames.push(String(pick.data.employeeName || ''));
+    retainedIds.push(row.id);
+    retainedNames.push(String(row.data.employeeName || ''));
 
-    if (opts.sendPush !== false && !adopt) {
-      const tokens = await employeePushTokens(db, String(pick.data.employeeId || ''));
+    if (!gapInFuture && opts.sendPush !== false && !adopt) {
+      const tokens = await employeePushTokens(db, String(row.data.employeeId || ''));
       if (tokens.length > 0) {
         await admin
           .messaging()
@@ -180,7 +241,7 @@ export async function retainOutgoingForGap(
             notification: {
               title: '⛔ Quedás retenido',
               body: (() => {
-                const name = guardFirstName({ employeeName: pick.data.employeeName });
+                const name = guardFirstName({ employeeName: row.data.employeeName });
                 const where = [titularShift.objectiveName, titularShift.positionName]
                   .map((s) => String(s || '').trim())
                   .filter(Boolean)
@@ -205,7 +266,7 @@ export async function retainOutgoingForGap(
     .where('type', '==', 'RETENCION_AUSENCIA_RELEVO')
     .limit(1)
     .get();
-  if (priorNov.empty && retainedIds.length && !toRetain[0].data.isRetention) {
+  if (!gapInFuture && priorNov.empty && retainedIds.length && !toRetain[0].data.isRetention) {
     await db.collection('novedades').add({
       type: 'RETENCION_AUSENCIA_RELEVO',
       status: 'pending',
@@ -226,6 +287,7 @@ export async function retainOutgoingForGap(
 
   return {
     applied: true,
+    planned: gapInFuture,
     shiftIds: retainedIds,
     employeeNames: retainedNames,
   };
@@ -241,7 +303,6 @@ export async function releaseRetentionForAbsenceShift(
   const snap = await db
     .collection('turnos')
     .where('retentionAbsenceShiftId', '==', aid)
-    .where('isRetention', '==', true)
     .limit(10)
     .get();
   if (snap.empty) return 0;
@@ -249,21 +310,87 @@ export async function releaseRetentionForAbsenceShift(
   const ordered = snap.docs
     .map((d) => ({ ref: d.ref, data: d.data() as Record<string, unknown> }))
     .filter((row) => row.data.isCompleted !== true)
+    .filter((row) => row.data.isRetention === true || !!row.data.retentionPlannedFor || !!row.data.retentionAbsenceShiftId)
+    .filter((row) => !row.data.manualRetentionType)
     .sort((a, b) => checkInMs(a.data) - checkInMs(b.data));
   if (!ordered.length) return 0;
 
   const batch = db.batch();
-  const now = FieldValue.serverTimestamp();
   for (const row of ordered) {
-    batch.update(row.ref, {
-      isRetention: false,
-      retentionReleasedAt: now,
-      releasedBy,
-      retentionReason: FieldValue.delete(),
-    });
+    batch.update(row.ref, releasedRetentionPatch(releasedBy));
   }
   await batch.commit();
   return ordered.length;
+}
+
+/**
+ * Un turno nuevo (o reasignado) del mismo puesto y la misma serie cubre el hueco:
+ * suelta la retención real o programada de la ausencia de esa franja.
+ */
+export async function releaseRetentionsCoveredByShift(
+  db: Firestore,
+  shift: Record<string, unknown> & { id?: string },
+  releasedBy: string,
+): Promise<number> {
+  if (shift.isAbsent === true || shift.draft === true || shift.isVirtual === true) return 0;
+  if (!isReliefEligibleShift(shift)) return 0;
+  const employeeId = String(shift.employeeId || '').trim();
+  if (!employeeId || employeeId === 'VACANTE' || shift.isUnassigned === true) return 0;
+  const objectiveId = String(shift.objectiveId || '').trim();
+  const positionName = shift.positionName;
+  const start = startMs(shift);
+  if (!objectiveId || !positionName || !start) return 0;
+  const code = seriesCodeOf(shift);
+  const snap = await db
+    .collection('turnos')
+    .where('objectiveId', '==', objectiveId)
+    .where('positionName', '==', positionName)
+    .where('startTime', '>=', Timestamp.fromMillis(start - GAP_ALIGN_MS))
+    .where('startTime', '<=', Timestamp.fromMillis(start + GAP_ALIGN_MS))
+    .get();
+  let released = 0;
+  for (const docSnap of snap.docs) {
+    if (docSnap.id === shift.id) continue;
+    const data = docSnap.data() as Record<string, unknown>;
+    const absent = data.isAbsent === true || String(data.status || '').toUpperCase() === 'ABSENT';
+    if (!absent) continue;
+    const theirCode = seriesCodeOf(data);
+    if (code && theirCode && code !== theirCode) continue;
+    released += await releaseRetentionForAbsenceShift(db, docSnap.id, releasedBy);
+  }
+  return released;
+}
+
+/**
+ * Borrado del titular, ausencia revertida o alta de un turno que cubre la franja.
+ * Lo llama el trigger de `turnos`.
+ */
+export async function syncRetentionVinculoOnTurnoWrite(
+  db: Firestore,
+  shiftId: string,
+  before: Record<string, unknown> | undefined,
+  after: Record<string, unknown> | undefined,
+): Promise<void> {
+  if (before && !after) {
+    await releaseRetentionForAbsenceShift(db, shiftId, 'TITULAR_BORRADO');
+    return;
+  }
+  if (!after || after.draft === true || after.isVirtual === true) return;
+  if (before?.isAbsent === true && after.isAbsent !== true) {
+    await releaseRetentionForAbsenceShift(db, shiftId, 'AUSENCIA_REVERTIDA');
+  }
+  const created = !before;
+  const reassigned = !!before && (
+    String(before.employeeId || '') !== String(after.employeeId || '')
+    || (before.isAbsent === true && after.isAbsent !== true)
+  );
+  if ((created || reassigned) && after.isAbsent !== true) {
+    await releaseRetentionsCoveredByShift(
+      db,
+      { ...after, id: shiftId },
+      created ? 'TURNO_NUEVO_CUBRE' : 'TURNO_REASIGNADO_CUBRE',
+    );
+  }
 }
 
 export function totalShiftMs(data: Record<string, unknown>, nowMs: number): number {

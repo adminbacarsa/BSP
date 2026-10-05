@@ -3,9 +3,9 @@
  *
  *   node scripts/arca-robot/subir.mjs --archivo C:\arca-txt\lote.txt --lote lote_x --cuit 30000000001 --tipo AT --empresa bacarsa
  *
- * ARCA_SIMULACION=1 no abre el navegador ni entra a ARCA: confirma en COSP con nro SIM-...
- * La clave fiscal se lee de ARCA_CLAVES_PATH (JSON { "CUIT": "clave" }, fuera del repo).
- * Reintentos: ARCA_ROBOT_REINTENTOS (default 3). Captura: ARCA_SHOTS_DIR.
+ * ARCA_SIMULACION=1 no abre el navegador, no pide la clave y confirma en COSP con nro SIM-...
+ * La clave se pide a COSP (action=credencial) y queda solo en memoria.
+ * ARCA_CLAVES_PATH es respaldo si COSP no la devuelve. Reintentos: ARCA_ROBOT_REINTENTOS (default 3).
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -17,8 +17,12 @@ import {
   clavesPathSeguro,
   esSimulacion,
   extraerNros,
+  formatearCuit,
   nroSimulado,
   parseArgs,
+  planAcceso,
+  sanitizarTexto,
+  soloDigitosCuit,
 } from './flujo.mjs';
 
 const LOGIN_URL = 'https://auth.afip.gob.ar/contribuyente_/login.xhtml';
@@ -62,6 +66,52 @@ async function capturar(page, loteId, intento) {
   return file;
 }
 
+
+async function pedirCredencial(empresaId) {
+  const base = String(process.env.ARCA_ENVIOS_URL || '').trim();
+  const key = String(process.env.ARCA_ROBOT_KEY || '').trim();
+  if (!base || !key || !empresaId) return null;
+  const join = base.includes('?') ? '&' : '?';
+  const res = await fetch(`${base}${join}action=credencial&empresaId=${encodeURIComponent(empresaId)}`, {
+    headers: { 'x-arca-key': key },
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  const clave = String(data.clave || '');
+  if (!clave) return null;
+  return {
+    cuitLogin: String(data.cuitLogin || ''),
+    cuitRepresentado: String(data.cuitRepresentado || data.cuitLogin || ''),
+    clave,
+  };
+}
+
+async function resolverAcceso(empresaId, cuitArg) {
+  try {
+    const remoto = await pedirCredencial(empresaId);
+    if (remoto && remoto.clave) return remoto;
+  } catch {
+    /* respaldo: archivo local */
+  }
+  const clave = claveDeCuit(leerClaves(), cuitArg);
+  if (!clave) return null;
+  const cuit = soloDigitosCuit(cuitArg);
+  return { cuitLogin: cuit, cuitRepresentado: cuit, clave };
+}
+
+async function elegirRepresentado(page, cuit) {
+  const visible = formatearCuit(cuit);
+  const crudo = soloDigitosCuit(cuit);
+  const fila = page.getByText(new RegExp(`${visible}|${crudo}`)).first();
+  await fila.waitFor({ timeout: 20000 });
+  await fila.click();
+  const entrar = page.getByRole('button', { name: /Representar|Ingresar|Seleccionar|Continuar/i }).or(
+    page.getByRole('link', { name: /Representar|Ingresar|Seleccionar|Continuar/i }),
+  );
+  if (await entrar.count()) await entrar.first().click();
+  await page.waitForLoadState('domcontentloaded', { timeout: 45000 });
+}
+
 async function login(page, cuit, clave) {
   await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: 45000 });
   await page.locator('#F1\\:username, input[name="F1:username"]').first().fill(cuit);
@@ -103,7 +153,7 @@ async function subirArchivo(sr, archivo) {
   return { nros, constanciaUrl };
 }
 
-async function subirReal({ archivo, cuit, clave, loteId, intento }) {
+async function subirReal({ archivo, acceso, loteId, intento }) {
   let chromium;
   try {
     ({ chromium } = await import('playwright'));
@@ -114,7 +164,9 @@ async function subirReal({ archivo, cuit, clave, loteId, intento }) {
   const context = await browser.newContext({ acceptDownloads: true });
   const page = await context.newPage();
   try {
-    await login(page, cuit, clave);
+    const plan = planAcceso(acceso);
+    await login(page, plan.cuitLogin, acceso.clave);
+    if (plan.elegirRepresentado) await elegirRepresentado(page, plan.cuitRepresentado);
     const sr = await abrirCargaMasiva(context, page);
     return await subirArchivo(sr, archivo);
   } catch (e) {
@@ -143,13 +195,13 @@ async function main() {
     await terminar(bodyResultado({ ...baseBody, estado: 'CONFIRMADO', nroTransaccion: nro }));
   }
 
-  let clave = '';
+  let acceso = null;
   try {
-    clave = claveDeCuit(leerClaves(), cuit);
+    acceso = await resolverAcceso(String(args.empresa || ''), cuit);
   } catch (e) {
-    await terminar(bodyResultado({ ...baseBody, estado: 'ERROR', error: e.message || 'CLAVE' }));
+    await terminar(bodyResultado({ ...baseBody, estado: 'ERROR', error: sanitizarTexto(e.message || 'CLAVE', '') }));
   }
-  if (!clave || !cuit) {
+  if (!acceso || !acceso.clave || !planAcceso(acceso).cuitLogin) {
     await terminar(bodyResultado({ ...baseBody, estado: 'ERROR', error: 'FALTA_CLAVE_FISCAL' }));
   }
   const archivo = String(args.archivo || '');
@@ -161,7 +213,7 @@ async function main() {
   let last = 'ERROR_ROBOT';
   for (let i = 1; i <= intentos; i += 1) {
     try {
-      const subido = await subirReal({ archivo, cuit, clave, loteId: loteId || envioId, intento: i });
+      const subido = await subirReal({ archivo, acceso, loteId: loteId || envioId, intento: i });
       console.log(JSON.stringify({ ok: true, nros: subido.nros, intento: i }));
       await terminar(bodyResultado({
         ...baseBody,
@@ -170,7 +222,7 @@ async function main() {
         constanciaUrl: subido.constanciaUrl,
       }));
     } catch (e) {
-      last = String(e && e.message ? e.message : e).slice(0, 500);
+      last = sanitizarTexto(String(e && e.message ? e.message : e), acceso && acceso.clave).slice(0, 500);
       console.error(JSON.stringify({ intento: i, error: last }));
     }
   }

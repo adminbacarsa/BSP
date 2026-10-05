@@ -1,4 +1,4 @@
-import { formatRetentionDuration, outgoingFor, relieverFor, seriesBoundMs } from '@cosp/ops-core';
+import { formatRetentionDuration, outgoingFor, relevoAusenteAviso, relieverFor, seriesBoundMs } from '@cosp/ops-core';
 import type { RetentionWaitInfo } from '@cosp/ops-core';
 import { formatIngresoLine } from '@/lib/operaciones/ingresoLabel';
 import { convocadoEnCaminoLabel } from '@/lib/operaciones/convocadoVentana';
@@ -226,9 +226,12 @@ export function guardDetalle(shift: GuardDetalleShift, siblings: readonly GuardD
   const pool = siblings.filter((row) => row && row.id !== shift.id && !row.isUnassigned && !row.isCompleted);
   // FIFO: los otros presentes del puesto son pares del saliente; los que entran, pares del entrante.
   const presentes = pool.filter((row) => row.isPresent && !row.realEndTime);
+  const avisoRelevo = relevoAusenteAviso(shift, siblings, now);
   const quienLoReleva = tone === 'ret' && shift.retentionWait
     ? null
-    : relieverFor(shift, pool, { peers: presentes, roster: siblings });
+    : avisoRelevo
+      ? null
+      : relieverFor(shift, pool, { peers: presentes, roster: siblings });
   const aQuienReleva = isVacante ? null : outgoingFor(shift, pool, { peers: pool, roster: siblings });
 
   let loReleva: string | null = null;
@@ -240,6 +243,8 @@ export function guardDetalle(shift: GuardDetalleShift, siblings: readonly GuardD
     else if (rel.status === 'AUSENTE') loReleva = `Relevo ausente: ${rel.employeeName}${rel.code ? ` · ${rel.code}` : ''} ${hhmmAR(rel.startMs)}`;
     else if (rel.status === 'PRESENTE') loReleva = `Lo releva ${rel.employeeName}${rel.code ? ` · ${rel.code}` : ''} ${hhmmAR(rel.startMs)} · ya fichó`;
     else loReleva = `Espera a ${rel.employeeName}${rel.code ? ` · ${rel.code}` : ''} ${hhmmAR(rel.startMs)}`;
+  } else if (avisoRelevo) {
+    loReleva = avisoRelevo;
   } else if (quienLoReleva) {
     loReleva = `Lo releva ${etiquetaRelevo(quienLoReleva)}`;
   }

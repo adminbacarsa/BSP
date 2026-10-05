@@ -30,6 +30,7 @@ import {
   buildSlaUnplannedGapDocId,
   plannedShiftCoversSlaBand,
   buildRetentionWaitInfo,
+  relevoAusenteAviso,
   etiquetaCierreSinContinuidad,
   computeShiftCloseTimes,
   turnoFueraDeCentroDeControl,
@@ -952,9 +953,11 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         });
         dedupByIdShifts.forEach((s: any) => {
             if (!s.isPresent || s.isCompleted) return;
-            if (!s.isRetention && !s.isPendingClose) return;
             const siblings = shiftsByObjective.get(String(s.objectiveId || '').trim()) || [];
-            s.retentionWait = buildRetentionWaitInfo(s, siblings, now);
+            if (s.isRetention || s.isPendingClose) {
+                s.retentionWait = buildRetentionWaitInfo(s, siblings, now);
+            }
+            s.relevoAusenteAviso = relevoAusenteAviso(s, siblings, currentTime);
         });
 
         // ── Deduplicar por (employeeId, objectiveId, startTime) para eliminar turnos

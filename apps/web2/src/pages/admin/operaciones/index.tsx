@@ -1230,6 +1230,9 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                 {shift.isPresent && shift.retentionWait && !shift.cierreSinFranja && (
                     <p className="text-[9px] font-bold text-orange-700 truncate" title={formatRetentionLine(shift.retentionWait) || ''}>{formatRetentionLine(shift.retentionWait)}</p>
                 )}
+                {shift.relevoAusenteAviso && (
+                    <p className="text-[9px] font-bold text-slate-600 truncate" data-relevo-ausente="1">{shift.relevoAusenteAviso}</p>
+                )}
                 {formatOpsNotaLine(shift.opsNota) && (
                     <p className="text-[9px] font-bold text-slate-600 truncate" title={formatOpsNotaLine(shift.opsNota) || ''}>{formatOpsNotaLine(shift.opsNota)}</p>
                 )}
@@ -1314,6 +1317,9 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                 </div>
                 {shift.isPresent && shift.retentionWait && !shift.cierreSinFranja && (
                     <p className="text-[10px] font-bold text-orange-700 mb-1.5 pl-10">{formatRetentionLine(shift.retentionWait)}</p>
+                )}
+                {shift.relevoAusenteAviso && (
+                    <p className="text-[10px] font-bold text-slate-600 mb-1.5 pl-10" data-relevo-ausente="1">{shift.relevoAusenteAviso}</p>
                 )}
                 {shift.isPresent && formatIngresoLine(shift) && (
                     <p className="text-[10px] font-bold text-emerald-700 mb-1.5 pl-10">{formatIngresoLine(shift)}</p>

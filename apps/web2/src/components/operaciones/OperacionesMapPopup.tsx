@@ -519,6 +519,11 @@ export function OperacionesMapPopup({
                     {formatRetentionLine(shift.retentionWait)}
                   </div>
                 )}
+                {shift.relevoAusenteAviso && (
+                  <div data-relevo-ausente="1" style={{ flex: '1 0 100%', fontSize: '10px', fontWeight: 700, color: '#475569', paddingLeft: '2px', lineHeight: 1.3 }}>
+                    {shift.relevoAusenteAviso}
+                  </div>
+                )}
               </div>
             );
           })

@@ -141,17 +141,27 @@ export async function applyAutoRetentionForGap(
     }
   }
 
+  const gapStart = shiftBoundMs(absenceShift, 'start');
+  const gapInFuture = gapStart > Date.now();
   const batch = writeBatch(db);
-  batch.update(shiftRef, {
-    isRetention: true,
-    retentionReason: 'AUSENCIA_RELEVO',
-    retentionKind: 'AUSENCIA_RELEVO',
-    retentionAbsenceShiftId: absenceShiftId || null,
-    autoRetentionAt: serverTimestamp(),
-    retentionEndTime: Timestamp.fromDate(gapEnd),
-  });
+  batch.update(shiftRef, gapInFuture
+    ? {
+      isRetention: false,
+      retentionPlannedFor: Timestamp.fromMillis(gapStart),
+      retentionPlannedKind: 'AUSENCIA_RELEVO',
+      retentionAbsenceShiftId: absenceShiftId || null,
+    }
+    : {
+      isRetention: true,
+      retentionReason: 'AUSENCIA_RELEVO',
+      retentionKind: 'AUSENCIA_RELEVO',
+      retentionAbsenceShiftId: absenceShiftId || null,
+      retentionStartedAt: Timestamp.fromMillis(gapStart || Date.now()),
+      autoRetentionAt: Timestamp.fromMillis(gapStart || Date.now()),
+      retentionEndTime: Timestamp.fromDate(gapEnd),
+    });
 
-  if (absenceShiftId) {
+  if (absenceShiftId && !gapInFuture) {
     const novQ = query(
       collection(db, 'novedades'),
       where('absenceShiftId', '==', absenceShiftId),

@@ -1,6 +1,6 @@
 # ARCA eventuales — flujos n8n
 
-Tres workflows para importar. No traen claves. La clave fiscal del dueño vive solo en la PC del n8n local.
+Tres workflows para importar. No traen claves. La clave fiscal se carga en COSP (Eventuales → Parámetros → ARCA, SuperAdmin) y queda en Secret Manager. El JSON local es solo respaldo.
 
 | Archivo | Dónde | Qué hace |
 |---|---|---|
@@ -35,6 +35,8 @@ N8N_ROBOT_WEBHOOK=http://127.0.0.1:5678/webhook/cosp-arca-robot
 `ARCA_ROBOT_KEY` se pide oculta si no está seteada. Si ya está, pregunta si se reemplaza. No se escribe en el repo. La clave fiscal ya no va en `D:\secretos\arca-claves.json` (sale de COSP / Secret Manager): el instalador no abre el Bloc de notas; si ese archivo tiene datos, avisa que se puede borrar.
 
 Crea `D:\arca-txt` y `D:\arca-txt\shots`. En `scripts\arca-robot` instala Playwright y Chromium. Después del reinicio prueba `GET /healthz` y si el nodo Execute Command quedó disponible. Si Docker está instalado pero el motor no responde, lo ignora. Al final muestra el resumen en pantalla y lo deja en `D:\arca-txt\instalar.log`, y espera una tecla.
+
+Si COSP no tiene la clave fiscal cargada, el robot puede usar como respaldo `D:\secretosrca-claves.json` (CUIT y clave), que queda solo en esa PC.
 
 ## 1. Variables (ninguna va al repo)
 
