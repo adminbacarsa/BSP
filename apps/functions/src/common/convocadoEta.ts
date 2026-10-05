@@ -48,8 +48,58 @@ export function convocadoTravelEta(input: {
   };
 }
 
-/** Recordatorio a los 2/3 del ETA, contado desde la aceptación. */
+/** Recordatorio a los 2/3 del ETA, contado desde la aceptación (hueco ya empezado). */
 export function convocadoReminderAtMs(acceptedAtMs: number, etaMinutes: number): number {
   const eta = Math.max(1, etaMinutes);
   return acceptedAtMs + Math.round((eta * 2) / 3) * 60 * 1000;
+}
+
+export const CONVOCADO_REMINDER_LEAD_MIN = 10;
+export const CONVOCADO_PUNCH_LEAD_MIN = 15;
+
+export type ConvocadoArrivalPlan = {
+  /** El hueco empieza después de aceptación + viaje: la llegada es el inicio, no “ya”. */
+  future: boolean;
+  expectedArrivalMs: number;
+  reminderAtMs: number;
+  /** Momento de salir: inicio del hueco menos el viaje. */
+  departAtMs: number;
+  /** Apertura de fichada. */
+  punchOpenMs: number;
+};
+
+/**
+ * Hueco futuro (inicio > aceptación + viaje): llegada = inicio, recordatorio = salida − 10 min
+ * (si eso ya pasó, T−5), fichada desde T−15. Hueco ya empezado: llegada = aceptación + viaje
+ * y recordatorio a los 2/3.
+ */
+export function planConvocadoArrival(input: {
+  acceptedAtMs: number;
+  gapStartMs: number;
+  etaMinutes: number;
+}): ConvocadoArrivalPlan {
+  const eta = Math.max(1, Math.round(Number(input.etaMinutes) || 0));
+  const travelMs = eta * 60_000;
+  const accepted = input.acceptedAtMs;
+  const gap = input.gapStartMs;
+  const future = gap > 0 && accepted > 0 && gap > accepted + travelMs;
+  if (!future) {
+    return {
+      future: false,
+      expectedArrivalMs: accepted + travelMs,
+      reminderAtMs: convocadoReminderAtMs(accepted, eta),
+      departAtMs: accepted,
+      punchOpenMs: accepted,
+    };
+  }
+  let reminderAtMs = gap - travelMs - CONVOCADO_REMINDER_LEAD_MIN * 60_000;
+  const tMinus5 = gap - 5 * 60_000;
+  if (reminderAtMs <= accepted) reminderAtMs = tMinus5 > accepted ? tMinus5 : accepted + 60_000;
+  return {
+    future: true,
+    expectedArrivalMs: gap,
+    reminderAtMs,
+    departAtMs: gap - travelMs,
+    punchOpenMs: gap - CONVOCADO_PUNCH_LEAD_MIN * 60_000,
+  };
 }

@@ -31,8 +31,19 @@ export function convocadoEnCaminoLabel(shift: {
   convocadoReminderSentAt?: TsLike;
   convocadoReply?: string;
   convocadoDemorado?: boolean;
-}): string | null {
+  startTime?: TsLike;
+  shiftDateObj?: TsLike;
+  acceptedAt?: TsLike;
+  etaMinutes?: number;
+}, now: Date = new Date()): string | null {
   if (shift.isPresent || shift.isCompleted) return null;
+  const gap = toMs(shift.startTime) || toMs(shift.shiftDateObj);
+  const accepted = toMs(shift.acceptedAt);
+  const travel = Number(shift.etaMinutes);
+  if (gap > 0 && accepted > 0 && Number.isFinite(travel) && travel > 0 && gap > accepted + travel * 60_000) {
+    const depart = gap - travel * 60_000;
+    if (now.getTime() < depart) return `Cubre ${hhmm(gap)} (aceptó ${hhmm(accepted)})`;
+  }
   const eta = toMs(shift.expectedArrivalAt);
   if (!eta) return null;
   const origin = shift.originSource === 'DEVICE'

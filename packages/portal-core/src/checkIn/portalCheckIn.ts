@@ -7,6 +7,7 @@ import {
   checkInRejectMessage,
   convocadoPunchAnchorMs,
   convocadoPunchCapMs,
+  convocadoPunchOpenMs,
   evaluateCheckInWindow,
   isAltaArcaConfirmada,
   isConvocadoCoverageShift,
@@ -56,8 +57,10 @@ export type CheckInTiming = {
   /** T+5…T+30 sin aviso previo: el botón es «Llegada tarde». */
   lateNoNotice?: boolean;
   lateMinutes?: number;
-  /** Convocado: sin ventana y sin marca de tarde. */
+  /** Convocado: sin marca de tarde. Hueco futuro abre a T−15. */
   convocado?: boolean;
+  /** Antes de salir: próximo turno. Desde la salida (o si el hueco ya empezó): en camino. */
+  convocadoPhase?: 'proximo' | 'en_camino';
 };
 
 export type CheckInTimingOptions = {
@@ -285,26 +288,34 @@ export function getCheckInTiming(
     const recEarly = s as unknown as Record<string, unknown>;
     const capMs = convocadoPunchCapMs(recEarly);
     const accepted = convocadoPunchAnchorMs(recEarly);
+    const open = convocadoPunchOpenMs(recEarly);
+    const gap = timestampLikeToMillis(recEarly.startTime);
+    const eta = Number(recEarly.etaMinutes);
+    const future = gap > 0 && accepted > 0 && Number.isFinite(eta) && eta > 0 && gap > accepted + eta * 60_000;
+    const depart = future ? gap - eta * 60_000 : accepted;
     const ended = capMs > 0 && nowMs > capMs;
-    const beforeAccept = accepted > 0 && nowMs < accepted;
-    const canCheckIn = !ended && !beforeAccept;
-    const rejectCode = ended ? ('SHIFT_ENDED' as const) : beforeAccept ? ('TOO_EARLY' as const) : undefined;
+    const beforeOpen = open > 0 && nowMs < open;
+    const canCheckIn = !ended && !beforeOpen;
+    const rejectCode = ended ? ('SHIFT_ENDED' as const) : beforeOpen ? ('TOO_EARLY' as const) : undefined;
     return {
       diffMinutes,
       canCheckIn,
       canNotifyLate: false,
       lateWindow: false,
-      tooEarly: beforeAccept,
+      tooEarly: beforeOpen,
       checkInDeadline: capMs > 0 ? new Date(capMs) : null,
       rejectCode,
       rejectMessage: rejectCode
-        ? beforeAccept
-          ? 'Podés fichar desde que aceptaste la convocatoria, hasta que termine el hueco.'
+        ? beforeOpen
+          ? (future
+            ? 'El ingreso se habilita 15 min antes del inicio.'
+            : 'Podés fichar desde que aceptaste la convocatoria, hasta que termine el hueco.')
           : checkInRejectMessage(rejectCode)
         : undefined,
       lateNoNotice: false,
       lateMinutes: 0,
       convocado: true,
+      convocadoPhase: future && nowMs < depart ? 'proximo' : 'en_camino',
     };
   }
 

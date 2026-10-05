@@ -37,6 +37,20 @@ export function convocadoPunchAnchorMs(shift: Record<string, unknown>): number {
   return createdMs(shift);
 }
 
+/**
+ * Hueco futuro (inicio > aceptación + viaje): la fichada abre a T−15.
+ * Hueco ya empezado, o sin ETA: desde la aceptación.
+ */
+export function convocadoPunchOpenMs(shift: Record<string, unknown>): number {
+  const gap = startMs(shift);
+  const accepted = convocadoPunchAnchorMs(shift);
+  const eta = Number(shift.etaMinutes);
+  if (gap > 0 && accepted > 0 && Number.isFinite(eta) && eta > 0 && gap > accepted + eta * 60_000) {
+    return gap - 15 * 60 * 1000;
+  }
+  return accepted;
+}
+
 /** Tope de fichada del convocado: el fin del hueco. Sin fin, no hay tope corto. */
 export function convocadoPunchCapMs(shift: Record<string, unknown>): number {
   const end = endMs(shift);
@@ -89,7 +103,7 @@ function finishAllowed(
 /**
  * Ventanas servidor (espejo portal-core): normal T−15…T+30 (T+5…T+30 sin aviso = llegada tarde);
  * con aviso hasta max(T+30, min(ETA, T+60)); AA provisoria fichable hasta T+60;
- * convocado (no EXT): desde la aceptación hasta el fin del hueco, sin tarde;
+ * convocado (no EXT): hueco ya empezado desde la aceptación; hueco futuro desde T−15; hasta el fin, sin tarde;
  * isEarlyStart = adelanto OR turno propio.
  */
 /** Día calendario en Argentina (YYYY-MM-DD). */
@@ -167,7 +181,7 @@ export function evaluateServerCheckInWindow(
     return { allowed: false, rejectCode: 'EXT_NO_CHECKIN' };
   }
   if (origin === 'OPERATIONS_COVERAGE') {
-    const anchor = convocadoPunchAnchorMs(shift);
+    const anchor = convocadoPunchOpenMs(shift);
     const cap = convocadoPunchCapMs(shift);
     if (anchor > 0 && nowMs < anchor) return { allowed: false, rejectCode: 'TOO_EARLY' };
     if (cap > 0 && nowMs > cap) return { allowed: false, rejectCode: 'SHIFT_ENDED' };

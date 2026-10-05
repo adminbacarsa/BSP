@@ -38,6 +38,8 @@ export interface GuardDetalleShift extends GuardFlags {
   lateArrivalEtaMinutes?: number | null;
   minutesRemainingLate?: number | null;
   expectedArrivalAt?: TsLike;
+  acceptedAt?: TsLike;
+  etaMinutes?: number;
   originSource?: string;
   convocadoReminderSentAt?: TsLike;
   convocadoReply?: string;
@@ -269,6 +271,9 @@ export function guardDetalle(shift: GuardDetalleShift, siblings: readonly GuardD
       isPresent: shift.isPresent,
       isCompleted: shift.isCompleted,
       expectedArrivalAt: toMs(shift.expectedArrivalAt) || undefined,
+      startTime: toMs(shift.shiftDateObj || shift.startTime) || undefined,
+      acceptedAt: toMs(shift.acceptedAt) || undefined,
+      etaMinutes: Number(shift.etaMinutes) || undefined,
       originSource: shift.originSource,
       convocadoReminderSentAt: toMs(shift.convocadoReminderSentAt) || undefined,
       convocadoReply: shift.convocadoReply,
