@@ -27,6 +27,13 @@
       "env": {
         "EXPO_PUBLIC_USE_EMULATOR": "false"
       }
+    },
+    "production-apk": {
+      "extends": "production",
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      }
     }
   },
   "submit": {
