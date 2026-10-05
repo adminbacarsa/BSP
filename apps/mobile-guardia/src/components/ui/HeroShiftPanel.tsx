@@ -1,38 +1,97 @@
 import type { ReactNode } from 'react';
-import { Linking, StyleSheet, Text, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import { StyleSheet, Text, View } from 'react-native';
 import type { Shift } from '@cosp/portal-types';
-import { formatDateAr, formatTimeAr, toDate, isAbsentLikeShift } from '@cosp/portal-core';
+import { Ionicons } from '@expo/vector-icons';
 import { radius, shadow, typography } from '../../theme/tokens';
 import { useTheme } from '../../theme/ThemeContext';
-import { CommandBadge } from './CommandButton';
 import type { ShiftPlacement } from '../../lib/shiftPlacement';
 import { resolveShiftPlacement } from '../../lib/shiftPlacement';
 import { useResponsiveLayout } from '../../hooks/useResponsiveLayout';
+import {
+  buildHeroShiftCardModel,
+  HERO_FILETE,
+  resolveHeroAccentColor,
+  type HeroEvDisplay,
+  type HeroShiftCardModel,
+} from '../../lib/heroShiftCard';
+
+const TZ = 'America/Argentina/Buenos_Aires';
+
+function toDateLocal(val: unknown): Date | null {
+  if (!val) return null;
+  if (val instanceof Date) return Number.isNaN(val.getTime()) ? null : val;
+  if (typeof val === 'object') {
+    const o = val as { toDate?: () => Date; seconds?: number; _seconds?: number };
+    if (typeof o.toDate === 'function') return o.toDate();
+    const seconds = o.seconds ?? o._seconds;
+    if (typeof seconds === 'number') return new Date(seconds * 1000);
+  }
+  if (typeof val === 'number' || typeof val === 'string') {
+    const d = new Date(val);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  return null;
+}
+
+function formatTimeArLocal(val: unknown): string {
+  const d = toDateLocal(val);
+  return d
+    ? d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: TZ })
+    : '-';
+}
+
+function formatDateArLocal(val: unknown): string {
+  const d = toDateLocal(val);
+  return d ? d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: TZ }) : '-';
+}
 
 type Props = {
-  headline: string;
-  subline: string;
+  /** @deprecated el kicker sale del modelo; se usa como sectionBase. */
+  headline?: string;
+  /** @deprecated el horario sale de timeRange / modelo. */
+  subline?: string;
   shift?: Shift;
-  /** Preferido: Cliente · Objetivo · Puesto ya resuelto */
   placement?: ShiftPlacement;
-  /** @deprecated usar placement */
   objective?: ShiftPlacement['objectiveLocation'];
-  /** @deprecated la empresa ya figura en el header; se ignora */
-  empresaNombre?: string;
-  /** En curso → "Turno actual"; futuro → "Próximo turno"; ausente → "Ausente" */
   sectionLabel?: string;
+  isToday?: boolean;
+  timeRange?: string | null;
+  ev?: HeroEvDisplay | null;
+  mapsUrl?: string | null;
+  isRetention?: boolean;
+  isConvocado?: boolean;
+  empresaLabel?: string | null;
+  /** Color de empresa (filete); si es claro se oscurece para AA. */
+  accentColor?: string | null;
   footer?: ReactNode;
   statusSlot?: ReactNode;
 };
 
+function fileteColor(model: HeroShiftCardModel, accent: string): string {
+  if (model.fileteTone === 'active') return accent;
+  return HERO_FILETE[model.fileteTone] || accent;
+}
+
+/**
+ * Tarjeta «Turno actual» de Hoy: fondo blanco (o card dark), filete de empresa,
+ * horario grande, lugar una sola vez, estado de fichada destacado. Sin chips
+ * repetidos ni «Cómo llegar» duplicado (el botón va en `footer`).
+ */
 export function HeroShiftPanel({
   headline,
   subline,
   shift,
   placement: placementProp,
   objective,
-  sectionLabel = 'Próximo turno',
+  sectionLabel = 'Turno actual',
+  isToday = false,
+  timeRange: timeRangeProp,
+  ev = null,
+  mapsUrl = null,
+  isRetention = false,
+  isConvocado = false,
+  empresaLabel = null,
+  accentColor = null,
   footer,
   statusSlot,
 }: Props) {
@@ -41,135 +100,119 @@ export function HeroShiftPanel({
   const placement =
     placementProp ||
     resolveShiftPlacement(shift, objective ? { [objective.name]: objective } : {});
-  const mapsTarget = placement.objectiveLocation || objective || null;
-  const mapsUrl =
-    mapsTarget?.lat && mapsTarget?.lng
-      ? `https://www.google.com/maps?q=${mapsTarget.lat},${mapsTarget.lng}`
-      : mapsTarget?.address
-        ? `https://www.google.com/maps/search/${encodeURIComponent(mapsTarget.address)}`
-        : null;
-  const isAbsentHero =
-    sectionLabel === 'Ausente' ||
-    (!!shift && isAbsentLikeShift(shift as unknown as Record<string, unknown>));
 
-  const inner = (
-    <>
-      <View style={styles.topRow}>
-        <Text
-          style={[
-            styles.sectionLabel,
-            { color: isAbsentHero ? '#fde68a' : palette.heroSubtext },
-          ]}
-        >
-          {sectionLabel}
-        </Text>
-      </View>
-      {isDark && !isAbsentHero ? (
-        <View style={styles.darkStatusRow}>
-          <View style={[styles.statusDot, { backgroundColor: palette.success }]} />
-          <Text style={[styles.sectionLabel, { color: palette.success }]}>OPERATIVO</Text>
-        </View>
-      ) : null}
-      <Text style={[styles.headline, isCompact && styles.headlineCompact, { color: palette.heroText }]}>
-        {headline}
-      </Text>
-      <Text style={[styles.subline, { color: palette.heroSubtext }]}>{subline}</Text>
+  const isAbsentHero = sectionLabel === 'Ausente';
 
-      {shift && !shift.isFranco ? (
-        <View style={styles.chips}>
-          <CommandBadge>{placement.client}</CommandBadge>
-          <View style={[styles.chip, { backgroundColor: palette.chipBg }]}>
-            <Text style={[styles.chipText, { color: palette.chipText }]}>{placement.objective}</Text>
-          </View>
-          <View style={[styles.chip, { backgroundColor: palette.chipBg }]}>
-            <Text style={[styles.chipText, { color: palette.chipText }]}>{placement.position}</Text>
-          </View>
-        </View>
-      ) : null}
+  const timeRange =
+    timeRangeProp ??
+    (shift && !shift.isFranco ? formatHeroTimeRange(shift) : null) ??
+    (typeof subline === 'string' && /^\d{1,2}:\d{2}/.test(subline) ? subline.split('\n')[0] : null);
 
-      {isAbsentHero ? (
-        <View
-          style={[
-            styles.francoBox,
-            {
-              backgroundColor: isDark ? 'rgba(245,158,11,0.18)' : 'rgba(245,158,11,0.22)',
-              borderColor: '#f59e0b',
-            },
-          ]}
-        >
-          <Text style={[styles.francoText, { color: isDark ? '#fbbf24' : '#78350f' }]}>
-            Hoy estuviste ausente — presentá el certificado hasta las 24:00
-          </Text>
-        </View>
-      ) : null}
+  const model = buildHeroShiftCardModel({
+    sectionBase: sectionLabel || 'Turno actual',
+    isToday: isToday || headline === 'HOY',
+    timeRange,
+    placement,
+    ev,
+    mapsUrl,
+    isFranco: !!shift?.isFranco && !isAbsentHero,
+    isAbsent: isAbsentHero,
+    isRetention,
+    isConvocado,
+    empresaLabel,
+  });
 
-      {shift?.isFranco && !isAbsentHero ? (
-        <View
-          style={[
-            styles.francoBox,
-            {
-              backgroundColor: isDark ? 'rgba(16,185,129,0.15)' : 'rgba(16,185,129,0.22)',
-              borderColor: palette.success,
-            },
-          ]}
-        >
-          <Text style={[styles.francoText, { color: palette.successMuted }]}>Franco — día libre</Text>
-        </View>
-      ) : null}
-
-      {mapsUrl && !isAbsentHero ? (
-        <Text style={[styles.mapsLink, { color: palette.heroSubtext }]} onPress={() => Linking.openURL(mapsUrl)}>
-          Cómo llegar →
-        </Text>
-      ) : null}
-
-      {statusSlot}
-      {footer}
-    </>
-  );
-
-  if (isDark) {
-    return (
-      <View
-        style={[
-          styles.heroDark,
-          shadow.hero,
-          {
-            backgroundColor: palette.card,
-            borderColor: isAbsentHero
-              ? '#f59e0b'
-              : palette.heroBorderAccent ?? palette.cardBorder,
-          },
-        ]}
-      >
-        <View style={[styles.inner, isCompact && styles.innerCompact]}>{inner}</View>
-      </View>
-    );
-  }
+  const accent = resolveHeroAccentColor(accentColor, palette.primary);
+  const filete = fileteColor(model, accent);
 
   return (
-    <LinearGradient
-      colors={isAbsentHero ? ['#b45309', '#92400e'] : palette.heroGradient}
-      style={[styles.hero, shadow.hero]}
+    <View
+      style={[
+        styles.card,
+        shadow.hero,
+        {
+          backgroundColor: palette.card,
+          borderColor: isDark ? palette.cardBorder : '#eceef1',
+        },
+      ]}
     >
-      <View style={styles.orbTop} />
-      <View style={styles.orbBottom} />
-      <View style={[styles.inner, isCompact && styles.innerCompact]}>{inner}</View>
-    </LinearGradient>
+      <View style={[styles.filete, { backgroundColor: filete }]} />
+      <View style={[styles.inner, isCompact && styles.innerCompact]}>
+        <Text style={[styles.kicker, { color: palette.onSurfaceMuted }]}>{model.kicker}</Text>
+
+        {model.timeRange ? (
+          <Text
+            style={[
+              styles.time,
+              isCompact && styles.timeCompact,
+              { color: palette.onSurface },
+            ]}
+          >
+            {model.timeRange}
+          </Text>
+        ) : null}
+
+        {model.whereTitle ? (
+          <Text style={[styles.whereTitle, { color: palette.onSurface }]} numberOfLines={3}>
+            {model.whereTitle}
+          </Text>
+        ) : null}
+
+        {model.wherePlace ? (
+          <View style={styles.placeRow}>
+            <Ionicons name="location-outline" size={16} color={palette.onSurfaceMuted} />
+            <Text style={[styles.wherePlace, { color: palette.onSurfaceMuted }]} numberOfLines={2}>
+              {model.wherePlace}
+            </Text>
+          </View>
+        ) : null}
+
+        {model.note ? (
+          <Text style={[styles.note, { color: palette.onSurfaceMuted }]} numberOfLines={3}>
+            {model.note}
+          </Text>
+        ) : null}
+
+        {model.kind === 'ausente' ? (
+          <View style={[styles.hintBox, { backgroundColor: '#fff7ed', borderColor: '#fdba74' }]}>
+            <Text style={[styles.hintText, { color: '#9a3412' }]}>
+              Presentá el certificado a RRHH — tenés hasta las 24:00 de hoy.
+            </Text>
+          </View>
+        ) : null}
+
+        {model.kind === 'franco' ? (
+          <View
+            style={[
+              styles.hintBox,
+              {
+                backgroundColor: isDark ? 'rgba(16,185,129,0.12)' : 'rgba(16,185,129,0.1)',
+                borderColor: palette.success,
+              },
+            ]}
+          >
+            <Text style={[styles.hintText, { color: palette.success }]}>Franco — día libre</Text>
+          </View>
+        ) : null}
+
+        {statusSlot}
+        {footer}
+      </View>
+    </View>
   );
 }
 
 export function formatHeroTimeRange(shift: Shift): string {
-  return `${formatTimeAr(shift.startTime)} – ${formatTimeAr(shift.endTime)}`;
+  return `${formatTimeArLocal(shift.startTime)}–${formatTimeArLocal(shift.endTime)}`;
 }
 
-/** Fecha + rango horario (ej. 22/08/2026 · 08:00 – 16:00). */
+/** Fecha + rango horario (ej. 22/08/2026 · 08:00–16:00). */
 export function formatHeroDateTimeRange(shift: Shift): string {
-  return `${formatDateAr(shift.startTime)} · ${formatHeroTimeRange(shift)}`;
+  return `${formatDateArLocal(shift.startTime)} · ${formatHeroTimeRange(shift)}`;
 }
 
 /**
- * Título del hero: HOY, o fecha + hora de inicio del próximo turno.
+ * Título legacy (HOY / fecha). El kicker nuevo sale de `buildHeroShiftCardModel`.
  */
 export function formatHeroShiftHeadline(
   shift: Shift | undefined,
@@ -177,83 +220,81 @@ export function formatHeroShiftHeadline(
 ): string {
   if (opts.isToday) return 'HOY';
   if (!shift) return 'SIN TURNO';
-  const d = toDate(shift.startTime);
+  const d = toDateLocal(shift.startTime);
   if (!d) return 'SIN FECHA';
-  const weekday = d.toLocaleDateString('es-AR', { weekday: 'short' });
-  return `${weekday} ${formatDateAr(shift.startTime)} · ${formatTimeAr(shift.startTime)}`;
+  const weekday = d.toLocaleDateString('es-AR', { weekday: 'short', timeZone: TZ });
+  return `${weekday} ${formatDateArLocal(shift.startTime)} · ${formatTimeArLocal(shift.startTime)}`;
 }
 
 const styles = StyleSheet.create({
-  hero: {
-    borderRadius: radius.xl,
-    overflow: 'hidden',
-    position: 'relative',
-  },
-  heroDark: {
+  card: {
     borderRadius: radius.xl,
     borderWidth: 1,
     overflow: 'hidden',
-  },
-  orbTop: {
-    position: 'absolute',
-    width: 160,
-    height: 160,
-    borderRadius: 80,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    top: -48,
-    right: -48,
-  },
-  orbBottom: {
-    position: 'absolute',
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    bottom: -40,
-    left: -24,
-  },
-  inner: { padding: 24, gap: 8, zIndex: 1 },
-  innerCompact: { padding: 18 },
-  topRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+  },
+  filete: {
+    width: 5,
+  },
+  inner: {
+    flex: 1,
+    paddingVertical: 20,
+    paddingHorizontal: 18,
     gap: 8,
   },
-  darkStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
-  statusDot: { width: 8, height: 8, borderRadius: 4 },
-  sectionLabel: {
+  innerCompact: {
+    paddingVertical: 16,
+    paddingHorizontal: 14,
+  },
+  kicker: {
     ...typography.sectionLabel,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.7,
   },
-  headline: {
-    fontSize: 26,
+  time: {
+    fontSize: 30,
     fontWeight: '900',
-    letterSpacing: -0.4,
+    letterSpacing: -0.6,
+    marginTop: 2,
   },
-  headlineCompact: { fontSize: 22 },
-  subline: {
-    fontSize: 18,
-    fontWeight: '700',
+  timeCompact: {
+    fontSize: 26,
   },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
-  chip: {
+  whereTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    lineHeight: 22,
+    marginTop: 2,
+  },
+  placeRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+  },
+  wherePlace: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '600',
+    lineHeight: 20,
+  },
+  note: {
+    fontSize: 12,
+    fontWeight: '600',
+    lineHeight: 17,
+    marginTop: 2,
+  },
+  hintBox: {
+    marginTop: 4,
+    alignSelf: 'stretch',
     paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: radius.pill,
-  },
-  chipText: { fontSize: 12, fontWeight: '700' },
-  francoBox: {
-    marginTop: 8,
-    alignSelf: 'flex-start',
-    paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: radius.md,
     borderWidth: 1,
   },
-  francoText: { fontWeight: '800', fontSize: 14 },
-  mapsLink: {
-    marginTop: 8,
+  hintText: {
     fontWeight: '800',
     fontSize: 13,
+    lineHeight: 18,
   },
 });
