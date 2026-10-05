@@ -59,7 +59,9 @@ export async function notificarUrgenteN8n(input: {
 
 /** Se dispara al crear o al pasar a URGENTE un AT/BT. No reavisa en cada correccion del mismo envio. */
 export const onArcaEnvioUrgente = functions
-  .runWith({ timeoutSeconds: 30, memory: '256MB' })
+  .runWith(process.env.FUNCTIONS_EMULATOR === 'true'
+    ? { timeoutSeconds: 30, memory: '256MB' }
+    : { timeoutSeconds: 30, memory: '256MB', secrets: ['ARCA_ROBOT_KEY'] })
   .firestore.document('arca_envios/{envioId}')
   .onWrite(async (change, context) => {
     const before = change.before.exists ? (change.before.data() as Record<string, unknown>) : null;
