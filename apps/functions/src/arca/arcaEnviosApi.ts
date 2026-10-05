@@ -8,6 +8,8 @@
  *    GET  ?action=vencidos&minutos=N          → AT/BT urgentes sin confirmar hace más de N min (sin TXT)
  *    POST ?action=resultado                   → { envioId | loteId, estado, nroTransaccion?, constanciaUrl?, error? }
  *    GET  ?action=credencial&empresaId=       -> CUIT de ingreso, CUIT representado y clave (solo HTTPS, no se loguea)
+ *    GET  ?action=anulacion&envioId=          -> CUIL, fecha AAAAMMDD, nro del alta y cuitRepresentado
+ *    POST ?action=resultado                   -> anulación: { envioId, estado: ANULADO, acuse } o ERROR con fallosRobot
  *
  *  Link mágico (sin login, token de un solo uso):
  *    GET  ?action=link&token=                 → resumen + TXT
@@ -31,6 +33,7 @@ import {
 } from './arcaEnviosCore';
 import { propagarAltaEnTurnos } from './altaArcaDenorm';
 import { leerCredencialParaRobot } from './arcaClaveFiscalCallable';
+import { motivoLegible, planRespuestaAnulacion, planTrasError } from './anulacionRobot';
 
 const ARCA_ROBOT_KEY = defineSecret('ARCA_ROBOT_KEY');
 
@@ -66,6 +69,8 @@ export async function aplicarTransicion(
     nroTransaccion?: string;
     constanciaUrl?: string;
     error?: string;
+    acuse?: string;
+    fallosRobot?: number;
     actor: string;
     marcarTokenUsado?: boolean;
   },
@@ -83,7 +88,39 @@ export async function aplicarTransicion(
 
   const patch: Record<string, unknown> = { ...out.patch, updatedAt: FieldValue.serverTimestamp() };
   if (input.marcarTokenUsado) patch.tokenUsadoAt = FieldValue.serverTimestamp();
+  const trasError = input.estado === 'ERROR' && envio.tipo === 'ANULACION'
+    ? planTrasError(envio, Date.now(), Number(input.fallosRobot || 0))
+    : null;
+  if (trasError) patch.fallosRobot = trasError.fallosRobot;
   await ref.update(patch);
+
+  if (trasError) {
+    const hacia = transicionEnvio(
+      { ...envio, estado: 'ERROR', tipo: 'ANULACION', intentos: patch.intentos as never },
+      {
+        estado: trasError.estado,
+        origen: trasError.estado === 'MANUAL' ? 'MANUAL' : 'ROBOT',
+        actor: 'sistema',
+        error: trasError.motivo || null,
+      },
+    );
+    if (hacia.ok && hacia.patch) {
+      await ref.update({
+        ...hacia.patch,
+        fallosRobot: trasError.fallosRobot,
+        ...(trasError.estado === 'MANUAL' ? { manualMotivo: trasError.motivo, carga: 'MANUAL_WEB' } : {}),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      if (trasError.estado === 'MANUAL') {
+        await avisarAnulacionManual(String(envio.empresaId || ''), envioId, trasError.motivo);
+      }
+    }
+    await auditar(`ARCA_ENVIO_${trasError.estado}`, `Anulación ${envioId} tras error del robot`, {
+      empresaId: envio.empresaId || null,
+      envioId,
+    });
+    return { status: 200, body: { ok: true, estado: trasError.estado, motivo: trasError.motivo || null } };
+  }
 
   if (input.estado === 'CONFIRMADO') {
     const contratoIds = Array.isArray(envio.contratoIds) ? envio.contratoIds.map(String) : [];
@@ -212,6 +249,56 @@ export const arcaEnviosApi = onRequest(
           nowMs,
         });
         res.status(out.status).json(out.body);
+        return;
+      }
+
+      if (action === 'anulacion' && req.method === 'GET') {
+        const envioId = String(req.query.envioId || '').trim();
+        if (!envioId) {
+          res.status(400).json({ error: 'PARAMETROS' });
+          return;
+        }
+        const ref = db().collection(COLL).doc(envioId);
+        const snap = await ref.get();
+        if (!snap.exists) {
+          res.status(404).json({ error: 'NO_EXISTE' });
+          return;
+        }
+        const envio = snap.data() || {};
+        let nroAlta = String(envio.nroTransaccionAlta || '');
+        const contratoId = Array.isArray(envio.contratoIds) ? String(envio.contratoIds[0] || '') : '';
+        if (envio.tipo === 'ANULACION' && !nroAlta && contratoId) {
+          const hermanos = await db().collection(COLL).where('contratoIds', 'array-contains', contratoId).get();
+          const alta = hermanos.docs.find((d) => d.data().tipo === 'AT' && d.data().estado === 'CONFIRMADO');
+          nroAlta = String(alta?.data()?.nroTransaccion || '');
+        }
+        const empresaId = String(envio.empresaId || '');
+        const empresa = empresaId ? await db().collection('empresas').doc(empresaId).get() : null;
+        const meta = (empresa?.data()?.arcaRobotAcceso || {}) as { cuitRepresentado?: string };
+        const cuitRepresentado = String(meta.cuitRepresentado || empresa?.data()?.cuit || '');
+        const plan = planRespuestaAnulacion(
+          { ...envio, nroTransaccionAlta: nroAlta || envio.nroTransaccionAlta },
+          { nowMs, envioId, cuitRepresentado },
+        );
+        if (plan.patch) {
+          const via = plan.patch.estado === 'MANUAL'
+            ? transicionEnvio(envio as never, {
+              estado: 'MANUAL',
+              origen: 'MANUAL',
+              actor: 'sistema',
+              error: String(plan.patch.manualMotivo || ''),
+            })
+            : null;
+          await ref.update({
+            ...(via?.ok ? via.patch : {}),
+            ...plan.patch,
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+          if (plan.avisar) {
+            await avisarAnulacionManual(empresaId, envioId, String(plan.patch.manualMotivo || plan.body.motivo || ''));
+          }
+        }
+        res.status(plan.status).json(plan.body);
         return;
       }
 
@@ -361,6 +448,8 @@ export const arcaEnviosApi = onRequest(
           nroTransaccion: nroDeBody(body) || undefined,
           constanciaUrl: String(body.constanciaUrl || '').slice(0, 500) || undefined,
           error: String(body.error || '').slice(0, 500) || undefined,
+          acuse: String(body.acuse || '').slice(0, 120) || undefined,
+          fallosRobot: Number(body.fallosRobot || 0) || undefined,
           actor: 'n8n-local',
         };
         if (loteId && !envioId) {
@@ -509,15 +598,33 @@ async function resolverAvisosEmpresa(empresaId: string): Promise<Record<string, 
   return out;
 }
 
-async function enviarPushAviso(empresaId: string, tipo: string, linkUrl: string, sinEscala = false): Promise<number> {
+async function avisarAnulacionManual(empresaId: string, envioId: string, motivo: string): Promise<void> {
+  await auditar('ARCA_ANULACION_MANUAL', `Anulación ${envioId} pasó a manual: ${motivo}`, { empresaId, envioId });
+  try {
+    await enviarPushAviso(empresaId, 'ARCA_ALTA_PENDIENTE', '/admin/rrhh/eventuales/', false, {
+      titulo: 'Anulación ARCA manual',
+      body: `Requiere acción manual (${motivoLegible(motivo)}).`,
+    });
+  } catch (e) {
+    console.error('[arca anulacion] no se pudo avisar a RRHH', (e as Error)?.message || e);
+  }
+}
+
+async function enviarPushAviso(
+  empresaId: string,
+  tipo: string,
+  linkUrl: string,
+  sinEscala = false,
+  copy?: { titulo: string; body: string },
+): Promise<number> {
   if (!empresaId) return 0;
   const avisos = await resolverAvisosEmpresa(empresaId);
   const tokens = (avisos[tipo]?.pushes || []).map((p) => p.token).filter(Boolean);
   if (!tokens.length) return 0;
-  const titulo = tipo === 'ARCA_BAJA_PENDIENTE' ? 'Baja ARCA pendiente' : 'Alta ARCA pendiente';
-  const body = sinEscala
+  const titulo = copy?.titulo || (tipo === 'ARCA_BAJA_PENDIENTE' ? 'Baja ARCA pendiente' : 'Alta ARCA pendiente');
+  const body = copy?.body || (sinEscala
     ? 'RETRIBUCION_PENDIENTE: no se puede enviar hasta aprobar la escala salarial.'
-    : 'Hay un envío de carga masiva esperando.';
+    : 'Hay un envío de carga masiva esperando.');
   const result = await admin.messaging().sendEachForMulticast({
     tokens: tokens.slice(0, 500),
     data: { title: titulo, body, url: linkUrl, tipo },

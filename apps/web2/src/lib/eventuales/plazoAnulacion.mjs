@@ -19,7 +19,7 @@ export const CONSTANCIA_NO_SE_PRESENTO = 'NO_SE_PRESENTO';
 export const CODIGO_MOTIVO_BAJA_NO_PRESENTACION = '30';
 /** Observación interna del envío y del legajo. No sale en el TXT. */
 export const OBSERVACION_INTERNA_NO_PRESENTACION = 'Sin efectivización de tareas / No presentación al primer turno';
-/** La anulación de alta se hace a mano en la web de ARCA. El TXT por lote queda sin armar. */
+/** El TXT por lote no se arma: la anula el robot, o RRHH si quedó MANUAL. */
 export const CARGA_ANULACION_MANUAL = 'MANUAL_WEB';
 export const PASOS_ANULACION_MANUAL = [
   'Entrá a ARCA con la clave fiscal de la empresa.',
@@ -182,6 +182,25 @@ export function cuentaRegresivaAnulacion(venceMs, ahoraMs) {
   if (horas > 0 || dias > 0) partes.push(`${horas} h`);
   partes.push(`${String(min).padStart(2, '0')} min`);
   return { vencido: false, texto: partes.join(' '), ms };
+}
+
+export function motivoAnulacionLegible(codigo) {
+  if (codigo === 'ROBOT_FALLO_2') return 'el robot falló 2 veces';
+  if (codigo === 'MENOS_DE_2H') return 'faltan menos de 2 horas';
+  if (codigo === 'FALTAN_DATOS') return 'faltan CUIL, fecha o la empresa representada';
+  if (!codigo) return 'revisar en ARCA';
+  return String(codigo);
+}
+
+/** Texto de la pantalla ARCA pendientes. El acuse a mano queda solo en MANUAL. */
+export function textoEstadoAnulacion(envio) {
+  if (envio?.estado === 'ANULADO' || envio?.acuseAnulacion) {
+    return `Anulada (acuse ${envio.acuseAnulacion || '—'})`;
+  }
+  if (envio?.estado === 'MANUAL') {
+    return `Requiere acción manual (${motivoAnulacionLegible(envio.manualMotivo)})`;
+  }
+  return 'Anulación automática en curso';
 }
 
 export function acuseAnulacionValido(acuse) {

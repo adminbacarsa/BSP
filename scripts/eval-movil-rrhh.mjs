@@ -184,7 +184,7 @@ const anulaHtml = renderToStaticMarkup(createElement(EventualesScreens, {
     venceAnulacionMs: Date.parse('2026-10-06T00:00:00-03:00'),
   }],
 }));
-check('anulación es tarea manual con datos, plazo y acuse', anulaHtml.includes('data-anulacion-manual="1"') && anulaHtml.includes('data-anula-cuil="1"') && anulaHtml.includes('20111111112') && anulaHtml.includes('20261005') && anulaHtml.includes('778899') && anulaHtml.includes('Anular Registro') && anulaHtml.includes('data-anula-plazo="abierto"') && anulaHtml.includes('Registrar acuse') && !anulaHtml.includes('Confirmar en ARCA'));
+check('anulación pendiente dice automática y muestra los datos', anulaHtml.includes('Anulación automática en curso') && anulaHtml.includes('data-anula-cuil="1"') && anulaHtml.includes('20111111112') && anulaHtml.includes('20261005') && anulaHtml.includes('778899') && anulaHtml.includes('data-anula-plazo="abierto"') && !anulaHtml.includes('Registrar acuse') && !anulaHtml.includes('Confirmar en ARCA') && !anulaHtml.includes('se hace a mano'));
 
 const bolsaPalabras = renderToStaticMarkup(createElement(EventualesScreens, {
   ...evProps,

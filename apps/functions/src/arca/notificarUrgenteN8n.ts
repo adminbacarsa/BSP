@@ -1,10 +1,12 @@
 /**
- * Avisa al n8n local cuando un AT/BT pasa a canal URGENTE.
+ * Avisa al n8n local cuando un AT/BT pasa a canal URGENTE,
+ * y cuando una ANULACION entra en PENDIENTE (el flujo llama al robot en modo anular).
  * La URL es ARCA_N8N_URGENTE_URL (el alias publico: Cloud Functions no llega a la LAN).
  * Sin esa variable no hace nada: el lote de las 18:00 y el respaldo de n8n Cloud siguen.
  * La clave fiscal no sale de aca.
  */
 import * as functions from 'firebase-functions/v1';
+import { debeAvisarAnulacion } from './anulacionRobot';
 
 export function debeAvisarUrgente(before: Record<string, unknown> | null, after: Record<string, unknown> | null): boolean {
   if (!after) return false;
@@ -29,7 +31,7 @@ export async function notificarUrgenteN8n(input: {
   const url = String(process.env.ARCA_N8N_URGENTE_URL || '').trim();
   const ids = (input.envioIds || []).map((id) => String(id || '').trim()).filter(Boolean);
   if (!url || !ids.length) return 'omitido';
-  if (input.tipo !== 'AT' && input.tipo !== 'BT') return 'omitido';
+  if (input.tipo !== 'AT' && input.tipo !== 'BT' && input.tipo !== 'ANULACION') return 'omitido';
   const fetchImpl = input.fetchImpl || fetch;
   try {
     const res = await fetchImpl(url, {
@@ -66,10 +68,12 @@ export const onArcaEnvioUrgente = functions
   .onWrite(async (change, context) => {
     const before = change.before.exists ? (change.before.data() as Record<string, unknown>) : null;
     const after = change.after.exists ? (change.after.data() as Record<string, unknown>) : null;
-    if (!debeAvisarUrgente(before, after) || !after) return;
+    if (!after) return;
+    const anular = debeAvisarAnulacion(before, after);
+    if (!debeAvisarUrgente(before, after) && !anular) return;
     await notificarUrgenteN8n({
       empresaId: String(after.empresaId || ''),
-      tipo: String(after.tipo || ''),
+      tipo: anular ? 'ANULACION' : String(after.tipo || ''),
       envioIds: [String(context.params.envioId || '')],
     });
   });

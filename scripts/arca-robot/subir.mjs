@@ -179,6 +179,18 @@ async function subirReal({ archivo, acceso, loteId, intento }) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  const modo = String(args.modo || '');
+  if (modo === 'anular' || modo === 'explorar') {
+    const { correrAnulacion } = await import('./anular.mjs');
+    await correrAnulacion({
+      args,
+      terminar,
+      resolverAcceso,
+      login,
+      elegirRepresentado,
+    });
+    return;
+  }
   const loteId = args.lote || '';
   const envioId = args.envio || '';
   const tipo = String(args.tipo || '').toUpperCase();
