@@ -117,6 +117,7 @@ export default function EventualesPage() {
   const [topeEmpresa, setTopeEmpresa] = useState<{ tope: number; periodo: string; margen: number }>({ tope: 50, periodo: 'CALENDARIO', margen: 2 });
   const [margenDraft, setMargenDraft] = useState('2');
   const [parametrosAbierto, setParametrosAbierto] = useState(false);
+  const [clavePendiente, setClavePendiente] = useState(false);
   const [horasTick, setHorasTick] = useState(0);
   const [guardandoTope, setGuardandoTope] = useState(false);
   const [topeDraft, setTopeDraft] = useState('50');
@@ -183,9 +184,13 @@ export default function EventualesPage() {
         empresaId: empresaActivaId,
         valores: arcaDraft,
       });
+      setHorasTick((n) => n + 1);
+      if (clavePendiente) {
+        toast.warning('Parámetros guardados. La clave fiscal escrita todavía no se guardó: usá «Guardar credenciales».');
+        return;
+      }
       toast.success('Parámetros guardados.');
       setParametrosAbierto(false);
-      setHorasTick((n) => n + 1);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'No se pudo guardar.');
     } finally {
@@ -717,13 +722,18 @@ export default function EventualesPage() {
                   </div>
                 )}
                 {isSuperAdmin && (
-                  <ArcaClaveFiscalPanel empresaId={empresaActivaId || ''} cuitEmpresa={empresaActiva?.cuit || ''} />
+                  <ArcaClaveFiscalPanel
+                    empresaId={empresaActivaId || ''}
+                    nombreEmpresa={nombreEmpresaActiva}
+                    cuitEmpresa={empresaActiva?.cuit || ''}
+                    onClavePendiente={setClavePendiente}
+                  />
                 )}
               </section>
 
               <div className="mt-4 flex justify-end gap-2">
-                <button type="button" onClick={() => setParametrosAbierto(false)} className="rounded-xl px-3 py-2 text-sm text-slate-500">Cancelar</button>
-                <button type="button" disabled={guardandoTope || !arcaDraft} onClick={() => void guardarTopeEmpresa()} className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{guardandoTope ? 'Guardando…' : 'Guardar'}</button>
+                <button type="button" onClick={() => { if (clavePendiente && !window.confirm('Hay una clave fiscal escrita sin guardar. ¿Cerrar igual?')) return; setParametrosAbierto(false); }} className="rounded-xl px-3 py-2 text-sm text-slate-500">Cancelar</button>
+                <button type="button" disabled={guardandoTope || !arcaDraft} onClick={() => void guardarTopeEmpresa()} className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{guardandoTope ? 'Guardando…' : 'Guardar parámetros'}</button>
               </div>
             </div>
           </div>

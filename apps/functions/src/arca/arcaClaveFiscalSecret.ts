@@ -13,10 +13,9 @@ function parentSecreto(secretId: string): string {
   return `projects/${proyecto()}/secrets/${secretId}`;
 }
 
-
 function versionViva(estado: unknown): boolean {
-  const texto = String(estado ?? "");
-  return texto === "ENABLED" || texto === "DISABLED" || texto === "1" || texto === "2";
+  const texto = String(estado ?? '');
+  return texto === 'ENABLED' || texto === 'DISABLED' || texto === '1' || texto === '2';
 }
 
 function versionCorta(nombre: string): string {
@@ -48,13 +47,20 @@ export function crearSecretManagerReal(): ClaveStore {
       const versionName = String(creada.name || '');
       const [lista] = await client.listSecretVersions({ parent: name });
       for (const item of lista) {
-        const estado = String(item.state || '');
         if (!item.name || item.name === versionName) continue;
-        if (versionViva(estado)) {
+        if (versionViva(item.state)) {
           await client.destroySecretVersion({ name: item.name });
         }
       }
       return { version: versionCorta(versionName) };
+    },
+    async leer(secretId) {
+      const [acceso] = await client.accessSecretVersion({
+        name: `${parentSecreto(secretId)}/versions/latest`,
+      });
+      const data = acceso.payload?.data;
+      if (!data) return '';
+      return Buffer.from(data).toString('utf8');
     },
     async destruir(secretId) {
       const name = parentSecreto(secretId);
@@ -66,22 +72,11 @@ export function crearSecretManagerReal(): ClaveStore {
         throw e;
       }
       for (const item of lista) {
-        const estado = String(item.state || '');
         if (!item.name) continue;
-        if (versionViva(estado)) {
+        if (versionViva(item.state)) {
           await client.destroySecretVersion({ name: item.name });
         }
       }
     },
   };
-}
-
-export async function leerClaveSecreta(secretId: string): Promise<string> {
-  const client = new SecretManagerServiceClient();
-  const [acceso] = await client.accessSecretVersion({
-    name: `${parentSecreto(secretId)}/versions/latest`,
-  });
-  const data = acceso.payload?.data;
-  if (!data) return '';
-  return Buffer.from(data).toString('utf8');
 }

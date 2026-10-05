@@ -9,11 +9,25 @@ import {
   ejecutarClaveFiscal,
   manejarCredencial,
   metaPublica,
-  secretIdDe,
+  secretRefDeMeta,
+  soloDigitosCuit,
+  type ClaveStore,
+  type EmpresaClave,
   type MetaClave,
   type PortsClave,
 } from './arcaClaveFiscal';
-import { crearSecretManagerReal, leerClaveSecreta } from './arcaClaveFiscalSecret';
+import { crearSecretManagerReal } from './arcaClaveFiscalSecret';
+
+let storeDePrueba: ClaveStore | null = null;
+
+/** Solo tests (emulador): reemplaza Secret Manager por un store en memoria. */
+export function usarClaveStoreDePrueba(store: ClaveStore | null): void {
+  storeDePrueba = store;
+}
+
+function storeActual(): ClaveStore {
+  return storeDePrueba || crearSecretManagerReal();
+}
 
 function db() {
   return admin.firestore();
@@ -38,21 +52,39 @@ function metaDe(data: FirebaseFirestore.DocumentData | undefined): MetaClave | n
   return {
     cuitLogin: String(vista.cuitLogin || ''),
     cuitRepresentado: String(vista.cuitRepresentado || ''),
+    secretRef: String(vista.secretRef || ''),
+    secretVersion: String(vista.secretVersion || ''),
     configuradoAt: String(vista.configuradoAt || ''),
     configuradoPor: String(vista.configuradoPor || ''),
-    secretVersion: String(vista.secretVersion || ''),
   };
+}
+
+function empresaActiva(data: FirebaseFirestore.DocumentData | undefined): boolean {
+  return data?.active !== false && data?.status !== 'INACTIVE';
+}
+
+async function listarEmpresas(): Promise<EmpresaClave[]> {
+  const snap = await db().collection('empresas').get();
+  return snap.docs
+    .filter((d) => empresaActiva(d.data()))
+    .map((d) => {
+      const data = d.data();
+      return {
+        empresaId: d.id,
+        nombre: String(data.name || data.nombre || data.razonSocial || d.id),
+        cuit: soloDigitosCuit(data.cuit),
+        meta: metaDe(data),
+      };
+    })
+    .sort((a, b) => a.nombre.localeCompare(b.nombre));
 }
 
 function portsReales(): PortsClave {
   return {
     lookupRole: rolDe,
-    store: crearSecretManagerReal(),
+    store: storeActual(),
     meta: {
-      async leer(empresaId) {
-        const snap = await db().collection('empresas').doc(empresaId).get();
-        return metaDe(snap.data());
-      },
+      listar: listarEmpresas,
       async guardar(empresaId, meta) {
         await db().collection('empresas').doc(empresaId).set({ arcaRobotAcceso: meta }, { merge: true });
       },
@@ -119,7 +151,7 @@ export async function leerCredencialParaRobot(input: {
     empresaId,
     nowMs: input.nowMs,
     meta,
-    leerClave: async () => leerClaveSecreta(secretIdDe(empresaId)),
+    leerClave: async () => storeActual().leer(secretRefDeMeta(meta, empresaId)),
   });
   if (out.audit) {
     await db().collection('audit_logs').add({

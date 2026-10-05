@@ -1,6 +1,6 @@
 # ARCA eventuales — flujos n8n
 
-Tres workflows para importar. No traen claves. La clave fiscal se carga en COSP (Eventuales → Parámetros → ARCA, SuperAdmin) y queda en Secret Manager. El JSON local es solo respaldo.
+Tres workflows para importar. No traen claves. La clave fiscal se carga en COSP (Eventuales → Parámetros → ARCA → «Acceso a ARCA del robot», SuperAdmin, botón **Guardar credenciales**) y queda en Secret Manager, un secreto por CUIT de ingreso que varias empresas pueden compartir. El JSON local es solo respaldo.
 
 | Archivo | Dónde | Qué hace |
 |---|---|---|

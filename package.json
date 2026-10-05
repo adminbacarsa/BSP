@@ -36,6 +36,7 @@
     "check:functions-standalone": "node scripts/check-functions-standalone.mjs",
     "eval:arca-n8n": "node --experimental-strip-types scripts/eval-arca-n8n.mjs",
     "eval:arca-clave": "node --experimental-strip-types --import ./scripts/register-arca-ts.mjs scripts/eval-arca-clave.mjs",
+    "eval:arca-clave-emulator": "firebase emulators:exec --only firestore --config firebase.e2e-p2.json --project demo-ev-clave \"node scripts/eval-arca-clave-emulator.mjs\"",
     "sync:eventuales-functions": "node scripts/sync-eventuales-to-functions.mjs",
     "start": "npm run serve:final",
     "test": "echo \"Error: Los tests se ejecutan en las subcarpetas: npm run test --workspace=functions\" && exit 1",
