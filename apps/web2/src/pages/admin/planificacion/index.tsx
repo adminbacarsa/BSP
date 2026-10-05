@@ -266,7 +266,16 @@ import {
     templateDayForRemaining,
     type ProposedGuardShift,
 } from '@/lib/planificacion/vacancyCoverageWizard';
-import { classifyRestViolation, stampShiftAuthMarks, type ShiftAuthMark } from '@/lib/planificacion/supervisorAuth';
+import {
+    clasificarPedidosPin,
+    classifyRestViolation,
+    periodoTopeDeFecha,
+    stampShiftAuthMarks,
+    textoAvisoTope,
+    topeRequierePin,
+    type ShiftAuthMark,
+    type TopeAutorizacion,
+} from '@/lib/planificacion/supervisorAuth';
 import { VacancyCoberturaAcciones, VacancyCoberturaLista } from '@/components/planificacion/VacancyCoberturaDia';
 import { alignVacancyGapBand } from '@/lib/planificacion/vacancySplitBands';
 import {
@@ -1364,6 +1373,7 @@ function PlanificacionDesktop() {
         auditAction?: string;
         auditDetails?: string;
         requireReason?: boolean;
+        topeAltas?: { empleadoId: string; periodo: string; horas: number; nombre: string }[];
     }>({ pendingFn: null, employees: [] });
     const [authPin, setAuthPin] = useState('');
     const [authReason, setAuthReason] = useState('');
@@ -1579,6 +1589,8 @@ function PlanificacionDesktop() {
     // IDs autorizados por supervisor para superar 200h (ref = valor síncrono para el engine)
     const [authorizedOver200Ids, setAuthorizedOver200Ids] = useState<Set<string>>(new Set());
     const authorizedOver200IdsRef = React.useRef<Set<string>>(new Set());
+    const [topeGrants, setTopeGrants] = useState<Record<string, TopeAutorizacion>>({});
+    const authActorRef = React.useRef('');
     // Slots de apertura del último mes generado — permite continuar el ciclo al generar el mes siguiente sin publicar.
     const lastGenOpeningRef = React.useRef<{
         year: number; month: number; objectiveId: string;
@@ -4858,11 +4870,36 @@ function PlanificacionDesktop() {
         fetchSLA();
     }, [selectedClient, selectedObjective, currentDate, empresaId, migracionCompleta, scopeEmpresa, clients, tenantClientIds, slaIdToObjId, dataRefreshNonce]);
 
-    // Resetear autorización 200h al cambiar de objetivo o mes
+    const periodoPlan = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
+
     useEffect(() => {
+        setTopeGrants({});
         setAuthorizedOver200Ids(new Set());
         authorizedOver200IdsRef.current = new Set();
-    }, [selectedObjective, currentDate.getFullYear(), currentDate.getMonth()]);
+        if (!empresaId) return;
+        const ref = doc(db, 'tope_autorizaciones', `${empresaId}_${periodoPlan}`);
+        return onSnapshot(ref, (snap) => {
+            const raw = snap.exists() ? ((snap.data()?.guardias || {}) as Record<string, any>) : {};
+            const next: Record<string, TopeAutorizacion> = {};
+            const ids = new Set<string>();
+            for (const [empId, g] of Object.entries(raw)) {
+                const grant: TopeAutorizacion = {
+                    empleadoId: empId,
+                    periodo: String(g?.periodo || periodoPlan),
+                    autorizadoPor: String(g?.autorizadoPor || ''),
+                    motivo: String(g?.motivo || ''),
+                    fecha: String(g?.fecha || ''),
+                    horasAlAutorizar: Number(g?.horasAlAutorizar) || 0,
+                    status: g?.status === 'REVOKED' ? 'REVOKED' : 'ACTIVE',
+                };
+                next[empId] = grant;
+                if (!topeRequierePin(grant, periodoPlan)) ids.add(empId);
+            }
+            setTopeGrants(next);
+            authorizedOver200IdsRef.current = ids;
+            setAuthorizedOver200Ids(ids);
+        }, () => {});
+    }, [empresaId, periodoPlan]);
 
     // Resetear guard de auto-rotación al cambiar objetivo o mes para que vuelva a pre-cargar
     useEffect(() => {
@@ -6080,6 +6117,114 @@ function PlanificacionDesktop() {
         return { ok: true, name: `${u.firstName} ${u.lastName}` };
     };
 
+    const guardarTopeAutorizaciones = async (
+        altas: { empleadoId: string; periodo: string; horas: number; nombre: string }[],
+        motivo: string,
+        actor: string,
+    ) => {
+        const limpio = motivo.trim();
+        if (!empresaId || !altas.length || !limpio) return;
+        const byPeriodo = new Map<string, typeof altas>();
+        for (const alta of altas) {
+            if (!alta.periodo || !alta.empleadoId) continue;
+            const list = byPeriodo.get(alta.periodo) || [];
+            list.push(alta);
+            byPeriodo.set(alta.periodo, list);
+        }
+        const now = new Date().toISOString();
+        const uid = getAuth().currentUser?.uid || null;
+        for (const [periodo, list] of byPeriodo) {
+            const ref = doc(db, 'tope_autorizaciones', `${empresaId}_${periodo}`);
+            const local: Record<string, TopeAutorizacion> = {};
+            const guardias: Record<string, unknown> = {};
+            const patch: Record<string, unknown> = { empresaId, periodo };
+            for (const alta of list) {
+                const row: TopeAutorizacion = {
+                    empleadoId: alta.empleadoId,
+                    periodo,
+                    autorizadoPor: actor,
+                    motivo: limpio,
+                    fecha: now,
+                    horasAlAutorizar: alta.horas,
+                    status: 'ACTIVE',
+                };
+                const stored = { ...row, autorizadoPorUid: uid };
+                guardias[alta.empleadoId] = stored;
+                patch[`guardias.${alta.empleadoId}`] = stored;
+                local[alta.empleadoId] = row;
+            }
+            const snap = await getDoc(ref);
+            if (snap.exists()) await updateDoc(ref, patch);
+            else await setDoc(ref, { empresaId, periodo, guardias });
+            if (periodo === periodoPlan) {
+                setTopeGrants((prev) => ({ ...prev, ...local }));
+                setAuthorizedOver200Ids((prev) => {
+                    const next = new Set(prev);
+                    for (const id of Object.keys(local)) next.add(id);
+                    authorizedOver200IdsRef.current = next;
+                    return next;
+                });
+            }
+            await addDoc(collection(db, 'audit_logs'), stampEmpresaId({
+                timestamp: serverTimestamp(),
+                action: 'AUTORIZACION_TOPE_MES',
+                module: 'PLANIFICADOR',
+                actorName: actor,
+                actorUid: uid,
+                details: list.map((a) => `${a.nombre} · ${periodo} · ${a.horas}h — motivo: ${limpio} — autorizó: ${actor}`).join(' | '),
+                objectiveId: selectedObjective || undefined,
+                objectiveName: selectedObjective ? getObjectiveName(selectedObjective) : undefined,
+            }, empresaId));
+        }
+    };
+
+    const revocarTopeMes = (emp: { id: string; name?: string }) => {
+        const grant = topeGrants[emp.id];
+        if (!empresaId || topeRequierePin(grant, periodoPlan) || !grant) return;
+        const nombre = emp.name || emp.id;
+        const aplicar = async (actor: string) => {
+            const ref = doc(db, 'tope_autorizaciones', `${empresaId}_${periodoPlan}`);
+            const at = new Date().toISOString();
+            await updateDoc(ref, {
+                [`guardias.${emp.id}.status`]: 'REVOKED',
+                [`guardias.${emp.id}.revocadoPor`]: actor,
+                [`guardias.${emp.id}.revocadoAt`]: at,
+            });
+            await addDoc(collection(db, 'audit_logs'), stampEmpresaId({
+                timestamp: serverTimestamp(),
+                action: 'AUTORIZACION_TOPE_REVOCADA',
+                module: 'PLANIFICADOR',
+                actorName: actor,
+                actorUid: getAuth().currentUser?.uid || null,
+                details: `Revocó el tope 200 h de ${nombre} en ${periodoPlan}. Había autorizado ${grant.autorizadoPor} (${grant.motivo}, ${grant.horasAlAutorizar} h).`,
+                objectiveId: selectedObjective || undefined,
+                objectiveName: selectedObjective ? getObjectiveName(selectedObjective) : undefined,
+            }, empresaId));
+            setTopeGrants((prev) => ({ ...prev, [emp.id]: { ...grant, status: 'REVOKED' } }));
+            setAuthorizedOver200Ids((prev) => {
+                const next = new Set(prev);
+                next.delete(emp.id);
+                authorizedOver200IdsRef.current = next;
+                return next;
+            });
+            toast.success('Autorización de tope revocada.');
+        };
+        if (isSuperAdmin) {
+            if (!confirm(`¿Revocar la autorización de 200 h de ${nombre} en este mes?`)) return;
+            void aplicar(activeActorName).catch(() => toast.error('No se pudo revocar la autorización.'));
+            return;
+        }
+        setAuthModal({
+            pendingFn: async () => { await aplicar(authActorRef.current || 'Supervisor'); },
+            employees: [{ name: nombre, hours: grant.horasAlAutorizar, detail: 'revocar tope del mes' }],
+            description: <>Revocar la autorización de tope 200 h de <strong>{nombre}</strong> en este mes. Hace falta PIN de supervisor.</>,
+            requireReason: false,
+        });
+        setAuthPin('');
+        setAuthReason('');
+        setAuthError('');
+    };
+
     const submitSupervisorAuth = async () => {
         if (authPin.length !== 4 || authLoading || !authModal.pendingFn) return;
         setAuthLoading(true);
@@ -6096,8 +6241,17 @@ function PlanificacionDesktop() {
             return;
         }
         authReasonRef.current = authReason.trim();
+        authActorRef.current = result.name;
         try {
             await authModal.pendingFn();
+            if (authModal.topeAltas?.length) {
+                try {
+                    await guardarTopeAutorizaciones(authModal.topeAltas, authReasonRef.current, result.name);
+                } catch (e) {
+                    console.error(e);
+                    toast.error('La asignación se autorizó, pero no se pudo guardar el tope del mes.');
+                }
+            }
             if (authModal.isSaveFlow) {
                 const newAuthorized = new Set(authorizedOver200IdsRef.current);
                 authModal.employees.forEach(e => { if ((e as any).empId) newAuthorized.add((e as any).empId); });
@@ -6172,8 +6326,19 @@ function PlanificacionDesktop() {
         }
         const descanso = items.filter((i) => i.kind === 'DESCANSO');
         const tope = items.filter((i) => i.kind === 'TOPE');
+        const altas = new Map<string, { empleadoId: string; periodo: string; horas: number; nombre: string }>();
+        for (const item of tope) {
+            const periodo = periodoTopeDeFecha(item.dateStr);
+            const key = `${item.employeeId}|${periodo}`;
+            const horas = item.monthHours || 0;
+            const prev = altas.get(key);
+            if (!prev || horas > prev.horas) {
+                altas.set(key, { empleadoId: item.employeeId, periodo, horas, nombre: item.name });
+            }
+        }
         setAuthModal({
             pendingFn: async () => { await onAuthorized(); },
+            topeAltas: [...altas.values()],
             employees: items.map((i) => ({
                 name: i.name,
                 hours: i.kind === 'TOPE' ? (i.monthHours || 0) : Math.round((i.restHours || 0) * 10) / 10,
@@ -6205,11 +6370,11 @@ function PlanificacionDesktop() {
             : `¿Guardar ${_rotCount} turno${_rotCount !== 1 ? 's' : ''} de ciclo?`;
         if (!confirm(_confirmMsg)) return;
 
-        // Verificar si algún empleado superaría las 200h (saltar los ya autorizados esta sesión)
+        // Verificar si algún empleado superaría las 200h (saltar los ya autorizados este mes)
         const overCap: { empId: string; name: string; hours: number }[] = [];
         Object.keys(pendingChanges).forEach(key => {
             const empId = key.split('_')[0];
-            if (authorizedOver200Ids.has(empId)) return;
+            if (authorizedOver200Ids.has(empId) || !topeRequierePin(topeGrants[empId], periodoPlan)) return;
             const hours = empMonthlyHours[empId] || 0;
             if (hours > planningLimits.monthly) {
                 const empName = displayedEmployees.find((e: any) => e.id === empId)?.name || empId;
@@ -6905,7 +7070,19 @@ function PlanificacionDesktop() {
         };
 
         if (overCap.length > 0) {
-            setAuthModal({ pendingFn: doSave, employees: overCap, operatorName: activeActorName || operatorName, isSaveFlow: true, requireReason: true });
+            setAuthModal({
+                pendingFn: doSave,
+                employees: overCap,
+                operatorName: activeActorName || operatorName,
+                isSaveFlow: true,
+                requireReason: true,
+                topeAltas: overCap.map((e) => ({
+                    empleadoId: e.empId,
+                    periodo: periodoPlan,
+                    horas: e.hours,
+                    nombre: e.name,
+                })),
+            });
             setAuthPin('');
             setAuthError('');
             return;
@@ -8311,7 +8488,20 @@ function PlanificacionDesktop() {
                     return;
                 }
                 if (warning.startsWith('ALERTA MENSUAL')) {
-                    applyToPending({ ...shiftConfig, positionName, isFrancoTrabajado: isFT, isFrancoCompensatorio: false, isExtended: false, isEarlyStart: false, plannedNovedad: modifiers.plannedNovedad });
+                    const base = { ...shiftConfig, positionName, isFrancoTrabajado: isFT, isFrancoCompensatorio: false, isExtended: false, isEarlyStart: false, plannedNovedad: modifiers.plannedNovedad };
+                    const grant = topeGrants[selectedCell.empId];
+                    const periodo = periodoTopeDeFecha(selectedCell.dateStr);
+                    if (grant && !topeRequierePin(grant, periodo)) {
+                        applyToPending({
+                            ...base,
+                            topeExcedido: true,
+                            horasMes: grant.horasAlAutorizar,
+                            autorizacionMotivo: grant.motivo,
+                        });
+                        toast.message(textoAvisoTope(grant), { duration: 5000 });
+                        return;
+                    }
+                    applyToPending(base);
                     const empName = employees.find((e: any) => e.id === selectedCell.empId)?.name || 'Empleado';
                     toast.warning(`${empName} supera ${planningLimits.monthly}h. El PIN se pedirá al guardar.`, { duration: 2000 });
                     return;
@@ -10632,6 +10822,8 @@ function PlanificacionDesktop() {
                                                 : displayHours > 0   ? 'text-slate-500 dark:text-slate-300'
                                                 : retDays > 0          ? 'text-amber-800 font-bold'
                                                 : 'text-slate-400 dark:text-slate-500';
+                                            const grantTope = topeGrants[emp.id];
+                                            const topeAviso = grantTope && !topeRequierePin(grantTope, periodoPlan) ? textoAvisoTope(grantTope) : '';
                                             return (
                                                 <div className="flex items-center justify-between w-full">
                                                     <div className="flex items-center gap-1 min-w-0 overflow-hidden">
@@ -10655,14 +10847,24 @@ function PlanificacionDesktop() {
                                                         {/* Horas mensuales planificadas (facturables) + días RET sobrantes */}
                                                         <span
                                                             title={hoursMode === 'cct'
-                                                                ? `${formatLegajoHours(cctHours)}h en el ciclo CCT actual (26 mes anterior → 25 de este mes). Tope 200h.\n${formatLegajoHours(monthHours)}h en el mes calendario.${retDays > 0 ? `\n${retDays} días RET (0 h planificadas; sobrante disponible en otro objetivo).` : ''}`
-                                                                : `${formatLegajoHours(monthHours)}h de plan publicado de este legajo (jornada del puesto, incluye FT). Los turnos sin código no tienen fila.\n${formatLegajoHours(cctHours)}h en el ciclo CCT actual (tope 200h).${retDays > 0 ? `\n${retDays} días RET (0 h planificadas; sobrante disponible en otro objetivo).` : ''}`}
+                                                                ? `${formatLegajoHours(cctHours)}h en el ciclo CCT actual (26 mes anterior → 25 de este mes). Tope 200h.\n${formatLegajoHours(monthHours)}h en el mes calendario.${retDays > 0 ? `\n${retDays} días RET (0 h planificadas; sobrante disponible en otro objetivo).` : ''}${topeAviso ? `\n${topeAviso}` : ''}`
+                                                                : `${formatLegajoHours(monthHours)}h de plan publicado de este legajo (jornada del puesto, incluye FT). Los turnos sin código no tienen fila.\n${formatLegajoHours(cctHours)}h en el ciclo CCT actual (tope 200h).${retDays > 0 ? `\n${retDays} días RET (0 h planificadas; sobrante disponible en otro objetivo).` : ''}${topeAviso ? `\n${topeAviso}` : ''}`}
                                                             className={`shrink-0 text-[8px] ${hoursColor}`}
                                                         >
                                                             {formatLegajoHours(displayHours)}h
                                                             {retDays > 0 && displayHours === 0 && <span className="ml-0.5 text-[7px] text-amber-700 font-bold" title={`${retDays} días RET (0 h planificadas)`}>+{retDays}RET</span>}
                                                             {hoursMode === 'cct' && <span className="ml-0.5 text-[7px] text-indigo-500 font-black">CCT</span>}
                                                         </span>
+                                                        {topeAviso ? (
+                                                            <button
+                                                                type="button"
+                                                                title={`${topeAviso}. Revocar`}
+                                                                onClick={(e) => { e.stopPropagation(); e.preventDefault(); revocarTopeMes(emp); }}
+                                                                className="shrink-0 text-[7px] font-black text-emerald-700 underline"
+                                                            >
+                                                                200 OK
+                                                            </button>
+                                                        ) : null}
                                                         {/* Distancia al objetivo — solo si hay coordenadas */}
                                                         {distKm !== null ? (
                                                             <span title="Distancia al objetivo" className={`shrink-0 flex items-center gap-0.5 text-[8px] ${distKm >= 9 ? 'text-orange-500' : distKm >= 3 ? 'text-amber-400' : 'text-slate-400 dark:text-slate-400'}`}>
@@ -15313,16 +15515,28 @@ function PlanificacionDesktop() {
                         for (const [day, cov] of Object.entries(incoming)) {
                             const guard = guardOnDay(day, cov);
                             for (const msg of guard.blocked) blocked.push(`${formatShortDay(day)}: ${msg}`);
-                            for (const auth of guard.authorizations) {
-                                const prev = vacancyAuthMarks[`${auth.employeeId}_${auth.dateStr}`];
-                                if (auth.kind === 'TOPE' && prev?.topeExcedido) continue;
-                                if (auth.kind === 'DESCANSO' && prev?.descansoReducido) continue;
-                                auths.push(auth);
-                            }
+                            for (const auth of guard.authorizations) auths.push(auth);
                         }
                         if (blocked.length) {
                             toast.error(blocked.slice(0, 4).join(' · '), { duration: 9000 });
                             return;
+                        }
+                        const clasificado = clasificarPedidosPin(auths, (empId, periodo) => {
+                            const grant = topeGrants[empId];
+                            return grant && grant.periodo === periodo ? grant : undefined;
+                        });
+                        for (const aviso of clasificado.avisos) toast.message(aviso, { duration: 6000 });
+                        const grantedMarks: Record<string, ShiftAuthMark> = {};
+                        for (const auth of auths) {
+                            if (auth.kind !== 'TOPE') continue;
+                            const periodo = periodoTopeDeFecha(auth.dateStr);
+                            const grant = topeGrants[auth.employeeId];
+                            if (!grant || topeRequierePin(grant, periodo)) continue;
+                            grantedMarks[`${auth.employeeId}_${auth.dateStr}`] = {
+                                topeExcedido: true,
+                                horasMes: grant.horasAlAutorizar,
+                                autorizacionMotivo: grant.motivo,
+                            };
                         }
                         const francoConflicts: FrancoCoverageConflict[] = [];
                         for (const [day, cov] of Object.entries(incoming)) {
@@ -15354,11 +15568,11 @@ function PlanificacionDesktop() {
                             if (francoConflicts.length > 0) setVacancyFrancoAuthApproved(true);
                             commit(extraMarks);
                         };
-                        if (auths.length) {
-                            requestSupervisorLaborAuth(auths, () => {
+                        if (clasificado.pedir.length) {
+                            requestSupervisorLaborAuth(clasificado.pedir, () => {
                                 const motivo = authReasonRef.current;
-                                const marks: Record<string, ShiftAuthMark> = {};
-                                for (const auth of auths) {
+                                const marks: Record<string, ShiftAuthMark> = { ...grantedMarks };
+                                for (const auth of clasificado.pedir) {
                                     const key = `${auth.employeeId}_${auth.dateStr}`;
                                     const prev = marks[key] || {};
                                     marks[key] = {
@@ -15375,7 +15589,7 @@ function PlanificacionDesktop() {
                             });
                             return;
                         }
-                        finish();
+                        finish(Object.keys(grantedMarks).length ? grantedMarks : undefined);
                     };
                     const applyThisDay = () => {
                         if (!vacancyEditingDay) return;
