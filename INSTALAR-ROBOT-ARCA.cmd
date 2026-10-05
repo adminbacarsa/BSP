@@ -11,6 +11,7 @@ if errorlevel 1 (
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\arca-robot\instalar.ps1"
 set ERR=%ERRORLEVEL%
 echo.
-if not "%ERR%"=="0" echo Termino con pendientes. El detalle quedo en D:\arca-txt\instalar.log
+if not "%ERR%"=="0" echo Termino con pendientes. El resumen quedo arriba y en D:\arca-txt\instalar.log
+if "%ERR%"=="0" echo Listo. El resumen quedo arriba y en D:\arca-txt\instalar.log
 pause
 exit /b %ERR%

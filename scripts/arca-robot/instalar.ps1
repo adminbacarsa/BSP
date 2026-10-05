@@ -7,7 +7,6 @@ $TxtDir = 'D:\arca-txt'
 $ShotsDir = 'D:\arca-txt\shots'
 $SecretosDir = 'D:\secretos'
 $ClavesPath = 'D:\secretos\arca-claves.json'
-$EjemploPath = 'D:\secretos\arca-claves.example.json'
 $LogPath = Join-Path $TxtDir 'instalar.log'
 $OverridePath = 'D:\secretos\n8n-compose.override.yml'
 $Placeholder = 'PEGAR_LA_CLAVE_FISCAL_ACA'
@@ -17,12 +16,15 @@ $PublicVars = [ordered]@{
     ARCA_TXT_DIR                 = 'D:\arca-txt'
     ARCA_SHOTS_DIR               = 'D:\arca-txt\shots'
     COSP_REPO                    = 'D:\APP\cronoapp'
-    ARCA_CLAVES_PATH             = 'D:\secretos\arca-claves.json'
     ARCA_SIMULACION              = '1'
     ARCA_ROBOT_REINTENTOS        = '3'
     NODES_EXCLUDE                = '[]'
     N8N_BLOCK_ENV_ACCESS_IN_NODE = 'false'
+    N8N_ROBOT_WEBHOOK            = 'http://127.0.0.1:5678/webhook/cosp-arca-robot'
 }
+
+$script:Pm2Cmd = ''
+$script:Pm2Home = ''
 
 $script:Hechos = New-Object System.Collections.Generic.List[string]
 $script:Faltan = New-Object System.Collections.Generic.List[string]
@@ -86,7 +88,15 @@ function Invoke-ToolText {
     $psi.CreateNoWindow = $true
     $proc = New-Object System.Diagnostics.Process
     $proc.StartInfo = $psi
-    [void]$proc.Start()
+    try {
+        [void]$proc.Start()
+    } catch {
+        return [pscustomobject]@{
+            Code = -1
+            Out  = ''
+            Err  = $_.Exception.Message
+        }
+    }
     $outTask = $proc.StandardOutput.ReadToEndAsync()
     $errTask = $proc.StandardError.ReadToEndAsync()
     if (-not $proc.WaitForExit($TimeoutSec * 1000)) {
@@ -144,13 +154,108 @@ function New-Runtime {
     }
 }
 
+function Find-Pm2DumpFiles {
+    $lista = New-Object System.Collections.Generic.List[string]
+    $raices = @(Get-ChildItem -LiteralPath 'C:\Users' -Directory -Force -ErrorAction SilentlyContinue)
+    foreach ($raiz in $raices) {
+        $dump = Join-Path $raiz.FullName '.pm2\dump.pm2'
+        if (Test-Path -LiteralPath $dump) { $lista.Add($dump) }
+    }
+    return @($lista)
+}
+
+function Test-DumpTieneN8n([string]$DumpPath) {
+    if (-not (Test-Path -LiteralPath $DumpPath)) { return $false }
+    try {
+        $raw = [System.IO.File]::ReadAllText($DumpPath)
+    } catch {
+        return $false
+    }
+    return (Test-TextoN8n $raw)
+}
+
+function Find-Pm2Cmd {
+    $comando = Get-Command pm2.cmd -ErrorAction SilentlyContinue
+    if ($comando -and $comando.Source -and (Test-Path -LiteralPath $comando.Source)) { return $comando.Source }
+    $suelto = Get-Command pm2 -ErrorAction SilentlyContinue
+    if ($suelto -and $suelto.Source -match '(?i)\.(cmd|bat|exe)$' -and (Test-Path -LiteralPath $suelto.Source)) {
+        return $suelto.Source
+    }
+    $perfiles = New-Object System.Collections.Generic.List[string]
+    if ($script:Pm2Home) { $perfiles.Add((Split-Path -Parent $script:Pm2Home)) }
+    $perfiles.Add('C:\Users\Soporte')
+    foreach ($raiz in $perfiles) {
+        $candidato = Join-Path $raiz 'AppData\Roaming\npm\pm2.cmd'
+        if (Test-Path -LiteralPath $candidato) { return $candidato }
+    }
+    $propio = Join-Path $env:APPDATA 'npm\pm2.cmd'
+    if ($propio -and (Test-Path -LiteralPath $propio)) { return $propio }
+    return ''
+}
+
+function Add-Pm2AlPath {
+    if (-not $script:Pm2Home) { return }
+    $userRoot = Split-Path -Parent $script:Pm2Home
+    $extras = @(
+        (Join-Path $userRoot 'AppData\Roaming\npm'),
+        'C:\Program Files\nodejs'
+    )
+    foreach ($dir in $extras) {
+        if (-not (Test-Path -LiteralPath $dir)) { continue }
+        if ($env:Path -notlike "*${dir}*") { $env:Path = "$dir;$env:Path" }
+    }
+}
+
+# El instalador corre como administrador (otro perfil). PM2 de n8n es el del usuario
+# dueño de .pm2\dump.pm2 (en la PC del n8n, Soporte). Nunca se lanza el shim "pm2" sin extensión.
+function Resolve-Pm2 {
+    $dumps = @(Find-Pm2DumpFiles)
+    $elegido = ''
+    $soporte = 'C:\Users\Soporte\.pm2\dump.pm2'
+    if ((Test-Path -LiteralPath $soporte) -and (Test-DumpTieneN8n $soporte)) {
+        $elegido = $soporte
+    }
+    if (-not $elegido) {
+        foreach ($dump in $dumps) {
+            if (Test-DumpTieneN8n $dump) { $elegido = $dump; break }
+        }
+    }
+    if (-not $elegido -and $dumps.Count -gt 0) { $elegido = $dumps[0] }
+    if ($elegido) { $script:Pm2Home = Split-Path -Parent $elegido }
+    $script:Pm2Cmd = Find-Pm2Cmd
+    if ($script:Pm2Home) {
+        $env:PM2_HOME = $script:Pm2Home
+        Add-Pm2AlPath
+    }
+    if ($script:Pm2Cmd) {
+        Write-Log "pm2.cmd=$($script:Pm2Cmd) PM2_HOME=$($script:Pm2Home)"
+    } else {
+        Write-Log 'No encontré pm2.cmd. No uso el comando pm2 sin extensión (no es un exe de Windows).'
+    }
+}
+
+function Invoke-Pm2Text {
+    param([string[]]$Pm2Args, [int]$TimeoutSec = 30)
+    if (-not $script:Pm2Cmd) {
+        return [pscustomobject]@{ Code = -1; Out = ''; Err = 'pm2.cmd no encontrado' }
+    }
+    if ($script:Pm2Home) { $env:PM2_HOME = $script:Pm2Home }
+    $partes = New-Object System.Collections.Generic.List[string]
+    foreach ($arg in $Pm2Args) {
+        if ($arg -match '[\s"]') { $partes.Add('"' + ($arg -replace '"', '\"') + '"') }
+        else { $partes.Add($arg) }
+    }
+    $linea = '/d /c "' + $script:Pm2Cmd + '" ' + ($partes -join ' ')
+    return Invoke-ToolText -Exe $env:ComSpec -Arguments $linea -TimeoutSec $TimeoutSec
+}
+
 function Find-DockerN8n {
     $lista = @()
     $docker = Get-Command docker -ErrorAction SilentlyContinue
     if (-not $docker) { return $lista }
     $ps = Invoke-ToolText -Exe $docker.Source -Arguments 'ps --format "{{.ID}}|{{.Image}}|{{.Names}}"' -TimeoutSec 20
     if (-not $ps -or $ps.Code -ne 0) {
-        Write-Log 'Docker esta instalado pero el motor no respondió. Sigo con el resto de la detección.'
+        Write-Log 'Docker esta instalado pero el motor no respondió. Lo ignoro y sigo.'
         return $lista
     }
     foreach ($linea in ($ps.Out -split "[\r\n]+")) {
@@ -264,35 +369,41 @@ function Find-ServiciosN8n {
 
 function Find-Pm2N8n {
     $lista = @()
-    $pm2 = Get-Command pm2 -ErrorAction SilentlyContinue
-    if (-not $pm2) { return $lista }
-    $cmd = $pm2.Source
-    $paramLinea = 'jlist'
-    if ($cmd -match '(?i)\.(cmd|bat)$') {
-        $paramLinea = "/c `"$cmd`" jlist"
-        $cmd = $env:ComSpec
-    }
-    $raw = Invoke-ToolText -Exe $cmd -Arguments $paramLinea -TimeoutSec 25
-    if (-not $raw -or [string]::IsNullOrWhiteSpace($raw.Out)) { return $lista }
-    $json = $raw.Out.Trim()
-    $inicio = $json.IndexOf('[')
-    if ($inicio -lt 0) { return $lista }
-    $json = $json.Substring($inicio)
-    try { $procs = @($json | ConvertFrom-Json) } catch { return $lista }
-    foreach ($p in $procs) {
-        if (-not $p) { continue }
-        $name = [string]$p.name
-        $exec = ''
-        $pargs = ''
-        if ($p.pm2_env) {
-            $exec = [string]$p.pm2_env.pm_exec_path
-            if ($p.pm2_env.args) { $pargs = [string]$p.pm2_env.args }
+    if (-not $script:Pm2Cmd) { return $lista }
+    $raw = Invoke-Pm2Text -Pm2Args @('jlist') -TimeoutSec 25
+    if (-not $raw -or [string]::IsNullOrWhiteSpace($raw.Out)) {
+        if ($raw -and $raw.Err) { Write-Log "pm2 jlist: $($raw.Err)" }
+    } else {
+        $json = $raw.Out.Trim()
+        $inicio = $json.IndexOf('[')
+        $procs = @()
+        if ($inicio -ge 0) {
+            try { $procs = @(($json.Substring($inicio)) | ConvertFrom-Json) } catch { $procs = @() }
         }
-        if (-not (Test-TextoN8n "$name $exec $pargs")) { continue }
-        $rt = New-Runtime -Modo 'pm2' -Nombre $name -Resumen "PM2, proceso '$name'"
-        $rt.Pm2Name = $name
-        $rt.Cuenta = Get-ProcessOwner -ProcessId ([int]$p.pid)
-        $lista += $rt
+        foreach ($p in $procs) {
+            if (-not $p) { continue }
+            $name = [string]$p.name
+            $exec = ''
+            $pargs = ''
+            if ($p.pm2_env) {
+                $exec = [string]$p.pm2_env.pm_exec_path
+                if ($p.pm2_env.args) { $pargs = [string]$p.pm2_env.args }
+            }
+            if (-not (Test-TextoN8n "$name $exec $pargs")) { continue }
+            $rt = New-Runtime -Modo 'pm2' -Nombre $name -Resumen "PM2, proceso '$name' (PM2_HOME=$($script:Pm2Home))"
+            $rt.Pm2Name = $name
+            if ($p.pid) { $rt.Cuenta = Get-ProcessOwner -ProcessId ([int]$p.pid) }
+            $lista += $rt
+        }
+    }
+    if ($lista.Count -eq 0 -and $script:Pm2Home) {
+        $dumpFile = Join-Path $script:Pm2Home 'dump.pm2'
+        if (Test-DumpTieneN8n $dumpFile) {
+            $rt = New-Runtime -Modo 'pm2' -Nombre 'n8n' -Resumen "PM2, proceso 'n8n' segun el dump ($($script:Pm2Home))"
+            $rt.Pm2Name = 'n8n'
+            $lista += $rt
+            Write-Log 'jlist no mostro n8n; el dump.pm2 si. Sigo con ese proceso.'
+        }
     }
     return $lista
 }
@@ -354,10 +465,17 @@ function Find-NpmN8n {
 }
 
 function Get-N8nRuntime {
+    Resolve-Pm2
+    $porPm2 = @(Find-Pm2N8n)
+    if ($porPm2.Count -ge 1) {
+        foreach ($item in $porPm2) {
+            if ($item.Pm2Name -eq 'n8n') { return $item }
+        }
+        return $porPm2[0]
+    }
     $todos = @()
-    $todos += @(Find-DockerN8n)
+    try { $todos += @(Find-DockerN8n) } catch { Write-Log "Docker: $($_.Exception.Message). Lo ignoro." }
     $todos += @(Find-ServiciosN8n)
-    $todos += @(Find-Pm2N8n)
     $todos += @(Find-TareasN8n)
     if ($todos.Count -eq 0) { $todos += @(Find-NpmN8n) }
     $unicos = @{}
@@ -460,15 +578,8 @@ function Set-MachineMap($Mapa) {
 }
 
 function Get-Pm2Dump {
-    $pm2 = Get-Command pm2 -ErrorAction SilentlyContinue
-    if (-not $pm2) { return @() }
-    $exe = $pm2.Source
-    $paramLinea = 'jlist'
-    if ($exe -match '(?i)\.(cmd|bat)$') {
-        $paramLinea = "/c `"$exe`" jlist"
-        $exe = $env:ComSpec
-    }
-    $raw = Invoke-ToolText -Exe $exe -Arguments $paramLinea -TimeoutSec 25
+    if (-not $script:Pm2Cmd) { return @() }
+    $raw = Invoke-Pm2Text -Pm2Args @('jlist') -TimeoutSec 25
     if (-not $raw -or [string]::IsNullOrWhiteSpace($raw.Out)) { return @() }
     $json = $raw.Out.Trim()
     $inicio = $json.IndexOf('[')
@@ -562,6 +673,13 @@ function Get-ExistingRobotKey($Rt) {
     }
 }
 
+function Test-ReemplazarClave {
+    Write-Host ''
+    Write-Host 'ARCA_ROBOT_KEY ya está seteada. No la muestro.'
+    $resp = Read-Host '¿Reemplazarla? (s/N)'
+    return ($resp -match '^(?i)\s*(s|si)\s*$')
+}
+
 function Read-ClaveRobot {
     Write-Host ''
     Write-Host 'ARCA_ROBOT_KEY (la misma que el secreto de Firebase). No se muestra y no se guarda en el repo.'
@@ -596,6 +714,8 @@ function Write-DockerOverride([string]$Servicio, $Mapa) {
 }
 
 function Set-ArcaEnv($Rt, $Mapa) {
+    Set-MachineMap $Mapa
+    Add-Hecho ('Variables de máquina (sobreviven un reinicio): ' + ((@($Mapa.Keys) | Where-Object { $_ -ne 'ARCA_ROBOT_KEY' }) -join ', ') + $(if ($Mapa.Contains('ARCA_ROBOT_KEY')) { ', ARCA_ROBOT_KEY' } else { '' }))
     switch ($Rt.Modo) {
         'servicio-nssm' {
             Set-NssmMap -ServiceName $Rt.ServiceName -Mapa $Mapa
@@ -611,7 +731,7 @@ function Set-ArcaEnv($Rt, $Mapa) {
             Add-Nota 'Esas variables quedaron para todos los procesos de esta PC, porque el servicio no guarda entorno aparte.'
         }
         'pm2' {
-            Add-Hecho "PM2 '$($Rt.Pm2Name)': las variables se aplican al reiniciar, conservando las que ya tenía el proceso."
+            Add-Hecho "PM2 '$($Rt.Pm2Name)': se aplican con pm2 restart --update-env y pm2 save (PM2_HOME=$($script:Pm2Home))."
         }
         'tarea' {
             Set-MachineMap $Mapa
@@ -634,7 +754,9 @@ function Set-ArcaEnv($Rt, $Mapa) {
                 Add-Nota 'n8n esta en un contenedor Linux. Execute Command corre adentro: D:\ y el Playwright del host no se ven salvo que el volumen este montado. No cambie volumenes.'
             }
         }
-        default { throw "Modo no configurable: $($Rt.Modo)" }
+        default {
+            Add-Falta "No identifiqué un solo arranque de n8n ($($Rt.Resumen)). Las variables igual quedaron a nivel máquina. No reinicié."
+        }
     }
 }
 
@@ -686,39 +808,18 @@ function Set-SecretosAcl([string]$Cuenta) {
     }
 }
 
-function Initialize-ArcaSecretos([string]$Cuenta) {
-    if (-not (Test-Path -LiteralPath $SecretosDir)) {
-        New-Item -ItemType Directory -Path $SecretosDir -Force | Out-Null
-    }
-    Set-SecretosAcl -Cuenta $Cuenta
-    $ejemplo = "{`r`n  `"30000000000`": `"$Placeholder`"`r`n}`r`n"
-    $utf8 = New-Object System.Text.UTF8Encoding $true
-    if (-not (Test-Path -LiteralPath $EjemploPath)) {
-        Assert-FueraDelRepo $EjemploPath
-        [System.IO.File]::WriteAllText($EjemploPath, $ejemplo, $utf8)
-        Add-Hecho "Creé $EjemploPath."
-    } else {
-        Add-Hecho "Ya estaba $EjemploPath. No lo pisé."
-    }
-    $abrir = $false
+function Initialize-ArcaSecretos {
     if (-not (Test-Path -LiteralPath $ClavesPath)) {
-        Copy-Item -LiteralPath $EjemploPath -Destination $ClavesPath
-        Add-Hecho "Copié el ejemplo a $ClavesPath."
-        $abrir = $true
+        Add-Hecho 'No hay D:\secretos\arca-claves.json. La clave fiscal se carga desde COSP (Secret Manager). No abrí el Bloc de notas.'
+        return
     }
     $texto = ''
-    if (Test-Path -LiteralPath $ClavesPath) { $texto = [System.IO.File]::ReadAllText($ClavesPath) }
-    $vacio = [string]::IsNullOrWhiteSpace($texto)
-    if ($vacio -or $texto -match [regex]::Escape($Placeholder)) {
-        $abrir = $true
-        Add-Nota "Completá el CUIT (solo dígitos) y la clave fiscal en $ClavesPath. No va en el repo ni en este chat."
+    try { $texto = [System.IO.File]::ReadAllText($ClavesPath) } catch { $texto = '' }
+    $tieneDatos = -not [string]::IsNullOrWhiteSpace($texto) -and ($texto -notmatch [regex]::Escape($Placeholder))
+    if ($tieneDatos) {
+        Add-Nota 'D:\secretos\arca-claves.json tiene datos. La clave fiscal ya no va en ese archivo (sale de COSP y vive en Secret Manager). Se puede borrar. No lo abrí ni lo pisé.'
     } else {
-        Add-Hecho 'arca-claves.json ya tiene datos. No lo abrí ni lo pisé.'
-    }
-    try { Set-Acl -LiteralPath $ClavesPath -AclObject (Get-Acl -LiteralPath $SecretosDir) } catch { }
-    if ($abrir) {
-        Start-Process -FilePath 'notepad.exe' -ArgumentList $ClavesPath
-        Add-Hecho 'Abrí el Bloc de notas con arca-claves.json.'
+        Add-Hecho 'arca-claves.json está vacío o es el ejemplo. No lo abrí. La clave fiscal sale de COSP (Secret Manager).'
     }
 }
 
@@ -793,7 +894,15 @@ function Start-ConEntorno([string]$Exe, [string]$Argumentos, $Entorno, [int]$Tim
     }
     $proc = New-Object System.Diagnostics.Process
     $proc.StartInfo = $psi
-    [void]$proc.Start()
+    try {
+        [void]$proc.Start()
+    } catch {
+        return [pscustomobject]@{
+            Code = -1
+            Out  = ''
+            Err  = $_.Exception.Message
+        }
+    }
     $outTask = $proc.StandardOutput.ReadToEndAsync()
     $errTask = $proc.StandardError.ReadToEndAsync()
     if (-not $proc.WaitForExit($TimeoutSec * 1000)) {
@@ -809,13 +918,13 @@ function Start-ConEntorno([string]$Exe, [string]$Argumentos, $Entorno, [int]$Tim
 }
 
 function Restart-Pm2App([string]$Nombre, $Mapa) {
+    if (-not $script:Pm2Cmd) { throw 'No encontré pm2.cmd. No reinicié (no lanzo el comando pm2 sin extensión).' }
+    if (-not $script:Pm2Home) { throw 'No encontré PM2_HOME (ningún C:\Users\*\.pm2\dump.pm2). No reinicié.' }
     $proc = $null
     foreach ($p in @(Get-Pm2Dump)) {
         if ([string]$p.name -eq $Nombre) { $proc = $p }
     }
-    if (-not $proc) { throw "PM2 no muestra '$Nombre'. No reinicié." }
     $viejas = Get-Pm2EnvMap $proc
-    if (@($viejas.Keys).Count -lt 1) { throw 'PM2 no devolvió el entorno actual. No reinicié para no vaciar n8n.' }
     $envMap = @{}
     $base = Get-BaseEnv
     $pathAdmin = ''
@@ -826,10 +935,18 @@ function Restart-Pm2App([string]$Nombre, $Mapa) {
     if ($viejas.Contains('PATH')) { $pathN8n = [string]$viejas['PATH'] }
     elseif ($viejas.Contains('Path')) { $pathN8n = [string]$viejas['Path'] }
     if ($pathAdmin -and $pathN8n -and $pathN8n -ne $pathAdmin) { $envMap['PATH'] = "$pathN8n;$pathAdmin" }
+    $envMap['PM2_HOME'] = $script:Pm2Home
     foreach ($k in @($Mapa.Keys)) { $envMap[$k.ToUpperInvariant()] = [string]$Mapa[$k] }
-    $run = Start-ConEntorno -Exe $env:ComSpec -Argumentos "/d /c pm2 restart `"$Nombre`" --update-env" -Entorno $envMap -TimeoutSec 90
-    if ($run.Code -ne 0) { throw "pm2 restart salió $($run.Code). $($run.Err)" }
-    Add-Hecho "Reinicié PM2 '$Nombre' conservando $($viejas.Count) variables anteriores."
+    $reinicio = '/d /c "' + $script:Pm2Cmd + '" restart "' + $Nombre + '" --update-env'
+    $run = Start-ConEntorno -Exe $env:ComSpec -Argumentos $reinicio -Entorno $envMap -TimeoutSec 90
+    if ($run.Code -ne 0) { throw "pm2 restart salió $($run.Code). $($run.Err) $($run.Out)" }
+    $guardar = '/d /c "' + $script:Pm2Cmd + '" save'
+    $save = Start-ConEntorno -Exe $env:ComSpec -Argumentos $guardar -Entorno $envMap -TimeoutSec 40
+    if ($save.Code -ne 0) { throw "pm2 save salió $($save.Code). $($save.Err) $($save.Out)" }
+    if (@($viejas.Keys).Count -lt 1) {
+        Add-Nota 'pm2 jlist no devolvió el entorno anterior. El reinicio usó las variables de máquina y las de esta consola.'
+    }
+    Add-Hecho "Reinicié PM2 '$Nombre' con --update-env y corrí pm2 save ($($script:Pm2Home)). Conservé $(@($viejas.Keys).Count) variables anteriores."
 }
 
 function Restart-N8nDocker($Rt) {
@@ -933,30 +1050,80 @@ function Wait-N8nHealth([int]$Segundos) {
 }
 
 function Add-InstruccionesModo([string]$Detalle) {
-    Add-Falta "No pude dejar un solo arranque de n8n ($Detalle). No cambié servicios, PM2, tareas, Docker ni variables."
-    Add-Falta 'Cuando haya un solo modo, volvé a correr INSTALAR-ROBOT-ARCA.cmd como administrador.'
-    Add-Falta 'A mano, en ESE arranque: ARCA_ENVIOS_URL, ARCA_TXT_DIR=D:\arca-txt, ARCA_SHOTS_DIR=D:\arca-txt\shots, COSP_REPO=D:\APP\cronoapp, ARCA_CLAVES_PATH=D:\secretos\arca-claves.json, ARCA_SIMULACION=1, ARCA_ROBOT_REINTENTOS=3, NODES_EXCLUDE=[], N8N_BLOCK_ENV_ACCESS_IN_NODE=false.'
-    Add-Falta 'ARCA_ROBOT_KEY se carga por este instalador (no va en el repo). Después probá http://127.0.0.1:5678/healthz.'
+    Add-Falta "No pude dejar un solo arranque de n8n ($Detalle)."
+    Add-Falta 'Las variables de máquina igual se guardan si este paso llegó a pedirlas. Cuando haya un solo modo, volvé a correr INSTALAR-ROBOT-ARCA.cmd como administrador.'
+}
+
+function Test-NodoExecuteCommand {
+    $urls = @(
+        'http://127.0.0.1:5678/types/nodes.json',
+        'http://127.0.0.1:5678/rest/node-types'
+    )
+    foreach ($url in $urls) {
+        try {
+            $resp = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 8
+            $body = [string]$resp.Content
+            if ($body -match 'executeCommand') {
+                return "Execute Command está en la API local ($url)."
+            }
+            if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 300 -and $body.Length -gt 200) {
+                return 'NO:La API local de n8n respondió y no lista Execute Command. Revisá NODES_EXCLUDE.'
+            }
+        } catch {
+            Write-Log "No pude leer $url ($($_.Exception.Message))."
+        }
+    }
+    if ($script:Pm2Cmd) {
+        $logs = Invoke-Pm2Text -Pm2Args @('logs', 'n8n', '--lines', '80', '--nostream') -TimeoutSec 20
+        $texto = ''
+        if ($logs) { $texto = [string]$logs.Out + [string]$logs.Err }
+        if ($texto -match 'executeCommand') {
+            return 'Execute Command aparece en pm2 logs n8n.'
+        }
+    }
+    foreach ($p in @(Get-Pm2Dump)) {
+        if ([string]$p.name -ne 'n8n') { continue }
+        $map = Get-Pm2EnvMap $p
+        $excluido = [string]$map['NODES_EXCLUDE']
+        $bloqueo = [string]$map['N8N_BLOCK_ENV_ACCESS_IN_NODE']
+        if ($excluido -eq '[]' -and $bloqueo -eq 'false') {
+            return 'n8n responde con NODES_EXCLUDE=[] y N8N_BLOCK_ENV_ACCESS_IN_NODE=false (Execute Command habilitado). La API de nodos no se pudo leer.'
+        }
+        return "NO:En el proceso n8n, NODES_EXCLUDE='$excluido' y N8N_BLOCK_ENV_ACCESS_IN_NODE='$bloqueo'."
+    }
+    return ''
 }
 
 function Show-Resumen {
-    Write-Host ''
-    Write-Host '=== RESUMEN ==='
-    Write-Host 'Hecho:'
-    if ($script:Hechos.Count -eq 0) { Write-Host '  - (nada)' }
-    foreach ($h in $script:Hechos) { Write-Host "  - $h" }
-    Write-Host 'Falta:'
+    $sb = New-Object System.Text.StringBuilder
+    [void]$sb.AppendLine('')
+    [void]$sb.AppendLine('=== RESUMEN DEL INSTALADOR ARCA ===')
+    [void]$sb.AppendLine('Hecho:')
+    if ($script:Hechos.Count -eq 0) { [void]$sb.AppendLine('  - (nada)') }
+    foreach ($h in $script:Hechos) { [void]$sb.AppendLine("  - $h") }
+    [void]$sb.AppendLine('Falta:')
     if ($script:Faltan.Count -eq 0) {
-        Write-Host '  - Nada. El robot queda en simulación (ARCA_SIMULACION=1).'
+        [void]$sb.AppendLine('  - Nada. El robot queda en simulación (ARCA_SIMULACION=1).')
     } else {
-        foreach ($f in $script:Faltan) { Write-Host "  - $f" }
+        foreach ($f in $script:Faltan) { [void]$sb.AppendLine("  - $f") }
     }
     if ($script:Notas.Count -gt 0) {
-        Write-Host 'A mano:'
-        foreach ($n in $script:Notas) { Write-Host "  - $n" }
+        [void]$sb.AppendLine('A mano:')
+        foreach ($n in $script:Notas) { [void]$sb.AppendLine("  - $n") }
     }
-    Write-Host "Log: $LogPath"
-    Write-Log '--- fin ---'
+    [void]$sb.AppendLine("Log: $LogPath")
+    [void]$sb.AppendLine('=== FIN DEL RESUMEN ===')
+    $texto = $sb.ToString()
+    Write-Host $texto
+    try {
+        $dir = Split-Path -Parent $LogPath
+        if (-not (Test-Path -LiteralPath $dir)) {
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        }
+        [System.IO.File]::AppendAllText($LogPath, $texto + [Environment]::NewLine, (New-Object System.Text.UTF8Encoding $false))
+    } catch {
+        Write-Host "No pude escribir el resumen en el log: $($_.Exception.Message)"
+    }
 }
 
 if (-not (Test-EsAdmin)) {
@@ -981,39 +1148,40 @@ try {
         }
     }
     Add-Hecho "Detecté: $($runtime.Resumen)."
-    if ($runtime.Modo -eq 'desconocido') {
-        Add-InstruccionesModo $runtime.Resumen
-    } else {
-        $existente = ''
-        try { $existente = Get-ExistingRobotKey $runtime } catch { $existente = '' }
-        if (Test-ClaveRobotValida $existente) {
-            $script:ClaveRobot = $existente
-            Add-Hecho 'ARCA_ROBOT_KEY ya estaba en ese arranque. No la volví a pedir.'
+    $existente = [string][Environment]::GetEnvironmentVariable('ARCA_ROBOT_KEY', 'Machine')
+    if (-not (Test-ClaveRobotValida $existente) -and $runtime.Modo -ne 'desconocido') {
+        try { $existente = [string](Get-ExistingRobotKey $runtime) } catch { $existente = '' }
+    }
+    if (Test-ClaveRobotValida $existente) {
+        if (Test-ReemplazarClave) {
+            $script:ClaveRobot = Read-ClaveRobot
+            Add-Hecho 'ARCA_ROBOT_KEY reemplazada (pedida oculta). No está en el repo.'
         } else {
-            try {
-                $script:ClaveRobot = Read-ClaveRobot
-                Add-Hecho 'ARCA_ROBOT_KEY quedó pedida por pantalla. No está en el repo.'
-            } catch {
-                $script:ClaveRobot = ''
-                Add-Falta $_.Exception.Message
-            }
+            $script:ClaveRobot = $existente
+            Add-Hecho 'ARCA_ROBOT_KEY ya estaba. La dejé.'
         }
-        $mapa = New-ArcaMap $script:ClaveRobot
+    } else {
         try {
-            Set-ArcaEnv -Rt $runtime -Mapa $mapa
-            $aplico = $true
+            $script:ClaveRobot = Read-ClaveRobot
+            Add-Hecho 'ARCA_ROBOT_KEY no estaba seteada: la pedí oculta. No está en el repo.'
         } catch {
-            Add-Falta (Hide-Clave $_.Exception.Message)
+            $script:ClaveRobot = ''
+            Add-Falta $_.Exception.Message
         }
+    }
+    $mapa = New-ArcaMap $script:ClaveRobot
+    try {
+        Set-ArcaEnv -Rt $runtime -Mapa $mapa
+        $aplico = ($runtime.Modo -ne 'desconocido')
+    } catch {
+        Add-Falta (Hide-Clave $_.Exception.Message)
     }
 } catch {
     Add-Falta (Hide-Clave $_.Exception.Message)
 }
 
 try {
-    $cuenta = ''
-    if ($runtime) { $cuenta = $runtime.Cuenta }
-    Initialize-ArcaSecretos -Cuenta $cuenta
+    Initialize-ArcaSecretos
 } catch {
     Add-Falta "Secretos: $($_.Exception.Message)"
 }
@@ -1026,6 +1194,14 @@ if ($aplico) {
         $salud = Wait-N8nHealth -Segundos 60
         if ($salud) { Add-Hecho "n8n responde en $salud." }
         else { Add-Falta 'Reinicié n8n pero no respondió GET /healthz (127.0.0.1:5678 ni https://autbacar.dnsalias.com/healthz).' }
+        $nodo = Test-NodoExecuteCommand
+        if (-not $nodo) {
+            Add-Falta 'No pude confirmar el nodo Execute Command (API local ni log de pm2).'
+        } elseif ($nodo.StartsWith('NO:')) {
+            Add-Falta $nodo.Substring(3)
+        } else {
+            Add-Hecho $nodo
+        }
     } catch {
         Add-Falta (Hide-Clave $_.Exception.Message)
     }
@@ -1035,7 +1211,10 @@ if ($aplico) {
     else { Add-Nota 'No reinicié n8n y /healthz no respondió.' }
 }
 
-Add-Nota 'No seteé N8N_ROBOT_WEBHOOK. Si falta, dejala en el mismo arranque: https://127.0.0.1:5678/webhook/cosp-arca-robot.'
 Show-Resumen
+Write-Host ''
+Write-Host 'El mismo resumen quedó en D:\arca-txt\instalar.log'
+Write-Host 'Presioná una tecla para cerrar esta ventana.'
+cmd.exe /d /c pause
 if ($script:Faltan.Count -gt 0) { exit 1 }
 exit 0

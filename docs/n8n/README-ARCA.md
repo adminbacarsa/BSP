@@ -16,29 +16,25 @@ COSP llama al webhook cuando un AT o BT pasa a canal URGENTE (`onArcaEnvioUrgent
 
 En la PC del n8n (`D:\APP\cronoapp`, `https://autbacar.dnsalias.com`, puerto 5678) hay una sola acción: clic derecho en `INSTALAR-ROBOT-ARCA.cmd` (raíz del repo) y **Ejecutar como administrador**. Llama a `scripts/arca-robot/instalar.ps1`. Se puede correr dos veces.
 
-Detecta cómo arranca n8n (servicio Windows nssm o WinSW, PM2, tarea programada, `n8n start` o Docker Desktop) y lo dice. Si hay más de un modo, o no puede saberlo, no cambia el arranque ni otras variables.
+En la PC del n8n, n8n corre con PM2 del usuario Soporte (`C:\Users\Soporte\.pm2`, `pm2.cmd`). El instalador corre como administrador: busca `pm2.cmd` (nunca el `pm2` sin extensión) y el `dump.pm2` en `C:\Users\*\.pm2`. Si hay PM2, ese es el arranque y no se mezcla con la tarea de inicio.
 
-Cuando el modo es uno solo, deja en ese arranque únicamente:
+Deja las variables a nivel **máquina** (sobreviven un reinicio) y las aplica al proceso con `pm2 restart n8n --update-env` y `pm2 save`:
 
 ```text
 ARCA_ENVIOS_URL=https://us-central1-comtroldata.cloudfunctions.net/arcaEnviosApi
 ARCA_TXT_DIR=D:\arca-txt
 ARCA_SHOTS_DIR=D:\arca-txt\shots
 COSP_REPO=D:\APP\cronoapp
-ARCA_CLAVES_PATH=D:\secretos\arca-claves.json
 ARCA_SIMULACION=1
 ARCA_ROBOT_REINTENTOS=3
 NODES_EXCLUDE=[]
 N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+N8N_ROBOT_WEBHOOK=http://127.0.0.1:5678/webhook/cosp-arca-robot
 ```
 
-`ARCA_ROBOT_KEY` se pide por pantalla (oculta) y queda en el entorno de esa PC o servicio. No se escribe en el repo. Si ya estaba, no la vuelve a pedir.
+`ARCA_ROBOT_KEY` se pide oculta si no está seteada. Si ya está, pregunta si se reemplaza. No se escribe en el repo. La clave fiscal ya no va en `D:\secretos\arca-claves.json` (sale de COSP / Secret Manager): el instalador no abre el Bloc de notas; si ese archivo tiene datos, avisa que se puede borrar.
 
-Crea `D:\arca-txt`, `D:\arca-txt\shots` y `D:\secretos` (SYSTEM, Administradores y la cuenta de n8n). Si falta, copia `arca-claves.example.json` a `arca-claves.json` y abre el Bloc de notas: ahí se completan el CUIT y la clave fiscal. No la pide por pantalla.
-
-En `D:\APP\cronoapp\scripts\arca-robot` instala Playwright y Chromium. Reinicia n8n según el modo y prueba `GET /healthz`. El log es `D:\arca-txt\instalar.log`.
-
-No setea `N8N_ROBOT_WEBHOOK`. Si falta, dejala en el mismo arranque: `https://127.0.0.1:5678/webhook/cosp-arca-robot`.
+Crea `D:\arca-txt` y `D:\arca-txt\shots`. En `scripts\arca-robot` instala Playwright y Chromium. Después del reinicio prueba `GET /healthz` y si el nodo Execute Command quedó disponible. Si Docker está instalado pero el motor no responde, lo ignora. Al final muestra el resumen en pantalla y lo deja en `D:\arca-txt\instalar.log`, y espera una tecla.
 
 ## 1. Variables (ninguna va al repo)
 
@@ -50,23 +46,14 @@ ARCA_ROBOT_KEY=LA_MISMA_QUE_EL_SECRETO_DE_FIREBASE
 ARCA_TXT_DIR=D:\arca-txt
 ARCA_SHOTS_DIR=D:\arca-txt\shots
 COSP_REPO=D:\APP\cronoapp
-N8N_ROBOT_WEBHOOK=https://127.0.0.1:5678/webhook/cosp-arca-robot
-ARCA_CLAVES_PATH=D:\secretos\arca-claves.json
+N8N_ROBOT_WEBHOOK=http://127.0.0.1:5678/webhook/cosp-arca-robot
 ARCA_SIMULACION=1
 ARCA_ROBOT_REINTENTOS=3
 ```
 
 `ARCA_N8N_URGENTE_URL` no va en n8n: va en el entorno de Functions (la setea el deploy cuando Mauro lo pida), por ejemplo `https://autbacar.dnsalias.com/webhook/urgente`. El certificado tiene que ser válido para Node. COSP manda el header `x-arca-key` con `ARCA_ROBOT_KEY`.
 
-Crear `D:\arca-txt` antes de activar. El archivo de claves, **fuera del repo**:
-
-```json
-{
-  "30000000000": "PEGAR_LA_CLAVE_FISCAL_SOLO_ACA"
-}
-```
-
-La clave del JSON es el CUIT de la empresa, solo dígitos. Un CUIT por empresa. Permisos de lectura solo para el usuario que corre n8n. No copiar ese archivo a COSP ni a git.
+La clave fiscal ya no va en `D:\secretos\arca-claves.json`: se carga desde COSP y vive en Secret Manager. Si ese archivo quedó de una instalación anterior, se puede borrar.
 
 En n8n Cloud, las mismas `ARCA_ENVIOS_URL` y `ARCA_ROBOT_KEY`, más `ARCA_URGENTE_MINUTOS=30`. Ahí no hay clave fiscal.
 
@@ -111,7 +98,7 @@ Los horarios 18:00 (AT, canal LOTE) y 09:00 (BT, canal LOTE) ya estan en el JSON
 ## 5. Pasar a real
 
 1. `ARCA_SIMULACION=0` y reiniciar n8n.
-2. Probar un solo lote chico de una empresa cuyo CUIT este en `arca-claves.json`.
+2. Probar un solo lote chico de una empresa cuya clave fiscal ya esté en COSP (Secret Manager).
 3. El robot entra a Clave Fiscal, abre Simplificación Registral → Relaciones Laborales → Carga Masiva → Nuevo, sube el TXT, lee el o los números de transacción y la constancia, y llama `POST ?action=resultado` con `estado: CONFIRMADO`, `loteId` y `nroTransaccion`.
 4. Si falla, reintenta (`ARCA_ROBOT_REINTENTOS`, default 3), guarda una captura en `ARCA_SHOTS_DIR` y marca el lote `ERROR` con el detalle. Esos envios vuelven a entrar en el próximo lote.
 5. Un `SUBIENDO` de más de 20 minutos (el proceso murio) también vuelve al lote.
