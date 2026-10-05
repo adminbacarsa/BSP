@@ -1,24 +1,35 @@
 import { CATEGORIA_VIGILADOR, EMPRESAS_CATEGORIA_VIGILADOR, RNOS_SUVICO } from './arcaConst.mjs';
+import { normalizeCuil } from './cuil.mjs';
 
 /**
  * Formato puro del registro de carga masiva ARCA (130 caracteres). Sin dependencias de Node:
  * lo importan el front (vista previa en Parámetros), `arcaTxt.mjs` y el servidor.
- * Fuente: docs/arca/CARGA-MASIVA-FORMATO.md y tablas descargadas el 29/09/2026.
- * El 14 de la tabla es período de prueba. Trabajo eventual es el código 12, en 3 posiciones: 012.
+ * Fuente: docs/arca/CARGA-MASIVA-FORMATO.md. Validado contra ARCA el 05/10/2026
+ * (novedad 245743, Bacar Transportadora).
  */
+export const CCT_CODIGO_VIGILADOR = '0422/05';
+export const PUESTO_VIGILADOR = '5169';
+export const ACTIVIDAD_DOMICILIO_DEFAULT = '749210';
+export const TIPO_SERVICIO_DEFAULT = '500';
+
 export const ARCA_EVENTUALES_DEFAULT = {
   tipoRegistro: '01',
   movimientoAlta: 'AT',
   movimientoBaja: 'BT',
-  agropecuario: ' ',
+  /** S o N. ARCA exige uno de los dos; el blanco rechaza. */
+  agropecuario: 'N',
   modalidadContrato: '012',
-  situacionRevistaAlta: '01',
+  /** En AT va en blanco (ARCA: no informar situación de baja en un alta). */
+  situacionRevistaAlta: '',
   situacionRevistaBaja: '30',
   modalidadLiquidacion: '5',
+  /** Domicilio de explotación (posiciones 74-78). En Bacar Transportadora: 00000. */
   sucursal: '00000',
-  actividad: '801000',
-  puesto: '5414',
-  rectificacion: '00',
+  /** Actividad del domicilio de desempeño (79-84). Tiene que coincidir con la del domicilio en ARCA. */
+  actividad: ACTIVIDAD_DOMICILIO_DEFAULT,
+  puesto: PUESTO_VIGILADOR,
+  /** En AT y BT va en blanco salvo una rectificación real. */
+  rectificacion: '',
   /**
    * La anulación de alta no usa un movimiento de baja: va por el módulo de Anulación de
    * Incorporaciones (`plazoAnulacion.mjs`). NA queda solo como código histórico del manual.
@@ -35,8 +46,9 @@ export const ARCA_EVENTUALES_DEFAULT = {
   cctCodigo: '',
   categoria: '',
   categoriaProfesional: '',
-  tipoServicio: '',
-  marcaCovid: '0',
+  tipoServicio: TIPO_SERVICIO_DEFAULT,
+  /** En blanco: ARCA rechaza 0 («Marca de Covid / Tipo de Contrato CCG no permitido»). */
+  marcaCovid: '',
   obraSocialDefault: '',
 };
 
@@ -56,6 +68,12 @@ export function arcaEventualesDe(empresa) {
   cfg.obraSocialDefault = 'obraSocialDefault' in guardada
     ? String(guardada.obraSocialDefault ?? '')
     : (delGrupo ? RNOS_SUVICO : '');
+  cfg.cctCodigo = 'cctCodigo' in guardada
+    ? String(guardada.cctCodigo ?? '')
+    : (delGrupo ? CCT_CODIGO_VIGILADOR : '');
+  cfg.tipoServicio = 'tipoServicio' in guardada
+    ? String(guardada.tipoServicio ?? '')
+    : (delGrupo ? TIPO_SERVICIO_DEFAULT : String(cfg.tipoServicio || ''));
   return cfg;
 }
 
@@ -65,6 +83,13 @@ function alfa(value, len) {
 
 function num(value, len) {
   const digits = String(value ?? '').replace(/\D/g, '');
+  return digits.padStart(len, '0').slice(-len);
+}
+
+/** Vacío → espacios (AT no admite 00 en revista/rectificación). */
+function numOBlank(value, len) {
+  const digits = String(value ?? '').replace(/\D/g, '');
+  if (!digits) return ' '.repeat(len);
   return digits.padStart(len, '0').slice(-len);
 }
 
@@ -85,35 +110,73 @@ function campoObraSocial(valor) {
   return { texto: digits.padStart(6, '0').slice(-6), falta: false };
 }
 
+function marcaCovidDe(cfg) {
+  const v = String(cfg.marcaCovid ?? '').trim();
+  if (!v) return ' ';
+  return v.slice(0, 1);
+}
+
 function armarLinea({ movimiento, revista, cuil, fechaAlta, fechaBaja, bruto, obraSocial, cfg }) {
   const os = campoObraSocial(obraSocial || cfg.obraSocialDefault);
   const cct = alfa(cfg.cctCodigo, 10);
   const categoria = alfa(String(cfg.categoria || cfg.categoriaProfesional || '').replace(/\D/g, ''), 6);
+  const cuilDigits = String(cuil ?? '').replace(/\D/g, '');
+  const cuilOk = !!normalizeCuil(cuilDigits);
+  const puesto = alfa(cfg.puesto, 4);
+  const sucursal = String(cfg.sucursal ?? '').replace(/\D/g, '');
+  const actividad = String(cfg.actividad ?? '').replace(/\D/g, '');
   const linea = [
     num(cfg.tipoRegistro, 2),
     alfa(movimiento, 2),
-    num(cuil, 11),
+    num(cuilDigits, 11),
     alfa(cfg.agropecuario, 1),
     num(cfg.modalidadContrato, 3),
     fechaArca(fechaAlta),
     fechaArca(fechaBaja),
     os.texto,
-    num(revista, 2),
+    numOBlank(revista, 2),
     ' '.repeat(10),
     retribucion(bruto),
     num(cfg.modalidadLiquidacion, 1),
-    num(cfg.sucursal, 5),
-    num(cfg.actividad, 6),
-    alfa(cfg.puesto, 4),
-    num(cfg.rectificacion, 2),
+    sucursal ? num(sucursal, 5) : ' '.repeat(5),
+    actividad ? num(actividad, 6) : ' '.repeat(6),
+    puesto,
+    numOBlank(cfg.rectificacion, 2),
     cct,
     categoria.trim() ? num(cfg.categoria || cfg.categoriaProfesional, 6) : ' '.repeat(6),
     cfg.tipoServicio ? num(cfg.tipoServicio, 3) : ' '.repeat(3),
     ' '.repeat(10),
     ' '.repeat(10),
-    num(cfg.marcaCovid, 1),
+    marcaCovidDe(cfg),
   ].join('');
-  return { linea, faltaObraSocial: os.falta, faltaCct: cct.trim() === '', faltaCategoria: categoria.trim() === '' };
+  return {
+    linea,
+    faltaObraSocial: os.falta,
+    faltaCct: cct.trim() === '',
+    faltaCategoria: categoria.trim() === '',
+    faltaPuesto: puesto.trim() === '',
+    faltaDomicilio: sucursal.length !== 5,
+    faltaActividad: actividad.length !== 6,
+    cuilInvalido: !cuilOk,
+  };
+}
+
+function advertenciasDe(armada, cfg, extras = []) {
+  const advertencias = [...extras];
+  if (armada.cuilInvalido) advertencias.push('CUIL_INVALIDO');
+  if (armada.faltaCct) advertencias.push('CCT_CODIGO_PENDIENTE');
+  if (armada.faltaCategoria) advertencias.push('CATEGORIA_PROFESIONAL_PENDIENTE');
+  if (armada.faltaObraSocial) advertencias.push('RNOS_PENDIENTE');
+  if (armada.faltaPuesto) advertencias.push('PUESTO_PENDIENTE');
+  if (armada.faltaDomicilio) advertencias.push('DOMICILIO_DESEMPENO_PENDIENTE');
+  if (armada.faltaActividad) advertencias.push('ACTIVIDAD_PENDIENTE');
+  if (String(cfg.puesto).trim() === PUESTO_VIGILADOR) advertencias.push('PUESTO_A_VERIFICAR');
+  return advertencias;
+}
+
+function esEnviable(advertencias, ...lineas) {
+  const bloquean = advertencias.filter((c) => c !== 'PUESTO_A_VERIFICAR' && c !== 'ANULACION_A_CONFIRMAR_CON_CONTADOR');
+  return bloquean.length === 0 && lineas.every((l) => l.length === LARGO_REGISTRO_ARCA);
 }
 
 /**
@@ -124,7 +187,7 @@ export function lineaMovimientoArca({ contrato, cuil, bruto, obraSocial, empresa
   const cfg = arcaEventualesDe(empresa);
   const armada = armarLinea({
     movimiento,
-    revista: revista || cfg.situacionRevistaBaja,
+    revista: revista == null ? cfg.situacionRevistaBaja : revista,
     cuil,
     fechaAlta: contrato?.fechaAlta,
     fechaBaja: fechaBaja == null ? contrato?.fechaBaja : fechaBaja,
@@ -132,22 +195,19 @@ export function lineaMovimientoArca({ contrato, cuil, bruto, obraSocial, empresa
     obraSocial,
     cfg,
   });
-  const advertencias = [];
-  if (armada.faltaCct) advertencias.push('CCT_CODIGO_PENDIENTE');
-  if (armada.faltaCategoria) advertencias.push('CATEGORIA_PROFESIONAL_PENDIENTE');
-  if (armada.faltaObraSocial) advertencias.push('RNOS_PENDIENTE');
-  if (String(cfg.puesto) === '5414') advertencias.push('PUESTO_A_VERIFICAR');
-  if (movimiento === cfg.movimientoAnulacion) advertencias.push('ANULACION_A_CONFIRMAR_CON_CONTADOR');
+  const extras = [];
+  if (movimiento === cfg.movimientoAnulacion) extras.push('ANULACION_A_CONFIRMAR_CON_CONTADOR');
+  const advertencias = advertenciasDe(armada, cfg, extras);
   return {
     linea: armada.linea,
     advertencias,
-    enviable: advertencias.filter((c) => c !== 'PUESTO_A_VERIFICAR' && c !== 'ANULACION_A_CONFIRMAR_CON_CONTADOR').length === 0
-      && armada.linea.length === LARGO_REGISTRO_ARCA,
+    enviable: esEnviable(advertencias, armada.linea),
   };
 }
 
 /**
- * Un contrato → línea AT y línea BT. No se envía si faltan CCT, categoría u obra social.
+ * Un contrato → línea AT y línea BT. No se envía si faltan CCT, categoría, obra social,
+ * puesto, domicilio de desempeño, actividad o si el CUIL no cierra.
  */
 export function lineasCargaMasiva({ contrato, cuil, bruto, obraSocial, empresa }) {
   const cfg = arcaEventualesDe(empresa);
@@ -161,16 +221,10 @@ export function lineasCargaMasiva({ contrato, cuil, bruto, obraSocial, empresa }
   };
   const alta = armarLinea({ ...comun, movimiento: cfg.movimientoAlta, revista: cfg.situacionRevistaAlta });
   const baja = armarLinea({ ...comun, movimiento: cfg.movimientoBaja, revista: cfg.situacionRevistaBaja });
-  const advertencias = [];
-  if (alta.faltaCct) advertencias.push('CCT_CODIGO_PENDIENTE');
-  if (alta.faltaCategoria) advertencias.push('CATEGORIA_PROFESIONAL_PENDIENTE');
-  if (alta.faltaObraSocial) advertencias.push('RNOS_PENDIENTE');
-  if (String(cfg.puesto) === '5414') advertencias.push('PUESTO_A_VERIFICAR');
+  const advertencias = advertenciasDe(alta, cfg);
   return {
     lineas: [alta.linea, baja.linea],
     advertencias,
-    enviable: advertencias.filter((c) => c !== 'PUESTO_A_VERIFICAR').length === 0
-      && alta.linea.length === LARGO_REGISTRO_ARCA
-      && baja.linea.length === LARGO_REGISTRO_ARCA,
+    enviable: esEnviable(advertencias, alta.linea, baja.linea),
   };
 }
