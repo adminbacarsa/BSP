@@ -1,10 +1,11 @@
 import { Redirect, Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { Platform } from 'react-native';
+import { Platform, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePortalAuth } from '../../src/context/PortalAuthContext';
 import { usePortalInbox } from '../../src/hooks/usePortalInbox';
 import { LoadingScreen } from '../../src/components/LoadingScreen';
+import { PushRequiredBanner } from '../../src/components/PushRequiredBanner';
 import { useTheme } from '../../src/theme/ThemeContext';
 
 const TAB_CONTENT = 56;
@@ -29,71 +30,75 @@ export default function TabsLayout() {
   }
 
   return (
-    <Tabs
-      screenOptions={{
-        headerStyle: { backgroundColor: palette.header },
-        headerTintColor: palette.headerTint,
-        headerTitleStyle: { fontWeight: '800', fontSize: 17 },
-        headerShadowVisible: !isDark,
-        tabBarActiveTintColor: palette.primary,
-        tabBarInactiveTintColor: palette.onSurfaceMuted,
-        tabBarStyle: {
-          backgroundColor: palette.card,
-          borderTopColor: palette.cardBorder,
-          borderTopWidth: 1,
-          height: TAB_CONTENT + bottom,
-          paddingBottom: bottom,
-          paddingTop: 6,
-        },
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '700' },
-        tabBarItemStyle: { paddingTop: 2 },
-      }}
-    >
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Hoy',
-          tabBarLabel: 'Hoy',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="home" size={size} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="agenda"
-        options={{
-          title: 'Agenda',
-          href: portalFeatures.viewSchedule ? undefined : null,
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="calendar" size={size} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="alertas"
-        options={{
-          title: 'Alertas',
-          tabBarBadge: unreadCount > 0 ? (unreadCount > 99 ? '99+' : unreadCount) : undefined,
-          tabBarBadgeStyle: {
-            backgroundColor: palette.error,
-            color: '#fff',
-            fontSize: 10,
-            fontWeight: '800',
+    <View style={{ flex: 1, backgroundColor: palette.background }}>
+      {/* Fijo arriba de Hoy / Agenda / Alertas: sin notificaciones no llegan convocatorias. */}
+      <PushRequiredBanner />
+      <Tabs
+        screenOptions={{
+          headerStyle: { backgroundColor: palette.header },
+          headerTintColor: palette.headerTint,
+          headerTitleStyle: { fontWeight: '800', fontSize: 17 },
+          headerShadowVisible: !isDark,
+          tabBarActiveTintColor: palette.primary,
+          tabBarInactiveTintColor: palette.onSurfaceMuted,
+          tabBarStyle: {
+            backgroundColor: palette.card,
+            borderTopColor: palette.cardBorder,
+            borderTopWidth: 1,
+            height: TAB_CONTENT + bottom,
+            paddingBottom: bottom,
+            paddingTop: 6,
           },
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="notifications" size={size} color={color} />
-          ),
+          tabBarLabelStyle: { fontSize: 11, fontWeight: '700' },
+          tabBarItemStyle: { paddingTop: 2 },
         }}
-      />
-      <Tabs.Screen
-        name="mas"
-        options={{
-          title: 'Más',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="grid" size={size} color={color} />
-          ),
-        }}
-      />
-    </Tabs>
+      >
+        <Tabs.Screen
+          name="index"
+          options={{
+            title: 'Hoy',
+            tabBarLabel: 'Hoy',
+            tabBarIcon: ({ color, size }) => (
+              <Ionicons name="home" size={size} color={color} />
+            ),
+          }}
+        />
+        <Tabs.Screen
+          name="agenda"
+          options={{
+            title: 'Agenda',
+            href: portalFeatures.viewSchedule ? undefined : null,
+            tabBarIcon: ({ color, size }) => (
+              <Ionicons name="calendar" size={size} color={color} />
+            ),
+          }}
+        />
+        <Tabs.Screen
+          name="alertas"
+          options={{
+            title: 'Alertas',
+            tabBarBadge: unreadCount > 0 ? (unreadCount > 99 ? '99+' : unreadCount) : undefined,
+            tabBarBadgeStyle: {
+              backgroundColor: palette.error,
+              color: '#fff',
+              fontSize: 10,
+              fontWeight: '800',
+            },
+            tabBarIcon: ({ color, size }) => (
+              <Ionicons name="notifications" size={size} color={color} />
+            ),
+          }}
+        />
+        <Tabs.Screen
+          name="mas"
+          options={{
+            title: 'Más',
+            tabBarIcon: ({ color, size }) => (
+              <Ionicons name="grid" size={size} color={color} />
+            ),
+          }}
+        />
+      </Tabs>
+    </View>
   );
 }

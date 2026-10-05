@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { AppState, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { usePortalAuth } from '../context/PortalAuthContext';
+import { usePushGate } from '../context/PushGateContext';
 import { getPortalFirebase } from '../lib/portal';
 import { routeFromNotificationData } from '../lib/notificationNavigation';
 import { appRoutes } from '../lib/appRoutes';
@@ -10,13 +11,8 @@ import {
   getStoredFcmToken,
   registerPushNotifications,
   subscribeWebForegroundMessages,
-  type PushRegistrationStatus,
 } from '../lib/pushNotifications';
 import { appAlert } from '@/lib/appAlert';
-
-type PushNotificationsBootstrapProps = {
-  onStatusChange?: (status: PushRegistrationStatus) => void;
-};
 
 function hrefFromRoute(route: string) {
   if (route === '/(tabs)' || route === '/(tabs)/') return appRoutes.hoy;
@@ -39,7 +35,12 @@ function mapLegacyEmployeeLink(link: string): string {
   return raw;
 }
 
-export function PushNotificationsBootstrap({ onStatusChange }: PushNotificationsBootstrapProps) {
+/**
+ * Registro automático de push + listeners de foreground / cold-start.
+ * El permiso denegado en nativo ya no abre un Alert «andá a Ajustes»: lo resuelve
+ * el banner fijo `PushRequiredBanner` (Activar ahora → request o openSettings).
+ */
+export function PushNotificationsBootstrap() {
   const router = useRouter();
   const {
     user,
@@ -50,6 +51,7 @@ export function PushNotificationsBootstrap({ onStatusChange }: PushNotifications
     isSuperAdmin,
     isPreviewMode,
   } = usePortalAuth();
+  const { refresh: refreshPushGate } = usePushGate();
   const { db } = getPortalFirebase();
   const lastForegroundToastRef = useRef<string | null>(null);
   const handledColdStartRef = useRef(false);
@@ -84,7 +86,7 @@ export function PushNotificationsBootstrap({ onStatusChange }: PushNotifications
     let cancelled = false;
 
     (async () => {
-      const result = await registerPushNotifications({
+      await registerPushNotifications({
         user,
         db,
         empDocId,
@@ -93,14 +95,7 @@ export function PushNotificationsBootstrap({ onStatusChange }: PushNotifications
         interactive: false,
       });
       if (!cancelled) {
-        onStatusChange?.(result.status);
-        // En web 'off' = falta gesto; el botón «Activar notificaciones» lo resuelve.
-        if (result.status === 'denied' && Platform.OS !== 'web') {
-          appAlert(
-            'Notificaciones',
-            'Para recibir alertas operativas, activá notificaciones de COSP Guardia en Ajustes del teléfono.',
-          );
-        }
+        await refreshPushGate();
       }
     })();
 
@@ -114,7 +109,7 @@ export function PushNotificationsBootstrap({ onStatusChange }: PushNotifications
     employee?.empresaId,
     isPreviewMode,
     db,
-    onStatusChange,
+    refreshPushGate,
   ]);
 
   useEffect(() => {
@@ -218,37 +213,11 @@ export function PushNotificationsBootstrap({ onStatusChange }: PushNotifications
   }, [user?.uid, router]);
 
   useEffect(() => {
-    if (!canAutoRegister || !user) return;
-
-    const sub = AppState.addEventListener('change', (state) => {
-      if (state !== 'active') return;
-      registerPushNotifications({
-        user,
-        db,
-        empDocId,
-        empresaId: employee?.empresaId ?? null,
-        previewOf: isPreviewMode,
-        interactive: false,
-      }).then((r) => onStatusChange?.(r.status));
-    });
-
-    return () => sub.remove();
-  }, [
-    canAutoRegister,
-    user,
-    empDocId,
-    employee?.empresaId,
-    isPreviewMode,
-    db,
-    onStatusChange,
-  ]);
-
-  useEffect(() => {
     if (!user) return;
-    getStoredFcmToken().then((token) => {
-      if (token) onStatusChange?.('enabled');
+    getStoredFcmToken().then(() => {
+      /* el gate refresca el banner; el token solo confirma registro local */
     });
-  }, [user?.uid, onStatusChange]);
+  }, [user?.uid]);
 
   return null;
 }

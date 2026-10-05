@@ -4,6 +4,7 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import { PortalAuthProvider, usePortalAuth } from '../src/context/PortalAuthContext';
+import { PushGateProvider } from '../src/context/PushGateContext';
 import { ThemeProvider, useTheme } from '../src/theme/ThemeContext';
 import { PushNotificationsBootstrap } from '../src/components/PushNotificationsBootstrap';
 import { AppUpdateBootstrap } from '../src/components/AppUpdateBootstrap';
@@ -67,11 +68,13 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <ThemeProvider>
         <PortalAuthProvider>
-          <PushNotificationsBootstrap />
-          <AppUpdateBootstrap />
-          <OfflineBanner />
-          <AddToHomeBanner />
-          <RootNavigator />
+          <PushGateProvider>
+            <PushNotificationsBootstrap />
+            <AppUpdateBootstrap />
+            <OfflineBanner />
+            <AddToHomeBanner />
+            <RootNavigator />
+          </PushGateProvider>
         </PortalAuthProvider>
       </ThemeProvider>
     </SafeAreaProvider>

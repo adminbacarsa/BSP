@@ -1,8 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Device from 'expo-device';
 import type { User } from 'firebase/auth';
-import { deleteDoc, doc, serverTimestamp, setDoc, type Firestore } from 'firebase/firestore';
-import { Platform } from 'react-native';
+import { deleteDoc, doc, serverTimestamp, setDoc, updateDoc, type Firestore } from 'firebase/firestore';
+import { Linking, Platform } from 'react-native';
 import Constants from 'expo-constants';
 import { getPortalFirebase } from './portal';
 import { buildDeviceTokenDoc } from './deviceTokenDoc';
@@ -13,9 +13,35 @@ import {
   ALERTAS_TURNO_CHANNEL_LEGACY,
   binaryHasAlertasTurnoSound,
 } from './alertasTurnoChannel';
+import {
+  decidePushActivateAction,
+  isAlertasChannelBlocked,
+  resolvePushEstado,
+  shouldShowPushRequiredBanner,
+  pushGateReason,
+  type AlertasChannelSnapshot,
+  type PushActivateAction,
+  type PushEstado,
+  type PushGateReason,
+  type PushPermissionSnapshot,
+} from './pushPermissionGate';
 
 export { buildDeviceTokenDoc } from './deviceTokenDoc';
 export { ALERTAS_TURNO_CHANNEL_ID } from './alertasTurnoChannel';
+export {
+  decidePushActivateAction,
+  isAlertasChannelBlocked,
+  resolvePushEstado,
+  shouldShowPushRequiredBanner,
+  pushGateReason,
+  PUSH_REQUIRED_TITLE,
+  PUSH_REQUIRED_BODY,
+  PUSH_REQUIRED_BUTTON,
+  PUSH_REQUIRED_CHANNEL_BODY,
+  type PushEstado,
+  type PushGateReason,
+  type PushActivateAction,
+} from './pushPermissionGate';
 
 let alertasTurnoChannelReady: Promise<void> | null = null;
 
@@ -75,11 +101,228 @@ export function ensureAlertasTurnoChannel(): Promise<void> {
   return alertasTurnoChannelReady;
 }
 
+/** Paquete Android (ajustes de canal). */
+function androidPackageName(): string {
+  return Constants.expoConfig?.android?.package || 'com.cosp.guardia';
+}
+
+/** Permiso de notificaciones (nativo). En web: Notification.permission. */
+export async function getPushPermissionSnapshot(): Promise<PushPermissionSnapshot> {
+  if (Platform.OS === 'web') {
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      return { status: 'denied', canAskAgain: false };
+    }
+    const p = Notification.permission;
+    return {
+      status: p === 'granted' ? 'granted' : p === 'denied' ? 'denied' : 'undetermined',
+      canAskAgain: p === 'default',
+    };
+  }
+  const Notifications = await import('expo-notifications');
+  const current = await Notifications.getPermissionsAsync();
+  return {
+    status: String(current.status || 'undetermined'),
+    canAskAgain: current.canAskAgain !== false,
+  };
+}
+
+/**
+ * Estado del canal de alertas de turno (Android).
+ * Mira v2 si el binario lo tiene; si no, el legado.
+ */
+export async function getAlertasChannelSnapshot(): Promise<AlertasChannelSnapshot> {
+  if (Platform.OS !== 'android') {
+    return { missing: false, importance: null };
+  }
+  const Notifications = await import('expo-notifications');
+  const preferV2 = binaryHasAlertasTurnoSound(Constants.nativeAppVersion);
+  const ids = preferV2
+    ? [ALERTAS_TURNO_CHANNEL_ID, ALERTAS_TURNO_CHANNEL_ID_LEGACY]
+    : [ALERTAS_TURNO_CHANNEL_ID_LEGACY];
+  for (const id of ids) {
+    try {
+      const ch = await Notifications.getNotificationChannelAsync(id);
+      if (ch) {
+        return { missing: false, importance: typeof ch.importance === 'number' ? ch.importance : null };
+      }
+    } catch {
+      /* siguiente */
+    }
+  }
+  return { missing: true, importance: null };
+}
+
+export type NativePushGateSnapshot = {
+  permission: PushPermissionSnapshot;
+  channel: AlertasChannelSnapshot;
+  channelBlocked: boolean;
+  permissionGranted: boolean;
+  needsBanner: boolean;
+  reason: PushGateReason;
+  activateAction: PushActivateAction;
+  unsupported: boolean;
+};
+
+/** Foto completa del gate nativo (permiso + canal). */
+export async function getNativePushGateSnapshot(): Promise<NativePushGateSnapshot> {
+  const unsupported = Platform.OS !== 'web' && !Device.isDevice;
+  const permission = await getPushPermissionSnapshot();
+  const permissionGranted = permission.status === 'granted';
+  let channel: AlertasChannelSnapshot = { missing: false, importance: null };
+  if (Platform.OS === 'android' && permissionGranted) {
+    // Asegura que el canal exista antes de leer importancia.
+    try {
+      await ensureAlertasTurnoChannel();
+    } catch {
+      /* ignore */
+    }
+    channel = await getAlertasChannelSnapshot();
+  }
+  const channelBlocked = isAlertasChannelBlocked(channel);
+  return {
+    permission,
+    channel,
+    channelBlocked,
+    permissionGranted,
+    needsBanner: shouldShowPushRequiredBanner({
+      platform: Platform.OS,
+      permissionGranted,
+      channelBlocked,
+      unsupported,
+    }),
+    reason: pushGateReason({ permissionGranted, channelBlocked }),
+    activateAction: decidePushActivateAction({ permission, channelBlocked }),
+    unsupported,
+  };
+}
+
+/** Abre Ajustes de la app, o del canal de alertas en Android si se puede. */
+export async function openPushSettings(opts?: { channelId?: string }): Promise<void> {
+  if (Platform.OS === 'android' && opts?.channelId) {
+    try {
+      await Linking.sendIntent('android.settings.CHANNEL_NOTIFICATION_SETTINGS', [
+        { key: 'android.provider.extra.APP_PACKAGE', value: androidPackageName() },
+        { key: 'android.provider.extra.CHANNEL_ID', value: opts.channelId },
+      ]);
+      return;
+    } catch {
+      /* cae a openSettings */
+    }
+  }
+  await Linking.openSettings();
+}
+
+/**
+ * Escribe `pushEstado` / `pushEstadoAt` en el legajo (y en el token si hay).
+ * El CC puede leer el legajo y mostrar «sin notificaciones».
+ */
+export async function persistPushEstado(params: {
+  db: Firestore;
+  empDocId: string | null;
+  estado: PushEstado;
+  token?: string | null;
+}): Promise<void> {
+  const { db, empDocId, estado, token } = params;
+  const patch = { pushEstado: estado, pushEstadoAt: serverTimestamp() };
+  if (empDocId) {
+    try {
+      await updateDoc(doc(db, 'empleados', empDocId), patch);
+    } catch {
+      /* sin permiso o legajo inexistente: no romper el flujo */
+    }
+  }
+  if (token) {
+    try {
+      await setDoc(doc(db, 'device_tokens', token), { ...patch }, { merge: true });
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+export type PushRegistrationStatus = 'unsupported' | 'off' | 'denied' | 'enabled' | 'error';
+
+export type ActivatePushResult = {
+  status: PushRegistrationStatus;
+  action: PushActivateAction;
+  openedSettings: boolean;
+  token?: string;
+  error?: string;
+  gate?: NativePushGateSnapshot;
+};
+
+/**
+ * «Activar ahora»: pide permiso si se puede; si no, abre Ajustes.
+ * Tras conceder, registra el token FCM.
+ */
+export async function activatePushNow(params: {
+  user: User;
+  db: Firestore;
+  empDocId: string | null;
+  empresaId: string | null;
+  previewOf?: boolean;
+}): Promise<ActivatePushResult> {
+  if (Platform.OS === 'web') {
+    const reg = await registerPushNotifications({ ...params, interactive: true });
+    return { status: reg.status, action: 'request', openedSettings: false, token: reg.token, error: reg.error };
+  }
+
+  const gate = await getNativePushGateSnapshot();
+  if (gate.unsupported) {
+    return { status: 'unsupported', action: 'none', openedSettings: false, gate, error: 'Sin dispositivo físico.' };
+  }
+
+  const action = gate.activateAction;
+  if (action === 'request') {
+    const Notifications = await import('expo-notifications');
+    await Notifications.requestPermissionsAsync();
+  }
+
+  const afterRequest = await getNativePushGateSnapshot();
+  if (afterRequest.permissionGranted && !afterRequest.channelBlocked) {
+    const reg = await registerPushNotifications({ ...params, interactive: true });
+    const stored = reg.token || (await getStoredFcmToken());
+    const estado = resolvePushEstado({
+      permissionGranted: true,
+      hasToken: !!stored,
+      channelBlocked: false,
+    });
+    await persistPushEstado({ db: params.db, empDocId: params.empDocId, estado, token: stored });
+    return {
+      status: reg.status,
+      action,
+      openedSettings: false,
+      token: reg.token,
+      error: reg.error,
+      gate: afterRequest,
+    };
+  }
+
+  // Denegado o canal bloqueado: abrir Ajustes (canal si aplica).
+  const channelId =
+    afterRequest.channelBlocked || afterRequest.reason === 'channel'
+      ? binaryHasAlertasTurnoSound(Constants.nativeAppVersion)
+        ? ALERTAS_TURNO_CHANNEL_ID
+        : ALERTAS_TURNO_CHANNEL_ID_LEGACY
+      : undefined;
+  await openPushSettings(channelId ? { channelId } : undefined);
+  await persistPushEstado({
+    db: params.db,
+    empDocId: params.empDocId,
+    estado: 'denegado',
+    token: await getStoredFcmToken(),
+  });
+  return {
+    status: 'denied',
+    action: action === 'request' ? 'open_settings' : action,
+    openedSettings: true,
+    gate: afterRequest,
+  };
+}
+
 /** Misma clave que el portal web viejo `/empleado` (localStorage). */
 export const WEB_FCM_STORAGE_KEY = 'fcm_token';
 const NATIVE_FCM_STORAGE_KEY = '@cosp/mobile_fcm_token';
-
-export type PushRegistrationStatus = 'unsupported' | 'off' | 'denied' | 'enabled' | 'error';
 
 export type RegisterPushOptions = {
   /**
@@ -189,14 +432,16 @@ async function persistTokenDoc(params: {
     platform,
     previewOf,
     nativeVersion: platform === 'web' ? null : Constants.nativeAppVersion,
+    pushEstado: 'activo',
   });
 
   await setDoc(
     doc(db, 'device_tokens', token),
-    { ...payload, updatedAt: serverTimestamp() },
+    { ...payload, pushEstadoAt: serverTimestamp(), updatedAt: serverTimestamp() },
     { merge: true },
   );
   await persistTokenLocal(token);
+  await persistPushEstado({ db, empDocId, estado: 'activo', token });
 }
 
 async function registerWebPush(params: {
@@ -296,7 +541,9 @@ async function registerNativePush(params: {
   let permission = current.status;
   if (permission !== 'granted') {
     // Nativo: se puede pedir en bootstrap; interactive fuerza el prompt si hacía falta.
+    // Sin interactive y ya denied: no re-prompt (el banner «Activar ahora» sí lo fuerza).
     if (!interactive && permission === 'denied') {
+      await persistPushEstado({ db, empDocId, estado: 'denegado', token: await getStoredFcmToken() });
       return { status: 'denied' };
     }
     const requested = await Notifications.requestPermissionsAsync();
@@ -304,13 +551,29 @@ async function registerNativePush(params: {
   }
 
   if (permission !== 'granted') {
-    return { status: permission === 'denied' ? 'denied' : 'off' };
+    const denied = permission === 'denied';
+    await persistPushEstado({
+      db,
+      empDocId,
+      estado: denied ? 'denegado' : 'sin_token',
+      token: await getStoredFcmToken(),
+    });
+    return { status: denied ? 'denied' : 'off' };
+  }
+
+  if (Platform.OS === 'android') {
+    const channel = await getAlertasChannelSnapshot();
+    if (isAlertasChannelBlocked(channel)) {
+      await persistPushEstado({ db, empDocId, estado: 'denegado', token: await getStoredFcmToken() });
+      return { status: 'denied', error: 'Canal de alertas apagado o en silencio.' };
+    }
   }
 
   try {
     const devicePush = await Notifications.getDevicePushTokenAsync();
     const token = typeof devicePush.data === 'string' ? devicePush.data.trim() : '';
     if (token.length < 10) {
+      await persistPushEstado({ db, empDocId, estado: 'sin_token' });
       return { status: 'error', error: 'No se obtuvo un token FCM válido.' };
     }
 
@@ -327,6 +590,7 @@ async function registerNativePush(params: {
     return { status: 'enabled', token };
   } catch (err) {
     const message = err instanceof Error ? err.message : 'No se pudo registrar push';
+    await persistPushEstado({ db, empDocId, estado: 'sin_token', token: await getStoredFcmToken() });
     return { status: 'error', error: message };
   }
 }

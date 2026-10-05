@@ -1,5 +1,7 @@
 /** Payload de `device_tokens/{token}` (puro — sin Firebase / React). */
 
+import type { PushEstado } from './pushPermissionGate';
+
 export function buildDeviceTokenDoc(params: {
   uid: string;
   employeeId: string | null;
@@ -9,6 +11,8 @@ export function buildDeviceTokenDoc(params: {
   previewOf?: boolean;
   /** `Constants.nativeAppVersion`: el servidor elige el canal de alertas con esto. */
   nativeVersion?: string | null;
+  /** Estado operativo del push (lo lee el CC para avisar al operador). */
+  pushEstado?: PushEstado | null;
 }): Record<string, unknown> {
   const docData: Record<string, unknown> = {
     uid: params.uid,
@@ -24,6 +28,9 @@ export function buildDeviceTokenDoc(params: {
   const nativeVersion = String(params.nativeVersion ?? '').trim();
   if (nativeVersion) {
     docData.nativeVersion = nativeVersion;
+  }
+  if (params.pushEstado) {
+    docData.pushEstado = params.pushEstado;
   }
   return docData;
 }

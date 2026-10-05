@@ -47,4 +47,15 @@ describe('buildDeviceTokenDoc — preview SuperAdmin', () => {
     });
     assert.ok(!('previewOf' in doc));
   });
+
+  it('pushEstado activo se escribe en el token', () => {
+    const doc = buildDeviceTokenDoc({
+      uid: 'g',
+      employeeId: 'e1',
+      token: 'tok',
+      platform: 'android',
+      pushEstado: 'activo',
+    });
+    assert.equal(doc.pushEstado, 'activo');
+  });
 });
