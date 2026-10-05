@@ -1,6 +1,6 @@
 # ARCA eventuales — flujos n8n
 
-Tres workflows para importar. No traen claves. La clave fiscal del dueño vive solo en la PC del n8n local.
+Tres workflows para importar. No traen claves. La clave fiscal se carga en COSP (Eventuales → Parámetros → ARCA, SuperAdmin) y queda en Secret Manager. El JSON local es solo respaldo.
 
 | Archivo | Dónde | Qué hace |
 |---|---|---|
@@ -34,7 +34,7 @@ N8N_BLOCK_ENV_ACCESS_IN_NODE=false
 
 `ARCA_ROBOT_KEY` se pide por pantalla (oculta) y queda en el entorno de esa PC o servicio. No se escribe en el repo. Si ya estaba, no la vuelve a pedir.
 
-Crea `D:\arca-txt`, `D:\arca-txt\shots` y `D:\secretos` (SYSTEM, Administradores y la cuenta de n8n). Si falta, copia `arca-claves.example.json` a `arca-claves.json` y abre el Bloc de notas: ahí se completan el CUIT y la clave fiscal. No la pide por pantalla.
+Crea `D:\arca-txt`, `D:\arca-txt\shots` y `D:\secretos` (SYSTEM, Administradores y la cuenta de n8n). Si COSP no tiene la clave, el robot usa ese JSON como respaldo. Si falta el archivo, copia `arca-claves.example.json` a `arca-claves.json` y abre el Bloc de notas: ahí se completan el CUIT y la clave fiscal. No la pide por pantalla ni la escribe en el repo.
 
 En `D:\APP\cronoapp\scripts\arca-robot` instala Playwright y Chromium. Reinicia n8n según el modo y prueba `GET /healthz`. El log es `D:\arca-txt\instalar.log`.
 
