@@ -1,12 +1,127 @@
 {
-  "_nota": "Textos y roles de la web de ARCA. No hay capturas reales: ajustar con --modo explorar (no confirma).",
-  "simplificacionRegistral": { "role": "link", "name": "Simplificaci[oó]n Registral" },
-  "relacionesLaborales": { "role": "link", "name": "Relaciones [Ll]aborales" },
-  "anularRegistro": { "role": "link", "name": "Anular" },
-  "cuil": { "label": "CUIL" },
-  "fechaInicio": { "label": "Fecha" },
-  "nroTransaccion": { "label": "Transacci" },
-  "buscar": { "role": "button", "name": "Buscar" },
-  "anular": { "role": "button", "name": "Anular" },
-  "confirmar": { "role": "button", "name": "Confirmar|Aceptar" }
+  "_nota": "Selectores del recorrido real de Carga Masiva (capturas Mauro 05/10, PNGs 205-212). Anulación sin capturas: queda explorar. Presentar / Nro. Transacción: por confirmar.",
+  "_capturas": {
+    "205": "IndexContribuyente.aspx — select CUIT empleador + Aceptar",
+    "206": "portalcf — tarjeta Simplificación Registral - Empleadores",
+    "207": "DatosBasicos.aspx — Continuar (opcional)",
+    "208": "Menú Relaciones Laborales → Carga Masiva",
+    "209": "CargaMasiva.aspx LISTADO DE NOVEDADES (Abierto → lápiz/borrar, sin Nuevo)",
+    "210": "INGRESO DE ARCHIVO — file + Cargar + Volver",
+    "211": "CargaMasiva_principal ARCHIVO A CARGAR — ícono Cargar Archivo",
+    "212": "mismo principal Código/Estado Abierto"
+  },
+  "portalServicioSimplificacion": {
+    "role": "link",
+    "name": "Simplificaci[oó]n Registral\\s*-\\s*Empleadores|Simplificaci[oó]n Registral",
+    "captura": "206"
+  },
+  "indexContribuyenteSelect": {
+    "css": "select",
+    "texto": "Ud. es apoderado de los siguientes CUITs",
+    "captura": "205"
+  },
+  "indexContribuyenteAceptar": {
+    "role": "button",
+    "name": "^Aceptar$",
+    "captura": "205"
+  },
+  "datosBasicosContinuar": {
+    "role": "button",
+    "name": "^Continuar$",
+    "opcional": true,
+    "captura": "207"
+  },
+  "menuRelacionesLaborales": {
+    "role": "link",
+    "name": "Relaciones Laborales",
+    "hover": true,
+    "captura": "208"
+  },
+  "menuCargaMasiva": {
+    "role": "link",
+    "name": "Carga Masiva",
+    "url": "Contribuyente/RelacionLaboral/CargaMasiva.aspx",
+    "captura": "208"
+  },
+  "listadoNovedades": {
+    "texto": "LISTADO DE NOVEDADES",
+    "columnas": ["Código", "Fecha Creación", "Fecha Presentación", "Nro. Transacción", "Estado", "Acción"],
+    "captura": "209"
+  },
+  "listadoNuevo": {
+    "role": "button",
+    "name": "^Nuevo$",
+    "nota": "Solo si no hay novedad Abierta",
+    "captura": "209"
+  },
+  "listadoEditar": {
+    "title": "Editar|Modificar",
+    "nota": "Ícono lápiz en fila Abierta del código del lote",
+    "captura": "209"
+  },
+  "listadoBorrar": {
+    "title": "Borrar|Eliminar",
+    "prohibido": true,
+    "nota": "El robot NUNCA borra una novedad abierta ajena",
+    "captura": "209"
+  },
+  "principalCodigo": {
+    "regex": "C[oó]digo\\s*:\\s*(\\d+)",
+    "captura": "211"
+  },
+  "principalEstadoAbierto": {
+    "texto": "Estado:\\s*Abierto",
+    "captura": "211"
+  },
+  "principalCargarArchivo": {
+    "title": "Cargar Archivo",
+    "captura": "211"
+  },
+  "ingresoArchivo": {
+    "texto": "INGRESO DE ARCHIVO",
+    "file": "input[type=file]",
+    "captura": "210"
+  },
+  "ingresoCargar": {
+    "role": "button",
+    "name": "^Cargar$",
+    "captura": "210"
+  },
+  "ingresoVolver": {
+    "role": "button",
+    "name": "^Volver$",
+    "captura": "210"
+  },
+  "presentarNovedad": {
+    "role": "button",
+    "name": "Presentar|Enviar|Cerrar",
+    "estado": "por confirmar",
+    "nota": "Falta captura: botón para presentar/cerrar la novedad abierta"
+  },
+  "nroTransaccionListado": {
+    "columna": "Nro. Transacción",
+    "estado": "por confirmar",
+    "nota": "Tras presentar, leer por Código guardado en el lote (listado paso 5)"
+  },
+  "simplificacionRegistral": {
+    "role": "link",
+    "name": "Simplificaci[oó]n Registral",
+    "nota": "Alias anulación / explorar"
+  },
+  "relacionesLaborales": {
+    "role": "link",
+    "name": "Relaciones Laborales"
+  },
+  "anularRegistro": {
+    "role": "link",
+    "name": "Modificaciones y Bajas|Anular",
+    "estado": "por confirmar",
+    "nota": "Anulación: sin capturas — solo --modo explorar"
+  },
+  "cuil": { "label": "CUIL", "estado": "por confirmar" },
+  "fechaInicio": { "label": "Fecha", "estado": "por confirmar" },
+  "nroTransaccion": { "label": "Transacci", "estado": "por confirmar" },
+  "buscar": { "role": "button", "name": "Buscar", "estado": "por confirmar" },
+  "anular": { "role": "button", "name": "Anular", "estado": "por confirmar" },
+  "confirmar": { "role": "button", "name": "Confirmar|Aceptar", "estado": "por confirmar" }
 }

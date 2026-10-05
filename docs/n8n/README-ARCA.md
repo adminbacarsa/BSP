@@ -101,11 +101,11 @@ Los horarios 18:00 (AT, canal LOTE) y 09:00 (BT, canal LOTE) ya estan en el JSON
 
 1. `ARCA_SIMULACION=0` y reiniciar n8n.
 2. Probar un solo lote chico de una empresa cuya clave fiscal ya esté en COSP (Secret Manager).
-3. El robot entra a Clave Fiscal, abre Simplificación Registral → Relaciones Laborales → Carga Masiva → Nuevo, sube el TXT, lee el o los números de transacción y la constancia, y llama `POST ?action=resultado` con `estado: CONFIRMADO`, `loteId` y `nroTransaccion`.
+3. El robot entra a Clave Fiscal → portal → **Simplificación Registral - Empleadores** → elige el CUIT del empleador en el `<select>` (no el primero) → Continuar si aparece DatosBasicos → `CargaMasiva.aspx` (LISTADO DE NOVEDADES). Si no hay abierta: **Nuevo**. Si hay una Abierta del código guardado en el lote: lápiz. Si hay otra abierta ajena: error claro y captura (nunca borra). En el principal guarda `arcaCodigoNovedad`, abre **Cargar Archivo**, sube el TXT, valida Registros vs líneas, presenta (selectores por confirmar) y lee el Nro. Transacción del listado por Código. Confirma con `POST ?action=resultado`.
 4. Si falla, reintenta (`ARCA_ROBOT_REINTENTOS`, default 3), guarda una captura en `ARCA_SHOTS_DIR` y marca el lote `ERROR` con el detalle. Esos envios vuelven a entrar en el próximo lote.
-5. Un `SUBIENDO` de más de 20 minutos (el proceso murio) también vuelve al lote.
+5. Un `SUBIENDO` de más de 20 minutos (el archivo murio) también vuelve al lote.
 
-La primera corrida real puede pedir un ajuste de selector si AFIP cambio la pantalla. La captura del error muestra donde se corto. Los selectores de la anulación están en `scripts/arca-robot/selectores.json`. Con credenciales reales y `ARCA_SIMULACION=0`, `node scripts/arca-robot/subir.mjs --modo explorar --envio ID --empresa EMPRESA` recorre hasta la búsqueda y **no confirma**.
+Selectores reales (capturas 05/10) en `scripts/arca-robot/selectores.json`. Presentar / Nro. Transacción y anulación: **por confirmar** (`--modo explorar` / `--modo explorar-carga`). Con archivo: `node scripts/arca-robot/subir.mjs --modo explorar --archivo TXT --lote …` llega hasta después de Cargar y no presenta. Anulación: `node scripts/arca-robot/subir.mjs --modo explorar --envio ID --empresa EMPRESA`.
 
 ## Anulación automática
 
@@ -117,7 +117,8 @@ Al entrar en `PENDIENTE`, COSP avisa el webhook urgente. El robot busca el alta 
 |---|---|
 | `GET ?action=lote&tipo=AT\|BT&canal=LOTE\|URGENTE[&empresaId=]` | TXT unico por empresa. Pasa esos envios a `SUBIENDO` y les pone `loteId`. No incluye `enviable: false` ni los quitados del lote. |
 | `GET ?action=anulacion&envioId=` | Datos de una anulación: CUIL, fecha AAAAMMDD, nro de transacción del alta y `cuitRepresentado`. Si faltan menos de 2 h o el robot ya falló 2 veces, responde `MANUAL` y no hay que entrar a ARCA. |
-| `POST ?action=resultado` | `{ loteId o envioId, estado, nroTransaccion?, nrosTransaccion?, constanciaUrl?, error? }`. Confirmar exige número. Un lote confirmado comparte el mismo número. |
+| `POST ?action=resultado` | `{ loteId o envioId, estado, nroTransaccion?, nrosTransaccion?, constanciaUrl?, error?, arcaCodigoNovedad? }`. Confirmar exige número. Un lote confirmado comparte el mismo número. |
+| `POST ?action=arca-codigo` | `{ loteId o envioId, arcaCodigoNovedad }` guarda el Código de Carga Masiva sin cambiar el estado. |
 | `GET ?action=vencidos&minutos=N` | AT/BT urgentes sin confirmar hace más de N minutos. No devuelve el TXT. |
 | `POST ?action=link-emitir` | `{ envioId, marcarRespaldo: true }` link de un solo uso. El push lo manda COSP. |
 | `GET ?action=config-avisos&empresaId=&tipo=` | mails de RRHH ya resueltos. |

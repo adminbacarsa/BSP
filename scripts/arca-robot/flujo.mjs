@@ -39,7 +39,9 @@ export function extraerNros(texto) {
   return found;
 }
 
-export function bodyResultado({ loteId, envioId, estado, nroTransaccion, constanciaUrl, error, acuse, fallosRobot }) {
+export function bodyResultado({
+  loteId, envioId, estado, nroTransaccion, constanciaUrl, error, acuse, fallosRobot, arcaCodigoNovedad,
+}) {
   const body = { estado };
   if (loteId) body.loteId = String(loteId);
   if (envioId) body.envioId = String(envioId);
@@ -48,6 +50,7 @@ export function bodyResultado({ loteId, envioId, estado, nroTransaccion, constan
   if (error) body.error = String(error).slice(0, 500);
   if (acuse) body.acuse = String(acuse).slice(0, 120);
   if (fallosRobot) body.fallosRobot = Number(fallosRobot);
+  if (arcaCodigoNovedad) body.arcaCodigoNovedad = String(arcaCodigoNovedad);
   return body;
 }
 
