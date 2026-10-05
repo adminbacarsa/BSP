@@ -6,7 +6,8 @@
  *    GET  ?action=lote&tipo=AT|BT&canal=LOTE|URGENTE[&empresaId=]
  *                                             → un TXT por empresa (reclama: SUBIENDO + loteId)
  *    GET  ?action=vencidos&minutos=N          → AT/BT urgentes sin confirmar hace más de N min (sin TXT)
- *    POST ?action=resultado                   → { envioId | loteId, estado, nroTransaccion?, constanciaUrl?, error? }
+ *    POST ?action=resultado                   → { envioId | loteId, estado, nroTransaccion?, constanciaUrl?, error?, arcaCodigoNovedad? }
+ *    POST ?action=arca-codigo                 → { loteId | envioId, arcaCodigoNovedad } guarda Código de Carga Masiva (sin cambiar estado)
  *    GET  ?action=credencial&empresaId=       -> CUIT de ingreso, CUIT representado y clave (solo HTTPS, no se loguea)
  *    GET  ?action=anulacion&envioId=          -> CUIL, fecha AAAAMMDD, nro del alta y cuitRepresentado
  *    POST ?action=resultado                   -> anulación: { envioId, estado: ANULADO, acuse } o ERROR con fallosRobot
@@ -73,6 +74,7 @@ export async function aplicarTransicion(
     fallosRobot?: number;
     actor: string;
     marcarTokenUsado?: boolean;
+    arcaCodigoNovedad?: string;
   },
 ): Promise<{ status: number; body: Record<string, unknown> }> {
   const ref = db().collection(COLL).doc(envioId);
@@ -88,6 +90,7 @@ export async function aplicarTransicion(
 
   const patch: Record<string, unknown> = { ...out.patch, updatedAt: FieldValue.serverTimestamp() };
   if (input.marcarTokenUsado) patch.tokenUsadoAt = FieldValue.serverTimestamp();
+  if (input.arcaCodigoNovedad) patch.arcaCodigoNovedad = String(input.arcaCodigoNovedad);
   const trasError = input.estado === 'ERROR' && envio.tipo === 'ANULACION'
     ? planTrasError(envio, Date.now(), Number(input.fallosRobot || 0))
     : null;
@@ -393,11 +396,21 @@ export const arcaEnviosApi = onRequest(
           if (!reclamado) continue;
           const empresa = await db().collection('empresas').doc(lote.empresaId).get();
           const data = empresa.data() || {};
+          const meta = (data.arcaRobotAcceso || {}) as { cuitRepresentado?: string };
+          let arcaCodigoNovedad = '';
+          for (const id of lote.envioIds) {
+            const prev = docs.find((d) => d.id === id)?.data()?.arcaCodigoNovedad;
+            if (prev) {
+              arcaCodigoNovedad = String(prev);
+              break;
+            }
+          }
           lotes.push({
             ...lote,
             loteId: reclamado,
-            cuit: String(data.cuit || '').replace(/\D/g, ''),
-            empresaNombre: String(data.nombre || data.razonSocial || ''),
+            cuit: String(meta.cuitRepresentado || data.cuit || '').replace(/\D/g, ''),
+            empresaNombre: String(data.nombre || data.name || data.razonSocial || ''),
+            arcaCodigoNovedad: arcaCodigoNovedad || null,
           });
         }
         res.status(200).json({ lotes });
@@ -433,6 +446,42 @@ export const arcaEnviosApi = onRequest(
         return;
       }
 
+      if (action === 'arca-codigo' && req.method === 'POST') {
+        const body = (req.body || {}) as Record<string, unknown>;
+        const envioId = String(body.envioId || '').trim();
+        const loteId = String(body.loteId || '').trim();
+        const codigo = String(body.arcaCodigoNovedad || '').trim();
+        if ((!envioId && !loteId) || !/^\d{4,}$/.test(codigo)) {
+          res.status(400).json({ error: 'PARAMETROS' });
+          return;
+        }
+        const refs: admin.firestore.DocumentReference[] = [];
+        if (loteId && !envioId) {
+          const snap = await db().collection(COLL).where('loteId', '==', loteId).get();
+          if (snap.empty) {
+            res.status(404).json({ error: 'NO_EXISTE' });
+            return;
+          }
+          snap.docs.forEach((d) => refs.push(d.ref));
+        } else {
+          refs.push(db().collection(COLL).doc(envioId));
+        }
+        const batch = db().batch();
+        for (const ref of refs) {
+          batch.update(ref, {
+            arcaCodigoNovedad: codigo,
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+        }
+        await batch.commit();
+        await auditar('ARCA_CODIGO_NOVEDAD', `Código Carga Masiva ${codigo}`, {
+          loteId: loteId || null,
+          envioId: envioId || null,
+        });
+        res.status(200).json({ ok: true, arcaCodigoNovedad: codigo, actualizados: refs.length });
+        return;
+      }
+
       if (action === 'resultado' && req.method === 'POST') {
         const body = (req.body || {}) as Record<string, unknown>;
         const envioId = String(body.envioId || '').trim();
@@ -442,6 +491,7 @@ export const arcaEnviosApi = onRequest(
           res.status(400).json({ error: 'PARAMETROS' });
           return;
         }
+        const arcaCodigoNovedad = String(body.arcaCodigoNovedad || '').trim();
         const input = {
           estado,
           origen: 'ROBOT' as const,
@@ -451,6 +501,7 @@ export const arcaEnviosApi = onRequest(
           acuse: String(body.acuse || '').slice(0, 120) || undefined,
           fallosRobot: Number(body.fallosRobot || 0) || undefined,
           actor: 'n8n-local',
+          arcaCodigoNovedad: arcaCodigoNovedad || undefined,
         };
         if (loteId && !envioId) {
           const snap = await db().collection(COLL).where('loteId', '==', loteId).get();
