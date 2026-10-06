@@ -1,6 +1,6 @@
 {
   "name": "COSP — ARCA respaldo urgente (CLOUD)",
-  "_nota": "Importar en n8n Cloud. Si un AT/BT URGENTE no se confirmo en N minutos, COSP emite el link magico (push a RRHH) y este flujo manda el mail. Sin clave fiscal.",
+  "_nota": "Importar en n8n Cloud (bacarit.app.n8n.cloud). Cada 10 min. La URL es variable del proyecto ARCA_ENVIOS_URL y la clave es credencial Header Auth. El nodo Gmail no trae token.",
   "settings": {
     "executionOrder": "v1",
     "timezone": "America/Argentina/Buenos_Aires"
@@ -12,13 +12,13 @@
           "interval": [
             {
               "field": "cronExpression",
-              "expression": "*/5 * * * *"
+              "expression": "*/10 * * * *"
             }
           ]
         }
       },
       "id": "sch",
-      "name": "Cada 5 min",
+      "name": "Cada 10 min",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
@@ -28,19 +28,12 @@
     },
     {
       "parameters": {
-        "url": "={{ $env.ARCA_ENVIOS_URL }}?action=vencidos&minutos={{ $env.ARCA_URGENTE_MINUTOS || 30 }}&canal=URGENTE",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "x-arca-key",
-              "value": "={{ $env.ARCA_ROBOT_KEY }}"
-            }
-          ]
-        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "options": {
           "timeout": 20000
-        }
+        },
+        "url": "={{ $vars.ARCA_ENVIOS_URL }}?action=vencidos&minutos=30"
       },
       "id": "get",
       "name": "GET urgentes vencidos",
@@ -49,7 +42,13 @@
       "position": [
         -280,
         0
-      ]
+      ],
+      "notes": "Credencial Header Auth: nombre del header x-arca-key, valor = secreto ARCA_ROBOT_KEY. Sin variables de entorno del proceso.",
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "ARCA x-arca-key"
+        }
+      }
     },
     {
       "parameters": {
@@ -100,23 +99,16 @@
     },
     {
       "parameters": {
-        "method": "POST",
-        "url": "={{ $env.ARCA_ENVIOS_URL }}?action=link-emitir",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "x-arca-key",
-              "value": "={{ $env.ARCA_ROBOT_KEY }}"
-            }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ envioId: $json.envioId, marcarRespaldo: true }) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "options": {
           "timeout": 20000
-        }
+        },
+        "method": "POST",
+        "url": "={{ $vars.ARCA_ENVIOS_URL }}?action=link-emitir",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ envioId: $json.envioId, marcarRespaldo: true }) }}"
       },
       "id": "link",
       "name": "Pedir link",
@@ -125,23 +117,22 @@
       "position": [
         400,
         0
-      ]
+      ],
+      "notes": "Credencial Header Auth: nombre del header x-arca-key, valor = secreto ARCA_ROBOT_KEY. Sin variables de entorno del proceso.",
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "ARCA x-arca-key"
+        }
+      }
     },
     {
       "parameters": {
-        "url": "={{ $env.ARCA_ENVIOS_URL }}?action=config-avisos&empresaId={{ $('Un envio').item.json.empresaId }}&tipo={{ $('Un envio').item.json.estado === 'ERROR' ? 'ARCA_ERROR' : ($('Un envio').item.json.tipo === 'BT' ? 'ARCA_BAJA_PENDIENTE' : 'ARCA_ALTA_PENDIENTE') }}",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "x-arca-key",
-              "value": "={{ $env.ARCA_ROBOT_KEY }}"
-            }
-          ]
-        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "options": {
           "timeout": 20000
-        }
+        },
+        "url": "={{ $vars.ARCA_ENVIOS_URL }}?action=config-avisos&empresaId={{ $('Un envio').item.json.empresaId }}&tipo={{ $('Un envio').item.json.estado === 'ERROR' ? 'ARCA_ERROR' : ($('Un envio').item.json.tipo === 'BT' ? 'ARCA_BAJA_PENDIENTE' : 'ARCA_ALTA_PENDIENTE') }}"
       },
       "id": "cfg",
       "name": "GET config-avisos",
@@ -150,13 +141,19 @@
       "position": [
         620,
         0
-      ]
+      ],
+      "notes": "Credencial Header Auth: nombre del header x-arca-key, valor = secreto ARCA_ROBOT_KEY. Sin variables de entorno del proceso.",
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "ARCA x-arca-key"
+        }
+      }
     },
     {
       "parameters": {
         "mode": "runOnceForEachItem",
         "language": "javaScript",
-        "jsCode": "const prev = $('Un envio').item.json;\nconst link = $('Pedir link').item.json;\nconst filas = [];\nfor (const mail of $json.mails || []) {\n  filas.push({ json: { mail, linkUrl: link.linkUrl || '', tipo: prev.tipo, estado: prev.estado, minutos: prev.minutos, empresaId: prev.empresaId, envioId: prev.envioId, ultimoError: prev.ultimoError || '', enviable: prev.enviable } });\n}\nreturn filas;"
+        "jsCode": "const prev = $('Un envio').item.json;\nconst link = $('Pedir link').item.json;\nconst estado = String(prev.estado || '');\nconst tipo = String(prev.tipo || '');\nconst linkUrl = String(link.linkUrl || '');\nconst detalle = String(prev.ultimoError || '');\nlet asunto = 'ARCA ' + tipo + ' urgente sin confirmar (' + estado + ')';\nlet texto = [\n  'Un alta, baja o anulación urgente de ARCA no se confirmó.',\n  '',\n  'Empresa: ' + (prev.empresaId || ''),\n  'Envío: ' + (prev.envioId || ''),\n  'Estado: ' + estado,\n  'Minutos: ' + (prev.minutos ?? ''),\n  'Enviable: ' + prev.enviable,\n  'Detalle: ' + detalle,\n  '',\n  'Carga manual, un solo uso, vence a las 48 h:',\n  linkUrl,\n].join('\\n');\nif (estado === 'VERIFICAR') {\n  asunto = 'ARCA ' + tipo + ' enviado pero no aparece en ARCA';\n  texto = [\n    'Enviado pero no aparece en ARCA.',\n    '',\n    'El alta figura enviada y, pasadas 48 h, no aparece la relación eventual (mod. 012).',\n    'Revisar el Domicilio Fiscal Electrónico.',\n    '',\n    'Empresa: ' + (prev.empresaId || ''),\n    'Envío: ' + (prev.envioId || ''),\n    'Estado: VERIFICAR',\n    '',\n    'Carga manual, un solo uso, vence a las 48 h:',\n    linkUrl,\n  ].join('\\n');\n} else if (estado === 'MANUAL' && tipo === 'ANULACION') {\n  asunto = 'ARCA anulación MANUAL';\n  texto = [\n    'La anulación urgente quedó en MANUAL. Hay que hacerla en la web de ARCA.',\n    '',\n    'Empresa: ' + (prev.empresaId || ''),\n    'Envío: ' + (prev.envioId || ''),\n    'Estado: MANUAL',\n    'Detalle: ' + detalle,\n    '',\n    'Carga manual, un solo uso, vence a las 48 h:',\n    linkUrl,\n  ].join('\\n');\n}\nconst filas = [];\nfor (const mail of $json.mails || []) {\n  if (!mail) continue;\n  filas.push({ json: { mail, asunto, texto, linkUrl, tipo, estado, envioId: prev.envioId } });\n}\nreturn filas;"
       },
       "id": "mails",
       "name": "Mails de RRHH",
@@ -170,8 +167,8 @@
     {
       "parameters": {
         "sendTo": "={{ $json.mail }}",
-        "subject": "=ARCA {{ $json.tipo }} urgente sin confirmar ({{ $json.estado }})",
-        "message": "=Un alta o baja urgente de ARCA no se confirmo.\n\nEmpresa: {{ $json.empresaId }}\nEnvio: {{ $json.envioId }}\nEstado: {{ $json.estado }}\nMinutos sin confirmar: {{ $json.minutos }}\nEnviable: {{ $json.enviable }}\nDetalle: {{ $json.ultimoError }}\n\nCarga manual, un solo uso, vence a las 48 h:\n{{ $json.linkUrl }}\n",
+        "subject": "={{ $json.asunto }}",
+        "message": "={{ $json.texto }}",
         "options": {}
       },
       "id": "mail",
@@ -182,16 +179,16 @@
         1060,
         0
       ],
+      "notes": "Al importar, elegir la credencial Gmail OAuth2 de la cuenta que envía. Este nodo no trae token.",
       "credentials": {
         "gmailOAuth2": {
-          "id": "REEMPLAZAR",
           "name": "Gmail RRHH"
         }
       }
     }
   ],
   "connections": {
-    "Cada 5 min": {
+    "Cada 10 min": {
       "main": [
         [
           {

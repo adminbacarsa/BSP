@@ -6,7 +6,7 @@ Tres workflows para importar. No traen claves. La clave fiscal se carga en COSP 
 |---|---|---|
 | `arca-local-lotes.json` | n8n local `https://192.168.0.8:5678` (alias `https://autbacar.dnsalias.com`) | 18:00 altas AT, 09:00 bajas BT (hora Argentina) y webhook `urgente` |
 | `arca-local-robot.json` | el mismo n8n local | Playwright: carga masiva y, de a una, anulación (`--modo anular --envio ID`) |
-| `arca-cloud-respaldo-urgente.json` | `https://bacarit.app.n8n.cloud/` | si un AT/BT urgente no se confirmó en N minutos, mail a RRHH con el link de carga manual |
+| `arca-cloud-respaldo-urgente.json` | `https://bacarit.app.n8n.cloud/` | cada 10 min, AT/BT/ANULACION urgente sin cerrar: mail a RRHH con estado y link manual. ENVIADO no entra. |
 
 Los JSON viejos `arca-local-playwright.json` y `arca-cloud-link-mágico.json` quedan de referencia. El que se importa para el aviso es el de respaldo: el link mágico lo emite COSP (`link-emitir`), igual que ese borrador.
 
@@ -57,9 +57,9 @@ ARCA_ROBOT_REINTENTOS=3
 
 La clave fiscal ya no va en `D:\secretos\arca-claves.json`: se carga desde COSP y vive en Secret Manager. Si ese archivo quedó de una instalación anterior, se puede borrar.
 
-En n8n Cloud, las mismas `ARCA_ENVIOS_URL` y `ARCA_ROBOT_KEY`, más `ARCA_URGENTE_MINUTOS=30`. Ahí no hay clave fiscal.
+En n8n Cloud no se usa `$env` (Cloud lo bloquea en los nodos). La URL y la clave se cargan como variable del proyecto y credencial Header Auth. El paso a paso está en «Respaldo urgente en n8n Cloud». Ahí no hay clave fiscal.
 
-Para que los nodos vean `$env`: `N8N_BLOCK_ENV_ACCESS_IN_NODE=false`. El nodo Execute Command tiene que estar habilitado en el n8n local (en Cloud no se usa).
+Para que los nodos del n8n **local** vean `$env`: `N8N_BLOCK_ENV_ACCESS_IN_NODE=false`. El nodo Execute Command tiene que estar habilitado en el n8n local (en Cloud no se usa).
 
 ## 2. Playwright en la PC del n8n
 
@@ -75,7 +75,7 @@ El script es `scripts/arca-robot/subir.mjs`. Con `ARCA_SIMULACION=1` no abre el 
 
 1. n8n local → Workflows → Import from file → `arca-local-robot.json`. Activar.
 2. Importar `arca-local-lotes.json`. No activar todavía.
-3. n8n Cloud → importar `arca-cloud-respaldo-urgente.json`. En el nodo Gmail elegir la credencial de RRHH (el JSON trae el nombre `Gmail RRHH`, sin token). No activar todavía.
+3. n8n Cloud → seguir «Respaldo urgente en n8n Cloud». No activar el horario hasta probar un envío a mano.
 
 Los webhooks de producción quedan `POST /webhook/urgente` y `POST /webhook/cosp-arca-robot`. Hay que mandar `x-arca-key`. Si falta o no coincide, el flujo corta con `NO_AUTORIZADO`.
 
@@ -93,7 +93,7 @@ x-arca-key: LA_MISMA_QUE_ARCA_ROBOT_KEY
 
 4. El flujo de lotes pide `GET ?action=lote`, guarda el TXT en `ARCA_TXT_DIR` y llama al robot. El robot **no entra a ARCA** y confirma en COSP con un número `SIM-...` y origen ROBOT. Una anulación en simulación confirma con `SIM-ANUL-...` y tampoco pide la clave.
 5. Revisar en `arca_envios` que el lote quedó `CONFIRMADO` con ese número. No tiene que haber login a AFIP.
-6. Para el respaldo: un urgente que siga `PENDIENTE` más de N minutos. Cloud pide `GET ?action=vencidos`. COSP emite el link (y el push a quien tenga el aviso `ARCA_ALTA_PENDIENTE` o `ARCA_BAJA_PENDIENTE`) y el nodo Gmail manda el estado y el link. Un envío se avisa una sola vez.
+6. El respaldo de Cloud se prueba con un envío de pruebas, como dice la sección de abajo. Un envío se avisa una sola vez (`marcarRespaldo`).
 
 Los horarios 18:00 (AT, canal LOTE) y 09:00 (BT, canal LOTE) ya estan en el JSON, zona `America/Argentina/Buenos_Aires`. El viernes a las 18:00 incluye lo del fin de semana porque eso ya lo clasifico COSP al armar el envio.
 
@@ -114,6 +114,39 @@ Selectores reales (capturas 05/10) en `scripts/arca-robot/selectores.json`. Tras
 `empresas.arcaEventuales.canalUrgente`: `ALTAS_TEXTO` o `CARGA_MASIVA` (default). Solo cambia el AT con canal URGENTE. El lote de las 18:00 sigue por Carga Masiva.
 
 Con `ALTAS_TEXTO` el robot usa `--modo altas-texto`: Relaciones Laborales → Registrar Nuevas Altas → Altas Masivas, pega hasta 10 líneas de 85 y Aceptar. Los errores salen como `Registro N: …`. `--modo explorar-altas` frena antes de Aceptar y captura. El número de alta o CAT de un Aceptar válido queda **por confirmar**: si aparece se guarda y el envío pasa a `ENVIADO` (la verificación CUIL sigue igual); si no aparece, no se marca enviado.
+
+
+## Respaldo urgente en n8n Cloud
+
+Instancia: `https://bacarit.app.n8n.cloud/`. Archivo: `docs/n8n/arca-cloud-respaldo-urgente.json`.
+
+Cada 10 minutos hace `GET arcaEnviosApi?action=vencidos&minutos=30` con el header `x-arca-key`. Por cada AT, BT o ANULACION urgente sin cerrar: `POST ?action=link-emitir` (`marcarRespaldo: true`, un aviso por envío) y un mail a los destinatarios de `GET ?action=config-avisos`. El mail lleva el estado y el link de carga manual.
+
+| Estado | Mail |
+|---|---|
+| `ENVIADO` | No. Ya tiene número y la fichada está habilitada. |
+| `VERIFICAR` | Sí. Texto propio: «enviado pero no aparece en ARCA». |
+| `MANUAL` de anulación | Sí. Hay que anular en la web de ARCA. |
+| `PENDIENTE`, `SUBIENDO`, `ERROR` | Sí, pasados 30 minutos, si todavía no se avisó. |
+
+Cloud bloquea `$env` en los nodos. Este JSON no lo usa.
+
+1. En Cloud: **Settings → Variables** (variables del proyecto). Crear `ARCA_ENVIOS_URL` con el valor `https://us-central1-comtroldata.cloudfunctions.net/arcaEnviosApi`. Sin barra al final. El flujo la lee como `$vars.ARCA_ENVIOS_URL`.
+2. **Credentials → Header Auth**. Nombre de la credencial: `ARCA x-arca-key` (el JSON la referencia por ese nombre). Name del header: `x-arca-key`. Value: el mismo secreto `ARCA_ROBOT_KEY` de Firebase. No pegar la clave en el workflow.
+3. **Workflows → Import from file** → `arca-cloud-respaldo-urgente.json`. En los tres nodos HTTP (GET vencidos, Pedir link, GET config-avisos) elegir esa credencial Header Auth si Cloud no la tomó sola.
+4. Nodo **Mail a RRHH**: credencial **Gmail OAuth2** de la cuenta que envía (Credentials → Gmail OAuth2 → Sign in with Google, o una que ya exista). El JSON solo trae el nombre `Gmail RRHH`, sin token ni refresh token. Asignarla al nodo.
+5. No activar el horario todavía.
+
+Probar con un envío de pruebas (no entra a ARCA):
+
+1. En COSP, un envío de `pruebas_sa` (o la empresa de prueba) con `canal: URGENTE`, tipo AT, BT o ANULACION, estado `PENDIENTE`, `MANUAL` o `VERIFICAR`, `createdAt` de más de 30 minutos y sin `respaldoAvisadoAt`. La empresa tiene que tener en Configuración → Avisos un mail de RRHH para `ARCA_ALTA_PENDIENTE` (BT usa `ARCA_BAJA_PENDIENTE`; ERROR usa `ARCA_ERROR`).
+2. En el workflow, **Execute workflow** una vez (no hace falta esperar los 10 minutos).
+3. El mail de un `VERIFICAR` dice «enviado pero no aparece en ARCA». El de una anulación `MANUAL` dice que hay que hacerla en la web. El de un `PENDIENTE` dice que no se confirmó, con el estado y el link.
+4. Un `ENVIADO` no tiene que aparecer en el GET ni generar mail.
+5. Volver a ejecutar: ese envío no se repite (`respaldoAvisadoAt`). Para probar de nuevo, borrar ese campo en el doc de prueba.
+6. Si el mail y el link están bien, activar el workflow.
+
+El filtro de estados está en `esUrgenteVencido` y en la consulta de `arcaEnviosApi`. Hasta el próximo deploy de functions, producción sigue con el filtro anterior.
 
 ## Verificación post-envío (ENVIADO ≠ CONFIRMADO)
 
@@ -136,7 +169,7 @@ Al entrar en `PENDIENTE`, COSP avisa el webhook urgente. El robot busca el alta 
 | `GET ?action=anulacion&envioId=` | Datos de una anulación: CUIL, fecha AAAAMMDD, nro de transacción del alta y `cuitRepresentado`. Si faltan menos de 2 h o el robot ya falló 2 veces, responde `MANUAL` y no hay que entrar a ARCA. |
 | `POST ?action=resultado` | `{ loteId o envioId, estado, nroTransaccion?, nrosTransaccion?, constanciaUrl?, error?, arcaCodigoNovedad? }`. Confirmar exige número. Un lote confirmado comparte el mismo número. |
 | `POST ?action=arca-codigo` | `{ loteId o envioId, arcaCodigoNovedad }` guarda el Código de Carga Masiva sin cambiar el estado. |
-| `GET ?action=vencidos&minutos=N` | AT/BT urgentes sin confirmar hace más de N minutos. No devuelve el TXT. |
+| `GET ?action=vencidos&minutos=N` | AT/BT/ANULACION urgentes en PENDIENTE, SUBIENDO, ERROR, MANUAL o VERIFICAR, pasados N minutos. ENVIADO, CONFIRMADO y ANULADO no entran. No devuelve el TXT. |
 | `POST ?action=link-emitir` | `{ envioId, marcarRespaldo: true }` link de un solo uso. El push lo manda COSP. |
 | `GET ?action=config-avisos&empresaId=&tipo=` | mails de RRHH ya resueltos. |
 
