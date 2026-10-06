@@ -7,11 +7,11 @@ import { evaluateServerCheckInWindow } from './checkInWindow';
 import { resolveCheckInPayClock } from './checkInPay';
 import { isOpsCoverageHoursOnSourceDoc } from '../coverage/coverageTraceShift';
 import { cancelLlegadaTardeConvocatorias } from '../attendance/cancelLlegadaTardeConvocatorias';
-import { notifyTurnoFinalizadoRelevo } from './relevoNotifications';
 import { findPresentOutgoingAlignedToGapStart } from './relevoOutgoingMatch';
 import { isReliefEligibleShift } from '../common/reliefEligibility';
 import { seriesCodeOf, seriesHandoffKind } from '../common/shiftSeries';
-import { buildAutoClosePatch, clearRetentionOnReliefClose } from '../scheduling/shiftClose';
+import { buildAutoClosePatch, clearRetentionOnReliefClose, shiftHardCapAtMs } from '../scheduling/shiftClose';
+import { claimFinTurnoAviso, notifyTurnoFinalizadoRelevo } from './relevoNotifications';
 import { isExcluidoDeOperacion } from '../common/excluirDeOperacion';
 
 export type PresenciaSource =
@@ -418,12 +418,14 @@ export async function registrarPresencia(
               relievedSource: source,
             });
           } else {
-            const realEndMs = Math.max(handoffMs, nowMs);
+            const requestedEnd = Math.max(handoffMs, nowMs);
+            const capAt = shiftHardCapAtMs(outData as Record<string, unknown>);
+            const overCap = capAt > 0 && requestedEnd > capAt;
             const outClose = buildAutoClosePatch(outData as Record<string, unknown>, {
-              realEndMs,
-              reason: 'RELEVO_PRESENTE',
+              realEndMs: requestedEnd,
+              reason: overCap ? 'TOPE_JORNADA' : 'RELEVO_PRESENTE',
               now: Timestamp.fromMillis(nowMs),
-              by: 'RELEVO',
+              by: overCap ? 'TOPE' : 'RELEVO',
             });
             await outDoc.ref.update({
               ...clearRetentionOnReliefClose(outClose),
@@ -437,13 +439,24 @@ export async function registrarPresencia(
             });
 
             if (outEmpId) {
-              void notifyTurnoFinalizadoRelevo(db, {
-                outEmpId,
-                outDocId: outDoc.id,
-                incomingName,
-                objectiveName,
-                empresaId,
-              });
+              if (overCap) {
+                void claimFinTurnoAviso(db, {
+                  kind: 'TOPE',
+                  outEmpId,
+                  outDocId: outDoc.id,
+                  employeeName: outName,
+                  place: objectiveName,
+                  empresaId,
+                });
+              } else {
+                void notifyTurnoFinalizadoRelevo(db, {
+                  outEmpId,
+                  outDocId: outDoc.id,
+                  incomingName,
+                  objectiveName,
+                  empresaId,
+                });
+              }
             }
           }
 

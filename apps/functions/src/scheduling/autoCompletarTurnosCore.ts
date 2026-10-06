@@ -214,6 +214,12 @@ function isGapCovered(data: FirebaseFirestore.DocumentData): boolean {
   return data.operacionallyCovered === true || String(data.coverageStatus || '').toUpperCase() === 'COVERED';
 }
 
+/** Cobertura ya asignada al hueco (ops_cov que toma la franja). EXT/ADV de registro no cuentan. */
+function isAssignedCoverageDoc(data: FirebaseFirestore.DocumentData): boolean {
+  if (isOpsCoverageHoursOnSourceDoc(data as Record<string, unknown>)) return false;
+  return String(data.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE';
+}
+
 function shiftEndDate(data: FirebaseFirestore.DocumentData): Date | null {
   const ms = shiftEndMs(data);
   return ms ? new Date(ms) : null;
@@ -347,7 +353,11 @@ export async function runAutoCompletarTurnosPass(
     incomingName?: string,
   ) => {
     const patch = buildAutoClosePatch(shift as Record<string, unknown>, { realEndMs, reason, now, extra });
-    if (reason === 'RELEVO_PRESENTE' || reason === 'RELEVO_PROGRAMADO') {
+    if (
+      reason === 'RELEVO_PRESENTE'
+      || reason === 'RELEVO_PROGRAMADO'
+      || (reason === 'TOPE_JORNADA' && extra?.relievedBy)
+    ) {
       clearRetentionOnReliefClose(patch);
     }
     const silent = !ctx.isEnabled(shift.empresaId) || ctx.isDemo?.(shift.empresaId) === true;
@@ -696,8 +706,17 @@ export async function runAutoCompletarTurnosPass(
       const relCheckMs = Math.max(handoffMs, Math.min(punchMs, nowMs));
       const closeMs = relCheckMs;
       const overCap = capAtMs > 0 && closeMs > capAtMs;
+      const incomingId = String(relData.employeeId || '').trim() || null;
       const incomingName = String(relData.employeeName || 'tu relevo').trim();
-      close(docSnap, shift, closeMs, overCap ? 'TOPE_JORNADA' : 'RELEVO_PRESENTE', undefined, undefined, incomingName);
+      close(
+        docSnap,
+        shift,
+        closeMs,
+        overCap ? 'TOPE_JORNADA' : 'RELEVO_PRESENTE',
+        { relievedBy: incomingId, relievedByName: incomingName, autoRelevo: true },
+        undefined,
+        incomingName,
+      );
       continue;
     }
 
@@ -799,16 +818,10 @@ export async function runAutoCompletarTurnosPass(
       if (relieveAbsent && !assignmentCoversAbsent(relieveDocs, relieveAbsent)) {
         const absentData = relieveAbsent.data();
         if (isGapCovered(absentData)) {
-          // Hueco ya cubierto (cubridor en camino): espera sin re-notificar la retención.
-          update(docSnap.ref, {
-            isRetention: true,
-            retentionReason: 'ESPERA_CUBRIDOR',
-            retentionKind: 'AUSENCIA_RELEVO',
-            retentionAbsenceShiftId: relieveAbsent.id,
-            retentionStartedAt: Timestamp.fromMillis(endTimeMs),
-            autoRetentionAt: Timestamp.fromMillis(endTimeMs),
-          });
-          actions.push(describe(docSnap.id, shift, 'RETAIN_QUIET', 'ESPERA_CUBRIDOR', { gapShiftId: relieveAbsent.id }));
+          // El hueco ya tiene cobertura confirmada: no se retiene. El saliente sigue en activos
+          // hasta que el cubridor fiche (ahí cierra por relevo) o llegue el tope.
+          actions.push(describe(docSnap.id, shift, 'WAIT', 'COBERTURA_CONFIRMADA', { gapShiftId: relieveAbsent.id }));
+          continue;
         } else {
           if (!dryRun) {
             await retainOutgoingForGap(
@@ -819,6 +832,9 @@ export async function runAutoCompletarTurnosPass(
           }
           actions.push(describe(docSnap.id, shift, 'RETAIN', 'AUSENCIA_RELEVO', { gapShiftId: relieveAbsent.id }));
         }
+      } else if (relievePending && isAssignedCoverageDoc(relievePending.data())) {
+        actions.push(describe(docSnap.id, shift, 'WAIT', 'COBERTURA_CONFIRMADA', { gapShiftId: relievePending.id }));
+        continue;
       } else if (relievePending) {
         const pendingData = relievePending.data();
         update(docSnap.ref, {
