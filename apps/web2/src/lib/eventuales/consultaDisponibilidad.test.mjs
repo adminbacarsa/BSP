@@ -27,6 +27,7 @@ describe('consulta de disponibilidad', () => {
     assert.equal(reservarLugar({ ...base, ahoraMs: 9_000 }).codigo, 'VENCIDA');
     assert.equal(reservarLugar({ ...base, status: 'VENCIDA' }).codigo, 'VENCIDA');
     assert.equal(reservarLugar({ ...base, status: 'COMPLETA' }).codigo, 'COMPLETA');
+    assert.equal(reservarLugar({ ...base, estadoInvitacion: 'CUBIERTO' }).codigo, 'COMPLETA');
     assert.equal(debeVencer({ status: 'ABIERTA', ahoraMs: 9_000, venceAtMs: 5_000 }), true);
     assert.equal(debeVencer({ status: 'COMPLETA', ahoraMs: 9_000, venceAtMs: 5_000 }), false);
   });

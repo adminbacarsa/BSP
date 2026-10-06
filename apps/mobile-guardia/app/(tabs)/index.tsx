@@ -34,6 +34,7 @@ import {
 } from '../../src/lib/shifts';
 import { resolveShiftPlacement } from '../../src/lib/shiftPlacement';
 import { appRoutes } from '../../src/lib/appRoutes';
+import { firmarAnexoDelTurno } from '../../src/lib/heroShiftCard';
 import { getPortalFirebase } from '../../src/lib/portal';
 import { CommandButton } from '../../src/components/ui/CommandButton';
 import { CommandCard } from '../../src/components/ui/CommandCard';
@@ -678,6 +679,18 @@ function HoyScreenContent() {
               footer={
                 todayAbsentShift ? null : (
                   <View style={styles.heroActions}>
+                    {firmarAnexoDelTurno(mainShift).visible ? (
+                      <CommandButton
+                        label={firmarAnexoDelTurno(mainShift).label}
+                        variant="secondary"
+                        onPress={() =>
+                          router.push({
+                            pathname: '/codigo-anexo',
+                            params: { contratoId: firmarAnexoDelTurno(mainShift).contratoId },
+                          })
+                        }
+                      />
+                    ) : null}
                     {heroMapsUrl ? (
                       <CommandButton
                         label="Cómo llegar"

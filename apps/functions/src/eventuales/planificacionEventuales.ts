@@ -406,6 +406,7 @@ export async function sincronizarContratoEventual(empresaId: string, cuil: strin
   const estado = (plan.contrato?.estado as string | undefined) || null;
   if (plan.accion === 'SIN_CAMBIOS') {
     await marcarTurnosConContrato(turnos, contratoId, enviosActuales);
+    await despacharAnexoSiCorresponde({ empresaId, cuil, contratoId, estado, bolsa });
     return { accion: plan.accion, contratoId, estado };
   }
 
@@ -474,7 +475,131 @@ export async function sincronizarContratoEventual(empresaId: string, cuil: strin
     await propagarAltaEnTurnos(db(), { contratoIds: [contratoId], encender: false });
   }
   await auditar('EVENTUAL_CONTRATO_' + plan.accion, actorUid, empresaId, cuil, `Contrato ${contratoId} → ${estado}. Envíos: ${plan.envios.map((e) => e.tipo).join(', ') || 'ninguno'}.`, { contratoId });
+  await despacharAnexoSiCorresponde({ empresaId, cuil, contratoId, estado, bolsa });
   return { accion: plan.accion, contratoId, estado };
+}
+
+type AnexoAsignacionEstado = 'PENDIENTE' | 'SIN_CANAL' | 'NO_EXIGIDO';
+
+/**
+ * Al quedar el contrato (borrador o confirmado), si el eventual exige marco manda el código
+ * del anexo. Idempotente: un código vigente no se regenera. Sin canal avisa a RRHH una sola vez.
+ * Lo comparten la asignación directa, la consulta de disponibilidad y la aceptación de un evento
+ * (todas pasan por `sincronizarContratoEventual`).
+ */
+async function despacharAnexoSiCorresponde(p: {
+  empresaId: string;
+  cuil: string;
+  contratoId: string;
+  estado: string | null;
+  bolsa: Record<string, unknown> & { cuil: string };
+}): Promise<void> {
+  if (p.estado !== 'BORRADOR' && p.estado !== 'CONFIRMADO') return;
+  try {
+    await despacharCodigoAnexoDeContrato(p);
+  } catch (e) {
+    console.error('[anexo-planificacion]', p.contratoId, (e as Error)?.message);
+  }
+}
+
+async function despacharCodigoAnexoDeContrato(p: {
+  empresaId: string;
+  cuil: string;
+  contratoId: string;
+  estado: string | null;
+  bolsa: Record<string, unknown> & { cuil: string };
+}): Promise<{ anexoEstado: AnexoAsignacionEstado; anexoMensaje: string | null }> {
+  const { exigeMarco } = await import('../eventuales-shared/pruebasSwitch.mjs') as { exigeMarco: (b: unknown) => boolean };
+  const contratoRef = db().collection('contratos_eventuales').doc(p.contratoId);
+  const codigoRef = db().collection('anexo_codigos').doc(p.contratoId);
+  if (!exigeMarco(p.bolsa)) {
+    const previo = (await contratoRef.get()).data() || {};
+    if (previo.anexoEstado !== 'NO_EXIGIDO') {
+      await contratoRef.set({ anexoEstado: 'NO_EXIGIDO', anexoMensaje: null }, { merge: true });
+      await marcarTurnosAnexo(p.contratoId, 'NO_EXIGIDO');
+    }
+    return { anexoEstado: 'NO_EXIGIDO', anexoMensaje: null };
+  }
+
+  const decision = await db().runTransaction(async (tx) => {
+    const [codeSnap, ctrSnap] = await Promise.all([tx.get(codigoRef), tx.get(contratoRef)]);
+    const code = codeSnap.data() || {};
+    const ctr = ctrSnap.data() || {};
+    if (code.usado === true || ctr.anexoEstado === 'FIRMADO') return { accion: 'firmado' as const };
+    const vivo = codeSnap.exists && code.usado !== true && Number(code.venceMs) > Date.now();
+    if (vivo) {
+      return { accion: 'pendiente' as const, mensaje: typeof ctr.anexoMensaje === 'string' ? ctr.anexoMensaje : null };
+    }
+    const lock = Number(ctr.anexoDespachoLockMs || 0);
+    if (lock && Date.now() - lock < 20_000) return { accion: 'espera' as const };
+    tx.set(contratoRef, { anexoDespachoLockMs: Date.now() }, { merge: true });
+    return { accion: 'enviar' as const, yaAviso: ctr.anexoSinCanalAvisado === true };
+  });
+
+  if (decision.accion === 'firmado') {
+    await marcarTurnosAnexo(p.contratoId, 'FIRMADO');
+    return { anexoEstado: 'NO_EXIGIDO', anexoMensaje: null };
+  }
+  if (decision.accion === 'pendiente') {
+    await marcarTurnosAnexo(p.contratoId, 'PENDIENTE');
+    return { anexoEstado: 'PENDIENTE', anexoMensaje: decision.mensaje };
+  }
+  if (decision.accion === 'espera') {
+    for (let i = 0; i < 10; i += 1) {
+      await new Promise((r) => setTimeout(r, 300));
+      const ctr = (await contratoRef.get()).data() || {};
+      const estado = String(ctr.anexoEstado || '');
+      if (estado === 'PENDIENTE' || estado === 'SIN_CANAL' || estado === 'NO_EXIGIDO') {
+        return { anexoEstado: estado, anexoMensaje: typeof ctr.anexoMensaje === 'string' ? ctr.anexoMensaje : null };
+      }
+    }
+    return { anexoEstado: 'PENDIENTE', anexoMensaje: null };
+  }
+
+  const { enviarCodigoAnexo } = await import('./marcoAnexoCall');
+  const envio = await enviarCodigoAnexo({
+    contratoId: p.contratoId,
+    convocatoriaId: '',
+    cuil: p.cuil,
+    bolsa: p.bolsa,
+    uid: String(p.bolsa.uid || ''),
+  });
+  const anexoEstado: AnexoAsignacionEstado = envio.ok ? 'PENDIENTE' : 'SIN_CANAL';
+  await contratoRef.set({
+    anexoEstado,
+    anexoMensaje: envio.mensaje,
+    anexoDespachoLockMs: admin.firestore.FieldValue.delete(),
+    ...(anexoEstado === 'SIN_CANAL' ? { anexoSinCanalAvisado: true } : {}),
+  }, { merge: true });
+  await marcarTurnosAnexo(p.contratoId, anexoEstado);
+  if (anexoEstado === 'SIN_CANAL' && !decision.yaAviso) {
+    const nombre = String(p.bolsa.nombre || p.cuil);
+    await db().collection('novedades').add({
+      type: 'MARCO_ANEXO_SIN_CANAL',
+      status: 'PENDIENTE',
+      source: 'EVENTUALES',
+      empresaId: p.empresaId,
+      bolsaCuil: p.cuil,
+      contratoId: p.contratoId,
+      employeeName: nombre,
+      description: `${nombre} quedó asignado y no tiene mail ni app para recibir el código del anexo. Acercale el anexo.`,
+      createdAt: admin.firestore.Timestamp.now(),
+    });
+  }
+  return { anexoEstado, anexoMensaje: envio.mensaje };
+}
+
+async function marcarTurnosAnexo(contratoId: string, anexoEstado: string) {
+  const snap = await db().collection('turnos').where('eventualContratoId', '==', contratoId).get();
+  if (snap.empty) return;
+  const batch = db().batch();
+  let n = 0;
+  for (const d of snap.docs) {
+    if (d.data().anexoEstado === anexoEstado) continue;
+    batch.update(d.ref, { anexoEstado });
+    n += 1;
+  }
+  if (n) await batch.commit();
 }
 
 /** Denormaliza en los turnos el contrato y si el alta ARCA ya está confirmada (gate de fichada). Solo escribe si cambia. */
@@ -925,10 +1050,15 @@ export async function aceptarConvocatoriaEventualEvento(
   let anexoEstado: AceptacionEventual['anexoEstado'] = 'NO_EXIGIDO';
   let anexoMensaje: string | null = null;
   if (exigeMarco(bolsa) && contratoId) {
-    const { enviarCodigoAnexo } = await import('./marcoAnexoCall');
-    const envio = await enviarCodigoAnexo({ contratoId, convocatoriaId: '', cuil, bolsa, uid: String(bolsa.uid || actor.uid || '') });
-    anexoEstado = envio.ok ? 'PENDIENTE' : 'SIN_CANAL';
-    anexoMensaje = envio.mensaje;
+    const ctr = (await db().collection('contratos_eventuales').doc(contratoId).get()).data() || {};
+    if (ctr.anexoEstado === 'PENDIENTE' || ctr.anexoEstado === 'SIN_CANAL') {
+      anexoEstado = ctr.anexoEstado;
+      anexoMensaje = typeof ctr.anexoMensaje === 'string' ? ctr.anexoMensaje : null;
+    } else {
+      const envio = await despacharCodigoAnexoDeContrato({ empresaId, cuil, contratoId, estado: 'CONFIRMADO', bolsa });
+      anexoEstado = envio.anexoEstado;
+      anexoMensaje = envio.anexoMensaje;
+    }
   }
 
   await db().collection('solicitudes_evento').doc(solicitudId).update({

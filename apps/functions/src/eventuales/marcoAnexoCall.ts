@@ -403,7 +403,8 @@ async function refCodigo(contratoId: string, convocatoriaId: string) {
 
 /**
  * Genera y manda el código OTP del anexo (push y/o mail) y guarda su hash en `anexo_codigos/{contratoId|convocatoriaId}`.
- * Lo usan la callable `pedirCodigoAnexoEventual` (la app) y la aceptación de un evento (`aceptarConvocatoriaEventualEvento`).
+ * Lo usan la callable `pedirCodigoAnexoEventual` (la app), la asignación de Planificación
+ * y la aceptación de un evento (`aceptarConvocatoriaEventualEvento`), vía `despacharCodigoAnexoDeContrato`.
  * Si no hay canal devuelve `{ ok: false, mensaje }` sin lanzar: quien llama decide si es error.
  */
 export async function enviarCodigoAnexo(p: {
@@ -561,6 +562,13 @@ export const confirmarAnexoEventual = callable.onCall(async (data, context) => {
     for (const s of sols.docs) {
       if (s.data().esEventual !== true) continue;
       await s.ref.update({ anexoEstado: 'FIRMADO', anexoId, anexoHash: hashAnexo, anexoFirmadoAt: admin.firestore.FieldValue.serverTimestamp() });
+    }
+    await db().collection('contratos_eventuales').doc(contratoId).set({ anexoEstado: 'FIRMADO' }, { merge: true });
+    const turnos = await db().collection('turnos').where('eventualContratoId', '==', contratoId).get();
+    if (!turnos.empty) {
+      const batch = db().batch();
+      turnos.docs.forEach((d) => batch.update(d.ref, { anexoEstado: 'FIRMADO' }));
+      await batch.commit();
     }
   }
   return { ok: true, hashAnexo, link: anexoGuardado.link, constanciaLink: anexoGuardado.link };

@@ -22,6 +22,7 @@ admin.initializeApp({ projectId });
 const db = admin.firestore();
 
 const { crearConsultaDisponibilidad, responderConsultaDisponibilidad, vencerConsultasDisponibilidad } = requireFn('./lib/eventuales/consultaDisponibilidad.js');
+const { asignarEventualPlanificacion } = requireFn('./lib/eventuales/planificacionEventuales.js');
 
 const results = [];
 function report(name, ok, detail = '') {
@@ -117,6 +118,70 @@ async function main() {
   const novedades = await db.collection('novedades').where('empresaId', '==', EMP).get();
   const aviso = novedades.docs.some((d) => d.data().type === 'CONSULTA_DISPONIBILIDAD_VENCIDA' && d.data().consultaId === vid);
   report('al vencer avisa al planificador', vencidas >= 1 && parentV?.status === 'VENCIDA' && aviso, `n=${vencidas} status=${parentV?.status} aviso=${aviso}`);
+
+  const conPush = { cuil: '27111111112', nombre: 'Paz, Inés', uid: 'uid-ines' };
+  await db.collection('eventuales_bolsa').doc(conPush.cuil).set(bolsa(conPush));
+  await db.collection('device_tokens').doc(conPush.uid).set({ uid: conPush.uid, token: 'token-e2e-anexo-ines-0123456789' });
+  const directa = await intentar(() => asignarEventualPlanificacion.run({
+    empresaId: EMP, cuil: conPush.cuil, modo: 'TURNOS', objectiveName: 'Peaje', positionName: 'Puesto 1',
+    turnos: [{ fecha: '2026-11-16', code: 'M', horaInicio: '08:00', horaFin: '16:00', horas: 8 }],
+  }, PLANNER));
+  const turnoDirecto = directa.ok
+    ? (await db.collection('turnos').where('bolsaCuil', '==', conPush.cuil).get()).docs[0]
+    : null;
+  const contratoDirecto = turnoDirecto?.data()?.eventualContratoId || '';
+  const codigoDirecto = contratoDirecto ? (await db.collection('anexo_codigos').doc(contratoDirecto).get()).data() : null;
+  const notifCodigo = contratoDirecto
+    ? (await db.collection('user_notifications').where('contratoId', '==', contratoDirecto).get()).docs.some((d) => d.data().type === 'CODIGO_ANEXO')
+    : false;
+  report(
+    'asignación directa manda el código del anexo',
+    directa.ok && turnoDirecto?.data()?.anexoEstado === 'PENDIENTE' && codigoDirecto?.usado === false && notifCodigo,
+    `estado=${turnoDirecto?.data()?.anexoEstado} codigo=${!!codigoDirecto} push=${notifCodigo} ${directa.message || ''}`,
+  );
+
+  const consultaPush = await intentar(() => crearConsultaDisponibilidad.run(pedido([conPush.cuil], 1, '2026-11-18'), PLANNER));
+  const siPush = await intentar(() => responderConsultaDisponibilidad.run({
+    invitacionId: `${consultaPush.value?.consultaId}_${conPush.cuil}`, respuesta: 'SI',
+  }, ctxEv(conPush)));
+  const turnoConsulta = (await db.collection('turnos').where('bolsaCuil', '==', conPush.cuil).get()).docs.find((d) => d.data().scheduleDate === '2026-11-18');
+  const contratoConsulta = turnoConsulta?.data()?.eventualContratoId || '';
+  const codigoConsulta = contratoConsulta ? (await db.collection('anexo_codigos').doc(contratoConsulta).get()).data() : null;
+  report(
+    'al tomar un lugar de la consulta manda el código',
+    siPush.ok && siPush.value?.codigo === 'ASIGNADO' && turnoConsulta?.data()?.anexoEstado === 'PENDIENTE' && codigoConsulta?.usado === false,
+    `${siPush.value?.codigo || siPush.message} estado=${turnoConsulta?.data()?.anexoEstado}`,
+  );
+
+  const sinMarco = { cuil: '27222222229', nombre: 'Luz, Omar', uid: 'uid-omar' };
+  await db.collection('eventuales_bolsa').doc(sinMarco.cuil).set(bolsa(sinMarco, { exigirMarco: false }));
+  const sin = await intentar(() => asignarEventualPlanificacion.run({
+    empresaId: EMP, cuil: sinMarco.cuil, modo: 'TURNOS', objectiveName: 'Peaje', positionName: 'Puesto 1',
+    turnos: [{ fecha: '2026-11-20', code: 'M', horaInicio: '08:00', horaFin: '16:00', horas: 8 }],
+  }, PLANNER));
+  const turnoSin = sin.ok ? (await db.collection('turnos').where('bolsaCuil', '==', sinMarco.cuil).get()).docs[0] : null;
+  const codigoSin = turnoSin?.data()?.eventualContratoId
+    ? await db.collection('anexo_codigos').doc(turnoSin.data().eventualContratoId).get()
+    : null;
+  report(
+    'sin exigir marco no manda código',
+    sin.ok && turnoSin?.data()?.anexoEstado === 'NO_EXIGIDO' && codigoSin?.exists === false,
+    `estado=${turnoSin?.data()?.anexoEstado} codigo=${codigoSin?.exists}`,
+  );
+
+  const sinCanal = { cuil: '27333333336', nombre: 'Rey, Noa', uid: '' };
+  await db.collection('eventuales_bolsa').doc(sinCanal.cuil).set(bolsa(sinCanal, { mail: '', uid: '' }));
+  const canal = await intentar(() => asignarEventualPlanificacion.run({
+    empresaId: EMP, cuil: sinCanal.cuil, modo: 'TURNOS', objectiveName: 'Peaje', positionName: 'Puesto 1',
+    turnos: [{ fecha: '2026-11-22', code: 'M', horaInicio: '08:00', horaFin: '16:00', horas: 8 }],
+  }, PLANNER));
+  const turnoCanal = canal.ok ? (await db.collection('turnos').where('bolsaCuil', '==', sinCanal.cuil).get()).docs[0] : null;
+  const novCanal = (await db.collection('novedades').where('empresaId', '==', EMP).get()).docs.some((d) => d.data().type === 'MARCO_ANEXO_SIN_CANAL' && d.data().bolsaCuil === sinCanal.cuil);
+  report(
+    'sin canal avisa a RRHH y no deja código',
+    canal.ok && turnoCanal?.data()?.anexoEstado === 'SIN_CANAL' && novCanal,
+    `estado=${turnoCanal?.data()?.anexoEstado} novedad=${novCanal} ${canal.message || ''}`,
+  );
 
   const falla = results.filter((r) => !r.ok).length;
   console.log(`\n${results.length - falla} OK / ${falla} FALLA`);

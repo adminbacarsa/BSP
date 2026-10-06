@@ -1,4 +1,5 @@
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useRouter } from 'expo-router';
 import { formatDateAr, formatTimeAr, isEvShift, resolveEvShiftDisplay } from '@cosp/portal-core';
 import type { Evento, ObjectiveLocation, Shift } from '@cosp/portal-types';
 import {
@@ -8,6 +9,7 @@ import {
   isOpsCoverageShift,
 } from '../../lib/agendaCalendar';
 import { resolveShiftPlacement } from '../../lib/shiftPlacement';
+import { firmarAnexoDelTurno } from '../../lib/heroShiftCard';
 import { CommandButton } from '../ui/CommandButton';
 import { radius, shadow } from '../../theme/tokens';
 import { useTheme } from '../../theme/ThemeContext';
@@ -22,6 +24,8 @@ type Props = {
 
 export function AgendaShiftCard({ item, eventosMap, objectivesMap, empresaLabel }: Props) {
   const { palette } = useTheme();
+  const router = useRouter();
+  const firmarAnexo = firmarAnexoDelTurno(item);
   const isOps = isOpsCoverageShift(item);
   const isAbsent = isAgendaAbsentShift(item);
   const isRetention = !isAbsent && isAgendaRetentionShift(item);
@@ -152,6 +156,14 @@ export function AgendaShiftCard({ item, eventosMap, objectivesMap, empresaLabel 
             label="Cómo llegar"
             variant="ghost"
             onPress={() => void Linking.openURL(ev.mapsUrl!)}
+            style={styles.mapsBtn}
+          />
+        ) : null}
+        {firmarAnexo.visible && !isAbsent ? (
+          <CommandButton
+            label={firmarAnexo.label}
+            variant="secondary"
+            onPress={() => router.push({ pathname: '/codigo-anexo', params: { contratoId: firmarAnexo.contratoId } })}
             style={styles.mapsBtn}
           />
         ) : null}

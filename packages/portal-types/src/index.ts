@@ -56,6 +56,8 @@ export type Shift = {
   bolsaCuil?: string;
   eventualContratoId?: string;
   eventualAltaArcaConfirmada?: boolean;
+  /** Código del anexo: PENDIENTE muestra «Firmar anexo» en la tarjeta del turno. */
+  anexoEstado?: 'PENDIENTE' | 'SIN_CANAL' | 'NO_EXIGIDO' | 'FIRMADO' | string;
 };
 
 export type PortalFeatures = {

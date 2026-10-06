@@ -60,6 +60,7 @@ export function venceEnMs({ ahoraMs, minutos, inicioPrimerTurnoMs }) {
 export function reservarLugar(p) {
   const estado = String(p.estadoInvitacion || 'PENDIENTE');
   if (estado === 'ASIGNADO' || estado === 'RESERVADO') return { ok: true, idempotente: true, orden: null };
+  if (estado === 'CUBIERTO') return { ok: false, codigo: 'COMPLETA' };
   if (estado !== 'PENDIENTE') return { ok: false, codigo: 'YA_RESPONDIO' };
   const status = String(p.status || '');
   if (status !== 'ABIERTA') {

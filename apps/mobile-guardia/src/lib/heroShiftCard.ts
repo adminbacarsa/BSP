@@ -262,3 +262,14 @@ export const HERO_FILETE: Record<HeroShiftCardModel['fileteTone'], string> = {
   absent: '#b45309',
   neutral: '#94a3b8',
 };
+
+export const LABEL_FIRMAR_ANEXO = 'Firmar anexo';
+
+/** La tarjeta del turno ofrece firmar solo si el código del anexo está pendiente. */
+export function firmarAnexoDelTurno(
+  shift: { anexoEstado?: string | null; eventualContratoId?: string | null } | null | undefined,
+): { visible: boolean; contratoId: string; label: string } {
+  const contratoId = String(shift?.eventualContratoId || '').trim();
+  const visible = String(shift?.anexoEstado || '') === 'PENDIENTE' && contratoId.length > 0;
+  return { visible, contratoId, label: LABEL_FIRMAR_ANEXO };
+}

@@ -6,8 +6,10 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildHeroShiftCardModel,
+  firmarAnexoDelTurno,
   resolveHeroAccentColor,
   HERO_FALLBACK_ACCENT,
+  LABEL_FIRMAR_ANEXO,
 } from './heroShiftCard';
 import type { ShiftPlacement } from './shiftPlacement';
 
@@ -123,5 +125,19 @@ describe('buildHeroShiftCardModel · puesto / retenido / convocado', () => {
     assert.match(cov.kicker, /EN CAMINO/);
     assert.match(cov.kicker, /Pruebas SA/);
     assert.equal(cov.fileteTone, 'warning');
+  });
+});
+
+describe('firmarAnexoDelTurno', () => {
+  it('muestra Firmar anexo solo con código pendiente y contrato', () => {
+    const si = firmarAnexoDelTurno({ anexoEstado: 'PENDIENTE', eventualContratoId: 'ctr_1' });
+    assert.equal(si.visible, true);
+    assert.equal(si.contratoId, 'ctr_1');
+    assert.equal(si.label, LABEL_FIRMAR_ANEXO);
+    assert.equal(firmarAnexoDelTurno({ anexoEstado: 'SIN_CANAL', eventualContratoId: 'ctr_1' }).visible, false);
+    assert.equal(firmarAnexoDelTurno({ anexoEstado: 'NO_EXIGIDO', eventualContratoId: 'ctr_1' }).visible, false);
+    assert.equal(firmarAnexoDelTurno({ anexoEstado: 'FIRMADO', eventualContratoId: 'ctr_1' }).visible, false);
+    assert.equal(firmarAnexoDelTurno({ anexoEstado: 'PENDIENTE' }).visible, false);
+    assert.equal(firmarAnexoDelTurno(null).visible, false);
   });
 });
