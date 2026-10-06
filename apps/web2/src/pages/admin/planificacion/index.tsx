@@ -277,8 +277,9 @@ import {
     type TopeAutorizacion,
 } from '@/lib/planificacion/supervisorAuth';
 import { VacancyCoberturaAcciones, VacancyCoberturaLista } from '@/components/planificacion/VacancyCoberturaDia';
-import { useConsultasDisponibilidadObjetivo } from '@/hooks/useConsultasDisponibilidadObjetivo';
-import { consultaDelDia, resumenConsultaDia } from '@/lib/planificacion/coberturaEventualesUx';
+import { ConsultasEnCursoPill, IndicadorConsultaCelda } from '@/components/planificacion/ConsultasEnCurso';
+import { useConsultasDisponibilidadObjetivo, type ConsultaObjetivo } from '@/hooks/useConsultasDisponibilidadObjetivo';
+import { cambiosManualesSobreConsulta, consultaAbiertaEnFecha, consultaDelDia, diaLoResuelveConsulta, novedadesDeConsultas, quitarBorradorQuePisaConsulta, resumenConsultaDia, textoIndicadorConsulta, textoTooltipConsulta, type ConsultaCurso } from '@/lib/planificacion/coberturaEventualesUx';
 import { alignVacancyGapBand } from '@/lib/planificacion/vacancySplitBands';
 import {
     listVacancyGapBandOptions,
@@ -1435,14 +1436,33 @@ function PlanificacionDesktop() {
     pendingChangesRef.current = pendingChanges;
 
     /** Guarda snapshot antes de mutar pendingChanges (máx. 40 pasos). */
+    const consultasCursoRef = useRef<ConsultaObjetivo[]>([]);
+    const consultasPrevRef = useRef<ConsultaObjetivo[] | null>(null);
+    const reabrirConsultaRef = useRef<(consulta: ConsultaCurso, eventuales: boolean) => void>(() => {});
+
+    const cancelarConsultaPlan = useCallback(async (consultaId: string) => {
+        const call = httpsCallable(functions, 'cancelarConsultaDisponibilidad');
+        await call({ consultaId, empresaId });
+        toast.success('Consulta cancelada. Se avisó que ya no hace falta.');
+    }, [empresaId]);
+
     const commitPendingChanges = useCallback((
         next: Record<string, any> | ((prev: Record<string, any>) => Record<string, any>),
     ) => {
-        setPendingChanges(prev => {
-            undoStackRef.current = [...undoStackRef.current.slice(-39), { ...prev }];
-            return typeof next === 'function' ? next(prev) : next;
-        });
-    }, []);
+        const prev = pendingChangesRef.current;
+        const resolved = typeof next === 'function' ? next(prev) : next;
+        const pisadas = cambiosManualesSobreConsulta(prev, resolved, consultasCursoRef.current);
+        if (pisadas.length) {
+            const fechas = [...new Set(pisadas.map((p) => `${p.fecha.slice(8, 10)}/${p.fecha.slice(5, 7)}`))];
+            const ok = window.confirm(`Ese día lo resuelve una consulta abierta (${fechas.join(', ')}). Si lo cambiás a mano, se cancela la consulta y se avisa que ya no hace falta. ¿Seguir?`);
+            if (!ok) return;
+            for (const id of [...new Set(pisadas.map((p) => p.consultaId))]) {
+                void cancelarConsultaPlan(id).catch(() => toast.error('No se pudo cancelar la consulta.'));
+            }
+        }
+        undoStackRef.current = [...undoStackRef.current.slice(-39), { ...prev }];
+        setPendingChanges(resolved);
+    }, [cancelarConsultaPlan]);
 
     const undoLastPending = useCallback(() => {
         const stack = undoStackRef.current;
@@ -1635,8 +1655,52 @@ function PlanificacionDesktop() {
     const [vacancySplitExtExtraHours, setVacancySplitExtExtraHours] = useState<number | null>(null);
     const [vacancySplitSecondExtraHours, setVacancySplitSecondExtraHours] = useState<number | null>(null);
     const vacancyReplacementPanelRef = React.useRef<HTMLDivElement>(null);
-    /** Consultas de disponibilidad del objetivo mientras el modal de cobertura está abierto (estado por día en vivo). */
-    const vacancyConsultas = useConsultasDisponibilidadObjetivo(empresaId, selectedObjective, !!vacancyData?.startDate && canConsultarEventual);
+    /** Consultas del objetivo, también con el modal cerrado: grilla, pastilla y toasts. */
+    const vacancyConsultas = useConsultasDisponibilidadObjetivo(empresaId, selectedObjective, !!selectedObjective && canConsultarEventual);
+    consultasCursoRef.current = vacancyConsultas;
+    const [consultaFoco, setConsultaFoco] = useState<string | null>(null);
+    const [consultaTick, setConsultaTick] = useState(0);
+
+    const reabrirDesdeConsulta = useCallback((consulta: ConsultaCurso, eventuales: boolean) => {
+        const fechas = (consulta.jornadas || []).map((j) => j.fecha).filter((f) => /^\d{4}-\d{2}-\d{2}$/.test(f)).sort();
+        const titularId = consulta.titularEmployeeId;
+        if (!fechas.length || !titularId) {
+            toast.message('Abrí ese día en la grilla para cubrirlo de otra forma.');
+            return;
+        }
+        const emp = employees.find((e: { id?: string; name?: string }) => e.id === titularId);
+        setVacancyData({
+            employeeId: titularId,
+            employeeName: emp?.name || 'Titular',
+            startDate: fechas[0],
+            endDate: fechas[fechas.length - 1],
+            type: 'L',
+            source: 'CONSULTA',
+            focusDate: fechas[0],
+        });
+        setShowVacancyModal(true);
+        setVacancyEventualesOpen(eventuales);
+        setConsultaFoco(null);
+    }, [employees]);
+    reabrirConsultaRef.current = reabrirDesdeConsulta;
+
+    useEffect(() => {
+        const prev = consultasPrevRef.current;
+        consultasPrevRef.current = vacancyConsultas;
+        if (prev === null) return;
+        for (const n of novedadesDeConsultas(prev, vacancyConsultas)) {
+            if (n.tipo === 'ACEPTO') {
+                toast.success(n.texto);
+                continue;
+            }
+            const consulta = vacancyConsultas.find((c) => c.id === n.id);
+            toast.warning(n.texto, {
+                duration: 14000,
+                action: consulta ? { label: 'Consultar a otros', onClick: () => reabrirConsultaRef.current(consulta, true) } : undefined,
+                cancel: consulta ? { label: 'Cubrir de otra forma', onClick: () => reabrirConsultaRef.current(consulta, false) } : undefined,
+            });
+        }
+    }, [vacancyConsultas]);
 
     useEffect(() => {
         if (!vacancyData?.startDate) {
@@ -6366,9 +6430,15 @@ function PlanificacionDesktop() {
 
     const handleSaveAll = async () => {
         if (isServiceLocked) { toast.error(activeServiceStatus.msg); return; }
-        const count = Object.keys(pendingChanges).length;
+        const saneado = quitarBorradorQuePisaConsulta(pendingChanges, vacancyConsultas);
+        if (saneado.quitadas.length) {
+            toast.message('Los días con consulta abierta no se guardan en el cronograma: los resuelve quien acepte.');
+            setPendingChanges(saneado.changes);
+        }
+        const pendingParaGuardar = saneado.changes;
+        const count = Object.keys(pendingParaGuardar).length;
         if (count === 0) return;
-        const _userCount = Object.values(pendingChanges).filter((v: any) => !v?._isAutoRotation).length;
+        const _userCount = Object.values(pendingParaGuardar).filter((v: any) => !v?._isAutoRotation).length;
         const _rotCount = count - _userCount;
         const _confirmMsg = _userCount > 0
             ? `¿Confirmar y guardar ${_userCount} cambio${_userCount !== 1 ? 's' : ''}${_rotCount > 0 ? ` (+ ${_rotCount} turno${_rotCount !== 1 ? 's' : ''} de ciclo)` : ''}?`
@@ -6377,7 +6447,7 @@ function PlanificacionDesktop() {
 
         // Verificar si algún empleado superaría las 200h (saltar los ya autorizados este mes)
         const overCap: { empId: string; name: string; hours: number }[] = [];
-        Object.keys(pendingChanges).forEach(key => {
+        Object.keys(pendingParaGuardar).forEach(key => {
             const empId = key.split('_')[0];
             if (authorizedOver200Ids.has(empId) || !topeRequierePin(topeGrants[empId], periodoPlan)) return;
             const hours = empMonthlyHours[empId] || 0;
@@ -6388,7 +6458,7 @@ function PlanificacionDesktop() {
         });
 
         const doSave = () => {
-            const jobPending = { ...pendingChanges };
+            const jobPending = { ...pendingParaGuardar };
             const motivoTope = authReasonRef.current.trim();
             if (overCap.length && motivoTope) {
                 const ids = new Set(overCap.map((e) => e.empId));
@@ -7465,12 +7535,17 @@ function PlanificacionDesktop() {
             }
             return { dateStr, coverage: { mode: 'none' as const } };
         });
+        const daysParaAplicar = days.map((d) => (
+            diaLoResuelveConsulta(vacancyConsultas, d.dateStr)
+                ? { dateStr: d.dateStr, coverage: { mode: 'none' as const } }
+                : d
+        ));
 
         const runApplyVacancy = (authorizeFranco: boolean) => {
             try {
                 const applied = applyVacancyCoverageToChanges(pendingChanges, {
                     vacancyData,
-                    days,
+                    days: daysParaAplicar,
                     selectedObjective,
                     activePosition,
                     shiftsMap,
@@ -7490,18 +7565,21 @@ function PlanificacionDesktop() {
                     fallbackGapBand: (vacancyGapBandOverride ? vacancyGapBandOverride.split('__')[0] : null) || resolveSuggestedGapBandForPosition(activeDays[0] || '', activePosition || '') || undefined,
                 });
                 const { count, covered, splitCovered, cleared } = applied;
-                const changes = stampShiftAuthMarks(applied.changes, vacancyAuthMarks);
+                const sinPisar = quitarBorradorQuePisaConsulta(applied.changes, vacancyConsultas);
+                const changes = stampShiftAuthMarks(sinPisar.changes, vacancyAuthMarks);
                 const vd = vacancyData;
                 const absCode = days.length ? (changes[`${vd.employeeId}_${days[0].dateStr}`]?.code || '—') : '—';
                 setPendingChanges(changes);
                 finalizeVacancyModal();
                 const clearedMsg = cleared > 0 ? ` Se removieron ${cleared} turno(s) de cobertura anterior.` : '';
                 const totalCovered = covered + splitCovered;
+                const resueltos = days.filter((d) => diaLoResuelveConsulta(vacancyConsultas, d.dateStr)).length;
+                const resuelveMsg = resueltos > 0 ? ' Esos días los resuelve la consulta.' : '';
                 if (totalCovered > 0) {
                     const splitMsg = splitCovered > 0 ? ` (${covered} suplente, ${splitCovered} ext+adel)` : '';
-                    toast.success(`${absCode} en ${count} día(s) — ${totalCovered} con cobertura${splitMsg}.${clearedMsg} Guardá los cambios.`);
+                    toast.success(`${absCode} en ${count} día(s) — ${totalCovered} con cobertura${splitMsg}.${clearedMsg}${resuelveMsg} Guardá los cambios.`);
                 } else {
-                    toast.success(`${absCode} en ${count} día(s) — sin cobertura asignada.${clearedMsg} Guardá los cambios.`);
+                    toast.success(`${absCode} en ${count} día(s) — sin cobertura asignada.${clearedMsg}${resuelveMsg} Guardá los cambios.`);
                 }
             } catch (e: any) {
                 const msg = String(e?.message || '');
@@ -7514,7 +7592,7 @@ function PlanificacionDesktop() {
         };
 
         const francoConflicts = collectVacancyFrancoConflicts(
-            { days, shiftsMap, employeesById },
+            { days: daysParaAplicar, shiftsMap, employeesById },
             pendingChanges,
         );
         if (francoConflicts.length > 0 && !vacancyFrancoAuthApproved) {
@@ -11117,11 +11195,12 @@ function PlanificacionDesktop() {
                                             ? `\n📊 ${_billBr.base}h base${_billBr.extra > 0 ? ` + ${_billBr.extra}h cobertura = ${_billBr.gross}h` : ` (${_billBr.gross}h)`}`
                                             : '';
                                         const _authHint = `${_cellShift?.descansoReducido ? `\n⚠ Descanso reducido autorizado${_cellShift.descansoHoras != null ? ` (${_cellShift.descansoHoras} h)` : ''}` : ''}${_cellShift?.topeExcedido ? `\n⚠ Tope 200 h autorizado${_cellShift.horasMes != null ? ` (${_cellShift.horasMes} h)` : ''}` : ''}`;
+                                        const _consultaCelda = consultaAbiertaEnFecha(vacancyConsultas, cellDateStr, emp.id, String(cellCode || leaveCellCode || ''));
                                         return <td key={key} data-testid="grilla-celda" onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={(e) => { if (!isSnapshotView && isDragging && allowPlanningMultiSelect) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); if (isLeaveCell) { const absType = absence?.type || activeShift?.name || LEGEND_DESCRIPTIONS[leaveCellCode] || leaveCellCode; const reason = absence?.reason || activeShift?.comments || p?.comments || ''; const covered = resolveTitularCoverageName(emp.id, emp.name || '', cellDateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell, cellTurnosMap); setShiftTooltip({ label: buildLeaveCellTooltipLabel({ absenceType: absType, reason, coveredBy: covered }), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else if ((s || p || rfzOnCell || _evOverlay) && !absence) { const shiftLabel = _evOverlay?.mode === 'EV'
                                                     ? _evOverlay.tooltip
                                                     : (cellCode === 'EV' && (activeShift?.eventoNombre || activeShift?.servicioNombre))
                                                     ? eventoTooltip(activeShift)
-                                                    : cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : (rfzOnCell ? 'Refuerzo cliente (RFZ)' : null); const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; const _exclHint = cellPosExcluded ? `\n⚠ Puesto excluido por SLA este día` : ''; const _otherObjHint = isOtherObjectiveShift && activeShift?.objectiveId ? `\n📍 Otro objetivo: ${getObjectiveName(activeShift.objectiveId)}` : ''; const _rfzHint = rfzOnCell ? `\n🔴 RFZ ${formatTime(rfzOnCell.startTime)}–${formatTime(rfzOnCell.endTime)}${rfzOnCell.positionName ? ` · ${rfzOnCell.positionName}` : ''}` : ''; const _linkedTura = activeShift?.id ? turaMap[activeShift.id] : null; const _turaHint = _linkedTura ? `\n🟣 TURA ${isTuraContiguousToParent(activeShift, _linkedTura) ? 'seguido' : 'cortado'} ${formatShiftClockRange(_linkedTura)}${_linkedTura.positionName ? ` → ${_linkedTura.positionName}` : ''}` : ''; const _tipLabel = isOpsCoverageCell ? buildOpsCoverageCellTooltip(opsTooltipShift, opsCoverageTooltipCtxFor(opsTooltipShift, emp.name || '')) : (shiftLabel ? `${shiftLabel}${_exclHint}${_otherObjHint}${_rfzHint}${_turaHint}${_covHint}${_billHint}${_authHint}${_lctRest ? `\n⚠ ${_lctRest}` : ''}` : (_exclHint || _otherObjHint || _rfzHint || _turaHint || _covHint || _billHint || _lctRest || null)); setShiftTooltip({ label: _tipLabel, readOnlyOps: isOpsCoverageCell, pos: _isRet ? null : (cellPosName || rfzOnCell?.positionName || null), range: _isRet ? null : (cellRange || (rfzOnCell ? `${formatTime(rfzOnCell.startTime)} - ${formatTime(rfzOnCell.endTime)}` : null)), x: e.clientX, y: e.clientY, restHours: _restHrs }); } else if (isExclusionCol) { setShiftTooltip({ label: excludedPositionsTooltip(excludedOnDay, cellDateStr), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked && !isOpsCoverageCell ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`} data-evento={_evOverlay ? _evOverlay.mode : undefined} title={isOpsCoverageCell ? undefined : _evOverlay ? (_evOverlay.mode === 'EV' ? _evOverlay.tooltip : `${_evOverlay.mode === 'FRANCO_USADO' ? 'Franco usado en evento' : 'También afectado al evento'}: ${_evOverlay.tooltip}`) : isExclusionCol && !s && !p ? excludedPositionsTooltip(excludedOnDay, cellDateStr) : isOtherObjectiveShift && activeShift?.objectiveId ? `Turno en ${getObjectiveName(activeShift.objectiveId)}` : undefined}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style} ${_lctRest ? 'ring-2 ring-amber-400' : cellPosExcluded ? 'ring-1 ring-rose-400/70' : ''}`}>{_evOverlay && _evOverlay.mode !== 'EV' && (<div className="absolute -bottom-0.5 right-0 text-[6.5px] font-black bg-yellow-400 text-yellow-900 px-0.5 rounded z-10" title={_evOverlay.tooltip}>EV</div>)}{_lctRest ? (<span className="absolute top-0 left-0 w-1.5 h-1.5 rounded-full bg-amber-500 border border-white" title={_lctRest}/>) : null}{content}{isExclusionCol && !content && (<span className="absolute bottom-0 left-0 w-1.5 h-1.5 rounded-full bg-rose-400/80" title="Día con puesto(s) excluido(s)"/>)}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly || isCoverageSplitCell) && <div className="absolute -top-1 -right-1 text-[8px] bg-red-900 text-white px-1 rounded-full border border-white/40">+</div>}{covRole === 'LIBERATED' && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-emerald-600 text-white px-0.5 rounded">RET</div>}{isCoverageSourceUsed && <div className="absolute -top-1 -left-1 text-[7px] font-black bg-violet-600 text-white px-0.5 rounded z-10" title="Turno usado en cobertura operativa">U</div>}{_cellShift?.descansoReducido && <div className="absolute -top-1 left-0 text-[7px] font-black bg-amber-500 text-white px-0.5 rounded z-10" title="Descanso reducido autorizado">8–12</div>}{_cellShift?.topeExcedido && <div className="absolute -bottom-0.5 right-0 text-[7px] font-black bg-rose-600 text-white px-0.5 rounded z-10" title="Tope de 200 h autorizado">200</div>}{(covRole === 'TARGET' || isLeaveCell) && coveredByCell && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-orange-500 text-white px-0.5 rounded" title={coveredByCell ? `Cubierto por ${coveredByCell}` : 'Cubierto'}>✓</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && !isOtherObjectiveShift && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}{isOtherObjectiveShift && content && (<div className="absolute bottom-0 left-0"><MapPin size={7} className="text-slate-300 drop-shadow-sm"/></div>)}{selectedGrupo && grupoUnifiedMode && content && !isOtherObjectiveShift && activeShift?.objectiveId && selectedGrupo.objectiveIds.includes(activeShift.objectiveId) && (() => {
+                                                    : cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : (rfzOnCell ? 'Refuerzo cliente (RFZ)' : null); const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; const _exclHint = cellPosExcluded ? `\n⚠ Puesto excluido por SLA este día` : ''; const _otherObjHint = isOtherObjectiveShift && activeShift?.objectiveId ? `\n📍 Otro objetivo: ${getObjectiveName(activeShift.objectiveId)}` : ''; const _rfzHint = rfzOnCell ? `\n🔴 RFZ ${formatTime(rfzOnCell.startTime)}–${formatTime(rfzOnCell.endTime)}${rfzOnCell.positionName ? ` · ${rfzOnCell.positionName}` : ''}` : ''; const _linkedTura = activeShift?.id ? turaMap[activeShift.id] : null; const _turaHint = _linkedTura ? `\n🟣 TURA ${isTuraContiguousToParent(activeShift, _linkedTura) ? 'seguido' : 'cortado'} ${formatShiftClockRange(_linkedTura)}${_linkedTura.positionName ? ` → ${_linkedTura.positionName}` : ''}` : ''; const _tipLabel = isOpsCoverageCell ? buildOpsCoverageCellTooltip(opsTooltipShift, opsCoverageTooltipCtxFor(opsTooltipShift, emp.name || '')) : (shiftLabel ? `${shiftLabel}${_exclHint}${_otherObjHint}${_rfzHint}${_turaHint}${_covHint}${_billHint}${_authHint}${_lctRest ? `\n⚠ ${_lctRest}` : ''}` : (_exclHint || _otherObjHint || _rfzHint || _turaHint || _covHint || _billHint || _lctRest || null)); setShiftTooltip({ label: _tipLabel, readOnlyOps: isOpsCoverageCell, pos: _isRet ? null : (cellPosName || rfzOnCell?.positionName || null), range: _isRet ? null : (cellRange || (rfzOnCell ? `${formatTime(rfzOnCell.startTime)} - ${formatTime(rfzOnCell.endTime)}` : null)), x: e.clientX, y: e.clientY, restHours: _restHrs }); } else if (isExclusionCol) { setShiftTooltip({ label: excludedPositionsTooltip(excludedOnDay, cellDateStr), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked && !isOpsCoverageCell ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`} data-evento={_evOverlay ? _evOverlay.mode : undefined} title={isOpsCoverageCell ? undefined : _evOverlay ? (_evOverlay.mode === 'EV' ? _evOverlay.tooltip : `${_evOverlay.mode === 'FRANCO_USADO' ? 'Franco usado en evento' : 'También afectado al evento'}: ${_evOverlay.tooltip}`) : isExclusionCol && !s && !p ? excludedPositionsTooltip(excludedOnDay, cellDateStr) : isOtherObjectiveShift && activeShift?.objectiveId ? `Turno en ${getObjectiveName(activeShift.objectiveId)}` : undefined}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style} ${_lctRest ? 'ring-2 ring-amber-400' : cellPosExcluded ? 'ring-1 ring-rose-400/70' : ''}`}>{_consultaCelda ? <IndicadorConsultaCelda texto={textoIndicadorConsulta(_consultaCelda)} tooltip={textoTooltipConsulta(_consultaCelda)} onAbrir={() => { setConsultaFoco(_consultaCelda.id); setConsultaTick((n) => n + 1); }} /> : null}{_evOverlay && _evOverlay.mode !== 'EV' && (<div className="absolute -bottom-0.5 right-0 text-[6.5px] font-black bg-yellow-400 text-yellow-900 px-0.5 rounded z-10" title={_evOverlay.tooltip}>EV</div>)}{_lctRest ? (<span className="absolute top-0 left-0 w-1.5 h-1.5 rounded-full bg-amber-500 border border-white" title={_lctRest}/>) : null}{content}{isExclusionCol && !content && (<span className="absolute bottom-0 left-0 w-1.5 h-1.5 rounded-full bg-rose-400/80" title="Día con puesto(s) excluido(s)"/>)}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly || isCoverageSplitCell) && <div className="absolute -top-1 -right-1 text-[8px] bg-red-900 text-white px-1 rounded-full border border-white/40">+</div>}{covRole === 'LIBERATED' && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-emerald-600 text-white px-0.5 rounded">RET</div>}{isCoverageSourceUsed && <div className="absolute -top-1 -left-1 text-[7px] font-black bg-violet-600 text-white px-0.5 rounded z-10" title="Turno usado en cobertura operativa">U</div>}{_cellShift?.descansoReducido && <div className="absolute -top-1 left-0 text-[7px] font-black bg-amber-500 text-white px-0.5 rounded z-10" title="Descanso reducido autorizado">8–12</div>}{_cellShift?.topeExcedido && <div className="absolute -bottom-0.5 right-0 text-[7px] font-black bg-rose-600 text-white px-0.5 rounded z-10" title="Tope de 200 h autorizado">200</div>}{(covRole === 'TARGET' || isLeaveCell) && coveredByCell && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-orange-500 text-white px-0.5 rounded" title={coveredByCell ? `Cubierto por ${coveredByCell}` : 'Cubierto'}>✓</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && !isOtherObjectiveShift && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}{isOtherObjectiveShift && content && (<div className="absolute bottom-0 left-0"><MapPin size={7} className="text-slate-300 drop-shadow-sm"/></div>)}{selectedGrupo && grupoUnifiedMode && content && !isOtherObjectiveShift && activeShift?.objectiveId && selectedGrupo.objectiveIds.includes(activeShift.objectiveId) && (() => {
                                                     const _oi = selectedGrupo.objectiveIds.indexOf(activeShift.objectiveId!);
                                                     const _clr = GRUPO_COLOR_HEX[_oi % GRUPO_COLOR_HEX.length];
                                                     const _nm = (selectedGrupo.objectiveNames[_oi] || '').trim().split(/\s+/).filter((w: string) => w.length > 1).pop()?.slice(0, 6).toUpperCase() || (selectedGrupo.objectiveNames[_oi] || '').slice(0, 5).toUpperCase();
@@ -15057,6 +15136,16 @@ function PlanificacionDesktop() {
                         </div>
                     </div>
                 )}
+                {canConsultarEventual && (
+                    <ConsultasEnCursoPill
+                        consultas={vacancyConsultas}
+                        focoId={consultaFoco}
+                        focoTick={consultaTick}
+                        onCancelar={(id) => { void cancelarConsultaPlan(id).catch(() => toast.error('No se pudo cancelar la consulta.')); }}
+                        onConsultarOtros={(c) => reabrirDesdeConsulta(c, true)}
+                        onCubrirOtraForma={(c) => reabrirDesdeConsulta(c, false)}
+                    />
+                )}
                 {showVacancyModal && (() => {
                     const absType = vacancyData?.type || '';
                     const absenceDateRange = vacancyData?.startDate
@@ -15768,6 +15857,7 @@ function PlanificacionDesktop() {
                                             editing: vacancyEditingDay === d,
                                             titular: chip ? [chip.code, chip.band, chip.position, chip.sched].filter(Boolean).join(' · ') : null,
                                             consulta: resumenConsultaDia(consultaDelDia(vacancyConsultas, d)),
+                                            resuelveConsulta: diaLoResuelveConsulta(vacancyConsultas, d),
                                         };
                                     })}
                                     emptyCount={vacancyEmptyActiveDays}
@@ -15955,6 +16045,7 @@ function PlanificacionDesktop() {
                                                         consulta={canConsultarEventual ? {
                                                             objectiveName: getObjectiveName(selectedObjective || '') || null,
                                                             positionName: vacancyGapPreferredPosition || null,
+                                                            titularEmployeeId: vacancyData?.employeeId || null,
                                                         } : null}
                                                         busy={vacancyEventualBusy}
                                                         compact

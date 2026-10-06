@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { toast } from 'sonner';
@@ -9,6 +9,9 @@ import { MovilBottomNav } from '@/components/movil/MovilBottomNav';
 import { useEmpresaSheet } from '@/components/movil/useEmpresaSheet';
 import { CambioPuntual, CandidatosHueco, PlanificacionMovilView, type EventualMovil } from '@/components/movil/PlanificacionMovilView';
 import { ConsultaDisponibilidadEstado } from '@/components/eventuales/ConsultaDisponibilidadEstado';
+import { ConsultasEnCursoPill } from '@/components/planificacion/ConsultasEnCurso';
+import { useConsultasDisponibilidadObjetivo } from '@/hooks/useConsultasDisponibilidadObjetivo';
+import { consultaAbiertaEnFecha, novedadesDeConsultas, textoIndicadorConsulta, textoTooltipConsulta, type ConsultaCurso } from '@/lib/planificacion/coberturaEventualesUx';
 import {
   BarraPublicar, CeldaSheetBody, SelectorObjetivoSheetBody, SemanaEncabezado, SemanaGrilla, type PanelPlanificacion,
 } from '@/components/movil/PlanificacionSemanaView';
@@ -262,6 +265,10 @@ export function PlanificacionMovil() {
   const diasSemana = useMemo(() => semanaDe(lunes), [lunes]);
   const ymSemana = mesDeSemana(lunes);
   const objetivoSel = objetivos.find((o) => o.id === seleccion?.objectiveId) || null;
+  const consultasObj = useConsultasDisponibilidadObjetivo(empresaId, objetivoSel?.id, !!objetivoSel && puedeConsultar);
+  const consultasPrevRef = useRef<typeof consultasObj | null>(null);
+  const [consultaFoco, setConsultaFoco] = useState<string | null>(null);
+  const [consultaTick, setConsultaTick] = useState(0);
   const clienteSel = clientesCat.find((c) => c.id === (seleccion?.clientId || objetivoSel?.clientId)) || null;
   const estructura = useMemo(() => {
     if (!objetivoSel) return null;
@@ -391,6 +398,14 @@ export function PlanificacionMovil() {
   };
 
   const stage = (cambio: CambioLocal) => {
+    const fecha = franjaAbierta?.date;
+    const abierta = fecha ? consultaAbiertaEnFecha(consultasObj, fecha, franjaAbierta?.employeeId && franjaAbierta.employeeId !== 'VACANTE' ? franjaAbierta.employeeId : null) : null;
+    if (abierta) {
+      const ok = window.confirm('Ese día lo resuelve una consulta abierta. Si lo cambiás a mano, se cancela la consulta y se avisa que ya no hace falta. ¿Seguir?');
+      if (!ok) return;
+      const call = httpsCallable(functions, 'cancelarConsultaDisponibilidad');
+      void call({ consultaId: abierta.id, empresaId }).catch(() => toast.error('No se pudo cancelar la consulta.'));
+    }
     setCambios((prev) => [...prev, cambio]);
     cerrar();
     toast.message('Quedó para publicar la corrección');
@@ -479,11 +494,13 @@ export function PlanificacionMovil() {
           objetivoGeo: objetivo?.lat != null && objetivo.lng != null ? { lat: objetivo.lat, lng: objetivo.lng } : null,
           jornadas: [{ fecha: franjaAbierta.date, horaInicio: banda.start, horaFin: banda.end, horas: banda.hours, code: banda.code, positionName: franjaAbierta.positionName }],
           cuils,
+          titularEmployeeId: franjaAbierta.employeeId && franjaAbierta.employeeId !== 'VACANTE' ? franjaAbierta.employeeId : null,
           // Un hueco de un puesto: siempre un lugar, el primero que acepte cubre.
           lugares: 1,
           venceMinutos: 120,
         });
         toast.success(res.data?.resumen || 'Consulta enviada.');
+        toast.message('Podés cerrar esta ventana. El día queda en espera.');
         setConsultaCuils([]);
       });
     } catch (error) {
@@ -530,6 +547,42 @@ export function PlanificacionMovil() {
     void router.replace({ pathname: router.pathname, query }, undefined, { shallow: true });
   };
 
+  const abrirHuecoConsulta = (consulta: ConsultaCurso) => {
+    const fecha = (consulta.jornadas || [])[0]?.fecha;
+    if (!fecha || !objetivoSel) {
+      toast.message('Elegí el objetivo y abrí ese día en la semana.');
+      return;
+    }
+    const flat = celdas.flat();
+    const celda = flat.find((x) => x.fecha === fecha && (!consulta.positionName || x.fila.positionName === consulta.positionName) && x.kind === 'hueco')
+      || flat.find((x) => x.fecha === fecha && x.kind !== 'sin-servicio');
+    if (!celda) {
+      toast.message('Ese día no está en la semana abierta.');
+      return;
+    }
+    if (celda.kind === 'hueco') setSheet({ tipo: 'cubrir', franja: huecoDeCelda(celda, objetivoSel), reemplazo: false });
+    else setSheet({ tipo: 'celda', filaId: celda.fila.id, fecha: celda.fecha });
+    setConsultaFoco(null);
+  };
+
+  useEffect(() => {
+    const prev = consultasPrevRef.current;
+    consultasPrevRef.current = consultasObj;
+    if (prev === null) return;
+    for (const n of novedadesDeConsultas(prev, consultasObj)) {
+      if (n.tipo === 'ACEPTO') {
+        toast.success(n.texto);
+        continue;
+      }
+      const consulta = consultasObj.find((c) => c.id === n.id);
+      toast.warning(n.texto, {
+        duration: 14000,
+        action: consulta ? { label: 'Consultar a otros', onClick: () => abrirHuecoConsulta(consulta) } : undefined,
+        cancel: consulta ? { label: 'Cubrir de otra forma', onClick: () => abrirHuecoConsulta(consulta) } : undefined,
+      });
+    }
+  }, [consultasObj]);
+
   if (!puedeLeer) {
     return <p className="p-6 text-sm font-medium text-slate-600">No tenés permiso de planificación.</p>;
   }
@@ -541,6 +594,22 @@ export function PlanificacionMovil() {
   return (
     <>
       <Head><title>Planificación · COSP</title></Head>
+      {puedeConsultar && (
+        <ConsultasEnCursoPill
+          consultas={consultasObj}
+          focoId={consultaFoco}
+          focoTick={consultaTick}
+          anclaje="celular"
+          onCancelar={(id) => {
+            const call = httpsCallable(functions, 'cancelarConsultaDisponibilidad');
+            void call({ consultaId: id, empresaId })
+              .then(() => toast.success('Consulta cancelada. Se avisó que ya no hace falta.'))
+              .catch(() => toast.error('No se pudo cancelar la consulta.'));
+          }}
+          onConsultarOtros={abrirHuecoConsulta}
+          onCubrirOtraForma={abrirHuecoConsulta}
+        />
+      )}
       <PlanificacionMovilView
         empresa={empresa?.name || empresaId}
         onEmpresa={empresaSheet.onEmpresa}
@@ -573,6 +642,14 @@ export function PlanificacionMovil() {
                   sinEstructura={sinEstructura}
                   onAnterior={() => setLunes((l) => semanaAnterior(l))}
                   onSiguiente={() => setLunes((l) => semanaSiguiente(l))}
+                  marcaConsulta={(fecha, positionName) => {
+                    const c = consultasObj.find((x) => x.status === 'ABIERTA' && (x.jornadas || []).some((j) => j.fecha === fecha) && (!x.positionName || x.positionName === positionName));
+                    return c ? { texto: textoIndicadorConsulta(c), tooltip: textoTooltipConsulta(c) } : null;
+                  }}
+                  onConsulta={(fecha, positionName) => {
+                    const c = consultasObj.find((x) => x.status === 'ABIERTA' && (x.jornadas || []).some((j) => j.fecha === fecha) && (!x.positionName || x.positionName === positionName));
+                    if (c) { setConsultaFoco(c.id); setConsultaTick((n) => n + 1); }
+                  }}
                   onCelda={(celda) => {
                     // Mes sin publicar: la celda se abre en solo lectura con el aviso.
                     if (semanaSoloLectura) {

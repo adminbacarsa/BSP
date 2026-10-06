@@ -8,7 +8,13 @@ import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { ConsultaResumenIn } from '@/lib/planificacion/coberturaEventualesUx';
 
-export type ConsultaObjetivo = ConsultaResumenIn & { id: string; positionName: string | null };
+export type ConsultaObjetivo = ConsultaResumenIn & {
+  id: string;
+  positionName: string | null;
+  objectiveName: string | null;
+  titularEmployeeId: string | null;
+  jornadas: { fecha: string; code?: string; horaInicio?: string; horaFin?: string }[];
+};
 
 export function useConsultasDisponibilidadObjetivo(empresaId: string | null | undefined, objectiveId: string | null | undefined, activo: boolean): ConsultaObjetivo[] {
   const [consultas, setConsultas] = useState<ConsultaObjetivo[]>([]);
@@ -26,11 +32,20 @@ export function useConsultasDisponibilidadObjetivo(empresaId: string | null | un
           id: d.id,
           status: String(data.status || ''),
           venceAtMs: Number(data.venceAtMs || 0) || null,
-          jornadas: Array.isArray(data.jornadas) ? (data.jornadas as { fecha: string }[]).map((j) => ({ fecha: String(j?.fecha || '') })) : [],
+          jornadas: Array.isArray(data.jornadas)
+            ? (data.jornadas as { fecha?: string; code?: string; horaInicio?: string; horaFin?: string }[]).map((j) => ({
+              fecha: String(j?.fecha || ''),
+              ...(j?.code ? { code: String(j.code) } : {}),
+              ...(j?.horaInicio ? { horaInicio: String(j.horaInicio) } : {}),
+              ...(j?.horaFin ? { horaFin: String(j.horaFin) } : {}),
+            }))
+            : [],
           respuestas: Array.isArray(data.respuestas)
             ? (data.respuestas as { nombre?: string; estado?: string; hora?: string | null }[]).map((r) => ({ nombre: String(r?.nombre || ''), estado: String(r?.estado || ''), hora: r?.hora || null }))
             : [],
           positionName: data.positionName ? String(data.positionName) : null,
+          objectiveName: data.objectiveName ? String(data.objectiveName) : null,
+          titularEmployeeId: data.titularEmployeeId ? String(data.titularEmployeeId) : null,
         };
       }));
     }, () => setConsultas([]));

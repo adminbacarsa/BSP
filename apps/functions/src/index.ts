@@ -3835,7 +3835,7 @@ export {
   convocarEventualEvento,
   onTurnoEventualWrite,
 } from './eventuales/planificacionEventuales';
-export { crearConsultaDisponibilidad, responderConsultaDisponibilidad } from './eventuales/consultaDisponibilidad';
+export { crearConsultaDisponibilidad, responderConsultaDisponibilidad, cancelarConsultaDisponibilidad } from './eventuales/consultaDisponibilidad';
 
 export { onArcaEnvioUrgente } from './arca/notificarUrgenteN8n';
 

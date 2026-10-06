@@ -132,7 +132,9 @@ export const crearConsultaDisponibilidad = functions.https.onCall(async (data, c
     clientId, clientName, objectiveId, objectiveName, positionName,
     objetivoGeo: data?.objetivoGeo || null,
     texto, venceAt: admin.firestore.Timestamp.fromMillis(venceAtMs), venceAtMs,
+    ...(String(data?.titularEmployeeId || '').trim() ? { titularEmployeeId: String(data.titularEmployeeId).trim() } : {}),
     creadoPor: auth.uid, creadoPorNombre: String(auth.token.email || auth.uid),
+    ...(String(data?.titularEmployeeId || '').trim() ? { titularEmployeeId: String(data.titularEmployeeId).trim() } : {}),
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
     respuestas, resumen: reglas.textoEstadoConsulta(respuestas),
   });
@@ -330,6 +332,65 @@ export const responderConsultaDisponibilidad = functions.https.onCall(async (dat
     await auditar('CONSULTA_DISPONIBILIDAD_NO_ELEGIBLE', uid, String(reserva.pdata.empresaId || ''), `${inv.nombre || cuil}: ${motivo}. El lugar sigue libre.`, { consultaId, bolsaCuil: cuil });
     return { ok: false, codigo: 'NO_ELEGIBLE', motivo };
   }
+});
+
+const MENSAJE_YA_NO_HACE_FALTA = 'Ya no hace falta';
+
+/** Cierra una consulta abierta y avisa a los que todavía no respondieron. */
+export const cancelarConsultaDisponibilidad = functions.https.onCall(async (data, context) => {
+  const auth = await exigirPuedeConsultar(context);
+  const consultaId = String(data?.consultaId || '').trim();
+  if (!consultaId) throw new functions.https.HttpsError('invalid-argument', 'Falta la consulta.');
+  const ref = db().collection(COL).doc(consultaId);
+  const snap = await ref.get();
+  if (!snap.exists) throw new functions.https.HttpsError('not-found', 'No existe la consulta.');
+  const parent = snap.data() || {};
+  if (data?.empresaId && String(parent.empresaId || '') !== String(data.empresaId)) {
+    throw new functions.https.HttpsError('permission-denied', 'La consulta es de otra empresa.');
+  }
+  if (String(parent.status || '') !== 'ABIERTA') return { ok: true, codigo: 'YA_CERRADA', status: parent.status || null };
+  const respuestas = ((parent.respuestas || []) as RespuestaVista[]).map((r) => (
+    r.estado === 'PENDIENTE' || r.estado === 'RESERVADO'
+      ? { ...r, estado: 'CANCELADA', motivo: MENSAJE_YA_NO_HACE_FALTA, orden: null }
+      : r
+  ));
+  await ref.update({
+    status: 'CERRADA',
+    venceAt: admin.firestore.FieldValue.delete(),
+    canceladaAt: admin.firestore.FieldValue.serverTimestamp(),
+    canceladaPor: auth.uid,
+    respuestas,
+    resumen: `Cancelada: ${MENSAJE_YA_NO_HACE_FALTA}`,
+  });
+  for (const r of (parent.respuestas || []) as RespuestaVista[]) {
+    if (r.estado !== 'PENDIENTE' && r.estado !== 'RESERVADO') continue;
+    const inv = invitacionRef(consultaId, r.cuil);
+    const invSnap = await inv.get();
+    const uid = invSnap.exists ? String(invSnap.data()?.uid || '') : '';
+    const employeeId = invSnap.exists ? (invSnap.data()?.employeeId || null) : null;
+    if (invSnap.exists) await inv.update({ estado: 'CANCELADA', motivo: MENSAJE_YA_NO_HACE_FALTA, orden: null });
+    if (uid) {
+      await db().collection('user_notifications').add({
+        uid,
+        employeeId,
+        empresaId: parent.empresaId || null,
+        type: 'CONSULTA_DISPONIBILIDAD',
+        target: 'employee',
+        title: MENSAJE_YA_NO_HACE_FALTA,
+        body: MENSAJE_YA_NO_HACE_FALTA,
+        consultaId,
+        objectiveId: parent.objectiveId || null,
+        objectiveName: parent.objectiveName || null,
+        positionName: parent.positionName || null,
+        read: false,
+        readAt: null,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+  }
+  await evento(consultaId, 'CANCELADA', { actorUid: auth.uid });
+  await auditar('CONSULTA_DISPONIBILIDAD_CANCELADA', auth.uid, String(parent.empresaId || ''), 'Consulta cancelada: ya no hace falta.', { consultaId });
+  return { ok: true, codigo: 'CERRADA' };
 });
 
 /** La corre el scheduler de convocatorias: vence las abiertas y avisa al planificador si quedó lugar. */

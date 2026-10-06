@@ -10,12 +10,21 @@ import {
   TarjetaEventual,
   type CandidatoTarjeta,
 } from '@/components/eventuales/EventualesCandidatosUx';
+import { ConsultasEnCursoPill, IndicadorConsultaCelda } from '@/components/planificacion/ConsultasEnCurso';
 import { VacancyCoberturaLista } from '@/components/planificacion/VacancyCoberturaDia';
 import { CandidatosHueco } from '@/components/movil/PlanificacionMovilView';
 import {
   accionParaMotivo,
+  cambiosManualesSobreConsulta,
+  consultaAbiertaEnFecha,
   consultaDelDia,
+  diaLoResuelveConsulta,
   linkFichaEventual,
+  novedadesDeConsultas,
+  quitarBorradorQuePisaConsulta,
+  textoIndicadorConsulta,
+  textoToastAcepto,
+  textoTooltipConsulta,
   resumenConsultaDia,
   separarCandidatos,
   horasDelBloque,
@@ -194,4 +203,80 @@ test('el celular cubre un hueco sin «Lugares» y colapsa a los no disponibles',
   assert.match(html, /data-no-disponibles="1"/);
   assert.match(html, /No disponibles \(1\)/);
   assert.doesNotMatch(html, /data-plan-candidato="20222222223"/);
+});
+
+test('un día con consulta abierta no guarda el suplente local y la celda avisa', () => {
+  const consulta = {
+    id: 'c1',
+    status: 'ABIERTA',
+    venceAtMs: Date.UTC(2026, 9, 6, 14, 15),
+    titularEmployeeId: 'titular',
+    positionName: 'Puesto 1',
+    jornadas: [{ fecha: '2026-10-06', code: 'M' }],
+    respuestas: [
+      { nombre: 'ABALLAY, Juan', estado: 'PENDIENTE', hora: null },
+      { nombre: 'BRIZUELA, Ana', estado: 'NO', hora: '10:20' },
+    ],
+  };
+  const changes: Record<string, { code: string; isDeleted?: boolean; employeeId?: string; hours?: number }> = {
+    'titular_2026-10-06': { code: 'L', isDeleted: false },
+    'suplente_2026-10-06': { code: 'M', employeeId: 'suplente', hours: 8 },
+    'otro_2026-10-07': { code: 'T' },
+  };
+  const sane = quitarBorradorQuePisaConsulta(changes, [consulta]);
+  assert.deepEqual(sane.quitadas, ['suplente_2026-10-06']);
+  assert.equal(sane.changes['titular_2026-10-06'].code, 'L');
+  assert.equal(sane.changes['otro_2026-10-07'].code, 'T');
+  assert.equal(sane.changes['suplente_2026-10-06'], undefined);
+  assert.equal(diaLoResuelveConsulta([consulta], '2026-10-06'), true);
+  assert.equal(consultaAbiertaEnFecha([consulta], '2026-10-06', 'titular')?.id, 'c1');
+  assert.equal(consultaAbiertaEnFecha([consulta], '2026-10-06', 'otro'), null);
+  assert.equal(textoIndicadorConsulta(consulta), 'Consulta enviada · vence 11:15');
+  assert.match(textoTooltipConsulta(consulta), /ABALLAY esperando/);
+  assert.match(textoTooltipConsulta(consulta), /BRIZUELA no/);
+
+  const manual = cambiosManualesSobreConsulta(
+    {},
+    { 'titular_2026-10-06': { code: 'M' } },
+    [consulta],
+  );
+  assert.equal(manual[0]?.consultaId, 'c1');
+  const licencia = cambiosManualesSobreConsulta(
+    {},
+    { 'titular_2026-10-06': { code: 'L' } },
+    [consulta],
+  );
+  assert.equal(licencia.length, 0);
+
+  const acepto = novedadesDeConsultas([consulta], [{
+    ...consulta,
+    respuestas: [{ nombre: 'ABALLAY, Juan', estado: 'ASIGNADO', hora: '10:42' }],
+  }]);
+  assert.equal(acepto[0]?.tipo, 'ACEPTO');
+  assert.equal(acepto[0]?.texto, textoToastAcepto('ABALLAY, Juan', '2026-10-06', 'M', 'Puesto 1'));
+  assert.equal(novedadesDeConsultas([consulta], [consulta]).length, 0);
+  const vencida = novedadesDeConsultas([consulta], [{ ...consulta, status: 'VENCIDA' }]);
+  assert.equal(vencida[0]?.tipo, 'VENCIDA');
+  assert.match(vencida[0]?.texto || '', /venció sin respuesta/);
+
+  const pill = renderToStaticMarkup(
+    <ConsultasEnCursoPill
+      consultas={[consulta, { ...consulta, id: 'c2', status: 'VENCIDA', respuestas: [{ nombre: 'CASAS, Luis', estado: 'NO', hora: null }] }]}
+      focoId="c2"
+      onCancelar={() => {}}
+      onConsultarOtros={() => {}}
+      onCubrirOtraForma={() => {}}
+    />,
+  );
+  assert.match(pill, /Consultas en curso \(1\)/);
+  assert.match(pill, /data-consulta-cancelar="c1"/);
+  assert.match(pill, /Cancelar consulta/);
+  assert.match(pill, /data-consulta-otros="c2"/);
+  assert.match(pill, /Consultar a otros/);
+  assert.match(pill, /Cubrir de otra forma/);
+  const celda = renderToStaticMarkup(
+    <IndicadorConsultaCelda texto={textoIndicadorConsulta(consulta)} tooltip={textoTooltipConsulta(consulta)} onAbrir={() => {}} />,
+  );
+  assert.match(celda, /data-consulta-celda="1"/);
+  assert.match(celda, /Consulta enviada · vence 11:15/);
 });
