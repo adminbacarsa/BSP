@@ -341,12 +341,25 @@ const supCodigos = render(OperacionScreens, {
   objective: { objectiveId: 'peaje', name: 'Peaje 9 Norte', client: 'Ruta 9', active: 4, retention: 0, absent: 0, vacant: 0, plan: 0, shifts: [
     base({ id: 'r', employeeName: 'Rios, Ana', code: 'REF', isPresent: true, realStartTime: ar('15:00'), shiftDateObj: ar('15:00'), endDateObj: ar('23:00') }),
     base({ id: 'e', employeeName: 'Solis, Bea', code: 'ESC', isPresent: true, realStartTime: ar('15:00'), shiftDateObj: ar('15:00'), endDateObj: ar('23:00') }),
+    // Peaje 9 Norte 06/10: la grilla dice REF·M2 / REF·T; el CC debe decir lo mismo.
+    base({ id: 'k', employeeName: 'Kopp, Luis', code: 'REF', deploymentBand: 'M2', isPresent: true, realStartTime: ar('11:00'), shiftDateObj: ar('11:00'), endDateObj: ar('15:00') }),
+    base({ id: 'l', employeeName: 'Lozano, Ana', code: 'REF', deploymentBand: 'T', isFuture: true, shiftDateObj: ar('15:00'), endDateObj: ar('23:00') }),
     base({ id: 'u', employeeName: 'Baez, Juan', code: 'M', turaContiguous: true, isPresent: true, realStartTime: ar('07:00'), shiftDateObj: ar('07:00'), endDateObj: ar('15:00') }),
     base({ id: 'v', employeeName: 'Paz, Noé', code: 'EV', origin: 'EVENTO', isPresent: true, realStartTime: ar('15:00'), shiftDateObj: ar('15:00'), endDateObj: ar('23:00') }),
   ] },
   ...noops,
 });
 check('supervisión muestra REF, ESC, TURA y EV y la tarjeta abre el detalle', supCodigos.includes('data-movil-code="REF"') && supCodigos.includes('data-movil-code="ESC"') && supCodigos.includes('data-movil-extra="TURA"') && supCodigos.includes('data-movil-code="EV"') && supCodigos.includes('data-movil-tap="r"') && !supCodigos.includes('data-movil-accion='));
+check('REF con banda muestra el código completo (REF·M2, REF·T) como la grilla', supCodigos.includes('data-movil-code="REF·M2"') && supCodigos.includes('data-movil-code="REF·T"'));
+const { deploymentCodeLabel, opsShiftCodeBadge, isReliefEligibleShift, relieverFor } = await importFront('../../../packages/ops-core/src/index.ts');
+check('deploymentCodeLabel: REF/ESC con banda, resto igual', deploymentCodeLabel('REF', 'M2') === 'REF·M2' && deploymentCodeLabel('ESC', 't2') === 'ESC·T2' && deploymentCodeLabel('REF') === 'REF' && deploymentCodeLabel('M', 'M2') === 'M' && deploymentCodeLabel('RET', 'M') === 'RET');
+const chipRef = opsShiftCodeBadge({ code: 'REF', deploymentBand: 'M2' });
+check('chip del CC dice REF·M2 con tono extra', chipRef.code === 'REF·M2' && chipRef.tone === 'extra' && chipRef.title.includes('M2'));
+check('la banda no convierte al REF en relevo', !isReliefEligibleShift({ code: 'REF', deploymentBand: 'T' }) && relieverFor(
+  { id: 'm', code: 'M', positionName: 'P1', shiftDateObj: ar('07:00'), endDateObj: ar('15:00') },
+  [{ id: 'ref', code: 'REF', deploymentBand: 'T', positionName: 'P1', shiftDateObj: ar('15:00'), endDateObj: ar('23:00') }],
+) === null);
+check('guardDetalle muestra REF·T', guardDetalle(base({ id: 'l2', employeeName: 'Lozano, Ana', code: 'REF', deploymentBand: 'T', isFuture: true, shiftDateObj: ar('15:00'), endDateObj: ar('23:00') }), [], AHORA).code === 'REF·T');
 const hojaSup = render(HojaDetalle, { shift: base({ id: 'r', employeeName: 'Rios, Ana', code: 'REF', isPresent: true, shiftDateObj: ar('15:00'), endDateObj: ar('23:00') }), siblings: [], now: AHORA, soloDetalle: true, onEjecutar: () => {}, onCerrar: () => {} });
 check('hoja de supervisión: detalle sin acciones', hojaSup.includes('data-movil-sheet="detalle"') && hojaSup.includes('REF') && !hojaSup.includes('data-movil-accion=') && !hojaSup.includes('Marcar ingreso') && !hojaSup.includes('data-movil-nota='));
 

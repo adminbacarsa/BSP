@@ -38,6 +38,14 @@ function standbyRet(s: OpsViewTabShift): boolean {
   return s.isPassiveRetStandby === true || isPassiveRetStandbyShift(s);
 }
 
+/**
+ * Retén disponible para llamar hoy: RET stand-by que no fichó, no cerró y sigue asignado.
+ * Se lista en la solapa FRANC (y en PLAN); nunca en AUS ni VAC.
+ */
+export function isStandbyRetDisponible(s: OpsViewTabShift): boolean {
+  return standbyRet(s) && !s.isFranco && !s.isUnassigned && !s.isPresent && !s.isCompleted;
+}
+
 export function shiftMatchesOpsViewTab(s: OpsViewTabShift, viewTab: string, now: Date = new Date()): boolean {
   switch (viewTab) {
     case 'TODOS':
@@ -70,7 +78,7 @@ export function shiftMatchesOpsViewTab(s: OpsViewTabShift, viewTab: string, now:
         && !s.isPassiveRetStandby
       );
     case 'PLAN':
-      if (standbyRet(s) && !s.isFranco && !s.isUnassigned && !s.isPresent && !s.isCompleted) return true;
+      if (isStandbyRetDisponible(s)) return true;
       return (
         (s.isFuture || s.isRRHHPlanned)
         && !s.isFranco
@@ -95,7 +103,8 @@ export function shiftMatchesOpsViewTab(s: OpsViewTabShift, viewTab: string, now:
       if (s.isProvisionalLateAbsence) return false;
       return !!(s.isAbsent || (s.isPotentialAbsence && s.opensCoverageVacancy));
     case 'FRANCOS':
-      return !!s.isFranco;
+      // Francos + retenes stand-by del día: a quién puede llamar el operador.
+      return !!s.isFranco || isStandbyRetDisponible(s);
     default:
       return !s.isFranco;
   }

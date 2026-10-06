@@ -1,4 +1,4 @@
-import { formatRetentionDuration, outgoingFor, relevoAusenteAviso, relieverFor, seriesBoundMs } from '@cosp/ops-core';
+import { deploymentCodeLabel, formatRetentionDuration, outgoingFor, relevoAusenteAviso, relieverFor, seriesBoundMs } from '@cosp/ops-core';
 import type { RetentionWaitInfo } from '@cosp/ops-core';
 import { formatIngresoLine } from '@/lib/operaciones/ingresoLabel';
 import { convocadoEnCaminoLabel } from '@/lib/operaciones/convocadoVentana';
@@ -15,6 +15,8 @@ export interface GuardDetalleShift extends GuardFlags {
   employeeId?: string;
   employeeName?: string;
   code?: string;
+  /** Banda del REF/ESC («M2»): el chip dice `REF·M2`, igual que la grilla. */
+  deploymentBand?: string | null;
   positionName?: string;
   objectiveName?: string;
   clientName?: string;
@@ -282,7 +284,7 @@ export function guardDetalle(shift: GuardDetalleShift, siblings: readonly GuardD
 
   return {
     nombre,
-    code: String(shift.code || '').trim().toUpperCase() || '—',
+    code: deploymentCodeLabel(String(shift.code || ''), shift.deploymentBand) || '—',
     puesto: String(shift.positionName || 'Puesto').trim(),
     // EV: el lugar del evento (lo resuelve el monitor), nunca el objetivo de base del guardia.
     objetivo: isEventShift(shift)

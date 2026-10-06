@@ -1,4 +1,4 @@
-import { outgoingFor, relevoAusenteAviso, relieverFor, seriesBoundMs } from '@cosp/ops-core';
+import { deploymentCodeLabel, outgoingFor, relevoAusenteAviso, relieverFor, seriesBoundMs } from '@cosp/ops-core';
 import { guardTone, type GuardTone } from '@/lib/movil/guardTone';
 import { hhmmAR, horarioPlanificado, type GuardDetalleShift } from '@/lib/movil/guardDetalle';
 import { normalizarNota } from '@/lib/operaciones/opsNota';
@@ -184,7 +184,7 @@ export function guardCompacto(shift: GuardDetalleShift, siblings: readonly Guard
   const notaRaw = shift.opsNota && typeof shift.opsNota === 'object' ? normalizarNota((shift.opsNota as { texto?: unknown }).texto) : null;
 
   const avisoRelevo = relevoAusenteAviso(shift, siblings, now);
-  const code = String(shift.code || shift.vacancyBand || '').trim().toUpperCase() || '—';
+  const code = deploymentCodeLabel(String(shift.code || shift.vacancyBand || ''), shift.deploymentBand) || '—';
   const type = String(shift.type || '').trim().toUpperCase();
   const extra = (shift.turaContiguous || shift.isTuraCutSegment) && code !== 'TURA'
     ? 'TURA'

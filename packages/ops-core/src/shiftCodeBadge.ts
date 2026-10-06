@@ -1,4 +1,5 @@
 import { isActiveOpsCoverageDoc, isOpsCoverageHoursOnSourceDoc } from './coverageSemantics';
+import { deploymentCodeLabel } from './deploymentCodeLabel';
 import { NON_RELIEF_EXTRA_CODES, reliefShiftCode } from './reliefEligibility';
 
 export type ShiftCodeBadgeTone = 'base' | 'extra' | 'coverage' | 'rest' | 'license' | 'other';
@@ -63,7 +64,11 @@ export function opsShiftCodeBadge(
   }
 
   const title = CODE_TITLES[code] || code;
-  if (NON_RELIEF_EXTRA_CODES.has(code)) return { code, tone: 'extra', title };
+  if (NON_RELIEF_EXTRA_CODES.has(code)) {
+    const label = deploymentCodeLabel(code, shift.deploymentBand);
+    const band = String(shift.deploymentBand ?? '').trim().toUpperCase();
+    return { code: label, tone: 'extra', title: band && label !== code ? `${title} · banda ${band}` : title };
+  }
   if (REST_CODES.has(code)) return { code, tone: 'rest', title };
   if (LICENSE_CODES.has(code)) return { code, tone: 'license', title };
   if (BASE_CODES.has(code)) return { code, tone: 'base', title };
