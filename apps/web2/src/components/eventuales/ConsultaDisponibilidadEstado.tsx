@@ -23,6 +23,7 @@ const ESTADO: Record<string, string> = {
   COMPLETA: 'Cubierta',
   VENCIDA: 'Vencida',
   CERRADA: 'Cerrada',
+  SIN_DESTINATARIOS: 'Sin destinatarios',
 };
 
 export function ConsultaDisponibilidadEstado({ empresaId, objectiveId, positionName, jornadas }: {

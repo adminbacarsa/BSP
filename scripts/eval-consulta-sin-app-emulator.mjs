@@ -1,0 +1,134 @@
+/**
+ * Consulta que no tiene a quién llegarle.
+ * Sin uid y sin mail → se cierra al toque y avisa a Planificación.
+ * Uno con app y otro sin → se envía al que tiene y el estado nombra al otro.
+ *   firebase emulators:exec --only firestore --config firebase.e2e-p2.json --project demo-consulta-sin-app "node scripts/eval-consulta-sin-app-emulator.mjs"
+ */
+import { createRequire } from 'module';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const requireFn = createRequire(path.join(__dirname, '../apps/functions/package.json'));
+const admin = requireFn('firebase-admin');
+
+if (!process.env.FIRESTORE_EMULATOR_HOST || process.env.FIRESTORE_EMULATOR_HOST.includes(':8080')) {
+  console.error('Usar el emulador aislado firebase.e2e-p2.json, no el lab :8080.');
+  process.exit(1);
+}
+
+const projectId = process.env.GCLOUD_PROJECT || 'demo-consulta-sin-app';
+admin.initializeApp({ projectId });
+const db = admin.firestore();
+
+const { crearConsultaDisponibilidad } = requireFn('./lib/eventuales/consultaDisponibilidad.js');
+
+const results = [];
+function report(name, ok, detail = '') {
+  results.push({ name, ok });
+  console.log(`${ok ? 'OK' : 'FALLA'}\t${name}\t${detail}`);
+}
+async function intentar(fn) {
+  try { return { ok: true, value: await fn() }; } catch (err) { return { ok: false, code: err?.code || '', message: err?.message || String(err) }; }
+}
+
+const EMP = 'csa_emp';
+const PLANNER = { auth: { uid: 'uid-plan', token: { role: 'SuperAdmin', email: 'plan@bacarsa.com.ar' } }, rawRequest: { ip: '10.0.0.8', headers: {} } };
+const SIN = { cuil: '20911111116', nombre: 'QUIROGA PEREZ' };
+const CON = { cuil: '20822222223', nombre: 'SOSA, Eva', uid: 'uid-sosa' };
+const FECHA = '2026-11-20';
+
+function bolsa(p, extra = {}) {
+  return {
+    cuil: p.cuil, nombre: p.nombre, uid: p.uid || '', disponibilidad: 'DISPONIBLE', empresasHabilitadas: [EMP],
+    credencialVencimiento: '2027-06-01', aptoPsicofisico: { estado: 'APTO', vencimiento: '2027-06-01' },
+    mail: '', telefono: '3510000000', domicilio: 'Cordoba',
+    marcos: { [EMP]: { firmado: true, fechaFirma: '2026-01-15', vigenciaDias: 365, vencimiento: '2027-01-15', estado: 'MARCO_VIGENTE' } },
+    status: 'ACTIVE', ...extra,
+  };
+}
+function pedido(cuils, fecha = FECHA) {
+  return {
+    empresaId: EMP, cuils, lugares: 1, venceMinutos: 120,
+    objectiveName: 'Peaje', positionName: 'Puesto 1', clientName: 'Norte',
+    jornadas: [{ fecha, horaInicio: '08:00', horaFin: '16:00', horas: 8, code: 'M' }],
+  };
+}
+function ts(iso) {
+  return admin.firestore.Timestamp.fromDate(new Date(iso));
+}
+
+async function main() {
+  await db.collection('empresas').doc(EMP).set({ name: 'Consulta SA', status: 'ACTIVE' });
+  await db.collection('eventuales_bolsa').doc(SIN.cuil).set(bolsa(SIN));
+
+  const sola = await intentar(() => crearConsultaDisponibilidad.run(pedido([SIN.cuil]), PLANNER));
+  const solaId = sola.value?.consultaId;
+  const solaDoc = solaId ? (await db.collection('consultas_disponibilidad').doc(solaId).get()).data() : null;
+  const solaInv = solaId ? (await db.collection('consultas_disponibilidad_invitaciones').doc(`${solaId}_${SIN.cuil}`).get()).data() : null;
+  const novedades = await db.collection('novedades').where('empresaId', '==', EMP).get();
+  const aviso = novedades.docs.some((d) => d.data().type === 'CONSULTA_DISPONIBILIDAD_SIN_DESTINATARIOS' && d.data().consultaId === solaId);
+  const pushes = solaId ? await db.collection('user_notifications').where('consultaId', '==', solaId).get() : { empty: true, size: 0 };
+  report(
+    'sin app ni mail se cierra y avisa ya',
+    sola.ok && sola.value?.status === 'SIN_DESTINATARIOS' && solaDoc?.status === 'SIN_DESTINATARIOS'
+      && /no le llegó: no tiene la app/.test(String(solaDoc?.resumen || ''))
+      && solaInv?.estado === 'NO_LLEGO' && aviso && pushes.empty && !solaDoc?.venceAt,
+    `${sola.value?.status || sola.message} resumen=${solaDoc?.resumen} inv=${solaInv?.estado} aviso=${aviso} push=${pushes.size}`,
+  );
+
+  await db.collection('eventuales_bolsa').doc(CON.cuil).set(bolsa(CON));
+  await db.collection('device_tokens').doc(`tok-${CON.uid}`).set({
+    uid: CON.uid, token: 'token-consulta-sosa-0123456789', pushEstado: 'activo',
+  });
+  const mezcla = await intentar(() => crearConsultaDisponibilidad.run(pedido([CON.cuil, SIN.cuil], '2026-11-21'), PLANNER));
+  const mixId = mezcla.value?.consultaId;
+  const mixDoc = mixId ? (await db.collection('consultas_disponibilidad').doc(mixId).get()).data() : null;
+  const invCon = mixId ? (await db.collection('consultas_disponibilidad_invitaciones').doc(`${mixId}_${CON.cuil}`).get()).data() : null;
+  const invSin = mixId ? (await db.collection('consultas_disponibilidad_invitaciones').doc(`${mixId}_${SIN.cuil}`).get()).data() : null;
+  const notif = mixId
+    ? (await db.collection('user_notifications').where('consultaId', '==', mixId).get()).docs.map((d) => d.data())
+    : [];
+  report(
+    'se envía al que tiene la app y el estado nombra al que no',
+    mezcla.ok && mixDoc?.status === 'ABIERTA' && invCon?.estado === 'PENDIENTE' && invSin?.estado === 'NO_LLEGO'
+      && /QUIROGA/.test(String(mixDoc?.resumen || '')) && /no le llegó/.test(String(mixDoc?.resumen || ''))
+      && notif.some((n) => n.uid === CON.uid && n.type === 'CONSULTA_DISPONIBILIDAD')
+      && !notif.some((n) => n.uid === '' || n.uid == null),
+    `${mixDoc?.status} ${mixDoc?.resumen} con=${invCon?.estado} sin=${invSin?.estado} push=${notif.length}`,
+  );
+
+  const guardiaId = 'emp-sin-app';
+  await db.collection('empleados').doc(guardiaId).set({
+    empresaId: EMP, nombre: 'MOLINA, Rita', name: 'MOLINA, Rita', uid: '', status: 'ACTIVE',
+  });
+  await db.collection('planificacion_estados').doc('obj-peaje_2026_11').set({ publishedAt: admin.firestore.Timestamp.now() });
+  await db.collection('turnos').doc('franco-sin-app').set({
+    empresaId: EMP, employeeId: guardiaId, employeeName: 'MOLINA, Rita',
+    code: 'F', isFranco: true, hours: 0, scheduleDate: '2026-11-22',
+    startTime: ts('2026-11-22T03:00:00.000Z'),
+    endTime: ts('2026-11-23T02:59:00.000Z'),
+    objectiveId: 'obj-peaje', positionName: 'Puesto 1',
+  });
+  const guardia = await intentar(() => crearConsultaDisponibilidad.run({
+    empresaId: EMP, lugares: 1, venceMinutos: 120,
+    objectiveId: 'obj-peaje', objectiveName: 'Peaje', positionName: 'Puesto 1', clientName: 'Norte',
+    guardias: [{ employeeId: guardiaId, tipo: 'FT', nombre: 'MOLINA, Rita' }],
+    jornadas: [{ fecha: '2026-11-22', horaInicio: '08:00', horaFin: '16:00', horas: 8, code: 'M' }],
+  }, PLANNER));
+  const gId = guardia.value?.consultaId;
+  const gDoc = gId ? (await db.collection('consultas_disponibilidad').doc(gId).get()).data() : null;
+  const gNov = (await db.collection('novedades').where('consultaId', '==', gId || 'ninguna').get()).docs
+    .some((d) => d.data().type === 'CONSULTA_DISPONIBILIDAD_SIN_DESTINATARIOS');
+  report(
+    'guardia propio sin app: mismo cierre',
+    guardia.ok && gDoc?.status === 'SIN_DESTINATARIOS' && /MOLINA/.test(String(gDoc?.resumen || '')) && gNov,
+    `${guardia.value?.status || guardia.message} ${gDoc?.resumen} aviso=${gNov}`,
+  );
+
+  const falla = results.filter((r) => !r.ok).length;
+  console.log(`\n${results.length - falla} OK / ${falla} FALLA`);
+  process.exit(falla ? 1 : 0);
+}
+
+main().catch((err) => { console.error(err); process.exit(1); });

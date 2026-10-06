@@ -644,9 +644,27 @@ export const listarCandidatosEventuales = functions.https.onCall(async (data, co
   const excluir = new Set<string>(((data?.excluirTurnoIds || []) as unknown[]).map(String));
   // Toda la bolsa DISPONIBLE pasa por el motor; la lista oculta a quien no está habilitado en la
   // empresa (antes ni se consultaba) y muestra el resto con su motivo (marco, vencimientos, cruce).
-  const lista = (await candidatosEventuales({ empresaId, jornadas, objetivoGeo, excluirTurnoIds: excluir }))
-    .filter((c) => c.motivoCodigo !== 'EMPRESA_NO_HABILITADA' && c.motivoCodigo !== 'NO_DISPONIBLE')
-    .map((c) => candidatoParaPanel(c, empresaId));
+  const crudos = (await candidatosEventuales({ empresaId, jornadas, objetivoGeo, excluirTurnoIds: excluir }))
+    .filter((c) => c.motivoCodigo !== 'EMPRESA_NO_HABILITADA' && c.motivoCodigo !== 'NO_DISPONIBLE');
+  const { canalVisible } = await import('./consultaCanalServer');
+  const lista = await Promise.all(crudos.map(async (c) => {
+    const panel = candidatoParaPanel(c, empresaId);
+    if (!panel.elegible) return panel;
+    const bolsa = await db().collection('eventuales_bolsa').doc(c.cuil).get();
+    const data = bolsa.data() || {};
+    let pushEstado = String(data.pushEstado || '');
+    if (!pushEstado && panel.employeeId) {
+      const emp = await db().collection('empleados').doc(String(panel.employeeId)).get();
+      pushEstado = String(emp.data()?.pushEstado || '');
+    }
+    const canal = await canalVisible({
+      uid: String(data.uid || c.uid || ''),
+      mail: String(data.mail || data.email || ''),
+      pushEstado,
+      employeeId: panel.employeeId ? String(panel.employeeId) : null,
+    });
+    return { ...panel, canal };
+  }));
   return { candidatos: lista, total: lista.length, elegibles: lista.filter((c) => c.elegible === true).length };
 });
 
@@ -862,23 +880,29 @@ export async function prevalidarEventualConsulta(p: {
   objectiveId: string | null;
   objetivoGeo: unknown;
   actorUid: string;
-}): Promise<{ elegible: boolean; motivo: string | null; nombre: string; uid: string; employeeId: string | null }> {
+}): Promise<{ elegible: boolean; motivo: string | null; nombre: string; uid: string; employeeId: string | null; mail: string; pushEstado: string }> {
   let bolsa: Record<string, unknown> & { cuil: string };
   try {
     bolsa = await bolsaDe(p.cuil);
   } catch (e) {
     const msg = e instanceof functions.https.HttpsError ? e.message : 'No está en la bolsa.';
-    return { elegible: false, motivo: msg, nombre: '', uid: '', employeeId: null };
+    return { elegible: false, motivo: msg, nombre: '', uid: '', employeeId: null, mail: '', pushEstado: '' };
   }
+  const mail = String(bolsa.mail || bolsa.email || '');
   const objetivoGeo = await objetivoGeoDe(p.empresaId, p.clientId, p.objectiveId, p.objetivoGeo);
   try {
     await exigirElegible(bolsa, p.empresaId, p.jornadas, objetivoGeo);
   } catch (e) {
     const msg = e instanceof functions.https.HttpsError ? e.message : 'No elegible';
-    return { elegible: false, motivo: msg, nombre: String(bolsa.nombre || ''), uid: String(bolsa.uid || ''), employeeId: null };
+    return { elegible: false, motivo: msg, nombre: String(bolsa.nombre || ''), uid: String(bolsa.uid || ''), employeeId: null, mail, pushEstado: String(bolsa.pushEstado || '') };
   }
   const employeeId = await asegurarLegajo(bolsa, p.empresaId, p.actorUid);
-  return { elegible: true, motivo: null, nombre: String(bolsa.nombre || ''), uid: String(bolsa.uid || ''), employeeId };
+  let pushEstado = String(bolsa.pushEstado || '');
+  if (!pushEstado && employeeId) {
+    const emp = await db().collection('empleados').doc(employeeId).get();
+    pushEstado = String(emp.data()?.pushEstado || '');
+  }
+  return { elegible: true, motivo: null, nombre: String(bolsa.nombre || ''), uid: String(bolsa.uid || ''), employeeId, mail, pushEstado };
 }
 
 // ── Eventos: convocatoria → aceptación ────────────────────────────────────────

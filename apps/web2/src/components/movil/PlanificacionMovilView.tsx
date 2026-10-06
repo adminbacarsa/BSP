@@ -24,6 +24,7 @@ export type EventualMovil = {
   motivoCodigo?: string | null;
   elegible: boolean;
   horasMes?: { usadas: number; tope: number; texto: string; aviso: boolean; cerca?: boolean; alcanzado?: boolean } | null;
+  canal?: { chip: string | null; motivo: string | null; sinCanal: boolean; porMail: boolean } | null;
 };
 
 /** Igual a `esOcultoPorTope` del motor: cerca del tope o lo pasa con este turno → no se ofrece. */
@@ -282,14 +283,16 @@ export function CandidatosHueco(props: {
               <input
                 type="checkbox"
                 checked={consultaCuils.includes(ev.cuil)}
+                disabled={!!ev.canal?.sinCanal}
                 onClick={(e) => e.stopPropagation()}
-                onChange={() => props.onToggleConsulta?.(ev.cuil)}
+                onChange={() => { if (!ev.canal?.sinCanal) props.onToggleConsulta?.(ev.cuil); }}
                 aria-label={`Consultar a ${ev.nombre}`}
                 data-consulta-cuil={ev.cuil}
                 className="h-4 w-4 accent-indigo-600"
               />
             )}
             {ev.nombre}<PuntajeChip sujetoId={ev.cuil} />
+            {ev.canal?.chip && <span data-sin-app={ev.cuil} className="text-[11px] font-semibold text-amber-800">{ev.canal.chip}{ev.canal.motivo ? ` · ${ev.canal.motivo}` : ''}</span>}
           </span>
           <span className="block text-[11px] font-medium tabular-nums text-slate-500">{ev.distanciaKm != null ? `${ev.distanciaKm} km` : 'sin distancia'} · bolsa</span>
           {ev.horasMes && (
@@ -298,6 +301,12 @@ export function CandidatosHueco(props: {
               {eventualOcultoPorTope(ev) && <span data-chip-tope={ev.horasMes.alcanzado ? 'alcanzado' : 'cerca'} className={`ml-1 ${ev.horasMes.alcanzado ? MOVIL_TEXT.rose : MOVIL_TEXT.amber}`}>· {ev.horasMes.alcanzado ? 'Tope alcanzado' : 'Cerca del tope'}</span>}
             </span>
           )}
+          {ev.canal?.sinCanal && (
+            <a href={`/admin/rrhh/eventuales/?cuil=${ev.cuil}`} data-crear-acceso={ev.cuil} onClick={(e) => e.stopPropagation()} className="block text-[11px] font-semibold text-amber-800 underline">
+              No le va a llegar: llamalo o creá su acceso
+            </a>
+          )}
+          {ev.canal?.porMail && <span data-por-mail={ev.cuil} className="block text-[11px] font-semibold text-slate-500">Le llega por mail</span>}
           {ev.motivo && <span className={`block text-[11px] font-semibold ${MOVIL_TEXT.rose}`}>{ev.motivo}</span>}
         </>
       ), { 'data-plan-candidato': ev.cuil }))}

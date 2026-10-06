@@ -63,7 +63,10 @@ function pedido(cuils, lugares, fecha = '2026-11-10') {
 
 async function main() {
   await db.collection('empresas').doc(EMP).set({ name: 'Consulta SA', status: 'ACTIVE' });
-  for (const p of PERSONAS) await db.collection('eventuales_bolsa').doc(p.cuil).set(bolsa(p));
+  for (const p of PERSONAS) {
+    await db.collection('eventuales_bolsa').doc(p.cuil).set(bolsa(p));
+    if (p.uid) await db.collection('device_tokens').doc(`tok-${p.uid}`).set({ uid: p.uid, token: `token-consulta-${p.uid}-0123456789`, pushEstado: 'activo' });
+  }
 
   const sinPermiso = await intentar(() => crearConsultaDisponibilidad.run(pedido([PERSONAS[0].cuil], 1), {
     auth: { uid: 'uid-op', token: { role: 'OPERADOR' } }, rawRequest: { ip: '10.0.0.1', headers: {} },
@@ -97,6 +100,7 @@ async function main() {
 
   const malo = { cuil: '20444444440', nombre: 'Ríos, Nico', uid: 'uid-nico' };
   await db.collection('eventuales_bolsa').doc(malo.cuil).set(bolsa(malo));
+  await db.collection('device_tokens').doc(`tok-${malo.uid}`).set({ uid: malo.uid, token: `token-consulta-${malo.uid}-0123456789`, pushEstado: 'activo' });
   const una = await intentar(() => crearConsultaDisponibilidad.run(pedido([malo.cuil], 1, '2026-11-12'), PLANNER));
   await db.collection('eventuales_bolsa').doc(malo.cuil).update({ credencialVencimiento: '2020-01-01' });
   const rechazo = await intentar(() => responderConsultaDisponibilidad.run({ invitacionId: `${una.value?.consultaId}_${malo.cuil}`, respuesta: 'SI' }, ctxEv(malo)));
@@ -105,6 +109,7 @@ async function main() {
 
   const vence = { cuil: '20555555557', nombre: 'Sosa, Eva', uid: 'uid-eva' };
   await db.collection('eventuales_bolsa').doc(vence.cuil).set(bolsa(vence));
+  await db.collection('device_tokens').doc(`tok-${vence.uid}`).set({ uid: vence.uid, token: `token-consulta-${vence.uid}-0123456789`, pushEstado: 'activo' });
   const porVencer = await intentar(() => crearConsultaDisponibilidad.run(pedido([vence.cuil], 1, '2026-11-14'), PLANNER));
   const vid = porVencer.value?.consultaId;
   if (vid) {

@@ -215,6 +215,7 @@ export const onEmployeeNotificationCreated = functions
         },
         { merge: true },
       );
+      if (result.successCount === 0) await anotarConsultaSinPush(data, 'error al enviar el aviso');
     } catch (e) {
       console.warn('[onEmployeeNotificationCreated] FCM error:', (e as Error)?.message);
       await snap.ref.set(
@@ -225,5 +226,19 @@ export const onEmployeeNotificationCreated = functions
         },
         { merge: true },
       );
+      await anotarConsultaSinPush(data, 'error al enviar el aviso');
     }
   });
+
+async function anotarConsultaSinPush(data: FirebaseFirestore.DocumentData, motivo: string) {
+  if (String(data.type || '').trim().toUpperCase() !== 'CONSULTA_DISPONIBILIDAD') return;
+  const consultaId = String(data.consultaId || '');
+  const invitacionId = String(data.invitacionId || '');
+  if (!consultaId || !invitacionId) return;
+  try {
+    const { anotarFalloPushConsulta } = await import('../eventuales/consultaCanalServer');
+    await anotarFalloPushConsulta({ consultaId, invitacionId, motivo });
+  } catch (err) {
+    console.warn('[consulta] no se pudo anotar el fallo de push', (err as Error)?.message);
+  }
+}
