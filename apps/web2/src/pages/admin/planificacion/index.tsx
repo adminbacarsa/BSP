@@ -346,6 +346,8 @@ import {
 import { checkGeneroPuesto, getPreferenciaGeneroFromPositionStructure, getPreferenciaGeneroUi, preferenciaGeneroOptionSuffix, preferenciaGeneroLabel } from '@/lib/planificacion/genderPreference';
 import { experienciaBadgeForReplacement, patchExperienciaForTurno } from '@/lib/planificacion/experienciaObjetivos';
 import EventualesCandidatosPanel, { type CandidatoEventual } from '@/components/eventuales/EventualesCandidatosPanel';
+import { ConsultaDisponibilidadEstado } from '@/components/eventuales/ConsultaDisponibilidadEstado';
+import { planEnvioGuardias } from '@/lib/eventuales/consultaGuardia.mjs';
 import { asignarEventualPlanificacion, canConsultarDisponibilidad, canConvocarEventuales, eventualErrorMessage, sustituirEventualPlanificacion } from '@/services/eventualesPlanificacionService';
 import { esLegajoEventual, jornadaEventualDesdeBanda } from '@/lib/eventuales/planificacionUi';
 import { gruposService, GrupoObjetivos } from '@/services/gruposService';
@@ -1375,6 +1377,7 @@ function PlanificacionDesktop() {
         auditDetails?: string;
         requireReason?: boolean;
         topeAltas?: { empleadoId: string; periodo: string; horas: number; nombre: string }[];
+        onDismiss?: () => void;
     }>({ pendingFn: null, employees: [] });
     const [authPin, setAuthPin] = useState('');
     const [authReason, setAuthReason] = useState('');
@@ -1619,6 +1622,10 @@ function PlanificacionDesktop() {
     const [vacancyPickerTab, setVacancyPickerTab] = useState<'substitute' | 'split'>('substitute');
     /** Solapa EVENTUALES (bolsa) dentro de "Traer suplente". */
     const [vacancyEventualesOpen, setVacancyEventualesOpen] = useState(false);
+    const [consultaNominaMarcados, setConsultaNominaMarcados] = useState<string[]>([]);
+    const [consultaNominaLugares, setConsultaNominaLugares] = useState(1);
+    const [consultaNominaVence, setConsultaNominaVence] = useState(120);
+    const [consultaNominaEnviando, setConsultaNominaEnviando] = useState(false);
     const [vacancyEventualBusy, setVacancyEventualBusy] = useState(false);
     /** Sustituir eventual desde la celda: titular (legajo + CUIL) y fecha desde la que se reemplaza. */
     const [eventualSustituir, setEventualSustituir] = useState<{ empId: string; cuil: string; name: string; dateStr: string } | null>(null);
@@ -6320,6 +6327,7 @@ function PlanificacionDesktop() {
     const requestSupervisorLaborAuth = (
         items: CoverageAuthRequest[],
         onAuthorized: () => void | Promise<void>,
+        onDismiss?: () => void,
     ) => {
         if (items.length === 0) {
             void onAuthorized();
@@ -6357,6 +6365,7 @@ function PlanificacionDesktop() {
                 ? 'AUTORIZACION_DESCANSO_TOPE'
                 : descanso.length ? 'AUTORIZACION_DESCANSO' : 'AUTORIZACION_TOPE',
             auditDetails: items.map((i) => `${i.dateStr} · ${i.name} · ${i.shiftCode || ''} · ${i.message}`).join(' | '),
+            onDismiss,
         });
     };
 
@@ -15237,16 +15246,18 @@ function PlanificacionDesktop() {
                     };
                     // Clasificar disponibilidad en la fecha de la ausencia
                     const NON_AVAILABLE = new Set(['F','FF','FP','FT','V','L','PG','A','E','AA','PAST','LOCKED']);
-                    type VacancyDayRole = 'RETEN' | 'ESC' | 'FREE' | 'WORKING' | 'LICENCIA';
+                    type VacancyDayRole = 'RETEN' | 'ESC' | 'FREE' | 'FRANCO' | 'WORKING' | 'LICENCIA';
                     const LICENSE_DAY = new Set(['V', 'L', 'PG', 'A', 'E', 'AA', 'ART']);
                     const getEmpDayRole = (empId: string, dateStr: string): VacancyDayRole => {
                         const key = `${empId}_${dateStr}`;
                         const s = pendingChanges[key] ? (pendingChanges[key].isDeleted ? null : pendingChanges[key]) : shiftsMap[key];
                         if (!s || s.isDeleted) return 'FREE';
                         const code = String(s.code || '').toUpperCase();
+                        if (s.isFrancoTrabajado === true || code === 'FT') return 'WORKING';
                         if (code === 'RET') return 'RETEN';
                         if (code === 'ESC') return 'ESC';
                         if (LICENSE_DAY.has(code)) return 'LICENCIA';
+                        if (code === 'F' || code === 'FF' || code === 'FP' || s.isFranco === true) return 'FRANCO';
                         if (NON_AVAILABLE.has(code)) return 'FREE';
                         return 'WORKING';
                     };
@@ -15262,12 +15273,13 @@ function PlanificacionDesktop() {
                             km: employeeKmToObjective(e, objLat, objLng) ?? 9999,
                             expBadge: experienciaBadgeForReplacement(e.id, selectedObjective || '', e.experienciaObjetivos, e.preferredObjectiveId),
                         }))
-                        .filter(e => e.dayRole === 'RETEN' || e.dayRole === 'ESC' || e.dayRole === 'FREE');
+                        .filter(e => e.dayRole === 'RETEN' || e.dayRole === 'ESC' || e.dayRole === 'FREE' || e.dayRole === 'FRANCO');
                     const q = vacancyReplacementSearch.toLowerCase().trim();
                     const matchesSearch = (e: typeof candidatos[0]) => {
                         if (!q) return true;
                         return `${e.name || ''} ${e.lastName || ''} ${e.firstName || ''} ${e.legajo || ''}`.toLowerCase().includes(q);
                     };
+                    const francoCandidatos = candidatos.filter(e => e.dayRole === 'FRANCO' && matchesSearch(e)).sort(sortKm);
                     const retenCandidatos = candidatos.filter(e => e.dayRole === 'RETEN' && matchesSearch(e)).sort(sortKm);
                     const escCandidatos = candidatos.filter(e => e.dayRole === 'ESC' && matchesSearch(e)).sort(sortKm);
                     const sinTurnoCandidatos = candidatos.filter(e => e.dayRole === 'FREE' && matchesSearch(e)).sort(sortKm);
@@ -15693,25 +15705,191 @@ function PlanificacionDesktop() {
                             setSelectedReplacement('');
                         }
                     };
-                    const renderVacancyCandidate = (e: typeof candidatos[0], suffix: string) => (
-                        <button
+                    const puedeConsultarNomina = canConsultarEventual || canAssignFT;
+                    const jornadasNomina = sortedActiveDates.map((d) => {
+                        const tit = resolveTitularForCoverageDay(d, splitReferenceDate || undefined);
+                        return jornadaEventualDesdeBanda(d, tit?.code || 'M', { scheduleLabel: tit?.scheduleLabel, hours: tit?.hours });
+                    });
+                    const hmTurno = (v: unknown): string | undefined => {
+                        if (v == null || v === '') return undefined;
+                        if (typeof v === 'string') {
+                            const m = v.match(/(\d{1,2}):(\d{2})/);
+                            return m ? `${m[1].padStart(2, '0')}:${m[2]}` : undefined;
+                        }
+                        const [h, mi] = getSafeTime(v);
+                        return `${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}`;
+                    };
+                    const shiftOfConsulta = (empId: string, dateStr: string) => {
+                        const key = `${empId}_${dateStr}`;
+                        const pending = pendingChanges[key];
+                        const src = pending ? (pending.isDeleted ? null : pending) : shiftsMap[key];
+                        if (!src) return null;
+                        const code = String(src.code || '').toUpperCase();
+                        return {
+                            code: src.code,
+                            startTime: hmTurno(src.startTime),
+                            endTime: hmTurno(src.endTime),
+                            hours: src.hours,
+                            isFranco: src.isFranco === true || code === 'F' || code === 'FF' || code === 'FP',
+                        };
+                    };
+                    const horasDiaGuardia = (empId: string, dateStr: string) => {
+                        const key = `${empId}_${dateStr}`;
+                        const p = pendingChanges[key];
+                        const sh = p && !p.isDeleted ? p : shiftsMap[key];
+                        if (!sh?.code || !shiftCountsForEmployeeCronoHours(sh)) return 0;
+                        return calcShiftHours(sh);
+                    };
+                    const despacharConsultaNomina = async (
+                        lista: { employeeId: string; tipo: 'FT' | 'RET' | 'LIBRE'; nombre: string }[],
+                        autorizaciones: { employeeId: string; kind: 'DESCANSO' | 'TOPE'; motivo: string; autorizadoPor: string }[],
+                    ) => {
+                        if (!lista.length || !empresaId) return;
+                        setConsultaNominaEnviando(true);
+                        try {
+                            const call = httpsCallable<Record<string, unknown>, { resumen?: string; omitidos?: { motivo: string }[] }>(functions, 'crearConsultaDisponibilidad');
+                            const res = await call({
+                                empresaId,
+                                objectiveId: selectedObjective || null,
+                                clientId: selectedClient || null,
+                                objectiveName: getObjectiveName(selectedObjective || '') || null,
+                                positionName: vacancyGapPreferredPosition || null,
+                                jornadas: jornadasNomina,
+                                guardias: lista,
+                                lugares: Math.min(consultaNominaLugares, lista.length),
+                                venceMinutos: consultaNominaVence,
+                                autorizaciones,
+                                cubreEmployeeId: vacancyData?.employeeId || null,
+                                cubreNombre: vacancyData?.employeeName || null,
+                            });
+                            toast.success(res.data?.resumen || 'Consulta enviada.');
+                            const omitidos = res.data?.omitidos || [];
+                            if (omitidos.length) toast.message(omitidos.slice(0, 3).map((o) => o.motivo).join(' · '), { duration: 8000 });
+                            setConsultaNominaMarcados((prev) => prev.filter((id) => !lista.some((g) => g.employeeId === id)));
+                        } catch (e) {
+                            toast.error(eventualErrorMessage(e));
+                        } finally {
+                            setConsultaNominaEnviando(false);
+                        }
+                    };
+                    const enviarConsultaNomina = () => {
+                        if (!puedeConsultarNomina || consultaNominaEnviando || !sortedActiveDates.length) {
+                            if (!sortedActiveDates.length) toast.error('Marcá los días a cubrir antes de consultar.');
+                            return;
+                        }
+                        const porId = new Map(candidatos.map((e) => [e.id, e]));
+                        const candidatosEnvio = consultaNominaMarcados.flatMap((id) => {
+                            const e = porId.get(id);
+                            if (!e || (e.dayRole !== 'FRANCO' && e.dayRole !== 'RETEN' && e.dayRole !== 'FREE')) return [];
+                            const tipo = e.dayRole === 'FRANCO' ? 'FT' as const : e.dayRole === 'RETEN' ? 'RET' as const : 'LIBRE' as const;
+                            return [{ employeeId: e.id, tipo, nombre: e.name || e.id }];
+                        });
+                        if (!candidatosEnvio.length) return;
+                        const evaluaciones = candidatosEnvio.map((c) => {
+                            const blocked: string[] = [];
+                            const authorizations: CoverageAuthRequest[] = [];
+                            const base = getEmpMonthHours(c.employeeId) - sortedActiveDates.reduce((s, d) => s + horasDiaGuardia(c.employeeId, d), 0);
+                            let extra = 0;
+                            for (const day of sortedActiveDates) {
+                                const j = jornadasNomina.find((x) => x.fecha === day);
+                                const hours = Number(j?.horas) || 8;
+                                const guard = evaluateCoverageDayGuards({
+                                    dateStr: day,
+                                    proposedByEmp: { [c.employeeId]: { code: j?.code || 'M', startTime: j?.horaInicio, endTime: j?.horaFin, hours, addHours: hours } },
+                                    shiftOf: shiftOfConsulta,
+                                    monthHoursOf: () => base + extra,
+                                    nameOf: (empId) => String(vacancyEmployeesById[empId]?.name || empId),
+                                });
+                                extra += hours;
+                                blocked.push(...guard.blocked);
+                                authorizations.push(...guard.authorizations);
+                            }
+                            return { employeeId: c.employeeId, blocked, authorizations };
+                        });
+                        const topeMes: Record<string, boolean> = {};
+                        for (const ev of evaluaciones) {
+                            const topes = ev.authorizations.filter((a) => a.kind === 'TOPE');
+                            if (topes.length && topes.every((a) => {
+                                const grant = topeGrants[ev.employeeId];
+                                return !!grant && !topeRequierePin(grant, periodoTopeDeFecha(a.dateStr));
+                            })) topeMes[ev.employeeId] = true;
+                        }
+                        const plan = planEnvioGuardias({ candidatos: candidatosEnvio, evaluaciones, topeMes, puedeFt: canAssignFT });
+                        for (const o of plan.omitidos.filter((x) => !x.motivo.startsWith('Falta autorización'))) {
+                            const nombre = candidatosEnvio.find((c) => c.employeeId === o.employeeId)?.nombre || o.employeeId;
+                            toast.message(`${nombre}: ${o.motivo}`, { duration: 7000 });
+                        }
+                        const faltaPin = new Set(plan.omitidos.filter((x) => x.motivo.startsWith('Falta autorización')).map((x) => x.employeeId));
+                        const pedidosPin = evaluaciones
+                            .filter((ev) => faltaPin.has(ev.employeeId))
+                            .flatMap((ev) => ev.authorizations)
+                            .filter((a) => !(a.kind === 'TOPE' && topeMes[a.employeeId]));
+                        const clasificado = clasificarPedidosPin(pedidosPin, (empId, periodo) => {
+                            const grant = topeGrants[empId];
+                            return grant && grant.periodo === periodo ? grant : undefined;
+                        });
+                        for (const aviso of clasificado.avisos) toast.message(aviso, { duration: 6000 });
+                        const pidePin = new Set(clasificado.pedir.map((p) => `${p.employeeId}|${p.dateStr}|${p.kind}`));
+                        const pedir = pedidosPin.filter((a) => pidePin.has(`${a.employeeId}|${a.dateStr}|${a.kind}`));
+                        const conPinIds = new Set(pedir.map((p) => p.employeeId));
+                        const sinPin = plan.consultables.filter((c: { employeeId: string }) => !conPinIds.has(c.employeeId));
+                        const conPin = candidatosEnvio.filter((c) => conPinIds.has(c.employeeId));
+                        if (pedir.length) {
+                            requestSupervisorLaborAuth(pedir, () => {
+                                const motivo = authReasonRef.current;
+                                const actor = authActorRef.current || 'Supervisor';
+                                const vistos = new Set<string>();
+                                const autorizaciones = pedir.flatMap((p) => {
+                                    const key = `${p.employeeId}|${p.kind}`;
+                                    if (vistos.has(key)) return [];
+                                    vistos.add(key);
+                                    return [{ employeeId: p.employeeId, kind: p.kind, motivo, autorizadoPor: actor }];
+                                });
+                                void despacharConsultaNomina([...sinPin, ...conPin], autorizaciones);
+                            }, () => {
+                                if (sinPin.length) void despacharConsultaNomina(sinPin, []);
+                            });
+                            return;
+                        }
+                        void despacharConsultaNomina(sinPin, []);
+                    };
+                    const renderVacancyCandidate = (e: typeof candidatos[0], suffix: string, consultaTipo?: 'FT' | 'RET' | 'LIBRE') => {
+                        const puedeCasilla = consultaTipo === 'FT' ? canAssignFT : !!consultaTipo && canConsultarEventual;
+                        const marcado = consultaNominaMarcados.includes(e.id);
+                        return (
+                        <div
                             key={e.id}
-                            type="button"
-                            onClick={() => {
-                                setVacancyPickerTab('substitute');
-                                setSelectedReplacement(e.id);
-                            }}
-                            className={`w-full px-3 py-2.5 text-left text-sm flex items-center gap-2 hover:bg-indigo-50 rounded-lg ${editingDaySubstituteId === e.id ? 'bg-indigo-50 ring-1 ring-indigo-300' : ''}`}
+                            className={`w-full px-3 py-2.5 text-left text-sm flex items-center gap-2 rounded-lg ${editingDaySubstituteId === e.id ? 'bg-indigo-50 ring-1 ring-indigo-300' : 'hover:bg-indigo-50'}`}
                         >
-                            <span className="font-bold truncate flex-1 min-w-0">{e.expBadge} {e.name}</span>
-                            {formatKmLabel(e.km) && (
-                                <span className="text-[10px] text-slate-400 font-mono shrink-0 flex items-center gap-0.5">
-                                    <MapPin size={10} />{formatKmLabel(e.km)}
-                                </span>
+                            {puedeCasilla && (
+                                <input
+                                    type="checkbox"
+                                    checked={marcado}
+                                    aria-label={`Consultar disponibilidad de ${e.name || 'guardia'}`}
+                                    data-consulta-nomina={e.id}
+                                    onChange={() => setConsultaNominaMarcados((prev) => (prev.includes(e.id) ? prev.filter((id) => id !== e.id) : [...prev, e.id]))}
+                                    className="h-4 w-4 shrink-0 accent-indigo-600"
+                                />
                             )}
-                            <span className="text-[10px] text-slate-400 shrink-0">{suffix}</span>
-                        </button>
-                    );
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setVacancyPickerTab('substitute');
+                                    setSelectedReplacement(e.id);
+                                }}
+                                className="flex flex-1 min-w-0 items-center gap-2 text-left"
+                            >
+                                <span className="font-bold truncate flex-1 min-w-0">{e.expBadge} {e.name}</span>
+                                {formatKmLabel(e.km) && (
+                                    <span className="text-[10px] text-slate-400 font-mono shrink-0 flex items-center gap-0.5">
+                                        <MapPin size={10} />{formatKmLabel(e.km)}
+                                    </span>
+                                )}
+                                <span className="text-[10px] text-slate-400 shrink-0">{suffix}</span>
+                            </button>
+                        </div>
+                        );
+                    };
                     return (
                     <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 sm:p-6 bg-black/25 backdrop-blur-[2px]">
                         <div className={`bg-white p-6 rounded-2xl shadow-2xl w-full max-w-[640px] max-h-[min(92vh,820px)] flex flex-col border-l-4 ${colorMap[color].split(' ')[0]}`}>
@@ -15986,6 +16164,42 @@ function PlanificacionDesktop() {
                                             </div>
                                         </div>
                                         <div className={`overflow-y-auto custom-scrollbar p-1 max-h-[min(38vh,260px)] ${vacancyEventualesOpen ? 'hidden' : ''}`}>
+                                            {puedeConsultarNomina && jornadasNomina.length > 0 && (
+                                                <div className="mx-1 mb-2 flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-2.5 py-2" data-consulta-bar="nomina">
+                                                    <label className="flex items-center gap-1 text-[10px] font-bold text-slate-600">
+                                                        Lugares
+                                                        <input type="number" min={1} max={20} value={consultaNominaLugares} onChange={(ev) => setConsultaNominaLugares(Math.max(1, Number(ev.target.value) || 1))} className="w-12 rounded-lg border border-slate-200 px-1 py-0.5 text-[11px] font-black text-slate-800" data-consulta-lugares />
+                                                    </label>
+                                                    <label className="flex items-center gap-1 text-[10px] font-bold text-slate-600">
+                                                        Vence
+                                                        <select value={consultaNominaVence} onChange={(ev) => setConsultaNominaVence(Number(ev.target.value))} className="rounded-lg border border-slate-200 bg-white px-1 py-0.5 text-[11px] font-bold text-slate-800" data-consulta-vence>
+                                                            <option value={120}>2 horas</option>
+                                                            <option value={30}>30 min</option>
+                                                            <option value={60}>1 hora</option>
+                                                            <option value={240}>4 horas</option>
+                                                            <option value={0}>Hasta el inicio</option>
+                                                        </select>
+                                                    </label>
+                                                    <button
+                                                        type="button"
+                                                        disabled={consultaNominaMarcados.length === 0 || consultaNominaEnviando}
+                                                        onClick={enviarConsultaNomina}
+                                                        data-consulta-enviar="nomina"
+                                                        className="rounded-xl bg-indigo-600 px-3 py-1.5 text-[10px] font-black text-white disabled:bg-slate-200 disabled:text-slate-500"
+                                                    >
+                                                        {consultaNominaEnviando ? 'Enviando…' : `Consultar disponibilidad (${consultaNominaMarcados.length})`}
+                                                    </button>
+                                                    <span className="text-[9px] font-bold text-slate-400">El primero que acepta cubre los {jornadasNomina.length} día(s). Franco = franco trabajado.</span>
+                                                </div>
+                                            )}
+                                            {jornadasNomina.length > 0 && (
+                                                <ConsultaDisponibilidadEstado
+                                                    empresaId={empresaId || ''}
+                                                    objectiveId={selectedObjective || null}
+                                                    positionName={vacancyGapPreferredPosition || null}
+                                                    jornadas={jornadasNomina}
+                                                />
+                                            )}
                                             <button
                                                 type="button"
                                                 onClick={() => {
@@ -15996,10 +16210,16 @@ function PlanificacionDesktop() {
                                             >
                                                 Sin cobertura — dejar vacante
                                             </button>
+                                            {francoCandidatos.length > 0 && (
+                                                <>
+                                                    <div className="px-3 py-1.5 text-[10px] font-black uppercase text-violet-700">Franco — se consulta como FT ({francoCandidatos.length})</div>
+                                                    {francoCandidatos.map(e => renderVacancyCandidate(e, `Franco · ${e.monthHours}h`, 'FT'))}
+                                                </>
+                                            )}
                                             {retenCandidatos.length > 0 && (
                                                 <>
                                                     <div className="px-3 py-1.5 text-[10px] font-black uppercase text-amber-600">Retén — más cerca primero ({retenCandidatos.length})</div>
-                                                    {retenCandidatos.map(e => renderVacancyCandidate(e, `Retén · ${e.monthHours}h`))}
+                                                    {retenCandidatos.map(e => renderVacancyCandidate(e, `Retén · ${e.monthHours}h`, 'RET'))}
                                                 </>
                                             )}
                                             {escCandidatos.length > 0 && (
@@ -16011,12 +16231,12 @@ function PlanificacionDesktop() {
                                             {sinTurnoCandidatos.length > 0 && (
                                                 <>
                                                     <div className="px-3 py-1.5 text-[10px] font-black uppercase text-emerald-600">Sin turno — más cerca primero ({sinTurnoCandidatos.length})</div>
-                                                    {sinTurnoCandidatos.map(e => renderVacancyCandidate(e, `Libre · ${e.monthHours}h`))}
+                                                    {sinTurnoCandidatos.map(e => renderVacancyCandidate(e, `Libre · ${e.monthHours}h`, 'LIBRE'))}
                                                 </>
                                             )}
-                                            {retenCandidatos.length === 0 && escCandidatos.length === 0 && sinTurnoCandidatos.length === 0 && (
+                                            {francoCandidatos.length === 0 && retenCandidatos.length === 0 && escCandidatos.length === 0 && sinTurnoCandidatos.length === 0 && (
                                                 <p className="px-3 py-6 text-xs text-slate-400 text-center">
-                                                    {q ? `Sin resultados para "${vacancyReplacementSearch}"` : 'No hay RET, ESC ni guardias libres ese día cerca del objetivo.'}
+                                                    {q ? `Sin resultados para "${vacancyReplacementSearch}"` : 'No hay francos, RET, ESC ni guardias libres ese día cerca del objetivo.'}
                                                 </p>
                                             )}
                                         </div>
@@ -16273,7 +16493,15 @@ function PlanificacionDesktop() {
                                 <div className="flex gap-3">
                                     <button
                                         type="button"
-                                        onClick={() => { setAuthModal({ pendingFn: null, employees: [] }); setAuthPin(''); setAuthReason(''); authReasonRef.current = ''; setAuthError(''); }}
+                                        onClick={() => {
+                                            const dismiss = authModal.onDismiss;
+                                            setAuthModal({ pendingFn: null, employees: [] });
+                                            setAuthPin('');
+                                            setAuthReason('');
+                                            authReasonRef.current = '';
+                                            setAuthError('');
+                                            dismiss?.();
+                                        }}
                                         className="flex-1 py-3 rounded-xl font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
                                     >
                                         Cancelar

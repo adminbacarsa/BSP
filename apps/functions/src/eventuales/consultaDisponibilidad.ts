@@ -7,13 +7,15 @@
 import * as admin from 'firebase-admin';
 import * as functions from 'firebase-functions/v1';
 import { asignarTurnosDeConsulta, exigirPuedeConsultar, prevalidarEventualConsulta } from './planificacionEventuales';
+import { asignarGuardiaDeConsulta, crearConsultaGuardias } from './consultaGuardiaServer';
 
 const AR_OFFSET = '-03:00';
 const COL = 'consultas_disponibilidad';
 const INV = 'consultas_disponibilidad_invitaciones';
 
 type JornadaIn = { fecha: string; horaInicio: string; horaFin: string; horas?: number; code?: string; name?: string; positionName?: string };
-type RespuestaVista = { cuil: string; nombre: string; estado: string; orden: number | null; hora: string | null; motivo: string | null };
+type RespuestaVista = { cuil: string; employeeId?: string | null; tipo?: string | null; nombre: string; estado: string; orden: number | null; hora: string | null; motivo: string | null };
+type PersonaConsulta = { tipo: 'EVENTUAL' | 'GUARDIA'; cuil: string; employeeId: string | null };
 
 type LibConsulta = {
   textoConsulta: (p: { cliente?: string | null; objetivo?: string | null; puesto?: string | null; jornadas: JornadaIn[] }) => string;
@@ -82,7 +84,23 @@ function invitacionRef(consultaId: string, cuil: string) {
   return db().collection(INV).doc(`${consultaId}_${cuil}`);
 }
 
+function mismaPersona(r: RespuestaVista, p: PersonaConsulta): boolean {
+  if (p.tipo === 'GUARDIA') return r.tipo === 'GUARDIA' && String(r.employeeId || '') === String(p.employeeId || '');
+  return r.tipo !== 'GUARDIA' && r.cuil === p.cuil;
+}
+
+function refDePersona(consultaId: string, p: PersonaConsulta) {
+  if (p.tipo === 'GUARDIA' && p.employeeId) return db().collection(INV).doc(`${consultaId}_emp_${p.employeeId}`);
+  return invitacionRef(consultaId, p.cuil);
+}
+
+function personaDeRespuesta(r: RespuestaVista): PersonaConsulta {
+  if (r.tipo === 'GUARDIA' && r.employeeId) return { tipo: 'GUARDIA', cuil: '', employeeId: String(r.employeeId) };
+  return { tipo: 'EVENTUAL', cuil: r.cuil, employeeId: r.employeeId ? String(r.employeeId) : null };
+}
+
 export const crearConsultaDisponibilidad = functions.https.onCall(async (data, context) => {
+  if (Array.isArray(data?.guardias) && data.guardias.length > 0) return crearConsultaGuardias(data, context);
   const auth = await exigirPuedeConsultar(context);
   const reglas = await lib();
   const empresaId = String(data?.empresaId || '');
@@ -173,16 +191,16 @@ export const crearConsultaDisponibilidad = functions.https.onCall(async (data, c
   return { ok: true, consultaId: ref.id, lugares, consultados: elegibles.length, omitidos, resumen: reglas.textoEstadoConsulta(respuestas), venceAtMs };
 });
 
-async function marcarRespuesta(consultaId: string, cuil: string, patch: Partial<RespuestaVista>, estadoInv: string, extraInv: Record<string, unknown> = {}) {
+async function marcarRespuesta(consultaId: string, persona: PersonaConsulta, patch: Partial<RespuestaVista>, estadoInv: string, extraInv: Record<string, unknown> = {}) {
   const reglas = await lib();
   const parentRef = db().collection(COL).doc(consultaId);
   await db().runTransaction(async (tx) => {
     const parent = await tx.get(parentRef);
     const data = parent.data() || {};
-    const respuestas = ((data.respuestas || []) as RespuestaVista[]).map((r) => (r.cuil === cuil ? { ...r, ...patch } : r));
+    const respuestas = ((data.respuestas || []) as RespuestaVista[]).map((r) => (mismaPersona(r, persona) ? { ...r, ...patch } : r));
     const tomados = respuestas.filter((r) => r.estado === 'ASIGNADO' || r.estado === 'RESERVADO').length;
     tx.update(parentRef, { respuestas, tomados, resumen: reglas.textoEstadoConsulta(respuestas) });
-    tx.update(invitacionRef(consultaId, cuil), { estado: estadoInv, ...extraInv });
+    tx.update(refDePersona(consultaId, persona), { estado: estadoInv, ...extraInv });
   });
 }
 
@@ -206,7 +224,7 @@ async function cerrarSiCompleta(consultaId: string, actorUid: string) {
     cerradaAt: admin.firestore.FieldValue.serverTimestamp(),
   });
   for (const p of pendientes) {
-    const inv = invitacionRef(consultaId, p.cuil);
+    const inv = refDePersona(consultaId, personaDeRespuesta(p));
     const invSnap = await inv.get();
     await inv.update({ estado: 'CUBIERTO', motivo: reglas.MENSAJE_CUBIERTO, venceAtMs: null });
     const uid = String(invSnap.data()?.uid || '');
@@ -245,16 +263,21 @@ export const responderConsultaDisponibilidad = functions.https.onCall(async (dat
   const propio = (inv.uid && inv.uid === uid) || (claimCuil && claimCuil === String(inv.bolsaCuil || ''));
   if (!propio) throw new functions.https.HttpsError('permission-denied', 'Esta consulta no es tuya.');
   const consultaId = String(inv.consultaId || '');
+  const esGuardia = String(inv.tipo || '') === 'GUARDIA';
   const cuil = String(inv.bolsaCuil || '');
+  const persona: PersonaConsulta = esGuardia
+    ? { tipo: 'GUARDIA', cuil: '', employeeId: String(inv.employeeId || '') }
+    : { tipo: 'EVENTUAL', cuil, employeeId: inv.employeeId ? String(inv.employeeId) : null };
+  const quien = esGuardia ? String(inv.employeeId || '') : cuil;
   const parentRef = db().collection(COL).doc(consultaId);
 
   if (respuesta === 'NO') {
     if (inv.estado === 'NO') return { ok: true, idempotente: true, codigo: 'NO' };
     if (inv.estado !== 'PENDIENTE') return { ok: false, codigo: 'YA_RESPONDIO' };
     const hora = horaAr(Date.now());
-    await marcarRespuesta(consultaId, cuil, { estado: 'NO', hora, motivo: null }, 'NO', { respondioAt: admin.firestore.FieldValue.serverTimestamp() });
-    await evento(consultaId, 'RESPUESTA', { bolsaCuil: cuil, respuesta: 'NO', hora, uid });
-    await auditar('CONSULTA_DISPONIBILIDAD_RESPUESTA', uid, String(inv.empresaId || ''), `${inv.nombre || cuil} no puede.`, { consultaId, bolsaCuil: cuil });
+    await marcarRespuesta(consultaId, persona, { estado: 'NO', hora, motivo: null }, 'NO', { respondioAt: admin.firestore.FieldValue.serverTimestamp() });
+    await evento(consultaId, 'RESPUESTA', { bolsaCuil: esGuardia ? null : cuil, employeeId: persona.employeeId, respuesta: 'NO', hora, uid });
+    await auditar('CONSULTA_DISPONIBILIDAD_RESPUESTA', uid, String(inv.empresaId || ''), `${inv.nombre || quien} no puede.`, { consultaId, bolsaCuil: esGuardia ? null : cuil, employeeId: persona.employeeId });
     return { ok: true, codigo: 'NO' };
   }
 
@@ -278,7 +301,7 @@ export const responderConsultaDisponibilidad = functions.https.onCall(async (dat
     if (!decision.ok || decision.idempotente) return { decision, pdata };
     const hora = horaAr(Date.now());
     const respuestas = ((pdata.respuestas || []) as RespuestaVista[]).map((r) => (
-      r.cuil === cuil ? { ...r, estado: 'RESERVADO', orden: decision.orden ?? null, hora } : r
+      mismaPersona(r, persona) ? { ...r, estado: 'RESERVADO', orden: decision.orden ?? null, hora } : r
     ));
     tx.update(parentRef, {
       tomados: decision.orden,
@@ -292,42 +315,60 @@ export const responderConsultaDisponibilidad = functions.https.onCall(async (dat
 
   if (!reserva.decision.ok) return { ok: false, codigo: reserva.decision.codigo || 'CERRADA' };
   if (reserva.decision.idempotente && String(inv.estado) === 'ASIGNADO') return { ok: true, idempotente: true, codigo: 'ASIGNADO' };
-  await evento(consultaId, 'RESPUESTA', { bolsaCuil: cuil, respuesta: 'SI', hora: reserva.hora, orden: reserva.decision.orden, uid });
+  await evento(consultaId, 'RESPUESTA', { bolsaCuil: esGuardia ? null : cuil, employeeId: persona.employeeId, respuesta: 'SI', hora: reserva.hora, orden: reserva.decision.orden, uid });
 
   const jornadas = (reserva.pdata.jornadas || inv.jornadas || []) as JornadaIn[];
   try {
-    const asignado = await asignarTurnosDeConsulta({
-      empresaId: String(reserva.pdata.empresaId || inv.empresaId || ''),
-      cuil,
-      turnos: jornadas.map((j) => ({
-        fecha: j.fecha, horaInicio: j.horaInicio, horaFin: j.horaFin, horas: Number(j.horas) || 0,
-        code: String(j.code || 'M'), name: j.name, positionName: j.positionName || String(reserva.pdata.positionName || ''),
-      })),
-      objectiveId: reserva.pdata.objectiveId ? String(reserva.pdata.objectiveId) : null,
-      objectiveName: reserva.pdata.objectiveName ? String(reserva.pdata.objectiveName) : null,
-      clientId: reserva.pdata.clientId ? String(reserva.pdata.clientId) : null,
-      clientName: reserva.pdata.clientName ? String(reserva.pdata.clientName) : null,
-      positionName: reserva.pdata.positionName ? String(reserva.pdata.positionName) : null,
-      objetivoGeo: reserva.pdata.objetivoGeo,
-      actorUid: String(reserva.pdata.creadoPor || uid),
-      actorName: String(reserva.pdata.creadoPorNombre || uid),
-    });
-    await marcarRespuesta(consultaId, cuil, { estado: 'ASIGNADO', orden: reserva.decision.orden ?? null, hora: reserva.hora || null, motivo: null }, 'ASIGNADO', { turnoIds: asignado.turnoIds, employeeId: asignado.employeeId });
-    await evento(consultaId, 'ASIGNADO', { bolsaCuil: cuil, orden: reserva.decision.orden, turnoIds: asignado.turnoIds, employeeId: asignado.employeeId });
-    await auditar('CONSULTA_DISPONIBILIDAD_ASIGNADO', uid, String(reserva.pdata.empresaId || ''), `${asignado.nombre} tomó el lugar ${reserva.decision.orden}.`, { consultaId, bolsaCuil: cuil, turnoIds: asignado.turnoIds });
+    const empresa = String(reserva.pdata.empresaId || inv.empresaId || '');
+    const asignado = esGuardia
+      ? await asignarGuardiaDeConsulta({
+        empresaId: empresa,
+        employeeId: String(inv.employeeId || ''),
+        nombre: String(inv.nombre || ''),
+        tipo: (String(inv.cobertura || 'FT').toUpperCase() as 'FT' | 'RET' | 'LIBRE'),
+        jornadas,
+        objectiveId: reserva.pdata.objectiveId ? String(reserva.pdata.objectiveId) : null,
+        objectiveName: reserva.pdata.objectiveName ? String(reserva.pdata.objectiveName) : null,
+        clientId: reserva.pdata.clientId ? String(reserva.pdata.clientId) : null,
+        clientName: reserva.pdata.clientName ? String(reserva.pdata.clientName) : null,
+        positionName: reserva.pdata.positionName ? String(reserva.pdata.positionName) : null,
+        cubreEmployeeId: reserva.pdata.cubreEmployeeId ? String(reserva.pdata.cubreEmployeeId) : null,
+        cubreNombre: reserva.pdata.cubreNombre ? String(reserva.pdata.cubreNombre) : null,
+        autorizaciones: (reserva.pdata.autorizaciones || []) as { employeeId: string; kind: 'DESCANSO' | 'TOPE'; motivo: string }[],
+        actorName: String(reserva.pdata.creadoPorNombre || uid),
+      })
+      : await asignarTurnosDeConsulta({
+        empresaId: empresa,
+        cuil,
+        turnos: jornadas.map((j) => ({
+          fecha: j.fecha, horaInicio: j.horaInicio, horaFin: j.horaFin, horas: Number(j.horas) || 0,
+          code: String(j.code || 'M'), name: j.name, positionName: j.positionName || String(reserva.pdata.positionName || ''),
+        })),
+        objectiveId: reserva.pdata.objectiveId ? String(reserva.pdata.objectiveId) : null,
+        objectiveName: reserva.pdata.objectiveName ? String(reserva.pdata.objectiveName) : null,
+        clientId: reserva.pdata.clientId ? String(reserva.pdata.clientId) : null,
+        clientName: reserva.pdata.clientName ? String(reserva.pdata.clientName) : null,
+        positionName: reserva.pdata.positionName ? String(reserva.pdata.positionName) : null,
+        objetivoGeo: reserva.pdata.objetivoGeo,
+        actorUid: String(reserva.pdata.creadoPor || uid),
+        actorName: String(reserva.pdata.creadoPorNombre || uid),
+      });
+    await marcarRespuesta(consultaId, persona, { estado: 'ASIGNADO', orden: reserva.decision.orden ?? null, hora: reserva.hora || null, motivo: null }, 'ASIGNADO', { turnoIds: asignado.turnoIds, employeeId: asignado.employeeId });
+    await evento(consultaId, 'ASIGNADO', { bolsaCuil: esGuardia ? null : cuil, employeeId: asignado.employeeId, orden: reserva.decision.orden, turnoIds: asignado.turnoIds });
+    await auditar('CONSULTA_DISPONIBILIDAD_ASIGNADO', uid, empresa, `${asignado.nombre} tomó el lugar ${reserva.decision.orden}.`, { consultaId, bolsaCuil: esGuardia ? null : cuil, employeeId: asignado.employeeId, turnoIds: asignado.turnoIds });
     await cerrarSiCompleta(consultaId, uid);
     return { ok: true, codigo: 'ASIGNADO', orden: reserva.decision.orden, turnoIds: asignado.turnoIds };
   } catch (e) {
     const motivo = e instanceof functions.https.HttpsError ? e.message : 'Ya no es elegible.';
     const parent = await parentRef.get();
     const respuestas = ((parent.data()?.respuestas || []) as RespuestaVista[]).map((r) => (
-      r.cuil === cuil ? { ...r, estado: 'NO_ELEGIBLE', motivo, orden: null } : r
+      mismaPersona(r, persona) ? { ...r, estado: 'NO_ELEGIBLE', motivo, orden: null } : r
     ));
-    const tomados = reglas.tomadosTrasNoElegible(respuestas, cuil);
+    const tomados = respuestas.filter((r) => !mismaPersona(r, persona) && (r.estado === 'ASIGNADO' || r.estado === 'RESERVADO')).length;
     await parentRef.update({ respuestas, tomados, resumen: reglas.textoEstadoConsulta(respuestas), status: 'ABIERTA' });
     await invRef.update({ estado: 'NO_ELEGIBLE', motivo, orden: null });
-    await evento(consultaId, 'RESPUESTA', { bolsaCuil: cuil, respuesta: 'NO_ELEGIBLE', motivo, uid });
-    await auditar('CONSULTA_DISPONIBILIDAD_NO_ELEGIBLE', uid, String(reserva.pdata.empresaId || ''), `${inv.nombre || cuil}: ${motivo}. El lugar sigue libre.`, { consultaId, bolsaCuil: cuil });
+    await evento(consultaId, 'RESPUESTA', { bolsaCuil: esGuardia ? null : cuil, employeeId: persona.employeeId, respuesta: 'NO_ELEGIBLE', motivo, uid });
+    await auditar('CONSULTA_DISPONIBILIDAD_NO_ELEGIBLE', uid, String(reserva.pdata.empresaId || ''), `${inv.nombre || quien}: ${motivo}. El lugar sigue libre.`, { consultaId, bolsaCuil: esGuardia ? null : cuil, employeeId: persona.employeeId });
     return { ok: false, codigo: 'NO_ELEGIBLE', motivo };
   }
 });
