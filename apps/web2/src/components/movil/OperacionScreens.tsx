@@ -10,7 +10,7 @@ import {
 import { coveragePct, guardStatusLabel, guardTone } from '@/lib/movil/guardTone';
 import { guardDetalle, proximoRelevo, type GuardDetalleShift } from '@/lib/movil/guardDetalle';
 import { guardCompacto, type GuardEstadoCompacto } from '@/lib/movil/guardCompacto';
-import { ALTO_HASTA_PRIMERA_TARJETA_PX, MOVIL_CONTADORES, buscarClientes, etiquetaEstado, mensajeVacio, type OpsClienteMovil, type OpsEstadoFiltro, type OpsFiltroMovil } from '@/lib/movil/operacionFiltros';
+import { ALTO_HASTA_PRIMERA_TARJETA_PX, MOVIL_CONTADORES, buscarClientes, etiquetaAus, etiquetaEstado, mensajeVacio, type OpsClienteMovil, type OpsEstadoFiltro, type OpsFiltroMovil } from '@/lib/movil/operacionFiltros';
 import { accionesParaTurno, avisoManualRestanteSeg, type GuardAccion, type GuardAccionId } from '@/lib/movil/guardAcciones';
 import { etiquetaProximas, resumenProximas, type ProximaFranja } from '@/lib/movil/proximasFranjas';
 import { OPS_NOTA_MAX } from '@/lib/operaciones/opsNota';
@@ -535,10 +535,24 @@ const ESTADO_ICON: Record<GuardEstadoCompacto, LucideIcon> = {
   tarde: Clock,
   ausente: UserX,
   cubierto: UserCheck,
+  cubriendo: Hourglass,
+  parcial: UserCheck,
   vacante: AlertTriangle,
   plan: CalendarClock,
   cierra: Clock,
 };
+
+/** Color del chip y del filete: la ausencia sigue el estado único (rojo sin cubrir, verde cubierta, ámbar en curso/parcial). */
+function visualDeEstado(c: ReturnType<typeof guardCompacto>): MovilTone {
+  switch (c.estado.kind) {
+    case 'cierra': return 'slate';
+    case 'ausente': return 'rose';
+    case 'cubierto': return 'emerald';
+    case 'cubriendo':
+    case 'parcial': return 'amber';
+    default: return toneForGuard(c.tone);
+  }
+}
 
 /** Ítem de la fila 2: ícono lucide + texto corto. */
 function MiniItem({ icon: Icon, children, className = '', attr }: { icon: LucideIcon; children: ReactNode; className?: string; attr?: string }) {
@@ -593,7 +607,7 @@ export function GuardCard({
   onAcciones?: (shift: GuardShift) => void;
 }) {
   const c = guardCompacto(shift, siblings, now ?? Date.now());
-  const visual = c.estado.kind === 'cierra' ? 'slate' : toneForGuard(c.tone);
+  const visual = visualDeEstado(c);
   const EstadoIcon = ESTADO_ICON[c.estado.kind];
   const abrir = onAcciones ?? (readOnly ? null : onProtocolo ?? null);
   const Fila = abrir ? 'button' : 'div';
@@ -670,6 +684,7 @@ export function OperacionScreens({
   now,
   filtro = { estado: 'TODOS', clientId: null, objectiveId: null },
   contadores,
+  ausSinCubrir,
   ambitoLabel = null,
   grupos = [],
   vacioLabel,
@@ -705,6 +720,8 @@ export function OperacionScreens({
   filtro?: OpsFiltroMovil;
   /** Número de cada contador dentro del ámbito = tarjetas que aparecen al filtrar. */
   contadores?: Partial<Record<OpsEstadoFiltro, number>>;
+  /** Ausencias sin cubrir dentro del ámbito: el número de AUS va en rojo solo si hay alguna. */
+  ausSinCubrir?: number;
   /** Chip del cliente/objetivo elegido. */
   ambitoLabel?: string | null;
   /** Tarjetas agrupadas por objetivo cuando hay un estado activo. */
@@ -848,18 +865,24 @@ export function OperacionScreens({
             <div className="mb-2 grid grid-cols-6 gap-1" role="group" aria-label="Filtrar por estado" data-movil-contadores="fila">
               {counters.map((item) => {
                 const activo = filtro.estado === item.id;
+                // AUS: el total se muestra; el rojo es solo por las sin cubrir (mismo criterio que el CC).
+                const esAus = item.id === 'AUSENTES';
+                const ausPendientes = esAus ? (ausSinCubrir ?? item.value ?? 0) : 0;
+                const label = esAus && typeof ausSinCubrir === 'number' ? etiquetaAus(item.value ?? 0, ausSinCubrir) : `${item.label}: ${item.value}`;
                 return (
                   <button
                     key={item.id}
                     type="button"
                     onClick={() => onCounter(item.id)}
                     aria-pressed={activo}
-                    aria-label={`${item.label}: ${item.value}`}
+                    aria-label={label}
+                    title={esAus ? label : undefined}
                     data-movil-contador={item.id}
+                    data-movil-aus-sin-cubrir={esAus && typeof ausSinCubrir === 'number' ? ausSinCubrir : undefined}
                     data-movil-filtro-activo={activo ? '1' : undefined}
                     className={`flex h-8 min-w-0 items-center justify-center gap-0.5 rounded border px-0.5 text-[11px] font-semibold tabular-nums ${activo ? `border-transparent ${MOVIL_PRIMARY_BG}` : `${MOVIL_BORDER} bg-white text-slate-700`}`}
                   >
-                    <b className="text-[11px] leading-none">{item.value}</b>
+                    <b className={`text-[11px] leading-none ${!activo && esAus && ausPendientes > 0 ? 'text-rose-600' : ''}`}>{item.value}</b>
                     <span className={`text-[10px] uppercase leading-none ${activo ? 'opacity-80' : 'text-slate-500'}`}>{item.corto}</span>
                   </button>
                 );
@@ -925,7 +948,11 @@ export function OperacionScreens({
                   <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
                     {item.active > 0 && <MovilBadge tone="emerald">ACT {item.active}</MovilBadge>}
                     {item.retention > 0 && <MovilBadge tone="orange">RET {item.retention}</MovilBadge>}
-                    {item.absent > 0 && <MovilBadge tone="rose">AUS {item.absent}</MovilBadge>}
+                    {item.absent > 0 && (
+                      <MovilBadge tone={((item as { absentSinCubrir?: number }).absentSinCubrir ?? item.absent) > 0 ? 'rose' : 'slate'}>
+                        AUS {item.absent}{((item as { absentSinCubrir?: number }).absentSinCubrir ?? item.absent) === 0 ? ' · cub.' : ''}
+                      </MovilBadge>
+                    )}
                     {item.vacant > 0 && <MovilBadge tone="rose">VAC {item.vacant}</MovilBadge>}
                     {item.plan > 0 && <MovilBadge tone="slate">PLA {item.plan}</MovilBadge>}
                   </div>
