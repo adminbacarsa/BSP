@@ -35,6 +35,12 @@ const lote = armarLotes(envios, { tipo: 'AT', canal: 'LOTE', empresaId: 'bacarsa
 check('lote AT agrupa la empresa y deja afuera urgente, otra empresa, quitado y no enviable', lote.length === 1 && lote[0].envioIds.join(',') === 'a,b,e,v' && lote[0].txt === 'LINEA-A\nLINEA-B\nLINEA-E\nLINEA-V');
 const urg = armarLotes(envios, { tipo: 'AT', canal: 'URGENTE' }, now);
 check('urgente es su propio lote', urg.length === 1 && urg[0].envioIds.join(',') === 'u');
+const muchas = Array.from({ length: 11 }, (_, i) => ({
+  id: 't' + i, empresaId: 'bacarsa', tipo: 'AT', estado: 'PENDIENTE', canal: 'URGENTE', canalCarga: 'ALTAS_TEXTO', txt: 'L' + i, enviable: true,
+}));
+const partes = armarLotes(muchas, { tipo: 'AT', canal: 'URGENTE' }, now);
+check('altas texto parte de a 10', partes.length === 2 && partes[0].lineas === 10 && partes[1].lineas === 1 && partes[0].canalCarga === 'ALTAS_TEXTO');
+check('lote de las 18 sigue carga masiva', lote[0].canalCarga === 'CARGA_MASIVA');
 check('bajas no mezclan altas', armarLotes(envios, { tipo: 'BT', canal: 'LOTE' }, now).length === 0);
 
 check('vencido a los 30 min', esUrgenteVencido({ canal: 'URGENTE', tipo: 'AT', estado: 'PENDIENTE', createdAtMs: now - 31 * 60_000 }, now, 30));

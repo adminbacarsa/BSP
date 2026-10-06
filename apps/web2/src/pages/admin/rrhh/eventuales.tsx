@@ -692,6 +692,17 @@ export default function EventualesPage() {
                     {CAMPOS_ARCA.map((campo) => (
                       <label key={campo.id} className="block text-[10px] font-black uppercase tracking-wider text-slate-500">
                         {campo.etiqueta}
+                        {campo.tipo === 'opcion' ? (
+                          <select
+                            data-arca-campo={campo.id}
+                            value={arcaDraft[campo.id] || campo.defecto || 'CARGA_MASIVA'}
+                            onChange={(e) => setArcaDraft({ ...arcaDraft, [campo.id]: e.target.value })}
+                            className="mt-1 block w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold normal-case tracking-normal text-slate-800"
+                          >
+                            <option value="CARGA_MASIVA">Carga masiva</option>
+                            <option value="ALTAS_TEXTO">Altas masivas (texto)</option>
+                          </select>
+                        ) : (
                         <input
                           data-arca-campo={campo.id}
                           value={arcaDraft[campo.id] ?? ''}
@@ -701,6 +712,7 @@ export default function EventualesPage() {
                           placeholder={campo.defecto || ''}
                           className="mt-1 block w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold normal-case tracking-normal text-slate-800"
                         />
+                        )}
                         <span className="mt-1 block text-[11px] font-medium normal-case tracking-normal text-slate-500">{campo.ayuda}</span>
                         {campo.id === 'cctCodigo' && !(arcaDraft.cctCodigo || '').trim() && (
                           <span data-arca-aviso-cct className="mt-1 block text-[11px] font-bold normal-case tracking-normal text-amber-800">{AVISO_CCT_PENDIENTE}</span>

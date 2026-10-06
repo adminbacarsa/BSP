@@ -108,6 +108,13 @@ Los horarios 18:00 (AT, canal LOTE) y 09:00 (BT, canal LOTE) ya estan en el JSON
 Selectores reales (capturas 05/10) en `scripts/arca-robot/selectores.json`. Tras Cargar válido: **Volver → Enviar**; Nro. desde listado (Estado Enviado); constancia SETI (`codigoControl`, `nroVerificador`). Anulación: **por confirmar** (`--modo explorar` / `--modo explorar-carga`). Con archivo: `node scripts/arca-robot/subir.mjs --modo explorar --archivo TXT --lote …` llega hasta después de Cargar y no presenta. Anulación: `node scripts/arca-robot/subir.mjs --modo explorar --envio ID --empresa EMPRESA`.
 
 
+
+## Altas masivas por texto (AT urgente)
+
+`empresas.arcaEventuales.canalUrgente`: `ALTAS_TEXTO` o `CARGA_MASIVA` (default). Solo cambia el AT con canal URGENTE. El lote de las 18:00 sigue por Carga Masiva.
+
+Con `ALTAS_TEXTO` el robot usa `--modo altas-texto`: Relaciones Laborales → Registrar Nuevas Altas → Altas Masivas, pega hasta 10 líneas de 85 y Aceptar. Los errores salen como `Registro N: …`. `--modo explorar-altas` frena antes de Aceptar y captura. El número de alta o CAT de un Aceptar válido queda **por confirmar**: si aparece se guarda y el envío pasa a `ENVIADO` (la verificación CUIL sigue igual); si no aparece, no se marca enviado.
+
 ## Verificación post-envío (ENVIADO ≠ CONFIRMADO)
 
 Tras **Enviar**, el robot confirma el lote como `ENVIADO` (con `nroTransaccion`). La fichada queda habilitada. Un paso `--modo verificar` (n8n: día siguiente o cada pocas horas hasta 48 h) consulta por CUIL: si hay tarjeta con Fecha de Inicio = fecha del alta y Mod. Contrato **012** → `CONFIRMADO`; si no aparece en 48 h → `VERIFICAR` + novedad `ARCA_ALTA_VERIFICAR` (revisar Domicilio Fiscal Electrónico).

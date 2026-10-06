@@ -10,7 +10,10 @@ export {
   EMPRESAS_CATEGORIA_VIGILADOR,
   LARGO_REGISTRO_ARCA,
   RNOS_SUVICO,
+  LARGO_ALTA_TEXTO,
   arcaEventualesDe,
+  canalUrgenteDe,
+  lineaAltaTexto,
   lineaMovimientoArca,
   lineasCargaMasiva,
 } from './arcaLinea.mjs';

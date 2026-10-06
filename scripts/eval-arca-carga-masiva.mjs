@@ -101,6 +101,9 @@ check('anulación parcial (tarjeta fecha+012)', sel.anularRegistro?.estado === '
 check('icono lápiz modificar', /lápiz|lapiz/i.test(sel.tarjetaIconoModificar?.nota || ''));
 check('icono documento baja', /documento/i.test(sel.tarjetaIconoBaja?.nota || ''));
 check('icono tacho anular', /tacho/i.test(sel.tarjetaIconoAnular?.nota || ''));
+check('altas masivas confirmado', sel.altasMasivas?.estado === 'confirmado' && sel.altasTextoArea?.max === 10);
+check('error Registro N confirmado', sel.altasTextoError?.estado === 'confirmado');
+check('confirmacion altas texto por confirmar', sel.altasTextoConfirmacion?.estado === 'por confirmar' && sel.altasTextoNro?.estado === 'por confirmar');
 
 console.log(failed ? `FALLARON ${failed}` : 'OK arca-carga-masiva');
 process.exit(failed ? 1 : 0);

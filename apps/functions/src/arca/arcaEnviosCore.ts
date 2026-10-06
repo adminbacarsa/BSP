@@ -168,6 +168,7 @@ export type FilaLote = {
   enviable?: boolean;
   quitadoDelLote?: boolean;
   loteReclamadoAtMs?: number;
+  canalCarga?: string;
 };
 
 export type FiltroLote = { tipo: string; canal: string; empresaId?: string };
@@ -189,11 +190,19 @@ export function entraEnLote(envio: FilaLote, filtro: FiltroLote, nowMs: number):
   return false;
 }
 
-/** Un TXT por empresa: una linea por envio. El urgente no entra en el lote de las 18:00. */
+const MAX_ALTAS_TEXTO = 10;
+
+function canalCargaDeFila(envio: FilaLote): 'ALTAS_TEXTO' | 'CARGA_MASIVA' {
+  return envio.canalCarga === 'ALTAS_TEXTO' ? 'ALTAS_TEXTO' : 'CARGA_MASIVA';
+}
+
+/** Un TXT por empresa: una linea por envio. El urgente no entra en el lote de las 18:00.
+ *  ALTAS_TEXTO parte de a 10 (tope del textarea). */
 export function armarLotes(envios: FilaLote[], filtro: FiltroLote, nowMs: number): Array<{
   empresaId: string;
   tipo: string;
   canal: string;
+  canalCarga: 'ALTAS_TEXTO' | 'CARGA_MASIVA';
   envioIds: string[];
   lineas: number;
   txt: string;
@@ -201,19 +210,39 @@ export function armarLotes(envios: FilaLote[], filtro: FiltroLote, nowMs: number
   const grupos = new Map<string, FilaLote[]>();
   for (const envio of envios || []) {
     if (!entraEnLote(envio, filtro, nowMs)) continue;
-    const key = String(envio.empresaId);
+    const carga = canalCargaDeFila(envio);
+    const key = String(envio.empresaId) + '|' + carga;
     const lista = grupos.get(key) || [];
     lista.push(envio);
     grupos.set(key, lista);
   }
-  return [...grupos.entries()].map(([empresaId, filas]) => ({
-    empresaId,
-    tipo: filtro.tipo,
-    canal: filtro.canal,
-    envioIds: filas.map((f) => f.id),
-    lineas: filas.length,
-    txt: filas.map((f) => String(f.txt).trim()).join('\n'),
-  }));
+  const out: Array<{
+    empresaId: string;
+    tipo: string;
+    canal: string;
+    canalCarga: 'ALTAS_TEXTO' | 'CARGA_MASIVA';
+    envioIds: string[];
+    lineas: number;
+    txt: string;
+  }> = [];
+  for (const filas of grupos.values()) {
+    const empresaId = String(filas[0].empresaId);
+    const canalCarga = canalCargaDeFila(filas[0]);
+    const tope = canalCarga === 'ALTAS_TEXTO' ? MAX_ALTAS_TEXTO : filas.length || 1;
+    for (let i = 0; i < filas.length; i += tope) {
+      const slice = filas.slice(i, i + tope);
+      out.push({
+        empresaId,
+        tipo: filtro.tipo,
+        canal: filtro.canal,
+        canalCarga,
+        envioIds: slice.map((f) => f.id),
+        lineas: slice.length,
+        txt: slice.map((f) => String(f.txt).trim()).join('\n'),
+      });
+    }
+  }
+  return out;
 }
 
 /** AT/BT urgente sin confirmar, pasado N minutos, y que el respaldo no aviso todavia. */

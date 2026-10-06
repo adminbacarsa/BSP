@@ -27,7 +27,7 @@
       "parameters": {
         "mode": "runOnceForAllItems",
         "language": "javaScript",
-        "jsCode": "const item = $input.first().json;\nconst body = item.body && typeof item.body === 'object' ? item.body : item;\nconst headers = item.headers || {};\nconst key = String(headers['x-arca-key'] || headers['X-Arca-Key'] || '');\nconst expected = String($env.ARCA_ROBOT_KEY || '');\nif (!expected || key !== expected) throw new Error('NO_AUTORIZADO');\nconst modo = String(body.modo || '');\nif (modo === 'anular' || modo === 'explorar') {\n  if (modo === 'anular' && !body.envioId) throw new Error('FALTA_ENVIO');\n  return [{ json: { modo, envioId: String(body.envioId || ''), empresaId: String(body.empresaId || '') } }];\n}\nif (!body.loteId || !body.archivo) throw new Error('FALTA_LOTE');\nreturn [{ json: { modo: 'subir', archivo: String(body.archivo), loteId: String(body.loteId), cuit: String(body.cuit || ''), tipo: String(body.tipo || 'AT'), empresaId: String(body.empresaId || ''), canal: String(body.canal || '') } }];"
+        "jsCode": "const item = $input.first().json;\nconst body = item.body && typeof item.body === 'object' ? item.body : item;\nconst headers = item.headers || {};\nconst key = String(headers['x-arca-key'] || headers['X-Arca-Key'] || '');\nconst expected = String($env.ARCA_ROBOT_KEY || '');\nif (!expected || key !== expected) throw new Error('NO_AUTORIZADO');\nconst modo = String(body.modo || '');\nif (modo === 'anular' || modo === 'explorar') {\n  if (modo === 'anular' && !body.envioId) throw new Error('FALTA_ENVIO');\n  return [{ json: { modo, envioId: String(body.envioId || ''), empresaId: String(body.empresaId || '') } }];\n}\nif (!body.loteId || !body.archivo) throw new Error('FALTA_LOTE');\nconst canalCarga = String(body.canalCarga || '');\nconst modoRobot = canalCarga === 'ALTAS_TEXTO' && String(body.tipo || 'AT').toUpperCase() === 'AT' ? 'altas-texto' : 'subir';\nreturn [{ json: { modo: modoRobot, archivo: String(body.archivo), loteId: String(body.loteId), cuit: String(body.cuit || ''), tipo: String(body.tipo || 'AT'), empresaId: String(body.empresaId || ''), canal: String(body.canal || '') } }];"
       },
       "id": "norm",
       "name": "Normalizar robot",
@@ -40,7 +40,7 @@
     },
     {
       "parameters": {
-        "command": "={{ $json.modo === 'anular' || $json.modo === 'explorar' ? 'node \"' + $env.COSP_REPO + '/scripts/arca-robot/subir.mjs\" --modo ' + $json.modo + ' --envio \"' + $json.envioId + '\" --empresa \"' + $json.empresaId + '\"' : 'node \"' + $env.COSP_REPO + '/scripts/arca-robot/subir.mjs\" --archivo \"' + $json.archivo + '\" --lote \"' + $json.loteId + '\" --cuit \"' + $json.cuit + '\" --tipo \"' + $json.tipo + '\" --empresa \"' + $json.empresaId + '\"' }}"
+        "command": "={{ $json.modo === 'anular' || $json.modo === 'explorar' ? 'node \"' + $env.COSP_REPO + '/scripts/arca-robot/subir.mjs\" --modo ' + $json.modo + ' --envio \"' + $json.envioId + '\" --empresa \"' + $json.empresaId + '\"' : 'node \"' + $env.COSP_REPO + '/scripts/arca-robot/subir.mjs\" --archivo \"' + $json.archivo + '\" --lote \"' + $json.loteId + '\" --cuit \"' + $json.cuit + '\" --tipo \"' + $json.tipo + '\" --empresa \"' + $json.empresaId + '\"'  + ($json.modo === 'altas-texto' ? ' --modo altas-texto' : '') }}"
       },
       "id": "exe",
       "name": "Ejecutar Playwright",

@@ -329,17 +329,23 @@ async function txtBajaDesistimiento(empresaId: string, contrato: Record<string, 
   }
 }
 
-async function txtDe(empresaId: string, contrato: Record<string, unknown>, cuil: string, bolsa: Record<string, unknown>, tipo: 'AT' | 'BT') {
+async function txtDe(empresaId: string, contrato: Record<string, unknown>, cuil: string, bolsa: Record<string, unknown>, tipo: 'AT' | 'BT', canal = 'LOTE') {
   try {
-    const { lineasCargaMasiva, brutoParaTxt } = await import('../eventuales-shared/arcaTxt.mjs') as {
+    const { lineasCargaMasiva, brutoParaTxt, lineaAltaTexto, canalUrgenteDe } = await import('../eventuales-shared/arcaTxt.mjs') as {
       lineasCargaMasiva: (i: Record<string, unknown>) => { lineas: string[]; advertencias: string[]; enviable: boolean };
       brutoParaTxt: (i: Record<string, unknown>) => { ok: boolean; codigo?: string; bruto: number };
+      lineaAltaTexto: (i: Record<string, unknown>) => { linea: string; advertencias: string[]; enviable: boolean };
+      canalUrgenteDe: (empresa: Record<string, unknown>) => 'ALTAS_TEXTO' | 'CARGA_MASIVA';
     };
     const empresa = { id: empresaId, ...((await db().collection('empresas').doc(empresaId).get()).data() || {}) };
     const escalasSnap = await db().collection('escalas_salariales').where('status', '==', 'ACTIVE').get();
     const bruto = brutoParaTxt({ contrato, escalas: escalasSnap.docs.map((d) => d.data()) });
     const out = lineasCargaMasiva({ contrato, cuil, bruto: bruto.bruto, obraSocial: bolsa.obraSocialRnos || '', empresa });
-    const advertencias = [...out.advertencias];
+    const usarTexto = tipo === 'AT' && canal === 'URGENTE' && canalUrgenteDe(empresa) === 'ALTAS_TEXTO';
+    const texto = usarTexto
+      ? lineaAltaTexto({ contrato, cuil, bruto: bruto.bruto, obraSocial: bolsa.obraSocialRnos || '', empresa })
+      : null;
+    const advertencias = [...(texto ? texto.advertencias : out.advertencias)];
     if (!bruto.ok) advertencias.push('RETRIBUCION_PENDIENTE');
     if (tipo === 'AT') {
       try {
@@ -364,10 +370,11 @@ async function txtDe(empresaId: string, contrato: Record<string, unknown>, cuil:
       }
     }
     return {
-      txt: tipo === 'AT' ? out.lineas[0] : out.lineas[1],
+      txt: texto ? texto.linea : (tipo === 'AT' ? out.lineas[0] : out.lineas[1]),
       advertencias,
-      enviable: out.enviable && bruto.ok,
+      enviable: (texto ? texto.enviable : out.enviable) && bruto.ok,
       bruto: bruto.bruto,
+      canalCarga: usarTexto ? 'ALTAS_TEXTO' as const : 'CARGA_MASIVA' as const,
     };
   } catch (e) {
     return { txt: null, advertencias: ['TXT_NO_GENERADO', (e as Error)?.message || ''], enviable: false, bruto: 0 };
@@ -429,7 +436,7 @@ export async function sincronizarContratoEventual(empresaId: string, cuil: strin
       : tipo === 'BAJA_NO_PRESENTACION'
         ? await txtBajaDesistimiento(empresaId, plan.contrato || {}, cuil, bolsa, envio)
         : tipo === 'AT' || tipo === 'BT'
-          ? await txtDe(empresaId, plan.contrato || {}, cuil, bolsa, tipo as 'AT' | 'BT')
+          ? await txtDe(empresaId, plan.contrato || {}, cuil, bolsa, tipo as 'AT' | 'BT', String(envio.canal || 'LOTE'))
           : { txt: null, advertencias: ['MOVIMIENTO_A_CONFIRMAR_CON_CONTADOR'], enviable: false, bruto: 0 };
     // Id determinístico: la callable y el trigger `onTurnoEventualWrite` corren a la vez y escriben el mismo doc.
     batch.set(db().collection('arca_envios').doc(arcaEnvioIdDe(contratoId, envio, enviosActuales)), {
@@ -437,6 +444,7 @@ export async function sincronizarContratoEventual(empresaId: string, cuil: strin
       contratoIds: [contratoId],
       bolsaCuil: cuil,
       txt: txt.txt,
+      canalCarga: (txt as { canalCarga?: string }).canalCarga || 'CARGA_MASIVA',
       advertencias: txt.advertencias,
       enviable: txt.enviable,
       bruto: txt.bruto,
@@ -452,7 +460,8 @@ export async function sincronizarContratoEventual(empresaId: string, cuil: strin
   }
   for (const { id, patch } of plan.patchesEnvios) {
     const { regenerarTxt, ...resto } = patch as Record<string, unknown> & { regenerarTxt?: boolean };
-    const extra = regenerarTxt ? await txtDe(empresaId, plan.contrato || {}, cuil, bolsa, 'AT') : {};
+    const previo = enviosActuales.find((e) => e.id === id) as { canal?: string } | undefined;
+    const extra = regenerarTxt ? await txtDe(empresaId, plan.contrato || {}, cuil, bolsa, 'AT', String(previo?.canal || 'LOTE')) : {};
     batch.update(db().collection('arca_envios').doc(id), { ...resto, ...extra, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
   }
   await batch.commit();

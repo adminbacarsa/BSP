@@ -474,6 +474,22 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const modo = String(args.modo || '');
   const explorarCarga = modo === 'explorar-carga' || (modo === 'explorar' && args.archivo);
+  if (modo === 'altas-texto' || modo === 'explorar-altas') {
+    const { correrAltasTexto } = await import('./altasTexto.mjs');
+    await correrAltasTexto({
+      args,
+      explorar: modo === 'explorar-altas',
+      terminar,
+      resolverAcceso,
+      login,
+      elegirRepresentado,
+      elegirEmpleadorSimplificacion,
+      abrirSimplificacion,
+      continuarDatosBasicosSiAparece,
+      capturar,
+    });
+    return;
+  }
   if (modo === 'verificar') {
     const { correrVerificacion } = await import('./verificar.mjs');
     await correrVerificacion({

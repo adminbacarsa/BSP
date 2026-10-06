@@ -265,7 +265,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ archivo: $('Preparar TXT').item.json.archivo, loteId: $('Preparar TXT').item.json.loteId, cuit: $('Preparar TXT').item.json.cuit, tipo: $('Preparar TXT').item.json.tipo, empresaId: $('Preparar TXT').item.json.empresaId, canal: $('Preparar TXT').item.json.canal }) }}",
+        "jsonBody": "={{ JSON.stringify({ archivo: $('Preparar TXT').item.json.archivo, loteId: $('Preparar TXT').item.json.loteId, cuit: $('Preparar TXT').item.json.cuit, tipo: $('Preparar TXT').item.json.tipo, empresaId: $('Preparar TXT').item.json.empresaId, canal: $('Preparar TXT').item.json.canal, canalCarga: $('Preparar TXT').item.json.canalCarga || 'CARGA_MASIVA' }) }}",
         "options": {
           "timeout": 20000
         }

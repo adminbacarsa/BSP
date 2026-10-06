@@ -52,9 +52,16 @@ export const ARCA_EVENTUALES_DEFAULT = {
   /** En blanco: ARCA rechaza 0 («Marca de Covid / Tipo de Contrato CCG no permitido»). */
   marcaCovid: '',
   obraSocialDefault: '',
+  /** AT urgente: ALTAS_TEXTO (textarea) o CARGA_MASIVA. El lote de las 18:00 no lo usa. */
+  canalUrgente: 'CARGA_MASIVA',
 };
 
 export const LARGO_REGISTRO_ARCA = 130;
+/** Altas masivas por texto (ArchivoAltas.aspx). Captura 247, 06/10. */
+export const LARGO_ALTA_TEXTO = 85;
+export const MAX_REGISTROS_ALTA_TEXTO = 10;
+/** Revista del alta por texto (posiciones 84-85). No es la del TXT de carga masiva. */
+export const SITUACION_REVISTA_ALTA_TEXTO = '01';
 
 export { CATEGORIA_VIGILADOR, RNOS_SUVICO, EMPRESAS_CATEGORIA_VIGILADOR };
 
@@ -79,7 +86,15 @@ export function arcaEventualesDe(empresa) {
   cfg.sucursal = 'sucursal' in guardada
     ? String(guardada.sucursal ?? '')
     : (delGrupo ? DOMICILIO_DESEMPENO_DEFAULT : String(cfg.sucursal || ''));
+  cfg.canalUrgente = canalUrgenteDe(empresa);
   return cfg;
+}
+
+/** Default CARGA_MASIVA hasta validar Altas Masivas en produccion. */
+export function canalUrgenteDe(empresa) {
+  return String(empresa?.arcaEventuales?.canalUrgente || '').trim() === 'ALTAS_TEXTO'
+    ? 'ALTAS_TEXTO'
+    : 'CARGA_MASIVA';
 }
 
 function alfa(value, len) {
@@ -102,6 +117,24 @@ function fechaArca(iso) {
   if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(String(iso))) return ' '.repeat(10);
   const [y, m, d] = String(iso).split('-');
   return `${y}/${m}/${d}`;
+}
+
+/** ddmmaaaa, sin barras. Vacio si la fecha no es YYYY-MM-DD. */
+function fechaDdmmaaaa(iso) {
+  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(String(iso))) return '';
+  const [y, m, d] = String(iso).split('-');
+  return `${d}${m}${y}`;
+}
+
+/** 8 enteros + 2 decimales, sin separadores. */
+function retribucionTexto(bruto) {
+  const cents = Math.round(Number(bruto || 0) * 100);
+  return String(Math.max(0, cents)).padStart(10, '0').slice(-10);
+}
+
+function agropecuarioTexto(cfg) {
+  const v = String(cfg.agropecuario || '').trim().toUpperCase();
+  return v === 'S' || v === '1' ? '1' : '0';
 }
 
 function retribucion(bruto) {
@@ -232,4 +265,72 @@ export function lineasCargaMasiva({ contrato, cuil, bruto, obraSocial, empresa }
     advertencias,
     enviable: esEnviable(advertencias, alta.linea, baja.linea),
   };
+}
+
+/**
+ * Una linea de 85 para Registrar Nuevas Altas → Altas Masivas (capturas 245-250).
+ * Mismos parametros de empresa que la carga masiva (`arcaEventualesDe`).
+ * CUIL invalido arma la linea y deja `enviable: false`.
+ */
+export function lineaAltaTexto({ contrato, cuil, bruto, obraSocial, empresa }) {
+  const cfg = arcaEventualesDe(empresa);
+  const os = campoObraSocial(obraSocial || cfg.obraSocialDefault);
+  const cct = alfa(cfg.cctCodigo, 10);
+  const categoriaSrc = String(cfg.categoria || cfg.categoriaProfesional || '').replace(/\D/g, '');
+  const cuilDigits = String(cuil ?? '').replace(/\D/g, '');
+  const cuilOk = !!normalizeCuil(cuilDigits);
+  const puestoDigits = String(cfg.puesto ?? '').replace(/\D/g, '');
+  const sucursal = String(cfg.sucursal ?? '').replace(/\D/g, '');
+  const actividad = String(cfg.actividad ?? '').replace(/\D/g, '');
+  const ini = fechaDdmmaaaa(contrato?.fechaAlta);
+  const fin = fechaDdmmaaaa(contrato?.fechaBaja);
+  const rem = retribucionTexto(bruto);
+  const revista = num(cfg.situacionRevistaAltaTexto || SITUACION_REVISTA_ALTA_TEXTO, 2);
+  const linea = [
+    num(cuilDigits, 11),
+    os.texto.trim() ? os.texto : num('', 6),
+    sucursal ? num(sucursal, 5) : num('', 5),
+    actividad ? num(actividad, 6) : num('', 6),
+    puestoDigits ? num(puestoDigits, 4) : num('', 4),
+    num(cfg.modalidadContrato, 3),
+    num(cfg.modalidadLiquidacion, 1),
+    rem.slice(0, 8),
+    rem.slice(8, 10),
+    agropecuarioTexto(cfg),
+    ini || '00000000',
+    fin || '00000000',
+    cct,
+    categoriaSrc ? num(categoriaSrc, 6) : num('', 6),
+    cfg.tipoServicio ? num(cfg.tipoServicio, 3) : num('', 3),
+    '0',
+    revista,
+  ].join('');
+  const advertencias = [];
+  if (!cuilOk) advertencias.push('CUIL_INVALIDO');
+  if (cct.trim() === '') advertencias.push('CCT_CODIGO_PENDIENTE');
+  if (!categoriaSrc) advertencias.push('CATEGORIA_PROFESIONAL_PENDIENTE');
+  if (os.falta) advertencias.push('RNOS_PENDIENTE');
+  if (!puestoDigits) advertencias.push('PUESTO_PENDIENTE');
+  if (sucursal.length !== 5) advertencias.push('DOMICILIO_DESEMPENO_PENDIENTE');
+  if (actividad.length !== 6) advertencias.push('ACTIVIDAD_PENDIENTE');
+  if (!ini || !fin) advertencias.push('FECHA_INVALIDA');
+  if (linea.length !== LARGO_ALTA_TEXTO) advertencias.push('LARGO_ALTA_TEXTO');
+  const bloquean = advertencias.filter((c) => c !== 'PUESTO_A_VERIFICAR');
+  return {
+    linea,
+    advertencias,
+    enviable: bloquean.length === 0 && linea.length === LARGO_ALTA_TEXTO,
+  };
+}
+
+/** Junta hasta 10 lineas. Mas de eso no entra en el textarea. */
+export function textoAltasMasivas(lineas) {
+  const filas = (lineas || []).map((l) => String(l || '').trim()).filter(Boolean);
+  if (filas.length > MAX_REGISTROS_ALTA_TEXTO) {
+    return { ok: false, codigo: 'MAS_DE_10', texto: '' };
+  }
+  if (filas.some((l) => l.length !== LARGO_ALTA_TEXTO)) {
+    return { ok: false, codigo: 'LARGO_ALTA_TEXTO', texto: '' };
+  }
+  return { ok: true, texto: filas.join('\n') };
 }

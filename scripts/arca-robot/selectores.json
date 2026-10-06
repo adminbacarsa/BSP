@@ -15,7 +15,11 @@
     "223": "SETI acuse Presentación DJ — nroVerificador + codigoControl",
     "224": "Modificaciones y Bajas — tarjeta relación + íconos lápiz/baja/anular",
     "225": "Consulta por CUIL (si distinta)",
-    "226": "Detalle consulta"
+    "226": "Detalle consulta",
+    "245": "Registrar Nuevas Altas — Ingrese un CUIL / Agregar / Altas Masivas",
+    "246": "Textarea ingreso masivo (máx. 10) + Aceptar",
+    "247": "Tabla formato 85 posiciones",
+    "250": "Registro 1: CUIL invalido en rojo bajo el textarea"
   },
   "portalServicioSimplificacion": {
     "role": "link",
@@ -219,5 +223,47 @@
     "title": "Anular",
     "nota": "tacho; gris = no disponible. Elegir por fecha+012, nunca la primera del CUIL",
     "captura": "224"
+  },
+  "menuRegistrarNuevasAltas": {
+    "role": "link",
+    "name": "Registrar Nuevas Altas",
+    "url": "RelacionLaboral/ArchivoAltas.aspx",
+    "captura": "245",
+    "estado": "confirmado"
+  },
+  "altasMasivas": {
+    "role": "button",
+    "name": "^Altas Masivas$",
+    "captura": "245",
+    "estado": "confirmado"
+  },
+  "altasTextoArea": {
+    "css": "textarea",
+    "texto": "Ingrese el texto correspondiente a los registros",
+    "max": 10,
+    "captura": "246",
+    "estado": "confirmado"
+  },
+  "altasTextoAceptar": {
+    "role": "button",
+    "name": "^Aceptar$",
+    "captura": "246",
+    "estado": "confirmado",
+    "nota": "Explorar frena antes de este click"
+  },
+  "altasTextoError": {
+    "regex": "Registro\\s+\\d+\\s*:",
+    "nota": "Rojo debajo del textarea. Captura 250: Registro 1: CUIL invalido",
+    "captura": "250",
+    "estado": "confirmado"
+  },
+  "altasTextoConfirmacion": {
+    "estado": "por confirmar",
+    "nota": "Pantalla tras un Aceptar válido (constancia, número de alta o CAT). Todavía no hay captura."
+  },
+  "altasTextoNro": {
+    "estado": "por confirmar",
+    "regex": "Nro\\.?\\s*(?:de\\s*)?(?:Alta|Transacci[oó]n)|\\bCAT\\b",
+    "nota": "Si aparece, se guarda nro/CAT y el envío queda ENVIADO. Si no, no se confirma."
   }
 }

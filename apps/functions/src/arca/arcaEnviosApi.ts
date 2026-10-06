@@ -78,6 +78,7 @@ export async function aplicarTransicion(
     codigoControl?: string;
     nroVerificador?: string;
     constanciaBase64?: string;
+    cat?: string;
   },
 ): Promise<{ status: number; body: Record<string, unknown> }> {
   const ref = db().collection(COLL).doc(envioId);
@@ -96,6 +97,7 @@ export async function aplicarTransicion(
   if (input.arcaCodigoNovedad) patch.arcaCodigoNovedad = String(input.arcaCodigoNovedad);
   if (input.codigoControl) patch.codigoControl = String(input.codigoControl).slice(0, 40);
   if (input.nroVerificador) patch.nroVerificador = String(input.nroVerificador).slice(0, 40);
+  if (input.cat) patch.catAlta = String(input.cat).slice(0, 40);
   if (input.constanciaBase64) {
     try {
       const buf = Buffer.from(String(input.constanciaBase64), 'base64');
@@ -597,6 +599,7 @@ export const arcaEnviosApi = onRequest(
           codigoControl: String(body.codigoControl || '').trim().slice(0, 40) || undefined,
           nroVerificador: String(body.nroVerificador || '').trim().slice(0, 40) || undefined,
           constanciaBase64: String(body.constanciaBase64 || '') || undefined,
+          cat: String(body.cat || '').trim().slice(0, 40) || undefined,
         };
         if (loteId && !envioId) {
           const snap = await db().collection(COLL).where('loteId', '==', loteId).get();
@@ -662,6 +665,7 @@ function filaDe(doc: { id: string; data: () => Record<string, unknown> }): FilaL
     estado: data.estado ? String(data.estado) : undefined,
     canal: data.canal ? String(data.canal) : undefined,
     txt: data.txt ? String(data.txt) : undefined,
+    canalCarga: data.canalCarga === 'ALTAS_TEXTO' ? 'ALTAS_TEXTO' : undefined,
     enviable: data.enviable !== false,
     quitadoDelLote: data.quitadoDelLote === true,
     loteReclamadoAtMs: Number(data.loteReclamadoAtMs || 0) || undefined,

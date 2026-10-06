@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { LARGO_REGISTRO_ARCA, brutoParaTxt, lineaMovimientoArca, lineasCargaMasiva } from './arcaTxt.mjs';
+import { LARGO_ALTA_TEXTO, LARGO_REGISTRO_ARCA, brutoParaTxt, canalUrgenteDe, lineaAltaTexto, lineaMovimientoArca, lineasCargaMasiva } from './arcaTxt.mjs';
 import { calcularRemuneracionContrato, escalaVigente } from './remuneracion.mjs';
 import { aprobarEscala, parsearEscalaSuvico, planJobEscalaSuvico } from './escalaPropuesta.mjs';
 
@@ -10,6 +10,38 @@ const cuil = '20111111112';
 const cuilInvalido = '20999999991';
 
 describe('TXT ARCA posiciones fijas', () => {
+
+  it('lineaAltaTexto tiene 85 y el CUIL invalido no se envia', () => {
+    const LINEA =
+      '2012345678012280700001749210516901250000100000012102026121020260422/05   033104500001';
+    assert.equal(LINEA.length, LARGO_ALTA_TEXTO);
+    const out = lineaAltaTexto({
+      contrato: { fechaAlta: '2026-10-12', fechaBaja: '2026-10-12' },
+      cuil: '20123456780',
+      bruto: 1000,
+      obraSocial: '122807',
+      empresa: { id: 'bacarsa' },
+    });
+    assert.equal(out.linea, LINEA);
+    assert.equal(out.linea.length, 85);
+    assert.equal(out.linea.slice(47, 55), '12102026');
+    assert.equal(out.linea.slice(55, 63), '12102026');
+    assert.equal(out.enviable, false);
+    assert.equal(out.advertencias.includes('CUIL_INVALIDO'), true);
+    const ok = lineaAltaTexto({
+      contrato: { fechaAlta: '2026-10-12', fechaBaja: '2026-10-12' },
+      cuil: '20111111112',
+      bruto: 1000,
+      obraSocial: '122807',
+      empresa: { id: 'bacarsa' },
+    });
+    assert.equal(ok.enviable, true);
+    assert.equal(ok.linea.length, 85);
+    assert.equal(ok.linea.slice(0, 11), '20111111112');
+    assert.equal(canalUrgenteDe({ id: 'bacarsa' }), 'CARGA_MASIVA');
+    assert.equal(canalUrgenteDe({ arcaEventuales: { canalUrgente: 'ALTAS_TEXTO' } }), 'ALTAS_TEXTO');
+  });
+
 
   it('coincide con la línea exacta validada por ARCA el 05/10 (novedad 245745)', () => {
     /** Línea de la prueba 3: solo falló CUIL inválido a propósito. */

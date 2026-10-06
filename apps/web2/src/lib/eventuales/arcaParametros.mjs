@@ -114,6 +114,15 @@ export const CAMPOS_ARCA = Object.freeze([
     defecto: 'N',
   },
   {
+    id: 'canalUrgente',
+    etiqueta: 'Canal del AT urgente',
+    ayuda: 'ALTAS_TEXTO usa Registrar Nuevas Altas → Altas Masivas (máximo 10). CARGA_MASIVA es el TXT de siempre. El lote de las 18:00 sigue por Carga Masiva.',
+    tipo: 'opcion',
+    opciones: ['CARGA_MASIVA', 'ALTAS_TEXTO'],
+    defecto: 'CARGA_MASIVA',
+    opcional: true,
+  },
+  {
     id: 'nocturnoPct',
     etiqueta: 'Nocturnidad de la escala (%)',
     ayuda: 'Recargo nocturno del anexo. Si la escala aprobada no trae el %, se usa este. Vacío = lo define la escala.',
@@ -184,6 +193,15 @@ export function validarParametrosArca(input) {
         errores.push({ id: campo.id, mensaje: `${campo.etiqueta}: hasta ${campo.max} caracteres.` });
       } else {
         doc[campo.id] = texto;
+      }
+      continue;
+    }
+    if (campo.tipo === 'opcion') {
+      const v = texto || String(campo.defecto || '');
+      if (!(campo.opciones || []).includes(v)) {
+        errores.push({ id: campo.id, mensaje: `${campo.etiqueta}: valor no permitido.` });
+      } else {
+        doc[campo.id] = v;
       }
       continue;
     }
