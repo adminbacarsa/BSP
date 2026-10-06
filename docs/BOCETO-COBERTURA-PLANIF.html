@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>Boceto — Cobertura en Planificación</title>
+<style>
+  :root {
+    --ink: #0f172a;
+    --muted: #64748b;
+    --line: #e2e8f0;
+    --line-strong: #cbd5e1;
+    --bg: #f4f5f7;
+    --white: #fff;
+    --indigo: #4338ca;
+    --indigo-soft: #eef2ff;
+    --emerald: #047857;
+    --emerald-soft: #ecfdf5;
+    --amber: #b45309;
+    --amber-soft: #fffbeb;
+    --rose: #be123c;
+    --rose-soft: #fff1f2;
+    --violet: #6d28d9;
+    --violet-soft: #f5f3ff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); }
+  body {
+    font-family: "Segoe UI", system-ui, sans-serif;
+    font-size: 14px;
+    line-height: 1.35;
+  }
+  .page { width: 1440px; margin: 0 auto; padding: 28px 0 64px; }
+  .intro { padding: 0 28px 8px; }
+  .kicker {
+    margin: 0 0 8px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--indigo);
+  }
+  h1 { margin: 0 0 8px; font-size: 22px; font-weight: 650; letter-spacing: -.02em; }
+  .intro p { margin: 0; max-width: 920px; color: #334155; }
+  nav.jump { display: flex; gap: 8px; padding: 16px 28px 0; }
+  nav.jump a {
+    color: var(--ink);
+    text-decoration: none;
+    border: 1px solid var(--line-strong);
+    background: var(--white);
+    border-radius: 999px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 650;
+  }
+  section.frame { padding: 28px 0 0; }
+  .delta { margin: 0 28px 10px; font-size: 14px; color: #334155; }
+  .delta b { color: var(--ink); }
+  .desk {
+    width: 1440px;
+    min-height: 720px;
+    background: #e8eaee;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    justify-content: center;
+    padding: 32px 0 40px;
+  }
+  .modal {
+    width: 1100px;
+    min-height: 640px;
+    background: var(--white);
+    border: 1px solid var(--line-strong);
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+  }
+  .strip {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--line);
+  }
+  .who { min-width: 0; }
+  .who strong { font-size: 16px; font-weight: 700; }
+  .who span { display: block; margin-top: 2px; color: var(--muted); font-size: 13px; }
+  .cubrir {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--line-strong);
+    border-radius: 8px;
+    background: var(--white);
+    white-space: nowrap;
+  }
+  .cubrir em { font-style: normal; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+  .cubrir b { font-size: 13px; font-weight: 700; }
+  .cubrir select {
+    border: 0;
+    background: transparent;
+    font: inherit;
+    font-weight: 700;
+    color: var(--ink);
+    max-width: 340px;
+  }
+  .body { display: flex; flex: 1; min-height: 0; }
+  .days {
+    width: 280px;
+    flex: 0 0 280px;
+    border-right: 1px solid var(--line);
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .days h2 {
+    margin: 0 0 4px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .day {
+    display: grid;
+    grid-template-columns: 16px 36px 1fr;
+    gap: 8px;
+    align-items: center;
+    width: 100%;
+    text-align: left;
+    padding: 8px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: var(--white);
+    color: var(--ink);
+    font: inherit;
+    cursor: pointer;
+  }
+  .day.on { border-color: var(--indigo); background: var(--indigo-soft); }
+  .day .dow { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: lowercase; }
+  .day .n { font-size: 13px; font-weight: 700; }
+  .st { font-size: 12px; font-weight: 650; }
+  .st.rose { color: var(--rose); }
+  .st.emerald { color: var(--emerald); }
+  .st.indigo { color: var(--indigo); }
+  .st.violet { color: var(--violet); }
+  .mass {
+    margin-top: auto;
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--line-strong);
+    background: var(--white);
+    color: var(--ink);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 700;
+    text-align: left;
+  }
+  .work { flex: 1; display: flex; flex-direction: column; min-width: 0; padding: 12px 14px 14px; }
+  .tabs { display: flex; gap: 0; border-bottom: 1px solid var(--line); }
+  .tabs button {
+    appearance: none;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
+    font-weight: 700;
+    font-size: 13px;
+    padding: 8px 14px;
+    margin-bottom: -1px;
+  }
+  .tabs button.on { color: var(--indigo); border-bottom-color: var(--indigo); }
+  .tools { display: flex; align-items: center; gap: 10px; padding: 10px 0; }
+  .switch {
+    display: inline-flex;
+    border: 1px solid var(--line-strong);
+    border-radius: 999px;
+    overflow: hidden;
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .switch span { padding: 4px 10px; color: var(--muted); background: var(--white); }
+  .switch span.on { background: var(--ink); color: var(--white); }
+  .search {
+    margin-left: auto;
+    width: 180px;
+    border: 1px solid var(--line-strong);
+    border-radius: 8px;
+    padding: 6px 8px;
+    color: var(--muted);
+    font-size: 12px;
+    background: var(--white);
+  }
+  .list { display: flex; flex-direction: column; gap: 6px; }
+  .cand {
+    display: grid;
+    grid-template-columns: 16px 1fr auto;
+    gap: 10px;
+    align-items: center;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--white);
+  }
+  .cand b { font-weight: 700; }
+  .cand .meta { color: var(--muted); font-size: 12px; }
+  .box {
+    width: 14px; height: 14px;
+    border: 1px solid var(--line-strong);
+    border-radius: 3px;
+    background: var(--white);
+  }
+  .box.on { background: var(--indigo); border-color: var(--indigo); }
+  .tag {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    color: var(--muted);
+    background: var(--white);
+  }
+  .tag.ok { color: var(--emerald); border-color: #a7f3d0; background: var(--emerald-soft); }
+  .tag.wait { color: var(--indigo); border-color: #c7d2fe; background: var(--indigo-soft); }
+  .tag.no { color: var(--rose); border-color: #fecdd3; background: var(--rose-soft); }
+  .bar {
+    margin-top: auto;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding-top: 12px;
+  }
+  .bar p { margin: 0; flex: 1; font-size: 13px; color: #334155; }
+  .btn {
+    appearance: none;
+    border-radius: 8px;
+    padding: 8px 14px;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .btn.primary { background: var(--indigo); color: #fff; border: 1px solid var(--indigo); }
+  .btn.ghost { background: var(--white); color: var(--ink); border: 1px solid var(--line-strong); }
+  .btn.quiet {
+    background: #f1f5f9;
+    color: #334155;
+    border: 1px solid var(--line-strong);
+  }
+  .foot {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    border-top: 1px solid var(--line);
+  }
+  .foot .hint { margin: 0; flex: 1; font-size: 12px; color: var(--muted); }
+  .card {
+    border: 1px solid #a7f3d0;
+    background: var(--emerald-soft);
+    border-radius: 8px;
+    padding: 14px;
+  }
+  .card h3 { margin: 0 0 4px; font-size: 15px; }
+  .card p { margin: 0; color: #334155; }
+  .waitbox {
+    border: 1px solid #c7d2fe;
+    background: var(--indigo-soft);
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 8px;
+  }
+  .waitbox strong { display: block; margin-bottom: 2px; }
+  .mark { width: 14px; height: 14px; border: 1px solid var(--line-strong); border-radius: 3px; background: var(--white); }
+  .mark.on { background: var(--indigo); border-color: var(--indigo); }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="intro">
+    <p class="kicker">Boceto · Planificación · 1440 px</p>
+    <h1>Cobertura de licencia</h1>
+    <p>Modal de 1100 px. Una franja arriba, los días a la izquierda, una sola forma de cubrir a la derecha. Caso BAEZ, 06/10, M 10:45–12:00 (1,3 h), Puesto 1.</p>
+  </div>
+  <nav class="jump">
+    <a href="#s1">1 · Un día sin cubrir</a>
+    <a href="#s2">2 · Cinco días</a>
+    <a href="#s3">3 · Consulta en espera</a>
+    <a href="#s4">4 · Aceptó</a>
+  </nav>
+
+  <section class="frame" id="s1">
+    <p class="delta"><b>1 · Licencia de un día, sin cobertura.</b> Hoy el turno se repite en el paso 1, el resumen, «Configurar» y la tarjeta amarilla; acá se lee una sola vez en la franja y la gente ocupa el ancho de la derecha.</p>
+    <div class="desk">
+      <div class="modal" data-estado="sin-cobertura">
+        <div class="strip">
+          <div class="who">
+            <strong>BAEZ</strong>
+            <span>Licencia · mar 06/10 · 1 día</span>
+          </div>
+          <div class="cubrir">
+            <em>Cubrir</em>
+            <b>M · Puesto 1 · 10:45–12:00 (1,3 h)</b>
+          </div>
+        </div>
+        <div class="body">
+          <aside class="days">
+            <h2>Días · 1 sin cubrir</h2>
+            <button class="day on" type="button">
+              <span class="mark"></span>
+              <span><span class="dow">mar</span><br><span class="n">06</span></span>
+              <span class="st rose">Sin cubrir</span>
+            </button>
+          </aside>
+          <div class="work">
+            <div class="tabs" role="tablist">
+              <button class="on" type="button">Nómina</button>
+              <button type="button">Eventuales</button>
+              <button type="button">Ext+Adel</button>
+            </div>
+            <div class="tools">
+              <div class="switch" aria-label="Modo">
+                <span>Preguntar</span>
+                <span class="on">Asignar directo</span>
+              </div>
+              <div class="search">Buscar guardia</div>
+            </div>
+            <div class="list">
+              <div class="cand"><span class="box"></span><div><b>FERRERO</b> <span class="meta">· libre · 142/200 h · 8 km</span></div><span class="tag ok">Libre</span></div>
+              <div class="cand"><span class="box"></span><div><b>LOPEZ</b> <span class="meta">· franco · 96/200 h · 3 km</span></div><span class="tag">Franco · pide PIN</span></div>
+              <div class="cand"><span class="box"></span><div><b>GARCIA</b> <span class="meta">· en servicio T · 11 km</span></div><span class="tag">No entra en esta franja</span></div>
+            </div>
+            <div class="bar">
+              <p>Nadie elegido para el 06/10.</p>
+              <button class="btn quiet" type="button">Asignar</button>
+            </div>
+          </div>
+        </div>
+        <div class="foot">
+          <p class="hint">Cerrar deja la licencia como pendiente del cronograma.</p>
+          <button class="btn ghost" type="button">Cerrar</button>
+          <button class="btn primary" type="button">Dejar vacante</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="frame" id="s2">
+    <p class="delta"><b>2 · Licencia de cinco días, dos cubiertos y tres sin cubrir.</b> Hoy el estado de cada día está debajo del pliegue; acá la lista izquierda lo muestra entero y «aplicar a los marcados» está al lado de esos días.</p>
+    <div class="desk">
+      <div class="modal" data-estado="cinco-dias">
+        <div class="strip">
+          <div class="who">
+            <strong>BAEZ</strong>
+            <span>Licencia · 06/10 → 10/10 · 5 días</span>
+          </div>
+          <label class="cubrir">
+            <em>Cubrir</em>
+            <select aria-label="Turno del día">
+              <option>M · Puesto 1 · 10:45–12:00 (1,3 h)</option>
+              <option>M2 · Puesto 1 · 11:00–15:00 (4 h)</option>
+            </select>
+          </label>
+        </div>
+        <div class="body">
+          <aside class="days">
+            <h2>Días · 3 sin cubrir</h2>
+            <button class="day" type="button">
+              <span class="mark"></span>
+              <span><span class="dow">mar</span><br><span class="n">06</span></span>
+              <span class="st emerald">Suplente · FERRERO</span>
+            </button>
+            <button class="day" type="button">
+              <span class="mark"></span>
+              <span><span class="dow">mié</span><br><span class="n">07</span></span>
+              <span class="st violet">Ext+Adel · LOPEZ / GARCIA</span>
+            </button>
+            <button class="day on" type="button">
+              <span class="mark on"></span>
+              <span><span class="dow">jue</span><br><span class="n">08</span></span>
+              <span class="st rose">Sin cubrir</span>
+            </button>
+            <button class="day" type="button">
+              <span class="mark on"></span>
+              <span><span class="dow">vie</span><br><span class="n">09</span></span>
+              <span class="st rose">Sin cubrir</span>
+            </button>
+            <button class="day" type="button">
+              <span class="mark on"></span>
+              <span><span class="dow">sáb</span><br><span class="n">10</span></span>
+              <span class="st rose">Sin cubrir</span>
+            </button>
+            <button class="mass" type="button">Aplicar esta cobertura a los 3 días marcados</button>
+          </aside>
+          <div class="work">
+            <div class="tabs">
+              <button class="on" type="button">Nómina</button>
+              <button type="button">Eventuales</button>
+              <button type="button">Ext+Adel</button>
+            </div>
+            <div class="tools">
+              <div class="switch">
+                <span>Preguntar</span>
+                <span class="on">Asignar directo</span>
+              </div>
+              <div class="search">Buscar guardia</div>
+            </div>
+            <div class="list">
+              <div class="cand"><span class="box on"></span><div><b>FERRERO</b> <span class="meta">· libre el jue 08 · 142/200 h · 8 km</span></div><span class="tag ok">Elegido</span></div>
+              <div class="cand"><span class="box"></span><div><b>LOPEZ</b> <span class="meta">· ya en el ext+adel del mié 07</span></div><span class="tag">Ocupado ese esquema</span></div>
+            </div>
+            <div class="bar">
+              <p>FERRERO cubre el jue 08, M 10:45–12:00. Los otros dos marcados reciben la misma cobertura al aplicarla.</p>
+              <button class="btn primary" type="button">Asignar a FERRERO</button>
+            </div>
+          </div>
+        </div>
+        <div class="foot">
+          <p class="hint">Dos días ya tienen cobertura. Cerrar no la publica: queda en el cronograma para guardar.</p>
+          <button class="btn ghost" type="button">Cerrar</button>
+          <button class="btn primary" type="button">Confirmar cobertura</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="frame" id="s3">
+    <p class="delta"><b>3 · Consulta enviada, esperando.</b> Hoy la espera convive con Traer suplente, Preguntar, Aplicar y Cerrar; acá el día dice «consultando · vence 11:15» y la derecha solo lista a quién se le preguntó.</p>
+    <div class="desk">
+      <div class="modal" data-estado="esperando">
+        <div class="strip">
+          <div class="who">
+            <strong>BAEZ</strong>
+            <span>Licencia · mar 06/10 · 1 día</span>
+          </div>
+          <div class="cubrir">
+            <em>Cubrir</em>
+            <b>M · Puesto 1 · 10:45–12:00 (1,3 h)</b>
+          </div>
+        </div>
+        <div class="body">
+          <aside class="days">
+            <h2>Días · lo resuelve la consulta</h2>
+            <button class="day on" type="button">
+              <span class="mark"></span>
+              <span><span class="dow">mar</span><br><span class="n">06</span></span>
+              <span class="st indigo">Consultando · vence 11:15</span>
+            </button>
+          </aside>
+          <div class="work">
+            <div class="tabs">
+              <button type="button">Nómina</button>
+              <button class="on" type="button">Eventuales</button>
+              <button type="button">Ext+Adel</button>
+            </div>
+            <div class="tools">
+              <div class="switch">
+                <span class="on">Preguntar</span>
+                <span>Asignar directo</span>
+              </div>
+            </div>
+            <div class="waitbox">
+              <strong>Consultados: 3 · esperando (vence 11:15)</strong>
+              El primero que acepte cubre el 06/10. Se puede cerrar esta ventana: el día sigue en espera.
+            </div>
+            <div class="list">
+              <div class="cand"><span class="box on"></span><div><b>ABALLAY</b> <span class="meta">· 16/50 h · 4,2 km</span></div><span class="tag wait">Pendiente</span></div>
+              <div class="cand"><span class="box on"></span><div><b>BRIZUELA</b> <span class="meta">· respondió 10:20</span></div><span class="tag no">No puede</span></div>
+              <div class="cand"><span class="box on"></span><div><b>CASAS</b> <span class="meta">· 22/50 h · 9 km</span></div><span class="tag wait">Pendiente</span></div>
+            </div>
+            <div class="bar">
+              <p>No se guarda un suplente local: si alguien acepta, el turno lo escribe el servidor.</p>
+              <button class="btn ghost" type="button">Cancelar consulta</button>
+            </div>
+          </div>
+        </div>
+        <div class="foot">
+          <p class="hint">Confirmar deja la licencia de BAEZ. El puesto lo cubre quien acepte.</p>
+          <button class="btn ghost" type="button">Cerrar</button>
+          <button class="btn primary" type="button">Confirmar cobertura</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="frame" id="s4">
+    <p class="delta"><b>4 · Alguien aceptó.</b> Hoy el sí aparece al final del scroll del resumen; acá el día pasa a «ABALLAY aceptó 10:42» y la derecha muestra el turno que ya escribió el servidor.</p>
+    <div class="desk">
+      <div class="modal" data-estado="acepto">
+        <div class="strip">
+          <div class="who">
+            <strong>BAEZ</strong>
+            <span>Licencia · mar 06/10 · 1 día</span>
+          </div>
+          <div class="cubrir">
+            <em>Cubrir</em>
+            <b>M · Puesto 1 · 10:45–12:00 (1,3 h)</b>
+          </div>
+        </div>
+        <div class="body">
+          <aside class="days">
+            <h2>Días · 1 cubierto</h2>
+            <button class="day on" type="button">
+              <span class="mark"></span>
+              <span><span class="dow">mar</span><br><span class="n">06</span></span>
+              <span class="st emerald">ABALLAY aceptó 10:42</span>
+            </button>
+          </aside>
+          <div class="work">
+            <div class="tabs">
+              <button type="button">Nómina</button>
+              <button class="on" type="button">Eventuales</button>
+              <button type="button">Ext+Adel</button>
+            </div>
+            <div class="card">
+              <h3>ABALLAY cubre el 06/10</h3>
+              <p>M · Puesto 1 · 10:45–12:00 (1,3 h). Aceptó a las 10:42. El turno ya está en el cronograma; guardar no lo pisa.</p>
+            </div>
+            <div class="bar">
+              <p>BRIZUELA no pudo. CASAS quedó avisado de que ya no hace falta.</p>
+              <button class="btn ghost" type="button">Cubrir de otra forma</button>
+            </div>
+          </div>
+        </div>
+        <div class="foot">
+          <p class="hint">La licencia de BAEZ sigue pendiente de guardar con el cronograma.</p>
+          <button class="btn ghost" type="button">Cerrar</button>
+          <button class="btn primary" type="button">Confirmar cobertura</button>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+</body>
+</html>
