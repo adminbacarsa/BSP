@@ -52,6 +52,17 @@ const shifts = [
     shiftDateObj: start(0, 0), endDateObj: end(23, 59),
   },
   {
+    // RET stand-by (caso prod 06/10, pruebas_sa): va a FRANC junto con los francos, no a AUS/VAC.
+    id: 'reten', objectiveId: 'peaje', employeeName: 'RETEN',
+    code: 'RET', isAbsent: true, isFuture: true, isUnassigned: false,
+    shiftDateObj: start(0, 0), endDateObj: end(0, 0),
+  },
+  {
+    id: 'reten-presente', objectiveId: 'peaje', employeeName: 'RETEN USADO',
+    code: 'RET', isPresent: true, isCompleted: false,
+    shiftDateObj: start(7, 0), endDateObj: end(15, 0),
+  },
+  {
     id: 'cubierta', objectiveId: 'otro', employeeName: 'CUBIERTA',
     code: 'T', isAbsent: true, operacionallyCovered: true, isFuture: true,
     shiftDateObj: start(16, 0), endDateObj: end(0, 0),
@@ -84,6 +95,22 @@ const vac = opsTabShiftIds(shifts, 'VACANTES', now);
 check('VAC incluye a VENENCIA', vac.list.includes('venencia') && vac.objectives.includes('venencia'));
 check('VAC no incluye la ausencia ya cubierta', !vac.list.includes('cubierta'));
 
+// Solapa FRANC: francos + retenes stand-by; el RET presente (ya trabaja) va a ACT.
+const { shiftMatchesOpsViewTab, isStandbyRetDisponible } = await import(
+  pathToFileURL(join(root, 'packages/ops-core/src/shiftMatchesOpsViewTab.ts')).href
+);
+const franc = opsTabShiftIds(shifts, 'FRANCOS', now);
+check('FRANC lista francos y RET stand-by', franc.list.includes('franco') && franc.list.includes('reten'));
+check('FRANC no lista el RET presente', !franc.list.includes('reten-presente'));
+check('RET stand-by no vuelve a VAC', !vac.list.includes('reten'));
+check('RET stand-by no vuelve a AUS', !opsTabShiftIds(shifts, 'AUSENTES', now).list.includes('reten'));
+check('RET stand-by sigue en PLAN', opsTabShiftIds(shifts, 'PLAN', now).list.includes('reten'));
+check('RET presente está en ACT', opsTabShiftIds(shifts, 'ACTIVOS', now).list.includes('reten-presente'));
+const francHoy = shifts.filter((s) => shiftMatchesOpsViewTab(s, 'FRANCOS', now));
+const francos = francHoy.filter((s) => !isStandbyRetDisponible(s)).length;
+const retenes = francHoy.filter((s) => isStandbyRetDisponible(s)).length;
+check('contador «1 FRANC · 1 RET» = lista por secciones', francos === 1 && retenes === 1 && francos + retenes === franc.list.length);
+
 function Vista({ ids }) {
   if (!ids.length) return React.createElement('p', null, 'Sin objetivos en este filtro');
   return React.createElement('ul', null, ids.map((id) => React.createElement('li', { key: id }, id)));
@@ -96,6 +123,10 @@ check('render sin turnos dice el vacío', vacio.includes('Sin objetivos en este 
 const page = readFileSync(new URL('../apps/web2/src/pages/admin/operaciones/index.tsx', import.meta.url), 'utf8');
 check('OBJ usa objectiveVisibleOnOpsTab', page.includes('objectiveVisibleOnOpsTab(o.shifts || [], logic.viewTab)'));
 check('OBJ ya no filtra VAC por el contador exclusivo', !page.includes("case 'VACANTES':  return o.vacant > 0"));
+check('solapa FRANC muestra el RET aparte', page.includes('`FRANC · ${logic.stats.retenes} RET`'));
+check('vista FRANC separa francos y retenes', page.includes('data-ops-ret-count={retenesLista.length}') && page.includes('data-ops-franc-count={francosLista.length}'));
+const mapView = readFileSync(new URL('../apps/web2/src/pages/admin/operaciones/map-view.tsx', import.meta.url), 'utf8');
+check('mapa muestra el RET aparte en FRAN', mapView.includes('`FRAN · ${logic.stats.retenes} RET`'));
 const movil = readFileSync(new URL('../apps/web2/src/lib/movil/operacionFiltros.ts', import.meta.url), 'utf8');
 check('celular agrupa con el mismo bucket', movil.includes('addShiftToOpsBucket(grupo, s as never, now)'));
 const mapa = readFileSync(new URL('../apps/web2/src/hooks/useOperacionesMonitor.ts', import.meta.url), 'utf8');

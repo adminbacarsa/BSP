@@ -1066,7 +1066,8 @@ export default function TacticalMapView() {
         { id: 'RETENIDOS', label: 'RET', count: logic.stats.retenidos, color: 'text-orange-600' },
         { id: 'VACANTES', label: 'VAC', count: logic.stats.vacantes, color: 'text-slate-800' },
         { id: 'AUSENTES', label: 'AUS', count: logic.stats.ausentes, color: 'text-slate-500' },
-        { id: 'FRANCOS', label: 'FRAN', count: logic.stats.francos, color: 'text-blue-600' }
+        // Francos + retenes stand-by (misma solapa que el CC); el número es el de francos.
+        { id: 'FRANCOS', label: logic.stats.retenes > 0 ? `FRAN · ${logic.stats.retenes} RET` : 'FRAN', count: logic.stats.francos, color: 'text-blue-600' }
     ];
 
     return (

@@ -79,7 +79,7 @@ import { formatIngresoLine } from '@/lib/operaciones/ingresoLabel';
 import { convocadoEnCaminoLabel } from '@/lib/operaciones/convocadoVentana';
 import { formatOpsNotaLine } from '@/lib/operaciones/opsNota';
 import { ConvocatoriaTimeline } from '@/components/operaciones/ConvocatoriaTimeline';
-import { isExtraNonReliefShift, isReliefEligibleShift, formatRetentionDuration, formatRetentionLine, addShiftToOpsBucket, objectiveVisibleOnOpsTab, opsObjectiveHasActivity } from '@cosp/ops-core';
+import { isExtraNonReliefShift, isReliefEligibleShift, isStandbyRetDisponible, formatRetentionDuration, formatRetentionLine, addShiftToOpsBucket, objectiveVisibleOnOpsTab, opsObjectiveHasActivity } from '@cosp/ops-core';
 import {
     isEventShift,
     eventGroupKey as getEventGroupKey,
@@ -1157,6 +1157,8 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
         else if (vOrigin === 'INTERRUPTION') badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-700 text-white shrink-0">RETIRO ANTICIP.</span>;
         else badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-rose-600 text-white shrink-0">SIN CUBRIR</span>;
     }
+    // Retén stand-by (RET): disponible para llamar; no es ausente ni vacante ni tarde.
+    else if (isStandbyRetDisponible(shift)) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 shrink-0" title="Retén disponible para llamar" data-ops-badge="ret-standby">RETÉN · disponible</span>;
     else if (shift.isPendingRetention) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-orange-500 text-white shrink-0 flex items-center gap-0.5"><Clock size={8}/>RET. EN PUESTO</span>;
     else if (shift.manualRetentionType === 'extended')  badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-600 text-white shrink-0 flex items-center gap-0.5"><Timer size={8}/>+{shift.manualRetentionHours}h MANUAL</span>;
     else if (shift.manualRetentionType === 'open')      badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-600 text-white animate-pulse shrink-0 flex items-center gap-0.5"><Timer size={8}/>MANUAL INDEF</span>;
@@ -3648,8 +3650,28 @@ export default function OperacionesPage() {
         { id: 'RETENIDOS', label: 'RET',     count: logic.stats.retenidos, color: 'text-orange-600' },
         { id: 'VACANTES',  label: 'VAC',     count: logic.stats.vacantes,  color: 'text-slate-800' },
         { id: 'AUSENTES',  label: 'AUS',     count: logic.stats.ausentes,  color: 'text-rose-700' },
-        { id: 'FRANCOS',   label: 'FRANC',   count: logic.stats.francos,   color: 'text-blue-600' }
+        // Francos + retenes stand-by del día; el número es el de francos y el RET va aparte.
+        { id: 'FRANCOS',   label: logic.stats.retenes > 0 ? `FRANC · ${logic.stats.retenes} RET` : 'FRANC', count: logic.stats.francos, color: 'text-blue-600' }
     ];
+    const francosLista = logic.viewTab === 'FRANCOS' ? logic.listData.filter((s: any) => !isStandbyRetDisponible(s)) : [];
+    const retenesLista = logic.viewTab === 'FRANCOS' ? logic.listData.filter((s: any) => isStandbyRetDisponible(s)) : [];
+    const renderFrancTabCard = (s: any) => (
+        <GuardCard key={s.id} shift={s} viewTab={logic.viewTab} isCompact={logic.isCompact} isAutoMode={opsCaps.fullAuto}
+            onOpenCheckout={(s:any)=>setCheckoutData({isOpen:true, shift:s})}
+            onOpenAttendance={(s:any)=>setAttendanceData({isOpen:true, shift:s})}
+            onOpenHandover={(s:any)=>setHandoverData({isOpen:true, shift:s})}
+            onOpenInterrupt={(s:any)=>setInterruptData({isOpen:true, shift:s})}
+            onOpenCoverage={(s:any)=>setCoverageData({isOpen:true, shift:s})}
+            onReportPlanning={handleReportPlanning}
+            onOpenWorkedFranco={(s:any)=>setWorkedFrancoData({isOpen:true, shift:s})}
+            onNovedadAbsence={handleNovedadAbsence}
+            onOpenWA={handleOpenWA}
+            onOpenAbsenceDecision={(s:any)=>setAbsenceDecisionData({isOpen:true,shift:s})}
+            onOpenRRHH={(s:any)=>setRrhhVacancyData({isOpen:true,shift:s})}
+            onOpenManualRetention={(s:any)=>setManualRetentionData({isOpen:true,shift:s})}
+            onRevertAbsence={handleRevertAbsence}
+        />
+    );
 
     const mapVisible = !isExternalMap && !mapCollapsed;
     /** Panel operaciones a ancho completo (mapa en otra pantalla o colapsado). */
@@ -4316,29 +4338,34 @@ export default function OperacionesPage() {
                             />
                         )}
                         {viewMode === 'objetivos' && logic.viewTab === 'FRANCOS' && (
-                        <div className={`p-2 ${objectivesLayoutClass}`}>
+                        <div className="p-2" data-ops-franc-tab="1">
                             {logic.listData.length === 0 ? (
-                                <div className="text-center py-10 text-slate-400 text-xs col-span-full">
-                                    {logic.filterText.trim() ? 'Sin francos que coincidan con la búsqueda' : 'Sin guardias de franco hoy'}
+                                <div className="text-center py-10 text-slate-400 text-xs">
+                                    {logic.filterText.trim() ? 'Sin francos ni retenes que coincidan con la búsqueda' : 'Sin guardias de franco ni retenes hoy'}
                                 </div>
                             ) : (
-                                logic.listData.map((s: any) => (
-                                    <GuardCard key={s.id} shift={s} viewTab={logic.viewTab} isCompact={logic.isCompact} isAutoMode={opsCaps.fullAuto}
-                                        onOpenCheckout={(s:any)=>setCheckoutData({isOpen:true, shift:s})}
-                                        onOpenAttendance={(s:any)=>setAttendanceData({isOpen:true, shift:s})}
-                                        onOpenHandover={(s:any)=>setHandoverData({isOpen:true, shift:s})}
-                                        onOpenInterrupt={(s:any)=>setInterruptData({isOpen:true, shift:s})}
-                                        onOpenCoverage={(s:any)=>setCoverageData({isOpen:true, shift:s})}
-                                        onReportPlanning={handleReportPlanning}
-                                        onOpenWorkedFranco={(s:any)=>setWorkedFrancoData({isOpen:true, shift:s})}
-                                        onNovedadAbsence={handleNovedadAbsence}
-                                        onOpenWA={handleOpenWA}
-                                        onOpenAbsenceDecision={(s:any)=>setAbsenceDecisionData({isOpen:true,shift:s})}
-                                        onOpenRRHH={(s:any)=>setRrhhVacancyData({isOpen:true,shift:s})}
-                                        onOpenManualRetention={(s:any)=>setManualRetentionData({isOpen:true,shift:s})}
-                                        onRevertAbsence={handleRevertAbsence}
-                                    />
-                                ))
+                                <>
+                                    <div className="flex items-center gap-2 px-1 pb-1.5">
+                                        <span className="text-[10px] font-black uppercase tracking-wide text-blue-700">Francos</span>
+                                        <span className="text-[10px] font-bold text-slate-400 tabular-nums" data-ops-franc-count={francosLista.length}>{francosLista.length}</span>
+                                    </div>
+                                    {francosLista.length === 0 ? (
+                                        <div className="px-1 pb-3 text-xs text-slate-400">Sin guardias de franco hoy</div>
+                                    ) : (
+                                        <div className={objectivesLayoutClass}>{francosLista.map(renderFrancTabCard)}</div>
+                                    )}
+                                    {/* Retén (RET stand-by): a quién puede llamar el operador. No es ausente ni vacante. */}
+                                    <div className="flex items-center gap-2 px-1 pb-1.5 pt-3 border-t border-slate-100 mt-2">
+                                        <span className="text-[10px] font-black uppercase tracking-wide text-slate-700">Retén · stand-by</span>
+                                        <span className="text-[10px] font-bold text-slate-400 tabular-nums" data-ops-ret-count={retenesLista.length}>{retenesLista.length}</span>
+                                        <span className="text-[10px] text-slate-400">disponibles para llamar</span>
+                                    </div>
+                                    {retenesLista.length === 0 ? (
+                                        <div className="px-1 pb-2 text-xs text-slate-400">Sin retenes hoy</div>
+                                    ) : (
+                                        <div className={objectivesLayoutClass}>{retenesLista.map(renderFrancTabCard)}</div>
+                                    )}
+                                </>
                             )}
                         </div>
                         )}

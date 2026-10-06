@@ -73,6 +73,7 @@ export {
   convocadoReminderAtMs,
 } from './convocadoEta';
 export { opsShiftCodeBadge, opsShiftCodeRangeLabel } from './shiftCodeBadge';
+export { DEPLOYMENT_BAND_CODES, deploymentCodeLabel, opsShiftDisplayCode } from './deploymentCodeLabel';
 export type { ShiftCodeBadge, ShiftCodeBadgeTone } from './shiftCodeBadge';
 export {
   RETENTION_HARD_CAP_MS,
@@ -98,7 +99,7 @@ export { seriesReliefChoiceNotice } from './seriesReliefNotice';
 export type { SeriesReliefNotice } from './seriesReliefNotice';
 export { classifyOpsShift } from './classifyOpsShift';
 export type { ClassifyOpsShiftInput, ClassifyOpsShiftResult } from './classifyOpsShift';
-export { shiftMatchesOpsViewTab } from './shiftMatchesOpsViewTab';
+export { shiftMatchesOpsViewTab, isStandbyRetDisponible } from './shiftMatchesOpsViewTab';
 export type { OpsViewTabShift } from './shiftMatchesOpsViewTab';
 export {
   addShiftToOpsBucket,

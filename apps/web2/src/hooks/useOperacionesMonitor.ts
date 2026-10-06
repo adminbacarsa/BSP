@@ -18,6 +18,7 @@ import {
   isOpsCoverageHoursOnSourceDoc,
   isOperationalOriginShift,
   shiftMatchesOpsViewTab as shiftMatchesOpsViewTabCore,
+  isStandbyRetDisponible,
   VACANCY_DESCUBIERTO_RATIO,
   getVacancyElapsedRatio,
   isVacancyDescubierto,
@@ -1210,7 +1211,10 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             vacantes: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'VACANTES')).length,
             devueltas: hoy.filter((s) => s.isUnassigned && s.isReportedToPlanning).length,
             ausentes: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'AUSENTES')).length,
-            francos: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'FRANCOS')).length,
+            // FRANC lista francos + retenes stand-by (`shiftMatchesOpsViewTab`), pero el número
+            // de la solapa sigue siendo el de francos y el RET se muestra aparte («4 FRANC · 2 RET»).
+            francos: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'FRANCOS') && !isStandbyRetDisponible(s)).length,
+            retenes: hoy.filter((s) => isStandbyRetDisponible(s)).length,
             rrhh_urgente: hoy.filter((s) => s.isRRHHUrgent && !s.isFranco).length,
             rrhh_planificado: hoy.filter((s) => s.isRRHHPlanned && !s.isFranco).length,
             total: hoy.length,

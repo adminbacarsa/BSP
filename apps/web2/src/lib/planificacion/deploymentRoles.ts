@@ -13,6 +13,7 @@
  * (conteo y hs de referencia), separados de los KPIs de cobertura SLA.
  */
 
+import { deploymentCodeLabel } from '@cosp/ops-core';
 import { RET_STANDBY_REFERENCE_HOURS } from './constants';
 
 export type DeploymentRole = 'REGULAR' | 'POOL' | 'SURPLUS' | 'TRAINING';
@@ -276,11 +277,7 @@ export function deploymentFieldsForFirestore(change: Record<string, unknown>): R
     };
 }
 
+/** Misma etiqueta que el chip del Centro de Control (`opsShiftCodeBadge`). */
 export function cellLabelForDeployment(code: string | undefined, deploymentBand?: string | null): string {
-    const c = String(code || '').toUpperCase();
-    if (c === 'REF' || c === 'ESC') {
-        const band = deploymentBand ? String(deploymentBand).toUpperCase() : '';
-        return band ? `${c}·${band}` : c;
-    }
-    return c;
+    return deploymentCodeLabel(code, deploymentBand);
 }
