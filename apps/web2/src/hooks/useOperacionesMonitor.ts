@@ -487,6 +487,8 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         const yearMonth = `${now.getFullYear()}_${now.getMonth() + 1}`;
         const empMap = new Map(); employees.forEach(e => empMap.set(e.id, e.fullName));
         const empPhoneMap = new Map(); employees.forEach(e => empPhoneMap.set(e.id, e.phone || e.celular || ''));
+        const empPushMap = new Map<string, { pushEstado: unknown; pushEstadoAt: unknown }>();
+        employees.forEach(e => empPushMap.set(e.id, { pushEstado: e.pushEstado ?? null, pushEstadoAt: e.pushEstadoAt ?? null }));
         // Los objetivos usan "objectiveId" como ID, no "id" — mapear ambos para compatibilidad
         const objMap = new Map();
         const excludedObjectiveIds = new Set<string>();
@@ -625,6 +627,9 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             });
 
             const phone = empPhoneMap.get(effectiveEmployeeId || shift.employeeId) || shift.phone || shift.celular || '';
+            const pushLegajo = isValidEmployee
+                ? (empPushMap.get(String(effectiveEmployeeId || '')) || { pushEstado: null, pushEstadoAt: null })
+                : null;
 
             const isTuraCutSegment = shiftCode === 'TURA' && !suppressedTuraIds.has(shift.id)
                 && (!!shift.parentShiftId || !!parentEmpleadoId);
@@ -638,6 +643,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             return {
                 ...shift, employeeName: finalEmpName, clientName: finalClient, objectiveName: finalObj, positionName: displayPos,
                 phone,
+                ...(pushLegajo ? { pushEstado: pushLegajo.pushEstado, pushEstadoAt: pushLegajo.pushEstadoAt } : {}),
                 employeeId: effectiveEmployeeId || shift.employeeId,
                 isValidEmployee,
                 // Evento: ubicación y cliente del evento (nunca el objetivo de base del guardia).

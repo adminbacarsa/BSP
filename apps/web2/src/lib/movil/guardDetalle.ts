@@ -5,6 +5,7 @@ import { convocadoEnCaminoLabel } from '@/lib/operaciones/convocadoVentana';
 import { formatOpsNotaLine, type OpsNota } from '@/lib/operaciones/opsNota';
 import { guardTone, type GuardFlags } from '@/lib/movil/guardTone';
 import { isEventShift } from '@/lib/operaciones/eventoCc';
+import { textoSinNotificacionesDe } from '@/lib/operaciones/pushAviso';
 
 type TsLike = { seconds?: number; toMillis?: () => number; toDate?: () => Date } | Date | string | number | null | undefined;
 
@@ -15,6 +16,9 @@ export interface GuardDetalleShift extends GuardFlags {
   employeeId?: string;
   employeeName?: string;
   code?: string;
+  /** Lo pega el monitor desde el legajo. Sin la clave, la tarjeta no inventa el aviso. */
+  pushEstado?: unknown;
+  pushEstadoAt?: unknown;
   /** Banda del REF/ESC («M2»): el chip dice `REF·M2`, igual que la grilla. */
   deploymentBand?: string | null;
   positionName?: string;
@@ -85,6 +89,8 @@ export interface GuardDetalle {
   /** «Nota 15:21 · Lopez: sin llaves» (última nota del operador). */
   nota: string | null;
   telefono: string | null;
+  /** Tooltip si no recibe push; null si está activo o el turno no trae el dato. */
+  sinAvisos: string | null;
 }
 
 const TZ = 'America/Argentina/Buenos_Aires';
@@ -299,6 +305,7 @@ export function guardDetalle(shift: GuardDetalleShift, siblings: readonly GuardD
     cobertura: coberturaDe(shift),
     nota: formatOpsNotaLine(shift.opsNota as Partial<OpsNota> | null | undefined),
     telefono,
+    sinAvisos: isVacante ? null : textoSinNotificacionesDe(shift),
   };
 }
 

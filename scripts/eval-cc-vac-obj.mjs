@@ -136,10 +136,17 @@ check('sin coma el apellido es la primera palabra', lallana.apellido === 'LALLAN
 check('tarjeta: nombre en su fila, cubierto debajo, puesto en la meta', page.includes('data-ops-guard-nombre') && page.includes('data-ops-guard-cubierto="1"') && page.includes('data-ops-guard-meta="1"') && page.includes('whitespace-nowrap'));
 check('el nombre de la tarjeta ya no va con truncate', !page.includes('font-black truncate ${isActionableOpsVacancy'));
 check('popover del objetivo abre a 720 px si hay lugar', page.includes('Math.max(r.width, 720)'));
+const { textoSinNotificacionesDe: textoPush } = await import(pathToFileURL(join(root, 'apps/web2/src/lib/operaciones/pushAviso.ts')).href);
+const pushAt = new Date('2026-10-06T15:00:00.000Z');
+check('sin notificaciones: denegado desde 06/10 y activo no', textoPush({ pushEstado: 'denegado', pushEstadoAt: pushAt }) === 'No recibe avisos de la app (permiso denegado desde 06/10). Llamalo.' && textoPush({ pushEstado: 'activo' }) === null && textoPush({}) === null);
+check('lista y OBJ muestran la campana', page.includes('<SinNotificacionesMark shift={shift} />'));
+const popupSrc = readFileSync(new URL('../apps/web2/src/components/operaciones/OperacionesMapPopup.tsx', import.meta.url), 'utf8');
+check('popup y panel del mapa muestran la campana', popupSrc.includes('<SinNotificacionesMark shift={shift}') && mapView.includes('<SinNotificacionesMark shift={s}'));
 const movil = readFileSync(new URL('../apps/web2/src/lib/movil/operacionFiltros.ts', import.meta.url), 'utf8');
 check('celular agrupa con el mismo bucket', movil.includes('addShiftToOpsBucket(grupo, s as never, now)'));
 const mapa = readFileSync(new URL('../apps/web2/src/hooks/useOperacionesMonitor.ts', import.meta.url), 'utf8');
 check('mapa sale de listData (misma solapa)', mapa.includes('listData.filter((s: any) => !isEventShift(s))'));
+check('monitor pega pushEstado del catálogo', mapa.includes('empPushMap') && mapa.includes('pushEstado: pushLegajo.pushEstado'));
 
 if (failed) {
   console.error(`\n${failed} falla(s)`);

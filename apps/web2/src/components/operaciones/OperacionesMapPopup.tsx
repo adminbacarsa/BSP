@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import type { OperacionesMapMarker } from '@/hooks/useOperacionesMapMarkers';
 import { opsShiftDayLabel } from '@/hooks/useOperacionesMonitor';
 import { ShiftCodeBadge } from '@/components/operaciones/ShiftCodeBadge';
+import { SinNotificacionesMark } from '@/components/operaciones/SinNotificacionesMark';
 import { canRevertAbsenceNow } from '@/lib/operaciones/revertAbsenceWindow';
 import { formatRetentionDuration, formatRetentionLine } from '@cosp/ops-core';
 import { estadoGuardiaEvento, eventServicioLabel } from '@/lib/operaciones/eventoCc';
@@ -341,6 +342,7 @@ export function OperacionesMapPopup({
                       {refuerzoLabel}
                     </span>
                   )}
+                  <SinNotificacionesMark shift={shift} size={11} />
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayName}</span>
                 </span>
                 <span
