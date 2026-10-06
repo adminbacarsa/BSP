@@ -104,7 +104,7 @@ check('FRANC lista francos y RET stand-by', franc.list.includes('franco') && fra
 check('FRANC no lista el RET presente', !franc.list.includes('reten-presente'));
 check('RET stand-by no vuelve a VAC', !vac.list.includes('reten'));
 check('RET stand-by no vuelve a AUS', !opsTabShiftIds(shifts, 'AUSENTES', now).list.includes('reten'));
-check('RET stand-by sigue en PLAN', opsTabShiftIds(shifts, 'PLAN', now).list.includes('reten'));
+check('RET stand-by no sale en PLAN (solo FRANC)', !opsTabShiftIds(shifts, 'PLAN', now).list.includes('reten'));
 check('RET presente está en ACT', opsTabShiftIds(shifts, 'ACTIVOS', now).list.includes('reten-presente'));
 const francHoy = shifts.filter((s) => shiftMatchesOpsViewTab(s, 'FRANCOS', now));
 const francos = francHoy.filter((s) => !isStandbyRetDisponible(s)).length;

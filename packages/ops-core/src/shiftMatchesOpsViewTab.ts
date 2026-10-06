@@ -40,7 +40,7 @@ function standbyRet(s: OpsViewTabShift): boolean {
 
 /**
  * Retén disponible para llamar hoy: RET stand-by que no fichó, no cerró y sigue asignado.
- * Se lista en la solapa FRANC (y en PLAN); nunca en AUS ni VAC.
+ * Se lista solo en la solapa FRANC; nunca en PLAN, AUS ni VAC.
  */
 export function isStandbyRetDisponible(s: OpsViewTabShift): boolean {
   return standbyRet(s) && !s.isFranco && !s.isUnassigned && !s.isPresent && !s.isCompleted;
@@ -78,7 +78,6 @@ export function shiftMatchesOpsViewTab(s: OpsViewTabShift, viewTab: string, now:
         && !s.isPassiveRetStandby
       );
     case 'PLAN':
-      if (isStandbyRetDisponible(s)) return true;
       return (
         (s.isFuture || s.isRRHHPlanned)
         && !s.isFranco
