@@ -151,3 +151,15 @@ describe('resolveAlertaCard — acuse y contadores', () => {
     );
   });
 });
+
+describe('resolveAlertaCard — consulta cerrada', () => {
+  it('el cupo y la cancelación quedan en una línea, sin botones', () => {
+    const cubierta = resolveAlertaCard({ type: 'CONSULTA_CUBIERTA', read: false, nowMs: now });
+    assert.equal(cubierta.closed, true);
+    assert.equal(cubierta.label, 'Ya se asignó a otra persona');
+    assert.equal(cubierta.showCoverageButtons, false);
+    const cancelada = resolveAlertaCard({ type: 'CONSULTA_CANCELADA', read: false, nowMs: now });
+    assert.equal(cancelada.closed, true);
+    assert.equal(cancelada.label, 'Ya no hace falta');
+  });
+});

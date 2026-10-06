@@ -217,12 +217,13 @@ export async function aplicarEntregasConsulta(ctx: ContextoEntrega, destinos: De
 
     const idx = respuestas.findIndex((r) => esDestino(r, d));
     if (idx >= 0) respuestas[idx] = { ...respuestas[idx], estado, motivo };
+    const venceAtMs = Number(data.venceAtMs || data.venceAt?.toMillis?.() || 0);
     await db().collection(INV).doc(d.invitacionId).set({
       estado,
       motivo,
       canales: canalesOk,
       mailOk: canalesOk.includes('MAIL'),
-      ...(estado === 'PENDIENTE' || estado === 'AVISO_MAIL' ? {} : { venceAtMs: null }),
+      ...(venceAtMs > 0 ? { venceAtMs } : {}),
     }, { merge: true });
   }
 
@@ -261,6 +262,8 @@ export async function aplicarEntregasConsulta(ctx: ContextoEntrega, destinos: De
       timestamp: admin.firestore.FieldValue.serverTimestamp(),
       consultaId: ctx.consultaId,
     });
+    const { cerrarInvitacionesConsulta } = await import('./consultaDisponibilidad');
+    await cerrarInvitacionesConsulta(ctx.consultaId, 'SIN_DESTINATARIOS');
   }
 
   return { resumen, status: cierre.status, entregados };
@@ -307,7 +310,10 @@ export async function anotarFalloPushConsulta(p: { consultaId: string; invitacio
       cerrar = true;
     }
     tx.update(parentRef, patch);
-    tx.update(invRef, { estado: 'NO_LLEGO', motivo: fallo.motivo || p.motivo, pushFallo: p.motivo, venceAtMs: null });
+    const vence = Number(inv.venceAtMs || data.venceAtMs || 0);
+    const invPatch: Record<string, unknown> = { estado: 'NO_LLEGO', motivo: fallo.motivo || p.motivo, pushFallo: p.motivo };
+    if (vence > 0) invPatch.venceAtMs = vence;
+    tx.update(invRef, invPatch);
   });
   if (!cerrar) return;
   await db().collection('novedades').add({
@@ -319,4 +325,6 @@ export async function anotarFalloPushConsulta(p: { consultaId: string; invitacio
     source: 'PLANIFICACION',
     consultaId: p.consultaId,
   });
+  const { cerrarInvitacionesConsulta } = await import('./consultaDisponibilidad');
+  await cerrarInvitacionesConsulta(p.consultaId, 'SIN_DESTINATARIOS');
 }

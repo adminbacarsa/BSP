@@ -17,6 +17,7 @@ const INBOX_NEEDS_FCM = new Set([
   'CONVOCATORIA_EVENTO',
   'CONSULTA_DISPONIBILIDAD',
   'CONSULTA_CUBIERTA',
+  'CONSULTA_CANCELADA',
   'EVENTO_CONFIRMADO',
   'EVENTO_CUPO_COMPLETO',       // «Ya se cubrió el cupo, gracias»: la convocatoria se cerró sola
   'SWAP_REQUEST',

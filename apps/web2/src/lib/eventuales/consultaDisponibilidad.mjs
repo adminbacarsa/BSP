@@ -7,7 +7,9 @@ import { textoAvisoMail, textoNoLlego } from './consultaCanal.mjs';
 
 export const VENCE_DEFAULT_MIN = 120;
 export const VENCE_MAX_MIN = 24 * 60;
-export const MENSAJE_CUBIERTO = 'Ya se cubrió, gracias';
+export const MENSAJE_CUBIERTO = 'Ya se asignó a otra persona. ¡Gracias!';
+export const MENSAJE_YA_NO_HACE_FALTA = 'Ya no hace falta, gracias';
+export const MENSAJE_VENCIDA = 'La consulta venció.';
 
 export function textoJornadas(jornadas) {
   const list = Array.isArray(jornadas) ? jornadas : [];
@@ -98,10 +100,49 @@ export function reservarLugar(p) {
   return { ok: true, orden: usados + 1, idempotente: false };
 }
 
-/** Con el cupo lleno, los que siguen en PENDIENTE se cierran. */
+const CONSERVAR_AL_CERRAR = new Set(['ASIGNADO', 'NO', 'CUBIERTO', 'CANCELADA', 'VENCIDA']);
+
+/** ASIGNADO y NO quedan. El resto (PENDIENTE, AVISO_MAIL, NO_LLEGO, RESERVADO) se cierra. */
+export function invitacionHayQueCerrarla(estado) {
+  return !CONSERVAR_AL_CERRAR.has(String(estado || ''));
+}
+
+/**
+ * Estado final de cada invitación según el padre.
+ * VENCIDA no avisa. CERRADA y el cupo completo sí. SIN_DESTINATARIOS cierra sin push.
+ */
+export function cierreDeConsulta(status) {
+  const s = String(status || '').toUpperCase();
+  if (s === 'COMPLETA') {
+    return { estado: 'CUBIERTO', motivo: MENSAJE_CUBIERTO, avisar: true, tipoAviso: 'CONSULTA_CUBIERTA', linea: 'Ya se asignó a otra persona' };
+  }
+  if (s === 'CERRADA') {
+    return { estado: 'CANCELADA', motivo: MENSAJE_YA_NO_HACE_FALTA, avisar: true, tipoAviso: 'CONSULTA_CANCELADA', linea: 'Ya no hace falta' };
+  }
+  if (s === 'SIN_DESTINATARIOS') {
+    return { estado: 'CANCELADA', motivo: MENSAJE_YA_NO_HACE_FALTA, avisar: false, tipoAviso: null, linea: 'Ya no hace falta' };
+  }
+  if (s === 'VENCIDA') {
+    return { estado: 'VENCIDA', motivo: MENSAJE_VENCIDA, avisar: false, tipoAviso: null, linea: null };
+  }
+  return null;
+}
+
+/** Lo que ve el guardia si responde cuando la invitación ya cerró. Nunca un error crudo. */
+export function mensajeRespuestaCerrada(estado, status, codigo) {
+  const e = String(estado || '').toUpperCase();
+  const s = String(status || '').toUpperCase();
+  const c = String(codigo || '').toUpperCase();
+  if (e === 'CUBIERTO' || s === 'COMPLETA' || c === 'COMPLETA') return MENSAJE_CUBIERTO;
+  if (e === 'CANCELADA' || s === 'CERRADA' || s === 'SIN_DESTINATARIOS' || c === 'CERRADA') return MENSAJE_YA_NO_HACE_FALTA;
+  if (e === 'VENCIDA' || s === 'VENCIDA' || c === 'VENCIDA') return MENSAJE_VENCIDA;
+  return 'La consulta ya no está abierta.';
+}
+
+/** Con el cupo lleno se cierran las que todavía no son ASIGNADO ni NO. */
 export function pendientesACerrar(invitaciones, tomados, lugares) {
   if (Number(tomados) < Number(lugares)) return [];
-  return (invitaciones || []).filter((i) => i && (i.estado === 'PENDIENTE' || i.estado === 'AVISO_MAIL')).map((i) => i.id);
+  return (invitaciones || []).filter((i) => i && invitacionHayQueCerrarla(i.estado)).map((i) => i.id);
 }
 
 /** Al fallar la revalidación ese lugar vuelve a estar libre: no cuenta como tomado. */

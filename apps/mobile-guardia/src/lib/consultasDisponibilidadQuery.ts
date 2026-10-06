@@ -38,6 +38,25 @@ export function consultaSigueAbierta(estado: string, venceAtMs: number | null, a
   return true;
 }
 
+/** Línea de Alertas cuando la invitación ya cerró. VENCIDA no deja renglón. */
+export function lineaInformativaConsulta(estadoOTipo: string | null | undefined): string | null {
+  const s = String(estadoOTipo || '').toUpperCase();
+  if (s === 'CUBIERTO' || s === 'CONSULTA_CUBIERTA' || s === 'COMPLETA') return 'Ya se asignó a otra persona';
+  if (s === 'CANCELADA' || s === 'CONSULTA_CANCELADA' || s === 'CERRADA') return 'Ya no hace falta';
+  return null;
+}
+
+/** Lo que muestra la app si la callable rechaza una invitación cerrada. */
+export function textoRespuestaCerrada(codigo?: string | null, motivo?: string | null): string {
+  const escrito = String(motivo || '').trim();
+  if (escrito) return escrito;
+  const c = String(codigo || '').toUpperCase();
+  if (c === 'COMPLETA' || c === 'CUBIERTO') return 'Ya se asignó a otra persona. ¡Gracias!';
+  if (c === 'CERRADA' || c === 'CANCELADA') return 'Ya no hace falta, gracias';
+  if (c === 'VENCIDA') return 'La consulta venció.';
+  return 'La consulta ya no está abierta.';
+}
+
 /** Args de la callable cuando el SuperAdmin responde en nombre del previsualizado. */
 export function argsPreviewConsulta(input: {
   isPreviewMode: boolean;

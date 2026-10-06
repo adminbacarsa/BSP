@@ -32,7 +32,7 @@ import { appAlert } from '@/lib/appAlert';
 import { ALERTAS_PAGE_SIZE, paginateAlertItems } from '../../src/lib/alertasPagination';
 import { respondCoberturaConvocatoria } from '../../src/lib/respondCoberturaConvocatoria';
 import { responderConsultaDisponibilidad } from '../../src/lib/responderConsultaDisponibilidad';
-import { argsPreviewConsulta } from '../../src/lib/consultasDisponibilidadQuery';
+import { argsPreviewConsulta, lineaInformativaConsulta, textoRespuestaCerrada } from '../../src/lib/consultasDisponibilidadQuery';
 import { ConsultasDisponibilidadBanner } from '../../src/components/ConsultasDisponibilidadBanner';
 import { useConsultasDisponibilidad } from '../../src/hooks/useConsultasDisponibilidad';
 import { buildCoberturaRespondFeedback } from '../../src/lib/coberturaRespondFeedback';
@@ -117,7 +117,7 @@ export default function AlertasScreen() {
 function AlertasScreenContent() {
   const router = useRouter();
   const { user, previewEmpDocId, isPreviewMode, isSuperAdmin, employee, bolsaCuil, empDocId } = usePortalAuth();
-  const consultasDisponibilidad = useConsultasDisponibilidad();
+  const { items: consultasDisponibilidad, porId: consultasPorId } = useConsultasDisponibilidad();
   const previewConsulta = argsPreviewConsulta({ isPreviewMode, bolsaCuil, employeeId: empDocId });
   const { objectivesMap } = useObjectivesMap();
   const { palette } = useTheme();
@@ -145,8 +145,20 @@ function AlertasScreenContent() {
   }, [consultasDisponibilidad, domainFilter, items]);
 
   const filtered = useMemo(() => {
-    if (domainFilter === 'Todas') return items;
-    return items.filter((n) => notificationDomainLabel(n.type) === domainFilter);
+    const cierre = new Set(
+      items
+        .filter((n) => {
+          const t = String(n.type || '').toUpperCase();
+          return (t === 'CONSULTA_CUBIERTA' || t === 'CONSULTA_CANCELADA') && n.invitacionId;
+        })
+        .map((n) => String(n.invitacionId)),
+    );
+    const base = domainFilter === 'Todas' ? items : items.filter((n) => notificationDomainLabel(n.type) === domainFilter);
+    return base.filter((n) => {
+      if (String(n.type || '').toUpperCase() !== 'CONSULTA_DISPONIBILIDAD') return true;
+      const id = String(n.invitacionId || '');
+      return !(id && cierre.has(id));
+    });
   }, [items, domainFilter]);
 
   const { pageItems, safePage, totalPages, from, to, total } = useMemo(
@@ -327,7 +339,7 @@ function AlertasScreenContent() {
                 setBusyId(n.id);
                 try {
                   const res = await responderConsultaDisponibilidad(invitacionId, si ? 'SI' : 'NO', previewConsulta);
-                  if (!res.ok) appAlert('No se pudo', res.motivo || (res.codigo === 'COMPLETA' ? 'Ya se cubrió, gracias.' : 'La consulta ya no está abierta.'));
+                  if (!res.ok) appAlert('No se pudo', textoRespuestaCerrada(res.codigo, res.motivo));
                   else await markRead(n.id);
                 } catch {
                   appAlert('Error', 'No se pudo enviar la respuesta.');
@@ -545,7 +557,7 @@ function AlertasScreenContent() {
                     try {
                       const res = await responderConsultaDisponibilidad(item.id, 'SI', previewConsulta);
                       if (res.ok) appAlert('Listo', res.codigo === 'ASIGNADO' ? 'Quedó el lugar.' : 'Recibimos la respuesta.');
-                      else appAlert('No se pudo', res.motivo || (res.codigo === 'COMPLETA' ? 'Ya se cubrió, gracias.' : 'La consulta ya no está abierta.'));
+                      else appAlert('No se pudo', textoRespuestaCerrada(res.codigo, res.motivo));
                     } catch {
                       appAlert('Error', 'No se pudo enviar la respuesta.');
                     } finally {
@@ -685,6 +697,9 @@ function AlertasScreenContent() {
           const tipoAlerta = String(n.type ?? '').toUpperCase();
           const isCoverage = COVERAGE_RESPONSE_TYPES.has(tipoAlerta);
           const esConsulta = tipoAlerta === 'CONSULTA_DISPONIBILIDAD';
+          const lineaCierre = esConsulta
+            ? lineaInformativaConsulta(consultasPorId.get(String(n.invitacionId || ''))?.estado)
+            : null;
           const busy = busyId === n.id;
           const route = routeFromNotificationData({
             type: n.type,
@@ -692,8 +707,10 @@ function AlertasScreenContent() {
             convType: n.convocatoriaId ? coberturaById[n.convocatoriaId]?.type : undefined,
             convocatoriaId: n.convocatoriaId,
           });
-          const card = resolveAlertaCard(cardInput(n, coberturaById, localReply[n.id], now.getTime()));
-          const settled = card.closed || (!needsAck && !isCoverage && !esConsulta && (n.read || !!n.ackedAt));
+          const card = lineaCierre
+            ? { closed: true as const, showCoverageButtons: false, showVenisButton: false, showAckButton: false, label: lineaCierre, atMs: null }
+            : resolveAlertaCard(cardInput(n, coberturaById, localReply[n.id], now.getTime()));
+          const settled = !!lineaCierre || card.closed || (!needsAck && !isCoverage && !esConsulta && (n.read || !!n.ackedAt));
           const receivedAt = n.createdAt ? formatDateTimeAr(n.createdAt as never) : '';
           const resultLine = card.closed
             ? card.atMs
@@ -723,7 +740,7 @@ function AlertasScreenContent() {
                     style={[styles.inboxTitleCompact, { color: palette.onSurface }]}
                     numberOfLines={1}
                   >
-                    {n.title || 'Alerta'}
+                    {lineaCierre || n.title || 'Alerta'}
                   </Text>
                   {receivedAt ? (
                     <Text style={[styles.metaLine, { color: palette.onSurfaceMuted }]} numberOfLines={1}>
