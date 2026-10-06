@@ -93,6 +93,7 @@ import { SeriesReliefPicker } from '@/components/operaciones/SeriesReliefPicker'
 import { ShiftCodeBadge } from '@/components/operaciones/ShiftCodeBadge';
 import { canRevertAbsenceNow, isRevertAbsenceExpired } from '@/lib/operaciones/revertAbsenceWindow';
 import { ALTA_ARCA_AVISO_TEXTO, ALTA_ARCA_AVISO_TITLE, altaArcaPendienteVisible, mostrarDescubierto } from '@/lib/operaciones/guardCardEstado';
+import { partesNombreTarjeta } from '@/lib/operaciones/guardCardNombre';
 import { shiftHardCapAt } from '@/lib/operaciones/shiftHardCap';
 
 const OperacionesMap = dynamic(() => import('@/components/operaciones/OperacionesMap'), { loading: () => <div className="h-full flex items-center justify-center text-slate-400">Cargando Mapa...</div>, ssr: false });
@@ -1084,6 +1085,21 @@ const shiftPostLabel = (shift: any): string => {
     return String(shift?.positionName || '—').trim();
 };
 
+/** Apellido en una sola pieza; el resto puede bajar a una segunda línea. */
+function GuardNombre({ name, danger }: { name: string; danger?: boolean }) {
+    const { apellido, resto, completo } = partesNombreTarjeta(name);
+    return (
+        <span
+            className={`min-w-0 flex-1 text-[13px] font-black leading-snug line-clamp-2 ${danger ? 'text-rose-600' : 'text-slate-800'}`}
+            data-ops-guard-nombre={completo}
+            title={completo}
+        >
+            <span className="whitespace-nowrap">{apellido}</span>
+            {resto ? <> {resto}</> : null}
+        </span>
+    );
+}
+
 const AltaArcaAviso = () => (
     <span className="text-[9px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded shrink-0" title={ALTA_ARCA_AVISO_TITLE}>{ALTA_ARCA_AVISO_TEXTO}</span>
 );
@@ -1136,6 +1152,9 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     const avatarClass = getGuardAvatarClass(shift);
     const isAbsentOperativelyCovered = isShiftOperativelyCovered(shift);
     const coveringEmployeeName = isAbsentOperativelyCovered ? formatCoveringEmployeeLabel(shift) : null;
+    const coveredLine = isAbsentOperativelyCovered
+        ? (coveringEmployeeName ? `Cubierto · ${coveringEmployeeName}` : 'Cubierto')
+        : null;
     const canRevertAbsence = canRevertAbsenceNow(shift, now.getTime());
 
     // Badge de estado
@@ -1166,13 +1185,13 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     else if (shift.cierreSinFranja)  badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-200 text-slate-600 shrink-0">{shift.cierreSinFranja}</span>;
     else if (shift.isPendingClose)   badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-orange-500 text-white shrink-0 flex items-center gap-0.5"><Clock size={8}/>ESPERANDO RELEVO{shift.retentionMinutes > 0 ? ` ${formatRetentionDuration(shift.retentionMinutes)}` : ''}</span>;
     else if (shift.isCoverageSourceUsed && shift.coverageUsedLabel) {
-        badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-violet-600 text-white shrink-0 max-w-[min(100%,260px)] truncate" title={shift.coverageUsedLabel}>🔗 {shift.coverageUsedLabel}</span>;
+        badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-violet-600 text-white max-w-full whitespace-normal break-words" title={shift.coverageUsedLabel}>🔗 {shift.coverageUsedLabel}</span>;
     }
     else if (shift.isProvisionalLateAbsence) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-600 text-white shrink-0">NO LLEGÓ / posible ausencia</span>;
     else if (shift.isPotentialAbsence) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-red-600 text-white animate-pulse shrink-0">AUSENCIA</span>;
     else if (shift.isLateNotified) {
         const lateTxt = opsLateArrivalBadgeLabel(shift) || 'TARDE AVISADA';
-        badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-500 text-white animate-pulse shrink-0 flex items-center gap-0.5 max-w-[min(100%,240px)] truncate" title={lateTxt}>⏱ {lateTxt}</span>;
+        badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-500 text-white animate-pulse max-w-full whitespace-normal break-words" title={lateTxt}>⏱ {lateTxt}</span>;
     }
     else if (shift.isLateUnnotified) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-400 text-white shrink-0">TARDE SIN AVISO</span>;
     else if (shift.isPresent)        badge =<span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-emerald-600 text-white shrink-0 flex items-center gap-0.5"><Clock size={8}/>ACTIVO {elapsedInShift ? elapsedInShift : ''}</span>;
@@ -1180,19 +1199,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     else if (shift.isPlannedExtensionImminent) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-violet-600 text-white animate-pulse shrink-0 flex items-center gap-0.5"><Timer size={8}/>EXT PLAN</span>;
     else if (shift.isPlannedLiberationRet) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-emerald-600 text-white shrink-0 flex items-center gap-0.5"><PlayCircle size={8}/>RET CONVOCABLE</span>;
     else if (shift.isConvocado && shift.isFuture) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 shrink-0 flex items-center gap-0.5"><PlayCircle size={8}/>CONVOCADO</span>;
-    else if (shift.isAbsent)         badge = isAbsentOperativelyCovered
-        ? (
-            <span
-                className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-700 text-white shrink-0 flex items-center gap-0.5 max-w-[min(100%,220px)]"
-                title={coveringEmployeeName ? `Cubierto por ${coveringEmployeeName}` : 'Cobertura registrada en CC'}
-            >
-                AUSENTE
-                <span className="bg-emerald-500 px-1 rounded text-[8px] truncate">
-                    ✓ cubierto{coveringEmployeeName ? ` · ${coveringEmployeeName}` : ''}
-                </span>
-            </span>
-        )
-        : <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-700 text-white shrink-0">AUSENTE</span>;
+    else if (shift.isAbsent)         badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-700 text-white shrink-0" title={coveredLine || 'AUSENTE'}>AUSENTE</span>;
     else if (shift.isResolvedByOps)  badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-600 text-white shrink-0">OPS</span>;
 
     const dayTag = opsShiftDayLabel(shift.shiftDateObj, now);
@@ -1206,45 +1213,46 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
             : 'text-amber-500';
 
     if (isCompact) return (
-        <div className={`relative flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200/80 mb-1 shadow-sm hover:shadow-md transition-all ${rowBg}`}>
+        <div className={`relative flex items-start gap-2 px-3 py-2 rounded-lg border border-slate-200/80 mb-1 shadow-sm hover:shadow-md transition-all ${rowBg}`} data-ops-guard-card="1">
             <div className={`absolute left-0 top-0 bottom-0 w-1 rounded-l-lg ${accentColor}`}/>
-            <div className={`w-7 h-7 rounded-full flex items-center justify-center font-black shrink-0 ml-1 ${avatarClass} ${refuerzoLabel ? 'text-[8px] tracking-tight' : 'text-[10px]'}`}>
+            <div className={`w-7 h-7 rounded-full flex items-center justify-center font-black shrink-0 ml-1 mt-0.5 ${avatarClass} ${refuerzoLabel ? 'text-[8px] tracking-tight' : 'text-[10px]'}`}>
                 {avatarLabel}
             </div>
             <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5 leading-tight">
-                    <span className={`text-[11px] font-black truncate ${isActionableOpsVacancy(shift) ? 'text-rose-600' : 'text-slate-800'}`}>{name}</span>
+                <div className="flex items-start gap-1.5 min-w-0">
+                    <GuardNombre name={name} danger={isActionableOpsVacancy(shift)} />
                     {!shift.isUnassigned && <PuntajeChip sujetoId={String((shift as { bolsaCuil?: string }).bolsaCuil || shift.employeeId || '')} />}
                     <ShiftCodeBadge shift={shift} />
+                </div>
+                <div className="mt-0.5 flex flex-wrap items-center gap-1 min-w-0">
                     {dayTagEl}
                     {badge}
                     {altaArcaPendienteVisible(shift, now) && <AltaArcaAviso />}
                 </div>
-                <div className="flex items-center gap-1.5 text-[9px] text-slate-400 leading-tight mt-0.5">
-                    <span className="truncate">{shiftPlaceLabel(shift)} · <span className="text-indigo-500">{shiftPostLabel(shift)}</span></span>
-                    <span className={`shrink-0 font-bold ${dayInlineClass}`}>{dayTag.label}</span>
-                    <span className="shrink-0 font-mono">{displayShiftTimeRange(shift)}</span>
-                    {convocadoCuenta && <span className="shrink-0 font-bold text-indigo-600">{convocadoCuenta}</span>}
-                </div>
-                {shift.isPresent && formatIngresoLine(shift) && (
-                    <p className="text-[9px] font-bold text-emerald-700 truncate">{formatIngresoLine(shift)}</p>
+                {coveredLine && (
+                    <p className="text-[10px] font-bold leading-snug text-emerald-700 break-words" data-ops-guard-cubierto="1" title={coveredLine}>{coveredLine}</p>
                 )}
+                <p className="mt-0.5 text-[10px] leading-snug text-slate-500 break-words" data-ops-guard-meta="1">
+                    <span className="font-semibold text-indigo-600">{shiftPostLabel(shift)}</span>
+                    <span className="text-slate-300"> · </span>
+                    {dayTag.key !== 'hoy' && <span className={`font-bold ${dayInlineClass}`}>{dayTag.label} · </span>}
+                    <span className="font-mono text-slate-600">{displayShiftTimeRange(shift)}</span>
+                    {shift.isPresent && formatIngresoLine(shift) ? (
+                        <span className="font-bold text-emerald-700"> · {formatIngresoLine(shift)}</span>
+                    ) : null}
+                </p>
+                {convocadoCuenta && <p className="text-[9px] font-bold leading-snug text-indigo-600 break-words">{convocadoCuenta}</p>}
                 {shift.isPresent && shift.retentionWait && !shift.cierreSinFranja && (
-                    <p className="text-[9px] font-bold text-orange-700 truncate" title={formatRetentionLine(shift.retentionWait) || ''}>{formatRetentionLine(shift.retentionWait)}</p>
+                    <p className="text-[9px] font-bold leading-snug text-orange-700 break-words" title={formatRetentionLine(shift.retentionWait) || ''}>{formatRetentionLine(shift.retentionWait)}</p>
                 )}
                 {shift.relevoAusenteAviso && (
-                    <p className="text-[9px] font-bold text-slate-600 truncate" data-relevo-ausente="1">{shift.relevoAusenteAviso}</p>
+                    <p className="text-[9px] font-bold leading-snug text-slate-600 break-words" data-relevo-ausente="1">{shift.relevoAusenteAviso}</p>
                 )}
                 {formatOpsNotaLine(shift.opsNota) && (
-                    <p className="text-[9px] font-bold text-slate-600 truncate" title={formatOpsNotaLine(shift.opsNota) || ''}>{formatOpsNotaLine(shift.opsNota)}</p>
-                )}
-                {coveringEmployeeName && !(viewTab === 'AUSENTES' && isAbsentOperativelyCovered) && (
-                    <p className="text-[9px] font-bold text-emerald-700 truncate mt-0.5" title={`Cubierto por ${coveringEmployeeName}`}>
-                        Cubre: {coveringEmployeeName}
-                    </p>
+                    <p className="text-[9px] font-bold leading-snug text-slate-600 break-words" title={formatOpsNotaLine(shift.opsNota) || ''}>{formatOpsNotaLine(shift.opsNota)}</p>
                 )}
             </div>
-            <div className="flex gap-1 shrink-0">
+            <div className="flex flex-wrap justify-end gap-1 shrink-0 self-start max-w-[9.5rem]">
                 {!shift.isUnassigned && (<button onClick={() => onOpenWA(shift)} className={`p-1.5 border rounded-lg hover:bg-emerald-100 transition-colors ${shift.phone ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-slate-50 text-slate-400 border-slate-200'}`} title={shift.phone ? 'WhatsApp' : 'Sin teléfono'}><MessageCircle size={12}/></button>)}
                 {canCover && viewTab === 'VACANTES' && (<button onClick={() => onOpenCoverage(shift)} className="p-1.5 bg-rose-600 text-white rounded-lg hover:bg-rose-700 transition-colors" title="Cubrir"><Siren size={12}/></button>)}
                 {canReturn && viewTab === 'VACANTES' && (<button onClick={handleReport} className="p-1.5 bg-slate-700 text-white rounded-lg hover:bg-slate-800 transition-colors" title="Devolver a planificación"><CornerUpLeft size={12}/></button>)}
@@ -1287,35 +1295,41 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
         <div className={`relative rounded-xl border border-slate-200 mb-2 shadow-sm overflow-hidden transition-all ${rowBg}`}>
             <div className={`h-1 w-full ${accentColor}`}/>
             <div className="px-3 pt-2.5 pb-1.5">
-                {/* Fila 1: nombre + badge + hora */}
-                <div className="flex items-start justify-between gap-2 mb-1">
-                    <div className="flex items-center gap-2 min-w-0">
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-black shrink-0 ${avatarClass} ${refuerzoLabel ? 'text-[9px] tracking-tight' : 'text-[11px]'}`}>
-                            {avatarLabel}
-                        </div>
-                        <div className="min-w-0">
-                            <span className={`text-[13px] font-black truncate ${shift.isUnassigned ? 'text-rose-600' : 'text-slate-800'} inline-flex items-center gap-1.5 max-w-full`}>
-                                <span className="truncate">{name}</span>
-                                {!shift.isUnassigned && <PuntajeChip sujetoId={String((shift as { bolsaCuil?: string }).bolsaCuil || shift.employeeId || '')} />}
-                            </span>
-                            <span className="text-[10px] text-slate-400">{isEventShift(shift) ? (eventClientName(shift) || shiftPlaceLabel(shift)) : (shift.clientName || shift.objectiveName)}</span>
-                        </div>
+                {/* Fila 1: nombre completo + puntaje + código. El estado va debajo. */}
+                <div className="flex items-start gap-2 mb-1 min-w-0">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-black shrink-0 ${avatarClass} ${refuerzoLabel ? 'text-[9px] tracking-tight' : 'text-[11px]'}`}>
+                        {avatarLabel}
                     </div>
-                    <div className="flex items-center gap-1.5 shrink-0">{dayTagEl}{badge}{altaArcaPendienteVisible(shift, now) && <AltaArcaAviso />}</div>
+                    <div className="min-w-0 flex-1">
+                        <span className="flex items-start gap-1.5 min-w-0">
+                            <GuardNombre name={name} danger={!!shift.isUnassigned} />
+                            {!shift.isUnassigned && <PuntajeChip sujetoId={String((shift as { bolsaCuil?: string }).bolsaCuil || shift.employeeId || '')} />}
+                            <ShiftCodeBadge shift={shift} />
+                        </span>
+                        <span className="text-[10px] text-slate-400 break-words">{isEventShift(shift) ? (eventClientName(shift) || shiftPlaceLabel(shift)) : (shift.clientName || shift.objectiveName)}</span>
+                    </div>
                 </div>
-                {/* Fila 2: objetivo · posición */}
-                <div className="flex items-center gap-2 text-[10px] text-slate-500 mb-1.5 pl-10">
-                    <MapPin size={10} className="text-indigo-400 shrink-0"/>
-                    <span className="truncate font-medium">{shiftPlaceLabel(shift)}</span>
+                <div className="mb-1 flex flex-wrap items-center gap-1 pl-10 min-w-0">
+                    {dayTagEl}{badge}{altaArcaPendienteVisible(shift, now) && <AltaArcaAviso />}
+                </div>
+                {coveredLine && (
+                    <p className="mb-1 pl-10 text-[10px] font-bold leading-snug text-emerald-700 break-words" data-ops-guard-cubierto="1" title={coveredLine}>{coveredLine}</p>
+                )}
+                <div className="mb-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 pl-10 text-[10px] text-slate-500" data-ops-guard-meta="1">
+                    <MapPin size={10} className="shrink-0 text-indigo-400"/>
+                    <span className="font-medium break-words">{shiftPlaceLabel(shift)}</span>
                     <span className="text-slate-300">·</span>
-                    <span className="text-indigo-600 font-bold truncate inline-flex items-center gap-1">{shiftPostLabel(shift)}<ShiftCodeBadge shift={shift} /></span>
+                    <span className="font-bold text-indigo-600 break-words">{shiftPostLabel(shift)}</span>
                     {shift.turaContiguous && shift.turaImputationPos && (
-                        <span className="text-violet-600 font-bold shrink-0">+TURA {shift.turaImputationPos}</span>
+                        <span className="shrink-0 font-bold text-violet-600">+TURA {shift.turaImputationPos}</span>
                     )}
-                    <span className="ml-auto font-mono text-slate-600 shrink-0 flex items-center gap-1">
-                        <span className={`font-bold not-font-mono text-[9px] ${dayInlineClass}`}>{dayTag.label}</span>
+                    <span className="font-mono text-slate-600">
+                        {dayTag.key !== 'hoy' && <span className={`font-sans font-bold text-[9px] ${dayInlineClass}`}>{dayTag.label} </span>}
                         {displayShiftTimeRange(shift)}
                     </span>
+                    {shift.isPresent && formatIngresoLine(shift) ? (
+                        <span className="font-bold text-emerald-700">{formatIngresoLine(shift)}</span>
+                    ) : null}
                 </div>
                 {shift.isPresent && shift.retentionWait && !shift.cierreSinFranja && (
                     <p className="text-[10px] font-bold text-orange-700 mb-1.5 pl-10">{formatRetentionLine(shift.retentionWait)}</p>
@@ -1323,19 +1337,11 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                 {shift.relevoAusenteAviso && (
                     <p className="text-[10px] font-bold text-slate-600 mb-1.5 pl-10" data-relevo-ausente="1">{shift.relevoAusenteAviso}</p>
                 )}
-                {shift.isPresent && formatIngresoLine(shift) && (
-                    <p className="text-[10px] font-bold text-emerald-700 mb-1.5 pl-10">{formatIngresoLine(shift)}</p>
-                )}
                 {formatOpsNotaLine(shift.opsNota) && (
-                    <p className="text-[10px] font-bold text-slate-600 mb-1.5 pl-10">{formatOpsNotaLine(shift.opsNota)}</p>
+                    <p className="text-[10px] font-bold text-slate-600 mb-1.5 pl-10 break-words">{formatOpsNotaLine(shift.opsNota)}</p>
                 )}
                 {convocadoCuenta && (
-                    <p className="text-[10px] font-bold text-indigo-700 mb-1.5 pl-10">{convocadoCuenta}</p>
-                )}
-                {coveringEmployeeName && !(viewTab === 'AUSENTES' && isAbsentOperativelyCovered) && (
-                    <div className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-700 mb-1.5 pl-10 truncate" title={`Cubierto por ${coveringEmployeeName}`}>
-                        Cubre: {coveringEmployeeName}
-                    </div>
+                    <p className="text-[10px] font-bold text-indigo-700 mb-1.5 pl-10 break-words">{convocadoCuenta}</p>
                 )}
                 {/* Franja retención */}
                 {(shift.isRetention || shift.manualRetentionType) && (
@@ -1498,9 +1504,11 @@ function ObjectiveExpandOverlay({
             const vh = window.innerHeight;
             const pad = 8;
             const gap = 4;
-            const maxPanel = 280;
-            const width = Math.min(Math.max(r.width, 280), vw - pad * 2);
-            const left = Math.max(pad, Math.min(r.left, vw - width - pad));
+            const maxPanel = 480;
+            const room = vw - pad * 2;
+            const width = Math.min(Math.max(r.width, 720), room);
+            let left = r.left;
+            if (left + width > vw - pad) left = Math.max(pad, vw - pad - width);
 
             const spaceBelow = vh - r.bottom - pad;
             const spaceAbove = r.top - pad;
