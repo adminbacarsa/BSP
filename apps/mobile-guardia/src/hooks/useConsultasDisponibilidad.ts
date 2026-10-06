@@ -37,10 +37,16 @@ function mapDoc(id: string, data: Record<string, unknown>): ConsultaInvitacion {
  * Vista previa: bolsaCuil / employeeId del previsualizado (el auth es el SuperAdmin).
  * Usuario real: uid, y también bolsaCuil o employeeId por si la invitación se creó sin uid.
  */
-export function useConsultasDisponibilidad() {
+export function useConsultasDisponibilidad(): {
+  items: ConsultaInvitacion[];
+  porId: Map<string, ConsultaInvitacion>;
+} {
   const { db } = getPortalFirebase();
   const { user, deviceVerified, isPreviewMode, isEventual, bolsaCuil, empDocId, eventualLegajos } = usePortalAuth();
-  const [items, setItems] = useState<ConsultaInvitacion[]>([]);
+  const [state, setState] = useState<{ items: ConsultaInvitacion[]; porId: Map<string, ConsultaInvitacion> }>({
+    items: [],
+    porId: new Map(),
+  });
   const legajosKey = eventualLegajos.map((l) => l.employeeId).join('|');
 
   useEffect(() => {
@@ -52,7 +58,7 @@ export function useConsultasDisponibilidad() {
       employeeIds,
     });
     if (deviceVerified !== true || keys.length === 0) {
-      setItems([]);
+      setState({ items: [], porId: new Map() });
       return;
     }
 
@@ -61,13 +67,12 @@ export function useConsultasDisponibilidad() {
 
     const publish = () => {
       const ahora = Date.now();
-      const map = new Map<string, ConsultaInvitacion>();
+      const todas = new Map<string, ConsultaInvitacion>();
       for (const list of Object.values(buckets)) {
-        for (const item of list) {
-          if (consultaSigueAbierta(item.estado, item.venceAtMs, ahora)) map.set(item.id, item);
-        }
+        for (const item of list) todas.set(item.id, item);
       }
-      setItems([...map.values()]);
+      const abiertas = [...todas.values()].filter((item) => consultaSigueAbierta(item.estado, item.venceAtMs, ahora));
+      setState({ items: abiertas, porId: todas });
     };
 
     const listen = (field: ConsultaListenField, value: string) => {
@@ -89,5 +94,5 @@ export function useConsultasDisponibilidad() {
     };
   }, [db, deviceVerified, isPreviewMode, isEventual, bolsaCuil, empDocId, legajosKey, user?.uid]);
 
-  return items;
+  return state;
 }

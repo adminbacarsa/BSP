@@ -73,7 +73,8 @@ async function main() {
     'sin app ni mail se cierra y avisa ya',
     sola.ok && sola.value?.status === 'SIN_DESTINATARIOS' && solaDoc?.status === 'SIN_DESTINATARIOS'
       && /no le llegó: no tiene la app/.test(String(solaDoc?.resumen || ''))
-      && solaInv?.estado === 'NO_LLEGO' && aviso && pushes.empty && !solaDoc?.venceAt,
+      && solaInv?.estado === 'CANCELADA' && typeof solaInv?.venceAtMs === 'number' && solaInv.venceAtMs > 0 && solaInv?.cerradaAt
+      && aviso && pushes.empty && !solaDoc?.venceAt,
     `${sola.value?.status || sola.message} resumen=${solaDoc?.resumen} inv=${solaInv?.estado} aviso=${aviso} push=${pushes.size}`,
   );
 

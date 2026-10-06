@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
-  debeVencer, huecoKeyDe, pendientesACerrar, reservarLugar, revalidacionFalla, textoConsulta, textoEstadoConsulta, tomadosTrasNoElegible, venceEnMs,
+  cierreDeConsulta, debeVencer, huecoKeyDe, invitacionHayQueCerrarla, mensajeRespuestaCerrada, MENSAJE_CUBIERTO, MENSAJE_VENCIDA, MENSAJE_YA_NO_HACE_FALTA,
+  pendientesACerrar, reservarLugar, revalidacionFalla, textoConsulta, textoEstadoConsulta, tomadosTrasNoElegible, venceEnMs,
 } from './consultaDisponibilidad.mjs';
 
 const base = { lugares: 2, tomados: 0, status: 'ABIERTA', venceAtMs: 5_000, ahoraMs: 1_000, estadoInvitacion: 'PENDIENTE' };
@@ -50,6 +51,43 @@ describe('consulta de disponibilidad', () => {
     const falla = revalidacionFalla('Supera el tope mensual');
     assert.equal(falla.lugarLibre, true);
     assert.equal(falla.codigo, 'NO_ELEGIBLE');
+  });
+
+  it('al cerrar la consulta, AVISO_MAIL, NO_LLEGO y RESERVADO pasan al estado final', () => {
+    const cubierta = cierreDeConsulta('COMPLETA');
+    assert.equal(cubierta?.estado, 'CUBIERTO');
+    assert.equal(cubierta?.motivo, MENSAJE_CUBIERTO);
+    assert.equal(cubierta?.avisar, true);
+    assert.equal(cubierta?.tipoAviso, 'CONSULTA_CUBIERTA');
+    const cancelada = cierreDeConsulta('CERRADA');
+    assert.equal(cancelada?.estado, 'CANCELADA');
+    assert.equal(cancelada?.motivo, MENSAJE_YA_NO_HACE_FALTA);
+    assert.equal(cancelada?.avisar, true);
+    assert.equal(cierreDeConsulta('SIN_DESTINATARIOS')?.avisar, false);
+    assert.equal(cierreDeConsulta('SIN_DESTINATARIOS')?.estado, 'CANCELADA');
+    const vencida = cierreDeConsulta('VENCIDA');
+    assert.equal(vencida?.estado, 'VENCIDA');
+    assert.equal(vencida?.motivo, MENSAJE_VENCIDA);
+    assert.equal(vencida?.avisar, false);
+    assert.equal(cierreDeConsulta('ABIERTA'), null);
+    assert.equal(invitacionHayQueCerrarla('PENDIENTE'), true);
+    assert.equal(invitacionHayQueCerrarla('AVISO_MAIL'), true);
+    assert.equal(invitacionHayQueCerrarla('NO_LLEGO'), true);
+    assert.equal(invitacionHayQueCerrarla('RESERVADO'), true);
+    assert.equal(invitacionHayQueCerrarla('ASIGNADO'), false);
+    assert.equal(invitacionHayQueCerrarla('NO'), false);
+    assert.equal(invitacionHayQueCerrarla('CUBIERTO'), false);
+    assert.equal(mensajeRespuestaCerrada('CUBIERTO', 'COMPLETA', 'COMPLETA'), MENSAJE_CUBIERTO);
+    assert.equal(mensajeRespuestaCerrada('CANCELADA', 'CERRADA', 'YA_RESPONDIO'), MENSAJE_YA_NO_HACE_FALTA);
+    assert.equal(mensajeRespuestaCerrada('VENCIDA', 'VENCIDA', 'YA_RESPONDIO'), MENSAJE_VENCIDA);
+    assert.deepEqual(pendientesACerrar([
+      { id: 'a', estado: 'ASIGNADO' },
+      { id: 'b', estado: 'NO' },
+      { id: 'c', estado: 'AVISO_MAIL' },
+      { id: 'd', estado: 'NO_LLEGO' },
+      { id: 'e', estado: 'RESERVADO' },
+      { id: 'f', estado: 'CUBIERTO' },
+    ], 1, 1), ['c', 'd', 'e']);
   });
 
   it('el plazo no pasa del inicio del primer turno y el texto nombra el hueco', () => {

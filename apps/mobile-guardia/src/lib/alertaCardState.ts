@@ -134,7 +134,8 @@ export function resolveAlertaCard(input: AlertaCardInput): AlertaCardState {
   };
 
   const typeUp = String(input.type || '').trim().toUpperCase();
-  if (typeUp === 'CONSULTA_CUBIERTA') return open;
+  if (typeUp === 'CONSULTA_CUBIERTA') return closed('Ya se asignó a otra persona', null);
+  if (typeUp === 'CONSULTA_CANCELADA') return closed('Ya no hace falta', null);
 
   if (isCoverage(input.type)) {
     const live = input.conv ? fromConvStatus(input.conv) : null;

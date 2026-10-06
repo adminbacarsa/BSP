@@ -7,6 +7,8 @@ import {
   argsPreviewConsulta,
   consultaSigueAbierta,
   consultasListenKeys,
+  lineaInformativaConsulta,
+  textoRespuestaCerrada,
 } from './consultasDisponibilidadQuery';
 
 const SA = 'uid-superadmin';
@@ -65,6 +67,19 @@ describe('consultaSigueAbierta', () => {
     assert.equal(consultaSigueAbierta('PENDIENTE', 5, 10), false);
     assert.equal(consultaSigueAbierta('NO', null, 10), false);
     assert.equal(consultaSigueAbierta('NO_LLEGO', null, 10), false);
+    assert.equal(consultaSigueAbierta('CUBIERTO', 9_000, 10), false);
+    assert.equal(consultaSigueAbierta('CANCELADA', null, 10), false);
+    assert.equal(consultaSigueAbierta('VENCIDA', 9_000, 10), false);
+  });
+
+  it('la línea de Alertas y el mensaje al responder no son un error crudo', () => {
+    assert.equal(lineaInformativaConsulta('CUBIERTO'), 'Ya se asignó a otra persona');
+    assert.equal(lineaInformativaConsulta('CONSULTA_CANCELADA'), 'Ya no hace falta');
+    assert.equal(lineaInformativaConsulta('VENCIDA'), null);
+    assert.equal(textoRespuestaCerrada('COMPLETA', ''), 'Ya se asignó a otra persona. ¡Gracias!');
+    assert.equal(textoRespuestaCerrada('YA_RESPONDIO', 'Ya no hace falta, gracias'), 'Ya no hace falta, gracias');
+    assert.equal(textoRespuestaCerrada('VENCIDA', ''), 'La consulta venció.');
+    assert.equal(textoRespuestaCerrada('', ''), 'La consulta ya no está abierta.');
   });
 });
 

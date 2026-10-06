@@ -8,6 +8,7 @@ import * as admin from 'firebase-admin';
 import * as functions from 'firebase-functions/v1';
 import { asignarTurnosDeConsulta, exigirPuedeConsultar, prevalidarEventualConsulta } from './planificacionEventuales';
 import { asignarGuardiaDeConsulta, crearConsultaGuardias } from './consultaGuardiaServer';
+import { MailNotConfiguredError, sendSystemMail } from '../common/mailer';
 import { aplicarEntregasConsulta, type DestinoEntrega } from './consultaCanalServer';
 
 const AR_OFFSET = '-03:00';
@@ -15,7 +16,7 @@ const COL = 'consultas_disponibilidad';
 const INV = 'consultas_disponibilidad_invitaciones';
 
 type JornadaIn = { fecha: string; horaInicio: string; horaFin: string; horas?: number; code?: string; name?: string; positionName?: string };
-type RespuestaVista = { cuil: string; employeeId?: string | null; tipo?: string | null; nombre: string; estado: string; orden: number | null; hora: string | null; motivo: string | null };
+type RespuestaVista = { cuil: string; employeeId?: string | null; tipo?: string | null; nombre: string; estado: string; orden: number | null; hora: string | null; motivo: string | null; entregaNota?: string | null };
 type PersonaConsulta = { tipo: 'EVENTUAL' | 'GUARDIA'; cuil: string; employeeId: string | null };
 
 type LibConsulta = {
@@ -27,6 +28,9 @@ type LibConsulta = {
   tomadosTrasNoElegible: (respuestas: RespuestaVista[], cuil: string) => number;
   debeVencer: (p: { status: string; ahoraMs: number; venceAtMs: number }) => boolean;
   MENSAJE_CUBIERTO: string;
+  cierreDeConsulta: (status: string) => { estado: string; motivo: string; avisar: boolean; tipoAviso: string | null; linea: string | null } | null;
+  invitacionHayQueCerrarla: (estado: unknown) => boolean;
+  mensajeRespuestaCerrada: (estado: string, status: string, codigo: string) => string;
 };
 
 function db() {
@@ -93,11 +97,6 @@ function mismaPersona(r: RespuestaVista, p: PersonaConsulta): boolean {
 function refDePersona(consultaId: string, p: PersonaConsulta) {
   if (p.tipo === 'GUARDIA' && p.employeeId) return db().collection(INV).doc(`${consultaId}_emp_${p.employeeId}`);
   return invitacionRef(consultaId, p.cuil);
-}
-
-function personaDeRespuesta(r: RespuestaVista): PersonaConsulta {
-  if (r.tipo === 'GUARDIA' && r.employeeId) return { tipo: 'GUARDIA', cuil: '', employeeId: String(r.employeeId) };
-  return { tipo: 'EVENTUAL', cuil: r.cuil, employeeId: r.employeeId ? String(r.employeeId) : null };
 }
 
 function esperaRespuesta(estado: unknown): boolean {
@@ -241,8 +240,96 @@ async function marcarRespuesta(consultaId: string, persona: PersonaConsulta, pat
   });
 }
 
-async function cerrarSiCompleta(consultaId: string, actorUid: string) {
+async function mailDeInvitacion(inv: admin.firestore.DocumentData): Promise<string> {
+  const cuil = String(inv.bolsaCuil || '').replace(/\D/g, '');
+  if (cuil.length === 11) {
+    const bolsa = await db().collection('eventuales_bolsa').doc(cuil).get();
+    const mail = String(bolsa.data()?.mail || bolsa.data()?.email || '').trim();
+    if (mail) return mail;
+  }
+  const employeeId = String(inv.employeeId || '').trim();
+  if (!employeeId) return '';
+  const emp = await db().collection('empleados').doc(employeeId).get();
+  return String(emp.data()?.email || emp.data()?.mail || '').trim();
+}
+
+/**
+ * Único cierre de invitaciones. ASIGNADO y NO quedan.
+ * El resto (PENDIENTE, AVISO_MAIL, NO_LLEGO, RESERVADO) pasa al estado final.
+ * VENCIDA no avisa. Quien no recibió el aviso (NO_LLEGO) tampoco.
+ */
+export async function cerrarInvitacionesConsulta(consultaId: string, statusPadre: string): Promise<number> {
   const reglas = await lib();
+  const plan = reglas.cierreDeConsulta(statusPadre);
+  if (!plan || !consultaId) return 0;
+  const canal = await import('../eventuales-shared/consultaCanal.mjs') as {
+    textoNoLlego: (nombre: string, motivo: string) => string;
+  };
+  const parentRef = db().collection(COL).doc(consultaId);
+  const parentSnap = await parentRef.get();
+  const data = parentSnap.data() || {};
+  const vencePadre = Number(data.venceAtMs || data.venceAt?.toMillis?.() || 0);
+  const respuestas = ((data.respuestas || []) as RespuestaVista[]).map((r) => {
+    if (!reglas.invitacionHayQueCerrarla(r.estado)) return r;
+    const entregaNota = r.estado === 'NO_LLEGO'
+      ? (r.entregaNota || canal.textoNoLlego(r.nombre, String(r.motivo || '')))
+      : (r.entregaNota || null);
+    return { ...r, estado: plan.estado, motivo: plan.motivo, entregaNota };
+  });
+  if (parentSnap.exists) {
+    await parentRef.update({ respuestas, resumen: reglas.textoEstadoConsulta(respuestas) });
+  }
+  const invs = await db().collection(INV).where('consultaId', '==', consultaId).get();
+  let n = 0;
+  for (const inv of invs.docs) {
+    const d = inv.data();
+    const previo = String(d.estado || '');
+    if (!reglas.invitacionHayQueCerrarla(previo)) continue;
+    const vence = Number(d.venceAtMs || 0) > 0 ? Number(d.venceAtMs) : vencePadre;
+    const patch: Record<string, unknown> = {
+      estado: plan.estado,
+      motivo: plan.motivo,
+      cerradaAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    if (vence > 0) patch.venceAtMs = vence;
+    await inv.ref.update(patch);
+    n += 1;
+    const avisar = plan.avisar && previo !== 'NO_LLEGO';
+    if (!avisar) continue;
+    const uid = String(d.uid || '').trim();
+    const employeeId = String(d.employeeId || '').trim();
+    if (uid || employeeId) {
+      await db().collection('user_notifications').add({
+        ...(uid ? { uid } : {}),
+        employeeId: employeeId || null,
+        empresaId: data.empresaId || d.empresaId || null,
+        type: plan.tipoAviso,
+        target: 'employee',
+        title: plan.linea || plan.motivo,
+        body: plan.motivo,
+        consultaId,
+        invitacionId: inv.id,
+        read: false,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+    if (d.mailOk === true) {
+      try {
+        const mail = await mailDeInvitacion(d);
+        if (mail) {
+          await sendSystemMail({ to: mail, subject: plan.linea || plan.motivo, text: plan.motivo });
+        }
+      } catch (err) {
+        if (!(err instanceof MailNotConfiguredError)) {
+          console.warn('[consulta] el mail de cierre no salió');
+        }
+      }
+    }
+  }
+  return n;
+}
+
+async function cerrarSiCompleta(consultaId: string, actorUid: string) {
   const parentRef = db().collection(COL).doc(consultaId);
   const snap = await parentRef.get();
   const data = snap.data() || {};
@@ -250,37 +337,13 @@ async function cerrarSiCompleta(consultaId: string, actorUid: string) {
   const respuestas = (data.respuestas || []) as RespuestaVista[];
   const asignados = respuestas.filter((r) => r.estado === 'ASIGNADO').length;
   if (asignados < Number(data.lugares || 0)) return;
-  const pendientes = respuestas.filter((r) => esperaRespuesta(r.estado));
-  const cerradas = respuestas.map((r) => (esperaRespuesta(r.estado) ? { ...r, estado: 'CUBIERTO', motivo: reglas.MENSAJE_CUBIERTO } : r));
   await parentRef.update({
     status: 'COMPLETA',
     tomados: asignados,
-    respuestas: cerradas,
-    resumen: reglas.textoEstadoConsulta(cerradas),
     venceAt: admin.firestore.FieldValue.delete(),
     cerradaAt: admin.firestore.FieldValue.serverTimestamp(),
   });
-  for (const p of pendientes) {
-    const inv = refDePersona(consultaId, personaDeRespuesta(p));
-    const invSnap = await inv.get();
-    await inv.update({ estado: 'CUBIERTO', motivo: reglas.MENSAJE_CUBIERTO, venceAtMs: null });
-    const uid = String(invSnap.data()?.uid || '');
-    if (uid) {
-      await db().collection('user_notifications').add({
-        uid,
-        employeeId: invSnap.data()?.employeeId || null,
-        empresaId: data.empresaId || null,
-        type: 'CONSULTA_CUBIERTA',
-        target: 'employee',
-        title: 'Cupo completo',
-        body: reglas.MENSAJE_CUBIERTO,
-        consultaId,
-        invitacionId: inv.id,
-        read: false,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
-    }
-  }
+  await cerrarInvitacionesConsulta(consultaId, 'COMPLETA');
   await evento(consultaId, 'CERRADA', { actorUid, asignados });
   await auditar('CONSULTA_DISPONIBILIDAD_CERRADA', actorUid, String(data.empresaId || ''), `Consulta cubierta (${asignados}/${data.lugares}).`, { consultaId });
 }
@@ -333,7 +396,14 @@ export const responderConsultaDisponibilidad = functions.https.onCall(async (dat
 
   if (respuesta === 'NO') {
     if (inv.estado === 'NO') return { ok: true, idempotente: true, codigo: 'NO' };
-    if (!esperaRespuesta(inv.estado)) return { ok: false, codigo: 'YA_RESPONDIO' };
+    if (!esperaRespuesta(inv.estado)) {
+      const parent = await parentRef.get();
+      return {
+        ok: false,
+        codigo: 'YA_RESPONDIO',
+        motivo: reglas.mensajeRespuestaCerrada(String(inv.estado || ''), String(parent.data()?.status || ''), ''),
+      };
+    }
     const hora = horaAr(Date.now());
     await marcarRespuesta(consultaId, persona, { estado: 'NO', hora, motivo: null }, 'NO', { respondioAt: admin.firestore.FieldValue.serverTimestamp(), ...extraPreview });
     await evento(consultaId, 'RESPUESTA', { bolsaCuil: esGuardia ? null : cuil, employeeId: persona.employeeId, respuesta: 'NO', hora, uid, ...marcaPreview });
@@ -378,7 +448,14 @@ export const responderConsultaDisponibilidad = functions.https.onCall(async (dat
     return { decision, pdata, hora };
   });
 
-  if (!reserva.decision.ok) return { ok: false, codigo: reserva.decision.codigo || 'CERRADA' };
+  if (!reserva.decision.ok) {
+    const codigo = reserva.decision.codigo || 'CERRADA';
+    return {
+      ok: false,
+      codigo,
+      motivo: reglas.mensajeRespuestaCerrada(String(inv.estado || ''), String(reserva.pdata.status || ''), codigo),
+    };
+  }
   if (reserva.decision.idempotente && String(inv.estado) === 'ASIGNADO') return { ok: true, idempotente: true, codigo: 'ASIGNADO' };
   await evento(consultaId, 'RESPUESTA', { bolsaCuil: esGuardia ? null : cuil, employeeId: persona.employeeId, respuesta: 'SI', hora: reserva.hora, orden: reserva.decision.orden, uid, ...marcaPreview });
 
@@ -438,8 +515,6 @@ export const responderConsultaDisponibilidad = functions.https.onCall(async (dat
   }
 });
 
-const MENSAJE_YA_NO_HACE_FALTA = 'Ya no hace falta';
-
 /** Cierra una consulta abierta y avisa a los que todavía no respondieron. */
 export const cancelarConsultaDisponibilidad = functions.https.onCall(async (data, context) => {
   const auth = await exigirPuedeConsultar(context);
@@ -453,45 +528,13 @@ export const cancelarConsultaDisponibilidad = functions.https.onCall(async (data
     throw new functions.https.HttpsError('permission-denied', 'La consulta es de otra empresa.');
   }
   if (String(parent.status || '') !== 'ABIERTA') return { ok: true, codigo: 'YA_CERRADA', status: parent.status || null };
-  const respuestas = ((parent.respuestas || []) as RespuestaVista[]).map((r) => (
-    r.estado === 'PENDIENTE' || r.estado === 'RESERVADO'
-      ? { ...r, estado: 'CANCELADA', motivo: MENSAJE_YA_NO_HACE_FALTA, orden: null }
-      : r
-  ));
   await ref.update({
     status: 'CERRADA',
     venceAt: admin.firestore.FieldValue.delete(),
     canceladaAt: admin.firestore.FieldValue.serverTimestamp(),
     canceladaPor: auth.uid,
-    respuestas,
-    resumen: `Cancelada: ${MENSAJE_YA_NO_HACE_FALTA}`,
   });
-  for (const r of (parent.respuestas || []) as RespuestaVista[]) {
-    if (r.estado !== 'PENDIENTE' && r.estado !== 'RESERVADO') continue;
-    const inv = refDePersona(consultaId, personaDeRespuesta(r));
-    const invSnap = await inv.get();
-    const uid = invSnap.exists ? String(invSnap.data()?.uid || '') : '';
-    const employeeId = invSnap.exists ? (invSnap.data()?.employeeId || null) : null;
-    if (invSnap.exists) await inv.update({ estado: 'CANCELADA', motivo: MENSAJE_YA_NO_HACE_FALTA, orden: null });
-    if (uid) {
-      await db().collection('user_notifications').add({
-        uid,
-        employeeId,
-        empresaId: parent.empresaId || null,
-        type: 'CONSULTA_DISPONIBILIDAD',
-        target: 'employee',
-        title: MENSAJE_YA_NO_HACE_FALTA,
-        body: MENSAJE_YA_NO_HACE_FALTA,
-        consultaId,
-        objectiveId: parent.objectiveId || null,
-        objectiveName: parent.objectiveName || null,
-        positionName: parent.positionName || null,
-        read: false,
-        readAt: null,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
-    }
-  }
+  await cerrarInvitacionesConsulta(consultaId, 'CERRADA');
   await evento(consultaId, 'CANCELADA', { actorUid: auth.uid });
   await auditar('CONSULTA_DISPONIBILIDAD_CANCELADA', auth.uid, String(parent.empresaId || ''), 'Consulta cancelada: ya no hace falta.', { consultaId });
   return { ok: true, codigo: 'CERRADA' };
@@ -510,6 +553,7 @@ export async function vencerConsultasDisponibilidad(now: admin.firestore.Timesta
       venceAt: admin.firestore.FieldValue.delete(),
       vencidaAt: admin.firestore.FieldValue.serverTimestamp(),
     });
+    await cerrarInvitacionesConsulta(doc.id, 'VENCIDA');
     await evento(doc.id, 'VENCIDA', { tomados: data.tomados || 0, lugares: data.lugares || 0 });
     const tomados = Number(data.tomados || 0);
     const lugares = Number(data.lugares || 0);

@@ -1,6 +1,6 @@
 /**
  * Consulta de disponibilidad de guardias propios: dos francos, uno acepta.
- * Queda el FT en el turno (sin contrato ni ARCA) y el otro recibe «Ya se cubrió, gracias».
+ * Queda el FT en el turno (sin contrato ni ARCA) y el otro recibe «Ya se asignó a otra persona. ¡Gracias!».
  *   firebase emulators:exec --only firestore --config firebase.e2e-p2.json --project demo-consulta-guardia "node scripts/eval-consulta-guardias-emulator.mjs"
  * Antes: `npm run build` en apps/functions (o tsc + sync eventuales-shared).
  */
@@ -114,7 +114,7 @@ async function main() {
   const avisoLuis = pushes.length
     ? (await db.collection('user_notifications').where('uid', '==', LUIS.uid).get()).docs.map((d) => d.data())
     : [];
-  report('el otro recibe que ya se cubrió', otro.value?.codigo === 'COMPLETA' && invLuis?.estado === 'CUBIERTO' && invLuis?.motivo === 'Ya se cubrió, gracias' && avisoLuis.some((n) => n.type === 'CONSULTA_CUBIERTA' && n.body === 'Ya se cubrió, gracias'), `${otro.value?.codigo || otro.message} estado=${invLuis?.estado} motivo=${invLuis?.motivo}`);
+  report('el otro recibe que ya se asignó', otro.value?.codigo === 'COMPLETA' && otro.value?.motivo === 'Ya se asignó a otra persona. ¡Gracias!' && invLuis?.estado === 'CUBIERTO' && invLuis?.motivo === 'Ya se asignó a otra persona. ¡Gracias!' && avisoLuis.some((n) => n.type === 'CONSULTA_CUBIERTA' && n.body === 'Ya se asignó a otra persona. ¡Gracias!' && n.employeeId), `${otro.value?.codigo || otro.message} estado=${invLuis?.estado} motivo=${invLuis?.motivo}`);
   const turnoLuis = (await db.collection('turnos').doc(`franco-${LUIS.employeeId}`).get()).data() || {};
   report('el que no llegó sigue de franco', turnoLuis.code === 'F' && turnoLuis.isFrancoTrabajado !== true, `code=${turnoLuis.code}`);
 
