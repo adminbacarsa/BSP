@@ -235,7 +235,7 @@ export function isActiveAbsence(doc: any): boolean {
     if (isLlegadaTarde(doc)) return false;
     const st = String(doc?.status || '').toLowerCase().trim();
     if (!st) return true; // legacy: sin status → la respetamos
-    if (st === 'rechazada' || st === 'rejected' || st === 'cancelada' || st === 'cancelled') return false;
+    if (st === 'rechazada' || st === 'rejected' || st === 'cancelada' || st === 'cancelled' || st === 'anulada') return false;
     // Confirmada: hecho operativo automático (No Presentación AA) — siempre activo
     if (st === 'confirmada') return true;
     if (st === 'en verificación' || st === 'en verificacion') return true;
