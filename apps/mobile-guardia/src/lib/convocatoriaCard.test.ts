@@ -178,6 +178,7 @@ describe('buildEventoCardModel', () => {
         status: 'convocado',
       },
       firstName: 'Laura',
+      now: new Date('2026-10-05T12:00:00-03:00'),
       eventosMap: {
         'ev-1': {
           id: 'ev-1',
@@ -213,7 +214,7 @@ describe('buildEventoCardModel', () => {
     assert.equal(m.fecha, '12/10/2026');
     assert.equal(m.horario, '18:00–02:00');
     assert.equal(m.actions, 'ACCEPT_REJECT');
-    assert.match(m.message, /^Laura, te convocamos al evento Recital Plaza \(Control de acceso\) el 12\/10\/2026 de 18:00 a 02:00\.$/);
+    assert.match(m.message, /^Laura, te convocamos al evento Recital Plaza \(Control de acceso\) el Lun 12\/10 18:00–Mar 13\/10 02:00\.$/);
   });
 });
 
@@ -282,21 +283,24 @@ describe('buildInboxCardModel (Alertas)', () => {
 
 describe('consulta de disponibilidad en bloque', () => {
   it('pregunta por los N días, lista cada jornada y avisa si son dos contratos', () => {
+    const ahora = new Date('2026-10-05T12:00:00-03:00');
     const uno = armarPreguntaDisponibilidad({
       objetivo: 'Peaje',
+      now: ahora,
       jornadas: [{ fecha: '2026-10-06', code: 'M', horaInicio: '07:00', horaFin: '15:00' }],
     });
     assert.equal(uno, null);
     const bloque = armarPreguntaDisponibilidad({
       objetivo: 'Peaje 9 Norte',
       puesto: 'Puesto 1',
+      now: ahora,
       jornadas: [
         { fecha: '2026-10-15', code: 'M', horaInicio: '07:00', horaFin: '15:00' },
         { fecha: '2026-10-06', code: 'M', horaInicio: '07:00', horaFin: '15:00' },
       ],
     });
-    assert.equal(bloque?.pregunta, '¿Podés cubrir 2 días (06/10 → 15/10) en Peaje 9 Norte · Puesto 1?');
-    assert.deepEqual(bloque?.detalle, ['06/10 · M 07:00–15:00', '15/10 · M 07:00–15:00']);
+    assert.equal(bloque?.pregunta, '¿Podés cubrir 2 días (Mañana → Jue 15/10) en Peaje 9 Norte · Puesto 1?');
+    assert.deepEqual(bloque?.detalle, ['Mañana · M 07:00–15:00', 'Jue 15/10 · M 07:00–15:00']);
     assert.equal(bloque?.contratos, null);
     const cruza = armarPreguntaDisponibilidad({
       objetivo: 'Peaje',
@@ -314,7 +318,7 @@ describe('consulta de disponibilidad en bloque', () => {
     });
     assert.equal(model.kind, 'DISPONIBILIDAD');
     assert.equal(model.title, '¿Podés cubrir?');
-    assert.deepEqual(model.detalle, ['06/10 · M 07:00–15:00', '15/10 · M 07:00–15:00']);
+    assert.deepEqual(model.detalle, ['Mañana · M 07:00–15:00', 'Jue 15/10 · M 07:00–15:00']);
     assert.equal(model.acceptLabel, 'Sí, puedo');
   });
 
@@ -332,11 +336,12 @@ describe('consulta de disponibilidad en bloque', () => {
           { fecha: '2026-10-06', code: 'M', horaInicio: '07:00', horaFin: '15:00' },
         ],
       },
+      now: new Date('2026-10-05T12:00:00-03:00'),
     });
     assert.equal(m?.kind, 'DISPONIBILIDAD');
     assert.equal(m?.title, '¿Podés cubrir?');
-    assert.match(m?.message || '', /2 días \(06\/10 → 15\/10\)/);
-    assert.deepEqual(m?.detalle, ['06/10 · M 07:00–15:00', '15/10 · M 07:00–15:00']);
+    assert.match(m?.message || '', /2 días \(Mañana → Jue 15\/10\)/);
+    assert.deepEqual(m?.detalle, ['Mañana · M 07:00–15:00', 'Jue 15/10 · M 07:00–15:00']);
     assert.equal(m?.acceptLabel, 'Sí, puedo');
   });
 });

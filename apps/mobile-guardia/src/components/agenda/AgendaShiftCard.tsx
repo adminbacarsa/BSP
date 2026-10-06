@@ -1,6 +1,6 @@
-import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { formatDateAr, formatTimeAr, isEvShift, resolveEvShiftDisplay } from '@cosp/portal-core';
+import { isEvShift, resolveEvShiftDisplay } from '@cosp/portal-core';
 import type { Evento, ObjectiveLocation, Shift } from '@cosp/portal-types';
 import {
   isAgendaAbsentShift,
@@ -10,6 +10,8 @@ import {
 } from '../../lib/agendaCalendar';
 import { resolveShiftPlacement } from '../../lib/shiftPlacement';
 import { firmarAnexoDelTurno } from '../../lib/heroShiftCard';
+import { buildAgendaShiftView, type AgendaEstadoChip } from '../../lib/agendaShiftCard';
+import { arYmd, etiquetaDiaYmd, formatCuandoTurno, toDateTurno } from '../../lib/fechaTurno';
 import { CommandButton } from '../ui/CommandButton';
 import { radius, shadow } from '../../theme/tokens';
 import { useTheme } from '../../theme/ThemeContext';
@@ -36,47 +38,20 @@ export function AgendaShiftCard({ item, eventosMap, objectivesMap, empresaLabel 
   const isEv = isEvShift(item);
   const placement = resolveShiftPlacement(item, objectivesMap);
 
-  const codeLabel = isAbsent
-    ? 'AA'
-    : isRetention
-      ? 'RET'
-      : isFranco
-        ? 'F'
-        : isFt
-          ? 'FT'
-          : isEv
-            ? 'EV'
-            : String(item.code || 'T').toUpperCase();
-
-  const title = isAbsent
-    ? 'Ausente'
-    : isRetention
-      ? 'Retenido'
-      : isOps
-        ? 'Cobertura'
-        : isFranco
-          ? 'Franco'
-          : isFt
-            ? 'Franco trabajado'
-            : ev?.nombre || placement.objective;
-
-  const timeLine = isFranco
-    ? formatDateAr(item.startTime)
-    : ev?.horarioBadge
-      ? `${formatDateAr(item.startTime)} · ${ev.horarioBadge}`
-      : `${formatDateAr(item.startTime)} · ${formatTimeAr(item.startTime)} – ${formatTimeAr(item.endTime)}`;
-
-  const metaLine = isAbsent
-    ? `${placement.line} · no corresponde asistir`
-    : isRetention
-      ? `${placement.line} · esperá al relevo`
-      : isOps
-        ? `Turno asignado · ${placement.line}`
-        : isFranco
-          ? 'Día libre programado'
-          : isWorked
-            ? `${placement.line} · ya trabajado`
-            : placement.line;
+  const start = toDateTurno(item.startTime);
+  const cuando = isFranco
+    ? (start ? etiquetaDiaYmd(arYmd(start)) : null)
+    : formatCuandoTurno(item.startTime, item.endTime);
+  const view = buildAgendaShiftView({
+    cuando,
+    placement,
+    ev: isEv ? ev : null,
+    isFranco,
+    isAbsent,
+    isRetention,
+    isWorked,
+    isFt,
+  });
 
   const accentColor = isAbsent
     ? '#b45309'
@@ -119,9 +94,6 @@ export function AgendaShiftCard({ item, eventosMap, objectivesMap, empresaLabel 
       ]}
     >
       <View style={[styles.rowAccent, { backgroundColor: accentColor }]} />
-      <View style={styles.codeBox}>
-        <Text style={[styles.codeText, { color: accentColor }]}>{codeLabel}</Text>
-      </View>
       <View style={styles.rowBody}>
         {empresaLabel ? (
           <View style={[styles.empresaBadge, { backgroundColor: palette.inputBg, borderColor: palette.cardBorder }]}>
@@ -130,36 +102,30 @@ export function AgendaShiftCard({ item, eventosMap, objectivesMap, empresaLabel 
             </Text>
           </View>
         ) : null}
-        <Text style={[styles.rowTitle, { color: palette.onSurface }]}>{title}</Text>
-        <Text style={[styles.rowSub, { color: palette.onSurfaceMuted }]}>{timeLine}</Text>
-        <Text
-          style={[styles.rowMeta, { color: isFranco ? palette.onSurfaceMuted : accentColor }]}
-          numberOfLines={3}
-        >
-          {metaLine}
-        </Text>
+        {view.cuando ? (
+          <Text style={[styles.rowTitle, { color: palette.onSurface }]}>{view.cuando}</Text>
+        ) : null}
+        {view.whereTitle ? (
+          <Text style={[styles.rowSub, { color: palette.onSurface }]} numberOfLines={2}>
+            {view.whereTitle}
+          </Text>
+        ) : null}
+        {view.wherePlace ? (
+          <Text style={[styles.rowAddr, { color: palette.onSurfaceMuted }]} numberOfLines={2}>
+            {view.wherePlace}
+          </Text>
+        ) : null}
+        {view.note ? (
+          <Text style={[styles.rowMeta, { color: palette.onSurfaceMuted }]} numberOfLines={2}>
+            {view.note}
+          </Text>
+        ) : null}
         {isAbsent ? (
           <Text style={[styles.certHint, { color: '#92400e' }]}>
             Si corresponde, presentá el certificado a RRHH (idealmente hoy).
           </Text>
         ) : null}
-        {ev?.eventoNombre && ev.eventoNombre !== ev.nombre ? (
-          <Text style={[styles.rowMeta, { color: palette.warning }]}>{ev.eventoNombre}</Text>
-        ) : null}
-        {ev?.direccion ? (
-          <Text style={[styles.rowAddr, { color: palette.onSurfaceMuted }]} numberOfLines={2}>
-            {ev.direccion}
-          </Text>
-        ) : null}
-        {ev?.mapsUrl && !isAbsent ? (
-          <CommandButton
-            label="Cómo llegar"
-            variant="ghost"
-            onPress={() => void Linking.openURL(ev.mapsUrl!)}
-            style={styles.mapsBtn}
-          />
-        ) : null}
-        {firmarAnexo.visible && !isAbsent ? (
+        {view.permiteAcciones && firmarAnexo.visible ? (
           <CommandButton
             label={firmarAnexo.label}
             variant="secondary"
@@ -168,27 +134,9 @@ export function AgendaShiftCard({ item, eventosMap, objectivesMap, empresaLabel 
           />
         ) : null}
       </View>
-      {isAbsent ? (
-        <View style={styles.badgeAbsent}>
-          <Text style={styles.badgeAbsentText}>Ausente</Text>
-        </View>
-      ) : isRetention ? (
-        <View style={styles.badgeRetention}>
-          <Text style={styles.badgeRetentionText}>Retenido</Text>
-        </View>
-      ) : item.isPresent || isWorked ? (
-        <View style={styles.badgeOk}>
-          <Text style={styles.badgeOkText}>{item.isPresent ? 'Presente' : 'Trabajado'}</Text>
-        </View>
-      ) : isOps ? (
-        <View style={styles.badgeOps}>
-          <Text style={styles.badgeOpsText}>Cobertura</Text>
-        </View>
-      ) : isFranco ? (
-        <View style={[styles.badgeFranco, { backgroundColor: palette.inputBg }]}>
-          <Text style={[styles.badgeFrancoText, { color: palette.success }]}>Libre</Text>
-        </View>
-      ) : null}
+      <View style={[styles.badge, { backgroundColor: badgeBg(view.estado, palette.inputBg) }]}>
+        <Text style={[styles.badgeText, { color: badgeFg(view.estado, palette.success) }]}>{view.estado}</Text>
+      </View>
     </View>
   );
 }
@@ -242,6 +190,22 @@ export function AgendaPeriodNav({ title, onPrev, onNext, onToday }: NavProps) {
   );
 }
 
+function badgeBg(estado: AgendaEstadoChip, francoBg: string): string {
+  if (estado === 'Trabajado') return '#d1fae5';
+  if (estado === 'Ausente') return '#fef3c7';
+  if (estado === 'Retenido') return '#ffedd5';
+  if (estado === 'Franco') return francoBg;
+  return '#e0e7ff';
+}
+
+function badgeFg(estado: AgendaEstadoChip, francoFg: string): string {
+  if (estado === 'Ausente') return '#92400e';
+  if (estado === 'Retenido') return '#c2410c';
+  if (estado === 'Franco') return francoFg;
+  if (estado === 'Próximo') return '#3730a3';
+  return '#065f46';
+}
+
 const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
@@ -252,13 +216,6 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   rowAccent: { width: 4 },
-  codeBox: {
-    width: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-  },
-  codeText: { fontWeight: '900', fontSize: 11 },
   rowBody: { flex: 1, paddingVertical: 14, paddingRight: 8, gap: 4 },
   rowTitle: { fontWeight: '800', fontSize: 16 },
   empresaBadge: {
@@ -271,54 +228,18 @@ const styles = StyleSheet.create({
   },
   empresaBadgeText: { fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.4 },
   rowSub: { fontSize: 13, fontWeight: '600' },
-  rowMeta: { fontSize: 12, fontWeight: '700' },
+  rowMeta: { fontSize: 12, fontWeight: '500' },
   certHint: { fontSize: 11, fontWeight: '700', lineHeight: 15, marginTop: 2 },
   rowAddr: { fontSize: 12, lineHeight: 17 },
   mapsBtn: { alignSelf: 'flex-start', marginTop: 2 },
-  badgeOk: {
-    alignSelf: 'center',
-    marginRight: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: radius.pill,
-    backgroundColor: '#d1fae5',
-  },
-  badgeOkText: { fontWeight: '800', fontSize: 11 },
-  badgeAbsent: {
-    alignSelf: 'center',
-    marginRight: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: radius.pill,
-    backgroundColor: '#fef3c7',
-  },
-  badgeAbsentText: { fontWeight: '800', fontSize: 11, color: '#92400e' },
-  badgeOps: {
-    alignSelf: 'center',
-    marginRight: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: radius.pill,
-    backgroundColor: '#ffedd5',
-  },
-  badgeOpsText: { fontWeight: '800', fontSize: 11, color: '#c2410c' },
-  badgeRetention: {
-    alignSelf: 'center',
-    marginRight: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: radius.pill,
-    backgroundColor: '#ffedd5',
-  },
-  badgeRetentionText: { fontWeight: '800', fontSize: 11, color: '#c2410c' },
-  badgeFranco: {
+  badge: {
     alignSelf: 'center',
     marginRight: 12,
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: radius.pill,
   },
-  badgeFrancoText: { fontWeight: '800', fontSize: 11 },
+  badgeText: { fontWeight: '800', fontSize: 11 },
   empty: {
     borderRadius: radius.lg,
     borderWidth: 1,

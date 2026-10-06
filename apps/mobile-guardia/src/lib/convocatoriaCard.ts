@@ -9,6 +9,7 @@
 import type { Evento, FirestoreTimestampLike, ObjectiveLocation, Shift, SolicitudEvento } from '@cosp/portal-types';
 import type { ConvocatoriaCobertura } from './convocatoriasCobertura';
 import { isAvisoEntrante, isRetencionAviso } from './avisosCc';
+import { addDaysYmd, etiquetaDiaYmd, formatCuandoTurno, formatLineaJornada } from './fechaTurno';
 
 /* Helpers de fecha locales (mismo criterio que portal-core `toDate` / `formatTimeAr`):
  * el módulo se testea en Node sin cargar el índice de portal-core. */
@@ -290,6 +291,8 @@ export type EventoCardInput = {
   sol: SolicitudEvento;
   firstName?: string | null;
   eventosMap?: Record<string, Evento>;
+  /** Para «Hoy» / «Mañana». En tests se fija. */
+  now?: Date;
 };
 
 /** Convocatoria a un evento: Aceptar / Rechazar. */
@@ -301,9 +304,24 @@ export function buildEventoCardModel(input: EventoCardInput): ConvocatoriaCardMo
   const hi = hhmm(sol.jornada?.horaInicio ?? servicio?.horaInicio ?? evento?.horaInicio);
   const hf = hhmm(sol.jornada?.horaFin ?? servicio?.horaFin ?? evento?.horaFin);
   const horario = hi ? (hf ? `${hi}–${hf}` : hi) : null;
-  const fecha = fechaDeYmd(sol.jornada?.fecha ?? sol.servicioFecha ?? servicio?.fecha ?? evento?.fecha);
+  const fechaYmd = String(sol.jornada?.fecha ?? sol.servicioFecha ?? servicio?.fecha ?? evento?.fecha ?? '').slice(0, 10);
+  const fecha = fechaDeYmd(fechaYmd);
   const objetivo = first(servicio?.ubicacion?.objectiveNombre, servicio?.ubicacion?.direccion, sol.eventoNombre);
-  const cuando = [fecha ? `el ${fecha}` : '', horario ? `de ${horario.replace('–', ' a ')}` : ''].filter(Boolean).join(' ');
+  const ahora = input.now ?? new Date();
+  const finYmd = hi && hf && hf < hi ? addDaysYmd(fechaYmd, 1) : fechaYmd;
+  const cuandoRelativo =
+    fechaYmd.length === 10 && hi
+      ? formatCuandoTurno(
+          `${fechaYmd}T${hi}:00-03:00`,
+          hf ? `${finYmd}T${hf}:00-03:00` : undefined,
+          ahora,
+        )
+      : null;
+  const cuando = cuandoRelativo
+    ? /^(Hoy|Mañana)\b/.test(cuandoRelativo)
+      ? cuandoRelativo
+      : `el ${cuandoRelativo}`
+    : [fecha ? `el ${fecha}` : '', horario ? `de ${horario.replace('–', ' a ')}` : ''].filter(Boolean).join(' ');
   const base = `te convocamos al evento ${first(sol.eventoNombre) || ''}${sol.servicioNombre ? ` (${sol.servicioNombre})` : ''}${cuando ? ` ${cuando}` : ''}.`;
   return {
     id: String(sol.id || `${sol.eventoId}_${sol.servicioId}`),
@@ -411,6 +429,8 @@ export type InboxCardInput = {
   firstName?: string | null;
   shifts?: Shift[];
   objectivesMap?: Record<string, ObjectiveLocation>;
+  /** Para «Hoy» / «Mañana» en la consulta. En tests se fija. */
+  now?: Date;
 };
 
 /** ¿La alerta de la bandeja se muestra con la tarjeta de convocatoria? */
@@ -431,29 +451,24 @@ export type JornadaDisponibilidadCard = { fecha?: string; code?: string; horaIni
 
 const MESES_CARD = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 
-function ddmmCard(fecha: string): string {
-  const [, m, d] = String(fecha || '').split('-');
-  return d && m ? `${d}/${m}` : String(fecha || '');
-}
-
 /** Pregunta del bloque para la tarjeta. Un solo día queda en el texto que guardó el servidor. */
 export function armarPreguntaDisponibilidad(input: {
   cliente?: string | null;
   objetivo?: string | null;
   puesto?: string | null;
   jornadas?: JornadaDisponibilidadCard[] | null;
+  now?: Date;
 }): { pregunta: string; detalle: string[]; contratos: string | null } | null {
+  const ahora = input.now ?? new Date();
   const list = (input.jornadas || [])
     .filter((j) => String(j?.fecha || '').length >= 10)
     .slice()
     .sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)));
   if (list.length <= 1) return null;
   const lugar = [input.cliente, input.objetivo, input.puesto].map((s) => String(s || '').trim()).filter(Boolean).join(' · ');
-  const detalle = list.map((j) => {
-    const code = String(j.code || '').trim();
-    const horario = `${String(j.horaInicio || '').slice(0, 5)}–${String(j.horaFin || '').slice(0, 5)}`;
-    return `${ddmmCard(String(j.fecha))} · ${code ? `${code} ` : ''}${horario}`;
-  });
+  const detalle = list.map((j) =>
+    formatLineaJornada(String(j.fecha), String(j.code || ''), String(j.horaInicio || ''), String(j.horaFin || ''), ahora),
+  );
   const meses = [...new Set(list.map((j) => String(j.fecha).slice(0, 7)))].sort();
   const contratos = meses.length < 2 ? null : (() => {
     const nombres = meses.map((mes) => {
@@ -464,7 +479,9 @@ export function armarPreguntaDisponibilidad(input: {
       ? `Son dos contratos (${nombres[0]} y ${nombres[1]}).`
       : `Son ${meses.length} contratos (${nombres.join(', ')}).`;
   })();
-  const pregunta = `¿Podés cubrir ${list.length} días (${ddmmCard(String(list[0].fecha))} → ${ddmmCard(String(list[list.length - 1].fecha))})${lugar ? ` en ${lugar}` : ''}?`;
+  const desde = etiquetaDiaYmd(String(list[0].fecha).slice(0, 10), ahora);
+  const hasta = etiquetaDiaYmd(String(list[list.length - 1].fecha).slice(0, 10), ahora);
+  const pregunta = `¿Podés cubrir ${list.length} días (${desde} → ${hasta})${lugar ? ` en ${lugar}` : ''}?`;
   return { pregunta, detalle, contratos };
 }
 
@@ -536,7 +553,16 @@ export function buildInboxCardModel(input: InboxCardInput): ConvocatoriaCardMode
       objetivo: first(item.objectiveName),
       puesto: first(item.positionName),
       jornadas: item.jornadas,
+      now: input.now,
     });
+    const jornada = !bloque
+      ? (item.jornadas || []).find((j) => String(j?.fecha || '').length >= 10)
+      : undefined;
+    const ymd = String(jornada?.fecha || '').slice(0, 10);
+    const fecha = ymd.length === 10 ? `${ymd.slice(8, 10)}/${ymd.slice(5, 7)}/${ymd.slice(0, 4)}` : null;
+    const hi = String(jornada?.horaInicio || '').slice(0, 5);
+    const hf = String(jornada?.horaFin || '').slice(0, 5);
+    const horario = hi && hf ? `${hi}–${hf}` : null;
     return buildDisponibilidadCardModel({
       id: item.id,
       title: bloque ? '¿Podés cubrir?' : undefined,
@@ -547,6 +573,8 @@ export function buildInboxCardModel(input: InboxCardInput): ConvocatoriaCardMode
       cliente: first(item.clientName),
       objetivo: first(item.objectiveName),
       puesto: first(item.positionName),
+      fecha,
+      horario,
       timeoutAtMs: toMs(item.timeoutAt),
     });
   }
