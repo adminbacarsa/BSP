@@ -107,6 +107,9 @@ export function ConvocatoriaCard({
             <Text style={[styles.detailLine, { color: palette.onSurface }]}>{model.puesto}</Text>
           ) : null}
           {cuando ? <Text style={[styles.detailLine, { color: palette.onSurface }]}>{cuando}</Text> : null}
+          {model.detalle?.map((linea, i) => (
+            <Text key={`${i}-${linea}`} style={[styles.detailLine, { color: palette.onSurface }]}>{linea}</Text>
+          ))}
           {model.codigo ? (
             <Text style={[styles.detailLine, { color: palette.onSurfaceMuted }]}>Código {model.codigo}</Text>
           ) : null}

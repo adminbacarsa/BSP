@@ -5,19 +5,30 @@
  * Lee la callable `listarCandidatosEventuales` (solo disponibles y habilitados para la empresa del objetivo;
  * el cruce 12 h con otras empresas del grupo se muestra como motivo). Escribe nada: el `onSelect`
  * decide (asignar / sustituir) y llama a la callable correspondiente.
+ *
+ * Con `consulta` (cobertura de licencia) hay dos modos: «Preguntar disponibilidad» (recomendado, se
+ * marca a quién y se manda la consulta; un lugar por día) y «Asignar directo» (con confirmación).
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import { httpsCallable } from 'firebase/functions';
-import { AlertTriangle, Loader2, MapPin, Phone, RotateCcw, Search, ShieldCheck, UserCheck, UserX } from 'lucide-react';
-import { PuntajeChip } from '@/components/desempeno/PuntajeChip';
+import { AlertTriangle, Loader2, RotateCcw, Search } from 'lucide-react';
 import { functions } from '@/lib/firebase';
 import { toast } from 'sonner';
 import { mensajeErrorCallable } from '@/lib/eventos/convocatoriaPlan';
-import { GrupoCandidatosHeader, PruebasBadge, SinEspecificarAviso, type GrupoCupoUi } from '@/components/servicios/EventoConvocarResumen';
+import { GrupoCandidatosHeader, SinEspecificarAviso, type GrupoCupoUi } from '@/components/servicios/EventoConvocarResumen';
 import { grupoDeGenero } from '@/lib/eventuales/cupoGenero.mjs';
 import { ConsultaDisponibilidadEstado } from '@/components/eventuales/ConsultaDisponibilidadEstado';
+import {
+    BarraPreguntar,
+    ConfirmarAsignacion,
+    ModoEventualesSelector,
+    NoDisponiblesLista,
+    TarjetaEventual,
+    type CandidatoTarjeta,
+} from '@/components/eventuales/EventualesCandidatosUx';
+import { ESPERA_DEFAULT_MIN, separarCandidatos, textoTopeBloque, type ModoEventuales } from '@/lib/planificacion/coberturaEventualesUx';
 
-export type JornadaEventual = { fecha: string; horaInicio: string; horaFin: string; horas: number };
+export type JornadaEventual = { fecha: string; horaInicio: string; horaFin: string; horas: number; code?: string };
 
 export type CandidatoEventual = {
     cuil: string;
@@ -91,17 +102,22 @@ export default function EventualesCandidatosPanel({
     /** «Ver» los ocultos por tope: solo lectura, no se pueden elegir. */
     const [verOcultosTope, setVerOcultosTope] = useState(false);
     const [marcados, setMarcados] = useState<string[]>([]);
-    const [lugares, setLugares] = useState(1);
-    const [venceMinutos, setVenceMinutos] = useState(120);
+    const [venceMinutos, setVenceMinutos] = useState(ESPERA_DEFAULT_MIN);
     const [enviando, setEnviando] = useState(false);
+    /** Sin consulta (eventos, sustituir) solo existe asignar; con consulta arranca en preguntar. */
+    const [modo, setModo] = useState<ModoEventuales>(consulta ? 'preguntar' : 'asignar');
+    const [confirmando, setConfirmando] = useState<CandidatoEventual | null>(null);
     const key = jornadasKey(jornadas);
     const veLista = canConvocar || !!consulta;
+    const puedePreguntar = !!consulta;
+    const modoEfectivo: ModoEventuales = !puedePreguntar ? 'asignar' : !canConvocar ? 'preguntar' : modo;
 
     useEffect(() => {
         if (!veLista || !empresaId || jornadas.length === 0) { setRows([]); return; }
         let alive = true;
         setLoading(true);
         setError(null);
+        setConfirmando(null);
         const call = httpsCallable<Record<string, unknown>, { candidatos: CandidatoEventual[] }>(functions, 'listarCandidatosEventuales');
         call({ empresaId, objectiveId: objectiveId || null, clientId: clientId || null, objetivoGeo: objetivoGeo || null, jornadas, excluirTurnoIds: excluirTurnoIds || [] })
             .then(res => { if (alive) setRows((res.data?.candidatos || []).filter(c => c.cuil !== excluirCuil)); })
@@ -111,12 +127,12 @@ export default function EventualesCandidatosPanel({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [empresaId, objectiveId, key, veLista, excluirCuil, (excluirTurnoIds || []).join(','), intento]);
 
-    const ocultosTope = useMemo(() => rows.filter(esOcultoPorTopeUi), [rows]);
     const filtered = useMemo(() => {
         const s = search.trim().toLowerCase();
-        const base = verOcultosTope ? rows : rows.filter((r) => !esOcultoPorTopeUi(r));
-        return s ? base.filter(r => `${r.nombre} ${r.cuil}`.toLowerCase().includes(s)) : base;
-    }, [rows, search, verOcultosTope]);
+        return s ? rows.filter(r => `${r.nombre} ${r.cuil}`.toLowerCase().includes(s)) : rows;
+    }, [rows, search]);
+    const partes = useMemo(() => separarCandidatos(filtered), [filtered]);
+    const ocultosTope = useMemo(() => rows.filter(esOcultoPorTopeUi), [rows]);
 
     if (!veLista) {
         return (
@@ -135,10 +151,11 @@ export default function EventualesCandidatosPanel({
         setEnviando(true);
         try {
             const call = httpsCallable<Record<string, unknown>, { resumen?: string; omitidos?: { motivo: string }[] }>(functions, 'crearConsultaDisponibilidad');
+            // Cobertura de licencia: siempre un lugar por día. El primero que acepte cubre.
             const res = await call({
                 empresaId, objectiveId: objectiveId || null, clientId: clientId || null, objetivoGeo: objetivoGeo || null,
                 clientName: consulta.clientName || null, objectiveName: consulta.objectiveName || null, positionName: consulta.positionName || null,
-                jornadas, cuils: marcados, lugares: Math.min(lugares, marcados.length), venceMinutos,
+                jornadas, cuils: marcados, lugares: 1, venceMinutos,
             });
             const omitidos = res.data?.omitidos?.length || 0;
             toast.success(res.data?.resumen || 'Consulta enviada.');
@@ -151,10 +168,56 @@ export default function EventualesCandidatosPanel({
         }
     };
 
-    const elegibles = rows.filter(r => r.elegible).length;
+    const bloque = jornadas.length > 1 && puedePreguntar;
+    const tarjetaDe = (c: CandidatoEventual): CandidatoTarjeta => {
+        const prontos = c.vencimientos.filter(v => v.estado === 'PRONTO').map(v => `${TIPO_LABEL[v.tipo] || v.tipo} vence ${v.fecha}`);
+        const avisos = [...prontos, ...(c.alertas || [])];
+        const topeBloque = bloque
+            ? (textoTopeBloque(c.horasMes, jornadas) || (c.motivoCodigo === 'TOPE_HORAS' ? `El bloque no entra en el tope del mes. ${c.motivo || ''}`.trim() : null))
+            : null;
+        return {
+            cuil: c.cuil,
+            nombre: c.nombre,
+            telefono: c.telefono,
+            elegible: c.elegible,
+            motivo: c.motivo,
+            motivoCodigo: c.motivoCodigo,
+            distanciaKm: c.distanciaKm,
+            pruebasSinMarco: c.pruebasSinMarco,
+            horasMes: c.horasMes ? { texto: avisos.length ? `${c.horasMes.texto} · ${avisos.join(' · ')}` : c.horasMes.texto, aviso: c.horasMes.aviso } : (avisos.length ? { texto: avisos.join(' · '), aviso: false } : null),
+            topeBloque,
+        };
+    };
+
+    const elegirDirecto = (c: CandidatoEventual) => {
+        if (!canConvocar || busy) return;
+        if (puedePreguntar) { setConfirmando(c); return; }
+        onSelect(c);
+    };
+
+    const renderElegibles = (lista: CandidatoEventual[]) => lista.map((c) => {
+        const tarjeta = tarjetaDe(c);
+        return (
+            <TarjetaEventual
+                key={c.cuil}
+                c={tarjeta}
+                modo={modoEfectivo}
+                marcado={marcados.includes(c.cuil)}
+                disabled={!!busy || !!tarjeta.topeBloque || (modoEfectivo === 'asignar' && !canConvocar)}
+                onToggle={() => toggleMarcado(c.cuil)}
+                onAsignar={() => elegirDirecto(c)}
+            />
+        );
+    });
+
+    const elegibles = rows.filter(r => r.elegible && !esOcultoPorTopeUi(r)).length;
+    /** En un bloque, quien no entra por el tope se ve en la tarjeta (marcado), no escondido en «ocultos». */
+    const noEntranBloque = bloque ? filtered.filter((c) => c.motivoCodigo === 'TOPE_HORAS') : [];
+    const ocultosLista = bloque ? ocultosTope.filter((c) => c.motivoCodigo !== 'TOPE_HORAS') : ocultosTope;
 
     return (
         <div className="flex flex-col min-h-0">
+            {puedePreguntar && canConvocar && <ModoEventualesSelector modo={modoEfectivo} onModo={(m) => { setModo(m); setConfirmando(null); }} />}
             <div className="px-1 pb-2 shrink-0">
                 <div className="flex items-center gap-2 bg-slate-50 rounded-lg px-2.5 py-1.5 border border-slate-200">
                     <Search size={12} className="text-slate-400 shrink-0"/>
@@ -189,162 +252,104 @@ export default function EventualesCandidatosPanel({
                         {rows.length === 0 ? 'No hay eventuales disponibles habilitados para esta empresa.' : ocultosTope.length === rows.length && !search.trim() ? 'Todos los eventuales están cerca del tope de horas.' : 'Sin coincidencias.'}
                     </p>
                 )}
-                {!loading && (() => {
-                    const renderCandidato = (c: CandidatoEventual, sinGrupo = false) => {
-                    const vencidos = c.vencimientos.filter(v => v.estado === 'VENCIDO');
-                    const prontos = c.vencimientos.filter(v => v.estado === 'PRONTO');
-                    // Sin género en la ficha con cupo por género: no cuenta para ningún cupo hasta cargarlo.
-                    const elegible = c.elegible && !sinGrupo && !esOcultoPorTopeUi(c);
-                    const puedeMarcar = !!consulta && elegible;
-                    return (
-                        <div key={c.cuil} className="flex items-start gap-1">
-                        {puedeMarcar && (
-                            <input
-                                type="checkbox"
-                                className="mt-3 h-4 w-4 shrink-0 accent-indigo-600"
-                                checked={marcados.includes(c.cuil)}
-                                onChange={() => toggleMarcado(c.cuil)}
-                                aria-label={`Consultar a ${c.nombre}`}
-                                data-consulta-cuil={c.cuil}
-                            />
+                {!loading && !error && filtered.length > 0 && !cupo && (
+                    <>
+                        {partes.elegibles.length === 0 && (
+                            <p className="px-1 py-2 text-[10px] font-bold text-slate-500" data-sin-elegibles>Nadie de la bolsa puede tomar este turno. Abajo está el motivo de cada uno.</p>
                         )}
-                        <button
-                            type="button"
-                            data-eventual-grupo={sinGrupo ? 'SIN_ESPECIFICAR' : (cupo ? (grupoDeGenero(cupo.servicio, c.genero) as string | null) || 'TODOS' : 'TODOS')}
-                            disabled={!elegible || !!busy || (!canConvocar && !puedeMarcar)}
-                            onClick={() => {
-                                if (!elegible) return;
-                                if (canConvocar) onSelect(c);
-                                else if (puedeMarcar) toggleMarcado(c.cuil);
-                            }}
-                            title={sinGrupo ? 'Sin género en la ficha: completala para convocarlo (cupo por género).' : !c.elegible ? (c.motivo || 'No elegible') : canConvocar ? `Asignar a ${c.nombre}` : `Consultar a ${c.nombre}`}
-                            className={`min-w-0 flex-1 text-left rounded-xl border px-3 py-2 transition-colors ${
-                                elegible
-                                    ? 'bg-white border-indigo-100 hover:border-indigo-300 hover:bg-indigo-50/60'
-                                    : 'bg-slate-50 border-slate-200 opacity-80 cursor-not-allowed'
-                            }`}
-                        >
-                            <div className="flex items-center justify-between gap-2">
-                                <div className="flex items-center gap-2 min-w-0">
-                                    {c.elegible
-                                        ? <UserCheck size={14} className="text-emerald-600 shrink-0"/>
-                                        : <UserX size={14} className="text-rose-500 shrink-0"/>}
-                                    <div className="min-w-0">
-                                        <div className="flex items-center gap-1 text-[11px] font-black text-slate-800"><span className="truncate">{c.nombre}</span><PuntajeChip sujetoId={c.cuil} /></div>
-                                        <div className="text-[9px] font-mono text-slate-400">{c.cuil}{c.employeeId ? ' · legajo en esta empresa' : ''}</div>
-                                        {c.horasMes && (
-                                          <div data-horas-mes className={`text-[9px] font-black ${c.horasMes.aviso ? 'text-amber-700' : 'text-slate-500'}`}>
-                                            {c.horasMes.texto}
-                                            {esOcultoPorTopeUi(c) && <span data-chip-tope={c.horasMes.alcanzado ? 'alcanzado' : 'cerca'} className={`ml-1 rounded px-1 ${c.horasMes.alcanzado ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-800'}`}>{c.horasMes.alcanzado ? 'Tope alcanzado' : 'Cerca del tope'}</span>}
-                                          </div>
-                                        )}
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-1.5 shrink-0">
-                                    {c.distanciaKm != null && (
-                                        <span className={`text-[9px] font-bold flex items-center gap-0.5 ${c.distanciaKm <= 15 ? 'text-emerald-700' : c.distanciaKm <= 30 ? 'text-amber-700' : 'text-rose-700'}`}>
-                                            <MapPin size={10}/>{c.distanciaKm} km
-                                        </span>
-                                    )}
-                                    {c.confiabilidad != null && (
-                                        <span
-                                            className={`text-[9px] font-black px-1.5 py-0.5 rounded flex items-center gap-0.5 ${c.confiabilidad >= 80 ? 'bg-emerald-100 text-emerald-800' : c.confiabilidad >= 60 ? 'bg-amber-100 text-amber-800' : 'bg-rose-100 text-rose-800'}`}
-                                            title="Confiabilidad"
-                                        >
-                                            <ShieldCheck size={10}/>{c.confiabilidad}%
-                                        </span>
-                                    )}
-                                    <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded bg-violet-100 text-violet-800">Eventual</span>
-                                    {c.pruebasSinMarco && <PruebasBadge compact />}
-                                </div>
-                            </div>
-                            {!c.elegible && c.motivo && (
-                                <p className="mt-1 text-[9px] font-bold text-rose-700 flex items-start gap-1">
-                                    <AlertTriangle size={10} className="shrink-0 mt-0.5"/>{c.motivo}
-                                </p>
-                            )}
-                            {(vencidos.length > 0 || prontos.length > 0 || c.telefono) && (
-                                <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[8px] font-bold">
-                                    {vencidos.map(v => (
-                                        <span key={v.tipo} className="px-1.5 py-0.5 rounded bg-rose-100 text-rose-800">{TIPO_LABEL[v.tipo] || v.tipo} vencido {v.fecha}</span>
-                                    ))}
-                                    {prontos.map(v => (
-                                        <span key={v.tipo} className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">{TIPO_LABEL[v.tipo] || v.tipo} vence {v.fecha}</span>
-                                    ))}
-                                    {c.telefono && <span className="text-slate-400 flex items-center gap-0.5"><Phone size={9}/>{c.telefono}</span>}
-                                </div>
-                            )}
-                        </button>
-                        </div>
-                    );
-                    };
-                    if (!cupo) return filtered.map((c) => renderCandidato(c));
+                        {renderElegibles(partes.elegibles)}
+                        {noEntranBloque.map((c) => (
+                            <TarjetaEventual
+                                key={c.cuil}
+                                c={tarjetaDe(c)}
+                                modo="preguntar"
+                                marcado={false}
+                                disabled
+                                onToggle={() => {}}
+                                onAsignar={() => {}}
+                            />
+                        ))}
+                        <NoDisponiblesLista rows={partes.noDisponibles.map(tarjetaDe)} />
+                    </>
+                )}
+                {!loading && !error && filtered.length > 0 && cupo && (() => {
                     // Cupo por género: Hombres / Mujeres con su ocupación, y «Sin especificar» aparte (mismo orden del motor).
                     const porGrupo = new Map<string, CandidatoEventual[]>(cupo.grupos.map((g) => [g.grupo, []]));
                     const sinEspecificar: CandidatoEventual[] = [];
                     for (const c of filtered) {
+                        if (esOcultoPorTopeUi(c)) continue;
                         const g = grupoDeGenero(cupo.servicio, c.genero) as string | null;
                         const lista = g ? porGrupo.get(g) : null;
                         if (lista) lista.push(c); else sinEspecificar.push(c);
                     }
                     return (
                         <>
-                            {cupo.grupos.map((g) => (
-                                <div key={g.grupo} className="space-y-1 -mx-1" data-eventuales-grupo={g.grupo}>
-                                    <GrupoCandidatosHeader grupo={g} cantidad={(porGrupo.get(g.grupo) || []).length} />
-                                    <div className="px-1 space-y-1">
-                                        {(porGrupo.get(g.grupo) || []).length === 0 && <p className="text-[10px] text-slate-400 py-1">Sin candidatos en este grupo.</p>}
-                                        {(porGrupo.get(g.grupo) || []).map((c) => renderCandidato(c))}
+                            {cupo.grupos.map((g) => {
+                                const del = separarCandidatos(porGrupo.get(g.grupo) || []);
+                                return (
+                                    <div key={g.grupo} className="space-y-1 -mx-1" data-eventuales-grupo={g.grupo}>
+                                        <GrupoCandidatosHeader grupo={g} cantidad={(porGrupo.get(g.grupo) || []).length} />
+                                        <div className="px-1 space-y-1">
+                                            {(porGrupo.get(g.grupo) || []).length === 0 && <p className="text-[10px] text-slate-400 py-1">Sin candidatos en este grupo.</p>}
+                                            {renderElegibles(del.elegibles)}
+                                            <NoDisponiblesLista rows={del.noDisponibles.map(tarjetaDe)} />
+                                        </div>
                                     </div>
-                                </div>
-                            ))}
+                                );
+                            })}
                             {sinEspecificar.length > 0 && (
                                 <div className="space-y-1 -mx-1" data-eventuales-grupo="SIN_ESPECIFICAR">
                                     <SinEspecificarAviso cantidad={sinEspecificar.length} />
-                                    <div className="px-1 space-y-1">{sinEspecificar.map((c) => renderCandidato(c, true))}</div>
+                                    <div className="px-1">
+                                        <NoDisponiblesLista rows={sinEspecificar.map((c) => ({ ...tarjetaDe(c), elegible: false, motivo: 'Sin género en la ficha: completala para convocarlo (cupo por género).', motivoCodigo: 'GENERO_SIN_ESPECIFICAR' }))} />
+                                    </div>
                                 </div>
                             )}
                         </>
                     );
                 })()}
+                {!loading && verOcultosTope && ocultosLista.length > 0 && (
+                    <div className="mt-1 space-y-1" data-ocultos-tope-lista>
+                        {ocultosLista.map((c) => (
+                            <div key={c.cuil} className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 opacity-80">
+                                <span className="min-w-0">
+                                    <span className="block truncate text-[10px] font-bold text-slate-700">{c.nombre}</span>
+                                    {c.horasMes && <span data-horas-mes className="block text-[9px] font-bold text-amber-700">{c.horasMes.texto}</span>}
+                                </span>
+                                {c.horasMes && <span data-chip-tope={c.horasMes.alcanzado ? 'alcanzado' : 'cerca'} className={`shrink-0 rounded px-1 text-[9px] font-black ${c.horasMes.alcanzado ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-800'}`}>{c.horasMes.alcanzado ? 'Tope alcanzado' : 'Cerca del tope'}</span>}
+                            </div>
+                        ))}
+                    </div>
+                )}
             </div>
-            {!loading && ocultosTope.length > 0 && (
-                <div data-ocultos-tope={ocultosTope.length} className="mx-1 mt-2 flex items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[10px] font-bold text-amber-800 shrink-0">
-                    <span>{textoOcultosPorTopeUi(ocultosTope.length)}</span>
+            {!loading && ocultosLista.length > 0 && (
+                <div data-ocultos-tope={ocultosLista.length} className="mx-1 mt-2 flex items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[10px] font-bold text-amber-800 shrink-0">
+                    <span>{textoOcultosPorTopeUi(ocultosLista.length)}</span>
                     <button type="button" onClick={() => setVerOcultosTope((v) => !v)} data-ocultos-tope-ver className="rounded-md border border-amber-300 bg-white px-2 py-0.5 text-[10px] font-black text-amber-800 hover:bg-amber-100">
                         {verOcultosTope ? 'Ocultar' : 'Ver'}
                     </button>
                 </div>
             )}
             <div className="px-1 pt-2 text-[9px] font-bold text-slate-400 shrink-0">
-                {loading ? 'Consultando bolsa…' : `${elegibles} de ${rows.length} elegibles · sin superposición ni descanso < 12 h en el grupo`}
+                {loading ? 'Consultando bolsa…' : `${elegibles} de ${rows.length} pueden tomar el turno · sin superposición ni descanso < 12 h en el grupo`}
             </div>
-            {consulta && (
-                <div className="mx-1 mt-2 flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-2.5 py-2" data-consulta-bar>
-                    <label className="flex items-center gap-1 text-[10px] font-bold text-slate-600">
-                        Lugares
-                        <input type="number" min={1} max={20} value={lugares} onChange={(e) => setLugares(Math.max(1, Number(e.target.value) || 1))} className="w-12 rounded-lg border border-slate-200 px-1 py-0.5 text-[11px] font-black text-slate-800" data-consulta-lugares />
-                    </label>
-                    <label className="flex items-center gap-1 text-[10px] font-bold text-slate-600">
-                        Vence
-                        <select value={venceMinutos} onChange={(e) => setVenceMinutos(Number(e.target.value))} className="rounded-lg border border-slate-200 bg-white px-1 py-0.5 text-[11px] font-bold text-slate-800" data-consulta-vence>
-                            <option value={120}>2 horas</option>
-                            <option value={30}>30 min</option>
-                            <option value={60}>1 hora</option>
-                            <option value={240}>4 horas</option>
-                            <option value={0}>Hasta el inicio</option>
-                        </select>
-                    </label>
-                    <button
-                        type="button"
-                        disabled={marcados.length === 0 || enviando}
-                        onClick={() => { void enviarConsulta(); }}
-                        data-consulta-enviar
-                        className="rounded-xl border border-indigo-600 bg-indigo-600 px-3 py-1.5 text-[10px] font-black text-white disabled:cursor-not-allowed disabled:border-slate-300 disabled:!bg-white disabled:!text-slate-600"
-                    >
-                        {enviando ? 'Enviando…' : marcados.length ? `Consultar disponibilidad (${marcados.length})` : 'Marcá a quién consultar'}
-                    </button>
-                </div>
+            {puedePreguntar && modoEfectivo === 'preguntar' && !loading && !error && (
+                <BarraPreguntar
+                    n={marcados.length}
+                    jornadas={jornadas}
+                    espera={venceMinutos}
+                    onEspera={setVenceMinutos}
+                    onEnviar={() => { void enviarConsulta(); }}
+                    enviando={enviando}
+                />
+            )}
+            {confirmando && modoEfectivo === 'asignar' && (
+                <ConfirmarAsignacion
+                    nombre={confirmando.nombre}
+                    busy={busy}
+                    onConfirmar={() => { const c = confirmando; setConfirmando(null); onSelect(c); }}
+                    onCancelar={() => setConfirmando(null)}
+                />
             )}
             {consulta && (
                 <ConsultaDisponibilidadEstado empresaId={empresaId} objectiveId={objectiveId} positionName={consulta.positionName} jornadas={jornadas} />

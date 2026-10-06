@@ -60,6 +60,8 @@ export type ConvocatoriaCardModel = {
   /** Si vienen, pisan «Aceptar» / «Rechazar» (consulta de disponibilidad). */
   acceptLabel?: string | null;
   rejectLabel?: string | null;
+  /** Líneas del bloque (un día por renglón) en la consulta de disponibilidad. */
+  detalle?: string[] | null;
 };
 
 const TZ = 'America/Argentina/Buenos_Aires';
@@ -424,6 +426,47 @@ export function inboxItemIsConvocatoria(item: Pick<InboxCardSource, 'type'>): bo
   );
 }
 
+export type JornadaDisponibilidadCard = { fecha?: string; code?: string; horaInicio?: string; horaFin?: string };
+
+const MESES_CARD = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+
+function ddmmCard(fecha: string): string {
+  const [, m, d] = String(fecha || '').split('-');
+  return d && m ? `${d}/${m}` : String(fecha || '');
+}
+
+/** Pregunta del bloque para la tarjeta. Un solo día queda en el texto que guardó el servidor. */
+export function armarPreguntaDisponibilidad(input: {
+  cliente?: string | null;
+  objetivo?: string | null;
+  puesto?: string | null;
+  jornadas?: JornadaDisponibilidadCard[] | null;
+}): { pregunta: string; detalle: string[]; contratos: string | null } | null {
+  const list = (input.jornadas || [])
+    .filter((j) => String(j?.fecha || '').length >= 10)
+    .slice()
+    .sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)));
+  if (list.length <= 1) return null;
+  const lugar = [input.cliente, input.objetivo, input.puesto].map((s) => String(s || '').trim()).filter(Boolean).join(' · ');
+  const detalle = list.map((j) => {
+    const code = String(j.code || '').trim();
+    const horario = `${String(j.horaInicio || '').slice(0, 5)}–${String(j.horaFin || '').slice(0, 5)}`;
+    return `${ddmmCard(String(j.fecha))} · ${code ? `${code} ` : ''}${horario}`;
+  });
+  const meses = [...new Set(list.map((j) => String(j.fecha).slice(0, 7)))].sort();
+  const contratos = meses.length < 2 ? null : (() => {
+    const nombres = meses.map((mes) => {
+      const [y, m] = mes.split('-');
+      return `${MESES_CARD[Number(m) - 1] || mes} ${y}`;
+    });
+    return meses.length === 2
+      ? `Son dos contratos (${nombres[0]} y ${nombres[1]}).`
+      : `Son ${meses.length} contratos (${nombres.join(', ')}).`;
+  })();
+  const pregunta = `¿Podés cubrir ${list.length} días (${ddmmCard(String(list[0].fecha))} → ${ddmmCard(String(list[list.length - 1].fecha))})${lugar ? ` en ${lugar}` : ''}?`;
+  return { pregunta, detalle, contratos };
+}
+
 export function buildDisponibilidadCardModel(input: {
   id: string;
   message: string;
@@ -433,13 +476,15 @@ export function buildDisponibilidadCardModel(input: {
   fecha?: string | null;
   horario?: string | null;
   timeoutAtMs?: number | null;
+  detalle?: string[] | null;
+  title?: string | null;
 }): ConvocatoriaCardModel {
   return {
     id: input.id,
     kind: 'DISPONIBILIDAD',
     kicker: 'Disponibilidad',
     tipo: 'Consulta',
-    title: '¿Estás disponible?',
+    title: input.title || '¿Estás disponible?',
     message: input.message,
     cliente: input.cliente || null,
     objetivo: input.objetivo || null,
@@ -451,6 +496,7 @@ export function buildDisponibilidadCardModel(input: {
     actions: 'ACCEPT_REJECT',
     acceptLabel: 'Sí, puedo',
     rejectLabel: 'No puedo',
+    detalle: input.detalle || null,
   };
 }
 

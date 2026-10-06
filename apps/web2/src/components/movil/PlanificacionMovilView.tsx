@@ -233,7 +233,8 @@ export function CandidatosHueco(props: {
   /** Cuiles marcados para consultar disponibilidad (solo eventuales elegibles). */
   consultaCuils?: string[];
   onToggleConsulta?: (cuil: string) => void;
-  onConsultar?: (cuils: string[], lugares: number) => void;
+  /** Cobertura de un hueco: siempre un lugar, el primero que acepte cubre. */
+  onConsultar?: (cuils: string[]) => void;
   puedeAsignarEventual?: boolean;
   /** Turno del SLA que se cubre: con más de una opción el operador puede cambiarlo. */
   opciones?: OpcionTurno[];
@@ -243,10 +244,12 @@ export function CandidatosHueco(props: {
   const lista = props.candidatos.filter((c) => c.tab === props.tab);
   const opcion = props.opciones?.find((o) => o.id === props.opcionId) || null;
   const [verOcultosTope, setVerOcultosTope] = useState(false);
-  const [lugaresConsulta, setLugaresConsulta] = useState(1);
   const consultaCuils = props.consultaCuils || [];
   const ocultosTope = props.eventuales.filter(eventualOcultoPorTope);
-  const eventualesVisibles = verOcultosTope ? props.eventuales : props.eventuales.filter((ev) => !eventualOcultoPorTope(ev));
+  const eventualesBase = verOcultosTope ? props.eventuales : props.eventuales.filter((ev) => !eventualOcultoPorTope(ev));
+  // Elegibles arriba; los bloqueados colapsados con su motivo.
+  const eventualesVisibles = eventualesBase.filter((ev) => ev.elegible || (verOcultosTope && eventualOcultoPorTope(ev)));
+  const eventualesNoDisponibles = eventualesBase.filter((ev) => !ev.elegible && !eventualOcultoPorTope(ev));
   const fila = (on: boolean, disabled: boolean, onClick: () => void, key: string, children: ReactNode, attrs: Record<string, string>) => (
     <button key={key} type="button" disabled={disabled} onClick={onClick} aria-pressed={on} {...attrs} className={`mb-2 flex min-h-14 w-full items-center gap-2 rounded border bg-white px-3 text-left ${on ? MOVIL_PRIMARY_BORDER : MOVIL_BORDER} disabled:opacity-60`}>
       <span className="min-w-0 flex-1">{children}</span>
@@ -298,6 +301,22 @@ export function CandidatosHueco(props: {
           {ev.motivo && <span className={`block text-[11px] font-semibold ${MOVIL_TEXT.rose}`}>{ev.motivo}</span>}
         </>
       ), { 'data-plan-candidato': ev.cuil }))}
+      {props.tab === 'eventuales' && props.puedeEventuales && eventualesVisibles.length === 0 && eventualesNoDisponibles.length > 0 && (
+        <p className="mb-2 text-[12px] font-medium text-slate-500" data-sin-elegibles>Nadie de la bolsa puede tomar este turno.</p>
+      )}
+      {props.tab === 'eventuales' && props.puedeEventuales && eventualesNoDisponibles.length > 0 && (
+        <details className={`mb-2 rounded border bg-white ${MOVIL_BORDER}`} data-no-disponibles={eventualesNoDisponibles.length}>
+          <summary className="min-h-10 cursor-pointer list-none px-3 py-2 text-[12px] font-semibold text-slate-600">No disponibles ({eventualesNoDisponibles.length})</summary>
+          <ul className={`divide-y border-t ${MOVIL_BORDER}`}>
+            {eventualesNoDisponibles.map((ev) => (
+              <li key={ev.cuil} className="px-3 py-2" data-no-disponible={ev.cuil}>
+                <span className="block text-[13px] font-semibold text-slate-800">{ev.nombre}</span>
+                <span className={`block text-[11px] font-semibold ${MOVIL_TEXT.rose}`}>{ev.motivo || 'No elegible'}</span>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
       {props.tab === 'eventuales' && props.puedeEventuales && ocultosTope.length > 0 && (
         <div data-ocultos-tope={ocultosTope.length} className={`mb-2 flex min-h-10 items-center justify-between gap-2 rounded border bg-white px-3 text-[11px] font-semibold ${MOVIL_BORDER} ${MOVIL_TEXT.amber}`}>
           <span>{textoOcultosPorTopeMovil(ocultosTope.length)}</span>
@@ -316,19 +335,18 @@ export function CandidatosHueco(props: {
         Confirmar
       </button>
       {props.tab === 'eventuales' && props.onConsultar && (
-        <div className="mt-2 flex items-center gap-2" data-consulta-bar>
-          <label className="flex items-center gap-1 text-[11px] font-semibold text-slate-600">
-            Lugares
-            <input type="number" min={1} max={20} value={lugaresConsulta} onChange={(e) => setLugaresConsulta(Math.max(1, Number(e.target.value) || 1))} className="w-12 rounded border border-slate-300 px-1 py-1 text-sm" data-consulta-lugares />
-          </label>
+        <div className="mt-2" data-consulta-bar>
+          <p className="mb-1 text-[11px] font-semibold text-slate-600" data-consulta-texto>
+            {consultaCuils.length > 0 ? `Preguntar a ${consultaCuils.length} · el primero que acepte cubre el turno` : 'Marcá a quién preguntar'}
+          </p>
           <button
             type="button"
             disabled={consultaCuils.length === 0}
-            onClick={() => props.onConsultar?.(consultaCuils, Math.min(lugaresConsulta, consultaCuils.length))}
+            onClick={() => props.onConsultar?.(consultaCuils)}
             data-consulta-enviar
-            className={`min-h-12 flex-1 rounded border text-sm font-semibold ${MOVIL_BTN_SECONDARY} disabled:opacity-50`}
+            className={`min-h-12 w-full rounded border text-sm font-semibold ${MOVIL_BTN_SECONDARY} disabled:opacity-50`}
           >
-            Consultar disponibilidad ({consultaCuils.length})
+            {consultaCuils.length > 0 ? `Enviar consulta (${consultaCuils.length})` : 'Marcá a quién preguntar'}
           </button>
         </div>
       )}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import { collection, getDocs, onSnapshot, query, where } from 'firebase/firestore';
@@ -281,6 +281,22 @@ export default function EventualesPage() {
       .catch(() => { if (vivo) setArcaPendientes(null); });
     return () => { vivo = false; };
   }, [empresaActivaId, mostrarArca]);
+
+  // Deep link desde «No disponibles» del modal de cobertura: ?cuil= abre esa ficha una vez cargada la bolsa.
+  const cuilDeepLinkRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (typeof window === 'undefined' || cuilDeepLinkRef.current !== null) return;
+    cuilDeepLinkRef.current = String(new URLSearchParams(window.location.search).get('cuil') || '').replace(/\D/g, '');
+  }, []);
+  useEffect(() => {
+    const cuil = cuilDeepLinkRef.current;
+    if (!cuil || fichas.length === 0) return;
+    if (!fichas.some((f) => f.id === cuil)) return;
+    cuilDeepLinkRef.current = '';
+    setFiltro('TODOS');
+    void abrirDetalle(cuil);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fichas]);
 
   const abrirDetalle = async (id: string) => {
     setElegida(id);

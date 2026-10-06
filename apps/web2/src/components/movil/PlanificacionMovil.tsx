@@ -463,7 +463,7 @@ export function PlanificacionMovil() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, franjaAbierta, veBolsa, empresaId, objetivo, opcionCubrirSel?.id]);
 
-  const consultarDisponibilidad = async (cuils: string[], lugares: number) => {
+  const consultarDisponibilidad = async (cuils: string[]) => {
     if (!franjaAbierta || cuils.length === 0) return;
     const banda = bandaCubrir ?? bandaParaCubrir(franjaAbierta);
     try {
@@ -479,7 +479,8 @@ export function PlanificacionMovil() {
           objetivoGeo: objetivo?.lat != null && objetivo.lng != null ? { lat: objetivo.lat, lng: objetivo.lng } : null,
           jornadas: [{ fecha: franjaAbierta.date, horaInicio: banda.start, horaFin: banda.end, horas: banda.hours, code: banda.code, positionName: franjaAbierta.positionName }],
           cuils,
-          lugares,
+          // Un hueco de un puesto: siempre un lugar, el primero que acepte cubre.
+          lugares: 1,
           venceMinutos: 120,
         });
         toast.success(res.data?.resumen || 'Consulta enviada.');
@@ -662,7 +663,7 @@ export function PlanificacionMovil() {
             puedeAsignarEventual={puedeEventuales}
             consultaCuils={consultaCuils}
             onToggleConsulta={puedeConsultar ? (cuil) => setConsultaCuils((prev) => (prev.includes(cuil) ? prev.filter((c) => c !== cuil) : [...prev, cuil])) : undefined}
-            onConsultar={puedeConsultar ? (cuils, lugares) => { void consultarDisponibilidad(cuils, lugares); } : undefined}
+            onConsultar={puedeConsultar ? (cuils) => { void consultarDisponibilidad(cuils); } : undefined}
             onElegir={setElegido}
             onConfirmar={() => { void confirmarCandidato(); }}
           />

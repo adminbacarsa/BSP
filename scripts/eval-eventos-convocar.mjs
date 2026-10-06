@@ -154,7 +154,8 @@ check('línea eventual no se pinta para nómina', !lineaNo.includes('data-eventu
 const badge = renderToStaticMarkup(createElement(UI.PruebasBadge, { compact: true }));
 check('PruebasBadge: texto fijo', badge.includes('data-pruebas="sin-marco"') && badge.includes('Pruebas: sin exigir marco'));
 check('modal: eventual se CONVOCA (no asignación directa) y Estado muestra vencidas', modal.includes('convocarEventualEvento({') && !modal.includes('asignarEventualPlanificacion(') && modal.includes('<EventualEstadoLinea') && modal.includes("s.status === 'vencida'") && modal.includes('Vencieron sin responder'));
-check('panel candidatos: marca Pruebas: sin exigir marco', panel.includes('c.pruebasSinMarco') && panel.includes('<PruebasBadge'));
+const panelUx = readFileSync(join(root, 'components/eventuales/EventualesCandidatosUx.tsx'), 'utf8');
+check('panel candidatos: marca Pruebas: sin exigir marco', panel.includes('pruebasSinMarco: c.pruebasSinMarco') && panelUx.includes('c.pruebasSinMarco') && panelUx.includes('<PruebasBadge'));
 const csm = readFileSync(join(root, 'components/operaciones/CoverageSessionManager.tsx'), 'utf8');
 check('CC: la fila del eventual marca Pruebas: sin exigir marco', csm.includes('row.pruebasSinMarco') && csm.includes('Pruebas: sin exigir marco'));
 const ficha = readFileSync(join(root, 'components/eventuales/FichaEventual.tsx'), 'utf8');
@@ -179,7 +180,7 @@ check('modal: nómina en grupos + sin especificar aparte', modal.includes('agrup
 check('modal: contadores y barras por grupo en cabecera, Estado y Cronograma', modal.includes('data-cabecera-cupo-grupos') && modal.includes('data-estado-cupo') && modal.includes('data-crono-cupo') && (modal.match(/<CupoGruposBarra/g) || []).length >= 3 && modal.includes('textoResumenCupo(cupoEstado)'));
 check('modal: solicitudes llevan genero y cupoGrupo; cupo_completo en Estado', modal.includes("genero: emp.genero || ''") && modal.includes('cupoGrupo: grupoEmp') && modal.includes("s.status === 'cupo_completo'") && modal.includes('Cupo completo antes de responder') && modal.includes('textoCupoServicio(selectedSrv)'));
 check('modal: si el servidor rechaza la asignación directa (cupo) se borra la solicitud', modal.includes('await deleteDoc(solicitudRef)'));
-check('panel eventuales: grupos por cupo + sin especificar', panel.includes('cupo?: CupoPanelEventuales | null') && panel.includes('<GrupoCandidatosHeader') && panel.includes('<SinEspecificarAviso') && panel.includes('renderCandidato(c, true)') && panel.includes('data-eventuales-grupo="SIN_ESPECIFICAR"'));
+check('panel eventuales: grupos por cupo + sin especificar', panel.includes('cupo?: CupoPanelEventuales | null') && panel.includes('<GrupoCandidatosHeader') && panel.includes('<SinEspecificarAviso') && panel.includes("motivoCodigo: 'GENERO_SIN_ESPECIFICAR'") && panel.includes('data-eventuales-grupo="SIN_ESPECIFICAR"'));
 const eventosPanel = readFileSync(join(root, 'components/servicios/EventosPanel.tsx'), 'utf8');
 check('servicio: Indistinto / Por género con cantidades y total', eventosPanel.includes('data-cupo-modo-btn={modo}') && eventosPanel.includes("'INDISTINTO'") && eventosPanel.includes("'POR_GENERO'") && eventosPanel.includes('data-cupo-total') && eventosPanel.includes('data-cupo-genero="M"') && eventosPanel.includes('data-cupo-genero="F"') && eventosPanel.includes('validarCupoServicio(') && eventosPanel.includes('cupoPorGenero: cupoCfg.cupoPorGenero'));
 
