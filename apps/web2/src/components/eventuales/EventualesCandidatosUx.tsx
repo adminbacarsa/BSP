@@ -34,6 +34,8 @@ export type CandidatoTarjeta = {
   horasMes?: { texto: string; aviso: boolean } | null;
   /** El bloque de días no entra en el tope del mes. */
   topeBloque?: string | null;
+  canal?: { chip: string | null; motivo: string | null; sinCanal: boolean; porMail: boolean } | null;
+  linkAcceso?: string | null;
 };
 
 export function ModoEventualesSelector({ modo, onModo }: { modo: ModoEventuales; onModo: (m: ModoEventuales) => void }) {
@@ -76,15 +78,16 @@ export function TarjetaEventual({ c, modo, marcado, disabled, onToggle, onAsigna
   onAsignar: () => void;
 }) {
   const preguntar = modo === 'preguntar';
+  const sinCanal = preguntar && !!c.canal?.sinCanal;
   const onClick = preguntar ? onToggle : onAsignar;
   return (
     <button
       type="button"
       data-eventual-tarjeta={c.cuil}
       disabled={!!disabled}
-      onClick={onClick}
+      onClick={() => { if (sinCanal) return; onClick(); }}
       aria-pressed={preguntar ? marcado : undefined}
-      title={preguntar ? `Preguntar a ${c.nombre}` : `Asignar a ${c.nombre}`}
+      title={sinCanal ? 'No le va a llegar: llamalo o creá su acceso' : (preguntar ? `Preguntar a ${c.nombre}` : `Asignar a ${c.nombre}`)}
       className={`flex w-full items-center gap-2 rounded-xl border px-3 py-2 text-left transition-colors ${
         marcado && preguntar ? 'border-indigo-400 bg-indigo-50/70' : 'border-slate-200 bg-white hover:border-indigo-300 hover:bg-indigo-50/40'
       } disabled:cursor-not-allowed disabled:opacity-60`}
@@ -105,6 +108,22 @@ export function TarjetaEventual({ c, modo, marcado, disabled, onToggle, onAsigna
           {c.pruebasSinMarco && <PruebasBadge compact />}
         </span>
         <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[9px] font-bold text-slate-500">
+          {c.canal?.chip && (
+            <span data-sin-app={c.cuil} className="rounded-md border border-amber-300 bg-amber-50 px-1.5 py-px text-amber-800">
+              {c.canal.chip}{c.canal.motivo ? ` · ${c.canal.motivo}` : ''}
+            </span>
+          )}
+          {c.canal?.porMail && <span data-por-mail={c.cuil}>Le llega por mail</span>}
+          {sinCanal && (
+            <span data-sin-canal={c.cuil} className="text-amber-800">
+              No le va a llegar: llamalo o creá su acceso
+              {c.linkAcceso && (
+                <a href={c.linkAcceso} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="ml-1 underline">
+                  Crear acceso a la app
+                </a>
+              )}
+            </span>
+          )}
           {c.horasMes && <span data-horas-mes className={c.horasMes.aviso ? 'text-amber-700' : ''}>{c.horasMes.texto}</span>}
           {c.topeBloque && <span data-tope-bloque className="text-amber-800">{c.topeBloque}</span>}
           {c.distanciaKm != null && <span className="flex items-center gap-0.5"><MapPin size={9} />{c.distanciaKm} km</span>}

@@ -5,6 +5,7 @@
  */
 import * as admin from 'firebase-admin';
 import * as functions from 'firebase-functions/v1';
+import { aplicarEntregasConsulta, type DestinoEntrega } from './consultaCanalServer';
 
 const AR_OFFSET = '-03:00';
 const SUPER = ['SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP'];
@@ -328,7 +329,7 @@ export async function crearConsultaGuardias(data: Record<string, unknown>, conte
   const positionName = data?.positionName ? String(data.positionName) : null;
   const lugar = [clientName, objectiveName, positionName].map((s) => String(s || '').trim()).filter(Boolean).join(' · ');
 
-  const elegibles: { employeeId: string; tipo: GuardiaIn['tipo']; nombre: string; uid: string }[] = [];
+  const elegibles: { employeeId: string; tipo: GuardiaIn['tipo']; nombre: string; uid: string; mail: string; pushEstado: string }[] = [];
   const omitidos: { employeeId: string; motivo: string }[] = [];
   for (const g of unicos) {
     if (g.tipo === 'FT' && !permiso.ft) {
@@ -350,16 +351,14 @@ export async function crearConsultaGuardias(data: Record<string, unknown>, conte
       continue;
     }
     const uid = String(ed?.uid || '');
-    if (!uid) {
-      omitidos.push({ employeeId: g.employeeId, motivo: 'Sin acceso a la app.' });
-      continue;
-    }
+    const mail = String(ed?.email || ed?.mail || '');
+    const pushEstado = String(ed?.pushEstado || '');
     const ev = await evaluarGuardiaEnServidor({
       empresaId, employeeId: g.employeeId, tipo: g.tipo, jornadas: jornadasNorm,
       autorizaciones: autorizaciones.filter((a) => a.employeeId === g.employeeId),
     });
     if (!ev.ok) omitidos.push({ employeeId: g.employeeId, motivo: ev.motivo || 'No se puede consultar.' });
-    else elegibles.push({ employeeId: g.employeeId, tipo: g.tipo, nombre: nombreDe(ed, g.nombre), uid });
+    else elegibles.push({ employeeId: g.employeeId, tipo: g.tipo, nombre: nombreDe(ed, g.nombre), uid, mail, pushEstado });
   }
   if (!elegibles.length) throw new functions.https.HttpsError('failed-precondition', omitidos[0]?.motivo || 'Nadie quedó para consultar.');
 
@@ -396,18 +395,22 @@ export async function crearConsultaGuardias(data: Record<string, unknown>, conte
   }
   await batch.commit();
   await evento(ref.id, 'CREADA', { actorUid: permiso.uid, lugares, employeeIds: elegibles.map((e) => e.employeeId), venceAtMs, audiencia: 'GUARDIA' });
-  for (const e of elegibles) {
-    const texto = reglas.textoPushGuardia({ dias: jornadasNorm.length, tipo: e.tipo, lugar });
-    const invitacionId = reglas.invitacionIdGuardia(ref.id, e.employeeId);
-    await db().collection('user_notifications').add({
-      uid: e.uid, employeeId: e.employeeId, empresaId,
-      type: 'CONSULTA_DISPONIBILIDAD', target: 'employee',
-      title: '¿Podés cubrir?', body: texto, consultaId: ref.id, invitacionId,
-      objectiveId, objectiveName, positionName, clientName,
-      read: false, readAt: null, createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-    await evento(ref.id, 'PUSH', { employeeId: e.employeeId, uid: e.uid, audiencia: 'GUARDIA' });
-  }
-  await auditar('CONSULTA_DISPONIBILIDAD_CREADA', permiso.uid, empresaId, `${elegibles.length} guardias consultados · ${lugares} lugar/es`, { consultaId: ref.id, huecoKey, audiencia: 'GUARDIA' });
-  return { ok: true, consultaId: ref.id, lugares, consultados: elegibles.length, omitidos, resumen: consulta.textoEstadoConsulta(respuestas), venceAtMs };
+  const destinos: DestinoEntrega[] = elegibles.map((e) => ({
+    invitacionId: reglas.invitacionIdGuardia(ref.id, e.employeeId),
+    nombre: e.nombre,
+    uid: e.uid,
+    mail: e.mail,
+    pushEstado: e.pushEstado,
+    employeeId: e.employeeId,
+    bolsaCuil: null,
+    texto: reglas.textoPushGuardia({ dias: jornadasNorm.length, tipo: e.tipo, lugar }),
+    cuil: '',
+    tipo: 'GUARDIA',
+  }));
+  const entrega = await aplicarEntregasConsulta({
+    consultaId: ref.id, empresaId, actorUid: permiso.uid,
+    objectiveId, objectiveName, positionName, clientName, lugar,
+  }, destinos);
+  await auditar('CONSULTA_DISPONIBILIDAD_CREADA', permiso.uid, empresaId, `${elegibles.length} guardias consultados · ${lugares} lugar/es`, { consultaId: ref.id, huecoKey, audiencia: 'GUARDIA', status: entrega.status });
+  return { ok: true, consultaId: ref.id, lugares, consultados: elegibles.length, omitidos, resumen: entrega.resumen, status: entrega.status, venceAtMs };
 }

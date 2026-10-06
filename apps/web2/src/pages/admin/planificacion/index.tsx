@@ -350,6 +350,7 @@ import { experienciaBadgeForReplacement, patchExperienciaForTurno } from '@/lib/
 import EventualesCandidatosPanel, { type CandidatoEventual } from '@/components/eventuales/EventualesCandidatosPanel';
 import { ConsultaDisponibilidadEstado } from '@/components/eventuales/ConsultaDisponibilidadEstado';
 import { planEnvioGuardias } from '@/lib/eventuales/consultaGuardia.mjs';
+import { canalDeConsulta } from '@/lib/eventuales/consultaCanal.mjs';
 import { asignarEventualPlanificacion, canConsultarDisponibilidad, canConvocarEventuales, eventualErrorMessage, sustituirEventualPlanificacion } from '@/services/eventualesPlanificacionService';
 import { esLegajoEventual, jornadaEventualDesdeBanda } from '@/lib/eventuales/planificacionUi';
 import { gruposService, GrupoObjetivos } from '@/services/gruposService';
@@ -5087,6 +5088,9 @@ function PlanificacionDesktop() {
                         volante: data.volante || [],
                         modalidad: data.modalidad || '',
                         bolsaCuil: data.bolsaCuil || '',
+                        uid: String(data.uid || ''),
+                        mail: String(data.email || data.mail || ''),
+                        pushEstado: String(data.pushEstado || ''),
                     };
                 });
             setEmployees(map(snap));
@@ -15751,7 +15755,7 @@ function PlanificacionDesktop() {
                         if (!lista.length || !empresaId) return;
                         setConsultaNominaEnviando(true);
                         try {
-                            const call = httpsCallable<Record<string, unknown>, { resumen?: string; omitidos?: { motivo: string }[] }>(functions, 'crearConsultaDisponibilidad');
+                            const call = httpsCallable<Record<string, unknown>, { resumen?: string; status?: string; omitidos?: { motivo: string }[] }>(functions, 'crearConsultaDisponibilidad');
                             const res = await call({
                                 empresaId,
                                 objectiveId: selectedObjective || null,
@@ -15766,7 +15770,8 @@ function PlanificacionDesktop() {
                                 cubreEmployeeId: vacancyData?.employeeId || null,
                                 cubreNombre: vacancyData?.employeeName || null,
                             });
-                            toast.success(res.data?.resumen || 'Consulta enviada.');
+                            if (res.data?.status === 'SIN_DESTINATARIOS') toast.message(res.data?.resumen || 'No le llegó a nadie.');
+                            else toast.success(res.data?.resumen || 'Consulta enviada.');
                             const omitidos = res.data?.omitidos || [];
                             if (omitidos.length) toast.message(omitidos.slice(0, 3).map((o) => o.motivo).join(' · '), { duration: 8000 });
                             setConsultaNominaMarcados((prev) => prev.filter((id) => !lista.some((g) => g.employeeId === id)));
@@ -15789,6 +15794,14 @@ function PlanificacionDesktop() {
                             return [{ employeeId: e.id, tipo, nombre: e.name || e.id }];
                         });
                         if (!candidatosEnvio.length) return;
+                        const nadieRecibe = candidatosEnvio.every((c) => {
+                            const e = porId.get(c.employeeId) as { uid?: string; mail?: string; pushEstado?: string } | undefined;
+                            return canalDeConsulta({ uid: e?.uid, mail: e?.mail, pushEstado: e?.pushEstado }).sinCanal;
+                        });
+                        if (nadieRecibe) {
+                            toast.message('A nadie le va a llegar: no tienen la app ni mail.');
+                            return;
+                        }
                         const evaluaciones = candidatosEnvio.map((c) => {
                             const blocked: string[] = [];
                             const authorizations: CoverageAuthRequest[] = [];
@@ -15859,7 +15872,9 @@ function PlanificacionDesktop() {
                     };
                     const renderVacancyCandidate = (e: typeof candidatos[0], suffix: string, consultaTipo?: 'FT' | 'RET' | 'LIBRE') => {
                         const puedeCasilla = consultaTipo === 'FT' ? canAssignFT : !!consultaTipo && canConsultarEventual;
-                        const marcado = consultaNominaMarcados.includes(e.id);
+                        const canalNomina = canalDeConsulta({ uid: (e as { uid?: string }).uid, mail: (e as { mail?: string }).mail, pushEstado: (e as { pushEstado?: string }).pushEstado });
+                        const sinCanal = !!consultaTipo && canalNomina.sinCanal;
+                        const marcado = consultaNominaMarcados.includes(e.id) && !sinCanal;
                         return (
                         <div
                             key={e.id}
@@ -15871,7 +15886,14 @@ function PlanificacionDesktop() {
                                     checked={marcado}
                                     aria-label={`Consultar disponibilidad de ${e.name || 'guardia'}`}
                                     data-consulta-nomina={e.id}
-                                    onChange={() => setConsultaNominaMarcados((prev) => (prev.includes(e.id) ? prev.filter((id) => id !== e.id) : [...prev, e.id]))}
+                                    disabled={sinCanal}
+                                    onChange={() => {
+                                        if (sinCanal) {
+                                            toast.message(`${e.name || 'El guardia'}: no le va a llegar. Llamalo o creá su acceso.`);
+                                            return;
+                                        }
+                                        setConsultaNominaMarcados((prev) => (prev.includes(e.id) ? prev.filter((id) => id !== e.id) : [...prev, e.id]));
+                                    }}
                                     className="h-4 w-4 shrink-0 accent-indigo-600"
                                 />
                             )}
@@ -15891,6 +15913,19 @@ function PlanificacionDesktop() {
                                 )}
                                 <span className="text-[10px] text-slate-400 shrink-0">{suffix}</span>
                             </button>
+                            {puedeCasilla && canalNomina.chip && (
+                                <span data-sin-app={e.id} title="No le va a llegar: llamalo o creá su acceso" className="shrink-0 rounded-md border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[9px] font-black text-amber-800">
+                                    {canalNomina.chip}{canalNomina.motivoApp ? ` · ${canalNomina.motivoApp}` : ''}
+                                </span>
+                            )}
+                            {puedeCasilla && canalNomina.porMail && (
+                                <span data-por-mail={e.id} className="shrink-0 text-[9px] font-bold text-slate-500">Le llega por mail</span>
+                            )}
+                            {sinCanal && (
+                                <a href={`/admin/empleados/${e.id}`} target="_blank" rel="noreferrer" data-crear-acceso={e.id} className="shrink-0 text-[9px] font-black text-indigo-700 underline">
+                                    Crear acceso a la app
+                                </a>
+                            )}
                         </div>
                         );
                     };

@@ -47,8 +47,13 @@ function ts(iso) {
 }
 async function empleado(p) {
   await db.collection('empleados').doc(p.employeeId).set({
-    empresaId: EMP, nombre: p.nombre, name: p.nombre, uid: p.uid, status: 'ACTIVE',
+    empresaId: EMP, nombre: p.nombre, name: p.nombre, uid: p.uid, status: 'ACTIVE', pushEstado: 'activo',
   });
+  if (p.uid) {
+    await db.collection('device_tokens').doc(`tok-${p.uid}`).set({
+      uid: p.uid, employeeId: p.employeeId, token: `token-guardia-${p.uid}-0123456789`, pushEstado: 'activo',
+    });
+  }
 }
 async function franco(p) {
   await db.collection('turnos').doc(`franco-${p.employeeId}`).set({
@@ -119,7 +124,7 @@ async function main() {
   report('auditoría CREADA, RESPUESTA, ASIGNADO y CERRADA', parent?.status === 'COMPLETA' && ['CREADA', 'RESPUESTA', 'ASIGNADO', 'CERRADA'].every((t) => tipos.has(t)), `${parent?.status} ${[...tipos].join(',')}`);
 
   const pinId = 'emp-pin';
-  await db.collection('empleados').doc(pinId).set({ empresaId: EMP, nombre: 'Ríos, Nico', uid: 'uid-pin', status: 'ACTIVE' });
+  await empleado({ employeeId: pinId, uid: 'uid-pin', nombre: 'Ríos, Nico' });
   await db.collection('turnos').doc('ayer-pin').set({
     empresaId: EMP, employeeId: pinId, code: 'T', hours: 8, scheduleDate: '2026-11-09',
     startTime: ts('2026-11-09T18:00:00.000Z'), endTime: ts('2026-11-10T02:00:00.000Z'),
@@ -146,7 +151,7 @@ async function main() {
   report('sin assign_ft no se consulta el franco', !sinFt.ok && /franco trabajado/.test(String(sinFt.message)), sinFt.message);
 
   const licId = 'emp-lic';
-  await db.collection('empleados').doc(licId).set({ empresaId: EMP, nombre: 'Díaz, Sol', uid: 'uid-lic', status: 'ACTIVE' });
+  await empleado({ employeeId: licId, uid: 'uid-lic', nombre: 'Díaz, Sol' });
   await db.collection('turnos').doc(`franco-${licId}`).set({
     empresaId: EMP, employeeId: licId, code: 'F', isFranco: true, hours: 0, scheduleDate: FECHA,
     startTime: ts('2026-11-10T03:00:00.000Z'), endTime: ts('2026-11-11T02:59:00.000Z'),

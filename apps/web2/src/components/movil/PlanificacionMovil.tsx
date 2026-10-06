@@ -465,10 +465,15 @@ export function PlanificacionMovil() {
 
   const consultarDisponibilidad = async (cuils: string[]) => {
     if (!franjaAbierta || cuils.length === 0) return;
+    const recibibles = cuils.filter((cuil) => !eventuales.find((ev) => ev.cuil === cuil)?.canal?.sinCanal);
+    if (!recibibles.length) {
+      toast.message('A nadie le va a llegar: no tienen la app ni mail.');
+      return;
+    }
     const banda = bandaCubrir ?? bandaParaCubrir(franjaAbierta);
     try {
       await runCallableOnline('Consultar disponibilidad', async () => {
-        const call = httpsCallable<Record<string, unknown>, { resumen?: string }>(functions, 'crearConsultaDisponibilidad');
+        const call = httpsCallable<Record<string, unknown>, { resumen?: string; status?: string }>(functions, 'crearConsultaDisponibilidad');
         const res = await call({
           empresaId,
           objectiveId: franjaAbierta.objectiveId,
@@ -478,12 +483,13 @@ export function PlanificacionMovil() {
           positionName: franjaAbierta.positionName,
           objetivoGeo: objetivo?.lat != null && objetivo.lng != null ? { lat: objetivo.lat, lng: objetivo.lng } : null,
           jornadas: [{ fecha: franjaAbierta.date, horaInicio: banda.start, horaFin: banda.end, horas: banda.hours, code: banda.code, positionName: franjaAbierta.positionName }],
-          cuils,
+          cuils: recibibles,
           // Un hueco de un puesto: siempre un lugar, el primero que acepte cubre.
           lugares: 1,
           venceMinutos: 120,
         });
-        toast.success(res.data?.resumen || 'Consulta enviada.');
+        if (res.data?.status === 'SIN_DESTINATARIOS') toast.message(res.data?.resumen || 'No le llegó a nadie.');
+        else toast.success(res.data?.resumen || 'Consulta enviada.');
         setConsultaCuils([]);
       });
     } catch (error) {
@@ -662,7 +668,14 @@ export function PlanificacionMovil() {
             puedeEventuales={veBolsa}
             puedeAsignarEventual={puedeEventuales}
             consultaCuils={consultaCuils}
-            onToggleConsulta={puedeConsultar ? (cuil) => setConsultaCuils((prev) => (prev.includes(cuil) ? prev.filter((c) => c !== cuil) : [...prev, cuil])) : undefined}
+            onToggleConsulta={puedeConsultar ? (cuil) => {
+              const ev = eventuales.find((row) => row.cuil === cuil);
+              if (ev?.canal?.sinCanal) {
+                toast.message(`${ev.nombre}: no le va a llegar. Llamalo o creá su acceso.`);
+                return;
+              }
+              setConsultaCuils((prev) => (prev.includes(cuil) ? prev.filter((c) => c !== cuil) : [...prev, cuil]));
+            } : undefined}
             onConsultar={puedeConsultar ? (cuils) => { void consultarDisponibilidad(cuils); } : undefined}
             onElegir={setElegido}
             onConfirmar={() => { void confirmarCandidato(); }}

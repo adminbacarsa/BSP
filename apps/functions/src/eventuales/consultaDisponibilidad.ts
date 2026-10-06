@@ -8,6 +8,7 @@ import * as admin from 'firebase-admin';
 import * as functions from 'firebase-functions/v1';
 import { asignarTurnosDeConsulta, exigirPuedeConsultar, prevalidarEventualConsulta } from './planificacionEventuales';
 import { asignarGuardiaDeConsulta, crearConsultaGuardias } from './consultaGuardiaServer';
+import { aplicarEntregasConsulta, type DestinoEntrega } from './consultaCanalServer';
 
 const AR_OFFSET = '-03:00';
 const COL = 'consultas_disponibilidad';
@@ -125,7 +126,7 @@ export const crearConsultaDisponibilidad = functions.https.onCall(async (data, c
     };
   });
 
-  const elegibles: { cuil: string; nombre: string; uid: string; employeeId: string | null }[] = [];
+  const elegibles: { cuil: string; nombre: string; uid: string; employeeId: string | null; mail: string; pushEstado: string }[] = [];
   const omitidos: { cuil: string; motivo: string }[] = [];
   for (const cuil of cuils) {
     const ev = await prevalidarEventualConsulta({
@@ -133,7 +134,7 @@ export const crearConsultaDisponibilidad = functions.https.onCall(async (data, c
       clientId, objectiveId, objetivoGeo: data?.objetivoGeo, actorUid: auth.uid,
     });
     if (!ev.elegible) omitidos.push({ cuil, motivo: ev.motivo || 'No elegible' });
-    else elegibles.push({ cuil, nombre: ev.nombre, uid: ev.uid, employeeId: ev.employeeId });
+    else elegibles.push({ cuil, nombre: ev.nombre, uid: ev.uid, employeeId: ev.employeeId, mail: ev.mail, pushEstado: ev.pushEstado });
   }
   if (!elegibles.length) throw new functions.https.HttpsError('failed-precondition', omitidos[0]?.motivo || 'Nadie quedó elegible.');
   const lugares = Math.min(lugaresPedidos, elegibles.length);
@@ -165,30 +166,25 @@ export const crearConsultaDisponibilidad = functions.https.onCall(async (data, c
   await batch.commit();
   await evento(ref.id, 'CREADA', { actorUid: auth.uid, lugares, cuils: elegibles.map((e) => e.cuil), venceAtMs });
 
-  for (const e of elegibles) {
-    if (e.uid) {
-      await db().collection('user_notifications').add({
-        uid: e.uid,
-        employeeId: e.employeeId || null,
-        empresaId,
-        type: 'CONSULTA_DISPONIBILIDAD',
-        target: 'employee',
-        title: '¿Estás disponible?',
-        body: texto,
-        consultaId: ref.id,
-        invitacionId: invitacionRef(ref.id, e.cuil).id,
-        objectiveId, objectiveName, positionName, clientName,
-        read: false,
-        readAt: null,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
-      await evento(ref.id, 'PUSH', { bolsaCuil: e.cuil, uid: e.uid });
-    } else {
-      await evento(ref.id, 'PUSH', { bolsaCuil: e.cuil, resultado: 'SIN_UID' });
-    }
-  }
-  await auditar('CONSULTA_DISPONIBILIDAD_CREADA', auth.uid, empresaId, `${elegibles.length} consultados · ${lugares} lugar/es · ${texto}`, { consultaId: ref.id, huecoKey });
-  return { ok: true, consultaId: ref.id, lugares, consultados: elegibles.length, omitidos, resumen: reglas.textoEstadoConsulta(respuestas), venceAtMs };
+  const destinos: DestinoEntrega[] = elegibles.map((e) => ({
+    invitacionId: invitacionRef(ref.id, e.cuil).id,
+    nombre: e.nombre,
+    uid: e.uid,
+    mail: e.mail,
+    pushEstado: e.pushEstado,
+    employeeId: e.employeeId,
+    bolsaCuil: e.cuil,
+    texto,
+    cuil: e.cuil,
+    tipo: 'EVENTUAL',
+  }));
+  const entrega = await aplicarEntregasConsulta({
+    consultaId: ref.id, empresaId, actorUid: auth.uid,
+    objectiveId, objectiveName, positionName, clientName,
+    lugar: [clientName, objectiveName, positionName].map((s) => String(s || '').trim()).filter(Boolean).join(' · ') || 'el puesto',
+  }, destinos);
+  await auditar('CONSULTA_DISPONIBILIDAD_CREADA', auth.uid, empresaId, `${elegibles.length} consultados · ${lugares} lugar/es · ${texto}`, { consultaId: ref.id, huecoKey, status: entrega.status });
+  return { ok: true, consultaId: ref.id, lugares, consultados: elegibles.length, omitidos, resumen: entrega.resumen, status: entrega.status, venceAtMs };
 });
 
 async function marcarRespuesta(consultaId: string, persona: PersonaConsulta, patch: Partial<RespuestaVista>, estadoInv: string, extraInv: Record<string, unknown> = {}) {
