@@ -134,9 +134,9 @@ export function ChecklistEventual({ pasos, puedeEditar, ocupado, onAccion }: { p
                 {ocupado === p.accion ? 'Guardando…' : p.boton}
               </button>
             )}
-            {p.hecho && p.aviso && puedeEditar && (
+            {p.hecho && p.aviso && puedeEditar && (p.id === 'MARCO' || p.id === 'VIGENCIAS') && (
               <button type="button" data-check-accion={p.accion} onClick={() => onAccion(p.accion)} className="shrink-0 rounded-xl border border-amber-200 bg-white px-2.5 py-1.5 text-[11px] font-bold text-amber-800 hover:bg-amber-50 active:scale-95">
-                Renovar marco
+                {p.id === 'MARCO' ? 'Renovar marco' : 'Renovar'}
               </button>
             )}
           </li>

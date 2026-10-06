@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import {
-  ArrowLeft, Building2, Check, Download, FileText, FlaskConical, FolderOpen, History, Home, KeyRound, Landmark, Mail, Pencil, Phone,
+  ArrowLeft, Building2, Check, Download, Eye, FileText, FlaskConical, FolderOpen, History, Home, KeyRound, Landmark, Mail, Pencil, Phone,
   RefreshCw, RotateCcw, ShieldAlert, Upload, User, UserX,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { TabBar } from '@/components/ui';
 import { ChecklistEventual, type PasoChecklist } from '@/components/eventuales/EventualesUx';
+import ContratosEventual, { abrirPdfCallable, type ArcaVista, type ContratoVista } from '@/components/eventuales/ContratosEventual';
 import { RNOS_DEFAULT_FICHA } from '@/lib/eventuales/ficha.mjs';
 import { GENERO_LABEL } from '@/lib/eventuales/cupoGenero.mjs';
 import { etiquetasPruebas, SWITCHES_PRUEBAS } from '@/lib/eventuales/pruebasSwitch.mjs';
@@ -48,8 +49,8 @@ export type FichaEventualData = {
 
 export type MarcoVista = { estado?: string; vencimiento?: string; avisar?: boolean };
 export type DocumentoVista = { id: string; tipo?: string; nombre?: string; link?: string | null; drivePendiente?: boolean };
-type Contrato = { id: string; empresaId?: string; estado?: string; fechaAlta?: string; fechaBaja?: string; jornadas?: { fecha: string; horaInicio: string; horaFin: string; horas: number }[] };
-type Arca = { id: string; tipo?: string; estado?: string; fechaAlta?: string; nroTransaccion?: string; constanciaUrl?: string; codigoControl?: string; nroVerificador?: string; advertencias?: string[] };
+type Contrato = ContratoVista;
+type Arca = ArcaVista & { codigoControl?: string | null; nroVerificador?: string | null; advertencias?: string[] };
 type Historial = { id: string; action?: string; details?: string; at?: string | null };
 
 type Props = {
@@ -192,6 +193,7 @@ export default function FichaEventual({ ficha, detalle, marcos, documentos, empr
   const historial = (detalle?.historial as Historial[]) || [];
   const rnos = detalle?.rnos as { pendiente?: boolean; sugerido?: boolean; sugerencia?: string; empresaId?: string } | undefined;
   const noDisponible = ficha.disponibilidad === 'NO_DISPONIBLE';
+  const puedeLeer = puede('read') || puede('update') || puede('create');
 
   const toggleEmpresa = async (empresaId: string, habilitar: boolean) => {
     setGuardandoEmpresa(empresaId);
@@ -217,6 +219,21 @@ export default function FichaEventual({ ficha, detalle, marcos, documentos, empr
     if (accion === 'MARCO') {
       setSolapa('EMPRESAS');
       if (empresaActivaId && habilitadas.includes(empresaActivaId)) setEmpresaMarco(empresaActivaId);
+      return;
+    }
+    if (accion === 'TOPE') {
+      const caja = document.querySelector<HTMLElement>('[data-tope-excepcion]');
+      if (!caja) { toast.message('Tope de horas', { description: 'La excepción de tope la carga un usuario con permiso de edición en Eventuales.' }); return; }
+      caja.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      caja.querySelector<HTMLInputElement>('input')?.focus();
+    }
+  };
+
+  const verMarco = async (empresaId: string, modo: 'ver' | 'descargar') => {
+    try {
+      await abrirPdfCallable(modo, () => llamar('gestionarMarcoEventual', { accion: 'marcoPdf', cuil: ficha.id, empresaId }) as Promise<{ pdfBase64?: string | null; link?: string | null; nombre?: string }>);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo abrir el marco.');
     }
   };
 
@@ -439,11 +456,14 @@ export default function FichaEventual({ ficha, detalle, marcos, documentos, empr
                 {habilitadas.map((emp) => {
                   const m = marcos[emp];
                   const vista = textoEstadoMarco(m?.estado, m?.vencimiento);
+                  const firmado = m?.estado === 'MARCO_VIGENTE' || m?.estado === 'VENCIDO';
                   return (
                     <li key={emp} className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
                       <span className="flex-1 font-bold text-slate-700">{nombreEmpresa(emp)}</span>
                       <span className={`rounded-full border px-2 py-0.5 text-[10px] font-black ${TONO[vista.tono] || TONO.pendiente}`}>{vista.texto}</span>
                       {m?.avisar && <span className="text-[10px] font-bold text-amber-700">vence en menos de 30 días</span>}
+                      {puedeLeer && firmado && <TextBtn label="Ver marco" title={`Abre el contrato marco firmado de ${nombreEmpresa(emp)}`} onClick={() => void verMarco(emp, 'ver')}><Eye size={13} /></TextBtn>}
+                      {puedeLeer && firmado && <TextBtn label="Descargar" title={`Descarga el PDF del contrato marco firmado de ${nombreEmpresa(emp)}`} onClick={() => void verMarco(emp, 'descargar')}><Download size={13} /></TextBtn>}
                       {puede('update') && <TextBtn label="PDF para imprimir" title={`Generar el PDF del contrato marco de ${nombreEmpresa(emp)} para firmar en papel`} onClick={() => generarPdf(emp)}><Download size={13} /></TextBtn>}
                     </li>
                   );
@@ -507,15 +527,17 @@ export default function FichaEventual({ ficha, detalle, marcos, documentos, empr
         )}
 
         {solapa === 'CONTRATOS' && (
-          <div className="space-y-2">
-            {contratos.length === 0 && <p className="text-xs text-slate-400">Sin contratos.</p>}
-            {contratos.map((c) => (
-              <div key={c.id} className="rounded-xl border border-slate-100 p-3 text-xs text-slate-600">
-                <p className="font-bold text-slate-800">{c.empresaId ? nombreEmpresa(c.empresaId) : 'Sin empresa'} · {humanizar(c.estado)} · {fmtFechaAr(c.fechaAlta) || '—'} → {fmtFechaAr(c.fechaBaja) || '—'}</p>
-                {(c.jornadas || []).map((j, i) => <p key={i}>{fmtFechaAr(j.fecha)} {j.horaInicio}–{j.horaFin} ({j.horas} h)</p>)}
-              </div>
-            ))}
-          </div>
+          <ContratosEventual
+            cuil={ficha.id}
+            exigirMarco={ficha.exigirMarco}
+            contratos={contratos}
+            arca={arca}
+            nombreEmpresa={nombreEmpresa}
+            puedeLeer={puedeLeer}
+            puedeEditar={puede('update')}
+            llamar={llamar}
+            recargar={recargar}
+          />
         )}
 
         {solapa === 'ARCA' && (

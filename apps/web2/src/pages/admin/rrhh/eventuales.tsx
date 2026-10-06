@@ -254,15 +254,17 @@ export default function EventualesPage() {
     });
   }, []);
 
+  // El tope de horas entra en «Listo» / «Falta» con el mismo criterio del motor de candidatos (solo en la empresa activa).
+  const horasParaEstado = todaLaBolsa ? null : horasMes;
   const visibles = useMemo(
-    () => (filtrarFichas({ fichas, empresaId: empresaActivaId, todaLaBolsa, filtro, buscar, hoy: hoy() }) as Ficha[]).sort((a, b) => a.nombre.localeCompare(b.nombre)),
-    [fichas, empresaActivaId, todaLaBolsa, filtro, buscar],
+    () => (filtrarFichas({ fichas, empresaId: empresaActivaId, todaLaBolsa, filtro, buscar, hoy: hoy(), horasMes: horasParaEstado }) as Ficha[]).sort((a, b) => a.nombre.localeCompare(b.nombre)),
+    [fichas, empresaActivaId, todaLaBolsa, filtro, buscar, horasParaEstado],
   );
   const tarjetas = useMemo(
-    () => resumenBolsa({ fichas, empresaId: empresaActivaId, todaLaBolsa, hoy: hoy(), arcaPendientes }) as TarjetaResumen[],
-    [fichas, empresaActivaId, todaLaBolsa, arcaPendientes],
+    () => resumenBolsa({ fichas, empresaId: empresaActivaId, todaLaBolsa, hoy: hoy(), arcaPendientes, horasMes: horasParaEstado }) as TarjetaResumen[],
+    [fichas, empresaActivaId, todaLaBolsa, arcaPendientes, horasParaEstado],
   );
-  const guia = useMemo(() => pasosGuia({ fichas, empresaId: empresaActivaId, todaLaBolsa, hoy: hoy() }) as GuiaVista, [fichas, empresaActivaId, todaLaBolsa]);
+  const guia = useMemo(() => pasosGuia({ fichas, empresaId: empresaActivaId, todaLaBolsa, hoy: hoy(), horasMes: horasParaEstado }) as GuiaVista, [fichas, empresaActivaId, todaLaBolsa, horasParaEstado]);
 
   const llamar = async (nombre: string, data: Record<string, unknown>) => {
     const fn = httpsCallable(functions, nombre);
@@ -409,8 +411,8 @@ export default function EventualesPage() {
 
   const ficha = fichas.find((f) => f.id === elegida) || null;
   const checklist = useMemo(
-    () => (ficha ? (checklistFicha(ficha, hoy(), empresaActivaId, nombreEmpresaActiva) as PasoChecklist[]) : []),
-    [ficha, empresaActivaId, nombreEmpresaActiva],
+    () => (ficha ? (checklistFicha(ficha, hoy(), empresaActivaId, nombreEmpresaActiva, horasMes[ficha.id] || null) as PasoChecklist[]) : []),
+    [ficha, empresaActivaId, nombreEmpresaActiva, horasMes],
   );
   const abrirAlta = () => { setEditando(''); setForm({ ...vacio(), empresasHabilitadas: empresaActivaId ? [empresaActivaId] : [] }); };
   const abrirImportar = () => setReporteNomina({ dryRun: true, resumen: { nuevo: 0, actualizar: 0, sinCambio: 0, cuilInvalido: 0, duplicado: 0, planta: 0, empresaDesconocida: 0, mailInvalido: 0 }, vista: [], filas: [] });
@@ -548,8 +550,8 @@ export default function EventualesPage() {
               </p>
               <ul className="flex-1 overflow-auto p-1.5" data-lista-eventuales>
                 {visibles.map((f) => {
-                  const estadoBase = estadoFila(f, hoy(), todaLaBolsa ? '' : empresaActivaId) as { tono: string; texto: string };
                   const horas = horasMes[f.id];
+                  const estadoBase = estadoFila(f, hoy(), todaLaBolsa ? '' : empresaActivaId, todaLaBolsa ? null : horas || null) as { tono: string; texto: string };
                   const estado = horas ? { ...estadoBase, texto: `${estadoBase.texto} · ${horas.texto.replace(/ este mes$/, '')}` } : estadoBase;
                   const habilitadaAca = f.empresasHabilitadas.includes(empresaActivaId);
                   const activo = elegida === f.id;

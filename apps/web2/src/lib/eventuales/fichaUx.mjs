@@ -6,6 +6,7 @@ import { normalizeCuil } from './cuil.mjs';
 import { GRUPO_EVENTUALES_EMPRESA_IDS, GRUPO_EVENTUALES_ID } from './grupo.mjs';
 import { marcoDeBolsa } from './marcoTexto.mjs';
 import { vencimientosDe } from './planificacion.mjs';
+import { exigeMarco } from './pruebasSwitch.mjs';
 
 const VIGENCIAS = [
   { dias: 365, label: '1 año' },
@@ -34,26 +35,48 @@ export function textoEstadoMarco(estado, vencimiento) {
   return { texto: 'Sin contrato marco', tono: 'pendiente' };
 }
 
+/** Ids de `faltantesConvocable` que son vigencias (credencial, apto, habilitación 9236). */
+export const FALTANTES_VIGENCIA = ['CREDENCIAL', 'CREDENCIAL_FECHA', 'APTO', 'APTO_FECHA', 'NO_APTO', 'HABILITACION'];
+
+function estadoAptoDe(ficha) {
+  return String(ficha?.aptoPsicofisico?.estado ?? ficha?.aptoEstado ?? '').trim().toUpperCase();
+}
+
 /**
  * Lo que le falta para poder convocarlo. `empresaId` vacío mira todas las habilitadas.
  * Sin ninguna habilitada el aviso es «Sin empresa habilitada».
+ *
+ * Mismos criterios que el motor de candidatos (`evaluarEventualParaHueco`): empresa habilitada y marco
+ * solo si `exigirMarco` está encendido; credencial y apto bloquean tanto vencidos como sin fecha;
+ * apto con estado distinto de APTO; habilitación 9236 solo si venció; y el tope de horas del mes
+ * si se pasa `horasMes` (`{ alcanzado, cerca }` de `gestionarEventual horasMes`).
  */
-export function faltantesConvocable(ficha, hoy, empresaId = '') {
+export function faltantesConvocable(ficha, hoy, empresaId = '', horasMes = null) {
   const chips = [];
   if (!String(ficha?.mail || '').trim()) chips.push({ id: 'MAIL', texto: 'falta mail' });
   if (!String(ficha?.telefono || '').trim()) chips.push({ id: 'TEL', texto: 'falta teléfono' });
   if (!String(ficha?.domicilio || '').trim()) chips.push({ id: 'DOM', texto: 'falta domicilio' });
-  const habilitadas = (Array.isArray(ficha?.empresasHabilitadas) ? ficha.empresasHabilitadas : []).map(String).filter(Boolean);
-  if (!habilitadas.length) {
-    chips.push({ id: 'EMPRESA', texto: 'Sin empresa habilitada' });
-  } else {
-    const empresas = empresaId ? habilitadas.filter((id) => id === empresaId) : habilitadas;
-    const sinMarco = (empresas.length ? empresas : habilitadas).some((id) => marcoDeBolsa(ficha, id, hoy).estado !== 'MARCO_VIGENTE');
-    if (sinMarco) chips.push({ id: 'MARCO', texto: 'sin marco' });
+  if (exigeMarco(ficha)) {
+    const habilitadas = (Array.isArray(ficha?.empresasHabilitadas) ? ficha.empresasHabilitadas : []).map(String).filter(Boolean);
+    if (!habilitadas.length) {
+      chips.push({ id: 'EMPRESA', texto: 'Sin empresa habilitada' });
+    } else {
+      const empresas = empresaId ? habilitadas.filter((id) => id === empresaId) : habilitadas;
+      const sinMarco = (empresas.length ? empresas : habilitadas).some((id) => marcoDeBolsa(ficha, id, hoy).estado !== 'MARCO_VIGENTE');
+      if (sinMarco) chips.push({ id: 'MARCO', texto: 'sin marco' });
+    }
   }
-  const vencidos = new Set(vencimientosDe(ficha, hoy).filter((v) => v.estado === 'VENCIDO').map((v) => v.tipo));
-  if (vencidos.has('credencial')) chips.push({ id: 'CREDENCIAL', texto: 'credencial vencida' });
-  if (vencidos.has('apto')) chips.push({ id: 'APTO', texto: 'apto vencido' });
+  const estados = new Map(vencimientosDe(ficha, hoy).map((v) => [v.tipo, v.estado]));
+  if (estados.get('credencial') === 'VENCIDO') chips.push({ id: 'CREDENCIAL', texto: 'credencial vencida' });
+  else if (estados.get('credencial') === 'SIN_DATO') chips.push({ id: 'CREDENCIAL_FECHA', texto: 'credencial sin fecha de vencimiento' });
+  if (estados.get('apto') === 'VENCIDO') chips.push({ id: 'APTO', texto: 'apto vencido' });
+  else if (estados.get('apto') === 'SIN_DATO') chips.push({ id: 'APTO_FECHA', texto: 'apto sin fecha de vencimiento' });
+  const aptoEstado = estadoAptoDe(ficha);
+  if (aptoEstado && aptoEstado !== 'APTO') chips.push({ id: 'NO_APTO', texto: 'apto psicofísico: no apto' });
+  if (estados.get('habilitacion') === 'VENCIDO') chips.push({ id: 'HABILITACION', texto: 'habilitación 9236 vencida' });
+  if (horasMes && (horasMes.alcanzado || horasMes.cerca)) {
+    chips.push({ id: 'TOPE', texto: horasMes.alcanzado ? 'tope de horas del mes alcanzado' : 'cerca del tope de horas del mes' });
+  }
   return chips;
 }
 
@@ -450,26 +473,29 @@ export function marcoPorVencer(f, hoy, empresaId = '') {
  * Filtros de la pantalla de escritorio (tarjetas-resumen y pasos de la guía). Todos sobre disponibles.
  * `empresaId` vacío = toda la bolsa (mira todas las habilitadas).
  */
-export const FILTROS_PASOS = ['LISTOS', 'FALTA', 'MARCO_VENCE', 'FALTA_CONTACTO', 'FALTA_MARCO', 'FALTA_EMPRESA', 'SIN_ACCESO'];
+export const FILTROS_PASOS = ['LISTOS', 'FALTA', 'MARCO_VENCE', 'FALTA_CONTACTO', 'FALTA_MARCO', 'FALTA_EMPRESA', 'FALTA_VIGENCIA', 'SIN_ACCESO', 'TOPE_HORAS'];
 
-function cumpleFiltroPaso(f, filtro, hoy, empresaFiltro, empresaActiva) {
+function cumpleFiltroPaso(f, filtro, hoy, empresaFiltro, empresaActiva, horas) {
   if (f.disponibilidad === 'NO_DISPONIBLE') return false;
-  const faltan = faltantesConvocable(f, hoy, empresaFiltro).map((c) => c.id);
+  const faltan = faltantesConvocable(f, hoy, empresaFiltro, horas).map((c) => c.id);
   if (filtro === 'LISTOS') return faltan.length === 0;
   if (filtro === 'FALTA') return faltan.length > 0;
   if (filtro === 'MARCO_VENCE') return marcoPorVencer(f, hoy, empresaFiltro);
   if (filtro === 'FALTA_CONTACTO') return faltan.some((id) => id === 'MAIL' || id === 'TEL' || id === 'DOM');
   if (filtro === 'FALTA_MARCO') return faltan.includes('MARCO');
-  if (filtro === 'FALTA_EMPRESA') return faltan.includes('EMPRESA') || (!!empresaActiva && !(f.empresasHabilitadas || []).map(String).includes(empresaActiva));
+  if (filtro === 'FALTA_EMPRESA') return faltan.includes('EMPRESA') || (exigeMarco(f) && !!empresaActiva && !(f.empresasHabilitadas || []).map(String).includes(empresaActiva));
+  if (filtro === 'FALTA_VIGENCIA') return faltan.some((id) => FALTANTES_VIGENCIA.includes(id));
   if (filtro === 'SIN_ACCESO') return !String(f.uid || '').trim();
+  if (filtro === 'TOPE_HORAS') return faltan.includes('TOPE');
   return true;
 }
 
 /**
  * Alcance + filtro + búsqueda de la lista.
  * `todaLaBolsa=false` → solo habilitados en `empresaId`. Incompletos mira lo que falta para esa empresa.
+ * `horasMes` (opcional) = `{ [fichaId]: { alcanzado, cerca } }` para que LISTOS / FALTA / TOPE_HORAS miren el tope.
  */
-export function filtrarFichas({ fichas, empresaId = '', todaLaBolsa = false, filtro = 'DISPONIBLE', buscar = '', hoy }) {
+export function filtrarFichas({ fichas, empresaId = '', todaLaBolsa = false, filtro = 'DISPONIBLE', buscar = '', hoy, horasMes = null }) {
   const q = String(buscar || '').trim().toLowerCase();
   const alcance = (fichas || []).filter((f) => todaLaBolsa || !empresaId || (f.empresasHabilitadas || []).includes(empresaId));
   const empresaFiltro = todaLaBolsa ? '' : empresaId;
@@ -478,7 +504,7 @@ export function filtrarFichas({ fichas, empresaId = '', todaLaBolsa = false, fil
     if (filtro === 'NO_DISPONIBLE') return f.disponibilidad === 'NO_DISPONIBLE';
     if (filtro === 'VENCE') return venceProntoFicha(f, hoy);
     if (filtro === 'INCOMPLETOS') return esIncompleto(f, hoy, empresaFiltro);
-    if (FILTROS_PASOS.includes(filtro)) return cumpleFiltroPaso(f, filtro, hoy, empresaFiltro, empresaId);
+    if (FILTROS_PASOS.includes(filtro)) return cumpleFiltroPaso(f, filtro, hoy, empresaFiltro, empresaId, horasMes ? horasMes[f.id] || null : null);
     return true;
   });
   if (!q) return porFiltro;
