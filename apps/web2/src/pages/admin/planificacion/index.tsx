@@ -277,6 +277,8 @@ import {
     type TopeAutorizacion,
 } from '@/lib/planificacion/supervisorAuth';
 import { VacancyCoberturaAcciones, VacancyCoberturaLista } from '@/components/planificacion/VacancyCoberturaDia';
+import { useConsultasDisponibilidadObjetivo } from '@/hooks/useConsultasDisponibilidadObjetivo';
+import { consultaDelDia, resumenConsultaDia } from '@/lib/planificacion/coberturaEventualesUx';
 import { alignVacancyGapBand } from '@/lib/planificacion/vacancySplitBands';
 import {
     listVacancyGapBandOptions,
@@ -1633,6 +1635,8 @@ function PlanificacionDesktop() {
     const [vacancySplitExtExtraHours, setVacancySplitExtExtraHours] = useState<number | null>(null);
     const [vacancySplitSecondExtraHours, setVacancySplitSecondExtraHours] = useState<number | null>(null);
     const vacancyReplacementPanelRef = React.useRef<HTMLDivElement>(null);
+    /** Consultas de disponibilidad del objetivo mientras el modal de cobertura está abierto (estado por día en vivo). */
+    const vacancyConsultas = useConsultasDisponibilidadObjetivo(empresaId, selectedObjective, !!vacancyData?.startDate && canConsultarEventual);
 
     useEffect(() => {
         if (!vacancyData?.startDate) {
@@ -15763,6 +15767,7 @@ function PlanificacionDesktop() {
                                             mode: cov.mode,
                                             editing: vacancyEditingDay === d,
                                             titular: chip ? [chip.code, chip.band, chip.position, chip.sched].filter(Boolean).join(' · ') : null,
+                                            consulta: resumenConsultaDia(consultaDelDia(vacancyConsultas, d)),
                                         };
                                     })}
                                     emptyCount={vacancyEmptyActiveDays}
@@ -15930,8 +15935,8 @@ function PlanificacionDesktop() {
                                             const objGeo = objLat && objLng ? { lat: objLat, lng: objLng } : null;
                                             return (
                                                 <div className="p-2">
-                                                    <p className="text-[9px] font-bold text-fuchsia-800 bg-fuchsia-50 border border-fuchsia-100 rounded-lg px-3 py-1.5 mb-2">
-                                                        {targetDays.length} día(s): {jornadas.map((j) => `${j.fecha.slice(8, 10)} ${j.code} ${j.horaInicio}–${j.horaFin}`).join(' · ')}. El eventual entra como suplente; al guardar, el contrato queda en borrador hasta publicar.
+                                                    <p className="text-[9px] font-bold text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 mb-2">
+                                                        Cubre {jornadas.map((j) => `${j.fecha.slice(8, 10)}/${j.fecha.slice(5, 7)} · ${j.code} ${j.horaInicio}–${j.horaFin}`).join(' · ')}. El eventual queda como suplente del día; al guardar se arma el contrato y el alta ARCA.
                                                     </p>
                                                     <EventualesCandidatosPanel
                                                         empresaId={empresaId || ''}

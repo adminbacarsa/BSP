@@ -7,6 +7,8 @@ export type CoberturaDiaFila = {
   mode: 'none' | 'substitute' | 'split';
   editing: boolean;
   titular: string | null;
+  /** Consulta de disponibilidad del día: «Consultados: 3 · esperando respuesta (vence 11:15)» / «ABALLAY aceptó 10:42 → suplente». */
+  consulta?: string | null;
 };
 
 /** Paso 2: resumen de lo que tiene cada día marcado. Tocar edita; Quitar saca solo ese día. */
@@ -51,6 +53,9 @@ export function VacancyCoberturaLista(props: {
                 ) : (
                   <span className="block text-[9px] font-bold text-rose-500 mt-0.5">Sin turno laboral inferido</span>
                 )}
+                {day.consulta ? (
+                  <span className="block truncate text-[9px] font-bold text-indigo-700 mt-0.5" data-cobertura-consulta={day.date}>{day.consulta}</span>
+                ) : null}
               </span>
               {day.mode === 'split' && (
                 <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-violet-100 text-violet-800 shrink-0">ext+adel</span>
