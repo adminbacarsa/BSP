@@ -288,7 +288,7 @@ export function CandidatosHueco(props: {
                 onChange={() => { if (!ev.canal?.sinCanal) props.onToggleConsulta?.(ev.cuil); }}
                 aria-label={`Consultar a ${ev.nombre}`}
                 data-consulta-cuil={ev.cuil}
-                className="h-4 w-4 accent-indigo-600"
+                className="h-4 w-4 accent-indigo-600 text-base"
               />
             )}
             {ev.nombre}<PuntajeChip sujetoId={ev.cuil} />
