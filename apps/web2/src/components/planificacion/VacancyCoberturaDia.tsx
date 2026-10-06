@@ -9,6 +9,8 @@ export type CoberturaDiaFila = {
   titular: string | null;
   /** Consulta de disponibilidad del día: «Consultados: 3 · esperando respuesta (vence 11:15)» / «ABALLAY aceptó 10:42 → suplente». */
   consulta?: string | null;
+  /** El turno de ese día lo escribe quien acepte: no queda suplente en el borrador local. */
+  resuelveConsulta?: boolean;
 };
 
 /** Paso 2: resumen de lo que tiene cada día marcado. Tocar edita; Quitar saca solo ese día. */
@@ -55,6 +57,9 @@ export function VacancyCoberturaLista(props: {
                 )}
                 {day.consulta ? (
                   <span className="block truncate text-[9px] font-bold text-indigo-700 mt-0.5" data-cobertura-consulta={day.date}>{day.consulta}</span>
+                ) : null}
+                {day.resuelveConsulta ? (
+                  <span className="block truncate text-[9px] font-black text-indigo-800 mt-0.5" data-cobertura-resuelve={day.date}>Lo resuelve la consulta</span>
                 ) : null}
               </span>
               {day.mode === 'split' && (

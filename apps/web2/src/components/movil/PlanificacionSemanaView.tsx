@@ -91,7 +91,13 @@ function diaNumero(fecha: string): string {
   return String(Number(fecha.slice(8, 10)));
 }
 
-function Celda({ celda, hoy, onClick }: { celda: CeldaSemana; hoy: string; onClick: () => void }) {
+function Celda({ celda, hoy, onClick, marca, onMarca }: {
+  celda: CeldaSemana;
+  hoy: string;
+  onClick: () => void;
+  marca?: { texto: string; tooltip: string } | null;
+  onMarca?: () => void;
+}) {
   const esHueco = celda.kind === 'hueco';
   const sinServicio = celda.kind === 'sin-servicio';
   const asignados = celda.guardias.filter((g) => !g.vacante);
@@ -115,6 +121,16 @@ function Celda({ celda, hoy, onClick }: { celda: CeldaSemana; hoy: string; onCli
           {celda.faltan > 1 ? `${celda.faltan} huecos` : 'Hueco'}
         </span>
       )}
+      {marca ? (
+        <span
+          data-consulta-celda="1"
+          title={marca.tooltip}
+          className="block w-full truncate text-[7px] font-black leading-none text-indigo-700"
+          onClick={(e) => { e.stopPropagation(); e.preventDefault(); onMarca?.(); }}
+        >
+          {marca.texto}
+        </span>
+      ) : null}
     </button>
   );
 }
@@ -133,6 +149,8 @@ export function SemanaGrilla(props: {
   onCelda: (celda: CeldaSemana) => void;
   onLicencia: (turno: TurnoMovil) => void;
   sinEstructura?: string | null;
+  marcaConsulta?: (fecha: string, positionName: string) => { texto: string; tooltip: string } | null;
+  onConsulta?: (fecha: string, positionName: string) => void;
 }) {
   const eventos = props.eventos || [];
   const touch = useRef<{ x: number; y: number } | null>(null);
@@ -178,7 +196,14 @@ export function SemanaGrilla(props: {
           </div>
           <div className="grid grid-cols-7 gap-1">
             {props.celdas[r].map((celda) => (
-              <Celda key={celda.fecha} celda={celda} hoy={props.hoy} onClick={() => props.onCelda(celda)} />
+              <Celda
+                key={celda.fecha}
+                celda={celda}
+                hoy={props.hoy}
+                marca={props.marcaConsulta?.(celda.fecha, celda.fila.positionName) || null}
+                onMarca={() => props.onConsulta?.(celda.fecha, celda.fila.positionName)}
+                onClick={() => props.onCelda(celda)}
+              />
             ))}
           </div>
         </div>

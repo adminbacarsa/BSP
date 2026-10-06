@@ -225,3 +225,155 @@ export function resumenConsultaDia(consulta: ConsultaResumenIn | null | undefine
   if (consulta.status === 'VENCIDA') return `Consultados: ${n} · venció sin respuesta${noTxt}`;
   return `Consultados: ${n} · sin suplente${noTxt}`;
 }
+
+const AUSENCIA_LOCAL = new Set(['V', 'L', 'E', 'A', 'AA', 'PG', 'ART', 'SGS', 'SUS']);
+
+export type JornadaConsulta = { fecha: string; code?: string; horaInicio?: string; horaFin?: string };
+
+export type ConsultaCurso = ConsultaResumenIn & {
+  id: string;
+  positionName?: string | null;
+  objectiveName?: string | null;
+  titularEmployeeId?: string | null;
+  jornadas?: JornadaConsulta[];
+};
+
+export function fechaDeClavePendiente(key: string): { empId: string; fecha: string } | null {
+  const m = key.match(/^(.*)_(\d{4}-\d{2}-\d{2})$/);
+  if (!m) return null;
+  return { empId: m[1], fecha: m[2] };
+}
+
+export function diaLoResuelveConsulta(consultas: ConsultaResumenIn[], fecha: string): boolean {
+  return consultas.some((c) => c.status === 'ABIERTA' && (c.jornadas || []).some((j) => j.fecha === fecha));
+}
+
+/** Celda del titular (o, si la consulta no trae titular, la celda de licencia de ese día). */
+export function consultaAbiertaEnFecha<T extends ConsultaResumenIn & { titularEmployeeId?: string | null }>(
+  consultas: T[],
+  fecha: string,
+  empId?: string | null,
+  codigoCelda?: string | null,
+): T | null {
+  const delDia = consultas.filter((c) => c.status === 'ABIERTA' && (c.jornadas || []).some((j) => j.fecha === fecha));
+  if (!delDia.length) return null;
+  if (!empId) return delDia[0];
+  const propia = delDia.find((c) => c.titularEmployeeId && c.titularEmployeeId === empId);
+  if (propia) return propia;
+  const sinTitular = delDia.filter((c) => !c.titularEmployeeId);
+  if (!sinTitular.length) return null;
+  const code = String(codigoCelda || '').toUpperCase();
+  return AUSENCIA_LOCAL.has(code) ? sinTitular[0] : null;
+}
+
+export function textoIndicadorConsulta(consulta: ConsultaResumenIn | null | undefined): string {
+  if (!consulta) return '';
+  const vence = horaArDe(consulta.venceAtMs);
+  return vence ? `Consulta enviada · vence ${vence}` : 'Consulta enviada';
+}
+
+export function textoTooltipConsulta(consulta: ConsultaResumenIn): string {
+  const lineas = (consulta.respuestas || []).map((r) => {
+    const nombre = apellidoDe(r.nombre);
+    if (r.estado === 'ASIGNADO') return `${nombre} aceptó${r.hora ? ` ${r.hora}` : ''}`;
+    if (r.estado === 'NO') return `${nombre} no`;
+    if (r.estado === 'CANCELADA') return `${nombre} · ya no hace falta`;
+    return `${nombre} esperando`;
+  });
+  return [textoIndicadorConsulta(consulta), ...lineas].filter(Boolean).join('\n');
+}
+
+function esAusenciaDelTitular(
+  empId: string,
+  change: { code?: string; isDeleted?: boolean } | null | undefined,
+  delDia: { titularEmployeeId?: string | null }[],
+): boolean {
+  if (!change || change.isDeleted) return false;
+  const code = String(change.code || '').toUpperCase();
+  if (!AUSENCIA_LOCAL.has(code)) return false;
+  return delDia.some((c) => !c.titularEmployeeId || c.titularEmployeeId === empId);
+}
+
+/**
+ * Saca del borrador local el turno de cobertura de un día con consulta abierta.
+ * La ausencia del titular se conserva: es otro documento y no pisa el turno del eventual.
+ */
+export function quitarBorradorQuePisaConsulta<T extends Record<string, any>>(
+  changes: T,
+  consultas: (ConsultaResumenIn & { titularEmployeeId?: string | null })[],
+): { changes: T; quitadas: string[] } {
+  const abiertas = consultas.filter((c) => c.status === 'ABIERTA');
+  const next = { ...changes } as T;
+  const quitadas: string[] = [];
+  for (const key of Object.keys(next)) {
+    const parsed = fechaDeClavePendiente(key);
+    if (!parsed) continue;
+    const delDia = abiertas.filter((c) => (c.jornadas || []).some((j) => j.fecha === parsed.fecha));
+    if (!delDia.length) continue;
+    if (esAusenciaDelTitular(parsed.empId, next[key], delDia)) continue;
+    delete next[key];
+    quitadas.push(key);
+  }
+  return { changes: next, quitadas };
+}
+
+export function cambiosManualesSobreConsulta(
+  prev: Record<string, any>,
+  next: Record<string, any>,
+  consultas: (ConsultaResumenIn & { id: string; titularEmployeeId?: string | null })[],
+): { key: string; consultaId: string; fecha: string }[] {
+  const abiertas = consultas.filter((c) => c.status === 'ABIERTA' && c.id);
+  const keys = new Set([...Object.keys(prev), ...Object.keys(next)]);
+  const out: { key: string; consultaId: string; fecha: string }[] = [];
+  for (const key of keys) {
+    if (JSON.stringify(prev[key] ?? null) === JSON.stringify(next[key] ?? null)) continue;
+    const parsed = fechaDeClavePendiente(key);
+    if (!parsed) continue;
+    const delDia = abiertas.filter((c) => (c.jornadas || []).some((j) => j.fecha === parsed.fecha));
+    const propia = delDia.find((c) => !c.titularEmployeeId || c.titularEmployeeId === parsed.empId);
+    if (!propia) continue;
+    if (esAusenciaDelTitular(parsed.empId, next[key], [propia])) continue;
+    out.push({ key, consultaId: propia.id, fecha: parsed.fecha });
+  }
+  return out;
+}
+
+export function textoToastAcepto(nombre: string, fecha: string, code?: string | null, positionName?: string | null): string {
+  const dia = /^\d{4}-\d{2}-\d{2}$/.test(fecha) ? `${fecha.slice(8, 10)}/${fecha.slice(5, 7)}` : fecha;
+  const banda = code ? ` ${String(code).toUpperCase()}` : '';
+  const puesto = positionName ? ` · ${positionName}` : '';
+  return `${apellidoDe(nombre)} aceptó cubrir ${dia}${banda}${puesto}`;
+}
+
+export function textoToastVencida(consulta: ConsultaCurso): string {
+  const j = (consulta.jornadas || [])[0];
+  const dia = j?.fecha && /^\d{4}-\d{2}-\d{2}$/.test(j.fecha) ? `${j.fecha.slice(8, 10)}/${j.fecha.slice(5, 7)}` : '';
+  const puesto = consulta.positionName ? ` · ${consulta.positionName}` : '';
+  return `La consulta${dia ? ` del ${dia}` : ''}${puesto} venció sin respuesta.`;
+}
+
+/** Diff de dos snapshots: un sí nuevo, o una abierta que pasó a vencida sin aceptación. */
+export function novedadesDeConsultas(prev: ConsultaCurso[], next: ConsultaCurso[]): { tipo: 'ACEPTO' | 'VENCIDA'; id: string; texto: string }[] {
+  const antes = new Map(prev.map((c) => [c.id, c]));
+  const out: { tipo: 'ACEPTO' | 'VENCIDA'; id: string; texto: string }[] = [];
+  for (const c of next) {
+    const p = antes.get(c.id);
+    if (!p) continue;
+    for (const r of c.respuestas || []) {
+      if (r.estado !== 'ASIGNADO') continue;
+      const ya = (p.respuestas || []).some((x) => x.nombre === r.nombre && x.estado === 'ASIGNADO');
+      if (ya) continue;
+      const j = (c.jornadas || [])[0];
+      out.push({ tipo: 'ACEPTO', id: c.id, texto: textoToastAcepto(r.nombre, j?.fecha || '', j?.code, c.positionName) });
+    }
+    const acepto = (c.respuestas || []).some((r) => r.estado === 'ASIGNADO');
+    if (p.status === 'ABIERTA' && c.status === 'VENCIDA' && !acepto) {
+      out.push({ tipo: 'VENCIDA', id: c.id, texto: textoToastVencida(c) });
+    }
+  }
+  return out;
+}
+
+export function consultasVisiblesEnCurso<T extends ConsultaCurso>(list: T[]): T[] {
+  return list.filter((c) => c.status === 'ABIERTA' || (c.status === 'VENCIDA' && !(c.respuestas || []).some((r) => r.estado === 'ASIGNADO')));
+}

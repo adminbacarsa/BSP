@@ -81,6 +81,7 @@ type Props = {
         clientName?: string | null;
         objectiveName?: string | null;
         positionName?: string | null;
+        titularEmployeeId?: string | null;
     } | null;
 };
 
@@ -155,10 +156,12 @@ export default function EventualesCandidatosPanel({
             const res = await call({
                 empresaId, objectiveId: objectiveId || null, clientId: clientId || null, objetivoGeo: objetivoGeo || null,
                 clientName: consulta.clientName || null, objectiveName: consulta.objectiveName || null, positionName: consulta.positionName || null,
+                titularEmployeeId: consulta.titularEmployeeId || null,
                 jornadas, cuils: marcados, lugares: 1, venceMinutos,
             });
             const omitidos = res.data?.omitidos?.length || 0;
             toast.success(res.data?.resumen || 'Consulta enviada.');
+            toast.message('Podés cerrar esta ventana. El día queda en espera.');
             if (omitidos) toast.message(`${omitidos} no se consultaron porque ya no estaban elegibles.`);
             setMarcados([]);
         } catch (e) {
