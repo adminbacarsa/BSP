@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import {
   canRespondCoberturaAsPreview,
   isEventualPreviewSuperAdmin,
+  puedeResponderConsulta,
   resolveBolsaCuilForListar,
   resolvePreviewCheckIn,
 } from '../../../../apps/functions/src/eventuales/eventualPreviewAuth';
@@ -84,6 +85,54 @@ describe('responder cobertura y fichada como el eventual', () => {
       resolvePreviewCheckIn({ isSuperAdmin: false, asEmployeeId: 'leg_a', shiftEmployeeId: 'leg_a' }),
       { scoped: false },
     );
+  });
+});
+
+describe('responder consulta en preview', () => {
+  const base = {
+    isSuperAdmin: false,
+    authUid: 'uid-sa',
+    claimBolsaCuil: null as string | null,
+    ownEmployeeIds: [] as string[],
+    asEmployeeId: null as string | null,
+    asBolsaCuil: null as string | null,
+    invUid: null as string | null,
+    invBolsaCuil: '20334141463',
+    invEmployeeId: null as string | null,
+  };
+
+  it('el eventual entra por claim aunque la invitación no tenga uid', () => {
+    const r = puedeResponderConsulta({
+      ...base,
+      authUid: 'uid-ev',
+      claimBolsaCuil: '20-33414146-3',
+    });
+    assert.deepEqual(r, { ok: true, preview: false });
+  });
+
+  it('SuperAdmin en preview responde en nombre del CUIL y queda marcado preview', () => {
+    const r = puedeResponderConsulta({
+      ...base,
+      isSuperAdmin: true,
+      asBolsaCuil: '20334141463',
+    });
+    assert.deepEqual(r, { ok: true, preview: true });
+  });
+
+  it('otro rol no responde una consulta ajena aunque mande el CUIL', () => {
+    const r = puedeResponderConsulta({ ...base, asBolsaCuil: '20334141463' });
+    assert.deepEqual(r, { ok: false });
+  });
+
+  it('el guardia entra por su legajo', () => {
+    const r = puedeResponderConsulta({
+      ...base,
+      authUid: 'uid-g',
+      ownEmployeeIds: ['emp-1'],
+      invBolsaCuil: null,
+      invEmployeeId: 'emp-1',
+    });
+    assert.deepEqual(r, { ok: true, preview: false });
   });
 });
 

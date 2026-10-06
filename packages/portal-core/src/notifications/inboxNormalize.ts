@@ -30,6 +30,7 @@ export type PortalInboxNormalized = {
   contratoId?: string;
   consultaId?: string;
   invitacionId?: string;
+  jornadas?: { fecha?: string; code?: string; horaInicio?: string; horaFin?: string }[];
 };
 
 function asOptionalString(v: unknown): string | undefined {
@@ -74,6 +75,9 @@ export function normalizePortalInboxItem(
     contratoId: asOptionalString(raw.contratoId),
     consultaId: asOptionalString(raw.consultaId),
     invitacionId: asOptionalString(raw.invitacionId),
+    jornadas: Array.isArray(raw.jornadas)
+      ? (raw.jornadas as { fecha?: string; code?: string; horaInicio?: string; horaFin?: string }[])
+      : undefined,
   };
 }
 

@@ -167,6 +167,7 @@ export async function aplicarEntregasConsulta(ctx: ContextoEntrega, destinos: De
         body: d.texto,
         consultaId: ctx.consultaId,
         invitacionId: d.invitacionId,
+        jornadas: Array.isArray(data.jornadas) ? data.jornadas : [],
         objectiveId: ctx.objectiveId,
         objectiveName: ctx.objectiveName,
         positionName: ctx.positionName,
@@ -221,7 +222,7 @@ export async function aplicarEntregasConsulta(ctx: ContextoEntrega, destinos: De
       motivo,
       canales: canalesOk,
       mailOk: canalesOk.includes('MAIL'),
-      ...(estado === 'PENDIENTE' ? {} : { venceAtMs: null }),
+      ...(estado === 'PENDIENTE' || estado === 'AVISO_MAIL' ? {} : { venceAtMs: null }),
     }, { merge: true });
   }
 

@@ -31,6 +31,46 @@ export function resolveBolsaCuilForListar(input: {
   return null;
 }
 
+function digitsCuil(raw: unknown): string {
+  return String(raw ?? '').replace(/\D/g, '');
+}
+
+/**
+ * Quién puede responder una consulta de disponibilidad.
+ * El dueño entra por uid, por claim bolsaCuil o por un legajo suyo.
+ * El SuperAdmin en vista previa entra solo si asBolsaCuil / asEmployeeId es el de ESA invitación.
+ */
+export function puedeResponderConsulta(input: {
+  isSuperAdmin: boolean;
+  authUid: string;
+  claimBolsaCuil: string | null;
+  ownEmployeeIds: string[];
+  asEmployeeId: string | null;
+  asBolsaCuil: string | null;
+  invUid: string | null;
+  invBolsaCuil: string | null;
+  invEmployeeId: string | null;
+}): { ok: true; preview: boolean } | { ok: false } {
+  const uid = String(input.authUid || '').trim();
+  const invUid = String(input.invUid || '').trim();
+  const claim = digitsCuil(input.claimBolsaCuil);
+  const invCuil = digitsCuil(input.invBolsaCuil);
+  const invEmp = String(input.invEmployeeId || '').trim();
+  const own = new Set((input.ownEmployeeIds || []).map((id) => String(id || '').trim()).filter(Boolean));
+  const propio =
+    (!!invUid && invUid === uid) ||
+    (!!claim && !!invCuil && claim === invCuil) ||
+    (!!invEmp && own.has(invEmp));
+  if (propio) return { ok: true, preview: false };
+  const asCuil = digitsCuil(input.asBolsaCuil);
+  const asEmp = String(input.asEmployeeId || '').trim();
+  const preview =
+    input.isSuperAdmin &&
+    ((!!asCuil && !!invCuil && asCuil === invCuil) || (!!asEmp && !!invEmp && asEmp === invEmp));
+  if (preview) return { ok: true, preview: true };
+  return { ok: false };
+}
+
 /** Responder una convocatoria ajena solo si SuperAdmin y el asEmployeeId es el candidato. */
 export function canRespondCoberturaAsPreview(input: {
   isSuperAdmin: boolean;

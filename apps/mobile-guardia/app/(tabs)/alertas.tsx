@@ -32,6 +32,9 @@ import { appAlert } from '@/lib/appAlert';
 import { ALERTAS_PAGE_SIZE, paginateAlertItems } from '../../src/lib/alertasPagination';
 import { respondCoberturaConvocatoria } from '../../src/lib/respondCoberturaConvocatoria';
 import { responderConsultaDisponibilidad } from '../../src/lib/responderConsultaDisponibilidad';
+import { argsPreviewConsulta } from '../../src/lib/consultasDisponibilidadQuery';
+import { ConsultasDisponibilidadBanner } from '../../src/components/ConsultasDisponibilidadBanner';
+import { useConsultasDisponibilidad } from '../../src/hooks/useConsultasDisponibilidad';
 import { buildCoberturaRespondFeedback } from '../../src/lib/coberturaRespondFeedback';
 import { ConvocatoriaCard } from '../../src/components/ConvocatoriaCard';
 import {
@@ -113,7 +116,9 @@ export default function AlertasScreen() {
 
 function AlertasScreenContent() {
   const router = useRouter();
-  const { user, previewEmpDocId, isPreviewMode, isSuperAdmin, employee } = usePortalAuth();
+  const { user, previewEmpDocId, isPreviewMode, isSuperAdmin, employee, bolsaCuil, empDocId } = usePortalAuth();
+  const consultasDisponibilidad = useConsultasDisponibilidad();
+  const previewConsulta = argsPreviewConsulta({ isPreviewMode, bolsaCuil, employeeId: empDocId });
   const { objectivesMap } = useObjectivesMap();
   const { palette } = useTheme();
   const { contentMaxWidth, horizontalPadding, isCompact } = useResponsiveLayout();
@@ -128,6 +133,16 @@ function AlertasScreenContent() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [domainFilter, setDomainFilter] = useState<DomainFilter>('Todas');
   const [page, setPage] = useState(0);
+
+  const consultasFueraDeBandeja = useMemo(() => {
+    if (domainFilter !== 'Todas' && domainFilter !== 'Operaciones') return [];
+    const enBandeja = new Set(
+      items
+        .filter((n) => String(n.type || '').toUpperCase() === 'CONSULTA_DISPONIBILIDAD' && n.invitacionId)
+        .map((n) => String(n.invitacionId)),
+    );
+    return consultasDisponibilidad.filter((c) => !enBandeja.has(c.id));
+  }, [consultasDisponibilidad, domainFilter, items]);
 
   const filtered = useMemo(() => {
     if (domainFilter === 'Todas') return items;
@@ -311,7 +326,7 @@ function AlertasScreenContent() {
                 }
                 setBusyId(n.id);
                 try {
-                  const res = await responderConsultaDisponibilidad(invitacionId, si ? 'SI' : 'NO');
+                  const res = await responderConsultaDisponibilidad(invitacionId, si ? 'SI' : 'NO', previewConsulta);
                   if (!res.ok) appAlert('No se pudo', res.motivo || (res.codigo === 'COMPLETA' ? 'Ya se cubrió, gracias.' : 'La consulta ya no está abierta.'));
                   else await markRead(n.id);
                 } catch {
@@ -456,7 +471,7 @@ function AlertasScreenContent() {
         }
       })();
     },
-    [busyId, coberturaById, isPreviewMode, respond, pinLocal, clearLocal],
+    [busyId, coberturaById, isPreviewMode, previewConsulta, respond, pinLocal, clearLocal],
   );
 
   const onDismiss = useCallback(
@@ -518,6 +533,39 @@ function AlertasScreenContent() {
                 Vista de SuperAdmin: ves las alertas de este guardia. Mientras dure la vista, sus
                 notificaciones también llegan a este teléfono.
               </Text>
+            ) : null}
+            {consultasFueraDeBandeja.length > 0 ? (
+              <ConsultasDisponibilidadBanner
+                items={consultasFueraDeBandeja}
+                busyId={busyId}
+                nowMs={now.getTime()}
+                onSi={(item) => {
+                  void (async () => {
+                    setBusyId(item.id);
+                    try {
+                      const res = await responderConsultaDisponibilidad(item.id, 'SI', previewConsulta);
+                      if (res.ok) appAlert('Listo', res.codigo === 'ASIGNADO' ? 'Quedó el lugar.' : 'Recibimos la respuesta.');
+                      else appAlert('No se pudo', res.motivo || (res.codigo === 'COMPLETA' ? 'Ya se cubrió, gracias.' : 'La consulta ya no está abierta.'));
+                    } catch {
+                      appAlert('Error', 'No se pudo enviar la respuesta.');
+                    } finally {
+                      setBusyId(null);
+                    }
+                  })();
+                }}
+                onNo={(item) => {
+                  void (async () => {
+                    setBusyId(item.id);
+                    try {
+                      await responderConsultaDisponibilidad(item.id, 'NO', previewConsulta);
+                    } catch {
+                      appAlert('Error', 'No se pudo enviar la respuesta.');
+                    } finally {
+                      setBusyId(null);
+                    }
+                  })();
+                }}
+              />
             ) : null}
             <ScrollView
               horizontal
@@ -634,7 +682,9 @@ function AlertasScreenContent() {
         }
         renderItem={({ item: n }) => {
           const needsAck = alertNeedsAck(n);
-          const isCoverage = COVERAGE_RESPONSE_TYPES.has(String(n.type ?? '').toUpperCase());
+          const tipoAlerta = String(n.type ?? '').toUpperCase();
+          const isCoverage = COVERAGE_RESPONSE_TYPES.has(tipoAlerta);
+          const esConsulta = tipoAlerta === 'CONSULTA_DISPONIBILIDAD';
           const busy = busyId === n.id;
           const route = routeFromNotificationData({
             type: n.type,
@@ -643,7 +693,7 @@ function AlertasScreenContent() {
             convocatoriaId: n.convocatoriaId,
           });
           const card = resolveAlertaCard(cardInput(n, coberturaById, localReply[n.id], now.getTime()));
-          const settled = card.closed || (!needsAck && !isCoverage && (n.read || !!n.ackedAt));
+          const settled = card.closed || (!needsAck && !isCoverage && !esConsulta && (n.read || !!n.ackedAt));
           const receivedAt = n.createdAt ? formatDateTimeAr(n.createdAt as never) : '';
           const resultLine = card.closed
             ? card.atMs
@@ -697,9 +747,14 @@ function AlertasScreenContent() {
             );
           }
 
+          const jornadasConsulta = esConsulta
+            ? (n.jornadas?.length
+              ? n.jornadas
+              : consultasDisponibilidad.find((c) => c.id === n.invitacionId)?.jornadas)
+            : undefined;
           const convModel = inboxItemIsConvocatoria(n)
             ? buildInboxCardModel({
-                item: n,
+                item: { ...n, jornadas: jornadasConsulta },
                 conv: n.convocatoriaId ? coberturaById[n.convocatoriaId] ?? null : null,
                 firstName: employee?.firstName,
                 objectivesMap,
@@ -707,7 +762,7 @@ function AlertasScreenContent() {
             : null;
 
           if (convModel) {
-            const canRespond = card.showCoverageButtons && convModel.actions === 'ACCEPT_REJECT';
+            const canRespond = (card.showCoverageButtons || convModel.kind === 'DISPONIBILIDAD') && convModel.actions === 'ACCEPT_REJECT';
             const canVenis = card.showVenisButton || (card.showCoverageButtons && convModel.actions === 'VENIS');
             return (
               <ConvocatoriaCard

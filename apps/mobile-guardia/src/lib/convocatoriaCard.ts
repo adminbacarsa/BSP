@@ -385,6 +385,7 @@ export type InboxCardSource = {
   eventoId?: string;
   servicioId?: string;
   solicitudId?: string;
+  jornadas?: { fecha?: string; code?: string; horaInicio?: string; horaFin?: string }[] | null;
 };
 
 /** Lo que la bandeja conoce del doc `convocatorias_cobertura` (timestamps sin tipar). */
@@ -530,9 +531,19 @@ export function buildInboxCardModel(input: InboxCardInput): ConvocatoriaCardMode
     return { ...buildRetencionCardModel({ aviso: { ...item, id: item.id }, shifts: input.shifts, objectivesMap: input.objectivesMap }), id: item.id };
   }
   if (type === 'CONSULTA_DISPONIBILIDAD') {
+    const bloque = armarPreguntaDisponibilidad({
+      cliente: first(item.clientName),
+      objetivo: first(item.objectiveName),
+      puesto: first(item.positionName),
+      jornadas: item.jornadas,
+    });
     return buildDisponibilidadCardModel({
       id: item.id,
-      message: clean(item.body) || '¿Estás disponible?',
+      title: bloque ? '¿Podés cubrir?' : undefined,
+      message: bloque
+        ? `${bloque.pregunta}${bloque.contratos ? ` ${bloque.contratos}` : ''}`
+        : (clean(item.body) || '¿Estás disponible?'),
+      detalle: bloque?.detalle,
       cliente: first(item.clientName),
       objetivo: first(item.objectiveName),
       puesto: first(item.positionName),

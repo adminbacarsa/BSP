@@ -65,6 +65,17 @@ async function activarAccesoEventual(db, input) {
         legajos.docs.forEach((d) => batch.set(d.ref, { uid }, { merge: true }));
         await batch.commit();
     }
+    try {
+        const { completarUidInvitacionesAbiertas } = await Promise.resolve().then(() => require('./consultaDisponibilidad'));
+        await completarUidInvitacionesAbiertas({
+            uid,
+            bolsaCuil: cuil,
+            employeeIds: legajos.docs.map((d) => d.id),
+        });
+    }
+    catch (e) {
+        console.warn('[activarAccesoEventual] no se pudo completar uid de consultas', e);
+    }
     await input.tokenRef.update({ used: true, usedAt: firestore_1.FieldValue.serverTimestamp() });
     return { email, employeeId, bolsaCuil: cuil };
 }
@@ -147,6 +158,13 @@ async function activateAndSetPasswordHandler(data) {
         console.warn('[activateAndSetPassword] no se pudo setear claim empresaId', e);
     }
     await tokenRef.update({ used: true, usedAt: firestore_1.FieldValue.serverTimestamp() });
+    try {
+        const { completarUidInvitacionesAbiertas } = await Promise.resolve().then(() => require('./consultaDisponibilidad'));
+        await completarUidInvitacionesAbiertas({ uid: String(uid), employeeIds: [String(employeeId)] });
+    }
+    catch (e) {
+        console.warn('[activateAndSetPassword] no se pudo completar uid de consultas', e);
+    }
     return { email, employeeId };
 }
 //# sourceMappingURL=activarAccesoEventual.js.map
