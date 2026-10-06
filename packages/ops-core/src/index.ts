@@ -97,6 +97,17 @@ export type { CierreSinContinuidadInput } from './cierreSinContinuidad';
 export type { RetentionWaitInfo, RetentionRelieverStatus } from './retentionDisplay';
 export { seriesReliefChoiceNotice } from './seriesReliefNotice';
 export type { SeriesReliefNotice } from './seriesReliefNotice';
+export {
+  esAusenciaCc,
+  esAusenciaCubierta,
+  nombreCubridor,
+  tipoCoberturaLabel,
+  tramoFaltanteParcial,
+  estadoAusenciaCc,
+  ausenciaSinCubrir,
+  contadorAusLabel,
+} from './estadoAusenciaCc';
+export type { EstadoAusenciaCc, EstadoAusenciaKind, EstadoAusenciaTone, EstadoAusenciaShift, EstadoAusenciaOpts } from './estadoAusenciaCc';
 export { classifyOpsShift } from './classifyOpsShift';
 export type { ClassifyOpsShiftInput, ClassifyOpsShiftResult } from './classifyOpsShift';
 export { shiftMatchesOpsViewTab, isStandbyRetDisponible } from './shiftMatchesOpsViewTab';

@@ -248,9 +248,10 @@ const dRet = guardDetalle(retenido, [retenido, { ...guerreroT, isPresent: false,
 check('retenido desde · minutos · tope y a quién espera', dRet.estado === 'Retenido desde 15:00 · 20 min · tope 19:59' && dRet.loReleva === 'Espera a Guerrero, Martín · T 15:00');
 
 const ausente = base({ ...guerreroT, id: 'a', isPresent: false, realStartTime: null, checkInAt: null, isAbsent: true });
-check('ausente: no llegó desde la hora planificada', guardDetalle(ausente, [], AHORA).estado === 'No llegó desde 15:00 · ausente' && guardDetalle(ausente, [], AHORA).ingreso === null);
-const ausenteCubierto = { ...ausente, operacionallyCovered: true, coveredByEmployeeName: 'Sosa, Carla (REF)' };
-check('ausente cubierto muestra quién lo cubre', guardDetalle(ausenteCubierto, [], AHORA).cobertura === 'Cubierto por Sosa, Carla');
+check('ausente: no llegó desde la hora planificada · sin cubrir', guardDetalle(ausente, [], AHORA).estado === 'No llegó desde 15:00 · ausente · sin cubrir' && guardDetalle(ausente, [], AHORA).ingreso === null);
+const ausenteCubierto = { ...ausente, operacionallyCovered: true, coveredByEmployeeName: 'Sosa, Carla (REF)', coveringTipo: 'REF' };
+check('ausente cubierto muestra quién lo cubre (mismo estado que el CC)', guardDetalle(ausenteCubierto, [], AHORA).estado === 'No llegó desde 15:00 · ausente · cubierto' && guardDetalle(ausenteCubierto, [], AHORA).cobertura === 'Cubre: Sosa, Carla (REF)');
+check('ausente con convocatoria en curso', guardDetalle({ ...ausente, convocatoriaEnCurso: true }, [], AHORA).estado === 'No llegó desde 15:00 · ausente · convocatoria en curso');
 const provisoria = { ...ausente, isAbsent: false, isPotentialAbsence: true, isProvisionalLateAbsence: true };
 check('posible ausencia con aviso', guardDetalle(provisoria, [], AHORA).estado === 'No llegó desde 15:00 · posible ausencia');
 
@@ -314,11 +315,11 @@ for (const [nombre, texto] of [
   ['vacante', 'data-movil-estado="vacante"'],
   ['vacante con banda', 'VACANTE · T'],
 ]) check(`render estado ${nombre}`, estadosHtml.includes(texto));
-check('la tarjeta no lleva los textos largos (van en la hoja)', !estadosHtml.includes('Retenido desde') && !estadosHtml.includes('No llegó desde') && !estadosHtml.includes('Cubierto por') && !estadosHtml.includes('EN CAMINO'));
+check('la tarjeta no lleva los textos largos (van en la hoja)', !estadosHtml.includes('Retenido desde') && !estadosHtml.includes('No llegó desde') && !estadosHtml.includes('Cubierto por') && !estadosHtml.includes('Cubre: ') && !estadosHtml.includes('EN CAMINO'));
 const { GuardAccionesSheetBody: HojaDetalle } = await importFront('components/movil/OperacionScreens.tsx');
 const hojaDe = (s) => render(HojaDetalle, { shift: s, siblings: estadosTarjeta, now: AHORA, onEjecutar: () => {}, onCerrar: () => {} });
 check('hoja: detalle completo del retenido', hojaDe(retenido).includes('Retenido desde 15:00 · 20 min · tope 19:59') && hojaDe(retenido).includes('Espera a Guerrero, Martín · T 15:00'));
-check('hoja: ausente, cubierto, tarde y vacante con texto largo', hojaDe(ausente).includes('No llegó desde 15:00 · ausente') && hojaDe(ausenteCubierto).includes('Cubierto por Sosa, Carla') && hojaDe(tardeAvisada).includes('Tarde 20 min · avisó · llega ~15:30') && hojaDe(vacante).includes('Vacante T · desde 15:00'));
+check('hoja: ausente, cubierto, tarde y vacante con texto largo', hojaDe(ausente).includes('No llegó desde 15:00 · ausente · sin cubrir') && hojaDe(ausenteCubierto).includes('Cubre: Sosa, Carla (REF)') && hojaDe(tardeAvisada).includes('Tarde 20 min · avisó · llega ~15:30') && hojaDe(vacante).includes('Vacante T · desde 15:00'));
 check('hoja: convocatoria y cobertura EXT', hojaDe(convocado).includes('EN CAMINO · llega ~15:40') && hojaDe(ext).includes('EXT hasta 19:00 · cubre a Guerrero, Martín'));
 const sinTelHtml = render(OperacionScreens, { empresa: 'P', modeLabel: 'Manual', online: true, pendingLabel: null, now: AHORA, stats: { activos: 1, retenidos: 0, ausentes: 0, vacantes: 0, plan: 0 }, panel: 'objetivo', alerts: [], objectives: [], objective: { ...objetivoDetalle, shifts: [{ ...baezM, phone: '' }] }, ...noops });
 check('vacante sin LLAMAR; sin teléfono deshabilitado', !estadosHtml.includes('data-movil-llamar="0"') && (estadosHtml.match(/data-movil-llamar="1"/g) || []).length === estadosTarjeta.length - 1 && sinTelHtml.includes('data-movil-llamar="0"'));
@@ -417,6 +418,8 @@ for (const estado of ['ACTIVOS', 'PLAN', 'AUSENTES', 'VACANTES', 'RETENIDOS', 'N
   const tarjetas = F.turnosFiltrados(visiblesF, { ...F.FILTRO_VACIO, estado }, NOW_F);
   check(`contador ${estado} = tarjetas al filtrar`, tarjetas.length === contTodos[estado]);
 }
+// AUS total 2 (p3 sin cubrir, c2 cubierto por Perez): el rojo es solo por las sin cubrir (mismo criterio que el CC).
+check('AUS sin cubrir (celular) = 1 de 2 y rótulo «2 AUS · 1 sin cubrir»', F.ausentesSinCubrirMovil(visiblesF, F.FILTRO_VACIO, NOW_F) === 1 && F.etiquetaAus(contTodos.AUSENTES, 1) === '2 AUS · 1 sin cubrir');
 check('tocar el contador activo vuelve a Todos', F.alternarEstado(F.FILTRO_VACIO, 'AUSENTES').estado === 'AUSENTES' && F.alternarEstado({ ...F.FILTRO_VACIO, estado: 'AUSENTES' }, 'AUSENTES').estado === 'TODOS' && F.alternarEstado({ ...F.FILTRO_VACIO, estado: 'AUSENTES' }, 'PLAN').estado === 'PLAN');
 const clientesF = F.clientesParaFiltro(visiblesF, [{ id: 'cet', clientId: 'c1', name: 'CET Río Ceballos', clientName: 'Ruta 9' }, { id: 'sinTurnos', clientId: 'c1', name: 'Sucursal Norte', clientName: 'Ruta 9' }]);
 check('clientes → objetivos con turnos (catálogo completa los sin turnos)', clientesF.map((c) => c.name).join(',') === 'Ruta 9,Malagueño' && clientesF[0].objetivos.map((o) => o.name).join(',') === 'Peaje 9 Norte,CET Río Ceballos,Sucursal Norte' && clientesF[0].turnos === 8 && clientesF[1].turnos === 5);

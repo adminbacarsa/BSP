@@ -19,6 +19,7 @@ import {
   claveGrupo,
   clientesParaFiltro,
   contadoresMovil,
+  ausentesSinCubrirMovil,
   etiquetaAmbito,
   guardarFiltro,
   leerFiltroGuardado,
@@ -145,6 +146,7 @@ export function OperacionMovil(props: Props) {
   const visibles = useMemo(() => turnosVisiblesMovil(props.shifts, props.publishStatusMap), [props.shifts, props.publishStatusMap]);
   const clientes = useMemo(() => clientesParaFiltro(visibles, props.catalogo || []), [visibles, props.catalogo]);
   const contadores = useMemo(() => contadoresMovil(visibles, filtro, now), [visibles, filtro, now]);
+  const ausSinCubrir = useMemo(() => ausentesSinCubrirMovil(visibles, filtro, now), [visibles, filtro, now]);
   const enAmbitoList = useMemo(() => turnosEnAmbito(visibles, filtro), [visibles, filtro]);
   const filtrados = useMemo(() => turnosFiltrados(visibles, filtro, now), [visibles, filtro, now]);
   // Resumen por objetivo (estado Todos) y tarjetas agrupadas (estado activo).
@@ -292,6 +294,7 @@ export function OperacionMovil(props: Props) {
         panel={panel === 'alertas' ? 'alertas' : panel}
         filtro={filtro}
         contadores={contadores}
+        ausSinCubrir={ausSinCubrir}
         ambitoLabel={ambitoLabel}
         grupos={grupos}
         vacioLabel={mensajeVacio(filtro, clientes)}

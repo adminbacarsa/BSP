@@ -36,7 +36,6 @@ import { app, db, onSnapshotFresh } from '@/lib/firebase';
 import {
     absentShiftCoveragePatch,
     syncAusenciaCoberturaGestionada,
-    formatCoveringEmployeeLabel,
 } from '@/lib/operaciones/syncAusenciaCobertura';
 import { getAuth } from 'firebase/auth';
 import {
@@ -73,13 +72,13 @@ import {
 } from '@/components/operaciones/CoverageSessionManager';
 import { EarlyWithdrawModal } from '@/components/operaciones/EarlyWithdrawModal';
 import { GuardDeviceApprovalBell } from '@/components/rrhh/GuardDeviceApprovalPanel';
-import { isShiftOperativelyCovered } from '@/lib/cosp/coverageSemantics';
+import { AusChipObj, EstadoAusenciaChip, EstadoAusenciaDetalle, estadoAusenciaAccent } from '@/components/operaciones/EstadoAusenciaChip';
 import { opsLateArrivalBadgeLabel } from '@/lib/operaciones/opsLateArrivalMonitor';
 import { formatIngresoLine } from '@/lib/operaciones/ingresoLabel';
 import { convocadoEnCaminoLabel } from '@/lib/operaciones/convocadoVentana';
 import { formatOpsNotaLine } from '@/lib/operaciones/opsNota';
 import { ConvocatoriaTimeline } from '@/components/operaciones/ConvocatoriaTimeline';
-import { isExtraNonReliefShift, isReliefEligibleShift, isStandbyRetDisponible, formatRetentionDuration, formatRetentionLine, addShiftToOpsBucket, objectiveVisibleOnOpsTab, opsObjectiveHasActivity } from '@cosp/ops-core';
+import { isExtraNonReliefShift, isReliefEligibleShift, isStandbyRetDisponible, formatRetentionDuration, formatRetentionLine, addShiftToOpsBucket, objectiveVisibleOnOpsTab, opsObjectiveHasActivity, estadoAusenciaCc, contadorAusLabel } from '@cosp/ops-core';
 import {
     isEventShift,
     eventGroupKey as getEventGroupKey,
@@ -92,7 +91,7 @@ import {
 import { SeriesReliefPicker } from '@/components/operaciones/SeriesReliefPicker';
 import { ShiftCodeBadge } from '@/components/operaciones/ShiftCodeBadge';
 import { canRevertAbsenceNow, isRevertAbsenceExpired } from '@/lib/operaciones/revertAbsenceWindow';
-import { ALTA_ARCA_AVISO_TEXTO, ALTA_ARCA_AVISO_TITLE, altaArcaPendienteVisible, mostrarDescubierto } from '@/lib/operaciones/guardCardEstado';
+import { ALTA_ARCA_AVISO_TEXTO, ALTA_ARCA_AVISO_TITLE, REVERTIR_VENCIDO_TEXTO, altaArcaPendienteVisible, mostrarDescubierto } from '@/lib/operaciones/guardCardEstado';
 import { partesNombreTarjeta } from '@/lib/operaciones/guardCardNombre';
 import { shiftHardCapAt } from '@/lib/operaciones/shiftHardCap';
 
@@ -1107,6 +1106,9 @@ const AltaArcaAviso = () => (
 const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHandover, onOpenInterrupt, onOpenCoverage, onReportPlanning, onOpenWorkedFranco, onNovedadAbsence, onOpenWA, onOpenAbsenceDecision, onOpenRRHH, onOpenManualRetention, isCompact, isAutoMode, onRevertAbsence }: any) => {
     let accentColor = 'bg-slate-400'; let rowBg = 'bg-white';
     const descubierto = mostrarDescubierto(shift);
+    // Un solo estado para la ausencia (SIN CUBRIR / CUBRIENDO / PARCIAL / CUBIERTO): manda la cobertura,
+    // no la marca `isSinCobertura` que deja la cascada agotada.
+    const estadoAus = estadoAusenciaCc(shift);
 
     if (shift.isUnassigned && shift.isReportedToPlanning)   { accentColor = 'bg-slate-500';   rowBg = 'bg-slate-50'; }
     else if (descubierto) { accentColor = 'bg-slate-400'; rowBg = 'bg-slate-50'; }
@@ -1114,6 +1116,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     else if (shift.isUnassigned)       { accentColor = 'bg-rose-500';    rowBg = 'bg-rose-50/40'; }
     else if (shift.isRetention)        { accentColor = 'bg-orange-500';  rowBg = 'bg-orange-50/40'; }
     else if (shift.isPresent)          { accentColor = 'bg-emerald-500'; rowBg = 'bg-emerald-50/20'; }
+    else if (estadoAus)                { ({ accentColor, rowBg } = estadoAusenciaAccent(estadoAus.tone)); }
     else if (shift.isProvisionalLateAbsence) { accentColor = 'bg-amber-600'; rowBg = 'bg-amber-50/50'; }
     else if (shift.isAbsent)           { accentColor = 'bg-slate-700';   rowBg = 'bg-slate-100'; }
     else if (shift.isCoverageSourceUsed) { accentColor = 'bg-violet-500'; rowBg = 'bg-violet-50/50'; }
@@ -1150,12 +1153,10 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     const refuerzoLabel = getRefuerzoLabel(shift);
     const avatarLabel = getGuardAvatarLabel(shift, name);
     const avatarClass = getGuardAvatarClass(shift);
-    const isAbsentOperativelyCovered = isShiftOperativelyCovered(shift);
-    const coveringEmployeeName = isAbsentOperativelyCovered ? formatCoveringEmployeeLabel(shift) : null;
-    const coveredLine = isAbsentOperativelyCovered
-        ? (coveringEmployeeName ? `Cubierto · ${coveringEmployeeName}` : 'Cubierto')
-        : null;
+    // La ausencia pide ir a VACANTES solo si nadie la cubre (ni total ni parcial, ni hay convocatoria en curso).
+    const ausenciaPideVac = estadoAus?.kind === 'SIN_CUBRIR' || estadoAus?.kind === 'PARCIAL';
     const canRevertAbsence = canRevertAbsenceNow(shift, now.getTime());
+    const revertirVencido = <span className="text-[9px] text-slate-400 italic self-center" data-ops-revertir-vencido="1">{REVERTIR_VENCIDO_TEXTO}</span>;
 
     // Badge de estado
     let badge = null;
@@ -1187,6 +1188,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     else if (shift.isCoverageSourceUsed && shift.coverageUsedLabel) {
         badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-violet-600 text-white max-w-full whitespace-normal break-words" title={shift.coverageUsedLabel}>🔗 {shift.coverageUsedLabel}</span>;
     }
+    else if (estadoAus) badge = <EstadoAusenciaChip estado={estadoAus} />;
     else if (shift.isProvisionalLateAbsence) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-600 text-white shrink-0">NO LLEGÓ / posible ausencia</span>;
     else if (shift.isPotentialAbsence) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-red-600 text-white animate-pulse shrink-0">AUSENCIA</span>;
     else if (shift.isLateNotified) {
@@ -1199,7 +1201,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     else if (shift.isPlannedExtensionImminent) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-violet-600 text-white animate-pulse shrink-0 flex items-center gap-0.5"><Timer size={8}/>EXT PLAN</span>;
     else if (shift.isPlannedLiberationRet) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-emerald-600 text-white shrink-0 flex items-center gap-0.5"><PlayCircle size={8}/>RET CONVOCABLE</span>;
     else if (shift.isConvocado && shift.isFuture) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 shrink-0 flex items-center gap-0.5"><PlayCircle size={8}/>CONVOCADO</span>;
-    else if (shift.isAbsent)         badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-700 text-white shrink-0" title={coveredLine || 'AUSENTE'}>AUSENTE</span>;
+    else if (shift.isAbsent)         badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-700 text-white shrink-0">AUSENTE</span>;
     else if (shift.isResolvedByOps)  badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-600 text-white shrink-0">OPS</span>;
 
     const dayTag = opsShiftDayLabel(shift.shiftDateObj, now);
@@ -1229,9 +1231,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                     {badge}
                     {altaArcaPendienteVisible(shift, now) && <AltaArcaAviso />}
                 </div>
-                {coveredLine && (
-                    <p className="text-[10px] font-bold leading-snug text-emerald-700 break-words" data-ops-guard-cubierto="1" title={coveredLine}>{coveredLine}</p>
-                )}
+                {estadoAus && <EstadoAusenciaDetalle estado={estadoAus} />}
                 <p className="mt-0.5 text-[10px] leading-snug text-slate-500 break-words" data-ops-guard-meta="1">
                     <span className="font-semibold text-indigo-600">{shiftPostLabel(shift)}</span>
                     <span className="text-slate-300"> · </span>
@@ -1273,14 +1273,14 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                         const endMs = shift.endDateObj?.getTime?.() ?? 0;
                         const shiftEnded = endMs > 0 && Date.now() > endMs;
                         if (shiftEnded && !canRevertAbsence) {
-                            return <span className="text-[9px] px-2 py-1 rounded bg-slate-100 text-slate-400 font-bold">VENCIDO</span>;
+                            return revertirVencido;
                         }
                         return (
                             <div className="flex gap-1">
-                                {!isAbsentOperativelyCovered && <span className="text-[9px] px-2 py-1 rounded bg-rose-50 text-rose-500 border border-rose-200 font-bold">→ VAC</span>}
+                                {ausenciaPideVac && <span className="text-[9px] px-2 py-1 rounded bg-rose-50 text-rose-500 border border-rose-200 font-bold">→ VAC</span>}
                                 {canRevertAbsence
                                     ? <button onClick={() => onRevertAbsence && onRevertAbsence(shift)} className="p-1.5 bg-slate-50 text-slate-400 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors" title="Llegó? — revertir ausencia (hasta T+60)"><XCircle size={12}/></button>
-                                    : <span className="text-[9px] px-2 py-1 rounded bg-slate-100 text-slate-400 font-bold" title="Revertir vencido (T+60)">VENCIDO</span>}
+                                    : revertirVencido}
                             </div>
                         );
                       })()
@@ -1312,9 +1312,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                 <div className="mb-1 flex flex-wrap items-center gap-1 pl-10 min-w-0">
                     {dayTagEl}{badge}{altaArcaPendienteVisible(shift, now) && <AltaArcaAviso />}
                 </div>
-                {coveredLine && (
-                    <p className="mb-1 pl-10 text-[10px] font-bold leading-snug text-emerald-700 break-words" data-ops-guard-cubierto="1" title={coveredLine}>{coveredLine}</p>
-                )}
+                {estadoAus && <EstadoAusenciaDetalle estado={estadoAus} className="mb-1 pl-10" />}
                 <div className="mb-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 pl-10 text-[10px] text-slate-500" data-ops-guard-meta="1">
                     <MapPin size={10} className="shrink-0 text-indigo-400"/>
                     <span className="font-medium break-words">{shiftPlaceLabel(shift)}</span>
@@ -1403,14 +1401,14 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                             const endMs = shift.endDateObj?.getTime?.() ?? 0;
                             const shiftEnded = endMs > 0 && Date.now() > endMs;
                             if (shiftEnded && !canRevertAbsence) {
-                                return <span className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-100 text-slate-400 rounded-lg text-[10px] font-bold">VENCIDO</span>;
+                                return revertirVencido;
                             }
                             return (
                                 <div className="flex gap-1.5 items-center">
-                                    {!isAbsentOperativelyCovered && <span className="flex items-center gap-1 px-2.5 py-1.5 bg-rose-50 text-rose-500 border border-rose-200 rounded-lg text-[10px] font-bold">→ Cubrir desde VACANTES</span>}
+                                    {ausenciaPideVac && <span className="flex items-center gap-1 px-2.5 py-1.5 bg-rose-50 text-rose-500 border border-rose-200 rounded-lg text-[10px] font-bold">→ Cubrir desde VACANTES</span>}
                                     {canRevertAbsence
                                         ? <button onClick={() => onRevertAbsence && onRevertAbsence(shift)} className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-50 text-slate-500 border border-slate-200 rounded-lg text-[10px] font-bold hover:bg-slate-100 transition-colors"><XCircle size={11}/>LLEGÓ? / REVERTIR</button>
-                                        : <span className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-100 text-slate-400 rounded-lg text-[10px] font-bold" title="Revertir vencido (T+60)">VENCIDO</span>}
+                                        : revertirVencido}
                                 </div>
                             );
                           })()
@@ -3657,7 +3655,8 @@ export default function OperacionesPage() {
         { id: 'ACTIVOS',   label: 'ACT',     count: logic.stats.activos,   color: 'text-emerald-600' },
         { id: 'RETENIDOS', label: 'RET',     count: logic.stats.retenidos, color: 'text-orange-600' },
         { id: 'VACANTES',  label: 'VAC',     count: logic.stats.vacantes,  color: 'text-slate-800' },
-        { id: 'AUSENTES',  label: 'AUS',     count: logic.stats.ausentes,  color: 'text-rose-700' },
+        // El total sigue siendo AUS; el rojo (y «N sin cubrir») sale solo de las ausencias sin cobertura.
+        { id: 'AUSENTES',  label: contadorAusLabel(logic.stats.ausentes, logic.stats.ausentesSinCubrir), count: logic.stats.ausentes, urgent: logic.stats.ausentesSinCubrir, color: 'text-slate-800' },
         // Francos + retenes stand-by del día; el número es el de francos y el RET va aparte.
         { id: 'FRANCOS',   label: logic.stats.retenes > 0 ? `FRANC · ${logic.stats.retenes} RET` : 'FRANC', count: logic.stats.francos, color: 'text-blue-600' }
     ];
@@ -3884,7 +3883,7 @@ export default function OperacionesPage() {
                                     { label: 'Plan', val: logic.stats.plan, cls: 'text-indigo-600', bg: 'bg-indigo-50' },
                                     { label: 'Act', val: dayStatusKpi.cubiertos, cls: 'text-emerald-600', bg: 'bg-emerald-50' },
                                     { label: 'Vac', val: logic.stats.vacantes, cls: logic.stats.vacantes > 0 ? 'text-rose-600' : 'text-slate-400', bg: logic.stats.vacantes > 0 ? 'bg-rose-50' : 'bg-slate-50' },
-                                    { label: 'Aus', val: logic.stats.ausentes, cls: logic.stats.ausentes > 0 ? 'text-rose-700' : 'text-slate-400', bg: logic.stats.ausentes > 0 ? 'bg-rose-50' : 'bg-slate-50' },
+                                    { label: 'Aus', val: logic.stats.ausentes, cls: logic.stats.ausentesSinCubrir > 0 ? 'text-rose-700' : 'text-slate-400', bg: logic.stats.ausentesSinCubrir > 0 ? 'bg-rose-50' : 'bg-slate-50' },
                                 ].map((m) => (
                                     <div key={m.label} className={`text-center px-1 py-0.5 rounded ${m.bg}`}>
                                         <div className={`text-[10px] font-black leading-none ${m.cls}`}>{m.val}</div>
@@ -4206,7 +4205,7 @@ export default function OperacionesPage() {
                         {/* UNA SOLA FILA: número grande + label abajo, clickable para filtrar */}
                         <div className="flex gap-0.5 overflow-x-auto">
                             {tabs.map(t => {
-                                const isUrgent = (t.id === 'VACANTES' || t.id === 'AUSENTES') && t.count > 0;
+                                const isUrgent = t.id === 'AUSENTES' ? ((t as { urgent?: number }).urgent ?? 0) > 0 : (t.id === 'VACANTES' && t.count > 0);
                                 const isActive = logic.viewTab === t.id;
                                 return (
                                     <button key={t.id} onClick={() => logic.setViewTab(t.id as any)}
@@ -4458,7 +4457,7 @@ export default function OperacionesPage() {
                                                             <div className="flex items-center gap-1">
                                                                 {ev.active > 0 && <span className="text-[9px] font-bold text-emerald-700 bg-emerald-100 px-1.5 rounded">{ev.active} act</span>}
                                                                 {ev.retention > 0 && <span className="text-[9px] font-bold text-orange-700 bg-orange-100 px-1.5 rounded animate-pulse">{ev.retention} ret</span>}
-                                                                {ev.absent > 0 && <span className="text-[9px] font-bold text-rose-700 bg-rose-100 px-1.5 rounded">{ev.absent} aus</span>}
+                                                                {ev.absent > 0 && <AusChipObj absent={ev.absent} sinCubrir={ev.absentSinCubrir} />}
                                                                 {ev.vacant > 0 && <span className="text-[9px] font-bold text-amber-700 bg-amber-100 px-1.5 rounded">{ev.vacant} vac</span>}
                                                                 {ev.plan > 0 && <span className="text-[9px] text-slate-500 px-1">{ev.plan} plan</span>}
                                                             </div>
@@ -4561,7 +4560,7 @@ export default function OperacionesPage() {
                                                     <div className="flex items-center gap-1">
                                                         {obj.active > 0 && <span className="text-[9px] font-bold text-emerald-700 bg-emerald-100 px-1.5 rounded">{obj.active} act</span>}
                                                         {obj.retention > 0 && <span className="text-[9px] font-bold text-orange-700 bg-orange-100 px-1.5 rounded animate-pulse">{obj.retention} ret</span>}
-                                                        {obj.absent > 0 && <span className="text-[9px] font-bold text-rose-700 bg-rose-100 px-1.5 rounded">{obj.absent} aus</span>}
+                                                        {obj.absent > 0 && <AusChipObj absent={obj.absent} sinCubrir={obj.absentSinCubrir} />}
                                                         {obj.vacant > 0 && <span className="text-[9px] font-bold text-amber-700 bg-amber-100 px-1.5 rounded">{obj.vacant} vac</span>}
                                                         {(activeConvsByObjective[obj.objectiveId] || 0) > 0 && <span className="text-[9px] font-bold text-purple-700 bg-purple-100 px-1.5 rounded animate-pulse">{activeConvsByObjective[obj.objectiveId]} conv</span>}
                                                         {obj.plan > 0 && <span className="text-[9px] text-slate-500 px-1">{obj.plan} plan</span>}

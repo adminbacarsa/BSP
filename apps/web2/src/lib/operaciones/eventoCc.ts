@@ -369,6 +369,8 @@ export interface EventoGrupo<T extends EventoCcShift = EventoCcShift> {
   active: number;
   retention: number;
   absent: number;
+  /** Ausencias sin cobertura (lo escribe `addShiftToOpsBucket`). */
+  absentSinCubrir?: number;
   vacant: number;
   plan: number;
   late: number;

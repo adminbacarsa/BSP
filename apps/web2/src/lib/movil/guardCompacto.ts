@@ -1,4 +1,4 @@
-import { deploymentCodeLabel, outgoingFor, relevoAusenteAviso, relieverFor, seriesBoundMs } from '@cosp/ops-core';
+import { deploymentCodeLabel, estadoAusenciaCc, outgoingFor, relevoAusenteAviso, relieverFor, seriesBoundMs } from '@cosp/ops-core';
 import { guardTone, type GuardTone } from '@/lib/movil/guardTone';
 import { hhmmAR, horarioPlanificado, type GuardDetalleShift } from '@/lib/movil/guardDetalle';
 import { normalizarNota } from '@/lib/operaciones/opsNota';
@@ -7,7 +7,7 @@ import { normalizarNota } from '@/lib/operaciones/opsNota';
  * Datos de la tarjeta compacta del guardia (celular): dos filas con íconos, sin textos
  * largos. El detalle completo (retención, relevo, cobertura) va en la hoja de acciones.
  */
-export type GuardEstadoCompacto = 'activo' | 'retenido' | 'tarde' | 'ausente' | 'cubierto' | 'vacante' | 'plan' | 'cierra';
+export type GuardEstadoCompacto = 'activo' | 'retenido' | 'tarde' | 'ausente' | 'cubierto' | 'cubriendo' | 'parcial' | 'vacante' | 'plan' | 'cierra';
 
 export interface GuardCompacto {
   /** «LOPEZ Hector» (apellido en mayúsculas, nombre capitalizado). */
@@ -106,9 +106,12 @@ export function duracionHm(ms: number): string {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
-function titularCubierto(shift: GuardDetalleShift): boolean {
-  if (!shift.isAbsent) return false;
-  return !!(shift.operacionallyCovered || shift.plannedOperativelyCovered || String(shift.coverageStatus || '').toUpperCase() === 'COVERED');
+/** Mismo estado único de la ausencia que el escritorio (`estadoAusenciaCc`): AUS / CUB / CONV / PARC. */
+function estadoAusencia(shift: GuardDetalleShift): GuardCompacto['estado'] {
+  const e = estadoAusenciaCc(shift);
+  if (!e) return { kind: 'ausente', texto: 'AUS' };
+  const kind: GuardEstadoCompacto = e.kind === 'CUBIERTO' ? 'cubierto' : e.kind === 'CUBRIENDO' ? 'cubriendo' : e.kind === 'PARCIAL' ? 'parcial' : 'ausente';
+  return { kind, texto: e.corto };
 }
 
 function estadoDe(shift: GuardDetalleShift, tone: GuardTone, nowMs: number): GuardCompacto['estado'] {
@@ -128,9 +131,7 @@ function estadoDe(shift: GuardDetalleShift, tone: GuardTone, nowMs: number): Gua
     const desde = toMs(shift.checkInAt) || toMs(shift.realStartTime) || toMs(shift.checkInTime) || startMs;
     return { kind: 'activo', texto: desde ? duracionHm(nowMs - desde) : 'ACT' };
   }
-  if (tone === 'aus') {
-    return titularCubierto(shift) ? { kind: 'cubierto', texto: 'CUB' } : { kind: 'ausente', texto: 'AUS' };
-  }
+  if (tone === 'aus') return estadoAusencia(shift);
   if (tone === 'late') {
     const mins = startMs ? Math.max(0, Math.floor((nowMs - startMs) / 60000)) : 0;
     return { kind: 'tarde', texto: `TAR ${mins}′` };

@@ -133,13 +133,67 @@ const baez = partesNombreTarjeta('BAEZ, Augusto Damian');
 const lallana = partesNombreTarjeta('LALLANA Fabian Alberto');
 check('apellido entero: BAEZ Augusto Damian', baez.apellido === 'BAEZ' && baez.resto === 'Augusto Damian' && baez.completo === 'BAEZ Augusto Damian');
 check('sin coma el apellido es la primera palabra', lallana.apellido === 'LALLANA' && lallana.resto === 'Fabian Alberto');
-check('tarjeta: nombre en su fila, cubierto debajo, puesto en la meta', page.includes('data-ops-guard-nombre') && page.includes('data-ops-guard-cubierto="1"') && page.includes('data-ops-guard-meta="1"') && page.includes('whitespace-nowrap'));
+const estadoChip = readFileSync(new URL('../apps/web2/src/components/operaciones/EstadoAusenciaChip.tsx', import.meta.url), 'utf8');
+check('tarjeta: nombre en su fila, cubierto debajo, puesto en la meta', page.includes('data-ops-guard-nombre') && estadoChip.includes("data-ops-guard-cubierto={estado.kind === 'CUBIERTO' ? '1' : undefined}") && page.includes('data-ops-guard-meta="1"') && page.includes('whitespace-nowrap'));
 check('el nombre de la tarjeta ya no va con truncate', !page.includes('font-black truncate ${isActionableOpsVacancy'));
 check('popover del objetivo abre a 720 px si hay lugar', page.includes('Math.max(r.width, 720)'));
 const movil = readFileSync(new URL('../apps/web2/src/lib/movil/operacionFiltros.ts', import.meta.url), 'utf8');
 check('celular agrupa con el mismo bucket', movil.includes('addShiftToOpsBucket(grupo, s as never, now)'));
 const mapa = readFileSync(new URL('../apps/web2/src/hooks/useOperacionesMonitor.ts', import.meta.url), 'utf8');
 check('mapa sale de listData (misma solapa)', mapa.includes('listData.filter((s: any) => !isEventShift(s))'));
+
+// ---- Estado único de la ausencia (06/10, Peaje 9 Norte: FARIAS «DESCUBIERTO» + «Cubierto · KOPP») ----
+const { estadoAusenciaCc, ausenciaSinCubrir, contadorAusLabel } = await import(
+  pathToFileURL(join(root, 'packages/ops-core/src/estadoAusenciaCc.ts')).href
+);
+const { mostrarDescubierto } = await import(pathToFileURL(join(root, 'apps/web2/src/lib/operaciones/guardCardEstado.ts')).href);
+
+const fariasCubierto = {
+  id: 'farias-m3', objectiveId: 'peaje', employeeName: 'FARIAS Marcos Matias Agustin', code: 'M3',
+  isAbsent: true, isSinCobertura: true, isUnassigned: true, status: 'SIN_COBERTURA', vacanteEscalada: true,
+  operacionallyCovered: true, coverageStatus: 'COVERED',
+  coveringDisplayName: 'KOPP Franco Isaias', coveringTipo: 'FT', coveringDesdeMs: start(12, 30).getTime(),
+  shiftDateObj: start(12, 30), endDateObj: end(16, 0),
+};
+const eFarias = estadoAusenciaCc(fariasCubierto);
+check('FARIAS cubierto → AUSENTE · CUBIERTO (la cobertura gana al isSinCobertura viejo)', eFarias?.kind === 'CUBIERTO' && eFarias.label === 'AUSENTE · CUBIERTO' && eFarias.tone === 'verde' && eFarias.sinCubrir === false);
+check('FARIAS detalle: Cubre: KOPP Franco Isaias (FT) desde 12:30', eFarias?.detalle === 'Cubre: KOPP Franco Isaias (FT) desde 12:30');
+check('FARIAS cubierto ya no muestra DESCUBIERTO', mostrarDescubierto(fariasCubierto) === false);
+check('un hueco sin asignar sigue siendo DESCUBIERTO', mostrarDescubierto({ id: 'hueco', isUnassigned: true, isDescubierto: true }) === true);
+
+const baezSinCubrir = { id: 'baez-aa', objectiveId: 'peaje', employeeName: 'BAEZ', code: 'M', isAbsent: true, shiftDateObj: start(10, 45), endDateObj: end(12, 0) };
+const eBaez = estadoAusenciaCc(baezSinCubrir);
+check('ausente sin cobertura → AUSENTE · SIN CUBRIR rojo', eBaez?.kind === 'SIN_CUBRIR' && eBaez.tone === 'rojo' && eBaez.sinCubrir === true && eBaez.detalle === null);
+check('convocatoria en curso → AUSENTE · CUBRIENDO ámbar', estadoAusenciaCc({ ...baezSinCubrir, convocatoriaEnCurso: true })?.kind === 'CUBRIENDO'
+  && estadoAusenciaCc(baezSinCubrir, { convocatoriaEnCurso: true })?.label === 'AUSENTE · CUBRIENDO');
+const eParcial = estadoAusenciaCc({
+  id: 'venencia-p', objectiveId: 'peaje', employeeName: 'VENENCIA', code: 'T', isAbsent: true,
+  coverageStatus: 'PARTIAL', coverageType: 'EXTEND', coveredByEmployeeName: 'LOPEZ (Ext)',
+  shiftDateObj: start(15, 0), endDateObj: end(23, 0),
+});
+check('Ext+Adel con una pata → COBERTURA PARCIAL con el tramo que falta', eParcial?.kind === 'PARCIAL' && eParcial.sinCubrir === true && eParcial.detalle === 'Ext: LOPEZ · Falta 19:00–23:00');
+check('provisoria (NO LLEGÓ) y presente no son ausencia', estadoAusenciaCc({ isAbsent: true, isProvisionalLateAbsence: true }) === null && estadoAusenciaCc({ isPresent: true }) === null);
+check('ausenciaSinCubrir: cubierto false, resto true', ausenciaSinCubrir(fariasCubierto) === false && ausenciaSinCubrir(baezSinCubrir) === true && ausenciaSinCubrir({ ...baezSinCubrir, convocatoriaEnCurso: true }) === true);
+check('rótulo del contador: «AUS · 0 sin cubrir»', contadorAusLabel(2, 0) === 'AUS · 0 sin cubrir' && contadorAusLabel(2, 1) === 'AUS · 1 sin cubrir' && contadorAusLabel(0, 0) === 'AUS');
+
+const bucketAus = emptyOpsObjectiveBucket();
+addShiftToOpsBucket(bucketAus, fariasCubierto, now);
+addShiftToOpsBucket(bucketAus, baezSinCubrir, now);
+check('OBJ: absent cuenta las dos, absentSinCubrir solo la de BAEZ', bucketAus.absent === 2 && bucketAus.absentSinCubrir === 1);
+
+check('LISTA usa contadorAusLabel y el rojo es por sin cubrir', page.includes('contadorAusLabel(logic.stats.ausentes, logic.stats.ausentesSinCubrir)') && page.includes("t.id === 'AUSENTES' ? ((t as { urgent?: number }).urgent ?? 0) > 0"));
+check('mapa usa el mismo rótulo', mapView.includes('contadorAusLabel(logic.stats.ausentes, logic.stats.ausentesSinCubrir)'));
+check('monitor publica ausentesSinCubrir y escucha convocatorias en curso', mapa.includes('ausentesSinCubrir:') && mapa.includes("where('status', 'in', ['PENDING', 'ESCALATED'])") && mapa.includes('s.convocatoriaEnCurso = true'));
+check('OBJ pinta el chip de ausencias con sin cubrir', page.includes('<AusChipObj absent={obj.absent} sinCubrir={obj.absentSinCubrir} />') && page.includes('<AusChipObj absent={ev.absent} sinCubrir={ev.absentSinCubrir} />'));
+check('la tarjeta usa el estado único (chip + detalle)', page.includes('estadoAusenciaCc(shift)') && page.includes('<EstadoAusenciaChip estado={estadoAus} />') && page.includes('<EstadoAusenciaDetalle estado={estadoAus}'));
+check('se fue la caja VENCIDO; queda «Revertir vencido (T+60)»', !page.includes('>VENCIDO<') && page.includes('data-ops-revertir-vencido="1"') && estadoChip.length > 0);
+const guardCardEstadoSrc = readFileSync(new URL('../apps/web2/src/lib/operaciones/guardCardEstado.ts', import.meta.url), 'utf8');
+check('texto del vencido definido una sola vez', guardCardEstadoSrc.includes("REVERTIR_VENCIDO_TEXTO = 'Revertir vencido (T+60)'"));
+const popup = readFileSync(new URL('../apps/web2/src/components/operaciones/OperacionesMapPopup.tsx', import.meta.url), 'utf8');
+check('popup del mapa: mismo estado y mismo texto de vencido', popup.includes('estadoAusenciaCc(shift)') && popup.includes('REVERTIR_VENCIDO_TEXTO') && popup.includes("shift.isSinCobertura && shift.isUnassigned"));
+const compacto = readFileSync(new URL('../apps/web2/src/lib/movil/guardCompacto.ts', import.meta.url), 'utf8');
+check('celular: guardCompacto deriva del mismo estado', compacto.includes('estadoAusenciaCc(shift)') && compacto.includes("'cubriendo'") && compacto.includes("'parcial'"));
+check('celular: contador AUS con sin cubrir', movil.includes('export function ausentesSinCubrirMovil') && movil.includes('export function etiquetaAus'));
 
 if (failed) {
   console.error(`\n${failed} falla(s)`);

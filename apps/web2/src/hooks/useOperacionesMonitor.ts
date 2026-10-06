@@ -35,6 +35,7 @@ import {
   etiquetaCierreSinContinuidad,
   computeShiftCloseTimes,
   turnoFueraDeCentroDeControl,
+  ausenciaSinCubrir,
 } from '@cosp/ops-core';
 
 const registerPublishedState = (
@@ -290,6 +291,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
     const [servicesSLA, setServicesSLA] = useState<any[]>([]);
     // Eventos vigentes de la empresa: dan la ubicación (objetivo del evento o coords) a los turnos EV.
     const [eventos, setEventos] = useState<EventoDocLite[]>([]);
+    const [convocatoriaShiftIds, setConvocatoriaShiftIds] = useState<Set<string>>(() => new Set());
     const [recentLogs, setRecentLogs] = useState<any[]>([]);
     const [viewTab, setViewTab] = useState<'PRIORIDAD' | 'NO_LLEGO' | 'PLAN' | 'ACTIVOS' | 'RETENIDOS' | 'VACANTES' | 'AUSENTES' | 'FRANCOS' | 'TODOS'>('PRIORIDAD');
     const [selectedClientId, setSelectedClientId] = useState<string>(forcedClientId || '');
@@ -375,6 +377,25 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             setEventos(snap.docs.map(d => ({ id: d.id, ...(d.data() as Record<string, unknown>) }) as EventoDocLite));
         }, (err) => {
             console.warn('[useOperacionesMonitor] eventos listener error:', err.code);
+        }));
+        // Convocatorias en curso por turno: la tarjeta del ausente dice «CUBRIENDO» (estadoAusenciaCc)
+        // en lista, OBJ, mapa y celular con la misma fuente. Misma consulta que el badge «N conv» del CC.
+        const convQ = query(
+            collection(db, 'convocatorias_cobertura'),
+            where('empresaId', '==', empresaId),
+            where('status', 'in', ['PENDING', 'ESCALATED']),
+        );
+        unsubs.push(onSnapshot(convQ, snap => {
+            const ids = new Set<string>();
+            snap.docs.forEach(d => {
+                const data = d.data() as Record<string, unknown>;
+                if (String(data.type || '').toUpperCase() === 'LLEGADA_TARDE') return;
+                const sid = String(data.shiftId || '').trim();
+                if (sid) ids.add(sid);
+            });
+            setConvocatoriaShiftIds(ids);
+        }, (err) => {
+            console.warn('[useOperacionesMonitor] convocatorias listener error:', err.code);
         }));
         const planifQ = empresaCollectionQuery('planificacion_estados', empresaId, scopeEmpresa);
         unsubs.push(onSnapshot(planifQ, snap => {
@@ -1134,15 +1155,35 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             return null;
         };
 
+        // Tipo y hora de inicio del que cubre: del ops_cov vinculado (FT/REF/ESC/RET, realStartTime o inicio).
+        const resolveCoveringMetaForTitular = (titular: any): { tipo: string | null; desdeMs: number } => {
+            const linked = dedupedRealShifts.find((x: any) =>
+                x.id !== titular.id
+                && !x.isAbsent
+                && !x.isUnassigned
+                && (x.absenceShiftId === titular.id || x.coveredShiftId === titular.id)
+                && String(x.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE',
+            );
+            if (!linked) return { tipo: String(titular.coverageType || '').trim() || null, desdeMs: 0 };
+            const tipo = String(linked.coverageType || titular.coverageType || '').trim() || null;
+            const desde = linked.realStartTime || linked.checkInAt || linked.shiftDateObj;
+            const desdeMs = desde instanceof Date ? desde.getTime() : (typeof desde?.toMillis === 'function' ? desde.toMillis() : 0);
+            return { tipo, desdeMs };
+        };
+
         visibleRealShifts.forEach((s) => {
-            if (!s.isAbsent) return;
+            if (!s.isAbsent && !(s.isPotentialAbsence && s.opensCoverageVacancy)) return;
+            if (convocatoriaShiftIds.has(String(s.id))) s.convocatoriaEnCurso = true;
             if (!(s.operacionallyCovered || s.plannedOperativelyCovered || s.coverageStatus === 'COVERED')) return;
             const name = resolveCoveringNameForTitular(s);
             if (name) s.coveringDisplayName = name;
+            const meta = resolveCoveringMetaForTitular(s);
+            if (meta.tipo) s.coveringTipo = meta.tipo;
+            if (meta.desdeMs) s.coveringDesdeMs = meta.desdeMs;
         });
 
         return [...visibleRealShifts, ...filteredVirtualVacancies].sort((a:any, b:any) => a.shiftDateObj - b.shiftDateObj);
-    }, [mergedRawShifts, shiftsFromServer, now, employees, objectives, servicesSLA, publishStatusMap, empresaId, eventos]);
+    }, [mergedRawShifts, shiftsFromServer, now, employees, objectives, servicesSLA, publishStatusMap, empresaId, eventos, convocatoriaShiftIds]);
 
     const filteredObjectives = useMemo(() => {
         let list = selectedClientId ? objectives.filter((o: any) => o.clientId === selectedClientId) : objectives;
@@ -1211,6 +1252,8 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             vacantes: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'VACANTES')).length,
             devueltas: hoy.filter((s) => s.isUnassigned && s.isReportedToPlanning).length,
             ausentes: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'AUSENTES')).length,
+            // El rojo del contador AUS es solo por las ausencias sin cubrir (estadoAusenciaCc); el total sigue siendo AUS.
+            ausentesSinCubrir: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'AUSENTES') && ausenciaSinCubrir(s)).length,
             // FRANC lista francos + retenes stand-by (`shiftMatchesOpsViewTab`), pero el número
             // de la solapa sigue siendo el de francos y el RET se muestra aparte («4 FRANC · 2 RET»).
             francos: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'FRANCOS') && !isStandbyRetDisponible(s)).length,

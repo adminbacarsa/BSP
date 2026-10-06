@@ -3,8 +3,10 @@ import type { OperacionesMapMarker } from '@/hooks/useOperacionesMapMarkers';
 import { opsShiftDayLabel } from '@/hooks/useOperacionesMonitor';
 import { ShiftCodeBadge } from '@/components/operaciones/ShiftCodeBadge';
 import { canRevertAbsenceNow } from '@/lib/operaciones/revertAbsenceWindow';
-import { formatRetentionDuration, formatRetentionLine } from '@cosp/ops-core';
+import { formatRetentionDuration, formatRetentionLine, estadoAusenciaCc } from '@cosp/ops-core';
+import { ESTADO_AUSENCIA_HEX } from '@/components/operaciones/EstadoAusenciaChip';
 import { estadoGuardiaEvento, eventServicioLabel } from '@/lib/operaciones/eventoCc';
+import { REVERTIR_VENCIDO_TEXTO } from '@/lib/operaciones/guardCardEstado';
 
 const getRefuerzoLabel = (shift: any): 'RFZ' | 'TURA' | null => {
   const code = String(shift?.code || '').toUpperCase();
@@ -235,10 +237,18 @@ export function OperacionesMapPopup({
             let statusLabel = 'PLAN';
             let statusColor = '#94a3b8';
             const refuerzoLabel = getRefuerzoLabel(shift);
+            // Ausencia: un solo estado (mismo criterio que la lista del CC y el celular); manda la cobertura.
+            const estadoAus = estadoAusenciaCc(shift);
             if (shift.isFranco) {
               statusLabel = 'FRANCO';
               statusColor = '#3b82f6';
-            } else if (shift.isSinCobertura) {
+            } else if (estadoAus) {
+              statusLabel = estadoAus.kind === 'CUBIERTO' ? 'AUS · CUB'
+                : estadoAus.kind === 'CUBRIENDO' ? 'AUS · CONV'
+                : estadoAus.kind === 'PARCIAL' ? 'PARCIAL'
+                : 'AUS · SIN CUBRIR';
+              statusColor = ESTADO_AUSENCIA_HEX[estadoAus.tone];
+            } else if (shift.isSinCobertura && shift.isUnassigned) {
               statusLabel = 'SIN COB.';
               statusColor = '#475569';
             } else if (shift.isPresent && shift.manualRetentionType === 'extended') {
@@ -283,7 +293,7 @@ export function OperacionesMapPopup({
               statusLabel = 'EN HORA';
               statusColor = '#4f46e5';
             }
-            if (refuerzoLabel) {
+            if (refuerzoLabel && !estadoAus) {
               statusLabel = shift.isUnassigned ? `VAC ${refuerzoLabel}` : refuerzoLabel;
               statusColor = refuerzoLabel === 'TURA' ? '#7c3aed' : '#dc2626';
             }
@@ -303,7 +313,7 @@ export function OperacionesMapPopup({
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  flexWrap: shift.isPresent && shift.retentionWait ? 'wrap' : 'nowrap',
+                  flexWrap: (shift.isPresent && shift.retentionWait) || shift.relevoAusenteAviso || estadoAus?.detalle ? 'wrap' : 'nowrap',
                   gap: '6px',
                   borderLeft: `3px solid ${s.borderColor}`,
                   background: idx % 2 === 0 ? s.background : '#ffffff',
@@ -382,16 +392,19 @@ export function OperacionesMapPopup({
                 </span>
                 <span
                   data-ops-estado={estadoEvento ? estadoEvento.estado : undefined}
+                  data-ops-estado-ausencia={estadoAus && !estadoEvento ? estadoAus.kind : undefined}
+                  title={estadoAus?.detalle || undefined}
                   style={{
-                    width: '52px',
+                    minWidth: '52px',
                     fontSize: '8px',
                     fontWeight: 800,
                     color: 'white',
                     background: statusColor,
                     borderRadius: '4px',
-                    padding: '2px 0',
+                    padding: '2px 4px',
                     textAlign: 'center',
                     flexShrink: 0,
+                    whiteSpace: 'nowrap',
                   }}
                 >
                   {statusLabel}
@@ -415,7 +428,7 @@ export function OperacionesMapPopup({
                       CUBRIR
                     </button>
                   )}
-                  {shift.isSinCobertura && (
+                  {shift.isSinCobertura && shift.isUnassigned && (
                     <span
                       style={{
                         fontSize: '8px',
@@ -427,6 +440,14 @@ export function OperacionesMapPopup({
                       }}
                     >
                       {shift.vacancyOrigin === 'ABSENCE' ? 'ausencia' : 'sin plan'}
+                    </span>
+                  )}
+                  {estadoAus && !canRevertAbsence && end && now.getTime() > end.getTime() && (
+                    <span
+                      data-ops-revertir-vencido="1"
+                      style={{ fontSize: '8px', color: '#94a3b8', fontStyle: 'italic', display: 'block', textAlign: 'center', lineHeight: 1.2 }}
+                    >
+                      {REVERTIR_VENCIDO_TEXTO}
                     </span>
                   )}
                   {!shift.isPresent && !shift.isUnassigned && !shift.isCompleted && (!shift.isAbsent || shift.isProvisionalLateAbsence || canRevertAbsence) && !shift.isFranco &&
@@ -522,6 +543,11 @@ export function OperacionesMapPopup({
                 {shift.relevoAusenteAviso && (
                   <div data-relevo-ausente="1" style={{ flex: '1 0 100%', fontSize: '10px', fontWeight: 700, color: '#475569', paddingLeft: '2px', lineHeight: 1.3 }}>
                     {shift.relevoAusenteAviso}
+                  </div>
+                )}
+                {estadoAus?.detalle && !estadoEvento && (
+                  <div data-ops-ausencia-detalle={estadoAus.kind} style={{ flex: '1 0 100%', fontSize: '10px', fontWeight: 700, color: ESTADO_AUSENCIA_HEX[estadoAus.tone], paddingLeft: '2px', lineHeight: 1.3 }}>
+                    {estadoAus.detalle}
                   </div>
                 )}
               </div>
