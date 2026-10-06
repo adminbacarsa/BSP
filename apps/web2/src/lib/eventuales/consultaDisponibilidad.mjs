@@ -83,7 +83,8 @@ export function reservarLugar(p) {
   const estado = String(p.estadoInvitacion || 'PENDIENTE');
   if (estado === 'ASIGNADO' || estado === 'RESERVADO') return { ok: true, idempotente: true, orden: null };
   if (estado === 'CUBIERTO') return { ok: false, codigo: 'COMPLETA' };
-  if (estado !== 'PENDIENTE') return { ok: false, codigo: 'YA_RESPONDIO' };
+  // AVISO_MAIL: le llegó por correo y todavía no tiene la app; puede responder igual.
+  if (estado !== 'PENDIENTE' && estado !== 'AVISO_MAIL') return { ok: false, codigo: 'YA_RESPONDIO' };
   const status = String(p.status || '');
   if (status !== 'ABIERTA') {
     if (status === 'VENCIDA') return { ok: false, codigo: 'VENCIDA' };
@@ -100,7 +101,7 @@ export function reservarLugar(p) {
 /** Con el cupo lleno, los que siguen en PENDIENTE se cierran. */
 export function pendientesACerrar(invitaciones, tomados, lugares) {
   if (Number(tomados) < Number(lugares)) return [];
-  return (invitaciones || []).filter((i) => i && i.estado === 'PENDIENTE').map((i) => i.id);
+  return (invitaciones || []).filter((i) => i && (i.estado === 'PENDIENTE' || i.estado === 'AVISO_MAIL')).map((i) => i.id);
 }
 
 /** Al fallar la revalidación ese lugar vuelve a estar libre: no cuenta como tomado. */

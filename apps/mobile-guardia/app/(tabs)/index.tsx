@@ -42,6 +42,7 @@ import { ConvocatoriasBanner } from '../../src/components/ConvocatoriasBanner';
 import { ConsultasDisponibilidadBanner } from '../../src/components/ConsultasDisponibilidadBanner';
 import { useConsultasDisponibilidad } from '../../src/hooks/useConsultasDisponibilidad';
 import { responderConsultaDisponibilidad } from '../../src/lib/responderConsultaDisponibilidad';
+import { argsPreviewConsulta } from '../../src/lib/consultasDisponibilidadQuery';
 import { CoberturaConvocatoriasBanner } from '../../src/components/CoberturaConvocatoriasBanner';
 import { LlegadaTardeVenisBanner } from '../../src/components/LlegadaTardeVenisBanner';
 import { RetencionAvisoCard } from '../../src/components/RetencionAvisoCard';
@@ -101,11 +102,13 @@ function HoyScreenContent() {
     isPreviewMode,
     previewEmpDocId,
     isEventual,
+    bolsaCuil,
     eventualLegajos,
     empresasNombres,
   } = usePortalAuth();
   const { shifts, allShifts, loading, error } = useEmployeeShifts(empDocId, user?.uid ?? null);
-  const consultasDisponibilidad = useConsultasDisponibilidad(user?.uid);
+  const consultasDisponibilidad = useConsultasDisponibilidad();
+  const previewConsulta = argsPreviewConsulta({ isPreviewMode, bolsaCuil, employeeId: empDocId });
   const [consultaBusyId, setConsultaBusyId] = useState<string | null>(null);
   const { objectivesMap } = useObjectivesMap();
   const { pendingCount, pendingShiftIds, busyShiftId, requestCheckInForShift, closeReviewShift, notifyLateArrival, lateEtaByShiftId } =
@@ -566,7 +569,7 @@ function HoyScreenContent() {
                 void (async () => {
                   setConsultaBusyId(item.id);
                   try {
-                    const res = await responderConsultaDisponibilidad(item.id, 'SI');
+                    const res = await responderConsultaDisponibilidad(item.id, 'SI', previewConsulta);
                     if (res.ok) appAlert('Listo', res.codigo === 'ASIGNADO' ? 'Quedó tu lugar.' : 'Recibimos tu respuesta.');
                     else appAlert('No se pudo', res.motivo || (res.codigo === 'COMPLETA' ? 'Ya se cubrió, gracias.' : 'La consulta ya no está abierta.'));
                   } catch {
@@ -580,7 +583,7 @@ function HoyScreenContent() {
                 void (async () => {
                   setConsultaBusyId(item.id);
                   try {
-                    await responderConsultaDisponibilidad(item.id, 'NO');
+                    await responderConsultaDisponibilidad(item.id, 'NO', previewConsulta);
                   } catch {
                     appAlert('Error', 'No se pudo enviar la respuesta.');
                   } finally {

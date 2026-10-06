@@ -92,6 +92,16 @@ export async function activarAccesoEventual(
     legajos.docs.forEach((d) => batch.set(d.ref, { uid }, { merge: true }));
     await batch.commit();
   }
+  try {
+    const { completarUidInvitacionesAbiertas } = await import('./consultaDisponibilidad');
+    await completarUidInvitacionesAbiertas({
+      uid,
+      bolsaCuil: cuil,
+      employeeIds: legajos.docs.map((d) => d.id),
+    });
+  } catch (e) {
+    console.warn('[activarAccesoEventual] no se pudo completar uid de consultas', e);
+  }
 
   await input.tokenRef.update({ used: true, usedAt: FieldValue.serverTimestamp() });
   return { email, employeeId, bolsaCuil: cuil };
@@ -190,6 +200,13 @@ export async function activateAndSetPasswordHandler(
   }
 
   await tokenRef.update({ used: true, usedAt: FieldValue.serverTimestamp() });
+
+  try {
+    const { completarUidInvitacionesAbiertas } = await import('./consultaDisponibilidad');
+    await completarUidInvitacionesAbiertas({ uid: String(uid), employeeIds: [String(employeeId)] });
+  } catch (e) {
+    console.warn('[activateAndSetPassword] no se pudo completar uid de consultas', e);
+  }
 
   return { email, employeeId };
 }

@@ -317,6 +317,28 @@ describe('consulta de disponibilidad en bloque', () => {
     assert.deepEqual(model.detalle, ['06/10 · M 07:00–15:00', '15/10 · M 07:00–15:00']);
     assert.equal(model.acceptLabel, 'Sí, puedo');
   });
+
+  it('la alerta de la bandeja arma el bloque de días si trae jornadas', () => {
+    const m = buildInboxCardModel({
+      item: {
+        id: 'n-consulta',
+        type: 'CONSULTA_DISPONIBILIDAD',
+        title: '¿Estás disponible?',
+        body: 'texto del servidor',
+        objectiveName: 'Peaje 9 Norte',
+        positionName: 'Puesto 1',
+        jornadas: [
+          { fecha: '2026-10-15', code: 'M', horaInicio: '07:00', horaFin: '15:00' },
+          { fecha: '2026-10-06', code: 'M', horaInicio: '07:00', horaFin: '15:00' },
+        ],
+      },
+    });
+    assert.equal(m?.kind, 'DISPONIBILIDAD');
+    assert.equal(m?.title, '¿Podés cubrir?');
+    assert.match(m?.message || '', /2 días \(06\/10 → 15\/10\)/);
+    assert.deepEqual(m?.detalle, ['06/10 · M 07:00–15:00', '15/10 · M 07:00–15:00']);
+    assert.equal(m?.acceptLabel, 'Sí, puedo');
+  });
 });
 
 describe('cuenta regresiva', () => {

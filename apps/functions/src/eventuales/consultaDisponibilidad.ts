@@ -100,6 +100,45 @@ function personaDeRespuesta(r: RespuestaVista): PersonaConsulta {
   return { tipo: 'EVENTUAL', cuil: r.cuil, employeeId: r.employeeId ? String(r.employeeId) : null };
 }
 
+function esperaRespuesta(estado: unknown): boolean {
+  const e = String(estado || '');
+  return e === 'PENDIENTE' || e === 'AVISO_MAIL';
+}
+
+/** Al crear el acceso a la app, las consultas abiertas de esa persona pasan a tener uid. */
+export async function completarUidInvitacionesAbiertas(input: {
+  uid: string;
+  bolsaCuil?: string | null;
+  employeeIds?: string[] | null;
+}): Promise<number> {
+  const uid = String(input.uid || '').trim();
+  if (!uid) return 0;
+  const seen = new Map<string, admin.firestore.QueryDocumentSnapshot>();
+  const cuil = String(input.bolsaCuil || '').replace(/\D/g, '');
+  if (cuil) {
+    const snap = await db().collection(INV).where('bolsaCuil', '==', cuil).get();
+    snap.docs.forEach((d) => seen.set(d.id, d));
+  }
+  for (const raw of input.employeeIds || []) {
+    const emp = String(raw || '').trim();
+    if (!emp) continue;
+    const snap = await db().collection(INV).where('employeeId', '==', emp).get();
+    snap.docs.forEach((d) => seen.set(d.id, d));
+  }
+  const abiertas = [...seen.values()].filter((d) => {
+    const data = d.data();
+    return esperaRespuesta(data.estado) && String(data.uid || '') !== uid;
+  });
+  let n = 0;
+  for (let i = 0; i < abiertas.length; i += 400) {
+    const batch = db().batch();
+    abiertas.slice(i, i + 400).forEach((d) => batch.update(d.ref, { uid }));
+    await batch.commit();
+    n += Math.min(400, abiertas.length - i);
+  }
+  return n;
+}
+
 export const crearConsultaDisponibilidad = functions.https.onCall(async (data, context) => {
   if (Array.isArray(data?.guardias) && data.guardias.length > 0) return crearConsultaGuardias(data, context);
   const auth = await exigirPuedeConsultar(context);
@@ -211,8 +250,8 @@ async function cerrarSiCompleta(consultaId: string, actorUid: string) {
   const respuestas = (data.respuestas || []) as RespuestaVista[];
   const asignados = respuestas.filter((r) => r.estado === 'ASIGNADO').length;
   if (asignados < Number(data.lugares || 0)) return;
-  const pendientes = respuestas.filter((r) => r.estado === 'PENDIENTE');
-  const cerradas = respuestas.map((r) => (r.estado === 'PENDIENTE' ? { ...r, estado: 'CUBIERTO', motivo: reglas.MENSAJE_CUBIERTO } : r));
+  const pendientes = respuestas.filter((r) => esperaRespuesta(r.estado));
+  const cerradas = respuestas.map((r) => (esperaRespuesta(r.estado) ? { ...r, estado: 'CUBIERTO', motivo: reglas.MENSAJE_CUBIERTO } : r));
   await parentRef.update({
     status: 'COMPLETA',
     tomados: asignados,
@@ -257,9 +296,32 @@ export const responderConsultaDisponibilidad = functions.https.onCall(async (dat
   if (!invSnap.exists) throw new functions.https.HttpsError('not-found', 'No encontramos la consulta.');
   const inv = invSnap.data() || {};
   const uid = context.auth.uid;
-  const claimCuil = String(context.auth.token.bolsaCuil || '').replace(/\D/g, '');
-  const propio = (inv.uid && inv.uid === uid) || (claimCuil && claimCuil === String(inv.bolsaCuil || ''));
-  if (!propio) throw new functions.https.HttpsError('permission-denied', 'Esta consulta no es tuya.');
+  const asEmployeeId = String(data?.asEmployeeId || '').trim();
+  const asBolsaCuil = String(data?.asBolsaCuil || '').replace(/\D/g, '');
+  const { isEventualPreviewSuperAdmin, puedeResponderConsulta } = await import('./eventualPreviewAuth');
+  const token = context.auth.token as { role?: unknown; type?: unknown; bolsaCuil?: unknown };
+  const ownSnap = await db().collection('empleados').where('uid', '==', uid).limit(10).get();
+  const ownEmployeeIds = ownSnap.docs.map((d) => d.id);
+  const porId = await db().collection('empleados').doc(uid).get();
+  if (porId.exists && !ownEmployeeIds.includes(porId.id)) ownEmployeeIds.push(porId.id);
+  const acceso = puedeResponderConsulta({
+    isSuperAdmin: isEventualPreviewSuperAdmin(token.role, token.type),
+    authUid: uid,
+    claimBolsaCuil: String(token.bolsaCuil || ''),
+    ownEmployeeIds,
+    asEmployeeId: asEmployeeId || null,
+    asBolsaCuil: asBolsaCuil || null,
+    invUid: inv.uid ? String(inv.uid) : null,
+    invBolsaCuil: inv.bolsaCuil ? String(inv.bolsaCuil) : null,
+    invEmployeeId: inv.employeeId ? String(inv.employeeId) : null,
+  });
+  if (!acceso.ok) throw new functions.https.HttpsError('permission-denied', 'Esta consulta no es tuya.');
+  const preview = acceso.preview;
+  const marcaPreview = preview
+    ? { preview: true, modo: 'preview', previewRespondedBy: uid, enNombreDe: String(inv.bolsaCuil || inv.employeeId || '') }
+    : {};
+  const detalle = (texto: string) => (preview ? `Vista previa · ${texto}` : texto);
+  const extraPreview = preview ? { previewRespondedBy: uid, respondidoEnPreview: true } : {};
   const consultaId = String(inv.consultaId || '');
   const esGuardia = String(inv.tipo || '') === 'GUARDIA';
   const cuil = String(inv.bolsaCuil || '');
@@ -271,11 +333,11 @@ export const responderConsultaDisponibilidad = functions.https.onCall(async (dat
 
   if (respuesta === 'NO') {
     if (inv.estado === 'NO') return { ok: true, idempotente: true, codigo: 'NO' };
-    if (inv.estado !== 'PENDIENTE') return { ok: false, codigo: 'YA_RESPONDIO' };
+    if (!esperaRespuesta(inv.estado)) return { ok: false, codigo: 'YA_RESPONDIO' };
     const hora = horaAr(Date.now());
-    await marcarRespuesta(consultaId, persona, { estado: 'NO', hora, motivo: null }, 'NO', { respondioAt: admin.firestore.FieldValue.serverTimestamp() });
-    await evento(consultaId, 'RESPUESTA', { bolsaCuil: esGuardia ? null : cuil, employeeId: persona.employeeId, respuesta: 'NO', hora, uid });
-    await auditar('CONSULTA_DISPONIBILIDAD_RESPUESTA', uid, String(inv.empresaId || ''), `${inv.nombre || quien} no puede.`, { consultaId, bolsaCuil: esGuardia ? null : cuil, employeeId: persona.employeeId });
+    await marcarRespuesta(consultaId, persona, { estado: 'NO', hora, motivo: null }, 'NO', { respondioAt: admin.firestore.FieldValue.serverTimestamp(), ...extraPreview });
+    await evento(consultaId, 'RESPUESTA', { bolsaCuil: esGuardia ? null : cuil, employeeId: persona.employeeId, respuesta: 'NO', hora, uid, ...marcaPreview });
+    await auditar('CONSULTA_DISPONIBILIDAD_RESPUESTA', uid, String(inv.empresaId || ''), detalle(`${inv.nombre || quien} no puede.`), { consultaId, bolsaCuil: esGuardia ? null : cuil, employeeId: persona.employeeId, ...marcaPreview });
     return { ok: true, codigo: 'NO' };
   }
 
@@ -307,13 +369,18 @@ export const responderConsultaDisponibilidad = functions.https.onCall(async (dat
       respuestas,
       resumen: reglas.textoEstadoConsulta(respuestas),
     });
-    tx.update(invRef, { estado: 'RESERVADO', orden: decision.orden, respondioAt: admin.firestore.FieldValue.serverTimestamp() });
+    tx.update(invRef, {
+      estado: 'RESERVADO',
+      orden: decision.orden,
+      respondioAt: admin.firestore.FieldValue.serverTimestamp(),
+      ...extraPreview,
+    });
     return { decision, pdata, hora };
   });
 
   if (!reserva.decision.ok) return { ok: false, codigo: reserva.decision.codigo || 'CERRADA' };
   if (reserva.decision.idempotente && String(inv.estado) === 'ASIGNADO') return { ok: true, idempotente: true, codigo: 'ASIGNADO' };
-  await evento(consultaId, 'RESPUESTA', { bolsaCuil: esGuardia ? null : cuil, employeeId: persona.employeeId, respuesta: 'SI', hora: reserva.hora, orden: reserva.decision.orden, uid });
+  await evento(consultaId, 'RESPUESTA', { bolsaCuil: esGuardia ? null : cuil, employeeId: persona.employeeId, respuesta: 'SI', hora: reserva.hora, orden: reserva.decision.orden, uid, ...marcaPreview });
 
   const jornadas = (reserva.pdata.jornadas || inv.jornadas || []) as JornadaIn[];
   try {
@@ -351,9 +418,9 @@ export const responderConsultaDisponibilidad = functions.https.onCall(async (dat
         actorUid: String(reserva.pdata.creadoPor || uid),
         actorName: String(reserva.pdata.creadoPorNombre || uid),
       });
-    await marcarRespuesta(consultaId, persona, { estado: 'ASIGNADO', orden: reserva.decision.orden ?? null, hora: reserva.hora || null, motivo: null }, 'ASIGNADO', { turnoIds: asignado.turnoIds, employeeId: asignado.employeeId });
-    await evento(consultaId, 'ASIGNADO', { bolsaCuil: esGuardia ? null : cuil, employeeId: asignado.employeeId, orden: reserva.decision.orden, turnoIds: asignado.turnoIds });
-    await auditar('CONSULTA_DISPONIBILIDAD_ASIGNADO', uid, empresa, `${asignado.nombre} tomó el lugar ${reserva.decision.orden}.`, { consultaId, bolsaCuil: esGuardia ? null : cuil, employeeId: asignado.employeeId, turnoIds: asignado.turnoIds });
+    await marcarRespuesta(consultaId, persona, { estado: 'ASIGNADO', orden: reserva.decision.orden ?? null, hora: reserva.hora || null, motivo: null }, 'ASIGNADO', { turnoIds: asignado.turnoIds, employeeId: asignado.employeeId, ...extraPreview });
+    await evento(consultaId, 'ASIGNADO', { bolsaCuil: esGuardia ? null : cuil, employeeId: asignado.employeeId, orden: reserva.decision.orden, turnoIds: asignado.turnoIds, ...marcaPreview });
+    await auditar('CONSULTA_DISPONIBILIDAD_ASIGNADO', uid, empresa, detalle(`${asignado.nombre} tomó el lugar ${reserva.decision.orden}.`), { consultaId, bolsaCuil: esGuardia ? null : cuil, employeeId: asignado.employeeId, turnoIds: asignado.turnoIds, ...marcaPreview });
     await cerrarSiCompleta(consultaId, uid);
     return { ok: true, codigo: 'ASIGNADO', orden: reserva.decision.orden, turnoIds: asignado.turnoIds };
   } catch (e) {
@@ -365,8 +432,8 @@ export const responderConsultaDisponibilidad = functions.https.onCall(async (dat
     const tomados = respuestas.filter((r) => !mismaPersona(r, persona) && (r.estado === 'ASIGNADO' || r.estado === 'RESERVADO')).length;
     await parentRef.update({ respuestas, tomados, resumen: reglas.textoEstadoConsulta(respuestas), status: 'ABIERTA' });
     await invRef.update({ estado: 'NO_ELEGIBLE', motivo, orden: null });
-    await evento(consultaId, 'RESPUESTA', { bolsaCuil: esGuardia ? null : cuil, employeeId: persona.employeeId, respuesta: 'NO_ELEGIBLE', motivo, uid });
-    await auditar('CONSULTA_DISPONIBILIDAD_NO_ELEGIBLE', uid, String(reserva.pdata.empresaId || ''), `${inv.nombre || quien}: ${motivo}. El lugar sigue libre.`, { consultaId, bolsaCuil: esGuardia ? null : cuil, employeeId: persona.employeeId });
+    await evento(consultaId, 'RESPUESTA', { bolsaCuil: esGuardia ? null : cuil, employeeId: persona.employeeId, respuesta: 'NO_ELEGIBLE', motivo, uid, ...marcaPreview });
+    await auditar('CONSULTA_DISPONIBILIDAD_NO_ELEGIBLE', uid, String(reserva.pdata.empresaId || ''), detalle(`${inv.nombre || quien}: ${motivo}. El lugar sigue libre.`), { consultaId, bolsaCuil: esGuardia ? null : cuil, employeeId: persona.employeeId, ...marcaPreview });
     return { ok: false, codigo: 'NO_ELEGIBLE', motivo };
   }
 });

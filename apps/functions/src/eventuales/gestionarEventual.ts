@@ -668,6 +668,17 @@ export const crearAccesoEventual = functions.https.onCall(async (data, context) 
     uid,
     portalInvite: { sent: true, email: plan.mail, sentBy: auth.uid, sentAt: admin.firestore.FieldValue.serverTimestamp() },
   }, { merge: true });
+  try {
+    const { completarUidInvitacionesAbiertas } = await import('./consultaDisponibilidad');
+    const legajos = ((snap.data()?.legajos) || []) as { employeeId?: string }[];
+    await completarUidInvitacionesAbiertas({
+      uid,
+      bolsaCuil: cuil,
+      employeeIds: legajos.map((l) => String(l.employeeId || '')),
+    });
+  } catch (e) {
+    console.warn('[crearAccesoEventual] no se pudo completar uid de consultas', e);
+  }
   await auditar('EVENTUAL_ACCESO', auth.uid, cuil, plan.mail);
   return { ok: true, uid, activacion: `https://comtroldata.web.app/app/activar?t=${token}` };
 });

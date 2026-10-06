@@ -946,7 +946,8 @@ service cloud.firestore {
       }
     }
 
-    // Consulta de disponibilidad (Planificación). El eventual lee su invitación y responde por callable.
+    // Consulta de disponibilidad (Planificación). Lee el admin del tenant, el dueño por uid,
+    // el EVENTUAL por claim bolsaCuil o el guardia si el employeeId es su legajo.
     // Escritura solo servidor. Las publica Mauro.
     match /consultas_disponibilidad/{consultaId} {
       allow read: if tenantAdminRead();
@@ -960,7 +961,14 @@ service cloud.firestore {
 
     match /consultas_disponibilidad_invitaciones/{invitacionId} {
       allow read: if tenantAdminRead()
-        || (request.auth != null && resource.data.uid == request.auth.uid);
+        || (request.auth != null && resource.data.uid == request.auth.uid)
+        || (isEventualClaim()
+            && request.auth.token.get('bolsaCuil', '') is string
+            && request.auth.token.get('bolsaCuil', '') != ''
+            && resource.data.bolsaCuil == request.auth.token.bolsaCuil)
+        || (resource.data.employeeId is string
+            && resource.data.employeeId != ''
+            && empleadoDocOwnedByAuth(resource.data.employeeId));
       allow write: if false;
     }
 
