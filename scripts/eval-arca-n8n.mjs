@@ -47,6 +47,19 @@ check('vencido a los 30 min', esUrgenteVencido({ canal: 'URGENTE', tipo: 'AT', e
 check('no vencido antes de N', !esUrgenteVencido({ canal: 'URGENTE', tipo: 'BT', estado: 'ERROR', createdAtMs: now - 10 * 60_000 }, now, 30));
 check('confirmado y lote programado no son respaldo', !esUrgenteVencido({ canal: 'URGENTE', tipo: 'AT', estado: 'CONFIRMADO', createdAtMs: now - 90 * 60_000 }, now, 30) && !esUrgenteVencido({ canal: 'LOTE', tipo: 'AT', estado: 'PENDIENTE', createdAtMs: now - 90 * 60_000 }, now, 30));
 check('ya avisado no vuelve a salir', !esUrgenteVencido({ canal: 'URGENTE', tipo: 'AT', estado: 'PENDIENTE', createdAtMs: now - 90 * 60_000, respaldoAvisadoAt: 'x' }, now, 30));
+check('ENVIADO no es vencido', !esUrgenteVencido({ canal: 'URGENTE', tipo: 'AT', estado: 'ENVIADO', createdAtMs: now - 48 * 60 * 60_000 }, now, 30));
+check('VERIFICAR si avisa', esUrgenteVencido({ canal: 'URGENTE', tipo: 'AT', estado: 'VERIFICAR', createdAtMs: now - 49 * 60 * 60_000 }, now, 30));
+check('VERIFICAR ya avisado no repite', !esUrgenteVencido({ canal: 'URGENTE', tipo: 'AT', estado: 'VERIFICAR', createdAtMs: now - 49 * 60 * 60_000, respaldoAvisadoAt: 'x' }, now, 30));
+check('MANUAL de anulacion avisa', esUrgenteVencido({ canal: 'URGENTE', tipo: 'ANULACION', estado: 'MANUAL', createdAtMs: now - 31 * 60_000 }, now, 30));
+check('ANULADO no avisa', !esUrgenteVencido({ canal: 'URGENTE', tipo: 'ANULACION', estado: 'ANULADO', createdAtMs: now - 90 * 60_000 }, now, 30));
+const cloud = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../docs/n8n/arca-cloud-respaldo-urgente.json'), 'utf8'));
+const cloudRaw = JSON.stringify(cloud);
+check('cloud sin $env', !cloudRaw.includes('$env'));
+check('cloud usa variable y header auth', cloudRaw.includes('$vars.ARCA_ENVIOS_URL') && cloudRaw.includes('httpHeaderAuth') && cloudRaw.includes('minutos=30') && cloudRaw.includes('*/10 * * * *'));
+check('cloud texto VERIFICAR', cloudRaw.includes('enviado pero no aparece en ARCA'));
+check('cloud gmail sin token', cloud.nodes.some((n) => n.type === 'n8n-nodes-base.gmail' && n.credentials?.gmailOAuth2?.name === 'Gmail RRHH' && !JSON.stringify(n).includes('accessToken') && !JSON.stringify(n).includes('refreshToken')));
+const apiSrc = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../apps/functions/src/arca/arcaEnviosApi.ts'), 'utf8');
+check('consulta abierta incluye VERIFICAR y no ENVIADO', /ESTADOS_ABIERTOS = \[[^\]]*VERIFICAR/.test(apiSrc) && !/ESTADOS_ABIERTOS = \[[^\]]*ENVIADO/.test(apiSrc));
 
 check('alta nueva urgente avisa', debeAvisarUrgente(null, { tipo: 'AT', canal: 'URGENTE', estado: 'PENDIENTE' }));
 check('correccion del mismo urgente no reavisa', !debeAvisarUrgente({ tipo: 'AT', canal: 'URGENTE', estado: 'PENDIENTE' }, { tipo: 'AT', canal: 'URGENTE', estado: 'SUBIENDO' }));

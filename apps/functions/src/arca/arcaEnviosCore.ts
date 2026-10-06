@@ -245,7 +245,11 @@ export function armarLotes(envios: FilaLote[], filtro: FiltroLote, nowMs: number
   return out;
 }
 
-/** AT/BT urgente sin confirmar, pasado N minutos, y que el respaldo no aviso todavia. */
+/** Estados que el mail de respaldo puede avisar. ENVIADO no: la fichada ya tiene número. */
+const ESTADOS_RESPALDO_URGENTE = new Set(['PENDIENTE', 'SUBIENDO', 'ERROR', 'MANUAL', 'VERIFICAR']);
+
+/** AT/BT/ANULACION urgente sin cerrar, pasado N minutos, y que el respaldo no avisó todavía.
+ *  ENVIADO y CONFIRMADO no entran. VERIFICAR y MANUAL de anulación sí. */
 export function esUrgenteVencido(
   envio: {
     canal?: string;
@@ -260,8 +264,9 @@ export function esUrgenteVencido(
 ): boolean {
   if (envio?.quitadoDelLote === true) return false;
   if (String(envio?.canal || '') !== 'URGENTE') return false;
-  if (envio?.tipo !== 'AT' && envio?.tipo !== 'BT') return false;
-  if (String(envio?.estado || '') === 'CONFIRMADO') return false;
+  const tipo = String(envio?.tipo || '');
+  if (tipo !== 'AT' && tipo !== 'BT' && tipo !== 'ANULACION') return false;
+  if (!ESTADOS_RESPALDO_URGENTE.has(String(envio?.estado || ''))) return false;
   if (envio?.respaldoAvisadoAt) return false;
   const created = Number(envio?.createdAtMs || 0);
   if (!created) return false;

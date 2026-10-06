@@ -5,7 +5,7 @@
  *    GET  ?action=pendientes[&empresaId=]     → envíos PENDIENTE/ERROR con su TXT
  *    GET  ?action=lote&tipo=AT|BT&canal=LOTE|URGENTE[&empresaId=]
  *                                             → un TXT por empresa (reclama: SUBIENDO + loteId)
- *    GET  ?action=vencidos&minutos=N          → AT/BT urgentes sin confirmar hace más de N min (sin TXT)
+ *    GET  ?action=vencidos&minutos=N          → AT/BT/ANULACION urgentes sin cerrar hace más de N min (sin TXT). ENVIADO no entra; VERIFICAR y MANUAL sí.
  *    POST ?action=resultado                   → { envioId | loteId, estado, nroTransaccion?, constanciaUrl?, error?, arcaCodigoNovedad?, codigoControl?, nroVerificador?, constanciaBase64? }
  *    POST ?action=arca-codigo                 → { loteId | envioId, arcaCodigoNovedad } guarda Código de Carga Masiva (sin cambiar estado)
  *    GET  ?action=credencial&empresaId=       -> CUIT de ingreso, CUIT representado y clave (solo HTTPS, no se loguea)
@@ -644,7 +644,7 @@ export const arcaEnviosApi = onRequest(
 );
 
 
-const ESTADOS_ABIERTOS = ['PENDIENTE', 'ERROR', 'SUBIENDO', 'MANUAL'];
+const ESTADOS_ABIERTOS = ['PENDIENTE', 'ERROR', 'SUBIENDO', 'MANUAL', 'VERIFICAR'];
 const MAX_ABIERTOS = 200;
 
 function createdAtMs(data: Record<string, unknown>): number {
