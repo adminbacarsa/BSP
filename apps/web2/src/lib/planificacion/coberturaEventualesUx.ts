@@ -299,6 +299,7 @@ export function consultaAbiertaEnFecha<T extends ConsultaResumenIn & { titularEm
 export function textoIndicadorConsulta(consulta: ConsultaResumenIn | null | undefined): string {
   if (!consulta) return '';
   const vence = horaArDe(consulta.venceAtMs);
+  if (consulta.status === 'VENCIDA') return vence ? `Venció ${vence} · nadie aceptó` : 'Venció · nadie aceptó';
   return vence ? `Consulta enviada · vence ${vence}` : 'Consulta enviada';
 }
 
