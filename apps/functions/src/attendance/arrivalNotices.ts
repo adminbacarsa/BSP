@@ -7,6 +7,7 @@ import { crearConvocatoriaLlegadaTarde } from '../coverage/convocatoriasCobertur
 import type { loadCentroControlState } from '../ops/centroControlGuard';
 import { guardFirstName } from '../common/pushGreeting';
 import { isEventoShift, eventoTieneFranjasEncadenadas } from '../eventos/eventoCoverage';
+import { isRetShift, isZeroDurationShift } from '../common/retShift';
 import {
   classifyArrivalNotice,
   headsUpBody,
@@ -40,6 +41,7 @@ function eligibleShift(shift: Record<string, unknown>): boolean {
   const emp = String(shift.employeeId || '').trim();
   if (!emp || emp === 'VACANTE') return false;
   if (SKIP_CODES.has(String(shift.code || '').toUpperCase())) return false;
+  if (isRetShift(shift) || isZeroDurationShift(shift)) return false;
   if (SKIP_STATUSES.has(String(shift.status || '').toUpperCase())) return false;
   if (shift.lateArrivalAt || shift.lateArrivalConfirmed) return false;
   return true;

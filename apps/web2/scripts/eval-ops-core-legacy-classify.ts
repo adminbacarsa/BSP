@@ -49,7 +49,8 @@ export function legacyClassifyOpsShift(input: LegacyClassifyInput): Record<strin
   const { shift, now: currentTime, isValidEmployee, isFranco, shiftCode, effectiveEndDateObj, parentEmpleadoId } = input;
   const createDateFromTime = input.createDateFromTime ?? defaultCreateDateFromTime;
 
-  const isAbsent = !!shift.isAbsent;
+  const isPassiveRetStandby = isPassiveRetStandbyShift({ ...shift, code: shiftCode });
+  const isAbsent = !!shift.isAbsent && !isPassiveRetStandby;
   const isEarlyStartShift = shift.isEarlyStart === true || shift.isReten === true
     || shift.origin === 'RETEN' || shift.origin === 'OPERATIONS_COVERAGE';
   const shiftStartMs = shift.shiftDateObj ? shift.shiftDateObj.getTime() : 0;
@@ -67,7 +68,6 @@ export function legacyClassifyOpsShift(input: LegacyClassifyInput): Record<strin
         shift.coverageUsedCoversEmployeeName || shift.coversEmployeeName || 'titular',
       ).trim()}${shift.coverageUsedObjectiveName ? ` en ${shift.coverageUsedObjectiveName}` : ''}`
     : null;
-  const isPassiveRetStandby = isPassiveRetStandbyShift({ ...shift, code: shiftCode });
   const isRfzVacante = shiftCode === 'RFZ' && isUnassigned;
   const isTuraVacante = shiftCode === 'TURA' && isUnassigned && !parentEmpleadoId;
   const isOperationalVacancy = isUnassigned && !isReportedToPlanning;

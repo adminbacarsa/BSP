@@ -1,6 +1,7 @@
 import { Timestamp, type Firestore } from 'firebase-admin/firestore';
 import { isEventoShift } from '../eventos/eventoCoverage';
 import { isExcluidoDeOperacion } from '../common/excluirDeOperacion';
+import { isRetShift, isZeroDurationShift } from '../common/retShift';
 
 export type ShiftAbsentReason =
   | 'AUTO_T30'
@@ -53,6 +54,9 @@ export async function markShiftAbsent(
   if (!snap.exists) return { applied: false };
   const shift = snap.data() as Record<string, unknown>;
   if (isExcluidoDeOperacion(shift)) return { applied: false };
+  if (opts.reason !== 'MANUAL_OPS' && (isRetShift(shift) || isZeroDurationShift(shift))) {
+    return { applied: false };
+  }
   const objectiveId = String(shift.objectiveId || '').trim();
   if (objectiveId) {
     const obj = await db.collection('objetivos').doc(objectiveId).get();

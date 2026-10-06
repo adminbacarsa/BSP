@@ -6,6 +6,7 @@
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import { arYmd, vacancyActionTargetAr } from '../common/arClock';
+import { isRetShift, isZeroDurationShift } from '../common/retShift';
 
 export async function stampTitularAbsenceVacancyMark(
   db: admin.firestore.Firestore,
@@ -17,6 +18,7 @@ export async function stampTitularAbsenceVacancyMark(
     if (!snap.exists) return 'SKIPPED';
     const after = snap.data() || {};
     if (after.vacancyCreatedForAbsence === true) return 'SKIPPED';
+    if (isRetShift(after) || isZeroDurationShift(after)) return 'SKIPPED';
     if (after.employeeId === 'VACANTE' || after.isUnassigned) return 'SKIPPED';
     const skipOrigins = new Set([
       'RETEN', 'OPERATIONS_COVERAGE', 'SLA_VIRTUAL',
@@ -41,6 +43,7 @@ export const onGuardAbsenceDetected = functions
     if (before.isAbsent === true || after.isAbsent !== true) return;
     if (after.employeeId === 'VACANTE' || after.isUnassigned) return;
     if (after.vacancyCreatedForAbsence === true) return;
+    if (isRetShift(after) || isZeroDurationShift(after)) return;
     const skipOrigins = new Set(['RETEN', 'OPERATIONS_COVERAGE', 'SLA_VIRTUAL',
                                  'VACANTE_CORRECCION', 'VACANTE_POR_EVENTO', 'VACANTE_POR_AUSENCIA']);
     if (skipOrigins.has(String(after.origin || ''))) return;

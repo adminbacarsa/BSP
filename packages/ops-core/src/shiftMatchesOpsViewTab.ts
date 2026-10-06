@@ -1,3 +1,4 @@
+import { isPassiveRetStandbyShift } from './passiveRetShift';
 import { isActionableOpsVacancy, isVacancyDescubierto } from './vacancyOps';
 
 /** Turno enriquecido mínimo para filtros de pestaña CC. */
@@ -33,6 +34,10 @@ export type OpsViewTabShift = Record<string, unknown> & {
   endDateObj?: Date;
 };
 
+function standbyRet(s: OpsViewTabShift): boolean {
+  return s.isPassiveRetStandby === true || isPassiveRetStandbyShift(s);
+}
+
 export function shiftMatchesOpsViewTab(s: OpsViewTabShift, viewTab: string, now: Date = new Date()): boolean {
   switch (viewTab) {
     case 'TODOS':
@@ -65,6 +70,7 @@ export function shiftMatchesOpsViewTab(s: OpsViewTabShift, viewTab: string, now:
         && !s.isPassiveRetStandby
       );
     case 'PLAN':
+      if (standbyRet(s) && !s.isFranco && !s.isUnassigned && !s.isPresent && !s.isCompleted) return true;
       return (
         (s.isFuture || s.isRRHHPlanned)
         && !s.isFranco
@@ -72,7 +78,7 @@ export function shiftMatchesOpsViewTab(s: OpsViewTabShift, viewTab: string, now:
         && !s.isEarlyStart
         && !s.isAwaitingCoverageCheckIn
         && !s.isPlannedLiberationRet
-        && !s.isPassiveRetStandby
+        && !standbyRet(s)
       );
     case 'ACTIVOS':
       return s.isPresent && !s.isCompleted;
@@ -80,9 +86,10 @@ export function shiftMatchesOpsViewTab(s: OpsViewTabShift, viewTab: string, now:
       // Retenido por el servidor o saliente con el fin vencido esperando relevo (P9).
       return !!s.isRetention || (!!s.isPendingClose && !!s.isPresent && !s.isCompleted);
     case 'VACANTES':
+      if (standbyRet(s)) return false;
       return isActionableOpsVacancy(s, now);
     case 'AUSENTES':
-      if (s.isRetention || s.origin === 'RETEN' || s.isReten || String(s.code || '').toUpperCase() === 'RET') {
+      if (standbyRet(s) || s.isRetention || s.origin === 'RETEN' || s.isReten || String(s.code || '').toUpperCase() === 'RET') {
         return false;
       }
       if (s.isProvisionalLateAbsence) return false;

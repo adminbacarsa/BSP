@@ -39,6 +39,7 @@ import { releaseTraceAbsencesRun } from './coverage/releaseTraceAbsences';
 import { markShiftAbsent } from './attendance/markShiftAbsent';
 import { clampLateEtaMinutes, isProvisionalLateAbsence, lateAbsenceDeadlineMs } from './attendance/lateAbsenceWindow';
 import { isAutoAbsenceSpanPlausible } from './attendance/autoAbsenceEligibility';
+import { isRetShift, isZeroDurationShift } from './common/retShift';
 import { openLateAbsenceVacancy } from './attendance/openLateAbsenceVacancy';
 import { cancelLlegadaTardeConvocatorias } from './attendance/cancelLlegadaTardeConvocatorias';
 import { applyLateReliefNoticeToOutgoing } from './fichajes/relevoNotifications';
@@ -2601,6 +2602,7 @@ export const detectarAusencias = functions
       if (shift.isReportedToPlanning === true) continue; // ya gestionado
       if (SKIP_CODES.has((shift.code || '').toUpperCase())) continue;
       if (!shift.employeeId || shift.employeeId === 'VACANTE') continue;
+      if (isRetShift(shift as Record<string, unknown>) || isZeroDurationShift(shift as Record<string, unknown>)) continue;
 
       const startMs: number = shift.startTime?.toMillis?.() ?? 0;
       if (!startMs) continue;
@@ -2812,6 +2814,7 @@ export const gestionarVacantes = functions
       if (!cc.isEnabled(shift.empresaId)) continue;
       // Ignorar borradores de planificación (draft flag)
       if (shift.draft === true) continue;
+      if (isRetShift(shift as Record<string, unknown>)) continue;
       if (skipAbsencePipelineForShift(shift as Record<string, unknown>)) continue;
       if (isEventoShift(shift as Record<string, unknown>)) continue;
       // Solo vacantes sin asignación

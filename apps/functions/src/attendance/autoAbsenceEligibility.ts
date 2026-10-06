@@ -10,10 +10,11 @@
  */
 export const AUTO_ABSENCE_MAX_SPAN_MS = 13 * 60 * 60 * 1000;
 
-/** `true` si el doc tiene una duración de jornada (≤ 13 h) o no tiene fin conocido. */
+/** `true` si el doc tiene una duración de jornada (≤ 13 h) o no tiene fin conocido. Duración 0 no. */
 export function isAutoAbsenceSpanPlausible(startMs: number, endMs: number): boolean {
   if (!startMs || !endMs) return true;
   const span = endMs - startMs;
-  if (span <= 0) return true;
+  if (span === 0) return false;
+  if (span < 0) return true;
   return span <= AUTO_ABSENCE_MAX_SPAN_MS;
 }

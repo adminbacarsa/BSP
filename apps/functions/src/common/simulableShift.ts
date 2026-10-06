@@ -3,6 +3,7 @@ import { isFrancoCoverageOriginDoc, isOpsCoverageHoursOnSourceDoc } from '../cov
 import { arYearMonth, arYmd } from './arClock';
 import { planificacionEstadoLookupDocIds } from '../assistant/planificacionEstadoKeys';
 import { isExcluidoDeOperacion } from './excluirDeOperacion';
+import { isRetShift, isZeroDurationShift } from './retShift';
 
 /**
  * Códigos de licencia/ausencia de la grilla (`AbsenceCode` de `tipos_novedad`) + ART.
@@ -22,6 +23,8 @@ export type SimulableSkipReason =
   | 'VIRTUAL'
   | 'OPS_COV_TRACE'
   | 'FRANCO_ORIGEN'
+  | 'RET'
+  | 'DURACION_CERO'
   | 'FUERA_OPERACION';
 
 export type SimulableShiftOpts = {
@@ -67,6 +70,8 @@ export function simulableShiftSkipReason(
 ): SimulableSkipReason | null {
   if (!data) return 'VIRTUAL';
   if (isExcluidoDeOperacion(data)) return 'FUERA_OPERACION';
+  if (isRetShift(data)) return 'RET';
+  if (isZeroDurationShift(data)) return 'DURACION_CERO';
   if (data.draft === true) return 'DRAFT';
   if (data.isVirtual === true) return 'VIRTUAL';
   if (isOpsCoverageHoursOnSourceDoc(data)) return 'OPS_COV_TRACE';

@@ -84,7 +84,8 @@ export function classifyOpsShift(input: ClassifyOpsShiftInput): ClassifyOpsShift
   const createDateFromTime = input.createDateFromTime ?? defaultCreateDateFromTime;
   const currentTime = now;
 
-  const isAbsent = !!shift.isAbsent;
+  const isPassiveRetStandby = isPassiveRetStandbyShift({ ...shift, code: shiftCode });
+  const isAbsent = !!shift.isAbsent && !isPassiveRetStandby;
   const isEarlyStartShift =
     shift.isEarlyStart === true
     || shift.isReten === true
@@ -110,7 +111,6 @@ export function classifyOpsShift(input: ClassifyOpsShiftInput): ClassifyOpsShift
       ).trim()}${shift.coverageUsedObjectiveName ? ` en ${shift.coverageUsedObjectiveName}` : ''}`
     : null;
 
-  const isPassiveRetStandby = isPassiveRetStandbyShift({ ...shift, code: shiftCode });
   const isRfzVacante = shiftCode === 'RFZ' && isUnassigned;
   const isTuraVacante = shiftCode === 'TURA' && isUnassigned && !parentEmpleadoId;
   const isOperationalVacancy = isUnassigned && !isReportedToPlanning;

@@ -1,3 +1,4 @@
+import { isPassiveRetStandbyShift } from './passiveRetShift';
 import { reliefPositionsMatch, seriesBoundMs, seriesCodeOf } from './shiftSeries';
 
 /** Un planificado cubre la franja SLA si arranca a ±30 min, mismo puesto y misma serie. */
@@ -56,6 +57,7 @@ export function isCanonicalGapTitular(s: {
 } | null | undefined): boolean {
   if (!s) return false;
   if (s.isFranco === true) return false;
+  if (isPassiveRetStandbyShift(s as Record<string, unknown>)) return false;
   const covered =
     s.operacionallyCovered === true
     || s.plannedOperativelyCovered === true

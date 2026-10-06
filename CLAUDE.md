@@ -314,9 +314,11 @@ Ambas montan **`CoverageSessionManager`** + **`bootstrapCoverageSession`** al ab
 | `N` | Noche | 8h | ✅ | Banda fija nocturna |
 | `D12` | Diurno 12h | 12h | ✅ | Extensión/rotativo diurno |
 | `N12` | Nocturno 12h | 12h | ✅ | Extensión/rotativo nocturno |
-| `RET` | Retención pasiva | 0h billables | — | Empleado en stand-by; disponible para cubrir. No genera horas facturables. Referencia interna: 8h stand-by. |
+| `RET` | Retención pasiva | 0h billables | — | Empleado en stand-by; disponible para cubrir. No genera horas facturables. Referencia interna: 8h stand-by. No ficha, no recibe T−5 ni ¿Venís?, no es AA ni vacante ni se simula en Demo. |
 | `ESC` | Escuela | 8h | ✅ | Sobreturno de capacitación: el vigilador va al puesto a aprender. Se usa como fuente de cobertura (prioridad 3). |
 | `REF` | Refuerzo | 8h | ✅ | Turno de refuerzo puntual, cobertura extra programada. |
+
+`isRetShift` (`packages/ops-core/src/retShift.ts`, espejo `functions/src/common/retShift.ts`) reconoce el stand-by por `code`/`shiftCode` RET, `isReten`, puesto o tipo «Retén», o `deploymentRole: POOL` con `countsForCoverage: false`. Lo usan ausencia automática, avisos de llegada, Demo, vacantes y el CC (no suma AUS ni VAC; entra en PLAN como stand-by). Sigue siendo candidato de la cascada y se ve en el cronograma. `deploymentFieldsForFirestore` no se toca (`isReten: false`). Un turno con `startTime = endTime` tampoco es elegible para ausencia ni aviso. Limpieza de los ya marcados: `node scripts/fix-ret-ausente.mjs` (dryRun; `--apply --allow-prod` solo con OK de Mauro).
 
 ### Francos / Descansos
 
