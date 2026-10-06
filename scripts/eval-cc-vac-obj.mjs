@@ -127,6 +127,15 @@ check('solapa FRANC muestra el RET aparte', page.includes('`FRANC · ${logic.sta
 check('vista FRANC separa francos y retenes', page.includes('data-ops-ret-count={retenesLista.length}') && page.includes('data-ops-franc-count={francosLista.length}'));
 const mapView = readFileSync(new URL('../apps/web2/src/pages/admin/operaciones/map-view.tsx', import.meta.url), 'utf8');
 check('mapa muestra el RET aparte en FRAN', mapView.includes('`FRAN · ${logic.stats.retenes} RET`'));
+
+const { partesNombreTarjeta } = await import(pathToFileURL(join(root, 'apps/web2/src/lib/operaciones/guardCardNombre.ts')).href);
+const baez = partesNombreTarjeta('BAEZ, Augusto Damian');
+const lallana = partesNombreTarjeta('LALLANA Fabian Alberto');
+check('apellido entero: BAEZ Augusto Damian', baez.apellido === 'BAEZ' && baez.resto === 'Augusto Damian' && baez.completo === 'BAEZ Augusto Damian');
+check('sin coma el apellido es la primera palabra', lallana.apellido === 'LALLANA' && lallana.resto === 'Fabian Alberto');
+check('tarjeta: nombre en su fila, cubierto debajo, puesto en la meta', page.includes('data-ops-guard-nombre') && page.includes('data-ops-guard-cubierto="1"') && page.includes('data-ops-guard-meta="1"') && page.includes('whitespace-nowrap'));
+check('el nombre de la tarjeta ya no va con truncate', !page.includes('font-black truncate ${isActionableOpsVacancy'));
+check('popover del objetivo abre a 720 px si hay lugar', page.includes('Math.max(r.width, 720)'));
 const movil = readFileSync(new URL('../apps/web2/src/lib/movil/operacionFiltros.ts', import.meta.url), 'utf8');
 check('celular agrupa con el mismo bucket', movil.includes('addShiftToOpsBucket(grupo, s as never, now)'));
 const mapa = readFileSync(new URL('../apps/web2/src/hooks/useOperacionesMonitor.ts', import.meta.url), 'utf8');
