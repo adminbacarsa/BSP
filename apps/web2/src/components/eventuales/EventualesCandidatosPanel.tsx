@@ -340,9 +340,9 @@ export default function EventualesCandidatosPanel({
                         disabled={marcados.length === 0 || enviando}
                         onClick={() => { void enviarConsulta(); }}
                         data-consulta-enviar
-                        className="rounded-xl bg-indigo-600 px-3 py-1.5 text-[10px] font-black text-white disabled:bg-slate-200 disabled:text-slate-500"
+                        className="rounded-xl border border-indigo-600 bg-indigo-600 px-3 py-1.5 text-[10px] font-black text-white disabled:cursor-not-allowed disabled:border-slate-300 disabled:!bg-white disabled:!text-slate-600"
                     >
-                        {enviando ? 'Enviando…' : `Consultar disponibilidad (${marcados.length})`}
+                        {enviando ? 'Enviando…' : marcados.length ? `Consultar disponibilidad (${marcados.length})` : 'Marcá a quién consultar'}
                     </button>
                 </div>
             )}
