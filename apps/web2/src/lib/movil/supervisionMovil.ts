@@ -233,9 +233,10 @@ export function esAlertaDeSupervision(alerta: MovilAlerta): boolean {
   return String(alerta?.source || '').toUpperCase() === SUPERVISION_SOURCE;
 }
 
-function atendida(status: unknown): boolean {
-  const s = String(status || '').toUpperCase();
-  return s === 'ATENDIDA' || s === 'RESUELTA' || s === 'CERRADA';
+function atendida(n: { status?: unknown; viewed?: unknown }): boolean {
+  if (n.viewed === true) return true;
+  const s = String(n.status || '').toUpperCase();
+  return s === 'ATENDIDA' || s === 'RESUELTA' || s === 'CERRADA' || s === 'READ';
 }
 
 export interface SupervisionAlertas {
@@ -257,7 +258,7 @@ export function alertasSupervision(input: {
     .map((row) => ({ row, dias: row.diasSinVisita }))
     .sort((a, b) => (b.dias ?? Number.MAX_SAFE_INTEGER) - (a.dias ?? Number.MAX_SAFE_INTEGER));
   const novedades = input.novedades
-    .filter((n) => esAlertaDeSupervision(n) && !atendida(n.status))
+    .filter((n) => esAlertaDeSupervision(n) && !atendida(n))
     .slice()
     .sort((a, b) => (b.createdAtMs || 0) - (a.createdAtMs || 0));
   return { sinVisita, novedades, total: sinVisita.length + novedades.length };

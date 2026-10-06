@@ -201,6 +201,8 @@ check('popup del mapa: mismo estado y mismo texto de vencido', popup.includes('e
 const compacto = readFileSync(new URL('../apps/web2/src/lib/movil/guardCompacto.ts', import.meta.url), 'utf8');
 check('celular: guardCompacto deriva del mismo estado', compacto.includes('estadoAusenciaCc(shift)') && compacto.includes("'cubriendo'") && compacto.includes("'parcial'"));
 check('celular: contador AUS con sin cubrir', movil.includes('export function ausentesSinCubrirMovil') && movil.includes('export function etiquetaAus'));
+check('bandeja de alertas: cubierto no entra', movil.includes('estado.kind !== \'CUBIERTO\'') && movil.includes('export function turnoEnBandejaAlertas'));
+check('novedad atendida o vista no vuelve a alertas', page.includes('novedadYaResuelta(n)') && page.includes('novedadDeAusenciaCubierta(n, logic.processedData)') && mapView.includes('novedadYaResuelta(n)') && mapView.includes('novedadDeAusenciaCubierta(n, logic.processedData)'));
 
 if (failed) {
   console.error(`\n${failed} falla(s)`);

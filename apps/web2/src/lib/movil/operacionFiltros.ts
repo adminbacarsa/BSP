@@ -1,4 +1,5 @@
-import { addShiftToOpsBucket, ausenciaSinCubrir, shiftMatchesOpsViewTab } from '@cosp/ops-core';
+import { addShiftToOpsBucket, ausenciaSinCubrir, estadoAusenciaCc, shiftMatchesOpsViewTab } from '@cosp/ops-core';
+import { guardTone } from '@/lib/movil/guardTone';
 import { shiftCountsInOpsHeader } from '@/lib/operaciones/opsHeaderCounts';
 import { eventClientId, eventClientName, eventGroupKey, eventGroupLabel, isEventShift } from '@/lib/operaciones/eventoCc';
 import type { GuardDetalleShift } from '@/lib/movil/guardDetalle';
@@ -139,6 +140,18 @@ export function ausentesSinCubrirMovil(shifts: readonly OpsShiftMovil[], filtro:
 /** «2 AUS · 0 sin cubrir» para el aria-label / title del contador del celular. */
 export function etiquetaAus(total: number, sinCubrir: number): string {
   return `${total} AUS · ${sinCubrir} sin cubrir`;
+}
+
+/**
+ * Bandeja Alertas: una ausencia entra solo si `estadoAusenciaCc` es SIN CUBRIR,
+ * CUBRIENDO o PARCIAL. CUBIERTO no es alerta (sigue en AUS). Vacante, retención,
+ * tarde y la provisoria (todavía no es ausencia del CC) siguen.
+ */
+export function turnoEnBandejaAlertas(shift: OpsShiftMovil): boolean {
+  const estado = estadoAusenciaCc(shift as never);
+  if (estado) return estado.kind !== 'CUBIERTO';
+  const tone = guardTone(shift);
+  return tone === 'aus' || tone === 'vac' || tone === 'ret' || tone === 'late';
 }
 
 /** El número del contador = cantidad de tarjetas al filtrar por ese estado dentro del ámbito. */

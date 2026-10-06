@@ -12,14 +12,10 @@ import { menuMovil, modulosMovil } from '@/lib/movil/movilModulos';
 import type { MovilAlerta } from '@/lib/movil/modulos';
 import { MENU_TURNOS_ADELANTE_MS, MENU_TURNOS_ATRAS_MS, resumenTurnosMenu, type MenuDatos, type TurnoMenuLike } from '@/lib/movil/menuLayout';
 import { writeMovilChoice } from '@/lib/movil/useMovilMode';
+import { novedadYaResuelta } from '@/lib/operaciones/novedadAlertDisplay';
 import { belongsToEmpresaView, shouldScopeQueriesToEmpresa } from '@/lib/tenantScope';
 
 const ALERTAS_VENTANA_MS = 24 * 60 * 60 * 1000;
-
-function atendida(status: unknown): boolean {
-  const s = String(status || '').toUpperCase();
-  return s === 'ATENDIDA' || s === 'RESUELTA' || s === 'CERRADA';
-}
 
 function toMs(value: unknown): number | null {
   if (value instanceof Timestamp) return value.toMillis();
@@ -104,7 +100,7 @@ export function MovilMenuModulos({ entrada = false }: { entrada?: boolean }) {
   }, [empresaId, saltar, migracionCompleta]);
 
   const alertas = useMemo(() => {
-    const pendientes = novedades.filter((n) => !atendida(n.status));
+    const pendientes = novedades.filter((n) => !novedadYaResuelta(n));
     const out: Record<string, number> = {};
     for (const modulo of modulos) out[modulo.id] = pendientes.filter((n) => modulo.esAlertaDelModulo(n)).length;
     return out;
@@ -113,7 +109,7 @@ export function MovilMenuModulos({ entrada = false }: { entrada?: boolean }) {
   const datos = useMemo(() => {
     const out: Record<string, MenuDatos> = {};
     const resumen = turnos ? resumenTurnosMenu(turnos, Date.now()) : null;
-    const arca = novedades.filter((n) => !atendida(n.status) && String(n.type || '').toUpperCase().startsWith('ARCA_')).length;
+    const arca = novedades.filter((n) => !novedadYaResuelta(n) && String(n.type || '').toUpperCase().startsWith('ARCA_')).length;
     const sinCronograma = cronograma.gruposPlanificacion.reduce((acc, g) => acc + g.items.length, 0);
     if (resumen) {
       out.operacion = { activos: resumen.activos };

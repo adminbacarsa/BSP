@@ -45,6 +45,8 @@ import {
     novedadSubline,
     isInformationalNovedad,
     isHiddenFromOpsAlerts,
+    novedadYaResuelta,
+    novedadDeAusenciaCubierta,
     isOrphanShiftNoiseNovedad,
     isStaleIaAutomationNovedad,
     isNovedadOutsideCcMonitorScope,
@@ -2087,7 +2089,8 @@ export default function OperacionesPage() {
     const pendingNovedades = useMemo(() => {
         const now = Date.now();
         const filtered = empNovedades.filter(n => {
-            if (n.status === 'ATENDIDA' || n.status === 'atendida') return false;
+            if (novedadYaResuelta(n)) return false;
+            if (novedadDeAusenciaCubierta(n, logic.processedData)) return false;
             if (n.type === 'VACANTE_A_PLANIFICACION') return false; // auto-procesada
             if (n.type === 'CRONOGRAMA_SIN_PUBLICAR') return false; // de Planificación: solo la línea agrupada (cronogramaAviso)
             if (isHiddenFromOpsAlerts(n)) return false; // fin rutinario: no inbox
@@ -2801,7 +2804,7 @@ export default function OperacionesPage() {
             seenAlertKeys.add(winKey);
             return true;
         });
-        const pendingNovedades  = dedupedAlerts.filter((n:any)=>n.status!=='ATENDIDA'&&n.status!=='atendida');
+        const pendingNovedades  = dedupedAlerts.filter((n: any) => !novedadYaResuelta(n) && !novedadDeAusenciaCubierta(n, logic.processedData));
 
         // ── Logs PDF ─────────────────────────────────────────────────────────
         const pdfOpsLogs = logic.recentLogs.filter((l: any) => {
@@ -3164,8 +3167,8 @@ export default function OperacionesPage() {
             RECARGO_12H:'RECARGO 12H', LLEGADA_TARDE:'TARDANZA', RETENCION:'RETENCION',
             RETENCION_DETECTADA:'RETENCION', RETENCIÓN:'RETENCION',
         } as any)[t] || t;
-        const pendientesAlerts = dedupedAlerts.filter((n:any)=>n.status!=='ATENDIDA'&&n.status!=='atendida');
-        const atendidasAlerts  = dedupedAlerts.filter((n:any)=>n.status==='ATENDIDA'||n.status==='atendida');
+        const pendientesAlerts = dedupedAlerts.filter((n: any) => !novedadYaResuelta(n) && !novedadDeAusenciaCubierta(n, logic.processedData));
+        const atendidasAlerts  = dedupedAlerts.filter((n: any) => novedadYaResuelta(n) || novedadDeAusenciaCubierta(n, logic.processedData));
         const alertRows = [...pendientesAlerts, ...atendidasAlerts].map((n:any) => {
             const ts = n.createdAt?.seconds ? new Date(n.createdAt.seconds*1000).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false,timeZone:tz}) : '--';
             const st = (n.status==='ATENDIDA'||n.status==='atendida') ? 'ATENDIDA' : 'PENDIENTE';

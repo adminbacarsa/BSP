@@ -420,6 +420,15 @@ for (const estado of ['ACTIVOS', 'PLAN', 'AUSENTES', 'VACANTES', 'RETENIDOS', 'N
 }
 // AUS total 2 (p3 sin cubrir, c2 cubierto por Perez): el rojo es solo por las sin cubrir (mismo criterio que el CC).
 check('AUS sin cubrir (celular) = 1 de 2 y rótulo «2 AUS · 1 sin cubrir»', F.ausentesSinCubrirMovil(visiblesF, F.FILTRO_VACIO, NOW_F) === 1 && F.etiquetaAus(contTodos.AUSENTES, 1) === '2 AUS · 1 sin cubrir');
+check('cubierto no es alerta; sin cubrir, cubriendo, parcial, vacante y tarde sí',
+  F.turnoEnBandejaAlertas(ausenteCubierto) === false
+  && F.turnoEnBandejaAlertas(ausente) === true
+  && F.turnoEnBandejaAlertas({ ...ausente, convocatoriaEnCurso: true }) === true
+  && F.turnoEnBandejaAlertas({ ...ausente, coverageStatus: 'PARTIAL', coverageType: 'EXTEND', operacionallyCovered: false }) === true
+  && F.turnoEnBandejaAlertas(vacante) === true
+  && F.turnoEnBandejaAlertas(tardeAvisada) === true);
+const opMovilSrc = readFileSync(join(web2, 'src/components/movil/OperacionMovil.tsx'), 'utf8');
+check('la bandeja y el contador usan turnoEnBandejaAlertas', opMovilSrc.includes('turnoEnBandejaAlertas(shift)') && opMovilSrc.includes('alertCount={alerts.length}'));
 check('tocar el contador activo vuelve a Todos', F.alternarEstado(F.FILTRO_VACIO, 'AUSENTES').estado === 'AUSENTES' && F.alternarEstado({ ...F.FILTRO_VACIO, estado: 'AUSENTES' }, 'AUSENTES').estado === 'TODOS' && F.alternarEstado({ ...F.FILTRO_VACIO, estado: 'AUSENTES' }, 'PLAN').estado === 'PLAN');
 const clientesF = F.clientesParaFiltro(visiblesF, [{ id: 'cet', clientId: 'c1', name: 'CET Río Ceballos', clientName: 'Ruta 9' }, { id: 'sinTurnos', clientId: 'c1', name: 'Sucursal Norte', clientName: 'Ruta 9' }]);
 check('clientes → objetivos con turnos (catálogo completa los sin turnos)', clientesF.map((c) => c.name).join(',') === 'Ruta 9,Malagueño' && clientesF[0].objetivos.map((o) => o.name).join(',') === 'Peaje 9 Norte,CET Río Ceballos,Sucursal Norte' && clientesF[0].turnos === 8 && clientesF[1].turnos === 5);

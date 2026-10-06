@@ -45,6 +45,8 @@ import {
     novedadSubline,
     isInformationalNovedad,
     isHiddenFromOpsAlerts,
+    novedadYaResuelta,
+    novedadDeAusenciaCubierta,
     isOrphanShiftNoiseNovedad,
     isStaleIaAutomationNovedad,
     isNovedadOutsideCcMonitorScope,
@@ -740,7 +742,8 @@ export default function TacticalMapView() {
     }, []);
     const pendingNovedades = useMemo(() => {
         const filtered = empNovedades.filter(n => {
-            if (n.status === 'ATENDIDA' || n.status === 'atendida') return false;
+            if (novedadYaResuelta(n)) return false;
+            if (novedadDeAusenciaCubierta(n, logic.processedData)) return false;
             if (n.type === 'VACANTE_A_PLANIFICACION') return false;
             if (n.type === 'CRONOGRAMA_SIN_PUBLICAR') return false; // de Planificación (línea agrupada en el CC)
             if (isHiddenFromOpsAlerts(n)) return false;

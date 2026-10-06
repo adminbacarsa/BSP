@@ -7,7 +7,6 @@ import { MovilBottomNav } from '@/components/movil/MovilBottomNav';
 import { AmbitoSheetBody, GuardAccionesSheetBody, OperacionScreens, ProximasSheetBody, SalaSheetBody, useOnlineFlag, type GuardShift, type MovilObjective } from '@/components/movil/OperacionScreens';
 import { COVERAGE_CASCADE_ORDER } from '@cosp/ops-core';
 import { auth } from '@/lib/firebase';
-import { guardTone } from '@/lib/movil/guardTone';
 import type { GuardAccion, GuardAccionId } from '@/lib/movil/guardAcciones';
 import { proximasFranjas } from '@/lib/movil/proximasFranjas';
 import { piePrincipal } from '@/lib/movil/estadoLista';
@@ -27,6 +26,7 @@ import {
   turnosEnAmbito,
   turnosFiltrados,
   turnosVisiblesMovil,
+  turnoEnBandejaAlertas,
   type OpsEstadoFiltro,
   type OpsFiltroMovil,
   type OpsShiftMovil,
@@ -173,10 +173,7 @@ export function OperacionMovil(props: Props) {
   const objective = (filtro.estado === 'TODOS' ? objectives : grupos).find((item) => item.objectiveId === selectedId) || null;
   const panel = panelQuery === 'alertas' ? 'alertas' : objective ? 'objetivo' : 'home';
   const alerts = useMemo(
-    () => enAmbitoList.filter((shift) => {
-      const tone = guardTone(shift);
-      return tone === 'aus' || tone === 'vac' || tone === 'ret' || tone === 'late';
-    }),
+    () => enAmbitoList.filter((shift) => turnoEnBandejaAlertas(shift)),
     [enAmbitoList],
   );
   const steps = Array.from(new Set(COVERAGE_CASCADE_ORDER.map((step) => STEP_LABEL[step] || step)));

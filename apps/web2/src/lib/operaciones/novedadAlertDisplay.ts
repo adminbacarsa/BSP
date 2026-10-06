@@ -1,6 +1,6 @@
 import { isOpsShiftHoy } from '@/hooks/useOperacionesMonitor';
 import { isObjectiveEligibleForCcMonth } from '@/lib/operaciones/ccObjectiveEligibility';
-import { isExtraNonReliefShift, opsShiftCodeBadge } from '@cosp/ops-core';
+import { estadoAusenciaCc, isExtraNonReliefShift, opsShiftCodeBadge } from '@cosp/ops-core';
 
 const TZ_AR = 'America/Argentina/Cordoba';
 
@@ -213,6 +213,25 @@ export function isIaAlertaNovedad(n: any): boolean {
 export function isHiddenFromOpsAlerts(n: any): boolean {
     if (isIaAlertaNovedad(n)) return true;
     return HIDDEN_FROM_OPS_ALERTS_TYPES.has(String(n?.type || ''));
+}
+
+const STATUS_CERRADO = new Set(['ATENDIDA', 'RESUELTA', 'CERRADA', 'READ']);
+
+/** Ya no es alerta: status cerrado o marcada vista (`viewed`). */
+export function novedadYaResuelta(n: { status?: unknown; viewed?: unknown } | null | undefined): boolean {
+    if (!n) return false;
+    if (n.viewed === true) return true;
+    return STATUS_CERRADO.has(String(n.status || '').toUpperCase());
+}
+
+/** Ausencia cuya cobertura ya está confirmada: no vuelve a la bandeja. */
+export function novedadDeAusenciaCubierta(n: { type?: unknown; shiftId?: unknown } | null | undefined, processedData: readonly { id?: string }[]): boolean {
+    if (!ABSENCE_ALERT_TYPES.has(String(n?.type || ''))) return false;
+    const shiftId = String(n?.shiftId || '').trim();
+    if (!shiftId) return false;
+    const shift = (processedData || []).find((s) => s?.id === shiftId);
+    if (!shift) return false;
+    return estadoAusenciaCc(shift as never)?.kind === 'CUBIERTO';
 }
 
 /**
