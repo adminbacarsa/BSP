@@ -220,6 +220,42 @@ function isAssignedCoverageDoc(data: FirebaseFirestore.DocumentData): boolean {
   return String(data.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE';
 }
 
+/** ops_cov confirmado que todavía no fichó: es el relevo, con otra persona. */
+function coverStillDue(data: FirebaseFirestore.DocumentData): boolean {
+  if (!isAssignedCoverageDoc(data)) return false;
+  if (data.isCompleted === true) return false;
+  if (isReliefAbsent(data)) return false;
+  return !isReliefPresent(data);
+}
+
+function coverageRetentionReason(data: FirebaseFirestore.DocumentData, nowMs: number): string {
+  const arrival = (data.expectedArrivalAt as { toMillis?: () => number } | undefined)?.toMillis?.() ?? 0;
+  return retentionPendingReason({
+    nowMs,
+    reliefStartMs: shiftStartMs(data),
+    employeeName: String(data.employeeName || 'relevo'),
+    cobertura: true,
+    arrivalMs: arrival,
+  });
+}
+
+function coverWaiting(
+  docs: QueryDocumentSnapshot[],
+  absentId?: string,
+): QueryDocumentSnapshot | undefined {
+  const due = docs.filter((d) => coverStillDue(d.data()));
+  if (!due.length) return undefined;
+  if (absentId) {
+    const linked = due.find((d) => {
+      const data = d.data();
+      const link = String(data.absenceShiftId || data.coveredShiftId || '').trim();
+      return link === absentId;
+    });
+    if (linked) return linked;
+  }
+  return due[0];
+}
+
 function shiftEndDate(data: FirebaseFirestore.DocumentData): Date | null {
   const ms = shiftEndMs(data);
   return ms ? new Date(ms) : null;
@@ -341,6 +377,24 @@ export async function runAutoCompletarTurnosPass(
       completeBatch.update(ref, patch);
       batchOps += 1;
     }
+  };
+
+  /** Cobertura confirmada que no fichó: retención desde el fin planificado, como un relevo. */
+  const retainUntilCover = (
+    docSnap: FirebaseFirestore.DocumentSnapshot,
+    shift: FirebaseFirestore.DocumentData,
+    cover: QueryDocumentSnapshot,
+    endTimeMs: number,
+    nowMs: number,
+  ) => {
+    update(docSnap.ref, {
+      isRetention: true,
+      retentionReason: coverageRetentionReason(cover.data(), nowMs),
+      retentionAbsenceShiftId: cover.id,
+      retentionStartedAt: Timestamp.fromMillis(endTimeMs),
+      autoRetentionAt: Timestamp.fromMillis(endTimeMs),
+    });
+    actions.push(describe(docSnap.id, shift, 'RETAIN', 'COBERTURA_SIN_FICHAR', { gapShiftId: cover.id }));
   };
 
   const close = (
@@ -775,11 +829,13 @@ export async function runAutoCompletarTurnosPass(
       }
       if (relievePending) {
         const pendingData = relievePending.data();
-        const nextReason = retentionPendingReason({
-          nowMs,
-          reliefStartMs: shiftStartMs(pendingData),
-          employeeName: String(pendingData.employeeName || 'relevo'),
-        });
+        const nextReason = isAssignedCoverageDoc(pendingData)
+          ? coverageRetentionReason(pendingData, nowMs)
+          : retentionPendingReason({
+            nowMs,
+            reliefStartMs: shiftStartMs(pendingData),
+            employeeName: String(pendingData.employeeName || 'relevo'),
+          });
         if (String(shift.retentionReason || '') !== nextReason) {
           update(docSnap.ref, { retentionReason: nextReason });
         }
@@ -817,11 +873,25 @@ export async function runAutoCompletarTurnosPass(
       }
       if (relieveAbsent && !assignmentCoversAbsent(relieveDocs, relieveAbsent)) {
         const absentData = relieveAbsent.data();
-        if (isGapCovered(absentData)) {
-          // El hueco ya tiene cobertura confirmada: no se retiene. El saliente sigue en activos
-          // hasta que el cubridor fiche (ahí cierra por relevo) o llegue el tope.
-          actions.push(describe(docSnap.id, shift, 'WAIT', 'COBERTURA_CONFIRMADA', { gapShiftId: relieveAbsent.id }));
-          continue;
+        const cover = isGapCovered(absentData) ? coverWaiting(relieveDocs, relieveAbsent.id) : undefined;
+        if (cover) {
+          // La cobertura es el relevo: si todavía no fichó, el saliente queda retenido.
+          retainUntilCover(docSnap, shift, cover, endTimeMs, nowMs);
+        } else if (isGapCovered(absentData)) {
+          const name = String(absentData.coveredByEmployeeName || absentData.coveredBy || 'relevo');
+          update(docSnap.ref, {
+            isRetention: true,
+            retentionReason: retentionPendingReason({
+              nowMs,
+              reliefStartMs: shiftStartMs(absentData) || endTimeMs,
+              employeeName: name,
+              cobertura: true,
+            }),
+            retentionAbsenceShiftId: relieveAbsent.id,
+            retentionStartedAt: Timestamp.fromMillis(endTimeMs),
+            autoRetentionAt: Timestamp.fromMillis(endTimeMs),
+          });
+          actions.push(describe(docSnap.id, shift, 'RETAIN', 'COBERTURA_SIN_FICHAR', { gapShiftId: relieveAbsent.id }));
         } else {
           if (!dryRun) {
             await retainOutgoingForGap(
@@ -833,8 +903,7 @@ export async function runAutoCompletarTurnosPass(
           actions.push(describe(docSnap.id, shift, 'RETAIN', 'AUSENCIA_RELEVO', { gapShiftId: relieveAbsent.id }));
         }
       } else if (relievePending && isAssignedCoverageDoc(relievePending.data())) {
-        actions.push(describe(docSnap.id, shift, 'WAIT', 'COBERTURA_CONFIRMADA', { gapShiftId: relievePending.id }));
-        continue;
+        retainUntilCover(docSnap, shift, relievePending, endTimeMs, nowMs);
       } else if (relievePending) {
         const pendingData = relievePending.data();
         update(docSnap.ref, {

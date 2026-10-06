@@ -74,6 +74,13 @@ const early = { nowMs: ms(at(15, 9)), reliefStartMs: ms(at(15, 30)), employeeNam
 const late = { nowMs: ms(at(15, 31)), reliefStartMs: ms(at(15, 30)), employeeName: 'GARCIA' };
 report('paridad texto antes de la hora', uiReason(early) === srvReason(early) && uiReason(early) === 'Esperando relevo de las 15:30 (GARCIA)', uiReason(early));
 report('paridad texto hora pasada', uiReason(late) === srvReason(late) && uiReason(late) === 'GARCIA no se presentó', uiReason(late));
+const covLlega = { nowMs: ms(at(15, 5)), reliefStartMs: ms(at(16, 0)), employeeName: 'KOPP Franco Isaias', cobertura: true };
+const covCamino = { nowMs: ms(at(15, 5)), reliefStartMs: ms(at(15, 0)), employeeName: 'KOPP, Franco', cobertura: true };
+report('paridad cobertura llega', uiReason(covLlega) === srvReason(covLlega) && uiReason(covLlega) === 'Esperando a KOPP (cobertura, llega 16:00)', uiReason(covLlega));
+report('paridad cobertura en camino', uiReason(covCamino) === srvReason(covCamino) && uiReason(covCamino) === 'Esperando a KOPP (cobertura, en camino)', uiReason(covCamino));
+const kopp = mk('kopp', 'KOPP Franco Isaias', 'T', 'Puesto 2', END, at(23, 0), { origin: 'OPERATIONS_COVERAGE', coverageType: 'FT', status: 'PENDING' });
+const wCov = buildRetentionWaitInfo(ferrero, [ferrero, kopp], now);
+report('tarjeta: cobertura sin fichar dice en camino', wCov?.waitLabel === 'Esperando a KOPP (cobertura, en camino)', wCov?.waitLabel);
 
 // Pestañas: el saliente vencido cuenta en RET y sigue en ACT; el retenido también.
 const classify = (shift, flags) => classifyOpsShift({

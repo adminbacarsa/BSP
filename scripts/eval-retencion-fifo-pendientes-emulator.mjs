@@ -2,7 +2,7 @@
  * Backlog «Retención — pendiente».
  * (a) FIFO: el primer entrante que ficha libera al retenido que más tiempo lleva.
  *     El tope 12:59 manda si esa fichada cae después.
- * (b) A T+0 no se retiene si el hueco ya tiene cobertura confirmada o presente.
+ * (b) A T+0 la cobertura es el relevo: si ya fichó, cierra; si no, retiene hasta que fiche.
  * (c) El compañero que sigue en el puesto no sale de ACTIVOS
  *     (relevo parcial, dos salientes y un entrante, entrante que ficha y se va).
  *
@@ -271,7 +271,7 @@ async function casoCoberturaPresente() {
     `kind=${act?.kind}/${act?.reason} ret=${sal.isRetention} done=${sal.isCompleted} by=${sal.relievedBy || '-'}`);
 }
 
-/** (b) Cobertura confirmada y el cubridor todavía no fichó: no se escribe isRetention. */
+/** (b) Cobertura confirmada y el cubridor todavía no fichó: retención hasta que fiche. */
 async function casoCoberturaConfirmada() {
   const prefix = 'b_conf';
   const { id } = await seedBase(prefix, {
@@ -289,14 +289,56 @@ async function casoCoberturaConfirmada() {
   const res = await runAutoCompletarTurnosPass(db, ctx, ar(15, 5));
   const sal = await get(id('sal'));
   const act = res.actions.find((a) => a.shiftId === id('sal'));
-  report('b confirmada sin fichar: no retiene y el saliente sigue en ACTIVOS',
-    sal.isRetention !== true
+  const started = sal.retentionStartedAt?.toMillis?.() ?? 0;
+  report('b confirmada sin fichar: retiene desde el fin, «en camino»',
+    sal.isRetention === true
     && sal.isCompleted !== true
     && sal.isPresent === true
-    && act?.kind !== 'RETAIN'
-    && act?.kind !== 'RETAIN_QUIET'
+    && started === ar(15, 0).toMillis()
+    && sal.retentionReason === 'Esperando a CUBRE (cobertura, en camino)'
+    && act?.kind === 'RETAIN'
     && enActivos(sal, ar(15, 6).toMillis()),
-    `kind=${act?.kind}/${act?.reason} ret=${sal.isRetention} present=${sal.isPresent} done=${sal.isCompleted}`);
+    `kind=${act?.kind}/${act?.reason} ret=${sal.isRetention} why=${sal.retentionReason || ''} started=${started}`);
+
+  const r = await registrarPresencia(db, {
+    shiftId: id('cub'), source: 'OPERATIONS', empId: `${prefix}_cub`, recordedAt: iso(15, 20),
+  });
+  const sal2 = await get(id('sal'));
+  report('b fichada del cubridor: releva al retenido, minutos y fin',
+    r.relieved?.shiftId === id('sal')
+    && sal2.isCompleted === true
+    && sal2.isRetention !== true
+    && sal2.relievedBy === `${prefix}_cub`
+    && sal2.retentionEndedAt?.toMillis?.() === ar(15, 20).toMillis()
+    && Number(sal2.retentionMinutes) === 20,
+    `relieved=${r.relieved?.shiftId || '-'} by=${sal2.relievedBy || '-'} ret=${sal2.isRetention} min=${sal2.retentionMinutes} end=${sal2.retentionEndedAt?.toMillis?.() || 0}`);
+}
+
+/** (b) Cobertura que entra más tarde: retenido con «llega HH:MM». */
+async function casoCoberturaFutura() {
+  const prefix = 'b_fut';
+  const { id } = await seedBase(prefix, {
+    positions: banda1,
+    shifts: salienteSolo(prefix, { operacionallyCovered: true, coverageStatus: 'COVERED', coveredByEmployeeName: 'KOPP Franco Isaias' }),
+  });
+  await db.collection('turnos').doc(id('cub')).set({
+    empresaId: `${prefix}_emp`, objectiveId: `${prefix}_obj`, positionName: 'Puesto 2',
+    employeeId: `${prefix}_cub`, employeeName: 'KOPP Franco Isaias', code: 'T',
+    origin: 'OPERATIONS_COVERAGE', coverageType: 'FT', status: 'PENDING', isPresent: false,
+    isAbsent: false, isCompleted: false,
+    startTime: ar(16, 0), endTime: ar(23, 0),
+    absenceShiftId: id('tit'),
+  });
+  const res = await runAutoCompletarTurnosPass(db, ctx, ar(15, 5));
+  const sal = await get(id('sal'));
+  const act = res.actions.find((a) => a.shiftId === id('sal'));
+  report('b cobertura futura: retiene y dice llega 16:00',
+    sal.isRetention === true
+    && sal.isCompleted !== true
+    && sal.retentionStartedAt?.toMillis?.() === ar(15, 0).toMillis()
+    && sal.retentionReason === 'Esperando a KOPP (cobertura, llega 16:00)'
+    && act?.kind === 'RETAIN',
+    `kind=${act?.kind}/${act?.reason} why=${sal.retentionReason || ''} ret=${sal.isRetention}`);
 }
 
 /** (b) Sin cobertura: sí se retiene. */
@@ -346,6 +388,7 @@ await casoTopeFichada();
 await casoTopeCron();
 await casoCoberturaPresente();
 await casoCoberturaConfirmada();
+await casoCoberturaFutura();
 await casoSinCobertura();
 await casoCompanero();
 
