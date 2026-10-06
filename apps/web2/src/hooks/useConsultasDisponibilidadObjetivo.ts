@@ -41,7 +41,12 @@ export function useConsultasDisponibilidadObjetivo(empresaId: string | null | un
             }))
             : [],
           respuestas: Array.isArray(data.respuestas)
-            ? (data.respuestas as { nombre?: string; estado?: string; hora?: string | null }[]).map((r) => ({ nombre: String(r?.nombre || ''), estado: String(r?.estado || ''), hora: r?.hora || null }))
+            ? (data.respuestas as { nombre?: string; estado?: string; hora?: string | null; motivo?: string | null }[]).map((r) => ({
+              nombre: String(r?.nombre || ''),
+              estado: String(r?.estado || ''),
+              hora: r?.hora || null,
+              ...(r?.motivo ? { motivo: String(r.motivo) } : {}),
+            }))
             : [],
           positionName: data.positionName ? String(data.positionName) : null,
           objectiveName: data.objectiveName ? String(data.objectiveName) : null,

@@ -26,7 +26,7 @@ import {
     TarjetaEventual,
     type CandidatoTarjeta,
 } from '@/components/eventuales/EventualesCandidatosUx';
-import { ESPERA_DEFAULT_MIN, separarCandidatos, textoTopeBloque, type ModoEventuales } from '@/lib/planificacion/coberturaEventualesUx';
+import { ESPERA_DEFAULT_MIN, linkFichaEventual, separarCandidatos, textoTopeBloque, type ModoEventuales } from '@/lib/planificacion/coberturaEventualesUx';
 
 export type JornadaEventual = { fecha: string; horaInicio: string; horaFin: string; horas: number; code?: string };
 
@@ -47,6 +47,7 @@ export type CandidatoEventual = {
     /** 'M' | 'F' | '' (sin especificar) — cupo por género de los eventos. */
     genero?: string;
     horasMes?: { usadas: number; tope: number; texto: string; aviso: boolean; margen?: number; cerca?: boolean; alcanzado?: boolean } | null;
+    canal?: { chip: string | null; motivo: string | null; sinCanal: boolean; porMail: boolean; puedeRecibir?: boolean } | null;
 };
 
 const MOTIVOS_TOPE = new Set(['TOPE_HORAS', 'TOPE_CERCA']);
@@ -150,14 +151,24 @@ export default function EventualesCandidatosPanel({
     }
 
     const toggleMarcado = (cuil: string) => {
+        const row = rows.find((r) => r.cuil === cuil);
+        if (row?.canal?.sinCanal && !marcados.includes(cuil)) {
+            toast.message(`${row.nombre}: no le va a llegar. Llamalo o creá su acceso.`);
+            return;
+        }
         setMarcados((prev) => (prev.includes(cuil) ? prev.filter((c) => c !== cuil) : [...prev, cuil]));
     };
 
     const enviarConsulta = async () => {
         if (!consulta || marcados.length === 0 || enviando) return;
+        const elegidos = rows.filter((r) => marcados.includes(r.cuil));
+        if (elegidos.length > 0 && elegidos.every((r) => r.canal?.sinCanal)) {
+            toast.message('A nadie le va a llegar: no tienen la app ni mail.');
+            return;
+        }
         setEnviando(true);
         try {
-            const call = httpsCallable<Record<string, unknown>, { resumen?: string; omitidos?: { motivo: string }[] }>(functions, 'crearConsultaDisponibilidad');
+            const call = httpsCallable<Record<string, unknown>, { resumen?: string; status?: string; omitidos?: { motivo: string }[] }>(functions, 'crearConsultaDisponibilidad');
             // Cobertura de licencia: siempre un lugar por día. El primero que acepte cubre.
             const res = await call({
                 empresaId, objectiveId: objectiveId || null, clientId: clientId || null, objetivoGeo: objetivoGeo || null,
@@ -166,8 +177,12 @@ export default function EventualesCandidatosPanel({
                 jornadas, cuils: marcados, lugares: 1, venceMinutos,
             });
             const omitidos = res.data?.omitidos?.length || 0;
-            toast.success(res.data?.resumen || 'Consulta enviada.');
-            toast.message('Podés cerrar esta ventana. El día queda en espera.');
+            if (res.data?.status === 'SIN_DESTINATARIOS') {
+                toast.message(res.data?.resumen || 'No le llegó a nadie.');
+            } else {
+                toast.success(res.data?.resumen || 'Consulta enviada.');
+                toast.message('Podés cerrar esta ventana. El día queda en espera.');
+            }
             if (omitidos) toast.message(`${omitidos} no se consultaron porque ya no estaban elegibles.`);
             setMarcados([]);
         } catch (e) {
@@ -195,6 +210,8 @@ export default function EventualesCandidatosPanel({
             pruebasSinMarco: c.pruebasSinMarco,
             horasMes: c.horasMes ? { texto: avisos.length ? `${c.horasMes.texto} · ${avisos.join(' · ')}` : c.horasMes.texto, aviso: c.horasMes.aviso } : (avisos.length ? { texto: avisos.join(' · '), aviso: false } : null),
             topeBloque,
+            canal: c.canal || null,
+            linkAcceso: linkFichaEventual(c.cuil),
         };
     };
 

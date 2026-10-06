@@ -1,4 +1,4 @@
-import { deploymentCodeLabel, formatRetentionDuration, outgoingFor, relevoAusenteAviso, relieverFor, seriesBoundMs } from '@cosp/ops-core';
+import { deploymentCodeLabel, estadoAusenciaCc, formatRetentionDuration, outgoingFor, relevoAusenteAviso, relieverFor, seriesBoundMs } from '@cosp/ops-core';
 import type { RetentionWaitInfo } from '@cosp/ops-core';
 import { formatIngresoLine } from '@/lib/operaciones/ingresoLabel';
 import { convocadoEnCaminoLabel } from '@/lib/operaciones/convocadoVentana';
@@ -126,20 +126,6 @@ function minutosDesde(ms: number, nowMs: number): number {
   return Math.max(0, Math.floor((nowMs - ms) / 60000));
 }
 
-/** Misma lectura que `formatCoveringEmployeeLabel` (lib/operaciones/syncAusenciaCobertura, que importa Firebase). */
-function nombreCubridor(shift: GuardDetalleShift): string | null {
-  const preset = String(shift.coveringDisplayName || '').trim();
-  if (preset) return preset;
-  const raw = String(shift.coveredByEmployeeName || shift.coveredBy || '').trim();
-  if (!raw) return null;
-  return raw.replace(/\s*\([^)]*\)\s*$/, '').trim() || raw;
-}
-
-function titularCubierto(shift: GuardDetalleShift): boolean {
-  if (!shift.isAbsent) return false;
-  return !!(shift.operacionallyCovered || shift.plannedOperativelyCovered || String(shift.coverageStatus || '').toUpperCase() === 'COVERED');
-}
-
 function etiquetaRelevo(row: GuardDetalleShift): string {
   const code = String(row.code || '').trim().toUpperCase();
   const start = hhmmAR(row.shiftDateObj || row.startTime);
@@ -170,6 +156,12 @@ function estadoDe(shift: GuardDetalleShift, nowMs: number): string | null {
   if (tone === 'aus') {
     const desde = startMs ? ` desde ${hhmmAR(startMs)}` : '';
     if (shift.isProvisionalLateAbsence) return `No llegó${desde} · posible ausencia`;
+    // Un solo estado de la ausencia, el mismo que el escritorio (`estadoAusenciaCc`).
+    const e = estadoAusenciaCc(shift);
+    if (e?.kind === 'CUBIERTO') return `No llegó${desde} · ausente · cubierto`;
+    if (e?.kind === 'CUBRIENDO') return `No llegó${desde} · ausente · convocatoria en curso`;
+    if (e?.kind === 'PARCIAL') return `No llegó${desde} · cobertura parcial`;
+    if (e?.kind === 'SIN_CUBRIR') return `No llegó${desde} · ausente · sin cubrir`;
     if (shift.isPotentialAbsence && !shift.isAbsent) return `No llegó${desde} · ausencia`;
     return `No llegó${desde} · ausente`;
   }
@@ -213,10 +205,8 @@ function coberturaDe(shift: GuardDetalleShift): string | null {
     if (label) return label;
     return cubreA ? `Cubre a ${cubreA}` : 'Cobertura asignada';
   }
-  if (titularCubierto(shift)) {
-    const quien = nombreCubridor(shift);
-    return quien ? `Cubierto por ${quien}` : 'Cubierto desde el CC';
-  }
+  const e = estadoAusenciaCc(shift);
+  if (e?.detalle) return e.detalle;
   return null;
 }
 

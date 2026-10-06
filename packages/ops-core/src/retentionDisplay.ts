@@ -1,3 +1,4 @@
+import { isOpsCoverageHoursOnSourceDoc } from './coverageSemantics';
 import { isReliefEligibleShift } from './reliefEligibility';
 import { SHIFT_SERIES_ALIGN_MS, relieverFor, reliefPositionsMatch, seriesBoundMs, seriesCodeOf, seriesHandoffKind, type SeriesShift } from './shiftSeries';
 
@@ -35,17 +36,37 @@ export function formatHmAR(ms: number): string {
   });
 }
 
+/** Primer token del apellido: «KOPP Franco» y «KOPP, Franco» → KOPP. */
+function quienCobertura(employeeName: string): string {
+  const raw = String(employeeName || '').trim();
+  const head = (raw.split(',')[0] || raw).trim();
+  return head.split(/\s+/)[0] || 'relevo';
+}
+
 /**
  * Texto del retenido. Antes de la hora del relevo: «Esperando relevo de las HH:MM (nombre)».
  * Pasada esa hora sin fichar: «nombre no se presentó».
+ * Cobertura (ops_cov, otra persona): «Esperando a KOPP (cobertura, en camino)» o «… llega HH:MM».
  * Espejo: `apps/functions/src/scheduling/retentionPendingReason.ts`.
  */
 export function retentionPendingReason(opts: {
   nowMs: number;
   reliefStartMs: number;
   employeeName: string;
+  /** ops_cov que toma la franja: mismo relevo, otra persona. */
+  cobertura?: boolean;
+  /** Llegada prevista (`expectedArrivalAt`). Si no, vale `reliefStartMs`. */
+  arrivalMs?: number;
 }): string {
   const name = String(opts.employeeName || 'relevo').trim() || 'relevo';
+  if (opts.cobertura) {
+    const who = quienCobertura(name);
+    const llega = opts.arrivalMs && opts.arrivalMs > 0 ? opts.arrivalMs : opts.reliefStartMs;
+    if (llega > 0 && opts.nowMs < llega) {
+      return `Esperando a ${who} (cobertura, llega ${formatHmAR(llega)})`;
+    }
+    return `Esperando a ${who} (cobertura, en camino)`;
+  }
   if (opts.reliefStartMs > 0 && opts.nowMs < opts.reliefStartMs) {
     return `Esperando relevo de las ${formatHmAR(opts.reliefStartMs)} (${name})`;
   }
@@ -237,9 +258,20 @@ export function buildRetentionWaitInfo(
     }
     : null;
 
+  const cobertura = !!picked
+    && !isOpsCoverageHoursOnSourceDoc(picked)
+    && String(picked.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE';
   let waitLabel: string;
   if (!reliever) {
     waitLabel = 'Sin relevo planificado → vacante';
+  } else if (cobertura && reliever.status !== 'PRESENTE') {
+    waitLabel = retentionPendingReason({
+      nowMs,
+      reliefStartMs: reliever.startMs,
+      employeeName: reliever.employeeName,
+      cobertura: true,
+      arrivalMs: readMs(picked?.expectedArrivalAt),
+    });
   } else {
     const who = `${reliever.employeeName}${reliever.code ? ` (${reliever.code} ${formatHmAR(reliever.startMs)})` : ` (${formatHmAR(reliever.startMs)})`}`;
     waitLabel = reliever.status === 'AUSENTE'

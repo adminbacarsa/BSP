@@ -306,6 +306,15 @@ export type CandidatoNominaFila = {
   tono: 'violet' | 'amber' | 'sky' | 'emerald';
   /** Un franco se consulta como FT. */
   nota?: string | null;
+  /** Canal de la consulta (`canalDeConsulta`): sin app ni mail no se puede tildar en Preguntar. */
+  canal?: {
+    chip?: string | null;
+    motivoApp?: string | null;
+    porMail?: boolean;
+    sinCanal?: boolean;
+    /** Link a la ficha para crear el acceso (solo si no tiene canal). */
+    crearAccesoHref?: string | null;
+  } | null;
 };
 
 const TAG_CLASES: Record<CandidatoNominaFila['tono'], string> = {
@@ -326,18 +335,22 @@ export function FilaCandidatoNomina(props: {
   extra?: React.ReactNode;
 }) {
   const { c } = props;
-  const activo = props.modo === 'preguntar' ? props.marcado : props.seleccionado;
+  const preguntar = props.modo === 'preguntar';
+  const sinCanal = preguntar && !!c.canal?.sinCanal;
+  const activo = preguntar ? props.marcado && !sinCanal : props.seleccionado;
   return (
     <div
       className={`flex items-center gap-2.5 rounded-xl border px-2.5 py-2 transition-colors ${activo ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200 bg-white hover:bg-slate-50'} ${props.disabled ? 'opacity-50' : ''}`}
       data-candidato={c.id}
       data-candidato-activo={activo ? '1' : undefined}
+      data-candidato-sin-canal={sinCanal ? '1' : undefined}
     >
-      {props.modo === 'preguntar' ? (
+      {preguntar ? (
         <input
           type="checkbox"
-          checked={props.marcado}
-          disabled={props.disabled}
+          checked={activo}
+          disabled={props.disabled || sinCanal}
+          title={sinCanal ? 'No le va a llegar: llamalo o creá su acceso' : undefined}
           onChange={props.onToggle}
           aria-label={`Preguntar a ${c.nombre}`}
           className="h-4 w-4 shrink-0 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
@@ -359,6 +372,19 @@ export function FilaCandidatoNomina(props: {
         </div>
         <div className="truncate text-[10px] font-bold text-slate-500">{c.meta}{c.nota ? ` · ${c.nota}` : ''}</div>
       </button>
+      {preguntar && c.canal?.chip && (
+        <span data-sin-app={c.id} title="No le va a llegar: llamalo o creá su acceso" className="shrink-0 rounded-md border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[9px] font-black text-amber-800">
+          {c.canal.chip}{c.canal.motivoApp ? ` · ${c.canal.motivoApp}` : ''}
+        </span>
+      )}
+      {preguntar && c.canal?.porMail && (
+        <span data-por-mail={c.id} className="shrink-0 text-[9px] font-bold text-slate-500">Le llega por mail</span>
+      )}
+      {sinCanal && c.canal?.crearAccesoHref && (
+        <a href={c.canal.crearAccesoHref} target="_blank" rel="noreferrer" data-crear-acceso={c.id} className="shrink-0 text-[9px] font-black text-indigo-700 underline">
+          Crear acceso a la app
+        </a>
+      )}
       <span className={`shrink-0 rounded-md border px-1.5 py-0.5 text-[9px] font-black ${TAG_CLASES[c.tono]}`}>{c.tag}</span>
     </div>
   );

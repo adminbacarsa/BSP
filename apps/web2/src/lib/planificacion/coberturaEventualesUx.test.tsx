@@ -175,6 +175,31 @@ test('el resumen del día muestra la consulta en vivo: esperando, aceptó, venci
   assert.equal(resumenConsultaDia(aceptada), 'ABALLAY aceptó 10:42 → suplente');
   assert.equal(resumenConsultaDia({ ...abierta, status: 'VENCIDA' }), 'Consultados: 3 · venció sin respuesta · 1 no');
   assert.equal(resumenConsultaDia(null), null);
+  // Estado «no le llegó»: sin app ni mail (NO_LLEGO con motivo) y aviso por mail; la consulta cerrada sin destinatarios.
+  const noLlego = {
+    ...abierta,
+    respuestas: [
+      { nombre: 'ABALLAY ROLON', estado: 'NO_LLEGO', hora: null, motivo: 'no tiene la app' },
+      { nombre: 'Pérez, Ana', estado: 'AVISO_MAIL', hora: null },
+      { nombre: 'BRIZUELA, Luis', estado: 'PENDIENTE', hora: null },
+    ],
+  };
+  assert.equal(
+    resumenConsultaDia(noLlego),
+    'Consultados: 3 · esperando respuesta (vence 11:15) · A ABALLAY no le llegó: no tiene la app · A Pérez le avisamos por mail: no tiene la app',
+  );
+  const sinDestinatarios = { ...abierta, status: 'SIN_DESTINATARIOS', respuestas: [{ nombre: 'ABALLAY ROLON', estado: 'NO_LLEGO', hora: null, motivo: 'permiso denegado' }] };
+  assert.equal(resumenConsultaDia(sinDestinatarios), 'Consultados: 1 · no le llegó a nadie · A ABALLAY no le llegó: permiso denegado');
+  assert.deepEqual(
+    estadoDiaCobertura({ activo: true, cobertura: { mode: 'none' }, consulta: sinDestinatarios }),
+    { tipo: 'sin_cubrir', tono: 'rose', texto: 'Sin cubrir · no le llegó a nadie' },
+  );
+  assert.deepEqual(
+    estadoDiaCobertura({ activo: true, cobertura: { mode: 'substitute', nombre: 'SUAREZ, Ana' }, consulta: sinDestinatarios }),
+    { tipo: 'suplente', tono: 'emerald', texto: 'Suplente · SUAREZ' },
+  );
+  assert.match(textoTooltipConsulta(noLlego), /A ABALLAY no le llegó: no tiene la app/);
+  assert.match(textoTooltipConsulta(noLlego), /A Pérez le avisamos por mail/);
   const otroDia = { ...abierta, jornadas: [{ fecha: '2026-10-07' }] };
   assert.equal(consultaDelDia([otroDia, aceptada], '2026-10-06'), aceptada);
   assert.equal(consultaDelDia([otroDia], '2026-10-06'), null);
@@ -316,6 +341,42 @@ test('la columna de días marca, selecciona, quita y aplica a los marcados; el p
   assert.doesNotMatch(filaAsignar, /type="checkbox"/);
   assert.match(filaAsignar, /data-candidato-activo="1"/);
   assert.match(filaAsignar, /pide PIN/);
+  // Sin app ni mail: chip «Sin app», casilla deshabilitada aunque esté marcado, link para crear el acceso.
+  const sinApp = renderToStaticMarkup(
+    <FilaCandidatoNomina
+      c={{
+        id: 'e4', nombre: 'DIAZ, Pedro', meta: '120 h este mes', tag: 'Libre', tono: 'emerald',
+        canal: { chip: 'Sin app', motivoApp: 'no tiene la app', porMail: false, sinCanal: true, crearAccesoHref: '/admin/empleados/e4' },
+      }}
+      modo="preguntar" marcado seleccionado={false} onToggle={() => {}} onElegir={() => {}}
+    />,
+  );
+  assert.match(sinApp, /data-candidato-sin-canal="1"/);
+  assert.match(sinApp, /data-sin-app="e4"/);
+  assert.match(sinApp, /Sin app · no tiene la app/);
+  assert.match(sinApp, /data-crear-acceso="e4"/);
+  assert.match(sinApp, /type="checkbox"[^>]*disabled=""/);
+  assert.doesNotMatch(sinApp, /checked=""/);
+  // Sin app pero con mail: se puede tildar y dice que le llega por mail.
+  const porMail = renderToStaticMarkup(
+    <FilaCandidatoNomina
+      c={{ id: 'e5', nombre: 'SOSA, Ana', meta: '100 h este mes', tag: 'Libre', tono: 'emerald', canal: { chip: 'Sin app', motivoApp: 'no tiene la app', porMail: true, sinCanal: false } }}
+      modo="preguntar" marcado seleccionado={false} onToggle={() => {}} onElegir={() => {}}
+    />,
+  );
+  assert.match(porMail, /data-por-mail="e5"/);
+  assert.match(porMail, /Le llega por mail/);
+  assert.match(porMail, /checked=""/);
+  assert.doesNotMatch(porMail, /data-crear-acceso/);
+  // En Asignar directo el canal no importa: se puede elegir igual.
+  const asignarSinApp = renderToStaticMarkup(
+    <FilaCandidatoNomina
+      c={{ id: 'e4', nombre: 'DIAZ, Pedro', meta: '120 h este mes', tag: 'Libre', tono: 'emerald', canal: { chip: 'Sin app', sinCanal: true } }}
+      modo="asignar" marcado={false} seleccionado onToggle={() => {}} onElegir={() => {}}
+    />,
+  );
+  assert.match(asignarSinApp, /data-candidato-activo="1"/);
+  assert.doesNotMatch(asignarSinApp, /data-sin-app/);
   const noDisp = renderToStaticMarkup(<NoDisponiblesNomina rows={[{ id: 'e3', nombre: 'LOPEZ, Raul', motivo: 'En servicio ese día' }]} />);
   assert.match(noDisp, /data-no-disponibles="1"/);
   assert.match(noDisp, /No disponibles \(1\)/);

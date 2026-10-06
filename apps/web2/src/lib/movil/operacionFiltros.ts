@@ -1,4 +1,4 @@
-import { addShiftToOpsBucket, shiftMatchesOpsViewTab } from '@cosp/ops-core';
+import { addShiftToOpsBucket, ausenciaSinCubrir, shiftMatchesOpsViewTab } from '@cosp/ops-core';
 import { shiftCountsInOpsHeader } from '@/lib/operaciones/opsHeaderCounts';
 import { eventClientId, eventClientName, eventGroupKey, eventGroupLabel, isEventShift } from '@/lib/operaciones/eventoCc';
 import type { GuardDetalleShift } from '@/lib/movil/guardDetalle';
@@ -129,6 +129,16 @@ export function cumpleEstado(shift: OpsShiftMovil, estado: OpsEstadoFiltro, now:
 
 export function turnosFiltrados<T extends OpsShiftMovil>(shifts: readonly T[], filtro: OpsFiltroMovil, now: Date): T[] {
   return turnosEnAmbito(shifts, filtro).filter((s) => cumpleEstado(s, filtro.estado, now));
+}
+
+/** Ausencias sin cubrir dentro del ámbito (mismo criterio que el rojo del contador AUS del escritorio). */
+export function ausentesSinCubrirMovil(shifts: readonly OpsShiftMovil[], filtro: Pick<OpsFiltroMovil, 'clientId' | 'objectiveId'>, now: Date): number {
+  return turnosEnAmbito(shifts, filtro).filter((s) => cumpleEstado(s, 'AUSENTES', now) && ausenciaSinCubrir(s as never)).length;
+}
+
+/** «2 AUS · 0 sin cubrir» para el aria-label / title del contador del celular. */
+export function etiquetaAus(total: number, sinCubrir: number): string {
+  return `${total} AUS · ${sinCubrir} sin cubrir`;
 }
 
 /** El número del contador = cantidad de tarjetas al filtrar por ese estado dentro del ámbito. */

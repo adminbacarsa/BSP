@@ -3,6 +3,7 @@
  * El primero que dice que sí toma el lugar 1, el segundo el 2, y así.
  * Sin Firestore: el servidor y los tests usan estas mismas decisiones.
  */
+import { textoAvisoMail, textoNoLlego } from './consultaCanal.mjs';
 
 export const VENCE_DEFAULT_MIN = 120;
 export const VENCE_MAX_MIN = 24 * 60;
@@ -121,6 +122,11 @@ export function textoEstadoConsulta(respuestas) {
   if (sis.length) partes.push(`${sis.length} sí${siTxt ? ` (${siTxt})` : ''}`);
   if (pend.length) partes.push(`${pend.length} pendiente${pend.length === 1 ? '' : 's'}`);
   if (no) partes.push(`${no} no`);
+  for (const r of list) {
+    if (r.estado === 'NO_LLEGO') partes.push(textoNoLlego(r.nombre, r.motivo));
+    else if (r.estado === 'AVISO_MAIL') partes.push(textoAvisoMail(r.nombre));
+    else if (r.entregaNota) partes.push(String(r.entregaNota));
+  }
   return partes.join(' · ');
 }
 

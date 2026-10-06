@@ -17,7 +17,7 @@ import { registrarPresenciaOps } from '@/services/registrarPresenciaOps';
 import { opsLateArrivalBadgeLabel } from '@/lib/operaciones/opsLateArrivalMonitor';
 import { formatIngresoLine } from '@/lib/operaciones/ingresoLabel';
 import { ALTA_ARCA_AVISO_TEXTO, ALTA_ARCA_AVISO_TITLE, altaArcaPendienteVisible } from '@/lib/operaciones/guardCardEstado';
-import { isExtraNonReliefShift, isReliefEligibleShift, formatRetentionDuration, formatRetentionLine } from '@cosp/ops-core';
+import { isExtraNonReliefShift, isReliefEligibleShift, formatRetentionDuration, formatRetentionLine, contadorAusLabel } from '@cosp/ops-core';
 import { SeriesReliefPicker } from '@/components/operaciones/SeriesReliefPicker';
 import { ShiftCodeBadge } from '@/components/operaciones/ShiftCodeBadge';
 import { shiftHardCapAt } from '@/lib/operaciones/shiftHardCap';
@@ -1066,7 +1066,8 @@ export default function TacticalMapView() {
         { id: 'ACTIVOS', label: 'ACT', count: logic.stats.activos, color: 'text-emerald-600' },
         { id: 'RETENIDOS', label: 'RET', count: logic.stats.retenidos, color: 'text-orange-600' },
         { id: 'VACANTES', label: 'VAC', count: logic.stats.vacantes, color: 'text-slate-800' },
-        { id: 'AUSENTES', label: 'AUS', count: logic.stats.ausentes, color: 'text-slate-500' },
+        // El rojo de AUS es solo por las sin cubrir (mismo criterio que el CC y el celular).
+        { id: 'AUSENTES', label: contadorAusLabel(logic.stats.ausentes, logic.stats.ausentesSinCubrir), count: logic.stats.ausentes, urgent: logic.stats.ausentesSinCubrir, color: 'text-slate-500' },
         // Francos + retenes stand-by (misma solapa que el CC); el número es el de francos.
         { id: 'FRANCOS', label: logic.stats.retenes > 0 ? `FRAN · ${logic.stats.retenes} RET` : 'FRAN', count: logic.stats.francos, color: 'text-blue-600' }
     ];
@@ -1100,7 +1101,7 @@ export default function TacticalMapView() {
                                 <span className="text-sm font-black">{pct}%</span>
                                 <div className="text-[10px] font-bold leading-tight">
                                     <div>{cubiertos} activos</div>
-                                    {(logic.stats.vacantes + logic.stats.ausentes) > 0 && <div className="opacity-80">{logic.stats.vacantes}vac · {logic.stats.ausentes}aus</div>}
+                                    {(logic.stats.vacantes + logic.stats.ausentes) > 0 && <div className="opacity-80">{logic.stats.vacantes}vac · {logic.stats.ausentes}aus{logic.stats.ausentes > 0 ? ` (${logic.stats.ausentesSinCubrir} sin cubrir)` : ''}</div>}
                                 </div>
                                 {logic.stats.plan > 0 && <div className="text-[9px] opacity-70">+{logic.stats.plan} plan</div>}
                             </div>
@@ -1109,7 +1110,9 @@ export default function TacticalMapView() {
                     <div className="bg-white/95 backdrop-blur shadow-2xl rounded-2xl p-1.5 flex gap-1 border border-slate-200">
                         <button onClick={() => logic.setViewTab('TODOS')} className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${logic.viewTab === 'TODOS' ? 'bg-slate-800 text-white shadow-md' : 'hover:bg-slate-100 text-slate-500'}`}>MAPA GENERAL</button>
                         {tabs.map(t => {
-                            const isUrgent = (t.id === 'VACANTES' || t.id === 'AUSENTES' || t.id === 'PRIORIDAD' || t.id === 'NO_LLEGO') && t.count > 0;
+                            const isUrgent = t.id === 'AUSENTES'
+                                ? ((t as { urgent?: number }).urgent ?? 0) > 0
+                                : (t.id === 'VACANTES' || t.id === 'PRIORIDAD' || t.id === 'NO_LLEGO') && t.count > 0;
                             const isActive = logic.viewTab === t.id;
                             return (
                                 <button key={t.id} onClick={() => logic.setViewTab(t.id as any)}

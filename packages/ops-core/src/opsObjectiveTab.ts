@@ -1,22 +1,28 @@
 import { shiftMatchesOpsViewTab, type OpsViewTabShift } from './shiftMatchesOpsViewTab';
+import { ausenciaSinCubrir } from './estadoAusenciaCc';
 
 /** Contadores de la tarjeta de objetivo. Cada solapa suma sola: un ausente descubierto es AUS y VAC. */
 export type OpsObjectiveBucket = {
   active: number;
   retention: number;
   absent: number;
+  /** Ausencias sin cobertura (el rojo del contador); `absent` sigue siendo el total. */
+  absentSinCubrir?: number;
   vacant: number;
   plan: number;
 };
 
 export function emptyOpsObjectiveBucket(): OpsObjectiveBucket {
-  return { active: 0, retention: 0, absent: 0, vacant: 0, plan: 0 };
+  return { active: 0, retention: 0, absent: 0, absentSinCubrir: 0, vacant: 0, plan: 0 };
 }
 
 export function addShiftToOpsBucket(bucket: OpsObjectiveBucket, shift: OpsViewTabShift, now: Date = new Date()): void {
   if (shiftMatchesOpsViewTab(shift, 'ACTIVOS', now)) bucket.active += 1;
   if (shiftMatchesOpsViewTab(shift, 'RETENIDOS', now)) bucket.retention += 1;
-  if (shiftMatchesOpsViewTab(shift, 'AUSENTES', now)) bucket.absent += 1;
+  if (shiftMatchesOpsViewTab(shift, 'AUSENTES', now)) {
+    bucket.absent += 1;
+    if (ausenciaSinCubrir(shift)) bucket.absentSinCubrir = (bucket.absentSinCubrir ?? 0) + 1;
+  }
   if (shiftMatchesOpsViewTab(shift, 'VACANTES', now)) bucket.vacant += 1;
   if (shiftMatchesOpsViewTab(shift, 'PLAN', now)) bucket.plan += 1;
 }

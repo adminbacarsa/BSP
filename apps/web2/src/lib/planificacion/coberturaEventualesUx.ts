@@ -186,8 +186,35 @@ export type ConsultaResumenIn = {
   status: string;
   venceAtMs?: number | null;
   jornadas?: { fecha: string }[];
-  respuestas: { nombre: string; estado: string; hora?: string | null }[];
+  /** `NO_LLEGO` trae `motivo` («no tiene la app», «permiso denegado»); `AVISO_MAIL` = le avisamos por mail. */
+  respuestas: { nombre: string; estado: string; hora?: string | null; motivo?: string | null }[];
 };
+
+/** «Pérez, Ana» → Pérez; «ABALLAY ROLON» → ABALLAY (igual que `apellidoDe` de `lib/eventuales/consultaCanal.mjs`). */
+function apellidoCortoDe(nombre: string): string {
+  const limpio = String(nombre || '').trim();
+  if (!limpio) return 'esta persona';
+  const antes = limpio.split(',')[0].trim();
+  return antes.split(/\s+/)[0] || antes;
+}
+
+/** Mismo texto que `textoNoLlego` / `textoAvisoMail` de `lib/eventuales/consultaCanal.mjs`. */
+export function textoNoLlego(nombre: string, motivo?: string | null): string {
+  return `A ${apellidoCortoDe(nombre)} no le llegó: ${motivo || 'no tiene la app'}`;
+}
+export function textoAvisoMail(nombre: string): string {
+  return `A ${apellidoCortoDe(nombre)} le avisamos por mail: no tiene la app`;
+}
+
+/** «A ABALLAY no le llegó: no tiene la app · A Pérez le avisamos por mail». */
+export function textoEntregaConsulta(respuestas: ConsultaResumenIn['respuestas'] | null | undefined): string {
+  const partes: string[] = [];
+  for (const r of respuestas || []) {
+    if (r.estado === 'NO_LLEGO') partes.push(textoNoLlego(r.nombre, r.motivo));
+    else if (r.estado === 'AVISO_MAIL') partes.push(textoAvisoMail(r.nombre));
+  }
+  return partes.join(' · ');
+}
 
 export function horaArDe(ms: number | null | undefined): string {
   const n = Number(ms);
@@ -218,12 +245,15 @@ export function resumenConsultaDia(consulta: ConsultaResumenIn | null | undefine
   const n = respuestas.length;
   const no = respuestas.filter((r) => r.estado === 'NO').length;
   const noTxt = no ? ` · ${no} no` : '';
+  const entrega = textoEntregaConsulta(respuestas);
+  const entregaTxt = entrega ? ` · ${entrega}` : '';
   if (consulta.status === 'ABIERTA') {
     const vence = horaArDe(consulta.venceAtMs);
-    return `Consultados: ${n} · esperando respuesta${vence ? ` (vence ${vence})` : ''}${noTxt}`;
+    return `Consultados: ${n} · esperando respuesta${vence ? ` (vence ${vence})` : ''}${noTxt}${entregaTxt}`;
   }
-  if (consulta.status === 'VENCIDA') return `Consultados: ${n} · venció sin respuesta${noTxt}`;
-  return `Consultados: ${n} · sin suplente${noTxt}`;
+  if (consulta.status === 'VENCIDA') return `Consultados: ${n} · venció sin respuesta${noTxt}${entregaTxt}`;
+  if (consulta.status === 'SIN_DESTINATARIOS') return `Consultados: ${n} · no le llegó a nadie${entregaTxt}`;
+  return `Consultados: ${n} · sin suplente${noTxt}${entregaTxt}`;
 }
 
 const AUSENCIA_LOCAL = new Set(['V', 'L', 'E', 'A', 'AA', 'PG', 'ART', 'SGS', 'SUS']);
@@ -278,6 +308,8 @@ export function textoTooltipConsulta(consulta: ConsultaResumenIn): string {
     if (r.estado === 'ASIGNADO') return `${nombre} aceptó${r.hora ? ` ${r.hora}` : ''}`;
     if (r.estado === 'NO') return `${nombre} no`;
     if (r.estado === 'CANCELADA') return `${nombre} · ya no hace falta`;
+    if (r.estado === 'NO_LLEGO') return textoNoLlego(r.nombre, r.motivo);
+    if (r.estado === 'AVISO_MAIL') return textoAvisoMail(r.nombre);
     return `${nombre} esperando`;
   });
   return [textoIndicadorConsulta(consulta), ...lineas].filter(Boolean).join('\n');
@@ -406,6 +438,8 @@ export function estadoDiaCobertura(p: { activo: boolean; cobertura: CoberturaDia
   }
   if (p.cobertura.mode === 'substitute') return { tipo: 'suplente', tono: 'emerald', texto: `Suplente · ${apellidoDe(p.cobertura.nombre)}` };
   if (p.cobertura.mode === 'split') return { tipo: 'split', tono: 'violet', texto: `Ext+Adel · ${apellidoDe(p.cobertura.ext)} / ${apellidoDe(p.cobertura.adel)}` };
+  // La consulta se cerró sin que le llegara a nadie (sin app ni mail): el día sigue sin cubrir y se dice por qué.
+  if (consulta && consulta.status === 'SIN_DESTINATARIOS') return { tipo: 'sin_cubrir', tono: 'rose', texto: 'Sin cubrir · no le llegó a nadie' };
   return { tipo: 'sin_cubrir', tono: 'rose', texto: 'Sin cubrir' };
 }
 

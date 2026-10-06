@@ -382,6 +382,7 @@ import { checkGeneroPuesto, getPreferenciaGeneroFromPositionStructure, getPrefer
 import { experienciaBadgeForReplacement, patchExperienciaForTurno } from '@/lib/planificacion/experienciaObjetivos';
 import EventualesCandidatosPanel, { type CandidatoEventual } from '@/components/eventuales/EventualesCandidatosPanel';
 import { planEnvioGuardias } from '@/lib/eventuales/consultaGuardia.mjs';
+import { canalDeConsulta } from '@/lib/eventuales/consultaCanal.mjs';
 import { asignarEventualPlanificacion, canConsultarDisponibilidad, canConvocarEventuales, eventualErrorMessage, sustituirEventualPlanificacion } from '@/services/eventualesPlanificacionService';
 import { esLegajoEventual, jornadaEventualDesdeBanda } from '@/lib/eventuales/planificacionUi';
 import { gruposService, GrupoObjetivos } from '@/services/gruposService';
@@ -5181,6 +5182,9 @@ function PlanificacionDesktop() {
                         volante: data.volante || [],
                         modalidad: data.modalidad || '',
                         bolsaCuil: data.bolsaCuil || '',
+                        uid: String(data.uid || ''),
+                        mail: String(data.email || data.mail || ''),
+                        pushEstado: String(data.pushEstado || ''),
                     };
                 });
             setEmployees(map(snap));
@@ -15790,7 +15794,7 @@ function PlanificacionDesktop() {
                         if (!lista.length || !empresaId) return;
                         setConsultaNominaEnviando(true);
                         try {
-                            const call = httpsCallable<Record<string, unknown>, { resumen?: string; omitidos?: { motivo: string }[] }>(functions, 'crearConsultaDisponibilidad');
+                            const call = httpsCallable<Record<string, unknown>, { resumen?: string; status?: string; omitidos?: { motivo: string }[] }>(functions, 'crearConsultaDisponibilidad');
                             const res = await call({
                                 empresaId,
                                 objectiveId: selectedObjective || null,
@@ -15805,7 +15809,8 @@ function PlanificacionDesktop() {
                                 cubreEmployeeId: vacancyData?.employeeId || null,
                                 cubreNombre: vacancyData?.employeeName || null,
                             });
-                            toast.success(res.data?.resumen || 'Consulta enviada.');
+                            if (res.data?.status === 'SIN_DESTINATARIOS') toast.message(res.data?.resumen || 'No le llegó a nadie.');
+                            else toast.success(res.data?.resumen || 'Consulta enviada.');
                             const omitidos = res.data?.omitidos || [];
                             if (omitidos.length) toast.message(omitidos.slice(0, 3).map((o) => o.motivo).join(' · '), { duration: 8000 });
                             setConsultaNominaMarcados((prev) => prev.filter((id) => !lista.some((g) => g.employeeId === id)));
@@ -15828,6 +15833,14 @@ function PlanificacionDesktop() {
                             return [{ employeeId: e.id, tipo, nombre: e.name || e.id }];
                         });
                         if (!candidatosEnvio.length) return;
+                        const nadieRecibe = candidatosEnvio.every((c) => {
+                            const e = porId.get(c.employeeId) as { uid?: string; mail?: string; pushEstado?: string } | undefined;
+                            return canalDeConsulta({ uid: e?.uid, mail: e?.mail, pushEstado: e?.pushEstado }).sinCanal;
+                        });
+                        if (nadieRecibe) {
+                            toast.message('A nadie le va a llegar: no tienen la app ni mail.');
+                            return;
+                        }
                         const evaluaciones = candidatosEnvio.map((c) => {
                             const blocked: string[] = [];
                             const authorizations: CoverageAuthRequest[] = [];
@@ -15960,7 +15973,11 @@ function PlanificacionDesktop() {
                         .filter((e) => (e.role === 'WORKING' || e.role === 'LICENCIA') && (!q || e.nombre.toLowerCase().includes(q)))
                         .map((e) => ({ id: e.id, nombre: e.nombre, motivo: e.role === 'LICENCIA' ? 'De licencia ese día' : 'En servicio ese día' }));
                     const seleccionadoNomina = selectedReplacement ? nominaOrdenada.find((e) => e.id === selectedReplacement) || null : null;
-                    const marcadosNomina = consultaNominaMarcados.filter((id) => nominaOrdenada.some((e) => e.id === id));
+                    // Sin app ni mail no se consulta: la casilla queda deshabilitada y no cuenta en «Preguntar a N».
+                    const marcadosNomina = consultaNominaMarcados.filter((id) => {
+                        const e = nominaOrdenada.find((x) => x.id === id) as { uid?: string; mail?: string; pushEstado?: string } | undefined;
+                        return !!e && !canalDeConsulta({ uid: e.uid, mail: e.mail, pushEstado: e.pushEstado }).sinCanal;
+                    });
                     const extSel = vacancySplitExtId ? (splitWorkerPoolExt.find((c) => c.id === vacancySplitExtId) || splitWorkerPoolAdel.find((c) => c.id === vacancySplitExtId)) : null;
                     const adelSel = vacancySplitAdelId ? splitWorkerPoolAdel.find((c) => c.id === vacancySplitAdelId) : null;
                     const diasBloque = sortedActiveDates.length > 0 ? sortedActiveDates : (diaSel ? [diaSel] : []);
@@ -16089,6 +16106,8 @@ function PlanificacionDesktop() {
                                                             const t = tagDe(e.dayRole);
                                                             const puedeCasilla = t.tipo === 'FT' ? canAssignFT : !!t.tipo && canConsultarEventual;
                                                             const km = formatKmLabel(e.km);
+                                                            const canalNomina = canalDeConsulta({ uid: (e as { uid?: string }).uid, mail: (e as { mail?: string }).mail, pushEstado: (e as { pushEstado?: string }).pushEstado });
+                                                            const sinCanal = puedeCasilla && canalNomina.sinCanal;
                                                             return (
                                                                 <FilaCandidatoNomina
                                                                     key={e.id}
@@ -16099,12 +16118,25 @@ function PlanificacionDesktop() {
                                                                         tag: t.tag,
                                                                         tono: t.tono,
                                                                         nota: t.tipo === 'FT' ? (modoEfectivo === 'preguntar' ? 'se consulta como FT' : 'franco trabajado · pide PIN') : t.tipo === null ? 'turno escuela: solo asignar' : null,
+                                                                        canal: puedeCasilla ? {
+                                                                            chip: canalNomina.chip,
+                                                                            motivoApp: canalNomina.motivoApp,
+                                                                            porMail: canalNomina.porMail,
+                                                                            sinCanal: canalNomina.sinCanal,
+                                                                            crearAccesoHref: `/admin/empleados/${e.id}`,
+                                                                        } : null,
                                                                     }}
                                                                     modo={modoEfectivo}
                                                                     marcado={marcadosNomina.includes(e.id)}
                                                                     seleccionado={selectedReplacement === e.id}
                                                                     disabled={modoEfectivo === 'preguntar' && !puedeCasilla}
-                                                                    onToggle={() => setConsultaNominaMarcados((prev) => (prev.includes(e.id) ? prev.filter((id) => id !== e.id) : [...prev, e.id]))}
+                                                                    onToggle={() => {
+                                                                        if (sinCanal) {
+                                                                            toast.message(`${e.name || 'El guardia'}: no le va a llegar. Llamalo o creá su acceso.`);
+                                                                            return;
+                                                                        }
+                                                                        setConsultaNominaMarcados((prev) => (prev.includes(e.id) ? prev.filter((id) => id !== e.id) : [...prev, e.id]));
+                                                                    }}
                                                                     onElegir={() => { setVacancyPickerTab('substitute'); setSelectedReplacement(e.id); }}
                                                                 />
                                                             );
