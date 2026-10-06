@@ -377,3 +377,84 @@ export function novedadesDeConsultas(prev: ConsultaCurso[], next: ConsultaCurso[
 export function consultasVisiblesEnCurso<T extends ConsultaCurso>(list: T[]): T[] {
   return list.filter((c) => c.status === 'ABIERTA' || (c.status === 'VENCIDA' && !(c.respuestas || []).some((r) => r.estado === 'ASIGNADO')));
 }
+
+// ── Modal de cobertura v2 (escritorio): dos columnas, una franja arriba y un pie de dos botones ──
+
+export type TonoEstadoDia = 'rose' | 'emerald' | 'violet' | 'indigo' | 'slate';
+export type TipoEstadoDia = 'sin_cubrir' | 'suplente' | 'split' | 'consultando' | 'acepto' | 'no_procesa';
+export type EstadoDiaCobertura = { tipo: TipoEstadoDia; tono: TonoEstadoDia; texto: string };
+
+export type CoberturaDiaIn =
+  | { mode: 'none' }
+  | { mode: 'substitute'; nombre: string }
+  | { mode: 'split'; ext: string; adel: string };
+
+/**
+ * Lo que dice cada día en la columna izquierda. La consulta en vivo manda sobre el borrador:
+ * si alguien aceptó, ese es el suplente; si está abierta, el día lo resuelve la consulta.
+ */
+export function estadoDiaCobertura(p: { activo: boolean; cobertura: CoberturaDiaIn; consulta?: ConsultaResumenIn | null }): EstadoDiaCobertura {
+  if (!p.activo) return { tipo: 'no_procesa', tono: 'slate', texto: 'No se procesa' };
+  const consulta = p.consulta || null;
+  if (consulta) {
+    const acepto = (consulta.respuestas || []).find((r) => r.estado === 'ASIGNADO');
+    if (acepto) return { tipo: 'acepto', tono: 'emerald', texto: `${apellidoDe(acepto.nombre)} aceptó${acepto.hora ? ` ${acepto.hora}` : ''}` };
+    if (consulta.status === 'ABIERTA') {
+      const vence = horaArDe(consulta.venceAtMs);
+      return { tipo: 'consultando', tono: 'indigo', texto: vence ? `Consultando · vence ${vence}` : 'Consultando' };
+    }
+  }
+  if (p.cobertura.mode === 'substitute') return { tipo: 'suplente', tono: 'emerald', texto: `Suplente · ${apellidoDe(p.cobertura.nombre)}` };
+  if (p.cobertura.mode === 'split') return { tipo: 'split', tono: 'violet', texto: `Ext+Adel · ${apellidoDe(p.cobertura.ext)} / ${apellidoDe(p.cobertura.adel)}` };
+  return { tipo: 'sin_cubrir', tono: 'rose', texto: 'Sin cubrir' };
+}
+
+export function fmtHorasAr(h: number): string {
+  const r = Math.round(Number(h) * 100) / 100;
+  return (Number.isFinite(r) ? String(r) : '0').replace('.', ',');
+}
+
+/** «M · Puesto 1 · 10:45–12:00 (1,25 h)»: lo que se va a cubrir del día elegido. */
+export function textoCubrir(t: { code?: string | null; positionName?: string | null; scheduleLabel?: string | null; hours?: number | null } | null | undefined): string {
+  if (!t) return 'Sin turno que cubrir ese día';
+  const partes = [String(t.code || '').trim(), String(t.positionName || '').trim(), String(t.scheduleLabel || '').trim()].filter(Boolean);
+  const horas = Number(t.hours);
+  return `${partes.join(' · ')}${Number.isFinite(horas) && horas > 0 ? ` (${fmtHorasAr(horas)} h)` : ''}`;
+}
+
+/** «1 día · 06/10» o «5 días · 06/10 → 10/10». */
+export function textoRangoDias(fechas: string[]): string {
+  const orden = [...fechas].filter(Boolean).sort();
+  if (!orden.length) return 'Sin días';
+  if (orden.length === 1) return `1 día · ${ddmm(orden[0])}`;
+  return `${orden.length} días · ${ddmm(orden[0])} → ${ddmm(orden[orden.length - 1])}`;
+}
+
+export function textoBarraAsignar(nombre: string | null | undefined, fecha: string, code?: string | null, horario?: string | null): string {
+  if (!nombre) return 'Tocá un guardia para asignarlo a este día';
+  const banda = [String(code || '').trim(), String(horario || '').trim()].filter(Boolean).join(' ');
+  return `${apellidoDe(nombre)} cubre el ${ddmm(fecha)}${banda ? ` · ${banda}` : ''}`;
+}
+
+export function textoBotonAsignar(nombre: string | null | undefined): string {
+  return nombre ? `Asignar a ${apellidoDe(nombre)}` : 'Elegí un guardia';
+}
+
+export function textoBarraSplit(ext: string | null | undefined, adel: string | null | undefined): string {
+  if (ext && adel) return `${apellidoDe(ext)} se extiende y ${apellidoDe(adel)} adelanta`;
+  if (ext) return `${apellidoDe(ext)} se extiende · falta quién adelanta`;
+  if (adel) return `${apellidoDe(adel)} adelanta · falta quién se extiende`;
+  return 'Elegí quién se extiende y quién adelanta';
+}
+
+export const TEXTO_BOTON_SPLIT = 'Asignar Ext + Adel';
+
+export function textoAccionPrincipal(hayCobertura: boolean): string {
+  return hayCobertura ? 'Confirmar cobertura' : 'Dejar vacante';
+}
+
+export function textoAplicarMarcados(n: number): string {
+  return `Aplicar esta cobertura a los ${n} días marcados`;
+}
+
+export const TEXTO_CERRAR_GUARDA = 'Cerrar guarda lo configurado como pendiente del cronograma. Nada se escribe hasta Guardar cronograma.';

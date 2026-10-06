@@ -405,7 +405,7 @@ export const cancelarConsultaDisponibilidad = functions.https.onCall(async (data
   });
   for (const r of (parent.respuestas || []) as RespuestaVista[]) {
     if (r.estado !== 'PENDIENTE' && r.estado !== 'RESERVADO') continue;
-    const inv = invitacionRef(consultaId, r.cuil);
+    const inv = refDePersona(consultaId, personaDeRespuesta(r));
     const invSnap = await inv.get();
     const uid = invSnap.exists ? String(invSnap.data()?.uid || '') : '';
     const employeeId = invSnap.exists ? (invSnap.data()?.employeeId || null) : null;

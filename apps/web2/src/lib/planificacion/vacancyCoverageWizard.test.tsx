@@ -1,8 +1,6 @@
 import React from 'react';
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { renderToStaticMarkup } from 'react-dom/server';
-import { VacancyCoberturaAcciones, VacancyCoberturaLista } from '@/components/planificacion/VacancyCoberturaDia';
 import {
   applyCoverageToDay,
   coveragesDiffer,
@@ -143,87 +141,6 @@ test('12 h pasa, 10 h pide PIN, 7 h bloquea y 204 h pide PIN', () => {
   assert.equal(pin204.authorizations.some((a) => a.kind === 'TOPE' && a.monthHours === 204), true);
   assert.match(unresolvedGuardMessages(pin204, { descanso: true, tope: false }).join(' '), /204 h/);
   assert.deepEqual(unresolvedGuardMessages(pin204, { descanso: true, tope: true }), []);
-});
-
-test('la lista muestra coberturas distintas y Quitar solo en los días cubiertos', () => {
-  const html = renderToStaticMarkup(
-    <VacancyCoberturaLista
-      days={[
-        { date: '2026-10-04', label: '04/10', coverageLabel: 'LIZARRAGA ext + RODRIGUEZ adel', mode: 'split', editing: true, titular: 'T · RECEPCION · 15:00–23:00' },
-        { date: '2026-10-05', label: '05/10', coverageLabel: 'Sin cobertura', mode: 'none', editing: false, titular: 'T · RECEPCION · 15:00–23:00' },
-        { date: '2026-10-06', label: '06/10', coverageLabel: 'SUAREZ suplente', mode: 'substitute', editing: false, titular: 'T · RECEPCION · 15:00–23:00' },
-      ]}
-      emptyCount={1}
-      templateLabel="04/10"
-      onEdit={() => {}}
-      onClear={() => {}}
-      onCompleteRemaining={() => {}}
-    />,
-  );
-  assert.match(html, /Paso 2/);
-  assert.match(html, /LIZARRAGA ext \+ RODRIGUEZ adel/);
-  assert.match(html, /SUAREZ suplente/);
-  assert.match(html, /Completar 1 día\(s\) sin cobertura con la de 04\/10/);
-  assert.match(html, /data-cobertura-quitar="2026-10-04"/);
-  assert.match(html, /data-cobertura-quitar="2026-10-06"/);
-  assert.equal(html.includes('data-cobertura-quitar="2026-10-05"'), false);
-  assert.match(html, /data-cobertura-dia="2026-10-05"/);
-});
-
-test('el botón principal aplica a este día y el secundario nombra los días marcados', () => {
-  const medio = renderToStaticMarkup(
-    <VacancyCoberturaAcciones
-      dayLabel="05/10"
-      markedCount={3}
-      canApply
-      isLast={false}
-      hasPreviousCoverage
-      onApplyThisDay={() => {}}
-      onApplyToMarked={() => {}}
-      onNext={() => {}}
-      onCopyPrevious={() => {}}
-      onClose={() => {}}
-    />,
-  );
-  assert.match(medio, /Aplicar a este día/);
-  assert.match(medio, /Aplicar esta misma cobertura a los 3 días marcados/);
-  assert.match(medio, /Siguiente día/);
-  assert.match(medio, /Copiar del día anterior/);
-  assert.equal(medio.includes('Aplicar a los 3 días seleccionados'), false);
-
-  const primero = renderToStaticMarkup(
-    <VacancyCoberturaAcciones
-      dayLabel="04/10"
-      markedCount={3}
-      canApply={false}
-      isLast={false}
-      hasPreviousCoverage={false}
-      onApplyThisDay={() => {}}
-      onApplyToMarked={() => {}}
-      onNext={() => {}}
-      onCopyPrevious={() => {}}
-      onClose={() => {}}
-    />,
-  );
-  assert.equal(primero.includes('Copiar del día anterior'), false);
-  assert.match(primero, /disabled=""/);
-
-  const ultimo = renderToStaticMarkup(
-    <VacancyCoberturaAcciones
-      dayLabel="06/10"
-      markedCount={1}
-      canApply
-      isLast
-      hasPreviousCoverage={false}
-      onApplyThisDay={() => {}}
-      onApplyToMarked={() => {}}
-      onNext={() => {}}
-      onCopyPrevious={() => {}}
-      onClose={() => {}}
-    />,
-  );
-  assert.match(ultimo, />Listo</);
-  assert.equal(ultimo.includes('días marcados'), false);
 });
 
 test('el CC muestra requiere autorización entre 8 y 12 h y excluye menos de 8 h', () => {

@@ -11,18 +11,36 @@ import {
   type CandidatoTarjeta,
 } from '@/components/eventuales/EventualesCandidatosUx';
 import { ConsultasEnCursoPill, IndicadorConsultaCelda } from '@/components/planificacion/ConsultasEnCurso';
-import { VacancyCoberturaLista } from '@/components/planificacion/VacancyCoberturaDia';
+import {
+  CoberturaBarra,
+  CoberturaDias,
+  CoberturaFranja,
+  CoberturaPie,
+  CoberturaTabs,
+  ConsultaDiaBox,
+  FilaCandidatoNomina,
+  ModoCoberturaSwitch,
+  NoDisponiblesNomina,
+} from '@/components/planificacion/CoberturaModalV2';
 import { CandidatosHueco } from '@/components/movil/PlanificacionMovilView';
+import { buildBrandCSS, buildCompanyTheme, companyButtonColor } from '@/lib/companyTheme';
 import {
   accionParaMotivo,
   cambiosManualesSobreConsulta,
   consultaAbiertaEnFecha,
   consultaDelDia,
   diaLoResuelveConsulta,
+  estadoDiaCobertura,
   linkFichaEventual,
   novedadesDeConsultas,
   quitarBorradorQuePisaConsulta,
+  textoAccionPrincipal,
+  textoBarraAsignar,
+  textoBarraSplit,
+  textoBotonAsignar,
+  textoCubrir,
   textoIndicadorConsulta,
+  textoRangoDias,
   textoToastAcepto,
   textoTooltipConsulta,
   resumenConsultaDia,
@@ -161,17 +179,165 @@ test('el resumen del día muestra la consulta en vivo: esperando, aceptó, venci
   assert.equal(consultaDelDia([otroDia, aceptada], '2026-10-06'), aceptada);
   assert.equal(consultaDelDia([otroDia], '2026-10-06'), null);
 
-  const lista = renderToStaticMarkup(
-    <VacancyCoberturaLista
-      days={[{ date: '2026-10-06', label: 'Mar 06', coverageLabel: 'Sin cobertura', mode: 'none', editing: false, titular: 'M · 10:45–12:00', consulta: resumenConsultaDia(abierta) }]}
-      emptyCount={1}
-      templateLabel={null}
-      onEdit={() => {}}
-      onClear={() => {}}
-      onCompleteRemaining={() => {}}
+  // Columna izquierda del modal v2: la consulta en vivo manda sobre el borrador local.
+  const esperando = estadoDiaCobertura({ activo: true, cobertura: { mode: 'none' }, consulta: abierta });
+  assert.deepEqual(esperando, { tipo: 'consultando', tono: 'indigo', texto: 'Consultando · vence 11:15' });
+  const acepto = estadoDiaCobertura({ activo: true, cobertura: { mode: 'substitute', nombre: 'SUAREZ, Ana' }, consulta: aceptada });
+  assert.deepEqual(acepto, { tipo: 'acepto', tono: 'emerald', texto: 'ABALLAY aceptó 10:42' });
+  assert.deepEqual(estadoDiaCobertura({ activo: true, cobertura: { mode: 'none' }, consulta: { ...abierta, status: 'VENCIDA' } }), { tipo: 'sin_cubrir', tono: 'rose', texto: 'Sin cubrir' });
+  assert.deepEqual(estadoDiaCobertura({ activo: true, cobertura: { mode: 'substitute', nombre: 'SUAREZ, Ana' } }), { tipo: 'suplente', tono: 'emerald', texto: 'Suplente · SUAREZ' });
+  assert.deepEqual(estadoDiaCobertura({ activo: true, cobertura: { mode: 'split', ext: 'LIZARRAGA, Hugo', adel: 'RODRIGUEZ, Lia' } }), { tipo: 'split', tono: 'violet', texto: 'Ext+Adel · LIZARRAGA / RODRIGUEZ' });
+  assert.deepEqual(estadoDiaCobertura({ activo: false, cobertura: { mode: 'none' } }), { tipo: 'no_procesa', tono: 'slate', texto: 'No se procesa' });
+
+  const box = renderToStaticMarkup(
+    <ConsultaDiaBox estado={esperando} resumen={resumenConsultaDia(abierta)} abierta onCancelar={() => {}} />,
+  );
+  assert.match(box, /data-consulta-dia="consultando"/);
+  assert.match(box, /Consultando · vence 11:15/);
+  assert.match(box, /Consultados: 3 · esperando respuesta \(vence 11:15\) · 1 no/);
+  assert.match(box, /data-consulta-dia-cancelar/);
+  assert.match(box, /Cancelar consulta/);
+  const boxOk = renderToStaticMarkup(<ConsultaDiaBox estado={acepto} resumen={resumenConsultaDia(aceptada)} abierta={false} onCancelar={() => {}} />);
+  assert.match(boxOk, /data-consulta-dia="acepto"/);
+  assert.match(boxOk, /ABALLAY aceptó 10:42/);
+  assert.doesNotMatch(boxOk, /Cancelar consulta/);
+});
+
+test('la franja dice qué se cubre y los textos del modal v2 son los del boceto', () => {
+  assert.equal(textoCubrir({ code: 'M', positionName: 'Puesto 1', scheduleLabel: '10:45–12:00', hours: 1.25 }), 'M · Puesto 1 · 10:45–12:00 (1,25 h)');
+  assert.equal(textoCubrir({ code: 'T', positionName: 'Recepción', scheduleLabel: '15:00–23:00', hours: 8 }), 'T · Recepción · 15:00–23:00 (8 h)');
+  assert.equal(textoCubrir(null), 'Sin turno que cubrir ese día');
+  assert.equal(textoRangoDias(['2026-10-06']), '1 día · 06/10');
+  assert.equal(textoRangoDias(['2026-10-10', '2026-10-06', '2026-10-08']), '3 días · 06/10 → 10/10');
+  assert.equal(textoBarraAsignar('FERRERO, Juan', '2026-10-08', 'M', '10:45–12:00'), 'FERRERO cubre el 08/10 · M 10:45–12:00');
+  assert.equal(textoBarraAsignar(null, '2026-10-08'), 'Tocá un guardia para asignarlo a este día');
+  assert.equal(textoBotonAsignar('FERRERO, Juan'), 'Asignar a FERRERO');
+  assert.equal(textoBotonAsignar(null), 'Elegí un guardia');
+  assert.equal(textoBarraSplit('LIZARRAGA, Hugo', 'RODRIGUEZ, Lia'), 'LIZARRAGA se extiende y RODRIGUEZ adelanta');
+  assert.equal(textoBarraSplit('LIZARRAGA, Hugo', null), 'LIZARRAGA se extiende · falta quién adelanta');
+  assert.equal(textoBarraSplit(null, null), 'Elegí quién se extiende y quién adelanta');
+  assert.equal(textoAccionPrincipal(true), 'Confirmar cobertura');
+  assert.equal(textoAccionPrincipal(false), 'Dejar vacante');
+
+  const franja = renderToStaticMarkup(
+    <CoberturaFranja
+      titular="BAEZ, Carlos"
+      motivo="Ausencia médica"
+      codigo="E"
+      rango="1 día · 06/10"
+      diaLabel="06/10"
+      cubrir="M · Puesto 1 · 10:45–12:00 (1,25 h)"
+      bandas={[{ value: 'M__Puesto 1', label: 'M · Puesto 1 · 10:45–12:00 (1.25 h)' }]}
+      bandaValue="M__Puesto 1"
+      onBanda={() => {}}
+      onClose={() => {}}
     />,
   );
-  assert.match(lista, /data-cobertura-consulta="2026-10-06"[^>]*>Consultados: 3 · esperando respuesta \(vence 11:15\) · 1 no</);
+  assert.match(franja, /data-cobertura-titular[^>]*>BAEZ, Carlos</);
+  assert.match(franja, /Cubrir · 06\/10/);
+  assert.match(franja, /M · Puesto 1 · 10:45–12:00 \(1,25 h\)/);
+  // Una sola banda posible: no hay selector.
+  assert.doesNotMatch(franja, /data-cobertura-banda/);
+  const franjaDos = renderToStaticMarkup(
+    <CoberturaFranja
+      titular="BAEZ, Carlos" motivo="Ausencia médica" codigo="E" rango="1 día · 06/10" diaLabel="06/10" cubrir="M · Puesto 1"
+      bandas={[{ value: 'M__P1', label: 'M' }, { value: 'T__P1', label: 'T' }]} bandaValue="M__P1" onBanda={() => {}} onClose={() => {}}
+    />,
+  );
+  assert.match(franjaDos, /data-cobertura-banda/);
+});
+
+test('la columna de días marca, selecciona, quita y aplica a los marcados; el pie tiene solo Cerrar y la acción', () => {
+  const dias = renderToStaticMarkup(
+    <CoberturaDias
+      dias={[
+        { date: '2026-10-06', label: 'mar 06/10', activo: true, seleccionado: false, estado: { tipo: 'suplente', tono: 'emerald', texto: 'Suplente · SUAREZ' }, puedeQuitar: true },
+        { date: '2026-10-07', label: 'mié 07/10', activo: true, seleccionado: true, estado: { tipo: 'sin_cubrir', tono: 'rose', texto: 'Sin cubrir' }, puedeQuitar: false },
+        { date: '2026-10-08', label: 'jue 08/10', activo: true, seleccionado: false, estado: { tipo: 'consultando', tono: 'indigo', texto: 'Consultando · vence 11:15' }, puedeQuitar: false },
+        { date: '2026-10-09', label: 'vie 09/10', activo: false, seleccionado: false, estado: { tipo: 'no_procesa', tono: 'slate', texto: 'No se procesa' }, puedeQuitar: false },
+      ]}
+      onSeleccionar={() => {}}
+      onMarcar={() => {}}
+      onTodos={() => {}}
+      onNinguno={() => {}}
+      onQuitar={() => {}}
+      aplicarMarcados={{ n: 3, habilitado: true, onClick: () => {} }}
+      completar={{ texto: 'Completar 1 día(s) sin cobertura con la de 06/10', onClick: () => {} }}
+    />,
+  );
+  assert.match(dias, /3 de 4 marcados/);
+  assert.match(dias, /data-cobertura-dia="2026-10-07"[^>]*data-cobertura-estado="sin_cubrir"[^>]*data-cobertura-seleccionado="1"/);
+  assert.match(dias, /data-cobertura-estado="consultando"/);
+  assert.match(dias, /data-cobertura-quitar="2026-10-06"/);
+  assert.doesNotMatch(dias, /data-cobertura-quitar="2026-10-07"/);
+  assert.match(dias, /Aplicar esta cobertura a los 3 días marcados/);
+  assert.match(dias, /Completar 1 día\(s\) sin cobertura con la de 06\/10/);
+  assert.match(dias, /data-cobertura-todos/);
+  assert.doesNotMatch(dias, /Aplicar a este día/);
+  assert.doesNotMatch(dias, /Siguiente día/);
+
+  const pie = renderToStaticMarkup(<CoberturaPie accion={textoAccionPrincipal(true)} onAccion={() => {}} onCerrar={() => {}} />);
+  assert.match(pie, /data-cobertura-cerrar[^>]*>Cerrar</);
+  assert.match(pie, /data-cobertura-principal[^>]*>Confirmar cobertura</);
+  assert.doesNotMatch(pie, /Cancelar/);
+  assert.doesNotMatch(pie, /Listo/);
+  assert.doesNotMatch(pie, /Marcar vacante/);
+
+  // La barra siempre dice qué hace el botón, también deshabilitado (texto gris sobre blanco, nunca invisible).
+  const barra = renderToStaticMarkup(<CoberturaBarra texto="Tocá un guardia para asignarlo a este día" boton="Elegí un guardia" disabled onClick={() => {}} />);
+  assert.match(barra, /<button[^>]*disabled=""[^>]*data-cobertura-accion[^>]*>Elegí un guardia</);
+  assert.match(barra, /disabled:bg-white disabled:text-slate-500/);
+
+  const tabs = renderToStaticMarkup(<CoberturaTabs tab="nomina" onTab={() => {}} eventuales split />);
+  assert.match(tabs, /aria-selected="true"[^>]*data-cobertura-tab="nomina"/);
+  assert.match(tabs, /Eventuales/);
+  assert.match(tabs, /Ext \+ Adel/);
+  const sinEventuales = renderToStaticMarkup(<CoberturaTabs tab="nomina" onTab={() => {}} eventuales={false} split />);
+  assert.doesNotMatch(sinEventuales, /data-cobertura-tab="eventuales"/);
+  const modo = renderToStaticMarkup(<ModoCoberturaSwitch modo="preguntar" onModo={() => {}} puedePreguntar />);
+  assert.match(modo, /data-cobertura-modo="preguntar"/);
+  assert.match(modo, /Asignar directo/);
+  assert.equal(renderToStaticMarkup(<ModoCoberturaSwitch modo="asignar" onModo={() => {}} puedePreguntar={false} />), '');
+
+  const fila = renderToStaticMarkup(
+    <FilaCandidatoNomina
+      c={{ id: 'e1', nombre: 'FERRERO, Juan', meta: '142 h este mes · 3 km', tag: 'Libre', tono: 'emerald' }}
+      modo="preguntar" marcado seleccionado={false} onToggle={() => {}} onElegir={() => {}}
+    />,
+  );
+  assert.match(fila, /data-consulta-nomina="e1"[^>]*checked=""/);
+  assert.match(fila, /FERRERO, Juan/);
+  const filaAsignar = renderToStaticMarkup(
+    <FilaCandidatoNomina
+      c={{ id: 'e2', nombre: 'GOMEZ, Ana', meta: '160 h este mes', tag: 'Franco · FT', tono: 'violet', nota: 'franco trabajado · pide PIN' }}
+      modo="asignar" marcado={false} seleccionado onToggle={() => {}} onElegir={() => {}}
+    />,
+  );
+  assert.doesNotMatch(filaAsignar, /type="checkbox"/);
+  assert.match(filaAsignar, /data-candidato-activo="1"/);
+  assert.match(filaAsignar, /pide PIN/);
+  const noDisp = renderToStaticMarkup(<NoDisponiblesNomina rows={[{ id: 'e3', nombre: 'LOPEZ, Raul', motivo: 'En servicio ese día' }]} />);
+  assert.match(noDisp, /data-no-disponibles="1"/);
+  assert.match(noDisp, /No disponibles \(1\)/);
+  assert.match(noDisp, /En servicio ese día/);
+});
+
+test('el tema de la empresa no pisa el botón deshabilitado ni pone blanco sobre un color claro', () => {
+  const css = buildBrandCSS();
+  // Los fondos rellenos solo se pintan con el color de la empresa cuando el botón está habilitado.
+  assert.match(css, /\.bg-indigo-600:not\(:disabled\):not\(\[aria-disabled="true"\]\)/);
+  assert.match(css, /\.bg-violet-600:not\(:disabled\)/);
+  assert.doesNotMatch(css, /\.bg-indigo-600,\s*\n/);
+  // Y usan el color apto para texto blanco, no el color crudo.
+  assert.match(css, /\.bg-indigo-500:not\(:disabled\)[^{]*\{ background-color: var\(--company-primary-btn\)/);
+  // Color claro (blanco encima < 4,5:1) → tono oscuro; gris → casi negro; índigo o azul → el mismo.
+  assert.equal(companyButtonColor('#4f46e5'), '#4f46e5');
+  assert.equal(companyButtonColor('#1d4ed8'), '#1d4ed8');
+  assert.equal(companyButtonColor('#d1d5db'), '#111827');
+  assert.notEqual(companyButtonColor('#fde68a'), '#fde68a');
+  assert.notEqual(companyButtonColor('#22c55e'), '#22c55e', 'verde claro: blanco encima no llega a AA');
+  assert.equal(buildCompanyTheme('#fde68a')['--company-primary-btn'], companyButtonColor('#fde68a'));
+  assert.equal(buildCompanyTheme('#4f46e5')['--company-primary-btn-text'], '#ffffff');
 });
 
 test('el celular cubre un hueco sin «Lugares» y colapsa a los no disponibles', () => {

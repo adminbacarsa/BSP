@@ -189,7 +189,7 @@ export function BarraPreguntar({ n, jornadas, espera, onEspera, onEnviar, envian
           disabled={n === 0 || !!enviando}
           onClick={onEnviar}
           data-consulta-enviar
-          className="ml-auto rounded-xl bg-indigo-600 px-3 py-1.5 text-[10px] font-black text-white disabled:bg-slate-200 disabled:text-slate-500"
+          className="ml-auto rounded-xl bg-indigo-600 px-3 py-1.5 text-[10px] font-black text-white disabled:cursor-not-allowed disabled:border disabled:border-slate-300 disabled:bg-white disabled:text-slate-500"
         >
           {enviando ? 'Enviando…' : textoBotonEnviar(n)}
         </button>

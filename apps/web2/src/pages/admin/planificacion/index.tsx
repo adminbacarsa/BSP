@@ -241,7 +241,6 @@ import {
     collectVacancyFrancoConflicts,
     VACANCY_NON_WORK_CODES,
     resolveVacancyDayCoverage,
-    formatVacancyDayCoverageLabel,
     vacancyDayHasCoverage,
     resolveTitularVacancyWorkShift,
     describeVacancySplitPlan,
@@ -252,17 +251,13 @@ import {
 } from '@/lib/planificacion/vacancyCoverage';
 import {
     clearDayCoverage,
-    coveragesDiffer,
     daysOverwritten,
     draftCoverage,
-    draftIsPartial,
     emptyDays,
     evaluateCoverageDayGuards,
     mergeCoverages,
     type CoverageAuthRequest,
     nextMarkedDay,
-    previousMarkedDay,
-    savedCoverage,
     templateDayForRemaining,
     type ProposedGuardShift,
 } from '@/lib/planificacion/vacancyCoverageWizard';
@@ -276,10 +271,47 @@ import {
     type ShiftAuthMark,
     type TopeAutorizacion,
 } from '@/lib/planificacion/supervisorAuth';
-import { VacancyCoberturaAcciones, VacancyCoberturaLista } from '@/components/planificacion/VacancyCoberturaDia';
+import {
+    AvisoCobertura,
+    CoberturaBarra,
+    CoberturaDias,
+    CoberturaFranja,
+    CoberturaPie,
+    CoberturaTabs,
+    ConsultaDiaBox,
+    FilaCandidatoNomina,
+    ModoCoberturaSwitch,
+    NoDisponiblesNomina,
+    type CandidatoNominaFila,
+    type CoberturaTab,
+    type DiaFila,
+    type ModoCobertura,
+} from '@/components/planificacion/CoberturaModalV2';
+import { BarraPreguntar } from '@/components/eventuales/EventualesCandidatosUx';
 import { ConsultasEnCursoPill, IndicadorConsultaCelda } from '@/components/planificacion/ConsultasEnCurso';
 import { useConsultasDisponibilidadObjetivo, type ConsultaObjetivo } from '@/hooks/useConsultasDisponibilidadObjetivo';
-import { cambiosManualesSobreConsulta, consultaAbiertaEnFecha, consultaDelDia, diaLoResuelveConsulta, novedadesDeConsultas, quitarBorradorQuePisaConsulta, resumenConsultaDia, textoIndicadorConsulta, textoTooltipConsulta, type ConsultaCurso } from '@/lib/planificacion/coberturaEventualesUx';
+import {
+    TEXTO_BOTON_SPLIT,
+    cambiosManualesSobreConsulta,
+    consultaAbiertaEnFecha,
+    consultaDelDia,
+    diaLoResuelveConsulta,
+    estadoDiaCobertura,
+    fmtHorasAr,
+    novedadesDeConsultas,
+    quitarBorradorQuePisaConsulta,
+    resumenConsultaDia,
+    textoAccionPrincipal,
+    textoBarraAsignar,
+    textoBarraSplit,
+    textoBotonAsignar,
+    textoCubrir,
+    textoIndicadorConsulta,
+    textoRangoDias,
+    textoTooltipConsulta,
+    type CoberturaDiaIn,
+    type ConsultaCurso,
+} from '@/lib/planificacion/coberturaEventualesUx';
 import { alignVacancyGapBand } from '@/lib/planificacion/vacancySplitBands';
 import {
     listVacancyGapBandOptions,
@@ -349,7 +381,6 @@ import {
 import { checkGeneroPuesto, getPreferenciaGeneroFromPositionStructure, getPreferenciaGeneroUi, preferenciaGeneroOptionSuffix, preferenciaGeneroLabel } from '@/lib/planificacion/genderPreference';
 import { experienciaBadgeForReplacement, patchExperienciaForTurno } from '@/lib/planificacion/experienciaObjetivos';
 import EventualesCandidatosPanel, { type CandidatoEventual } from '@/components/eventuales/EventualesCandidatosPanel';
-import { ConsultaDisponibilidadEstado } from '@/components/eventuales/ConsultaDisponibilidadEstado';
 import { planEnvioGuardias } from '@/lib/eventuales/consultaGuardia.mjs';
 import { asignarEventualPlanificacion, canConsultarDisponibilidad, canConvocarEventuales, eventualErrorMessage, sustituirEventualPlanificacion } from '@/services/eventualesPlanificacionService';
 import { esLegajoEventual, jornadaEventualDesdeBanda } from '@/lib/eventuales/planificacionUi';
@@ -1645,8 +1676,10 @@ function PlanificacionDesktop() {
     /** Solapa EVENTUALES (bolsa) dentro de "Traer suplente". */
     const [vacancyEventualesOpen, setVacancyEventualesOpen] = useState(false);
     const [consultaNominaMarcados, setConsultaNominaMarcados] = useState<string[]>([]);
-    const [consultaNominaLugares, setConsultaNominaLugares] = useState(1);
     const [consultaNominaVence, setConsultaNominaVence] = useState(120);
+    /** Modal v2: «Preguntar» (consulta por la app) o «Asignar directo», compartido por Nómina y Eventuales. */
+    const [vacancyModo, setVacancyModo] = useState<ModoCobertura>('preguntar');
+    const [consultaCancelando, setConsultaCancelando] = useState<string | null>(null);
     const [consultaNominaEnviando, setConsultaNominaEnviando] = useState(false);
     const [vacancyEventualBusy, setVacancyEventualBusy] = useState(false);
     /** Sustituir eventual desde la celda: titular (legajo + CUIL) y fecha desde la que se reemplaza. */
@@ -1724,15 +1757,12 @@ function PlanificacionDesktop() {
         setVacancyDayCoverages({});
         setVacancyTemplateDay(null);
         setVacancyAuthMarks({});
-        const activeCount = (initialDates.length ? initialDates : all).length;
-        if (activeCount > 1) {
-            setVacancyEditingDay(null);
-            setVacancyReplacementOpen(false);
-        } else {
-            const onlyDay = initialDates[0] || all[0] || null;
-            setVacancyEditingDay(onlyDay);
-            setVacancyReplacementOpen(!!onlyDay);
-        }
+        // Modal v2: siempre hay un día elegido y la columna derecha abierta.
+        const firstDay = initialDates[0] || all[0] || null;
+        setVacancyEditingDay(firstDay);
+        setVacancyReplacementOpen(!!firstDay);
+        setVacancyModo('preguntar');
+        setConsultaNominaMarcados([]);
         setSelectedReplacement('');
         setVacancyPickerTab('substitute');
         setVacancySplitExtId('');
@@ -15167,43 +15197,14 @@ function PlanificacionDesktop() {
                     const isInj = absType === 'Injustificada';
                     const color = isVac ? 'teal' : isEnf ? 'rose' : isPG ? 'blue' : isLic ? 'purple' : 'amber';
                     const colorMap: any = { teal: 'border-l-teal-500 bg-teal-50 text-teal-700', rose: 'border-l-rose-500 bg-rose-50 text-rose-700', purple: 'border-l-purple-500 bg-purple-50 text-purple-700', blue: 'border-l-blue-500 bg-blue-50 text-blue-700', amber: 'border-l-amber-500 bg-amber-50 text-amber-700' };
-                    const btnColor: any = { teal: 'bg-teal-600 hover:bg-teal-700 shadow-teal-200', rose: 'bg-rose-600 hover:bg-rose-700 shadow-rose-200', purple: 'bg-purple-600 hover:bg-purple-700 shadow-purple-200', blue: 'bg-blue-600 hover:bg-blue-700 shadow-blue-200', amber: 'bg-amber-500 hover:bg-amber-600 shadow-amber-200' };
-                    const title = isVac ? 'Vacaciones — Planificar Cobertura' : isEnf ? 'Ausencia Médica — Cobertura Temporal' : isPG ? 'PG Permiso Gremial — Planificar Cobertura' : isLic ? 'Licencia Especial — Planificar Cobertura' : 'Ausencia Injustificada — Gestionar';
-                    const hint = isVac
-                        ? 'Elegí qué días procesar y quién cubre cada uno. Por día: traer suplente (RET/ESC/libre) o ext+adel con guardias del cronograma.'
-                        : isEnf
-                            ? 'Por día: suplente externo o ext+adel con personal ya en servicio ese día.'
-                            : isPG
-                                ? 'Asigná cobertura por día: suplente o ext+adel desde el cronograma.'
-                                : isLic
-                                    ? 'Suplente o ext+adel por día; ordenados por cercanía (suplentes).'
-                                    : 'Podés asignar cobertura por día o dejar vacante.';
                     const sortedActiveDates = [...vacancyActiveDates].sort();
                     const candidateDate = vacancyEditingDay || sortedActiveDates[0] || vacancyData?.startDate;
                     const splitReferenceDate = vacancyEditingDay || candidateDate || '';
-                    const isBulkCoverageMode = vacancyReplacementOpen && !vacancyEditingDay;
                     const vacancyEmployeesById: Record<string, any> = {};
                     employees.forEach((e: any) => { if (e.id) vacancyEmployeesById[e.id] = e; });
                     const formatShortDay = (ymd: string) => {
                         const [, m, d] = ymd.split('-');
                         return `${d}/${m}`;
-                    };
-                    const formatTitularChip = (tit: NonNullable<ReturnType<typeof resolveTitularShiftForDay>>) => {
-                        const band = tit.bandLabel !== tit.code ? tit.bandLabel : null;
-                        const sched = tit.scheduleLabel && tit.scheduleLabel !== '—' ? tit.scheduleLabel : null;
-                        return { code: tit.code, band, sched, position: tit.positionName };
-                    };
-                    const renderTitularChipLine = (tit: NonNullable<ReturnType<typeof resolveTitularShiftForDay>>) => {
-                        const c = formatTitularChip(tit);
-                        return (
-                            <>
-                                <span className="font-mono">{c.code}</span>
-                                {c.band && <><span className="text-slate-300 mx-0.5">·</span><span>{c.band}</span></>}
-                                <span className="text-slate-300 mx-0.5">·</span>
-                                <span>{c.position}</span>
-                                {c.sched && <><span className="text-slate-300 mx-0.5">·</span><span className="font-mono">{c.sched}</span></>}
-                            </>
-                        );
                     };
                     const toggleVacancyDate = (d: string) => {
                         setVacancyActiveDates((prev) => {
@@ -15214,11 +15215,8 @@ function PlanificacionDesktop() {
                     };
                     const resolveDayCoverageForUi = (dateStr: string) =>
                         resolveVacancyDayCoverage(dateStr, vacancyDayCoverages, '');
-                    const resolveDayCoverageLabel = (dateStr: string) =>
-                        formatVacancyDayCoverageLabel(resolveDayCoverageForUi(dateStr), vacancyEmployeesById);
                     const willAssignAny = [...vacancyActiveDates].some((d) => vacancyDayHasCoverage(resolveDayCoverageForUi(d)));
                     const vacancyEmptyActiveDays = sortedActiveDates.filter((d) => !vacancyDayHasCoverage(resolveDayCoverageForUi(d))).length;
-                    const vacancyConfiguredDays = sortedActiveDates.length - vacancyEmptyActiveDays;
                     const getTypicalShiftForTitular = (empId: string) => {
                         const yr = currentDate.getFullYear(); const mo = currentDate.getMonth();
                         const daysInMo = new Date(yr, mo + 1, 0).getDate();
@@ -15503,7 +15501,6 @@ function PlanificacionDesktop() {
                             return rows;
                         })()
                         : [];
-                    const editingDaySubstituteId = selectedReplacement;
                     const shiftOfGuard = (empId: string, dateStr: string) => {
                         const key = `${empId}_${dateStr}`;
                         const pending = pendingChanges[key];
@@ -15599,14 +15596,10 @@ function PlanificacionDesktop() {
                             nameOf: (id) => String(vacancyEmployeesById[id]?.name || id),
                         });
                     };
-                    const leaveEditor = () => {
-                        setVacancyReplacementOpen(false);
-                        setVacancyEditingDay(null);
-                        setVacancyReplacementSearch('');
-                    };
+                    // Modal v2: el día elegido nunca se vacía; sin siguiente, se queda en el actual.
                     const goToDay = (day: string | null) => {
                         if (day) openDayCoveragePicker(day);
-                        else leaveEditor();
+                        else setVacancyReplacementSearch('');
                     };
                     const writeDays = (
                         incoming: Record<string, VacancyDayCoverage>,
@@ -15727,7 +15720,7 @@ function PlanificacionDesktop() {
                             toast.error(`Sin turno del titular en ${missing.join(', ')}.`);
                             return;
                         }
-                        writeDays(incoming, `Misma cobertura en ${sortedActiveDates.length} día(s).`, vacancyEditingDay, () => leaveEditor());
+                        writeDays(incoming, `Misma cobertura en ${sortedActiveDates.length} día(s).`, vacancyEditingDay);
                     };
                     const completeRemainingDays = () => {
                         const tplDay = templateDayForRemaining(sortedActiveDates, vacancyDayCoverages, vacancyTemplateDay);
@@ -15745,29 +15738,6 @@ function PlanificacionDesktop() {
                         }
                         writeDays(incoming, `Se completaron ${filled.length} día(s) sin cobertura con la de ${formatShortDay(tplDay)}.`, tplDay);
                     };
-                    const goNextDay = () => {
-                        if (!vacancyEditingDay) return;
-                        const day = vacancyEditingDay;
-                        const draft = draftNow();
-                        const saved = savedCoverage(vacancyDayCoverages, day);
-                        const go = () => goToDay(nextMarkedDay(sortedActiveDates, day));
-                        if (draft && coveragesDiffer(saved, draft)) {
-                            writeDays({ [day]: draft }, `Cobertura del ${formatShortDay(day)} guardada.`, day, go);
-                            return;
-                        }
-                        if (draftIsPartial({ tab: vacancyPickerTab, substituteId: selectedReplacement, extId: vacancySplitExtId, adelId: vacancySplitAdelId })) {
-                            if (!confirm(`Hay cambios sin aplicar el ${formatShortDay(day)}. ¿Seguir sin guardarlos?`)) return;
-                        }
-                        go();
-                    };
-                    const copyPreviousDay = () => {
-                        if (!vacancyEditingDay) return;
-                        const prev = previousMarkedDay(sortedActiveDates, vacancyEditingDay);
-                        const cov = prev ? vacancyDayCoverages[prev] : undefined;
-                        if (!prev || !cov || !vacancyDayHasCoverage(cov)) return;
-                        loadPickerFields(cov);
-                        toast.message(`Copiada la cobertura del ${formatShortDay(prev)}. Aplicá a este día para guardarla.`);
-                    };
                     const applySubstituteToActiveDays = (employeeId: string) => {
                         setVacancyPickerTab('substitute');
                         setSelectedReplacement(employeeId);
@@ -15777,26 +15747,6 @@ function PlanificacionDesktop() {
                         writeDays({ [day]: cov }, `Cobertura del ${formatShortDay(day)} guardada.`, day, () => {
                             goToDay(nextMarkedDay(sortedActiveDates, day));
                         });
-                    };
-                    const clearCoverageForScope = () => {
-                        const applyAll = shouldApplyCoverageToAllDays();
-                        if (applyAll) {
-                            setSelectedReplacement('');
-                            setVacancyDayCoverages((prev) => {
-                                const next = { ...prev };
-                                for (const d of sortedActiveDates) delete next[d];
-                                return next;
-                            });
-                        } else if (vacancyEditingDay) {
-                            setVacancyDayCoverages((prev) => {
-                                const next = { ...prev };
-                                delete next[vacancyEditingDay];
-                                return next;
-                            });
-                            setVacancyEditingDay(null);
-                        } else {
-                            setSelectedReplacement('');
-                        }
                     };
                     const puedeConsultarNomina = canConsultarEventual || canAssignFT;
                     const jornadasNomina = sortedActiveDates.map((d) => {
@@ -15849,7 +15799,7 @@ function PlanificacionDesktop() {
                                 positionName: vacancyGapPreferredPosition || null,
                                 jornadas: jornadasNomina,
                                 guardias: lista,
-                                lugares: Math.min(consultaNominaLugares, lista.length),
+                                lugares: 1,
                                 venceMinutos: consultaNominaVence,
                                 autorizaciones,
                                 cubreEmployeeId: vacancyData?.employeeId || null,
@@ -15946,287 +15896,263 @@ function PlanificacionDesktop() {
                         }
                         void despacharConsultaNomina(sinPin, []);
                     };
-                    const renderVacancyCandidate = (e: typeof candidatos[0], suffix: string, consultaTipo?: 'FT' | 'RET' | 'LIBRE') => {
-                        const puedeCasilla = consultaTipo === 'FT' ? canAssignFT : !!consultaTipo && canConsultarEventual;
-                        const marcado = consultaNominaMarcados.includes(e.id);
-                        return (
-                        <div
-                            key={e.id}
-                            className={`w-full px-3 py-2.5 text-left text-sm flex items-center gap-2 rounded-lg ${editingDaySubstituteId === e.id ? 'bg-indigo-50 ring-1 ring-indigo-300' : 'hover:bg-indigo-50'}`}
-                        >
-                            {puedeCasilla && (
-                                <input
-                                    type="checkbox"
-                                    checked={marcado}
-                                    aria-label={`Consultar disponibilidad de ${e.name || 'guardia'}`}
-                                    data-consulta-nomina={e.id}
-                                    onChange={() => setConsultaNominaMarcados((prev) => (prev.includes(e.id) ? prev.filter((id) => id !== e.id) : [...prev, e.id]))}
-                                    className="h-4 w-4 shrink-0 accent-indigo-600"
-                                />
-                            )}
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setVacancyPickerTab('substitute');
-                                    setSelectedReplacement(e.id);
-                                }}
-                                className="flex flex-1 min-w-0 items-center gap-2 text-left"
-                            >
-                                <span className="font-bold truncate flex-1 min-w-0">{e.expBadge} {e.name}</span>
-                                {formatKmLabel(e.km) && (
-                                    <span className="text-[10px] text-slate-400 font-mono shrink-0 flex items-center gap-0.5">
-                                        <MapPin size={10} />{formatKmLabel(e.km)}
-                                    </span>
-                                )}
-                                <span className="text-[10px] text-slate-400 shrink-0">{suffix}</span>
-                            </button>
-                        </div>
-                        );
+                    const tabActual: CoberturaTab = vacancyPickerTab === 'split' ? 'split' : vacancyEventualesOpen ? 'eventuales' : 'nomina';
+                    const setTab = (t: CoberturaTab) => {
+                        if (t === 'split') { setVacancyPickerTab('split'); return; }
+                        setVacancyPickerTab('substitute');
+                        setVacancyEventualesOpen(t === 'eventuales');
                     };
-                    return (
-                    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 sm:p-6 bg-black/25 backdrop-blur-[2px]">
-                        <div className={`bg-white p-6 rounded-2xl shadow-2xl w-full max-w-[640px] max-h-[min(92vh,820px)] flex flex-col border-l-4 ${colorMap[color].split(' ')[0]}`}>
-                            <div className="flex items-start justify-between mb-4 shrink-0">
-                                <div>
-                                    <h3 className="font-black text-lg text-slate-800">{title}</h3>
-                                    <p className="text-sm text-slate-500 mt-0.5">
-                                        <span className="font-bold text-slate-700">{vacancyData?.employeeName}</span>
-                                        {vacancyData?.startDate && <span className="ml-2 text-xs bg-slate-100 px-2 py-0.5 rounded font-mono">{vacancyData.startDate} → {vacancyData.endDate}</span>}
-                                    </p>
-                                </div>
-                                <span className={`text-[10px] font-black px-2 py-1 rounded-full ${colorMap[color]}`}>{absType}</span>
+                    const puedePreguntar = tabActual === 'eventuales' ? (canConsultarEventual && canConvocarEventual) : (tabActual === 'nomina' && puedeConsultarNomina);
+                    const modoEfectivo: ModoCobertura = puedePreguntar ? vacancyModo : 'asignar';
+                    const diaCorto = (ymd: string) => {
+                        const [y, m, d] = ymd.split('-').map(Number);
+                        const wd = new Date(y, m - 1, d).toLocaleDateString('es-AR', { weekday: 'short' }).replace('.', '');
+                        return `${wd} ${formatShortDay(ymd)}`;
+                    };
+                    const nombreDe = (id: string) => String(vacancyEmployeesById[id]?.name || id);
+                    const coberturaIn = (d: string): CoberturaDiaIn => {
+                        const cov = resolveDayCoverageForUi(d);
+                        if (cov.mode === 'substitute') return { mode: 'substitute', nombre: nombreDe(cov.employeeId) };
+                        if (cov.mode === 'split') return { mode: 'split', ext: nombreDe(cov.extEmpId), adel: nombreDe(cov.adelEmpId) };
+                        return { mode: 'none' };
+                    };
+                    const consultaViva = (d: string) => {
+                        const c = consultaDelDia(vacancyConsultas, d);
+                        if (!c) return null;
+                        return c.status === 'ABIERTA' || c.respuestas.some((r) => r.estado === 'ASIGNADO') ? c : null;
+                    };
+                    const diaSel = vacancyEditingDay || sortedActiveDates[0] || absenceDateRange[0] || null;
+                    const titSel = diaSel ? resolveEffectiveTitularForDay(diaSel) : null;
+                    const consultaSel = diaSel ? consultaViva(diaSel) : null;
+                    const estadoSel = diaSel ? estadoDiaCobertura({ activo: vacancyActiveDates.has(diaSel), cobertura: coberturaIn(diaSel), consulta: consultaSel }) : null;
+                    const diasFilas: DiaFila[] = absenceDateRange.map((d) => ({
+                        date: d,
+                        label: diaCorto(d),
+                        activo: vacancyActiveDates.has(d),
+                        seleccionado: d === diaSel,
+                        estado: estadoDiaCobertura({ activo: vacancyActiveDates.has(d), cobertura: coberturaIn(d), consulta: consultaViva(d) }),
+                        puedeQuitar: vacancyActiveDates.has(d) && vacancyDayHasCoverage(resolveDayCoverageForUi(d)) && !consultaViva(d),
+                    }));
+                    const hayConsultaActiva = sortedActiveDates.some((d) => !!consultaViva(d));
+                    const accionPrincipal = textoAccionPrincipal(willAssignAny || hayConsultaActiva);
+                    const cerrarModal = () => {
+                        if (vacancyActiveDates.size > 0 && (willAssignAny || hayConsultaActiva)) handleProcessVacancy();
+                        else finalizeVacancyModal();
+                    };
+                    const bandaAuto = titSel ? `${titSel.code}__${titSel.positionName}` : '';
+                    const bandas = vacancyGapBandOptions.map((opt) => ({
+                        value: `${opt.code}__${opt.positionName}`,
+                        label: `${opt.code} · ${opt.positionName} · ${opt.scheduleLabel} (${opt.hours} h)`,
+                    }));
+                    const motivoTxt = isVac ? 'Vacaciones' : isEnf ? (absType === 'ART' ? 'ART' : 'Ausencia médica') : isPG ? 'Permiso gremial' : isLic ? 'Licencia especial' : isInj ? 'Ausencia injustificada' : (absType || 'Ausencia');
+                    const tplDay = templateDayForRemaining(sortedActiveDates, vacancyDayCoverages, vacancyTemplateDay);
+                    const draftActual = draftNow();
+                    const tagDe = (role: string): { tag: string; tono: CandidatoNominaFila['tono']; tipo: 'FT' | 'RET' | 'LIBRE' | null } => {
+                        if (role === 'RETEN') return { tag: 'Retén', tono: 'amber', tipo: 'RET' };
+                        if (role === 'ESC') return { tag: 'ESC', tono: 'sky', tipo: null };
+                        if (role === 'FRANCO') return { tag: 'Franco · FT', tono: 'violet', tipo: 'FT' };
+                        return { tag: 'Libre', tono: 'emerald', tipo: 'LIBRE' };
+                    };
+                    const nominaOrdenada = [...retenCandidatos, ...escCandidatos, ...sinTurnoCandidatos, ...francoCandidatos];
+                    const nominaNoDisponibles = employees
+                        .filter((e: any) => e.id && e.id !== vacancyData?.employeeId)
+                        .map((e: any) => ({ id: e.id as string, nombre: String(e.name || e.id), role: getEmpDayRole(e.id, candidateDate || vacancyData?.startDate || '') }))
+                        .filter((e) => (e.role === 'WORKING' || e.role === 'LICENCIA') && (!q || e.nombre.toLowerCase().includes(q)))
+                        .map((e) => ({ id: e.id, nombre: e.nombre, motivo: e.role === 'LICENCIA' ? 'De licencia ese día' : 'En servicio ese día' }));
+                    const seleccionadoNomina = selectedReplacement ? nominaOrdenada.find((e) => e.id === selectedReplacement) || null : null;
+                    const marcadosNomina = consultaNominaMarcados.filter((id) => nominaOrdenada.some((e) => e.id === id));
+                    const extSel = vacancySplitExtId ? (splitWorkerPoolExt.find((c) => c.id === vacancySplitExtId) || splitWorkerPoolAdel.find((c) => c.id === vacancySplitExtId)) : null;
+                    const adelSel = vacancySplitAdelId ? splitWorkerPoolAdel.find((c) => c.id === vacancySplitAdelId) : null;
+                    const diasBloque = sortedActiveDates.length > 0 ? sortedActiveDates : (diaSel ? [diaSel] : []);
+                    const jornadasBloque = diasBloque.map((d) => {
+                        const tit = resolveTitularForCoverageDay(d, splitReferenceDate || undefined);
+                        return jornadaEventualDesdeBanda(d, tit?.code || 'M', { scheduleLabel: tit?.scheduleLabel, hours: tit?.hours });
+                    });
+                    const diaAsignarEventual = diaSel && jornadasBloque.some((j) => j.fecha === diaSel) ? diaSel : jornadasBloque[0]?.fecha;
+                    const jornadasAsignar = jornadasBloque.filter((j) => j.fecha === diaAsignarEventual);
+                    const objGeo = objLat && objLng ? { lat: objLat, lng: objLng } : null;
+                    const buscador = (placeholder: string, autoFocus = false) => (
+                        <div className="relative">
+                            <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                            <input
+                                autoFocus={autoFocus}
+                                className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm font-bold outline-none focus:border-indigo-400"
+                                placeholder={placeholder}
+                                value={vacancyReplacementSearch}
+                                onChange={(e) => setVacancyReplacementSearch(e.target.value)}
+                                data-cobertura-buscar
+                            />
+                        </div>
+                    );
+                    const listaSplit = (
+                        rotulo: string,
+                        detalle: string,
+                        pool: typeof splitWorkerPoolExt,
+                        vacio: string,
+                        value: string,
+                        onPick: (id: string) => void,
+                    ) => (
+                        <div data-split-lista={rotulo}>
+                            <div className="mb-0.5 text-[10px] font-black uppercase text-slate-500">{rotulo}</div>
+                            <p className="mb-1.5 text-[9px] font-bold text-slate-400">{detalle}</p>
+                            <div className="space-y-1 rounded-xl border border-slate-100 p-1">
+                                {pool.length === 0 ? (
+                                    <p className="px-2 py-3 text-center text-[10px] text-slate-400">{vacio}</p>
+                                ) : pool.map((c) => (
+                                    <button
+                                        key={c.id}
+                                        type="button"
+                                        onClick={() => onPick(c.id)}
+                                        data-split-candidato={c.id}
+                                        className={`w-full rounded-lg border px-2.5 py-2 text-left text-xs font-bold transition-colors ${value === c.id ? 'border-violet-500 bg-violet-50 text-violet-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}
+                                    >
+                                        {c.name} · {c.code} · {c.positionName}
+                                    </button>
+                                ))}
                             </div>
-                            <p className="text-xs text-slate-400 mb-3 shrink-0">{hint}</p>
-                            <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar -mx-1 px-1 space-y-3 mb-4">
-                            {absenceDateRange.length > 1 && (
-                                <div className="mb-3 shrink-0">
-                                    <div className="flex items-center justify-between mb-1.5">
-                                        <label className="text-[10px] font-black uppercase text-slate-400" data-cobertura-paso="1">Paso 1 · Días a procesar</label>
-                                        <div className="flex gap-2">
-                                            <button type="button" onClick={() => setVacancyActiveDates(new Set(absenceDateRange))} className="text-[10px] font-bold text-indigo-600 hover:underline">Todos</button>
-                                            <button type="button" onClick={() => setVacancyActiveDates(new Set())} className="text-[10px] font-bold text-slate-400 hover:underline">Ninguno</button>
-                                        </div>
-                                    </div>
-                                    <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto custom-scrollbar">
-                                        {absenceDateRange.map((d) => (
-                                            <button
-                                                key={d}
-                                                type="button"
-                                                onClick={() => toggleVacancyDate(d)}
-                                                className={`px-2 py-1 rounded-lg text-[11px] font-bold font-mono border transition-colors ${vacancyActiveDates.has(d) ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-indigo-300'}`}
-                                            >
-                                                {formatShortDay(d)}
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-                            {vacancyActiveDates.size > 0 && (
-                                <VacancyCoberturaLista
-                                    days={sortedActiveDates.map((d) => {
-                                        const cov = resolveDayCoverageForUi(d);
-                                        const tit = resolveEffectiveTitularForDay(d);
-                                        const chip = tit ? formatTitularChip(tit) : null;
-                                        return {
-                                            date: d,
-                                            label: formatShortDay(d),
-                                            coverageLabel: resolveDayCoverageLabel(d),
-                                            mode: cov.mode,
-                                            editing: vacancyEditingDay === d,
-                                            titular: chip ? [chip.code, chip.band, chip.position, chip.sched].filter(Boolean).join(' · ') : null,
-                                            consulta: resumenConsultaDia(consultaDelDia(vacancyConsultas, d)),
-                                            resuelveConsulta: diaLoResuelveConsulta(vacancyConsultas, d),
-                                        };
-                                    })}
-                                    emptyCount={vacancyEmptyActiveDays}
-                                    templateLabel={(() => {
-                                        const tpl = templateDayForRemaining(sortedActiveDates, vacancyDayCoverages, vacancyTemplateDay);
-                                        return tpl ? formatShortDay(tpl) : null;
-                                    })()}
-                                    onEdit={openDayCoveragePicker}
-                                    onClear={(d) => {
-                                        setVacancyDayCoverages((prev) => clearDayCoverage(prev, d));
-                                        setVacancyTemplateDay((cur) => (cur === d ? null : cur));
-                                        if (vacancyEditingDay === d) loadPickerFields(undefined);
-                                    }}
-                                    onCompleteRemaining={completeRemainingDays}
-                                />
-                            )}
-                            {(vacancyReplacementOpen && vacancyEditingDay) && (
-                            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 mb-4 shrink-0 space-y-3">
-                                <label className="text-[10px] font-black uppercase text-slate-400 block">
-                                    {`Configurar ${formatShortDay(vacancyEditingDay)}`}
-                                </label>
-                                {(vacancyEditingDay || isBulkCoverageMode) && splitTitularShift && (
-                                    <div className="rounded-2xl border-2 border-amber-200 bg-amber-50/90 px-3 py-3">
-                                        <div className="text-[10px] font-black uppercase text-amber-900 mb-1.5 flex items-center gap-1">
-                                            <Clock size={11} /> Hueco de cobertura (turno SLA)
-                                            {isBulkCoverageMode && splitReferenceDate && (
-                                                <span className="normal-case font-bold text-amber-700/80 ml-1">· ref. {formatShortDay(splitReferenceDate)}</span>
-                                            )}
-                                        </div>
-                                        {vacancyGapBandOptions.length > 0 && (
-                                            <label className="block mb-2">
-                                                <span className="text-[9px] font-black uppercase text-amber-800/90">¿Qué turno cubrir?</span>
-                                                <select
-                                                    className="mt-1 w-full rounded-xl border border-amber-300 bg-white px-2.5 py-2 text-xs font-bold text-slate-800 shadow-sm focus:border-amber-500 focus:ring-1 focus:ring-amber-400"
-                                                    value={vacancyGapBandOverride ?? `${splitTitularShift.code}__${splitTitularShift.positionName}`}
-                                                    onChange={(e) => {
-                                                        const v = e.target.value;
-                                                        const autoKey = `${splitTitularShift.code}__${splitTitularShift.positionName}`;
-                                                        setVacancyGapBandOverride(v && v !== autoKey ? v : null);
-                                                    }}
-                                                >
-                                                    {vacancyGapBandOptions.map((opt) => (
-                                                        <option key={`${opt.code}__${opt.positionName}`} value={`${opt.code}__${opt.positionName}`}>
-                                                            {opt.code} · {opt.positionName} · {opt.scheduleLabel} ({opt.hours}h)
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                                <span className="text-[9px] font-bold text-amber-800/80 mt-1 block">
-                                                    Si el cronograma muestra otro código (ej. S), elegí la banda real del SLA (ej. E3 14:00–20:00).
-                                                </span>
-                                            </label>
-                                        )}
-                                        <div className="text-sm font-black text-slate-800 flex flex-wrap items-center gap-1.5">
-                                            <span className="font-mono bg-white px-2 py-0.5 rounded-lg border border-amber-300 text-amber-900">{splitTitularShift.code}</span>
-                                            {splitTitularShift.bandLabel !== splitTitularShift.code && (
-                                                <span>{splitTitularShift.bandLabel}</span>
-                                            )}
-                                            <span className="text-slate-400">·</span>
-                                            <span>{splitTitularShift.positionName}</span>
-                                        </div>
-                                        <div className="text-[10px] font-bold text-slate-600 mt-1">
-                                            {splitTitularShift.scheduleLabel !== '—' ? (
-                                                <>{splitTitularShift.scheduleLabel} · {splitTitularShift.hours}h</>
-                                            ) : (
-                                                <>{splitTitularShift.hours}h · horario según cronograma</>
-                                            )}
-                                        </div>
-                                        <div className="text-[9px] font-bold text-amber-800/90 mt-1">{splitTitularShift.sourceLabel}</div>
-                                        {vacancyPickerTab === 'split' && splitPlan && (
-                                            <div className="mt-2.5 pt-2.5 border-t border-amber-200/80 grid grid-cols-1 sm:grid-cols-3 gap-2 text-[9px] font-bold text-violet-900">
-                                                <div className="rounded-lg bg-white/70 px-2 py-1.5 border border-violet-100">
-                                                    <div className="text-violet-600 uppercase text-[8px] mb-0.5">Hueco</div>
-                                                    <div>{splitPlan.gapLabel}</div>
-                                                </div>
-                                                <div className="rounded-lg bg-white/70 px-2 py-1.5 border border-violet-100">
-                                                    <div className="text-violet-600 uppercase text-[8px] mb-0.5">Ext · {splitPlan.extBand}</div>
-                                                    <div>{splitPlan.extSegment}</div>
-                                                </div>
-                                                <div className="rounded-lg bg-white/70 px-2 py-1.5 border border-violet-100">
-                                                    <div className="text-violet-600 uppercase text-[8px] mb-0.5">Adel · {splitPlan.adelBand}</div>
-                                                    <div>{splitPlan.adelSegment}</div>
-                                                </div>
-                                            </div>
-                                        )}
-                                        {vacancyPickerTab === 'substitute' && (
-                                            <div className="mt-2.5 pt-2.5 border-t border-amber-200/80 text-[9px] font-bold text-teal-800">
-                                                El suplente heredará turno <strong>{splitTitularShift.code}</strong> en <strong>{splitTitularShift.positionName}</strong>
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-                                {(vacancyEditingDay || isBulkCoverageMode) && vacancyGapBandOptions.length > 0 && !splitTitularShift && (
-                                    <div className="rounded-2xl border border-amber-200 bg-amber-50/90 px-3 py-3">
-                                        <label className="block">
-                                            <span className="text-[10px] font-black uppercase text-amber-900 flex items-center gap-1 mb-1">
-                                                <Clock size={11} /> Elegí el turno SLA a cubrir
-                                            </span>
-                                            <select
-                                                className="w-full rounded-xl border border-amber-300 bg-white px-2.5 py-2 text-xs font-bold text-slate-800 shadow-sm"
-                                                value={vacancyGapBandOverride ?? ''}
-                                                onChange={(e) => setVacancyGapBandOverride(e.target.value || null)}
-                                            >
-                                                <option value="">— Seleccionar banda (ej. E3 14:00–20:00) —</option>
-                                                {vacancyGapBandOptions.map((opt) => (
-                                                    <option key={`${opt.code}__${opt.positionName}`} value={`${opt.code}__${opt.positionName}`}>
-                                                        {opt.code} · {opt.positionName} · {opt.scheduleLabel}
-                                                    </option>
-                                                ))}
-                                            </select>
-                                        </label>
-                                    </div>
-                                )}
-                                {(vacancyEditingDay || isBulkCoverageMode) && (
-                                    <div className="flex gap-2">
-                                        <button
-                                            type="button"
-                                            onClick={() => setVacancyPickerTab('substitute')}
-                                            className={`flex-1 py-2.5 rounded-xl text-[11px] font-black border transition-colors ${vacancyPickerTab === 'substitute' ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm' : 'bg-white text-slate-500 border-slate-200 hover:border-indigo-200'}`}
-                                        >
-                                            Traer suplente
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => setVacancyPickerTab('split')}
-                                            className={`flex-1 py-2.5 rounded-xl text-[11px] font-black border flex items-center justify-center gap-1 transition-colors ${vacancyPickerTab === 'split' ? 'bg-violet-600 text-white border-violet-600 shadow-sm' : 'bg-white text-slate-500 border-slate-200 hover:border-violet-200'}`}
-                                        >
-                                            <Split size={12} /> Ext + Adel
-                                        </button>
-                                    </div>
-                                )}
-                                {isBulkCoverageMode && (
-                                    <p className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-xl px-3 py-2">
-                                        La configuración se aplicará a los {vacancyActiveDates.size} días seleccionados arriba.
-                                    </p>
-                                )}
-                                {vacancyPickerTab === 'substitute' && (
-                                    <div ref={vacancyReplacementPanelRef} className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-                                        <p className="text-[10px] font-bold text-teal-800 bg-teal-50 border-b border-teal-100 px-3 py-2">
-                                            Preferí <strong>RET</strong>, <strong>ESC</strong> o guardias <strong>sin turno</strong> — evitás franco trabajado (FT) y costo extra.
+                        </div>
+                    );
+                    return (
+                    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/25 p-3 backdrop-blur-[2px] sm:p-6">
+                        <div className={`flex w-full max-w-[1100px] max-h-[min(92vh,860px)] flex-col overflow-hidden rounded-2xl border-l-4 bg-white shadow-2xl ${colorMap[color].split(' ')[0]}`} data-cobertura-modal>
+                            <CoberturaFranja
+                                titular={vacancyData?.employeeName || 'Titular'}
+                                motivo={motivoTxt}
+                                codigo={absType || '—'}
+                                rango={textoRangoDias(absenceDateRange)}
+                                diaLabel={diaSel ? formatShortDay(diaSel) : null}
+                                cubrir={textoCubrir(titSel)}
+                                bandas={bandas}
+                                bandaValue={vacancyGapBandOverride ?? bandaAuto}
+                                onBanda={(v) => setVacancyGapBandOverride(v && v !== bandaAuto ? v : null)}
+                                onClose={cerrarModal}
+                            />
+                            <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+                                <aside className="flex max-h-[38vh] shrink-0 flex-col border-b border-slate-200 bg-slate-50/70 lg:max-h-none lg:w-[300px] lg:border-b-0 lg:border-r">
+                                    <CoberturaDias
+                                        dias={diasFilas}
+                                        onSeleccionar={openDayCoveragePicker}
+                                        onMarcar={toggleVacancyDate}
+                                        onTodos={() => setVacancyActiveDates(new Set(absenceDateRange))}
+                                        onNinguno={() => setVacancyActiveDates(new Set())}
+                                        onQuitar={(d) => {
+                                            setVacancyDayCoverages((prev) => clearDayCoverage(prev, d));
+                                            setVacancyTemplateDay((cur) => (cur === d ? null : cur));
+                                            if (diaSel === d) loadPickerFields(undefined);
+                                        }}
+                                        aplicarMarcados={sortedActiveDates.length > 1 ? { n: sortedActiveDates.length, habilitado: !!draftActual, onClick: applyToMarkedDays } : null}
+                                        completar={tplDay && vacancyEmptyActiveDays > 0 ? { texto: `Completar ${vacancyEmptyActiveDays} día(s) sin cobertura con la de ${formatShortDay(tplDay)}`, onClick: completeRemainingDays } : null}
+                                    />
+                                </aside>
+                                <section className="flex min-h-0 flex-1 flex-col p-4" data-cobertura-derecha={tabActual}>
+                                    {!diaSel || !vacancyActiveDates.has(diaSel) ? (
+                                        <p className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-6 text-center text-xs font-bold text-slate-500">
+                                            {absenceDateRange.length ? 'Marcá el día en la lista para configurar su cobertura.' : 'Sin días para cubrir.'}
                                         </p>
-                                        <div className="flex border-b border-slate-200">
-                                            <button
-                                                type="button"
-                                                onClick={() => setVacancyEventualesOpen(false)}
-                                                className={`flex-1 py-2 text-[10px] font-black transition-colors ${!vacancyEventualesOpen ? 'border-b-2 border-indigo-600 text-indigo-700' : 'text-slate-500 hover:text-slate-700'}`}
-                                            >
-                                                Nómina
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => setVacancyEventualesOpen(true)}
-                                                className={`flex-1 py-2 text-[10px] font-black transition-colors ${vacancyEventualesOpen ? 'border-b-2 border-fuchsia-600 text-fuchsia-700' : 'text-slate-500 hover:text-slate-700'}`}
-                                            >
-                                                Eventuales (bolsa)
-                                            </button>
-                                        </div>
-                                        {vacancyEventualesOpen && (() => {
-                                            // La consulta es el bloque: todos los días marcados, una sola vez. Asignar directo sigue siendo el día que se está editando.
-                                            const diasBloque = sortedActiveDates.length > 0
-                                                ? sortedActiveDates
-                                                : (vacancyEditingDay ? [vacancyEditingDay] : []);
-                                            const jornadas = diasBloque.map((d) => {
-                                                const tit = resolveTitularForCoverageDay(d, splitReferenceDate || undefined);
-                                                return jornadaEventualDesdeBanda(d, tit?.code || 'M', { scheduleLabel: tit?.scheduleLabel, hours: tit?.hours });
-                                            });
-                                            const diaAsignar = vacancyEditingDay && jornadas.some((j) => j.fecha === vacancyEditingDay)
-                                                ? vacancyEditingDay
-                                                : jornadas[0]?.fecha;
-                                            const jornadasAsignar = jornadas.filter((j) => j.fecha === diaAsignar);
-                                            const objGeo = objLat && objLng ? { lat: objLat, lng: objLng } : null;
-                                            return (
-                                                <div className="p-2">
-                                                    <p className="text-[9px] font-bold text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 mb-2">
-                                                        {jornadas.length > 1
-                                                            ? 'La consulta es por el bloque completo: el primero que acepta cubre todos los días marcados. Al asignar directo, el suplente queda en el día que estás editando; al guardar se arma el contrato y el alta ARCA.'
-                                                            : `Cubre ${jornadas.map((j) => `${j.fecha.slice(8, 10)}/${j.fecha.slice(5, 7)} · ${j.code} ${j.horaInicio}–${j.horaFin}`).join(' · ')}. El eventual queda como suplente del día; al guardar se arma el contrato y el alta ARCA.`}
+                                    ) : estadoSel && consultaSel ? (
+                                        <>
+                                            <ConsultaDiaBox
+                                                estado={estadoSel}
+                                                resumen={resumenConsultaDia(consultaSel)}
+                                                abierta={consultaSel.status === 'ABIERTA'}
+                                                cancelando={consultaCancelando === consultaSel.id}
+                                                onCancelar={consultaSel.status === 'ABIERTA' ? () => {
+                                                    setConsultaCancelando(consultaSel.id);
+                                                    void cancelarConsultaPlan(consultaSel.id)
+                                                        .then(() => toast.message('Consulta cancelada. Se les avisó que ya no hace falta.'))
+                                                        .catch(() => toast.error('No se pudo cancelar la consulta.'))
+                                                        .finally(() => setConsultaCancelando(null));
+                                                } : undefined}
+                                            />
+                                            <p className="text-[10px] font-bold text-slate-500">
+                                                {consultaSel.status === 'ABIERTA'
+                                                    ? 'Para cubrir este día de otra forma, cancelá la consulta primero.'
+                                                    : 'Si hace falta cambiarlo, hacelo desde la celda de la grilla.'}
+                                            </p>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                                                <CoberturaTabs tab={tabActual} onTab={setTab} eventuales={canConvocarEventual || canConsultarEventual} split={!!splitTitularShift || vacancyGapBandOptions.length > 0} />
+                                                <ModoCoberturaSwitch modo={modoEfectivo} onModo={setVacancyModo} puedePreguntar={puedePreguntar} />
+                                            </div>
+                                            {tabActual === 'nomina' && (
+                                                <>
+                                                    {buscador('Buscar por nombre o legajo…', true)}
+                                                    <div className="mt-2 min-h-0 flex-1 space-y-1 overflow-y-auto custom-scrollbar pr-0.5" data-nomina-lista>
+                                                        {nominaOrdenada.length === 0 && (
+                                                            <p className="px-3 py-6 text-center text-xs text-slate-400">
+                                                                {q ? `Sin resultados para "${vacancyReplacementSearch}"` : 'No hay retenes, ESC, guardias libres ni francos ese día en el objetivo.'}
+                                                            </p>
+                                                        )}
+                                                        {nominaOrdenada.map((e) => {
+                                                            const t = tagDe(e.dayRole);
+                                                            const puedeCasilla = t.tipo === 'FT' ? canAssignFT : !!t.tipo && canConsultarEventual;
+                                                            const km = formatKmLabel(e.km);
+                                                            return (
+                                                                <FilaCandidatoNomina
+                                                                    key={e.id}
+                                                                    c={{
+                                                                        id: e.id,
+                                                                        nombre: `${e.expBadge ? `${e.expBadge} ` : ''}${e.name}`,
+                                                                        meta: [`${e.monthHours} h este mes`, km ? `${km}` : null].filter(Boolean).join(' · '),
+                                                                        tag: t.tag,
+                                                                        tono: t.tono,
+                                                                        nota: t.tipo === 'FT' ? (modoEfectivo === 'preguntar' ? 'se consulta como FT' : 'franco trabajado · pide PIN') : t.tipo === null ? 'turno escuela: solo asignar' : null,
+                                                                    }}
+                                                                    modo={modoEfectivo}
+                                                                    marcado={marcadosNomina.includes(e.id)}
+                                                                    seleccionado={selectedReplacement === e.id}
+                                                                    disabled={modoEfectivo === 'preguntar' && !puedeCasilla}
+                                                                    onToggle={() => setConsultaNominaMarcados((prev) => (prev.includes(e.id) ? prev.filter((id) => id !== e.id) : [...prev, e.id]))}
+                                                                    onElegir={() => { setVacancyPickerTab('substitute'); setSelectedReplacement(e.id); }}
+                                                                />
+                                                            );
+                                                        })}
+                                                        <NoDisponiblesNomina rows={nominaNoDisponibles} />
+                                                    </div>
+                                                    {modoEfectivo === 'preguntar' ? (
+                                                        <BarraPreguntar
+                                                            n={marcadosNomina.length}
+                                                            jornadas={jornadasNomina}
+                                                            espera={consultaNominaVence}
+                                                            onEspera={setConsultaNominaVence}
+                                                            onEnviar={enviarConsultaNomina}
+                                                            enviando={consultaNominaEnviando}
+                                                        />
+                                                    ) : (
+                                                        <CoberturaBarra
+                                                            texto={textoBarraAsignar(seleccionadoNomina?.name, diaSel, titSel?.code, titSel?.scheduleLabel && titSel.scheduleLabel !== '—' ? titSel.scheduleLabel : null)}
+                                                            detalle={seleccionadoNomina?.dayRole === 'FRANCO' ? 'Franco planificado: queda como franco trabajado y pide PIN de supervisor.' : seleccionadoNomina ? `${titSel?.positionName || ''}${titSel?.hours ? ` · ${fmtHorasAr(titSel.hours)} h` : ''}` : null}
+                                                            boton={textoBotonAsignar(seleccionadoNomina?.name)}
+                                                            disabled={!seleccionadoNomina || !draftActual}
+                                                            onClick={applyThisDay}
+                                                        />
+                                                    )}
+                                                </>
+                                            )}
+                                            {tabActual === 'eventuales' && (
+                                                <div className="flex min-h-0 flex-1 flex-col" data-eventuales-tab>
+                                                    <p className="mb-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-[9px] font-bold text-slate-600">
+                                                        {jornadasBloque.length > 1
+                                                            ? 'La consulta es por el bloque completo: el primero que acepta cubre todos los días marcados. Al asignar directo, el eventual queda en el día elegido; al guardar se arma el contrato y el alta ARCA.'
+                                                            : 'El eventual queda como suplente del día; al guardar se arma el contrato y el alta ARCA.'}
                                                     </p>
                                                     <EventualesCandidatosPanel
                                                         empresaId={empresaId || ''}
                                                         objectiveId={selectedObjective || null}
                                                         clientId={selectedClient || null}
                                                         objetivoGeo={objGeo}
-                                                        jornadas={jornadas}
+                                                        jornadas={jornadasBloque}
                                                         canConvocar={canConvocarEventual}
                                                         consulta={canConsultarEventual ? {
                                                             objectiveName: getObjectiveName(selectedObjective || '') || null,
                                                             positionName: vacancyGapPreferredPosition || null,
                                                             titularEmployeeId: vacancyData?.employeeId || null,
                                                         } : null}
+                                                        modo={modoEfectivo}
+                                                        sinEstadoConsulta
                                                         busy={vacancyEventualBusy}
-                                                        compact
                                                         onSelect={async (candidato) => {
                                                             setVacancyEventualBusy(true);
                                                             try {
@@ -16237,12 +16163,10 @@ function PlanificacionDesktop() {
                                                                     objectiveName: getObjectiveName(selectedObjective || '') || null,
                                                                     clientId: selectedClient || null,
                                                                     positionName: vacancyGapPreferredPosition || null,
-                                                                    turnos: jornadasAsignar.length ? jornadasAsignar : jornadas,
+                                                                    turnos: jornadasAsignar.length ? jornadasAsignar : jornadasBloque,
                                                                     modo: 'LEGAJO',
                                                                 });
                                                                 applySubstituteToActiveDays(res.employeeId);
-                                                                setVacancyReplacementOpen(false);
-                                                                setVacancyEventualesOpen(false);
                                                                 toast.success(`${(res.nombre || candidato.nombre).split(',')[0]} (eventual) como suplente en ${jornadasAsignar.length || 1} día(s).`);
                                                             } catch (e) {
                                                                 toast.error(eventualErrorMessage(e));
@@ -16252,291 +16176,133 @@ function PlanificacionDesktop() {
                                                         }}
                                                     />
                                                 </div>
-                                            );
-                                        })()}
-                                        <div className={`p-2 border-b bg-white ${vacancyEventualesOpen ? 'hidden' : ''}`}>
-                                            <div className="relative">
-                                                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-                                                <input
-                                                    autoFocus
-                                                    className="w-full pl-9 pr-3 py-2.5 text-sm font-bold bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-400"
-                                                    placeholder="Buscar por nombre o legajo..."
-                                                    value={vacancyReplacementSearch}
-                                                    onChange={e => setVacancyReplacementSearch(e.target.value)}
-                                                />
-                                            </div>
-                                        </div>
-                                        <div className={`overflow-y-auto custom-scrollbar p-1 max-h-[min(38vh,260px)] ${vacancyEventualesOpen ? 'hidden' : ''}`}>
-                                            {puedeConsultarNomina && jornadasNomina.length > 0 && (
-                                                <div className="mx-1 mb-2 flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-2.5 py-2" data-consulta-bar="nomina">
-                                                    <label className="flex items-center gap-1 text-[10px] font-bold text-slate-600">
-                                                        Lugares
-                                                        <input type="number" min={1} max={20} value={consultaNominaLugares} onChange={(ev) => setConsultaNominaLugares(Math.max(1, Number(ev.target.value) || 1))} className="w-12 rounded-lg border border-slate-200 px-1 py-0.5 text-[11px] font-black text-slate-800" data-consulta-lugares />
-                                                    </label>
-                                                    <label className="flex items-center gap-1 text-[10px] font-bold text-slate-600">
-                                                        Vence
-                                                        <select value={consultaNominaVence} onChange={(ev) => setConsultaNominaVence(Number(ev.target.value))} className="rounded-lg border border-slate-200 bg-white px-1 py-0.5 text-[11px] font-bold text-slate-800" data-consulta-vence>
-                                                            <option value={120}>2 horas</option>
-                                                            <option value={30}>30 min</option>
-                                                            <option value={60}>1 hora</option>
-                                                            <option value={240}>4 horas</option>
-                                                            <option value={0}>Hasta el inicio</option>
-                                                        </select>
-                                                    </label>
-                                                    <button
-                                                        type="button"
-                                                        disabled={consultaNominaMarcados.length === 0 || consultaNominaEnviando}
-                                                        onClick={enviarConsultaNomina}
-                                                        data-consulta-enviar="nomina"
-                                                        className="rounded-xl bg-indigo-600 px-3 py-1.5 text-[10px] font-black text-white disabled:bg-slate-200 disabled:text-slate-500"
-                                                    >
-                                                        {consultaNominaEnviando ? 'Enviando…' : `Consultar disponibilidad (${consultaNominaMarcados.length})`}
-                                                    </button>
-                                                    <span className="text-[9px] font-bold text-slate-400">El primero que acepta cubre los {jornadasNomina.length} día(s). Franco = franco trabajado.</span>
-                                                </div>
                                             )}
-                                            {jornadasNomina.length > 0 && (
-                                                <ConsultaDisponibilidadEstado
-                                                    empresaId={empresaId || ''}
-                                                    objectiveId={selectedObjective || null}
-                                                    positionName={vacancyGapPreferredPosition || null}
-                                                    jornadas={jornadasNomina}
-                                                />
-                                            )}
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    clearCoverageForScope();
-                                                    setVacancyReplacementOpen(false);
-                                                }}
-                                                className={`w-full px-3 py-2.5 text-left text-sm font-bold hover:bg-slate-50 rounded-lg ${!vacancyDayHasCoverage(vacancyEditingDay ? resolveDayCoverageForUi(vacancyEditingDay) : (selectedReplacement ? { mode: 'substitute', employeeId: selectedReplacement } : { mode: 'none' })) ? 'bg-slate-50 ring-1 ring-slate-300 text-slate-500' : 'text-slate-400'}`}
-                                            >
-                                                Sin cobertura — dejar vacante
-                                            </button>
-                                            {francoCandidatos.length > 0 && (
-                                                <>
-                                                    <div className="px-3 py-1.5 text-[10px] font-black uppercase text-violet-700">Franco — se consulta como FT ({francoCandidatos.length})</div>
-                                                    {francoCandidatos.map(e => renderVacancyCandidate(e, `Franco · ${e.monthHours}h`, 'FT'))}
-                                                </>
-                                            )}
-                                            {retenCandidatos.length > 0 && (
-                                                <>
-                                                    <div className="px-3 py-1.5 text-[10px] font-black uppercase text-amber-600">Retén — más cerca primero ({retenCandidatos.length})</div>
-                                                    {retenCandidatos.map(e => renderVacancyCandidate(e, `Retén · ${e.monthHours}h`, 'RET'))}
-                                                </>
-                                            )}
-                                            {escCandidatos.length > 0 && (
-                                                <>
-                                                    <div className="px-3 py-1.5 text-[10px] font-black uppercase text-sky-600">ESC — más cerca primero ({escCandidatos.length})</div>
-                                                    {escCandidatos.map(e => renderVacancyCandidate(e, `ESC · ${e.monthHours}h`))}
-                                                </>
-                                            )}
-                                            {sinTurnoCandidatos.length > 0 && (
-                                                <>
-                                                    <div className="px-3 py-1.5 text-[10px] font-black uppercase text-emerald-600">Sin turno — más cerca primero ({sinTurnoCandidatos.length})</div>
-                                                    {sinTurnoCandidatos.map(e => renderVacancyCandidate(e, `Libre · ${e.monthHours}h`, 'LIBRE'))}
-                                                </>
-                                            )}
-                                            {francoCandidatos.length === 0 && retenCandidatos.length === 0 && escCandidatos.length === 0 && sinTurnoCandidatos.length === 0 && (
-                                                <p className="px-3 py-6 text-xs text-slate-400 text-center">
-                                                    {q ? `Sin resultados para "${vacancyReplacementSearch}"` : 'No hay francos, RET, ESC ni guardias libres ese día cerca del objetivo.'}
-                                                </p>
-                                            )}
-                                        </div>
-                                    </div>
-                                )}
-                                {vacancyPickerTab === 'split' && (vacancyEditingDay || isBulkCoverageMode) && (
-                                    <div ref={vacancyReplacementPanelRef} className="bg-white border border-slate-200 rounded-2xl shadow-sm p-3 space-y-3">
-                                        {!splitTitularShift ? (
-                                            <p className="text-xs text-slate-400 text-center py-4">
-                                                No se pudo inferir la banda a cubrir. Revisá el turno habitual del titular en el cronograma.
-                                            </p>
-                                        ) : (
-                                            <>
-                                                <div className="relative">
-                                                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-                                                    <input
-                                                        className="w-full pl-9 pr-3 py-2 text-sm font-bold bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-violet-400"
-                                                        placeholder="Filtrar guardias..."
-                                                        value={vacancyReplacementSearch}
-                                                        onChange={e => setVacancyReplacementSearch(e.target.value)}
-                                                    />
-                                                </div>
-                                                <div>
-                                                    <label className="text-[10px] font-black uppercase text-slate-500 block mb-0.5">
-                                                        1.er tramo — extensión ({splitExtSegmentLabel})
-                                                    </label>
-                                                    <p className="text-[9px] text-slate-400 font-bold mb-1.5">
-                                                        Solo banda {splitPlan?.extBand || 'anterior'} (turno que termina cuando empieza el hueco). El titular ausente no aparece.
-                                                    </p>
-                                                    <div className="space-y-1 max-h-36 overflow-y-auto custom-scrollbar rounded-xl border border-slate-100 p-1">
-                                                        {splitWorkerPoolExt.length === 0 ? (
-                                                            <p className="text-[10px] text-slate-400 px-2 py-3 text-center">
-                                                                No hay guardias en banda {splitPlan?.extBand || 'anterior'} ese día en el objetivo.
-                                                            </p>
-                                                        ) : splitWorkerPoolExt.map(c => (
-                                                            <button
-                                                                key={c.id}
-                                                                type="button"
-                                                                onClick={() => setVacancySplitExtId(c.id)}
-                                                                className={`w-full px-2.5 py-2 text-left text-xs font-bold rounded-lg border transition-colors ${vacancySplitExtId === c.id ? 'bg-red-100 border-red-500 text-red-900' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}
-                                                            >
-                                                                {c.name} · {c.code} · {c.positionName}
-                                                            </button>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                                <div>
-                                                    <label className="text-[10px] font-black uppercase text-slate-500 block mb-0.5">
-                                                        2.º tramo — adelanto ({splitSecondSegmentLabel})
-                                                    </label>
-                                                    <p className="text-[9px] text-slate-400 font-bold mb-1.5">
-                                                        Solo banda {splitPlan?.adelBand || 'posterior'} (turno que empieza cuando termina el hueco).
-                                                    </p>
-                                                    <div className="space-y-1 max-h-36 overflow-y-auto custom-scrollbar rounded-xl border border-slate-100 p-1">
-                                                        {splitWorkerPoolAdel.length === 0 ? (
-                                                            <p className="text-[10px] text-slate-400 px-2 py-3 text-center">
-                                                                {vacancySplitExtId
-                                                                    ? `No hay guardias en banda ${splitPlan?.adelBand || 'posterior'} ese día (distintos del 1.er tramo).`
-                                                                    : `No hay guardias en banda ${splitPlan?.adelBand || 'posterior'} ese día en el objetivo.`}
-                                                            </p>
-                                                        ) : splitWorkerPoolAdel.map(c => (
-                                                            <button
-                                                                key={c.id}
-                                                                type="button"
-                                                                onClick={() => setVacancySplitAdelId(c.id)}
-                                                                className={`w-full px-2.5 py-2 text-left text-xs font-bold rounded-lg border transition-colors ${vacancySplitAdelId === c.id ? 'bg-red-100 border-red-500 text-red-900' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}
-                                                            >
-                                                                {c.name} · {c.code} · {c.positionName}
-                                                            </button>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                                <div className="rounded-xl border border-violet-200 bg-violet-50/80 px-3 py-2.5 space-y-2">
-                                                    <div className="text-[10px] font-black uppercase text-violet-900">Horas de extensión</div>
-                                                    <p className="text-[9px] font-bold text-violet-800/90">
-                                                        {splitManualExtraHours
-                                                            ? `Manual: +${vacancySplitExtExtraHours}h y +${vacancySplitSecondExtraHours}h sobre el fin SLA de cada guardia.`
-                                                            : 'Auto: tramos según hueco SLA (corte entre bandas).'}
-                                                    </p>
-                                                    <div className="flex flex-wrap gap-1.5">
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => {
-                                                                setVacancySplitExtExtraHours(null);
-                                                                setVacancySplitSecondExtraHours(null);
-                                                            }}
-                                                            className={`px-2.5 py-1.5 rounded-lg text-[10px] font-black border ${!splitManualExtraHours ? 'bg-violet-600 text-white border-violet-600' : 'bg-white text-slate-600 border-slate-200 hover:border-violet-300'}`}
-                                                        >
-                                                            Auto SLA
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => {
-                                                                setVacancySplitExtExtraHours(2);
-                                                                setVacancySplitSecondExtraHours(4);
-                                                            }}
-                                                            className={`px-2.5 py-1.5 rounded-lg text-[10px] font-black border ${splitManualExtraHours && vacancySplitExtExtraHours === 2 && vacancySplitSecondExtraHours === 4 ? 'bg-red-600 text-white border-red-600' : 'bg-white text-slate-600 border-slate-200 hover:border-red-200'}`}
-                                                        >
-                                                            +2h / +4h
-                                                        </button>
-                                                    </div>
-                                                    <div className="grid grid-cols-2 gap-2">
-                                                        <label className="text-[9px] font-bold text-slate-600">
-                                                            1.er guardia (+h)
-                                                            <input
-                                                                type="number"
-                                                                min={0}
-                                                                max={12}
-                                                                step={0.5}
-                                                                className="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-bold"
-                                                                placeholder="Auto"
-                                                                value={vacancySplitExtExtraHours ?? ''}
-                                                                onChange={(e) => {
-                                                                    const raw = e.target.value.trim();
-                                                                    if (!raw) {
-                                                                        setVacancySplitExtExtraHours(null);
-                                                                        return;
-                                                                    }
-                                                                    const n = Number(raw);
-                                                                    setVacancySplitExtExtraHours(Number.isFinite(n) ? n : null);
-                                                                }}
+                                            {tabActual === 'split' && (
+                                                <div className="flex min-h-0 flex-1 flex-col" data-split-tab>
+                                                    {!splitTitularShift ? (
+                                                        <p className="py-4 text-center text-xs text-slate-400">
+                                                            No se pudo inferir la banda a cubrir. Elegí el turno en la franja de arriba o revisá el turno habitual del titular.
+                                                        </p>
+                                                    ) : (
+                                                        <>
+                                                            {buscador('Filtrar guardias…')}
+                                                            <div className="mt-2 min-h-0 flex-1 space-y-3 overflow-y-auto custom-scrollbar pr-0.5">
+                                                                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                                                                    {listaSplit(
+                                                                        `1.er tramo — extensión (${splitExtSegmentLabel})`,
+                                                                        `Solo banda ${splitPlan?.extBand || 'anterior'}: el turno que termina cuando empieza el hueco.`,
+                                                                        splitWorkerPoolExt,
+                                                                        `No hay guardias en banda ${splitPlan?.extBand || 'anterior'} ese día en el objetivo.`,
+                                                                        vacancySplitExtId,
+                                                                        setVacancySplitExtId,
+                                                                    )}
+                                                                    {listaSplit(
+                                                                        `2.º tramo — adelanto (${splitSecondSegmentLabel})`,
+                                                                        `Solo banda ${splitPlan?.adelBand || 'posterior'}: el turno que empieza cuando termina el hueco.`,
+                                                                        splitWorkerPoolAdel,
+                                                                        vacancySplitExtId
+                                                                            ? `No hay guardias en banda ${splitPlan?.adelBand || 'posterior'} ese día (distintos del 1.er tramo).`
+                                                                            : `No hay guardias en banda ${splitPlan?.adelBand || 'posterior'} ese día en el objetivo.`,
+                                                                        vacancySplitAdelId,
+                                                                        setVacancySplitAdelId,
+                                                                    )}
+                                                                </div>
+                                                                <div className="space-y-2 rounded-xl border border-violet-200 bg-violet-50/80 px-3 py-2.5">
+                                                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                                                        <div>
+                                                                            <div className="text-[10px] font-black uppercase text-violet-900">Horas de extensión</div>
+                                                                            <p className="text-[9px] font-bold text-violet-800/90">
+                                                                                {splitManualExtraHours
+                                                                                    ? `Manual: +${vacancySplitExtExtraHours} h y +${vacancySplitSecondExtraHours} h sobre el fin SLA de cada guardia.`
+                                                                                    : 'Auto: tramos según el hueco SLA (corte entre bandas).'}
+                                                                            </p>
+                                                                        </div>
+                                                                        <div className="flex flex-wrap gap-1.5">
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => { setVacancySplitExtExtraHours(null); setVacancySplitSecondExtraHours(null); }}
+                                                                                className={`rounded-lg border px-2.5 py-1.5 text-[10px] font-black ${!splitManualExtraHours ? 'border-violet-600 bg-violet-600 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-violet-300'}`}
+                                                                            >
+                                                                                Auto SLA
+                                                                            </button>
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => { setVacancySplitExtExtraHours(2); setVacancySplitSecondExtraHours(4); }}
+                                                                                className={`rounded-lg border px-2.5 py-1.5 text-[10px] font-black ${splitManualExtraHours && vacancySplitExtExtraHours === 2 && vacancySplitSecondExtraHours === 4 ? 'border-violet-600 bg-violet-600 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-violet-300'}`}
+                                                                            >
+                                                                                +2 h / +4 h
+                                                                            </button>
+                                                                        </div>
+                                                                    </div>
+                                                                    <div className="grid grid-cols-2 gap-2">
+                                                                        <label className="text-[9px] font-bold text-slate-600">
+                                                                            1.er guardia (+h)
+                                                                            <input
+                                                                                type="number"
+                                                                                min={0}
+                                                                                max={12}
+                                                                                step={0.5}
+                                                                                className="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-bold"
+                                                                                placeholder="Auto"
+                                                                                value={vacancySplitExtExtraHours ?? ''}
+                                                                                onChange={(e) => {
+                                                                                    const raw = e.target.value.trim();
+                                                                                    if (!raw) { setVacancySplitExtExtraHours(null); return; }
+                                                                                    const n = Number(raw);
+                                                                                    setVacancySplitExtExtraHours(Number.isFinite(n) ? n : null);
+                                                                                }}
+                                                                            />
+                                                                        </label>
+                                                                        <label className="text-[9px] font-bold text-slate-600">
+                                                                            2.º guardia (+h)
+                                                                            <input
+                                                                                type="number"
+                                                                                min={0}
+                                                                                max={12}
+                                                                                step={0.5}
+                                                                                className="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-bold"
+                                                                                placeholder="Auto"
+                                                                                value={vacancySplitSecondExtraHours ?? ''}
+                                                                                onChange={(e) => {
+                                                                                    const raw = e.target.value.trim();
+                                                                                    if (!raw) { setVacancySplitSecondExtraHours(null); return; }
+                                                                                    const n = Number(raw);
+                                                                                    setVacancySplitSecondExtraHours(Number.isFinite(n) ? n : null);
+                                                                                }}
+                                                                            />
+                                                                        </label>
+                                                                    </div>
+                                                                </div>
+                                                                {splitFrancoPreview.length > 0 && (
+                                                                    <AvisoCobertura>
+                                                                        {formatFrancoConflictSummary(splitFrancoPreview)}. Requiere <strong>PIN de supervisor</strong> o elegí guardias en servicio / RET / ESC (pestaña Nómina).
+                                                                    </AvisoCobertura>
+                                                                )}
+                                                            </div>
+                                                            <CoberturaBarra
+                                                                tono="violet"
+                                                                texto={textoBarraSplit(extSel?.name, adelSel?.name)}
+                                                                detalle={splitDualPreview
+                                                                    ? `Hueco ${splitDualPreview.gap.from}–${splitDualPreview.gap.to} · 1.º ${splitDualPreview.first.from}–${splitDualPreview.first.to} · 2.º ${splitDualPreview.second.from}–${splitDualPreview.second.to}`
+                                                                    : (splitPlan ? `Hueco ${splitPlan.gapLabel} · Ext ${splitPlan.extBand} ${splitPlan.extSegment} · Adel ${splitPlan.adelBand} ${splitPlan.adelSegment}` : null)}
+                                                                boton={TEXTO_BOTON_SPLIT}
+                                                                disabled={!draftActual}
+                                                                onClick={applyThisDay}
                                                             />
-                                                        </label>
-                                                        <label className="text-[9px] font-bold text-slate-600">
-                                                            2.º guardia (+h)
-                                                            <input
-                                                                type="number"
-                                                                min={0}
-                                                                max={12}
-                                                                step={0.5}
-                                                                className="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-bold"
-                                                                placeholder="Auto"
-                                                                value={vacancySplitSecondExtraHours ?? ''}
-                                                                onChange={(e) => {
-                                                                    const raw = e.target.value.trim();
-                                                                    if (!raw) {
-                                                                        setVacancySplitSecondExtraHours(null);
-                                                                        return;
-                                                                    }
-                                                                    const n = Number(raw);
-                                                                    setVacancySplitSecondExtraHours(Number.isFinite(n) ? n : null);
-                                                                }}
-                                                            />
-                                                        </label>
-                                                    </div>
-                                                    {splitDualPreview && (
-                                                        <div className="text-[9px] font-bold text-violet-900 pt-1 border-t border-violet-200/80">
-                                                            Hueco {splitDualPreview.gap.from}–{splitDualPreview.gap.to}
-                                                            {' · '}
-                                                            1.º {splitDualPreview.first.from}–{splitDualPreview.first.to}
-                                                            {' · '}
-                                                            2.º {splitDualPreview.second.from}–{splitDualPreview.second.to}
-                                                        </div>
+                                                        </>
                                                     )}
                                                 </div>
-                                                {splitFrancoPreview.length > 0 && (
-                                                    <div className="rounded-xl border-2 border-amber-300 bg-amber-50 px-3 py-2.5 text-[10px] font-bold text-amber-900">
-                                                        <div className="flex items-center gap-1.5 mb-1 text-amber-800">
-                                                            <AlertTriangle size={12} /> Franco planificado — costo FT
-                                                        </div>
-                                                        <p className="leading-relaxed">
-                                                            {formatFrancoConflictSummary(splitFrancoPreview)}.
-                                                            Requiere <strong>PIN de supervisor</strong> o elegí guardias en servicio / RET / ESC (pestaña suplente).
-                                                        </p>
-                                                    </div>
-                                                )}
-                                            </>
-                                        )}
-                                    </div>
-                                )}
-                                {vacancyEditingDay && (
-                                    <VacancyCoberturaAcciones
-                                        dayLabel={formatShortDay(vacancyEditingDay)}
-                                        markedCount={sortedActiveDates.length}
-                                        canApply={!!draftNow()}
-                                        isLast={nextMarkedDay(sortedActiveDates, vacancyEditingDay) == null}
-                                        hasPreviousCoverage={(() => {
-                                            const prev = previousMarkedDay(sortedActiveDates, vacancyEditingDay);
-                                            return !!(prev && vacancyDayHasCoverage(savedCoverage(vacancyDayCoverages, prev)));
-                                        })()}
-                                        onApplyThisDay={applyThisDay}
-                                        onApplyToMarked={applyToMarkedDays}
-                                        onNext={goNextDay}
-                                        onCopyPrevious={copyPreviousDay}
-                                        onClose={leaveEditor}
-                                    />
-                                )}
+                                            )}
+                                        </>
+                                    )}
+                                </section>
                             </div>
-                            )}
-                            </div>
-                            <div className="flex gap-3 shrink-0">
-                                <button onClick={finalizeVacancyModal} className="flex-1 py-3 text-slate-400 font-bold hover:bg-slate-50 rounded-xl border">Cancelar</button>
-                                <button onClick={handleProcessVacancy} disabled={vacancyActiveDates.size === 0} className={`flex-1 py-3 text-white rounded-xl font-bold shadow-lg disabled:opacity-40 ${btnColor[color]}`}>
-                                    {willAssignAny ? 'Confirmar cobertura' : 'Marcar vacante'}
-                                </button>
-                            </div>
-                            <p className="text-[10px] text-slate-400 text-center mt-3 shrink-0">Los cambios quedan pendientes — recordá guardar el cronograma.</p>
+                            <CoberturaPie
+                                accion={accionPrincipal}
+                                accionDisabled={vacancyActiveDates.size === 0}
+                                onAccion={handleProcessVacancy}
+                                onCerrar={cerrarModal}
+                            />
                         </div>
                     </div>
                     );

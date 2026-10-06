@@ -83,6 +83,10 @@ type Props = {
         positionName?: string | null;
         titularEmployeeId?: string | null;
     } | null;
+    /** Modo controlado desde afuera (modal v2 del escritorio): el panel no dibuja su propio selector. */
+    modo?: ModoEventuales;
+    /** Sin estado de la consulta adentro: la página lo muestra en otro lugar. */
+    sinEstadoConsulta?: boolean;
 };
 
 export function jornadasKey(jornadas: JornadaEventual[]): string {
@@ -93,6 +97,7 @@ const TIPO_LABEL: Record<string, string> = { credencial: 'Credencial', apto: 'Ap
 
 export default function EventualesCandidatosPanel({
     empresaId, objectiveId, clientId, objetivoGeo, jornadas, excluirTurnoIds, excluirCuil, canConvocar, busy, onSelect, compact, cupo, consulta,
+    modo: modoControlado, sinEstadoConsulta,
 }: Props) {
     const [rows, setRows] = useState<CandidatoEventual[]>([]);
     const [loading, setLoading] = useState(false);
@@ -111,7 +116,8 @@ export default function EventualesCandidatosPanel({
     const key = jornadasKey(jornadas);
     const veLista = canConvocar || !!consulta;
     const puedePreguntar = !!consulta;
-    const modoEfectivo: ModoEventuales = !puedePreguntar ? 'asignar' : !canConvocar ? 'preguntar' : modo;
+    const modoEfectivo: ModoEventuales = !puedePreguntar ? 'asignar' : !canConvocar ? 'preguntar' : (modoControlado || modo);
+    useEffect(() => { setConfirmando(null); }, [modoControlado]);
 
     useEffect(() => {
         if (!veLista || !empresaId || jornadas.length === 0) { setRows([]); return; }
@@ -220,7 +226,7 @@ export default function EventualesCandidatosPanel({
 
     return (
         <div className="flex flex-col min-h-0">
-            {puedePreguntar && canConvocar && <ModoEventualesSelector modo={modoEfectivo} onModo={(m) => { setModo(m); setConfirmando(null); }} />}
+            {puedePreguntar && canConvocar && !modoControlado && <ModoEventualesSelector modo={modoEfectivo} onModo={(m) => { setModo(m); setConfirmando(null); }} />}
             <div className="px-1 pb-2 shrink-0">
                 <div className="flex items-center gap-2 bg-slate-50 rounded-lg px-2.5 py-1.5 border border-slate-200">
                     <Search size={12} className="text-slate-400 shrink-0"/>
@@ -354,7 +360,7 @@ export default function EventualesCandidatosPanel({
                     onCancelar={() => setConfirmando(null)}
                 />
             )}
-            {consulta && (
+            {consulta && !sinEstadoConsulta && (
                 <ConsultaDisponibilidadEstado empresaId={empresaId} objectiveId={objectiveId} positionName={consulta.positionName} jornadas={jornadas} />
             )}
         </div>

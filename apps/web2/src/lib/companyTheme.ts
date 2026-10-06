@@ -12,19 +12,32 @@ export const COMPANY_THEME_VARS = [
   '--company-primary-dark-card2','--company-primary-dark-border',
   '--company-primary-glow','--company-primary-active-bg',
   '--company-primary-tag-bg','--company-primary-tag-text',
+  '--company-primary-btn','--company-primary-btn-text',
   '--movil-topbar','--movil-primary','--movil-primary-text',
 ];
 
 /**
- * Luminosidad HSL (0–100) del color. Por encima de `MOVIL_LIGHT_L` el color es «claro»:
- * el texto blanco encima no llega a AA y el celular usa el tono oscuro.
+ * Un color es «claro» cuando el texto blanco encima no llega a AA (contraste WCAG < 4,5:1).
+ * Se mide con luminancia relativa, no con la L de HSL: un índigo tiene L alta pero contrasta bien.
  */
-export const MOVIL_LIGHT_L = 58;
+export const MIN_CONTRASTE_BLANCO = 4.5;
 /** Saturación HSL por debajo de la cual el color de la empresa es «gris». */
 export const MOVIL_GRAY_S = 20;
 
+function luminanciaRelativa(hex: string): number {
+  const canal = (i: number) => {
+    const c = parseInt(hex.slice(i, i + 2), 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * canal(1) + 0.7152 * canal(3) + 0.0722 * canal(5);
+}
+
+export function contrasteConBlanco(hex: string): number {
+  return 1.05 / (luminanciaRelativa(hex) + 0.05);
+}
+
 export function companyColorIsLight(hex: string): boolean {
-  return hexToHsl(hex)[2] > MOVIL_LIGHT_L;
+  return contrasteConBlanco(hex) < MIN_CONTRASTE_BLANCO;
 }
 
 /**
@@ -36,13 +49,20 @@ export function companyColorIsLight(hex: string): boolean {
  */
 export function buildMovilTheme(hex: string): { '--movil-topbar': string; '--movil-primary': string; '--movil-primary-text': string } {
   const theme = buildCompanyTheme(hex);
-  // Un color casi gris como primario se confunde con un botón deshabilitado: ahí va casi negro.
-  const gris = hexToHsl(hex)[1] < MOVIL_GRAY_S;
   return {
     '--movil-topbar': theme['--topbar-bg'],
-    '--movil-primary': gris ? '#111827' : companyColorIsLight(hex) ? theme['--company-primary-darker'] : hex,
-    '--movil-primary-text': '#ffffff',
+    '--movil-primary': theme['--company-primary-btn'],
+    '--movil-primary-text': theme['--company-primary-btn-text'],
   };
+}
+
+/**
+ * Color de los botones rellenos (`bg-indigo-600` y compañía) con el tema de la empresa.
+ * Un color casi gris se confunde con un botón deshabilitado: ahí va casi negro. Un color claro
+ * no llega a AA con texto blanco: ahí va el tono oscuro. El texto siempre es blanco.
+ */
+export function companyButtonColor(hex: string): string {
+  return buildCompanyTheme(hex)['--company-primary-btn'];
 }
 
 function hexToHsl(hex: string): [number, number, number] {
@@ -76,7 +96,11 @@ function hslToHex(h: number, s: number, l: number): string {
 export function buildCompanyTheme(hex: string): Record<string, string> {
   const [h, s] = hexToHsl(hex);
   const sat = Math.min(s, 88);
+  const darker = hslToHex(h, sat, 27);
+  const btn = s < MOVIL_GRAY_S ? '#111827' : companyColorIsLight(hex) ? darker : hex;
   return {
+    '--company-primary-btn':      btn,
+    '--company-primary-btn-text': '#ffffff',
     '--sb-bg':                    hslToHex(h, sat, 13),
     '--sb-border':                hslToHex(h, sat - 10, 22),
     '--sb-text':                  hslToHex(h, 22, 83),
@@ -113,15 +137,24 @@ export function buildCompanyTheme(hex: string): Record<string, string> {
   };
 }
 
-function buildBrandCSS(): string {
+/**
+ * Un botón deshabilitado conserva sus clases `bg-indigo-600 text-white` y Tailwind le pone
+ * `disabled:bg-slate-200 disabled:text-slate-500`. Si la marca pisa el fondo con `!important` sin
+ * mirar `:disabled`, queda texto gris sobre el color de la empresa (o blanco sobre un color claro):
+ * el botón «sin título» que se vio en Planificación. Por eso los fondos rellenos excluyen
+ * `:disabled` y usan `--company-primary-btn`, que siempre contrasta con blanco.
+ */
+const BTN_ON = ':not(:disabled):not([aria-disabled="true"])';
+
+export function buildBrandCSS(): string {
   return `
     /* ── LIGHT MODE (default) ── */
-    html[data-brand] .bg-indigo-600,
-    html[data-brand] .bg-indigo-500 { background-color: var(--company-primary) !important; }
-    html[data-brand] .bg-indigo-700 { background-color: var(--company-primary-dark) !important; }
-    html[data-brand] .bg-indigo-800 { background-color: var(--company-primary-darker) !important; }
-    html[data-brand] .hover\\:bg-indigo-700:hover { background-color: var(--company-primary-dark) !important; }
-    html[data-brand] .hover\\:bg-indigo-600:hover { background-color: var(--company-primary) !important; }
+    html[data-brand] .bg-indigo-600${BTN_ON},
+    html[data-brand] .bg-indigo-500${BTN_ON} { background-color: var(--company-primary-btn) !important; }
+    html[data-brand] .bg-indigo-700${BTN_ON} { background-color: var(--company-primary-dark) !important; }
+    html[data-brand] .bg-indigo-800${BTN_ON} { background-color: var(--company-primary-darker) !important; }
+    html[data-brand] .hover\\:bg-indigo-700:hover${BTN_ON} { background-color: var(--company-primary-dark) !important; }
+    html[data-brand] .hover\\:bg-indigo-600:hover${BTN_ON} { background-color: var(--company-primary-btn) !important; }
     html[data-brand] .bg-indigo-50  { background-color: var(--company-primary-lightest) !important; }
     html[data-brand] .bg-indigo-100 { background-color: var(--company-primary-lighter) !important; }
     html[data-brand] .text-indigo-600,
@@ -163,12 +196,12 @@ function buildBrandCSS(): string {
     html.dark[data-brand] .focus\\:border-indigo-400:focus { border-color: var(--company-primary-dark-border) !important; }
 
     /* ── VIOLET / PURPLE — mismas reglas que indigo para componentes que usan esas clases ── */
-    html[data-brand] .bg-violet-600,
-    html[data-brand] .bg-violet-500,
-    html[data-brand] .bg-purple-600,
-    html[data-brand] .bg-purple-500 { background-color: var(--company-primary) !important; }
-    html[data-brand] .bg-violet-700,
-    html[data-brand] .bg-purple-700  { background-color: var(--company-primary-dark) !important; }
+    html[data-brand] .bg-violet-600${BTN_ON},
+    html[data-brand] .bg-violet-500${BTN_ON},
+    html[data-brand] .bg-purple-600${BTN_ON},
+    html[data-brand] .bg-purple-500${BTN_ON} { background-color: var(--company-primary-btn) !important; }
+    html[data-brand] .bg-violet-700${BTN_ON},
+    html[data-brand] .bg-purple-700${BTN_ON}  { background-color: var(--company-primary-dark) !important; }
     html[data-brand] .bg-violet-50,
     html[data-brand] .bg-purple-50   { background-color: var(--company-primary-lightest) !important; }
     html[data-brand] .bg-violet-100,
