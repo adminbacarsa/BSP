@@ -14,6 +14,7 @@ import {
   type HeroEvDisplay,
   type HeroShiftCardModel,
 } from '../../lib/heroShiftCard';
+import { formatCuandoTurno } from '../../lib/fechaTurno';
 
 const TZ = 'America/Argentina/Buenos_Aires';
 
@@ -202,13 +203,16 @@ export function HeroShiftPanel({
   );
 }
 
-export function formatHeroTimeRange(shift: Shift): string {
-  return `${formatTimeArLocal(shift.startTime)}–${formatTimeArLocal(shift.endTime)}`;
+export function formatHeroTimeRange(shift: Shift, now = new Date()): string {
+  return (
+    formatCuandoTurno(shift.startTime, shift.endTime, now) ||
+    `${formatTimeArLocal(shift.startTime)}–${formatTimeArLocal(shift.endTime)}`
+  );
 }
 
-/** Fecha + rango horario (ej. 22/08/2026 · 08:00–16:00). */
-export function formatHeroDateTimeRange(shift: Shift): string {
-  return `${formatDateArLocal(shift.startTime)} · ${formatHeroTimeRange(shift)}`;
+/** Fecha relativa + rango horario (ej. Sáb 17/10 · 10:00–20:00). */
+export function formatHeroDateTimeRange(shift: Shift, now = new Date()): string {
+  return formatHeroTimeRange(shift, now);
 }
 
 /**

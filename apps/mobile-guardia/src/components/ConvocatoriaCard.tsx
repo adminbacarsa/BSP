@@ -12,6 +12,7 @@ import {
   type ConvocatoriaCardModel,
   type LlegadaTardeEtaMinutes,
 } from '../lib/convocatoriaCard';
+import { formatCuandoDesdePartes } from '../lib/fechaTurno';
 
 export type ConvocatoriaCardProps = {
   model: ConvocatoriaCardModel;
@@ -65,7 +66,9 @@ export function ConvocatoriaCard({
   const tone = TONE[model.kind];
   const remain = closedLabel ? '' : remainingLabel(model.timeoutAtMs, nowMs);
   const lugar = lugarLinea({ cliente: model.cliente, objetivo: model.objetivo, puesto: null });
-  const cuando = [model.fecha, model.horario].filter(Boolean).join(' · ');
+  const cuando =
+    formatCuandoDesdePartes(model.fecha, model.horario, new Date(nowMs)) ||
+    [model.fecha, model.horario].filter(Boolean).join(' · ');
   const blocked = busy || disabled;
 
   return (

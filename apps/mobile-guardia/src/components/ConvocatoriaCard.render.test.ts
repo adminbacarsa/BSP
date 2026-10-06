@@ -74,7 +74,7 @@ describe('ConvocatoriaCard · cobertura', () => {
     assert.match(t, /Franco trabajado \(FT\)/);
     assert.match(t, /Caminos de las Sierras · Peaje 9 Norte/);
     assert.match(t, /Puesto 1/);
-    assert.match(t, /05\/10\/2026 · 16:00–17:00/);
+    assert.match(t, /Hoy · 16:00–17:00/);
     assert.match(t, /Código T3/);
     assert.match(t, /59s restantes/);
     assert.match(t, /Laura, ¿nos das una mano\? Necesitamos cubrir Puesto 1 en Peaje 9 Norte de 16:00 a 17:00\./);
@@ -165,7 +165,7 @@ describe('ConvocatoriaCard · evento', () => {
     assert.match(t, /Recital Plaza/);
     assert.match(t, /Evento/);
     assert.match(t, /Control de acceso/);
-    assert.match(t, /12\/10\/2026 · 18:00–02:00/);
+    assert.match(t, /Lun 12\/10 18:00–Mar 13\/10 02:00/);
     assert.deepEqual(buttons(html), ['Aceptar', 'Rechazar']);
   });
 });
@@ -175,6 +175,7 @@ describe('ConvocatoriaCard · disponibilidad en bloque', () => {
     const bloque = armarPreguntaDisponibilidad({
       objetivo: 'Peaje 9 Norte',
       puesto: 'Puesto 1',
+      now: new Date(NOW),
       jornadas: [
         { fecha: '2026-10-06', code: 'M', horaInicio: '07:00', horaFin: '15:00' },
         { fecha: '2026-10-15', code: 'M', horaInicio: '07:00', horaFin: '15:00' },
@@ -189,9 +190,9 @@ describe('ConvocatoriaCard · disponibilidad en bloque', () => {
       puesto: 'Puesto 1',
     }));
     const t = text(html);
-    assert.match(t, /¿Podés cubrir 2 días \(06\/10 → 15\/10\) en Peaje 9 Norte · Puesto 1\?/);
-    assert.match(t, /06\/10 · M 07:00–15:00/);
-    assert.match(t, /15\/10 · M 07:00–15:00/);
+    assert.match(t, /¿Podés cubrir 2 días \(Mañana → Jue 15\/10\) en Peaje 9 Norte · Puesto 1\?/);
+    assert.match(t, /Mañana · M 07:00–15:00/);
+    assert.match(t, /Jue 15\/10 · M 07:00–15:00/);
     assert.deepEqual(buttons(html), ['Sí, puedo', 'No puedo']);
   });
 });

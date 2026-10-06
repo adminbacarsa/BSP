@@ -25,6 +25,7 @@ export function ConsultasDisponibilidadBanner({
           objetivo: item.objectiveName,
           puesto: item.positionName,
           jornadas: item.jornadas,
+          now: new Date(nowMs),
         });
         const j = item.jornadas[0];
         const fecha = !bloque && j?.fecha && j.fecha.length === 10 ? `${j.fecha.slice(8, 10)}/${j.fecha.slice(5, 7)}/${j.fecha.slice(0, 4)}` : null;
