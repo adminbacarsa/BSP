@@ -11,7 +11,8 @@
  * @param {{ filas: FilaNovedad[], codigoLote?: string }} input
  */
 export function decidirNovedadAbierta({ filas, codigoLote }) {
-  const abiertas = (filas || []).filter((f) => /^abierto$/i.test(String(f.estado || '').trim()));
+  // Abierto (sin archivo) y Cargado (archivo subido, sin enviar) siguen abiertas: no se crea otra.
+  const abiertas = (filas || []).filter((f) => /^(abierto|cargado)$/i.test(String(f.estado || '').trim()));
   if (!abiertas.length) return { accion: 'NUEVO' };
   const codigo = String(codigoLote || '').trim();
   const mia = codigo ? abiertas.find((f) => String(f.codigo) === codigo) : null;
@@ -37,7 +38,7 @@ export function mensajeNovedadAjena(codigo) {
 export function parseFilasListado(texto) {
   const src = String(texto || '');
   const filas = [];
-  const re = /(\d{4,})\s+(\d{1,2}\/\d{1,2}\/\d{4})(?:\s+(\d{1,2}\/\d{1,2}\/\d{4}(?:\s+\d{1,2}:\d{2}:\d{2})?))?(?:\s+(\d{6,}))?\s+(Abierto|Presentado|Cerrado|Anulado|Confirmado|Enviado)/gi;
+  const re = /(\d{4,})\s+(\d{1,2}\/\d{1,2}\/\d{4})(?:\s+(\d{1,2}\/\d{1,2}\/\d{4}(?:\s+\d{1,2}:\d{2}:\d{2})?))?(?:\s+(\d{6,}))?\s+(Abierto|Cargado|Presentado|Cerrado|Anulado|Confirmado|Enviado)/gi;
   let m = re.exec(src);
   while (m) {
     filas.push({
