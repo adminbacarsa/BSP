@@ -16,17 +16,104 @@ function db() {
   return admin.firestore();
 }
 
-export async function exigirRrhh(context: functions.https.CallableContext) {
+async function accionesEventuales(context: functions.https.CallableContext): Promise<{ super: boolean; acciones: string[] }> {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Tenés que iniciar sesión.');
   const role = String(context.auth.token.role || '');
-  if (SUPER.includes(role)) return context.auth;
+  if (SUPER.includes(role)) return { super: true, acciones: [] };
   const sys = await db().collection('system_users').doc(context.auth.uid).get();
   const roleId = String(sys.data()?.role || role);
-  if (SUPER.includes(roleId)) return context.auth;
+  if (SUPER.includes(roleId)) return { super: true, acciones: [] };
   const rol = roleId ? await db().collection('roles').doc(roleId).get() : null;
-  const acciones = (rol?.data()?.permissions?.EVENTUALES || []) as string[];
-  if (acciones.includes('update') || acciones.includes('create')) return context.auth;
+  return { super: false, acciones: (rol?.data()?.permissions?.EVENTUALES || []) as string[] };
+}
+
+export async function exigirRrhh(context: functions.https.CallableContext) {
+  const p = await accionesEventuales(context);
+  if (p.super || p.acciones.includes('update') || p.acciones.includes('create')) return context.auth!;
   throw new functions.https.HttpsError('permission-denied', 'No tenés permiso de eventuales.');
+}
+
+/** Solo lectura (ver o descargar PDF, listar marcos): EVENTUALES `read` alcanza. */
+export async function exigirRrhhLectura(context: functions.https.CallableContext) {
+  const p = await accionesEventuales(context);
+  if (p.super || ['read', 'update', 'create'].some((a) => p.acciones.includes(a))) return context.auth!;
+  throw new functions.https.HttpsError('permission-denied', 'No tenés permiso de eventuales.');
+}
+
+/** Baja el PDF guardado por `guardarPdf`: primero Storage, después Drive. Null si no se pudo. */
+export async function bytesDePdfGuardado(p: { storagePath?: string | null; driveFileId?: string | null }): Promise<Buffer | null> {
+  if (p.storagePath) {
+    try {
+      const [buf] = await admin.storage().bucket().file(String(p.storagePath)).download();
+      if (buf?.length) return buf;
+    } catch (e) {
+      console.warn('[marcoAnexo] PDF no está en Storage:', (e as Error)?.message);
+    }
+  }
+  if (p.driveFileId) {
+    try {
+      const { drive } = await clienteDrive();
+      const res = await drive.files.get({ fileId: String(p.driveFileId), alt: 'media', supportsAllDrives: true }, { responseType: 'arraybuffer' });
+      const buf = Buffer.from(res.data as ArrayBuffer);
+      if (buf.length) return buf;
+    } catch (e) {
+      console.warn('[marcoAnexo] PDF no se pudo bajar de Drive:', (e as Error)?.message);
+    }
+  }
+  return null;
+}
+
+/** El mismo PDF buscado por huella en `eventuales_documentos` (el anexo guarda link pero no el id de Drive). */
+async function bytesPorHash(cuil: string, hash: string, tipo: string): Promise<{ bytes: Buffer | null; link: string | null }> {
+  if (!hash) return { bytes: null, link: null };
+  const docs = await db().collection('eventuales_documentos').where('bolsaCuil', '==', cuil).get();
+  const fila = docs.docs.map((d) => d.data()).find((d) => String(d.hash || '') === hash && String(d.tipo || '') === tipo);
+  if (!fila) return { bytes: null, link: null };
+  return { bytes: await bytesDePdfGuardado({ storagePath: fila.storagePath, driveFileId: fila.driveFileId }), link: fila.link || null };
+}
+
+function nombreEmpresaDe(empresa: Record<string, unknown>, fallback: string) {
+  return String(empresa.name || empresa.razonSocial || empresa.nombre || fallback);
+}
+
+/**
+ * Datos del Anexo C de un contrato: los mismos para la firma (`confirmarAnexoEventual`) y para el
+ * borrador «SIN FIRMAR» que ve RRHH desde la ficha. El bruto sale de la escala aprobada vigente a cada jornada.
+ */
+async function datosAnexoDeContrato(p: {
+  contrato: Record<string, any>; contratoId: string; bolsa: Record<string, any>; cuil: string; hoy: string; lugar?: string; causa?: unknown; bruto?: unknown;
+}) {
+  const m = await lib();
+  const empresaId = String(p.contrato.empresaId || '');
+  const marco = (p.bolsa.marcos || {})[empresaId] || {};
+  const empresaDoc = empresaId ? (await db().collection('empresas').doc(empresaId).get()).data() || {} : {};
+  const jornadas = (p.contrato.jornadas || []) as { fecha?: string }[];
+  const planMarco = m.planMarco({ firmado: marco.firmado === true, fechaFirma: marco.fechaFirma, vigenciaDias: marco.vigenciaDias, hoy: p.hoy });
+  const brutoAnexo = await brutoDelAnexo(p.contrato, jornadas, p.hoy);
+  const empresaNombre = nombreEmpresaDe(empresaDoc, empresaId || 'Empresa');
+  const lugar = String(p.lugar || p.contrato.lugar || p.contrato.objectiveName || 'convocatoria');
+  return {
+    empresaId,
+    empresaNombre,
+    marco,
+    brutoAnexo,
+    lugar,
+    datosAnexo: {
+      numero: String(p.contrato.numero || p.contratoId || '').slice(0, 24),
+      empresaNombre,
+      empresaCuit: String(empresaDoc.cuit || ''),
+      trabajadorNombre: String(p.bolsa.nombre || ''),
+      trabajadorDni: String(p.bolsa.dni || ''),
+      trabajadorCuil: p.cuil,
+      marcoFecha: marco.fechaFirma,
+      marcoVencimiento: planMarco.vencimiento,
+      causa: p.contrato.causa || p.causa,
+      lugar,
+      jornadas,
+      bruto: brutoAnexo.brutoTexto ?? p.contrato.brutoEstimado ?? p.bruto,
+      escalaTexto: brutoAnexo.escalaTexto,
+    },
+  };
 }
 
 export async function lib() {
@@ -229,10 +316,12 @@ export async function firmarMarco(params: {
   return { ok: true, ...plan, hash, ...guardado };
 }
 
+const ACCIONES_LECTURA = ['listar', 'anexoPdf', 'marcoPdf'];
+
 export const gestionarMarcoEventual = callable.onCall(async (data, context) => {
-  const auth = await exigirRrhh(context);
-  const m = await lib();
   const accion = String(data?.accion || '');
+  const auth = ACCIONES_LECTURA.includes(accion) ? await exigirRrhhLectura(context) : await exigirRrhh(context);
+  const m = await lib();
   const cuil = String(data?.cuil || '');
   const empresaId = String(data?.empresaId || '');
   if (accion === 'config') {
@@ -295,6 +384,115 @@ export const gestionarMarcoEventual = callable.onCall(async (data, context) => {
       }),
       driveFolderId: (await db().collection('eventuales_bolsa').doc(cuil).get()).data()?.driveFolderId || null,
     };
+  }
+
+  // PDF del anexo de un contrato: el firmado si existe; si no, el borrador marcado «SIN FIRMAR» generado al vuelo.
+  if (accion === 'anexoPdf') {
+    const contratoId = String(data?.contratoId || '');
+    if (!contratoId) throw new functions.https.HttpsError('invalid-argument', 'Falta el contrato.');
+    const ctrSnap = await db().collection('contratos_eventuales').doc(contratoId).get();
+    const contrato = (ctrSnap.data() || {}) as Record<string, any>;
+    if (!ctrSnap.exists || String(contrato.bolsaCuil || '') !== cuil) {
+      throw new functions.https.HttpsError('not-found', 'El contrato no es de este eventual.');
+    }
+    const bolsa = (await db().collection('eventuales_bolsa').doc(cuil).get()).data() || {};
+    const empresaCtr = String(contrato.empresaId || '');
+    const empresaDoc = empresaCtr ? (await db().collection('empresas').doc(empresaCtr).get()).data() || {} : {};
+    const empresaNombre = nombreEmpresaDe(empresaDoc, empresaCtr || 'Empresa');
+    const fechaCtr = String(contrato.fechaAlta || contrato.jornadas?.[0]?.fecha || '').slice(0, 10);
+    const { nombrePdfAnexo } = await import('../eventuales-shared/contratoVista.mjs') as {
+      nombrePdfAnexo: (i: { empresa: string; fecha: string; firmado: boolean }) => string;
+    };
+    const anexosSnap = await db().collection('anexos_eventuales').where('contratoId', '==', contratoId).limit(5).get();
+    const firmado = anexosSnap.docs.map((d) => d.data()).sort((a, b) => String(b.fechaHora || '').localeCompare(String(a.fechaHora || '')))[0] || null;
+    if (firmado) {
+      let bytes = await bytesDePdfGuardado({ storagePath: firmado.storagePath, driveFileId: firmado.driveFileId });
+      let link: string | null = firmado.link || null;
+      if (!bytes) {
+        const porHash = await bytesPorHash(cuil, String(firmado.hashAnexo || ''), 'ANEXO');
+        bytes = porHash.bytes;
+        link = link || porHash.link;
+      }
+      const nombre = nombrePdfAnexo({ empresa: empresaNombre, fecha: fechaCtr, firmado: true });
+      if (bytes) return { ok: true, firmado: true, nombre, pdfBase64: bytes.toString('base64'), link };
+      if (link) return { ok: true, firmado: true, nombre, pdfBase64: null, link };
+      throw new functions.https.HttpsError('not-found', 'El anexo firmado no está disponible para descargar.');
+    }
+    const hoy = new Date().toISOString().slice(0, 10);
+    const armado = await datosAnexoDeContrato({ contrato, contratoId, bolsa, cuil, hoy });
+    const pdf = (await m.pdfAnexo({ ...armado.datosAnexo, sinFirmar: true, generadoEl: hoy })).bytes;
+    await db().collection('audit_logs').add({
+      action: 'EVENTUAL_ANEXO_BORRADOR_VISTO', module: 'EVENTUALES', actorUid: auth.uid, bolsaCuil: cuil, empresaId: empresaCtr, contratoId,
+      details: 'Anexo sin firmar generado desde la ficha', timestamp: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    return {
+      ok: true,
+      firmado: false,
+      nombre: nombrePdfAnexo({ empresa: empresaNombre, fecha: fechaCtr, firmado: false }),
+      pdfBase64: pdf.toString('base64'),
+      link: null,
+      escalaTexto: armado.brutoAnexo.escalaTexto,
+      brutoTexto: armado.brutoAnexo.brutoTexto,
+    };
+  }
+
+  // PDF del contrato marco firmado (escaneo cargado por RRHH) de una empresa.
+  if (accion === 'marcoPdf') {
+    if (!empresaId) throw new functions.https.HttpsError('invalid-argument', 'Falta la empresa.');
+    const marcoSnap = await db().collection('contratos_marco').doc(`${cuil}_${empresaId}`).get();
+    const marco = (marcoSnap.data() || {}) as Record<string, any>;
+    if (!marcoSnap.exists || marco.firmado !== true) {
+      throw new functions.https.HttpsError('failed-precondition', 'No hay contrato marco firmado cargado para esta empresa.');
+    }
+    const empresaDoc = (await db().collection('empresas').doc(empresaId).get()).data() || {};
+    const { nombrePdfMarco } = await import('../eventuales-shared/contratoVista.mjs') as {
+      nombrePdfMarco: (i: { empresa: string; fecha: string }) => string;
+    };
+    const nombre = nombrePdfMarco({ empresa: nombreEmpresaDe(empresaDoc, empresaId), fecha: String(marco.fechaFirma || '') });
+    let bytes = await bytesDePdfGuardado({ storagePath: marco.storagePath, driveFileId: marco.driveFileId });
+    let link: string | null = marco.link || null;
+    if (!bytes) {
+      const porHash = await bytesPorHash(cuil, String(marco.hash || ''), 'MARCO');
+      bytes = porHash.bytes;
+      link = link || porHash.link;
+    }
+    if (bytes) return { ok: true, nombre, pdfBase64: bytes.toString('base64'), link, fechaFirma: marco.fechaFirma || null, vencimiento: marco.vencimiento || null };
+    if (link) return { ok: true, nombre, pdfBase64: null, link, fechaFirma: marco.fechaFirma || null, vencimiento: marco.vencimiento || null };
+    throw new functions.https.HttpsError('not-found', 'El marco firmado no está disponible para descargar.');
+  }
+
+  // RRHH reenvía el código del anexo (push y/o mail). Siempre genera un código nuevo.
+  if (accion === 'reenviarCodigoAnexo') {
+    const contratoId = String(data?.contratoId || '');
+    if (!contratoId) throw new functions.https.HttpsError('invalid-argument', 'Falta el contrato.');
+    const ctrRef = db().collection('contratos_eventuales').doc(contratoId);
+    const ctrSnap = await ctrRef.get();
+    const contrato = (ctrSnap.data() || {}) as Record<string, any>;
+    if (!ctrSnap.exists || String(contrato.bolsaCuil || '') !== cuil) {
+      throw new functions.https.HttpsError('not-found', 'El contrato no es de este eventual.');
+    }
+    if (String(contrato.anexoEstado || '') === 'FIRMADO') throw new functions.https.HttpsError('failed-precondition', 'El anexo ya está firmado.');
+    if (['ANULADO', 'SUSTITUIDO'].includes(String(contrato.estado || ''))) throw new functions.https.HttpsError('failed-precondition', 'El contrato ya no está vigente.');
+    const bolsa = (await db().collection('eventuales_bolsa').doc(cuil).get()).data() || {};
+    const { exigeMarco } = await import('../eventuales-shared/pruebasSwitch.mjs') as { exigeMarco: (b: unknown) => boolean };
+    if (!exigeMarco(bolsa)) throw new functions.https.HttpsError('failed-precondition', 'A este eventual no se le exige anexo (switch de pruebas).');
+    const envio = await enviarCodigoAnexo({ contratoId, convocatoriaId: '', cuil, bolsa, uid: String(bolsa.uid || '') });
+    const anexoEstado = envio.ok ? 'PENDIENTE' : 'SIN_CANAL';
+    await ctrRef.set({
+      anexoEstado, anexoMensaje: envio.mensaje, anexoReenviadoAt: admin.firestore.FieldValue.serverTimestamp(), anexoReenviadoPor: auth.uid,
+    }, { merge: true });
+    const turnos = await db().collection('turnos').where('eventualContratoId', '==', contratoId).get();
+    if (!turnos.empty) {
+      const batch = db().batch();
+      turnos.docs.forEach((d) => { if (d.data().anexoEstado !== anexoEstado) batch.update(d.ref, { anexoEstado }); });
+      await batch.commit();
+    }
+    await db().collection('audit_logs').add({
+      action: 'EVENTUAL_ANEXO_CODIGO_REENVIADO', module: 'EVENTUALES', actorUid: auth.uid, bolsaCuil: cuil, empresaId: String(contrato.empresaId || ''), contratoId,
+      details: envio.ok ? `Código reenviado por ${envio.canales.join(' y ')}` : `Sin canal: ${envio.mensaje}`, timestamp: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    if (!envio.ok) throw new functions.https.HttpsError('failed-precondition', envio.mensaje);
+    return { ok: true, anexoEstado, canales: envio.canales, venceMs: envio.venceMs, mensaje: envio.mensaje };
   }
 
   if (!empresaId && accion !== 'reintentar') throw new functions.https.HttpsError('invalid-argument', 'Falta la empresa.');
@@ -499,33 +697,21 @@ export const confirmarAnexoEventual = callable.onCall(async (data, context) => {
   if (!plan.ok) throw new functions.https.HttpsError('failed-precondition', plan.codigo || 'CODIGO');
   const cuil = String(guardado.bolsaCuil || '');
   const bolsa = (await db().collection('eventuales_bolsa').doc(cuil).get()).data() || {};
-  const contrato = contratoId ? (await db().collection('contratos_eventuales').doc(contratoId).get()).data() || {} : {};
-  const empresaId = String(contrato.empresaId || data?.empresaId || '');
-  const marco = (bolsa.marcos || {})[empresaId] || {};
-  const lugar = String(data?.lugar || contrato.lugar || contrato.objectiveName || 'convocatoria');
+  const contratoCrudo = contratoId ? (await db().collection('contratos_eventuales').doc(contratoId).get()).data() || {} : {};
+  const contrato = {
+    ...contratoCrudo,
+    empresaId: String(contratoCrudo.empresaId || data?.empresaId || ''),
+    jornadas: contratoCrudo.jornadas || data?.jornadas || [],
+  } as Record<string, any>;
   const ahora = new Date().toISOString();
   const fecha = ahora.slice(0, 10);
-  const empresaDoc = empresaId ? (await db().collection('empresas').doc(empresaId).get()).data() || {} : {};
-  const empresaNombre = String(empresaDoc.name || empresaDoc.razonSocial || empresaDoc.nombre || empresaId || 'Empresa');
-  const jornadas = (contrato.jornadas || data?.jornadas || []) as { fecha?: string }[];
-  const planMarco = m.planMarco({ firmado: marco.firmado === true, fechaFirma: marco.fechaFirma, vigenciaDias: marco.vigenciaDias, hoy: fecha });
   // Bruto del anexo: escala APROBADA vigente a la fecha de cada jornada; sin escala en esa fecha, la de hoy y aviso.
-  const brutoAnexo = await brutoDelAnexo(contrato, jornadas, fecha);
-  const datosAnexo = {
-    numero: String(contrato.numero || ref.id || '').slice(0, 24),
-    empresaNombre,
-    empresaCuit: String(empresaDoc.cuit || ''),
-    trabajadorNombre: String(bolsa.nombre || ''),
-    trabajadorDni: String(bolsa.dni || ''),
-    trabajadorCuil: cuil,
-    marcoFecha: marco.fechaFirma,
-    marcoVencimiento: planMarco.vencimiento,
-    causa: contrato.causa || data?.causa,
-    lugar,
-    jornadas,
-    bruto: brutoAnexo.brutoTexto ?? contrato.brutoEstimado ?? data?.bruto,
-    escalaTexto: brutoAnexo.escalaTexto,
-  };
+  const armado = await datosAnexoDeContrato({
+    contrato, contratoId: contratoId || ref.id, bolsa, cuil, hoy: fecha, lugar: data?.lugar ? String(data.lugar) : undefined, causa: data?.causa, bruto: data?.bruto,
+  });
+  const { empresaId, empresaNombre, marco, brutoAnexo, lugar, datosAnexo } = armado;
+  const { resumirDispositivo } = await import('../eventuales-shared/contratoVista.mjs') as { resumirDispositivo: (d: unknown, ua?: unknown) => string };
+  const dispositivo = resumirDispositivo(data?.dispositivo, context.rawRequest?.headers?.['user-agent']);
   const anexoTexto = m.textoAnexo(datosAnexo);
   const hashAnexo = m.sha256(anexoTexto);
   const anexoPdf = (await m.pdfAnexo({
@@ -539,7 +725,7 @@ export const confirmarAnexoEventual = callable.onCall(async (data, context) => {
       uid: context.auth.uid,
       fechaHora: ahora,
       codigoVerificado: true,
-      dispositivo: data?.dispositivo,
+      dispositivo: dispositivo || data?.dispositivo,
       ip: context.rawRequest?.ip,
       ubicacion: data?.ubicacion,
       hashAnexo,
@@ -553,8 +739,10 @@ export const confirmarAnexoEventual = callable.onCall(async (data, context) => {
   await db().collection('anexos_eventuales').doc(anexoId).set({
     bolsaCuil: cuil, empresaId, contratoId: contratoId || null, convocatoriaId: convocatoriaId || null,
     hashAnexo, uid: context.auth.uid, fechaHora: ahora, link: anexoGuardado.link, storagePath: anexoGuardado.storagePath,
+    driveFileId: anexoGuardado.driveFileId, nombreArchivo: nombreAnexo,
+    dispositivo: dispositivo || null, ip: context.rawRequest?.ip || null,
     constanciaHash: hashAnexo, constanciaLink: anexoGuardado.link, drivePendiente: anexoGuardado.drivePendiente,
-    bruto: brutoAnexo.bruto, escalas: brutoAnexo.escalas, escalaRespaldo: brutoAnexo.escalaRespaldo, escalaTexto: brutoAnexo.escalaTexto || null,
+    bruto: brutoAnexo.bruto, brutoTexto: brutoAnexo.brutoTexto, escalas: brutoAnexo.escalas, escalaRespaldo: brutoAnexo.escalaRespaldo, escalaTexto: brutoAnexo.escalaTexto || null,
   });
   // La convocatoria del evento (si la hubo) pasa a «anexo firmado» para la solapa Estado.
   if (contratoId) {

@@ -198,7 +198,26 @@ function bloque(doc, titulo, cuerpo) {
   doc.moveDown(0.4);
 }
 
-/** Anexo C + hoja de constancia (Anexo D). */
+export const TEXTO_SIN_FIRMAR = 'SIN FIRMAR';
+
+/** Marca de agua diagonal en todas las páginas (borrador del anexo que el eventual todavía no aceptó). */
+function marcaAgua(doc, texto) {
+  const rango = doc.bufferedPageRange();
+  for (let i = 0; i < rango.count; i += 1) {
+    doc.switchToPage(rango.start + i);
+    doc.save();
+    doc.rotate(-35, { origin: [ANCHO / 2, ALTO / 2] });
+    doc.font(FUENTE_NEGRITA).fontSize(72).fillColor('#b91c1c').fillOpacity(0.16)
+      .text(texto, 0, ALTO / 2 - 40, { width: ANCHO, align: 'center', lineBreak: false });
+    doc.restore();
+  }
+}
+
+/**
+ * Anexo C + hoja de constancia (Anexo D).
+ * Con `sinFirmar: true` sale el mismo anexo con la marca «SIN FIRMAR» y, en vez de la constancia,
+ * una hoja que dice que el eventual todavía no lo aceptó (lo pide la ficha de RRHH para verlo).
+ */
 export async function pdfAnexo(input = {}) {
   const version = Number(input.marcoVersion) > 0 ? Number(input.marcoVersion) : MARCO_VERSION;
   const modelo = modeloAnexo(input);
@@ -211,17 +230,24 @@ export async function pdfAnexo(input = {}) {
   parrafo(doc, modelo.arca);
   parrafo(doc, modelo.cierre);
   doc.addPage();
-  tituloCentrado(doc, 'CONSTANCIA DE ACEPTACIÓN ELECTRÓNICA');
-  const cajaY = doc.y;
-  const lineas = textoConstancia(input.constancia || {}).split('\n');
-  doc.font(FUENTE).fontSize(10).fillColor('#111111');
-  for (const linea of lineas) {
-    doc.text(linea, MARGEN + 10, doc.y, { width: ANCHO - MARGEN * 2 - 20 });
-    doc.moveDown(0.15);
+  if (input.sinFirmar) {
+    tituloCentrado(doc, 'ANEXO SIN FIRMAR');
+    parrafo(doc, 'Este anexo todavía no fue aceptado por el trabajador. La constancia de aceptación electrónica se emite recién cuando confirma el código de un solo uso desde la app o el mail.');
+    parrafo(doc, `Generado el ${String(input.generadoEl || new Date().toISOString()).slice(0, 10)} desde la ficha del eventual para consulta de RRHH. No reemplaza al anexo firmado.`);
+  } else {
+    tituloCentrado(doc, 'CONSTANCIA DE ACEPTACIÓN ELECTRÓNICA');
+    const cajaY = doc.y;
+    const lineas = textoConstancia(input.constancia || {}).split('\n');
+    doc.font(FUENTE).fontSize(10).fillColor('#111111');
+    for (const linea of lineas) {
+      doc.text(linea, MARGEN + 10, doc.y, { width: ANCHO - MARGEN * 2 - 20 });
+      doc.moveDown(0.15);
+    }
+    doc.rect(MARGEN, cajaY - 8, ANCHO - MARGEN * 2, doc.y - cajaY + 16).lineWidth(0.6).strokeColor('#222222').stroke();
   }
-  doc.rect(MARGEN, cajaY - 8, ANCHO - MARGEN * 2, doc.y - cajaY + 16).lineWidth(0.6).strokeColor('#222222').stroke();
   const paginas = doc.bufferedPageRange().count;
   pie(doc, version);
+  if (input.sinFirmar) marcaAgua(doc, TEXTO_SIN_FIRMAR);
   const bytes = await aBuffer(doc);
   return { bytes, paginas };
 }

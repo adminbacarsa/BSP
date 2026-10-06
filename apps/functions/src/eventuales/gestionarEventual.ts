@@ -91,18 +91,79 @@ export const gestionarEventual = functions.https.onCall(async (data, context) =>
     const cuil = String(data?.cuil || '');
     const ficha = await db().collection('eventuales_bolsa').doc(cuil).get();
     if (!ficha.exists) throw new functions.https.HttpsError('not-found', 'No está en la bolsa.');
-    const [contratos, envios, historial, legajosOs] = await Promise.all([
+    const [contratos, envios, historial, legajosOs, anexos] = await Promise.all([
       db().collection('contratos_eventuales').where('bolsaCuil', '==', cuil).get(),
       db().collection('arca_envios').where('bolsaCuil', '==', cuil).get(),
       db().collection('audit_logs').where('bolsaCuil', '==', cuil).limit(30).get(),
       db().collection('empleados').where('cuil', '==', cuil).limit(20).get(),
+      db().collection('anexos_eventuales').where('bolsaCuil', '==', cuil).get(),
     ]);
+    // Anexo firmado por contrato (el último si hubiera más de uno): lo que ve la solapa Contratos.
+    const anexoPorContrato = new Map<string, Record<string, unknown>>();
+    for (const d of anexos.docs) {
+      const a = d.data();
+      const id = String(a.contratoId || '');
+      if (!id) continue;
+      const previo = anexoPorContrato.get(id);
+      if (!previo || String(a.fechaHora || '') > String(previo.fechaHora || '')) anexoPorContrato.set(id, a);
+    }
+    const { exigeMarco } = await import('../eventuales-shared/pruebasSwitch.mjs') as { exigeMarco: (b: unknown) => boolean };
+    const { brutoDelAnexo } = await import('./marcoAnexoCall');
+    const { formatoPesos } = await import('../eventuales-shared/remuneracion.mjs') as { formatoPesos: (n: number) => string };
+    const exige = exigeMarco(ficha.data());
+    const hoy = new Date().toISOString().slice(0, 10);
+    type ContratoDoc = Record<string, any> & { id: string };
+    const contratosOrdenados: ContratoDoc[] = contratos.docs
+      .map((d): ContratoDoc => ({ ...(d.data() as Record<string, any>), id: d.id }))
+      .sort((a: ContratoDoc, b: ContratoDoc) => String(b.fechaAlta || '').localeCompare(String(a.fechaAlta || '')));
+    // Para los que no tienen anexo firmado se estima escala y bruto al día de hoy (los 8 más recientes).
+    let estimados = 0;
+    const contratosDetalle = [];
+    for (const c of contratosOrdenados) {
+      const a = anexoPorContrato.get(c.id) || null;
+      const anexo = a ? {
+        fechaHora: a.fechaHora || null,
+        dispositivo: a.dispositivo || null,
+        link: a.link || null,
+        drivePendiente: a.drivePendiente === true,
+        escalaTexto: a.escalaTexto || null,
+        brutoTexto: a.brutoTexto || (typeof a.bruto === 'number' && a.bruto > 0 ? formatoPesos(a.bruto) : null),
+        escalaRespaldo: a.escalaRespaldo === true,
+        hashAnexo: a.hashAnexo || null,
+      } : null;
+      const cerrado = ['ANULADO', 'SUSTITUIDO'].includes(String(c.estado || ''));
+      let codigoVenceMs: number | null = null;
+      let estimado: { escalaTexto: string; brutoTexto: string | null; escalaRespaldo: boolean } | null = null;
+      if (!anexo && !cerrado) {
+        if (exige) {
+          const code = (await db().collection('anexo_codigos').doc(c.id).get()).data();
+          if (code && code.usado !== true && Number(code.venceMs) > Date.now()) codigoVenceMs = Number(code.venceMs);
+        }
+        if (estimados < 8) {
+          estimados += 1;
+          const b = await brutoDelAnexo(c, Array.isArray(c.jornadas) ? c.jornadas : [], hoy);
+          estimado = { escalaTexto: b.escalaTexto, brutoTexto: b.brutoTexto, escalaRespaldo: b.escalaRespaldo };
+        }
+      }
+      contratosDetalle.push({
+        ...c,
+        anexo,
+        codigoVenceMs,
+        anexoExigido: exige,
+        ...(estimado ? { anexoEscalaTexto: estimado.escalaTexto, anexoBrutoTexto: estimado.brutoTexto, anexoEscalaRespaldo: estimado.escalaRespaldo } : {}),
+      });
+    }
     return {
       ficha: { id: ficha.id, ...ficha.data() },
-      contratos: contratos.docs.map((d) => ({ id: d.id, ...d.data() })),
+      contratos: contratosDetalle,
       arca: envios.docs.map((d) => {
         const e = d.data();
-        return { id: d.id, tipo: e.tipo, estado: e.estado, fechaAlta: e.fechaAlta, fechaBaja: e.fechaBaja, nroTransaccion: e.nroTransaccion || null, constanciaUrl: e.constanciaUrl || null, codigoControl: e.codigoControl || null, nroVerificador: e.nroVerificador || null };
+        return {
+          id: d.id, tipo: e.tipo, estado: e.estado, fechaAlta: e.fechaAlta, fechaBaja: e.fechaBaja, nroTransaccion: e.nroTransaccion || null,
+          constanciaUrl: e.constanciaUrl || null, codigoControl: e.codigoControl || null, nroVerificador: e.nroVerificador || null,
+          contratoIds: Array.isArray(e.contratoIds) ? e.contratoIds.map(String) : [], canal: e.canal || null,
+          quitadoDelLote: e.quitadoDelLote === true, acuseAnulacion: e.acuseAnulacion || null, motivo: e.motivo || e.observacion || null,
+        };
       }),
       historial: historial.docs.map((d) => {
         const h = d.data();
