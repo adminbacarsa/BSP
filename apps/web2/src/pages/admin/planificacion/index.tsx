@@ -297,6 +297,7 @@ import {
     consultaDelDia,
     diaLoResuelveConsulta,
     estadoDiaCobertura,
+    fechaDeClavePendiente,
     fmtHorasAr,
     novedadesDeConsultas,
     quitarBorradorQuePisaConsulta,
@@ -1704,9 +1705,26 @@ function PlanificacionDesktop() {
 
     const reabrirDesdeConsulta = useCallback((consulta: ConsultaCurso, eventuales: boolean) => {
         const fechas = (consulta.jornadas || []).map((j) => j.fecha).filter((f) => /^\d{4}-\d{2}-\d{2}$/.test(f)).sort();
-        const titularId = consulta.titularEmployeeId;
+        let titularId = consulta.titularEmployeeId || null;
+        // Consultas viejas no guardan el titular: se busca la ausencia de ese día en ese puesto en la grilla.
+        if (!titularId && fechas.length) {
+            const puesto = String(consulta.positionName || '').trim();
+            const delDia = Object.keys(absencesMap)
+                .map((k) => fechaDeClavePendiente(k))
+                .filter((p): p is { empId: string; fecha: string } => !!p && p.fecha === fechas[0])
+                .filter((p) => !puesto || String(shiftsMap[`${p.empId}_${p.fecha}`]?.positionName || '').trim() === puesto);
+            if (delDia.length === 1) titularId = delDia[0].empId;
+        }
         if (!fechas.length || !titularId) {
             toast.message('Abrí ese día en la grilla para cubrirlo de otra forma.');
+            return;
+        }
+        const ausencia = absencesMap[`${titularId}_${fechas[0]}`];
+        if (ausencia && ausencia.type) {
+            setVacancyData({ ...ausencia, source: 'AUSENCIA', focusDate: fechas[0] });
+            setShowVacancyModal(true);
+            setVacancyEventualesOpen(eventuales);
+            setConsultaFoco(null);
             return;
         }
         const emp = employees.find((e: { id?: string; name?: string }) => e.id === titularId);
@@ -1722,7 +1740,7 @@ function PlanificacionDesktop() {
         setShowVacancyModal(true);
         setVacancyEventualesOpen(eventuales);
         setConsultaFoco(null);
-    }, [employees]);
+    }, [employees, absencesMap, shiftsMap]);
     reabrirConsultaRef.current = reabrirDesdeConsulta;
 
     useEffect(() => {

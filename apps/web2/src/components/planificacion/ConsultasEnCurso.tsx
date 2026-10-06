@@ -109,7 +109,7 @@ export function ConsultasEnCursoPill(props: {
                   <button
                     type="button"
                     data-consulta-otros={c.id}
-                    onClick={() => props.onConsultarOtros(c)}
+                    onClick={() => { descartar([c.id]); props.onConsultarOtros(c); }}
                     className="rounded-lg bg-indigo-600 px-2 py-1 text-[10px] font-black text-white"
                   >
                     Consultar a otros
@@ -117,7 +117,7 @@ export function ConsultasEnCursoPill(props: {
                   <button
                     type="button"
                     data-consulta-otra={c.id}
-                    onClick={() => props.onCubrirOtraForma(c)}
+                    onClick={() => { descartar([c.id]); props.onCubrirOtraForma(c); }}
                     className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[10px] font-black text-slate-700"
                   >
                     Cubrir de otra forma
