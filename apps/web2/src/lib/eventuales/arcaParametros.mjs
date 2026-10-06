@@ -76,7 +76,7 @@ export const CAMPOS_ARCA = Object.freeze([
   {
     id: 'puesto',
     etiqueta: 'Puesto',
-    ayuda: 'Hasta 4 caracteres. Posiciones 85-88. Default 5169 (servicios de protección y seguridad); el contador tiene que confirmarlo en la tabla de puestos.',
+    ayuda: 'Hasta 4 caracteres. Posiciones 85-88. Default 5169 (personal de servicios de protección y seguridad), confirmado por el contador el 06/10.',
     tipo: 'alfa',
     max: 4,
     defecto: PUESTO_VIGILADOR,

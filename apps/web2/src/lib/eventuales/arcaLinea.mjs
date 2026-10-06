@@ -175,7 +175,7 @@ function advertenciasDe(armada, cfg, extras = []) {
   if (armada.faltaPuesto) advertencias.push('PUESTO_PENDIENTE');
   if (armada.faltaDomicilio) advertencias.push('DOMICILIO_DESEMPENO_PENDIENTE');
   if (armada.faltaActividad) advertencias.push('ACTIVIDAD_PENDIENTE');
-  if (String(cfg.puesto).trim() === PUESTO_VIGILADOR) advertencias.push('PUESTO_A_VERIFICAR');
+
   return advertencias;
 }
 

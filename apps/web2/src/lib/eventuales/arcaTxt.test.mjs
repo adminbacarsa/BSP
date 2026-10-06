@@ -76,7 +76,7 @@ describe('TXT ARCA posiciones fijas', () => {
     assert.equal(baja.slice(88, 90), '  ');
     assert.equal(baja.slice(129, 130), ' ');
     assert.equal(out.enviable, true);
-    assert.equal(out.advertencias.includes('PUESTO_A_VERIFICAR'), true);
+    assert.equal(out.advertencias.includes('PUESTO_A_VERIFICAR'), false);
   });
 
   it('rechaza CUIL con dígito verificador inválido', () => {
@@ -147,7 +147,7 @@ describe('TXT ARCA posiciones fijas', () => {
     assert.equal(out.lineas[0].slice(106, 109), '500');
     assert.equal(out.lineas[0].slice(73, 78), '00001');
     assert.equal(out.advertencias.includes('CCT_CODIGO_PENDIENTE'), false);
-    assert.equal(out.advertencias.includes('PUESTO_A_VERIFICAR'), true);
+    assert.equal(out.advertencias.includes('PUESTO_A_VERIFICAR'), false);
     assert.equal(out.enviable, true);
     const editada = lineasCargaMasiva({
       contrato,
