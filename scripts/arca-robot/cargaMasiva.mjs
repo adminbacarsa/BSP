@@ -89,10 +89,11 @@ export function leerEstadoCarga(texto) {
 export function extraerErroresLinea(texto) {
   const src = String(texto || '');
   const found = [];
-  const re = /L[ií]nea\s+\d+\s*:[^\n\r]+/gi;
+  // ARCA sirve «Línea» mal codificado (LÃ�nea): se acepta cualquier cosa entre la L y «nea».
+  const re = /L\S{1,4}nea\s+\d+\s*:[^\n\r]+/gi;
   let m = re.exec(src);
   while (m) {
-    found.push(m[0].trim());
+    found.push(m[0].trim().replace(/^L\S{1,4}nea/i, 'Línea'));
     m = re.exec(src);
   }
   return found;

@@ -102,7 +102,10 @@ async function pedirCredencial(empresaId) {
   const res = await fetch(`${base}${join}action=credencial&empresaId=${encodeURIComponent(empresaId)}`, {
     headers: { 'x-arca-key': key },
   });
-  if (!res.ok) return null;
+  if (!res.ok) {
+    console.error(JSON.stringify({ credencial: res.status, detalle: (await res.text()).slice(0, 300) }));
+    return null;
+  }
   const data = await res.json();
   const clave = String(data.clave || '');
   if (!clave) return null;
@@ -131,7 +134,12 @@ async function elegirRepresentado(page, cuit) {
   const visible = formatearCuit(cuit);
   const crudo = soloDigitosCuit(cuit);
   const fila = page.getByText(new RegExp(`${visible}|${crudo}`)).first();
-  await fila.waitFor({ timeout: 20000 });
+  // En el portal nuevo no hay selector de representado: se elige en el select de Simplificación Registral.
+  try {
+    await fila.waitFor({ timeout: 5000 });
+  } catch {
+    return;
+  }
   await fila.click();
   const entrar = page.getByRole('button', { name: /Representar|Ingresar|Seleccionar|Continuar/i }).or(
     page.getByRole('link', { name: /Representar|Ingresar|Seleccionar|Continuar/i }),
@@ -235,22 +243,41 @@ async function abrirNovedad(sr, decision) {
     await nuevo.first().click({ timeout: 20000 });
   } else if (decision.accion === 'EDITAR') {
     const fila = sr.locator('tr').filter({ hasText: new RegExp(`^\\s*${decision.codigo}\\b`) }).first();
-    const lapiz = fila.locator('a, button, img, input').filter({
-      has: sr.locator('[title*="Editar" i], [title*="Modificar" i], [alt*="Editar" i], [src*="edit" i], [src*="lapiz" i], [src*="pencil" i]'),
-    }).or(fila.locator('a').nth(0));
-    await lapiz.first().click({ timeout: 20000 });
+    // La fila trae un <a> oculto al recibo (sin nro) además del lápiz y el borrar: se elige el control
+    // visible que no sea recibo ni borrar. Se loguean los candidatos para ajustar el selector si cambia.
+    const candidatos = fila.locator('a, input[type="image"], img, button');
+    const n = await candidatos.count();
+    const vistos = [];
+    let elegido = null;
+    for (let i = 0; i < n; i += 1) {
+      const c = candidatos.nth(i);
+      const html = (await c.evaluate((el) => el.outerHTML).catch(() => '')).slice(0, 200);
+      const visible = await c.isVisible().catch(() => false);
+      vistos.push({ html, visible });
+      if (elegido || !visible) continue;
+      if (/recibo|borr|elimin|delete|baja|quitar/i.test(html)) continue;
+      elegido = c;
+    }
+    console.log(JSON.stringify({ editarCandidatos: vistos }));
+    if (!elegido) throw new Error('SIN_LAPIZ_EDITAR');
+    await elegido.click({ timeout: 20000 });
   } else {
     throw new Error(decision.mensaje || 'NOVEDAD_ABIERTA_AJENA');
   }
   await sr.waitForLoadState('domcontentloaded', { timeout: 45000 });
 }
 
-async function leerYGuardarCodigo(sr, { loteId, envioId }) {
+async function leerYGuardarCodigo(sr, { loteId, envioId, explorar }) {
   const texto = await sr.locator('body').innerText();
   const codigo = extraerCodigoPrincipal(texto);
   if (!codigo) throw new Error('SIN_CODIGO_NOVEDAD');
   console.log(JSON.stringify({ arcaCodigoNovedad: codigo }));
-  await guardarCodigoLote({ loteId, envioId, arcaCodigoNovedad: codigo });
+  try {
+    await guardarCodigoLote({ loteId, envioId, arcaCodigoNovedad: codigo });
+  } catch (e) {
+    // En explorar el lote es de prueba y COSP no lo conoce: se sigue igual.
+    if (!explorar) throw e;
+  }
   return codigo;
 }
 
@@ -279,7 +306,10 @@ async function subirYValidar(sr, archivo) {
   if (!validacion.ok) {
     const detalle = [...erroresLinea, texto.slice(0, 600)].filter(Boolean).join(' | ');
     console.error(JSON.stringify({ detalleErrores: detalle.slice(0, 800) }));
-    throw new Error((erroresLinea.join('; ') || validacion.error).slice(0, 500));
+    const err = new Error((erroresLinea.join('; ') || validacion.error).slice(0, 500));
+    // Un archivo Inválido no mejora reintentando: se corta y el lote queda en ERROR con el detalle.
+    err.noReintentar = true;
+    throw err;
   }
   return { estado, lineasTxt, texto };
 }
@@ -383,6 +413,20 @@ async function subirReal({ archivo, acceso, loteId, envioId, codigoLote, intento
   }
   const browser = await chromium.launch({ headless: process.env.ARCA_ROBOT_HEADLESS !== '0' });
   const context = await browser.newContext({ acceptDownloads: true });
+  // Simplificación Registral abre ventanas de aviso («SR EMPLEADOR: …», con «Desactivar este mensaje»): se cierran solas.
+  context.on('page', async (p) => {
+    try {
+      await p.waitForLoadState('domcontentloaded', { timeout: 15000 });
+      const texto = await p.locator('body').innerText({ timeout: 5000 });
+      if (!/SR\.?\s*EMPLEADOR|Desactivar este mensaje/i.test(texto)) return;
+      const check = p.getByRole('checkbox').first();
+      if (await check.count()) await check.check({ timeout: 3000 }).catch(() => {});
+      console.log(JSON.stringify({ avisoArcaCerrado: p.url().slice(0, 120) }));
+      await p.close();
+    } catch {
+      /* no es un aviso o ya se cerró */
+    }
+  });
   const page = await context.newPage();
   let sr = page;
   try {
@@ -401,7 +445,7 @@ async function subirReal({ archivo, acceso, loteId, envioId, codigoLote, intento
       throw new Error(decision.mensaje);
     }
     await abrirNovedad(sr, decision);
-    const codigo = await leerYGuardarCodigo(sr, { loteId, envioId });
+    const codigo = await leerYGuardarCodigo(sr, { loteId, envioId, explorar });
     await clickCargarArchivo(sr);
     await subirYValidar(sr, archivo);
     const envioPaso = await volverYEnviar(sr, explorar);
@@ -477,6 +521,7 @@ async function main() {
     await terminar(bodyResultado({ ...baseBody, estado: 'ERROR', error: sanitizarTexto(e.message || 'CLAVE', '') }));
   }
   if (!acceso || !acceso.clave || !planAcceso(acceso).cuitLogin) {
+    console.error(JSON.stringify({ error: 'FALTA_CLAVE_FISCAL', empresa: args.empresa || '' }));
     await terminar(bodyResultado({ ...baseBody, estado: 'ERROR', error: 'FALTA_CLAVE_FISCAL' }));
   }
   const archivo = String(args.archivo || '');
@@ -516,6 +561,7 @@ async function main() {
     } catch (e) {
       last = sanitizarTexto(String(e && e.message ? e.message : e), acceso && acceso.clave).slice(0, 500);
       console.error(JSON.stringify({ intento: i, error: last }));
+      if (e && e.noReintentar) break;
     }
   }
   await terminar(bodyResultado({ ...baseBody, estado: 'ERROR', error: last }));
