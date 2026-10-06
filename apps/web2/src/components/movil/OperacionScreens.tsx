@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import {
-  AlertTriangle, ArrowLeft, ArrowRightLeft, Bell, CalendarClock, Clock, Hourglass, LogIn, MapPin, MessageSquare, MoreHorizontal, Phone, Radio, Search, ShieldAlert, Star, StickyNote, Timer, User, UserCheck, UserX, X,
+  AlertTriangle, ArrowLeft, ArrowRightLeft, Bell, BellOff, CalendarClock, Clock, Hourglass, LogIn, MapPin, MessageSquare, MoreHorizontal, Phone, Radio, Search, ShieldAlert, Star, StickyNote, Timer, User, UserCheck, UserX, X,
   type LucideIcon,
 } from 'lucide-react';
 import {
@@ -16,6 +16,7 @@ import { etiquetaProximas, resumenProximas, type ProximaFranja } from '@/lib/mov
 import { OPS_NOTA_MAX } from '@/lib/operaciones/opsNota';
 import { movilFechaCorta } from '@/lib/movil/fechaCorta';
 import { PuntajeChip } from '@/components/desempeno/PuntajeChip';
+import { textoSinNotificacionesDe } from '@/lib/operaciones/pushAviso';
 
 /**
  * Botones de la hoja de acciones: primario = color de la empresa (negro por defecto),
@@ -88,6 +89,17 @@ export function GuardAccionesSheetBody({
       setGuardandoNota(false);
     }
   };
+  const targetDe = (accion: GuardAccion): GuardShift => (
+    accion.targetShiftId && accion.targetShiftId !== shift.id
+      ? siblings.find((s) => s.id === accion.targetShiftId) || shift
+      : shift
+  );
+  const motivoAviso = (accion: GuardAccion): string | null => {
+    if (accion.id !== 'AVISAR_ENTRANTE' && accion.id !== 'AVISAR_RETENIDO') return null;
+    return textoSinNotificacionesDe(targetDe(accion));
+  };
+  const primerBloqueo = acciones.find((accion) => motivoAviso(accion)) || null;
+  const telPrimero = primerBloqueo ? (String(targetDe(primerBloqueo).phone || shift.phone || '').trim() || null) : null;
   const cooldownDe = (accion: GuardAccion): number => {
     if (accion.id !== 'AVISAR_ENTRANTE' && accion.id !== 'AVISAR_RETENIDO') return 0;
     const target = accion.targetShiftId === shift.id ? shift : siblings.find((s) => s.id === accion.targetShiftId) || null;
@@ -104,6 +116,11 @@ export function GuardAccionesSheetBody({
             {shift.isUnassigned ? `VACANTE${shift.vacancyBand ? ` · ${shift.vacancyBand}` : ''}` : shift.employeeName || 'Sin nombre'}
           </strong>
           {!shift.isUnassigned && <PuntajeChip sujetoId={String((shift as { bolsaCuil?: string }).bolsaCuil || shift.employeeId || '')} />}
+          {detalle.sinAvisos && (
+            <span title={detalle.sinAvisos} aria-label={detalle.sinAvisos} data-movil-sin-avisos="1" className="inline-flex shrink-0 text-amber-600">
+              <BellOff size={14} strokeWidth={1.75} aria-hidden="true" />
+            </span>
+          )}
           <MovilBadge tone={visual} className="ml-auto">{guardStatusLabel(shift)}</MovilBadge>
         </div>
         <GuardDetalleLines shift={shift} siblings={siblings} now={nowMs} />
@@ -121,22 +138,29 @@ export function GuardAccionesSheetBody({
         </div>
       ) : (
         <>
+          {primerBloqueo && (
+            <div className="mb-2" data-movil-llamar-primero="1">
+              <LlamarButton telefono={telPrimero} />
+            </div>
+          )}
           {acciones.map((accion, index) => {
             const cooldown = cooldownDe(accion);
+            const motivo = motivoAviso(accion);
             return (
               <button
                 key={`${accion.id}-${accion.targetShiftId || index}`}
                 type="button"
                 data-movil-accion={accion.id}
                 data-movil-accion-target={accion.targetShiftId}
-                disabled={cooldown > 0}
+                data-movil-sin-push={motivo ? '1' : undefined}
+                disabled={cooldown > 0 || !!motivo}
                 onClick={() => (accion.confirm ? setConfirmando(accion.id) : void ejecutar(accion))}
                 className={`mb-2 flex min-h-14 w-full items-center justify-between rounded-lg px-3 text-left disabled:opacity-50 ${ACCION_CLS[accion.tone]}`}
               >
                 <span className="min-w-0">
                   <span className="block truncate text-sm font-semibold">{accion.label}</span>
-                  <span className="block truncate text-[11px] font-medium opacity-75" data-movil-accion-hint={accion.id}>
-                    {cooldown > 0 ? `Ya se le avisó · reintentá en ${Math.ceil(cooldown / 60)} min` : accion.hint}
+                  <span className="block text-[11px] font-medium opacity-75 whitespace-normal" data-movil-accion-hint={accion.id}>
+                    {motivo || (cooldown > 0 ? `Ya se le avisó · reintentá en ${Math.ceil(cooldown / 60)} min` : accion.hint)}
                   </span>
                 </span>
                 <span aria-hidden="true" className="ml-2 shrink-0 text-lg">›</span>
@@ -168,7 +192,7 @@ export function GuardAccionesSheetBody({
               <p className="mt-1 text-[10px] font-medium text-slate-400">La ve el escritorio en la tarjeta y la bitácora, con tu nombre y la hora. Sin señal queda pendiente.</p>
             </div>
           )}
-          {!shift.isUnassigned && (
+          {!shift.isUnassigned && !primerBloqueo && (
             <div className="mt-3">
               <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">Último recurso</p>
               <LlamarButton telefono={telefono} />
@@ -499,6 +523,7 @@ export function GuardDetalleLines({ shift, siblings = [], now, showObjective = t
       {d.convocatoria && <p className="truncate text-[11px] font-semibold text-slate-700">{d.convocatoria}</p>}
       {d.cobertura && <p className="truncate text-[11px] font-semibold text-slate-700">{d.cobertura}</p>}
       {d.nota && <p className="truncate text-[11px] font-medium text-slate-600" data-movil-nota-linea="1">{d.nota}</p>}
+      {d.sinAvisos && <p className="text-[11px] font-medium text-amber-700" data-movil-sin-avisos="1" title={d.sinAvisos}>{d.sinAvisos}</p>}
     </div>
   );
 }
@@ -588,6 +613,11 @@ export function GuardCard({
           <strong className={`truncate text-[13px] font-semibold leading-5 ${c.esVacante ? 'text-rose-600' : 'text-slate-900'}`}>{c.nombre}</strong>
           {!c.esVacante && <PuntajeChip sujetoId={String((shift as { bolsaCuil?: string }).bolsaCuil || shift.employeeId || '')} />}
           <span className="shrink-0 rounded border border-slate-300 px-1 text-[10px] font-bold leading-4 text-slate-700" data-movil-code={c.code}>{c.code}</span>
+          {c.sinAvisos && (
+            <span title={c.sinAvisos} aria-label={c.sinAvisos} data-movil-sin-avisos="1" className="inline-flex shrink-0 text-amber-600">
+              <BellOff size={12} strokeWidth={1.75} aria-hidden="true" />
+            </span>
+          )}
           {c.extra && <span className="shrink-0 rounded border border-slate-300 px-1 text-[10px] font-bold leading-4 text-slate-700" data-movil-extra={c.extra}>{c.extra}</span>}
           <span className={`ml-auto flex shrink-0 items-center gap-1 text-[10px] font-bold leading-4 tabular-nums ${MOVIL_TEXT[visual]}`} data-movil-estado={c.estado.kind}>
             <EstadoIcon size={11} strokeWidth={1.75} aria-hidden="true" />

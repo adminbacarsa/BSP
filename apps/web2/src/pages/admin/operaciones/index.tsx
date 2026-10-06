@@ -91,6 +91,7 @@ import {
 } from '@/lib/operaciones/eventoCc';
 import { SeriesReliefPicker } from '@/components/operaciones/SeriesReliefPicker';
 import { ShiftCodeBadge } from '@/components/operaciones/ShiftCodeBadge';
+import { SinNotificacionesMark } from '@/components/operaciones/SinNotificacionesMark';
 import { canRevertAbsenceNow, isRevertAbsenceExpired } from '@/lib/operaciones/revertAbsenceWindow';
 import { ALTA_ARCA_AVISO_TEXTO, ALTA_ARCA_AVISO_TITLE, altaArcaPendienteVisible, mostrarDescubierto } from '@/lib/operaciones/guardCardEstado';
 import { partesNombreTarjeta } from '@/lib/operaciones/guardCardNombre';
@@ -1223,6 +1224,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                     <GuardNombre name={name} danger={isActionableOpsVacancy(shift)} />
                     {!shift.isUnassigned && <PuntajeChip sujetoId={String((shift as { bolsaCuil?: string }).bolsaCuil || shift.employeeId || '')} />}
                     <ShiftCodeBadge shift={shift} />
+                    <SinNotificacionesMark shift={shift} />
                 </div>
                 <div className="mt-0.5 flex flex-wrap items-center gap-1 min-w-0">
                     {dayTagEl}
@@ -1305,6 +1307,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                             <GuardNombre name={name} danger={!!shift.isUnassigned} />
                             {!shift.isUnassigned && <PuntajeChip sujetoId={String((shift as { bolsaCuil?: string }).bolsaCuil || shift.employeeId || '')} />}
                             <ShiftCodeBadge shift={shift} />
+                            <SinNotificacionesMark shift={shift} />
                         </span>
                         <span className="text-[10px] text-slate-400 break-words">{isEventShift(shift) ? (eventClientName(shift) || shiftPlaceLabel(shift)) : (shift.clientName || shift.objectiveName)}</span>
                     </div>

@@ -33,6 +33,7 @@ const registrarBitacora = async (action: string, details: string, extra?: { obje
     } catch (e) { console.error('Error registrando bitácora', e); toast.error('No se pudo registrar en bitácora.'); }
 };
 import { Radio, Filter, Search, Building2, Shield, Clock, Siren, CheckCircle, LogOut, AlertTriangle, Phone, MessageCircle, Calendar, Send, PlayCircle, EyeOff, Briefcase, X, UserCheck, Navigation, ChevronUp, ChevronDown, MapPin, BellRing, UserX, Users, XCircle, CornerUpLeft, Timer, AlarmClock, Loader2 } from 'lucide-react';
+import { SinNotificacionesMark } from '@/components/operaciones/SinNotificacionesMark';
 import { openWhatsApp, waMensaje } from '@/lib/whatsapp';
 import { WorkedDayOffModal as WorkedDayOffModalPro, AttendanceModal } from '@/components/operaciones/OperationalModals';
 import { EarlyWithdrawModal } from '@/components/operaciones/EarlyWithdrawModal';
@@ -1327,6 +1328,7 @@ export default function TacticalMapView() {
                                             <div className="flex-1 min-w-0">
                                                 <p className="text-[11px] font-bold text-slate-800 leading-snug">
                                                     {s.employeeName || 'Desconocido'}
+                                                    <SinNotificacionesMark shift={s} size={11} className="ml-1 align-middle" />
                                                     <ShiftCodeBadge shift={s} className="ml-1" />
                                                     <span className={`ml-1.5 text-[9px] font-black px-1.5 rounded ${s.manualRetentionType ? 'bg-amber-100 text-amber-700' : s.isRetention ? 'bg-orange-100 text-orange-700' : s.cierreSinFranja ? 'bg-slate-200 text-slate-600' : s.isEarlyStart ? 'bg-indigo-100 text-indigo-700' : s.isAwaitingCoverageCheckIn ? 'bg-indigo-100 text-indigo-700' : 'bg-rose-100 text-rose-700'}`}>
                                                         {s.manualRetentionType === 'extended' ? `+${s.manualRetentionHours}h MAN` : s.manualRetentionType === 'open' ? 'MAN INDEF' : s.isRetention ? `RETENIDO${s.retentionMinutes > 0 ? ` ${formatRetentionDuration(s.retentionMinutes)}` : ''}` : s.cierreSinFranja ? s.cierreSinFranja : s.isPendingClose ? `ESPERANDO RELEVO${s.retentionMinutes > 0 ? ` ${formatRetentionDuration(s.retentionMinutes)}` : ''}` : s.isEarlyStart ? 'ADELANTADO' : s.isAwaitingCoverageCheckIn ? 'CONVOCADO' : 'INMINENTE'}
@@ -1371,6 +1373,7 @@ export default function TacticalMapView() {
                                                 <div className="flex-1 min-w-0">
                                                     <p className="text-[11px] font-bold text-slate-800 leading-snug">
                                                         {s.employeeName || 'Desconocido'}
+                                                        <SinNotificacionesMark shift={s} size={11} className="ml-1 align-middle" />
                                                         <ShiftCodeBadge shift={s} className="ml-1" />
                                                         <span className="ml-1.5 text-[9px] font-black px-1.5 rounded bg-amber-100 text-amber-700" title={lateBadge}>{lateBadge}</span>
                                                     </p>

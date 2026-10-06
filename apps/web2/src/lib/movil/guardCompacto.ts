@@ -2,6 +2,7 @@ import { deploymentCodeLabel, outgoingFor, relevoAusenteAviso, relieverFor, seri
 import { guardTone, type GuardTone } from '@/lib/movil/guardTone';
 import { hhmmAR, horarioPlanificado, type GuardDetalleShift } from '@/lib/movil/guardDetalle';
 import { normalizarNota } from '@/lib/operaciones/opsNota';
+import { textoSinNotificacionesDe } from '@/lib/operaciones/pushAviso';
 
 /**
  * Datos de la tarjeta compacta del guardia (celular): dos filas con íconos, sin textos
@@ -38,6 +39,8 @@ export interface GuardCompacto {
   tone: GuardTone;
   telefono: string | null;
   esVacante: boolean;
+  /** Tooltip si no recibe push; null si está activo o el turno no trae el dato. */
+  sinAvisos: string | null;
 }
 
 /** Alto de diseño de la tarjeta compacta: 2 filas (20 + 16 px) + gap 2 + padding 16 + borde 2, más 6 px de separación. */
@@ -209,6 +212,7 @@ export function guardCompacto(shift: GuardDetalleShift, siblings: readonly Guard
     tone,
     telefono: String(shift.phone || '').trim() || null,
     esVacante,
+    sinAvisos: esVacante ? null : textoSinNotificacionesDe(shift),
   };
 }
 
