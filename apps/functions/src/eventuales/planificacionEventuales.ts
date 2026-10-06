@@ -464,7 +464,8 @@ export async function sincronizarContratoEventual(empresaId: string, cuil: strin
 
 /** Denormaliza en los turnos el contrato y si el alta ARCA ya está confirmada (gate de fichada). Solo escribe si cambia. */
 async function marcarTurnosConContrato(turnos: (Record<string, unknown> & { id: string })[], contratoId: string, envios: Record<string, unknown>[]) {
-  const alta = envios.find((e) => e.tipo === 'AT' && e.estado === 'CONFIRMADO' && !e.quitadoDelLote);
+  // Mismo criterio que propagarAltaEnTurnos: con el nro de ENVIADO ya ficha (la verificación sigue aparte).
+  const alta = envios.find((e) => e.tipo === 'AT' && ['CONFIRMADO', 'ENVIADO', 'VERIFICAR'].includes(String(e.estado || '')) && !e.quitadoDelLote);
   const altaOk = !!alta;
   const nro = String(alta?.nroTransaccion || '').trim();
   const batch = db().batch();
