@@ -33,7 +33,7 @@ function formatTimeAr(d: Date): string {
   return d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: TZ });
 }
 
-export type ConvocatoriaCardKind = 'COBERTURA' | 'EVENTO' | 'VENIS' | 'RETENCION';
+export type ConvocatoriaCardKind = 'COBERTURA' | 'EVENTO' | 'VENIS' | 'RETENCION' | 'DISPONIBILIDAD';
 
 export type ConvocatoriaCardActions = 'ACCEPT_REJECT' | 'VENIS' | 'NONE';
 
@@ -57,6 +57,9 @@ export type ConvocatoriaCardModel = {
   codigo: string | null;
   timeoutAtMs: number | null;
   actions: ConvocatoriaCardActions;
+  /** Si vienen, pisan «Aceptar» / «Rechazar» (consulta de disponibilidad). */
+  acceptLabel?: string | null;
+  rejectLabel?: string | null;
 };
 
 const TZ = 'America/Argentina/Buenos_Aires';
@@ -416,8 +419,39 @@ export function inboxItemIsConvocatoria(item: Pick<InboxCardSource, 'type'>): bo
     t === 'ADELANTO' ||
     t === 'LLEGADA_TARDE' ||
     t === 'RETENCION_AVISO' ||
-    t === 'CONVOCATORIA_EVENTO'
+    t === 'CONVOCATORIA_EVENTO' ||
+    t === 'CONSULTA_DISPONIBILIDAD'
   );
+}
+
+export function buildDisponibilidadCardModel(input: {
+  id: string;
+  message: string;
+  cliente?: string | null;
+  objetivo?: string | null;
+  puesto?: string | null;
+  fecha?: string | null;
+  horario?: string | null;
+  timeoutAtMs?: number | null;
+}): ConvocatoriaCardModel {
+  return {
+    id: input.id,
+    kind: 'DISPONIBILIDAD',
+    kicker: 'Disponibilidad',
+    tipo: 'Consulta',
+    title: '¿Estás disponible?',
+    message: input.message,
+    cliente: input.cliente || null,
+    objetivo: input.objetivo || null,
+    puesto: input.puesto || null,
+    fecha: input.fecha || null,
+    horario: input.horario || null,
+    codigo: null,
+    timeoutAtMs: input.timeoutAtMs ?? null,
+    actions: 'ACCEPT_REJECT',
+    acceptLabel: 'Sí, puedo',
+    rejectLabel: 'No puedo',
+  };
 }
 
 /**
@@ -448,6 +482,16 @@ export function buildInboxCardModel(input: InboxCardInput): ConvocatoriaCardMode
 
   if (isRetencionAviso(type)) {
     return { ...buildRetencionCardModel({ aviso: { ...item, id: item.id }, shifts: input.shifts, objectivesMap: input.objectivesMap }), id: item.id };
+  }
+  if (type === 'CONSULTA_DISPONIBILIDAD') {
+    return buildDisponibilidadCardModel({
+      id: item.id,
+      message: clean(item.body) || '¿Estás disponible?',
+      cliente: first(item.clientName),
+      objetivo: first(item.objectiveName),
+      puesto: first(item.positionName),
+      timeoutAtMs: toMs(item.timeoutAt),
+    });
   }
   if (type === 'CONVOCATORIA_EVENTO') {
     const lugar = resolveLugarConvocatoria(merged, input.shifts, input.objectivesMap);

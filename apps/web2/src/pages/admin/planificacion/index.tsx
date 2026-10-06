@@ -346,7 +346,7 @@ import {
 import { checkGeneroPuesto, getPreferenciaGeneroFromPositionStructure, getPreferenciaGeneroUi, preferenciaGeneroOptionSuffix, preferenciaGeneroLabel } from '@/lib/planificacion/genderPreference';
 import { experienciaBadgeForReplacement, patchExperienciaForTurno } from '@/lib/planificacion/experienciaObjetivos';
 import EventualesCandidatosPanel, { type CandidatoEventual } from '@/components/eventuales/EventualesCandidatosPanel';
-import { asignarEventualPlanificacion, canConvocarEventuales, eventualErrorMessage, sustituirEventualPlanificacion } from '@/services/eventualesPlanificacionService';
+import { asignarEventualPlanificacion, canConsultarDisponibilidad, canConvocarEventuales, eventualErrorMessage, sustituirEventualPlanificacion } from '@/services/eventualesPlanificacionService';
 import { esLegajoEventual, jornadaEventualDesdeBanda } from '@/lib/eventuales/planificacionUi';
 import { gruposService, GrupoObjetivos } from '@/services/gruposService';
 import { solicitudRefuerzoService } from '@/services/solicitudRefuerzoService';
@@ -1093,6 +1093,7 @@ function PlanificacionDesktop() {
     const canAutoLab = canAccessAutoLab(isSuperAdmin, rolePermissions);
     const canAssignFT = canAssignFrancoTrabajado(isSuperAdmin, rolePermissions);
     const canConvocarEventual = canConvocarEventuales(isSuperAdmin, rolePermissions as Record<string, string[]>);
+    const canConsultarEventual = canConsultarDisponibilidad(isSuperAdmin, rolePermissions as Record<string, string[]>);
     const migracionCompleta = (empresa as any)?.migracionCompleta === true;
     const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
 
@@ -15939,6 +15940,10 @@ function PlanificacionDesktop() {
                                                         objetivoGeo={objGeo}
                                                         jornadas={jornadas}
                                                         canConvocar={canConvocarEventual}
+                                                        consulta={canConsultarEventual ? {
+                                                            objectiveName: getObjectiveName(selectedObjective || '') || null,
+                                                            positionName: vacancyGapPreferredPosition || null,
+                                                        } : null}
                                                         busy={vacancyEventualBusy}
                                                         compact
                                                         onSelect={async (candidato) => {
@@ -16726,6 +16731,10 @@ function PlanificacionDesktop() {
                                 canConvocar: canConvocarEventual,
                                 clientId: selectedClient || null,
                                 jornadas: eventualJornadas,
+                                consulta: canConsultarEventual ? {
+                                    objectiveName: getObjectiveName(selectedObjective || '') || null,
+                                    positionName: planCoverageModalGaps[0]?.positionName || positionStructure[0]?.positionName || null,
+                                } : null,
                                 onAssign: async (candidato: CandidatoEventual) => {
                                     try {
                                         // Solo el legajo: los turnos van por la grilla (pendientes → Guardar) como cualquier cobertura.

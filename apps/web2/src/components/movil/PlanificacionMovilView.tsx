@@ -230,6 +230,11 @@ export function CandidatosHueco(props: {
   puedeEventuales: boolean;
   onElegir: (id: string) => void;
   onConfirmar: () => void;
+  /** Cuiles marcados para consultar disponibilidad (solo eventuales elegibles). */
+  consultaCuils?: string[];
+  onToggleConsulta?: (cuil: string) => void;
+  onConsultar?: (cuils: string[], lugares: number) => void;
+  puedeAsignarEventual?: boolean;
   /** Turno del SLA que se cubre: con más de una opción el operador puede cambiarlo. */
   opciones?: OpcionTurno[];
   opcionId?: string | null;
@@ -238,6 +243,8 @@ export function CandidatosHueco(props: {
   const lista = props.candidatos.filter((c) => c.tab === props.tab);
   const opcion = props.opciones?.find((o) => o.id === props.opcionId) || null;
   const [verOcultosTope, setVerOcultosTope] = useState(false);
+  const [lugaresConsulta, setLugaresConsulta] = useState(1);
+  const consultaCuils = props.consultaCuils || [];
   const ocultosTope = props.eventuales.filter(eventualOcultoPorTope);
   const eventualesVisibles = verOcultosTope ? props.eventuales : props.eventuales.filter((ev) => !eventualOcultoPorTope(ev));
   const fila = (on: boolean, disabled: boolean, onClick: () => void, key: string, children: ReactNode, attrs: Record<string, string>) => (
@@ -267,7 +274,20 @@ export function CandidatosHueco(props: {
       {props.tab === 'eventuales' && !props.puedeEventuales && <p className="text-xs font-medium text-slate-500">Hace falta el permiso para convocar eventuales.</p>}
       {props.tab === 'eventuales' && props.puedeEventuales && eventualesVisibles.map((ev) => fila(props.elegidoId === ev.cuil, !ev.elegible, () => props.onElegir(ev.cuil), ev.cuil, (
         <>
-          <span className="flex items-center gap-1 text-sm font-semibold text-slate-900">{ev.nombre}<PuntajeChip sujetoId={ev.cuil} /></span>
+          <span className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+            {ev.elegible && props.onToggleConsulta && (
+              <input
+                type="checkbox"
+                checked={consultaCuils.includes(ev.cuil)}
+                onClick={(e) => e.stopPropagation()}
+                onChange={() => props.onToggleConsulta?.(ev.cuil)}
+                aria-label={`Consultar a ${ev.nombre}`}
+                data-consulta-cuil={ev.cuil}
+                className="h-4 w-4 accent-indigo-600"
+              />
+            )}
+            {ev.nombre}<PuntajeChip sujetoId={ev.cuil} />
+          </span>
           <span className="block text-[11px] font-medium tabular-nums text-slate-500">{ev.distanciaKm != null ? `${ev.distanciaKm} km` : 'sin distancia'} · bolsa</span>
           {ev.horasMes && (
             <span data-horas-mes className={`block text-[11px] font-semibold tabular-nums ${ev.horasMes.aviso ? 'text-amber-700' : 'text-slate-500'}`}>
@@ -292,9 +312,26 @@ export function CandidatosHueco(props: {
         </>
       ), { 'data-plan-candidato': c.employeeId }))}
       {props.tab !== 'eventuales' && lista.length === 0 && <p className="py-4 text-center text-[12px] font-medium text-slate-400">Sin candidatos en esta pestaña.</p>}
-      <button type="button" disabled={!props.elegidoId} onClick={props.onConfirmar} data-plan-confirmar="1" className={`mt-2 min-h-12 w-full rounded text-sm font-semibold ${MOVIL_BTN_PRIMARY} disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-500`}>
+      <button type="button" disabled={!props.elegidoId || (props.tab === 'eventuales' && props.puedeAsignarEventual === false)} onClick={props.onConfirmar} data-plan-confirmar="1" className={`mt-2 min-h-12 w-full rounded text-sm font-semibold ${MOVIL_BTN_PRIMARY} disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-500`}>
         Confirmar
       </button>
+      {props.tab === 'eventuales' && props.onConsultar && (
+        <div className="mt-2 flex items-center gap-2" data-consulta-bar>
+          <label className="flex items-center gap-1 text-[11px] font-semibold text-slate-600">
+            Lugares
+            <input type="number" min={1} max={20} value={lugaresConsulta} onChange={(e) => setLugaresConsulta(Math.max(1, Number(e.target.value) || 1))} className="w-12 rounded border border-slate-300 px-1 py-1 text-sm" data-consulta-lugares />
+          </label>
+          <button
+            type="button"
+            disabled={consultaCuils.length === 0}
+            onClick={() => props.onConsultar?.(consultaCuils, Math.min(lugaresConsulta, consultaCuils.length))}
+            data-consulta-enviar
+            className={`min-h-12 flex-1 rounded border text-sm font-semibold ${MOVIL_BTN_SECONDARY} disabled:opacity-50`}
+          >
+            Consultar disponibilidad ({consultaCuils.length})
+          </button>
+        </div>
+      )}
       <p className="mt-2 text-[11px] font-medium text-slate-400">Un toque elige. El segundo confirma.</p>
     </div>
   );

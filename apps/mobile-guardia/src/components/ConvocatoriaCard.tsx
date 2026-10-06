@@ -39,6 +39,7 @@ const TONE = {
   EVENTO: { border: '#d97706', pill: '#d97706', bg: 'rgba(217, 119, 6, 0.08)' },
   VENIS: { border: '#f59e0b', pill: '#b45309', bg: 'rgba(245, 158, 11, 0.08)' },
   RETENCION: { border: '#b91c1c', pill: '#b91c1c', bg: 'rgba(185, 28, 28, 0.06)' },
+  DISPONIBILIDAD: { border: '#4f46e5', pill: '#4f46e5', bg: 'rgba(79, 70, 229, 0.08)' },
 } as const;
 
 /**
@@ -117,7 +118,7 @@ export function ConvocatoriaCard({
       ) : model.actions === 'ACCEPT_REJECT' ? (
         <View style={styles.rowBtns}>
           <CommandButton
-            label={busy ? 'Enviando…' : CONVOCATORIA_ACCEPT_LABEL}
+            label={busy ? 'Enviando…' : (model.acceptLabel || CONVOCATORIA_ACCEPT_LABEL)}
             variant="success"
             onPress={onAccept}
             disabled={blocked || !onAccept}
@@ -125,7 +126,7 @@ export function ConvocatoriaCard({
             style={styles.btnFlex}
           />
           <CommandButton
-            label={busy ? 'Enviando…' : CONVOCATORIA_REJECT_LABEL}
+            label={busy ? 'Enviando…' : (model.rejectLabel || CONVOCATORIA_REJECT_LABEL)}
             variant="danger"
             onPress={onReject}
             disabled={blocked || !onReject}

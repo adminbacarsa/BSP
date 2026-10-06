@@ -946,6 +946,24 @@ service cloud.firestore {
       }
     }
 
+    // Consulta de disponibilidad (Planificación). El eventual lee su invitación y responde por callable.
+    // Escritura solo servidor. Las publica Mauro.
+    match /consultas_disponibilidad/{consultaId} {
+      allow read: if tenantAdminRead();
+      allow write: if false;
+
+      match /eventos/{eventId} {
+        allow read: if tenantAdminRead();
+        allow write: if false;
+      }
+    }
+
+    match /consultas_disponibilidad_invitaciones/{invitacionId} {
+      allow read: if tenantAdminRead()
+        || (request.auth != null && resource.data.uid == request.auth.uid);
+      allow write: if false;
+    }
+
     function contratoEventualCausaOk(data) {
       return data.get('causa', '') is string && data.get('causa', '').size() > 0;
     }

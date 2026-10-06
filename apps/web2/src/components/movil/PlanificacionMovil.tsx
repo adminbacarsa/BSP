@@ -8,6 +8,7 @@ import { BottomSheet } from '@/components/movil/BottomSheet';
 import { MovilBottomNav } from '@/components/movil/MovilBottomNav';
 import { useEmpresaSheet } from '@/components/movil/useEmpresaSheet';
 import { CambioPuntual, CandidatosHueco, PlanificacionMovilView, type EventualMovil } from '@/components/movil/PlanificacionMovilView';
+import { ConsultaDisponibilidadEstado } from '@/components/eventuales/ConsultaDisponibilidadEstado';
 import {
   BarraPublicar, CeldaSheetBody, SelectorObjetivoSheetBody, SemanaEncabezado, SemanaGrilla, type PanelPlanificacion,
 } from '@/components/movil/PlanificacionSemanaView';
@@ -76,7 +77,7 @@ import { ingestPlanningTurnosSnapshot } from '@/lib/planificacion/planningTurnos
 import { belongsToEmpresaView, empresaCollectionQuery, fetchPlanificacionPublishStatus } from '@/lib/multiempresa';
 import type { SlaPlanningRow } from '@/lib/slaPlanningMatch';
 import { shouldScopeQueriesToEmpresa } from '@/lib/tenantScope';
-import { asignarEventualPlanificacion, canConvocarEventuales, eventualErrorMessage } from '@/services/eventualesPlanificacionService';
+import { asignarEventualPlanificacion, canConsultarDisponibilidad, canConvocarEventuales, eventualErrorMessage } from '@/services/eventualesPlanificacionService';
 
 type ObjGeo = { id: string; name: string; clientId: string; clientName: string; lat: number | null; lng: number | null };
 type Sheet =
@@ -139,6 +140,9 @@ export function PlanificacionMovil() {
   const puedeCorregir = isSuperAdmin || (rolePermissions.PLANNING || []).includes('correct');
   const puedeFt = canAssignFrancoTrabajado(isSuperAdmin, rolePermissions);
   const puedeEventuales = canConvocarEventuales(isSuperAdmin, rolePermissions);
+  const puedeConsultar = canConsultarDisponibilidad(isSuperAdmin, rolePermissions);
+  const veBolsa = puedeEventuales || puedeConsultar;
+  const [consultaCuils, setConsultaCuils] = useState<string[]>([]);
   const actorName = user?.displayName || user?.email || 'Planificación celular';
   const cronograma = useCronogramaSinPublicar(empresaId, puedeLeer);
 
@@ -439,7 +443,7 @@ export function PlanificacionMovil() {
   };
 
   useEffect(() => {
-    if (tab !== 'eventuales' || !franjaAbierta || !puedeEventuales) return;
+    if (tab !== 'eventuales' || !franjaAbierta || !veBolsa) return;
     const banda = bandaCubrir ?? bandaParaCubrir(franjaAbierta);
     let alive = true;
     void runCallableOnline('Bolsa de eventuales', async () => {
@@ -457,7 +461,34 @@ export function PlanificacionMovil() {
     });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, franjaAbierta, puedeEventuales, empresaId, objetivo, opcionCubrirSel?.id]);
+  }, [tab, franjaAbierta, veBolsa, empresaId, objetivo, opcionCubrirSel?.id]);
+
+  const consultarDisponibilidad = async (cuils: string[], lugares: number) => {
+    if (!franjaAbierta || cuils.length === 0) return;
+    const banda = bandaCubrir ?? bandaParaCubrir(franjaAbierta);
+    try {
+      await runCallableOnline('Consultar disponibilidad', async () => {
+        const call = httpsCallable<Record<string, unknown>, { resumen?: string }>(functions, 'crearConsultaDisponibilidad');
+        const res = await call({
+          empresaId,
+          objectiveId: franjaAbierta.objectiveId,
+          objectiveName: franjaAbierta.objectiveName,
+          clientId: franjaAbierta.clientId || objetivo?.clientId || null,
+          clientName: franjaAbierta.clientName || objetivo?.clientName || null,
+          positionName: franjaAbierta.positionName,
+          objetivoGeo: objetivo?.lat != null && objetivo.lng != null ? { lat: objetivo.lat, lng: objetivo.lng } : null,
+          jornadas: [{ fecha: franjaAbierta.date, horaInicio: banda.start, horaFin: banda.end, horas: banda.hours, code: banda.code, positionName: franjaAbierta.positionName }],
+          cuils,
+          lugares,
+          venceMinutos: 120,
+        });
+        toast.success(res.data?.resumen || 'Consulta enviada.');
+        setConsultaCuils([]);
+      });
+    } catch (error) {
+      toast.error(eventualErrorMessage(error, 'La consulta requiere conexión.'));
+    }
+  };
 
   /**
    * Publica la corrección (`draft:false`, con aviso al guardia). Se vuelve a verificar en el servidor
@@ -627,9 +658,26 @@ export function PlanificacionMovil() {
             eventuales={eventuales}
             elegidoId={elegido}
             puedeFt={puedeFt}
-            puedeEventuales={puedeEventuales}
+            puedeEventuales={veBolsa}
+            puedeAsignarEventual={puedeEventuales}
+            consultaCuils={consultaCuils}
+            onToggleConsulta={puedeConsultar ? (cuil) => setConsultaCuils((prev) => (prev.includes(cuil) ? prev.filter((c) => c !== cuil) : [...prev, cuil])) : undefined}
+            onConsultar={puedeConsultar ? (cuils, lugares) => { void consultarDisponibilidad(cuils, lugares); } : undefined}
             onElegir={setElegido}
             onConfirmar={() => { void confirmarCandidato(); }}
+          />
+        )}
+        {puedeConsultar && franjaAbierta && (
+          <ConsultaDisponibilidadEstado
+            empresaId={empresaId}
+            objectiveId={franjaAbierta.objectiveId}
+            positionName={franjaAbierta.positionName}
+            jornadas={[{
+              fecha: franjaAbierta.date,
+              code: (bandaCubrir ?? bandaParaCubrir(franjaAbierta)).code,
+              horaInicio: (bandaCubrir ?? bandaParaCubrir(franjaAbierta)).start,
+              horaFin: (bandaCubrir ?? bandaParaCubrir(franjaAbierta)).end,
+            }]}
           />
         )}
       </BottomSheet>

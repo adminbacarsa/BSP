@@ -1636,6 +1636,14 @@ export const checkConvocatoriaTimeouts = onSchedule(
     }
 
     try {
+      const { vencerConsultasDisponibilidad } = await import('../eventuales/consultaDisponibilidad');
+      const consultas = await vencerConsultasDisponibilidad(now);
+      if (consultas) console.log(`[checkConvocatoriaTimeouts] ${consultas} consulta/s de disponibilidad vencida/s`);
+    } catch (e) {
+      console.error('[checkConvocatoriaTimeouts] consultas disponibilidad:', (e as Error).message);
+    }
+
+    try {
       const { vencerAnulacionesPendientes } = await import('../eventuales/eventualNoSePresento');
       const pasadas = await vencerAnulacionesPendientes(db, Date.now());
       if (pasadas) console.log(`[checkConvocatoriaTimeouts] ${pasadas} anulación/es de alta pasada/s a baja`);

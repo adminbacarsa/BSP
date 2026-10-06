@@ -31,6 +31,7 @@ import { formatDateTimeAr, portalInboxDetailLines, toDate } from '@cosp/portal-c
 import { appAlert } from '@/lib/appAlert';
 import { ALERTAS_PAGE_SIZE, paginateAlertItems } from '../../src/lib/alertasPagination';
 import { respondCoberturaConvocatoria } from '../../src/lib/respondCoberturaConvocatoria';
+import { responderConsultaDisponibilidad } from '../../src/lib/responderConsultaDisponibilidad';
 import { buildCoberturaRespondFeedback } from '../../src/lib/coberturaRespondFeedback';
 import { ConvocatoriaCard } from '../../src/components/ConvocatoriaCard';
 import {
@@ -294,6 +295,36 @@ function AlertasScreenContent() {
   const onRespond = useCallback(
     (n: PortalInboxItem, response: 'ACCEPTED' | 'REJECTED') => {
       if (busyId) return;
+      if (String(n.type || '').toUpperCase() === 'CONSULTA_DISPONIBILIDAD') {
+        const invitacionId = String(n.invitacionId || '').trim();
+        const si = response === 'ACCEPTED';
+        appAlert(si ? 'Sí, puedo' : 'No puedo', si ? '¿Confirmás que podés?' : '¿Confirmás que no podés?', [
+          { text: 'Cancelar', style: 'cancel' },
+          {
+            text: si ? 'Sí, puedo' : 'No puedo',
+            style: si ? 'default' : 'destructive',
+            onPress: () => {
+              void (async () => {
+                if (!invitacionId) {
+                  appAlert('Consulta', 'Abrí Hoy y respondé desde la tarjeta.');
+                  return;
+                }
+                setBusyId(n.id);
+                try {
+                  const res = await responderConsultaDisponibilidad(invitacionId, si ? 'SI' : 'NO');
+                  if (!res.ok) appAlert('No se pudo', res.motivo || (res.codigo === 'COMPLETA' ? 'Ya se cubrió, gracias.' : 'La consulta ya no está abierta.'));
+                  else await markRead(n.id);
+                } catch {
+                  appAlert('Error', 'No se pudo enviar la respuesta.');
+                } finally {
+                  setBusyId(null);
+                }
+              })();
+            },
+          },
+        ]);
+        return;
+      }
       const label = response === 'ACCEPTED' ? 'Aceptar' : 'Rechazar';
       appAlert(
         label,
@@ -375,7 +406,7 @@ function AlertasScreenContent() {
         ],
       );
     },
-    [respond, busyId, router, pinLocal, clearLocal],
+    [respond, busyId, router, pinLocal, clearLocal, markRead],
   );
 
   /** ¿Venís?: 10/15/30 → ACCEPTED con ETA; «Tengo un problema» → REJECTED. Igual que el banner de Hoy. */

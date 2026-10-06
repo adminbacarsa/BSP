@@ -63,6 +63,21 @@ async function exigirConvocar(context: functions.https.CallableContext) {
   throw new functions.https.HttpsError('permission-denied', 'No tenés permiso para convocar eventuales.');
 }
 
+/** Consultar disponibilidad: EVENTUALES convocar o PLANNING update (o SuperAdmin). */
+export async function exigirPuedeConsultar(context: functions.https.CallableContext) {
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Tenés que iniciar sesión.');
+  const permiso = await permisosDe(context.auth.uid, String(context.auth.token.role || ''));
+  if (permiso.super || permiso.acciones.includes('convocar')) return context.auth;
+  const sys = await db().collection('system_users').doc(context.auth.uid).get();
+  const roleId = String(sys.data()?.role || context.auth.token.role || '');
+  if (roleId) {
+    const rol = await db().collection('roles').doc(roleId).get();
+    const planning = (rol.data()?.permissions?.PLANNING || []) as string[];
+    if (planning.includes('update')) return context.auth;
+  }
+  throw new functions.https.HttpsError('permission-denied', 'No tenés permiso para consultar disponibilidad.');
+}
+
 function hoyAr(): string {
   return new Date(Date.now() - 3 * 3600000).toISOString().slice(0, 10);
 }
@@ -487,7 +502,7 @@ async function marcarTurnosConContrato(turnos: (Record<string, unknown> & { id: 
 // ── Callables ─────────────────────────────────────────────────────────────────
 
 export const listarCandidatosEventuales = functions.https.onCall(async (data, context) => {
-  await exigirConvocar(context);
+  await exigirPuedeConsultar(context);
   const empresaId = String(data?.empresaId || '');
   const jornadas = ((data?.jornadas || []) as Partial<Jornada>[]).filter(validarJornada).map((j) => ({ ...j, horas: Number(j.horas) || 0 }));
   if (!empresaId || !jornadas.length) throw new functions.https.HttpsError('invalid-argument', 'Faltan empresa o jornadas.');
@@ -668,6 +683,68 @@ async function escribirTurnosEventual(p: {
   const contratos = [];
   for (const periodo of periodos) contratos.push(await sincronizarContratoEventual(empresaId, cuil, periodo, p.actorUid));
   return { turnoIds, contratos };
+}
+
+/**
+ * Mismo camino que asignar en modo TURNOS, sin cupo de evento: revalida elegibilidad y tope,
+ * escribe turnos + contrato + AT. Lo usa la consulta de disponibilidad al tomar un lugar.
+ */
+export async function asignarTurnosDeConsulta(p: {
+  empresaId: string;
+  cuil: string;
+  turnos: TurnoIn[];
+  objectiveId: string | null;
+  objectiveName: string | null;
+  clientId: string | null;
+  clientName: string | null;
+  positionName: string | null;
+  objetivoGeo: unknown;
+  actorUid: string;
+  actorName: string;
+}): Promise<{ employeeId: string; turnoIds: string[]; nombre: string }> {
+  const bolsa = await bolsaDe(p.cuil);
+  const jornadas: Jornada[] = p.turnos.map((t) => ({ fecha: t.fecha, horaInicio: t.horaInicio, horaFin: t.horaFin, horas: Number(t.horas) || 0 }));
+  const objetivoGeo = await objetivoGeoDe(p.empresaId, p.clientId, p.objectiveId, p.objetivoGeo);
+  await exigirElegible(bolsa, p.empresaId, jornadas, objetivoGeo);
+  await exigirTope(p.empresaId, p.cuil, jornadas);
+  const employeeId = await asegurarLegajo(bolsa, p.empresaId, p.actorUid);
+  const { turnoIds } = await escribirTurnosEventual({
+    bolsa, empresaId: p.empresaId, employeeId, turnosIn: p.turnos, evento: null,
+    objectiveId: p.objectiveId, objectiveName: p.objectiveName, clientId: p.clientId, clientName: p.clientName,
+    positionName: p.positionName, cubreA: null, actorUid: p.actorUid, actorName: p.actorName,
+  });
+  return { employeeId, turnoIds, nombre: String(bolsa.nombre || '') };
+}
+
+/**
+ * Antes de mandar la consulta: elegible para esas jornadas, sin reservar el tope de horas
+ * (eso ocurre recién cuando dice que sí).
+ */
+export async function prevalidarEventualConsulta(p: {
+  empresaId: string;
+  cuil: string;
+  jornadas: Jornada[];
+  clientId: string | null;
+  objectiveId: string | null;
+  objetivoGeo: unknown;
+  actorUid: string;
+}): Promise<{ elegible: boolean; motivo: string | null; nombre: string; uid: string; employeeId: string | null }> {
+  let bolsa: Record<string, unknown> & { cuil: string };
+  try {
+    bolsa = await bolsaDe(p.cuil);
+  } catch (e) {
+    const msg = e instanceof functions.https.HttpsError ? e.message : 'No está en la bolsa.';
+    return { elegible: false, motivo: msg, nombre: '', uid: '', employeeId: null };
+  }
+  const objetivoGeo = await objetivoGeoDe(p.empresaId, p.clientId, p.objectiveId, p.objetivoGeo);
+  try {
+    await exigirElegible(bolsa, p.empresaId, p.jornadas, objetivoGeo);
+  } catch (e) {
+    const msg = e instanceof functions.https.HttpsError ? e.message : 'No elegible';
+    return { elegible: false, motivo: msg, nombre: String(bolsa.nombre || ''), uid: String(bolsa.uid || ''), employeeId: null };
+  }
+  const employeeId = await asegurarLegajo(bolsa, p.empresaId, p.actorUid);
+  return { elegible: true, motivo: null, nombre: String(bolsa.nombre || ''), uid: String(bolsa.uid || ''), employeeId };
 }
 
 // ── Eventos: convocatoria → aceptación ────────────────────────────────────────

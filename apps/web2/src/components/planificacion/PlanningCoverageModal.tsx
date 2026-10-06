@@ -62,6 +62,7 @@ type Props = {
         /** Jornadas del hueco (una por gap) para el cruce 12 h del grupo. */
         jornadas: JornadaEventual[];
         onAssign: (candidato: CandidatoEventual) => Promise<void> | void;
+        consulta?: { clientName?: string | null; objectiveName?: string | null; positionName?: string | null } | null;
     } | null;
 };
 
@@ -287,6 +288,7 @@ export default function PlanningCoverageModal({
                             objetivoGeo={objLat != null && objLng != null ? { lat: Number(objLat), lng: Number(objLng) } : null}
                             jornadas={eventuales.jornadas}
                             canConvocar={eventuales.canConvocar}
+                            consulta={eventuales.consulta}
                             busy={eventualBusy}
                             onSelect={async (c) => {
                                 setEventualBusy(true);

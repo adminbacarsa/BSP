@@ -48,6 +48,13 @@ export function canConvocarEventuales(isSuperAdmin: boolean, rolePermissions: Re
     return (rolePermissions?.EVENTUALES || []).includes('convocar');
 }
 
+/** Consulta de disponibilidad: convocar eventuales o actualizar la planificación. */
+export function canConsultarDisponibilidad(isSuperAdmin: boolean, rolePermissions: Record<string, string[]> | undefined | null): boolean {
+    if (isSuperAdmin) return true;
+    if ((rolePermissions?.EVENTUALES || []).includes('convocar')) return true;
+    return (rolePermissions?.PLANNING || []).includes('update');
+}
+
 export async function asignarEventualPlanificacion(params: AsignarEventualParams): Promise<AsignarEventualResult> {
     const call = httpsCallable<AsignarEventualParams, AsignarEventualResult>(functions, 'asignarEventualPlanificacion');
     const res = await call(params);

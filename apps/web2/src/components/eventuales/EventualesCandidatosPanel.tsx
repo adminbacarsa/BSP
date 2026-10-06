@@ -11,9 +11,11 @@ import { httpsCallable } from 'firebase/functions';
 import { AlertTriangle, Loader2, MapPin, Phone, RotateCcw, Search, ShieldCheck, UserCheck, UserX } from 'lucide-react';
 import { PuntajeChip } from '@/components/desempeno/PuntajeChip';
 import { functions } from '@/lib/firebase';
+import { toast } from 'sonner';
 import { mensajeErrorCallable } from '@/lib/eventos/convocatoriaPlan';
 import { GrupoCandidatosHeader, PruebasBadge, SinEspecificarAviso, type GrupoCupoUi } from '@/components/servicios/EventoConvocarResumen';
 import { grupoDeGenero } from '@/lib/eventuales/cupoGenero.mjs';
+import { ConsultaDisponibilidadEstado } from '@/components/eventuales/ConsultaDisponibilidadEstado';
 
 export type JornadaEventual = { fecha: string; horaInicio: string; horaFin: string; horas: number };
 
@@ -63,6 +65,12 @@ type Props = {
     compact?: boolean;
     /** Si el servicio tiene cupo por género: agrupa la lista y deja aparte a los «Sin especificar». */
     cupo?: CupoPanelEventuales | null;
+    /** Consulta de disponibilidad del hueco. Quien planifica (PLANNING update) también la ve, aunque no pueda asignar. */
+    consulta?: {
+        clientName?: string | null;
+        objectiveName?: string | null;
+        positionName?: string | null;
+    } | null;
 };
 
 export function jornadasKey(jornadas: JornadaEventual[]): string {
@@ -72,7 +80,7 @@ export function jornadasKey(jornadas: JornadaEventual[]): string {
 const TIPO_LABEL: Record<string, string> = { credencial: 'Credencial', apto: 'Apto', habilitacion: 'Hab. 9236' };
 
 export default function EventualesCandidatosPanel({
-    empresaId, objectiveId, clientId, objetivoGeo, jornadas, excluirTurnoIds, excluirCuil, canConvocar, busy, onSelect, compact, cupo,
+    empresaId, objectiveId, clientId, objetivoGeo, jornadas, excluirTurnoIds, excluirCuil, canConvocar, busy, onSelect, compact, cupo, consulta,
 }: Props) {
     const [rows, setRows] = useState<CandidatoEventual[]>([]);
     const [loading, setLoading] = useState(false);
@@ -82,10 +90,15 @@ export default function EventualesCandidatosPanel({
     const [intento, setIntento] = useState(0);
     /** «Ver» los ocultos por tope: solo lectura, no se pueden elegir. */
     const [verOcultosTope, setVerOcultosTope] = useState(false);
+    const [marcados, setMarcados] = useState<string[]>([]);
+    const [lugares, setLugares] = useState(1);
+    const [venceMinutos, setVenceMinutos] = useState(120);
+    const [enviando, setEnviando] = useState(false);
     const key = jornadasKey(jornadas);
+    const veLista = canConvocar || !!consulta;
 
     useEffect(() => {
-        if (!canConvocar || !empresaId || jornadas.length === 0) { setRows([]); return; }
+        if (!veLista || !empresaId || jornadas.length === 0) { setRows([]); return; }
         let alive = true;
         setLoading(true);
         setError(null);
@@ -96,7 +109,7 @@ export default function EventualesCandidatosPanel({
             .finally(() => { if (alive) setLoading(false); });
         return () => { alive = false; };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [empresaId, objectiveId, key, canConvocar, excluirCuil, (excluirTurnoIds || []).join(','), intento]);
+    }, [empresaId, objectiveId, key, veLista, excluirCuil, (excluirTurnoIds || []).join(','), intento]);
 
     const ocultosTope = useMemo(() => rows.filter(esOcultoPorTopeUi), [rows]);
     const filtered = useMemo(() => {
@@ -105,13 +118,38 @@ export default function EventualesCandidatosPanel({
         return s ? base.filter(r => `${r.nombre} ${r.cuil}`.toLowerCase().includes(s)) : base;
     }, [rows, search, verOcultosTope]);
 
-    if (!canConvocar) {
+    if (!veLista) {
         return (
             <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-4 text-[11px] font-bold text-slate-500 text-center">
-                Necesitás el permiso <span className="font-black">EVENTUALES · Convocar</span> para asignar desde la bolsa.
+                Necesitás el permiso <span className="font-black">EVENTUALES · Convocar</span> o <span className="font-black">Planificación · Actualizar</span>.
             </div>
         );
     }
+
+    const toggleMarcado = (cuil: string) => {
+        setMarcados((prev) => (prev.includes(cuil) ? prev.filter((c) => c !== cuil) : [...prev, cuil]));
+    };
+
+    const enviarConsulta = async () => {
+        if (!consulta || marcados.length === 0 || enviando) return;
+        setEnviando(true);
+        try {
+            const call = httpsCallable<Record<string, unknown>, { resumen?: string; omitidos?: { motivo: string }[] }>(functions, 'crearConsultaDisponibilidad');
+            const res = await call({
+                empresaId, objectiveId: objectiveId || null, clientId: clientId || null, objetivoGeo: objetivoGeo || null,
+                clientName: consulta.clientName || null, objectiveName: consulta.objectiveName || null, positionName: consulta.positionName || null,
+                jornadas, cuils: marcados, lugares: Math.min(lugares, marcados.length), venceMinutos,
+            });
+            const omitidos = res.data?.omitidos?.length || 0;
+            toast.success(res.data?.resumen || 'Consulta enviada.');
+            if (omitidos) toast.message(`${omitidos} no se consultaron porque ya no estaban elegibles.`);
+            setMarcados([]);
+        } catch (e) {
+            toast.error(mensajeErrorCallable(e, 'No se pudo enviar la consulta.'));
+        } finally {
+            setEnviando(false);
+        }
+    };
 
     const elegibles = rows.filter(r => r.elegible).length;
 
@@ -156,16 +194,31 @@ export default function EventualesCandidatosPanel({
                     const vencidos = c.vencimientos.filter(v => v.estado === 'VENCIDO');
                     const prontos = c.vencimientos.filter(v => v.estado === 'PRONTO');
                     // Sin género en la ficha con cupo por género: no cuenta para ningún cupo hasta cargarlo.
-                    const elegible = c.elegible && !sinGrupo;
+                    const elegible = c.elegible && !sinGrupo && !esOcultoPorTopeUi(c);
+                    const puedeMarcar = !!consulta && elegible;
                     return (
+                        <div key={c.cuil} className="flex items-start gap-1">
+                        {puedeMarcar && (
+                            <input
+                                type="checkbox"
+                                className="mt-3 h-4 w-4 shrink-0 accent-indigo-600"
+                                checked={marcados.includes(c.cuil)}
+                                onChange={() => toggleMarcado(c.cuil)}
+                                aria-label={`Consultar a ${c.nombre}`}
+                                data-consulta-cuil={c.cuil}
+                            />
+                        )}
                         <button
-                            key={c.cuil}
                             type="button"
                             data-eventual-grupo={sinGrupo ? 'SIN_ESPECIFICAR' : (cupo ? (grupoDeGenero(cupo.servicio, c.genero) as string | null) || 'TODOS' : 'TODOS')}
-                            disabled={!elegible || !!busy}
-                            onClick={() => elegible && onSelect(c)}
-                            title={sinGrupo ? 'Sin género en la ficha: completala para convocarlo (cupo por género).' : c.elegible ? `Asignar a ${c.nombre}` : c.motivo || 'No elegible'}
-                            className={`w-full text-left rounded-xl border px-3 py-2 transition-colors ${
+                            disabled={!elegible || !!busy || (!canConvocar && !puedeMarcar)}
+                            onClick={() => {
+                                if (!elegible) return;
+                                if (canConvocar) onSelect(c);
+                                else if (puedeMarcar) toggleMarcado(c.cuil);
+                            }}
+                            title={sinGrupo ? 'Sin género en la ficha: completala para convocarlo (cupo por género).' : !c.elegible ? (c.motivo || 'No elegible') : canConvocar ? `Asignar a ${c.nombre}` : `Consultar a ${c.nombre}`}
+                            className={`min-w-0 flex-1 text-left rounded-xl border px-3 py-2 transition-colors ${
                                 elegible
                                     ? 'bg-white border-indigo-100 hover:border-indigo-300 hover:bg-indigo-50/60'
                                     : 'bg-slate-50 border-slate-200 opacity-80 cursor-not-allowed'
@@ -222,6 +275,7 @@ export default function EventualesCandidatosPanel({
                                 </div>
                             )}
                         </button>
+                        </div>
                     );
                     };
                     if (!cupo) return filtered.map((c) => renderCandidato(c));
@@ -265,6 +319,36 @@ export default function EventualesCandidatosPanel({
             <div className="px-1 pt-2 text-[9px] font-bold text-slate-400 shrink-0">
                 {loading ? 'Consultando bolsa…' : `${elegibles} de ${rows.length} elegibles · sin superposición ni descanso < 12 h en el grupo`}
             </div>
+            {consulta && (
+                <div className="mx-1 mt-2 flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-2.5 py-2" data-consulta-bar>
+                    <label className="flex items-center gap-1 text-[10px] font-bold text-slate-600">
+                        Lugares
+                        <input type="number" min={1} max={20} value={lugares} onChange={(e) => setLugares(Math.max(1, Number(e.target.value) || 1))} className="w-12 rounded-lg border border-slate-200 px-1 py-0.5 text-[11px] font-black text-slate-800" data-consulta-lugares />
+                    </label>
+                    <label className="flex items-center gap-1 text-[10px] font-bold text-slate-600">
+                        Vence
+                        <select value={venceMinutos} onChange={(e) => setVenceMinutos(Number(e.target.value))} className="rounded-lg border border-slate-200 bg-white px-1 py-0.5 text-[11px] font-bold text-slate-800" data-consulta-vence>
+                            <option value={120}>2 horas</option>
+                            <option value={30}>30 min</option>
+                            <option value={60}>1 hora</option>
+                            <option value={240}>4 horas</option>
+                            <option value={0}>Hasta el inicio</option>
+                        </select>
+                    </label>
+                    <button
+                        type="button"
+                        disabled={marcados.length === 0 || enviando}
+                        onClick={() => { void enviarConsulta(); }}
+                        data-consulta-enviar
+                        className="rounded-xl bg-indigo-600 px-3 py-1.5 text-[10px] font-black text-white disabled:bg-slate-200 disabled:text-slate-500"
+                    >
+                        {enviando ? 'Enviando…' : `Consultar disponibilidad (${marcados.length})`}
+                    </button>
+                </div>
+            )}
+            {consulta && (
+                <ConsultaDisponibilidadEstado empresaId={empresaId} objectiveId={objectiveId} positionName={consulta.positionName} jornadas={jornadas} />
+            )}
         </div>
     );
 }

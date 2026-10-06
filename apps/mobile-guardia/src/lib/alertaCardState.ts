@@ -133,6 +133,9 @@ export function resolveAlertaCard(input: AlertaCardInput): AlertaCardState {
     atMs: null,
   };
 
+  const typeUp = String(input.type || '').trim().toUpperCase();
+  if (typeUp === 'CONSULTA_CUBIERTA') return open;
+
   if (isCoverage(input.type)) {
     const live = input.conv ? fromConvStatus(input.conv) : null;
     if (live) return live;

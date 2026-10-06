@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -38,6 +38,9 @@ import { getPortalFirebase } from '../../src/lib/portal';
 import { CommandButton } from '../../src/components/ui/CommandButton';
 import { CommandCard } from '../../src/components/ui/CommandCard';
 import { ConvocatoriasBanner } from '../../src/components/ConvocatoriasBanner';
+import { ConsultasDisponibilidadBanner } from '../../src/components/ConsultasDisponibilidadBanner';
+import { useConsultasDisponibilidad } from '../../src/hooks/useConsultasDisponibilidad';
+import { responderConsultaDisponibilidad } from '../../src/lib/responderConsultaDisponibilidad';
 import { CoberturaConvocatoriasBanner } from '../../src/components/CoberturaConvocatoriasBanner';
 import { LlegadaTardeVenisBanner } from '../../src/components/LlegadaTardeVenisBanner';
 import { RetencionAvisoCard } from '../../src/components/RetencionAvisoCard';
@@ -101,6 +104,8 @@ function HoyScreenContent() {
     empresasNombres,
   } = usePortalAuth();
   const { shifts, allShifts, loading, error } = useEmployeeShifts(empDocId, user?.uid ?? null);
+  const consultasDisponibilidad = useConsultasDisponibilidad(user?.uid);
+  const [consultaBusyId, setConsultaBusyId] = useState<string | null>(null);
   const { objectivesMap } = useObjectivesMap();
   const { pendingCount, pendingShiftIds, busyShiftId, requestCheckInForShift, closeReviewShift, notifyLateArrival, lateEtaByShiftId } =
     useCheckIn();
@@ -548,6 +553,40 @@ function HoyScreenContent() {
               firstName={employee?.firstName}
               onSiVoy={(c, eta) => void onSiVoyLlegadaTarde(c, eta)}
               onNoVoy={(c) => void onNoVoyLlegadaTarde(c)}
+            />
+          ) : null}
+
+          {consultasDisponibilidad.length > 0 ? (
+            <ConsultasDisponibilidadBanner
+              items={consultasDisponibilidad}
+              busyId={consultaBusyId}
+              nowMs={now.getTime()}
+              onSi={(item) => {
+                void (async () => {
+                  setConsultaBusyId(item.id);
+                  try {
+                    const res = await responderConsultaDisponibilidad(item.id, 'SI');
+                    if (res.ok) appAlert('Listo', res.codigo === 'ASIGNADO' ? 'Quedó tu lugar.' : 'Recibimos tu respuesta.');
+                    else appAlert('No se pudo', res.motivo || (res.codigo === 'COMPLETA' ? 'Ya se cubrió, gracias.' : 'La consulta ya no está abierta.'));
+                  } catch {
+                    appAlert('Error', 'No se pudo enviar la respuesta.');
+                  } finally {
+                    setConsultaBusyId(null);
+                  }
+                })();
+              }}
+              onNo={(item) => {
+                void (async () => {
+                  setConsultaBusyId(item.id);
+                  try {
+                    await responderConsultaDisponibilidad(item.id, 'NO');
+                  } catch {
+                    appAlert('Error', 'No se pudo enviar la respuesta.');
+                  } finally {
+                    setConsultaBusyId(null);
+                  }
+                })();
+              }}
             />
           ) : null}
 

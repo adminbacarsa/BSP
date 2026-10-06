@@ -8,6 +8,8 @@ import { isAvisoEntrante, isRetencionAviso } from './avisosCc';
 /** Tipos que un vigilador debe ver en la app (whitelist). */
 export const EMPLOYEE_ALERT_TYPES = new Set([
   'CONVOCATORIA_EVENTO',
+  'CONSULTA_DISPONIBILIDAD',
+  'CONSULTA_CUBIERTA',
   'EVENTO_CONFIRMADO',
   'EVENTO_CUPO_COMPLETO',
   'CRONOGRAMA_PUBLICADO',
@@ -72,6 +74,8 @@ const AGENDA_TYPES = new Set([
 ]);
 
 const HOY_TYPES = new Set([
+  'CONSULTA_DISPONIBILIDAD',
+  'CONSULTA_CUBIERTA',
   'RETENCION_AUTO',
   'RETENCION_DETECTADA',
   'RETENCION_AVISO',
