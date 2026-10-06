@@ -10,7 +10,9 @@ import type { ObjectiveLocation } from '@cosp/portal-types';
 import { ThemeProvider } from '../theme/ThemeContext';
 import { ConvocatoriaCard } from './ConvocatoriaCard';
 import {
+  armarPreguntaDisponibilidad,
   buildCoberturaCardModel,
+  buildDisponibilidadCardModel,
   buildEventoCardModel,
   buildRetencionCardModel,
   buildVenisCardModel,
@@ -165,6 +167,32 @@ describe('ConvocatoriaCard · evento', () => {
     assert.match(t, /Control de acceso/);
     assert.match(t, /12\/10\/2026 · 18:00–02:00/);
     assert.deepEqual(buttons(html), ['Aceptar', 'Rechazar']);
+  });
+});
+
+describe('ConvocatoriaCard · disponibilidad en bloque', () => {
+  it('pregunta por los N días y lista cada jornada', () => {
+    const bloque = armarPreguntaDisponibilidad({
+      objetivo: 'Peaje 9 Norte',
+      puesto: 'Puesto 1',
+      jornadas: [
+        { fecha: '2026-10-06', code: 'M', horaInicio: '07:00', horaFin: '15:00' },
+        { fecha: '2026-10-15', code: 'M', horaInicio: '07:00', horaFin: '15:00' },
+      ],
+    });
+    const html = render(buildDisponibilidadCardModel({
+      id: 'consulta-1',
+      title: '¿Podés cubrir?',
+      message: bloque?.pregunta || '',
+      detalle: bloque?.detalle,
+      objetivo: 'Peaje 9 Norte',
+      puesto: 'Puesto 1',
+    }));
+    const t = text(html);
+    assert.match(t, /¿Podés cubrir 2 días \(06\/10 → 15\/10\) en Peaje 9 Norte · Puesto 1\?/);
+    assert.match(t, /06\/10 · M 07:00–15:00/);
+    assert.match(t, /15\/10 · M 07:00–15:00/);
+    assert.deepEqual(buttons(html), ['Sí, puedo', 'No puedo']);
   });
 });
 

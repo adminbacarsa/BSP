@@ -26,7 +26,7 @@ import {
     TarjetaEventual,
     type CandidatoTarjeta,
 } from '@/components/eventuales/EventualesCandidatosUx';
-import { ESPERA_DEFAULT_MIN, separarCandidatos, type ModoEventuales } from '@/lib/planificacion/coberturaEventualesUx';
+import { ESPERA_DEFAULT_MIN, separarCandidatos, textoTopeBloque, type ModoEventuales } from '@/lib/planificacion/coberturaEventualesUx';
 
 export type JornadaEventual = { fecha: string; horaInicio: string; horaFin: string; horas: number; code?: string };
 
@@ -168,9 +168,13 @@ export default function EventualesCandidatosPanel({
         }
     };
 
+    const bloque = jornadas.length > 1 && puedePreguntar;
     const tarjetaDe = (c: CandidatoEventual): CandidatoTarjeta => {
         const prontos = c.vencimientos.filter(v => v.estado === 'PRONTO').map(v => `${TIPO_LABEL[v.tipo] || v.tipo} vence ${v.fecha}`);
         const avisos = [...prontos, ...(c.alertas || [])];
+        const topeBloque = bloque
+            ? (textoTopeBloque(c.horasMes, jornadas) || (c.motivoCodigo === 'TOPE_HORAS' ? `El bloque no entra en el tope del mes. ${c.motivo || ''}`.trim() : null))
+            : null;
         return {
             cuil: c.cuil,
             nombre: c.nombre,
@@ -181,6 +185,7 @@ export default function EventualesCandidatosPanel({
             distanciaKm: c.distanciaKm,
             pruebasSinMarco: c.pruebasSinMarco,
             horasMes: c.horasMes ? { texto: avisos.length ? `${c.horasMes.texto} · ${avisos.join(' · ')}` : c.horasMes.texto, aviso: c.horasMes.aviso } : (avisos.length ? { texto: avisos.join(' · '), aviso: false } : null),
+            topeBloque,
         };
     };
 
@@ -190,19 +195,25 @@ export default function EventualesCandidatosPanel({
         onSelect(c);
     };
 
-    const renderElegibles = (lista: CandidatoEventual[]) => lista.map((c) => (
-        <TarjetaEventual
-            key={c.cuil}
-            c={tarjetaDe(c)}
-            modo={modoEfectivo}
-            marcado={marcados.includes(c.cuil)}
-            disabled={!!busy || (modoEfectivo === 'asignar' && !canConvocar)}
-            onToggle={() => toggleMarcado(c.cuil)}
-            onAsignar={() => elegirDirecto(c)}
-        />
-    ));
+    const renderElegibles = (lista: CandidatoEventual[]) => lista.map((c) => {
+        const tarjeta = tarjetaDe(c);
+        return (
+            <TarjetaEventual
+                key={c.cuil}
+                c={tarjeta}
+                modo={modoEfectivo}
+                marcado={marcados.includes(c.cuil)}
+                disabled={!!busy || !!tarjeta.topeBloque || (modoEfectivo === 'asignar' && !canConvocar)}
+                onToggle={() => toggleMarcado(c.cuil)}
+                onAsignar={() => elegirDirecto(c)}
+            />
+        );
+    });
 
     const elegibles = rows.filter(r => r.elegible && !esOcultoPorTopeUi(r)).length;
+    /** En un bloque, quien no entra por el tope se ve en la tarjeta (marcado), no escondido en «ocultos». */
+    const noEntranBloque = bloque ? filtered.filter((c) => c.motivoCodigo === 'TOPE_HORAS') : [];
+    const ocultosLista = bloque ? ocultosTope.filter((c) => c.motivoCodigo !== 'TOPE_HORAS') : ocultosTope;
 
     return (
         <div className="flex flex-col min-h-0">
@@ -247,6 +258,17 @@ export default function EventualesCandidatosPanel({
                             <p className="px-1 py-2 text-[10px] font-bold text-slate-500" data-sin-elegibles>Nadie de la bolsa puede tomar este turno. Abajo está el motivo de cada uno.</p>
                         )}
                         {renderElegibles(partes.elegibles)}
+                        {noEntranBloque.map((c) => (
+                            <TarjetaEventual
+                                key={c.cuil}
+                                c={tarjetaDe(c)}
+                                modo="preguntar"
+                                marcado={false}
+                                disabled
+                                onToggle={() => {}}
+                                onAsignar={() => {}}
+                            />
+                        ))}
                         <NoDisponiblesLista rows={partes.noDisponibles.map(tarjetaDe)} />
                     </>
                 )}
@@ -286,9 +308,9 @@ export default function EventualesCandidatosPanel({
                         </>
                     );
                 })()}
-                {!loading && verOcultosTope && ocultosTope.length > 0 && (
+                {!loading && verOcultosTope && ocultosLista.length > 0 && (
                     <div className="mt-1 space-y-1" data-ocultos-tope-lista>
-                        {ocultosTope.map((c) => (
+                        {ocultosLista.map((c) => (
                             <div key={c.cuil} className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 opacity-80">
                                 <span className="min-w-0">
                                     <span className="block truncate text-[10px] font-bold text-slate-700">{c.nombre}</span>
@@ -300,9 +322,9 @@ export default function EventualesCandidatosPanel({
                     </div>
                 )}
             </div>
-            {!loading && ocultosTope.length > 0 && (
-                <div data-ocultos-tope={ocultosTope.length} className="mx-1 mt-2 flex items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[10px] font-bold text-amber-800 shrink-0">
-                    <span>{textoOcultosPorTopeUi(ocultosTope.length)}</span>
+            {!loading && ocultosLista.length > 0 && (
+                <div data-ocultos-tope={ocultosLista.length} className="mx-1 mt-2 flex items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[10px] font-bold text-amber-800 shrink-0">
+                    <span>{textoOcultosPorTopeUi(ocultosLista.length)}</span>
                     <button type="button" onClick={() => setVerOcultosTope((v) => !v)} data-ocultos-tope-ver className="rounded-md border border-amber-300 bg-white px-2 py-0.5 text-[10px] font-black text-amber-800 hover:bg-amber-100">
                         {verOcultosTope ? 'Ocultar' : 'Ver'}
                     </button>

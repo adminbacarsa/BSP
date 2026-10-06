@@ -15925,18 +15925,25 @@ function PlanificacionDesktop() {
                                             </button>
                                         </div>
                                         {vacancyEventualesOpen && (() => {
-                                            const targetDays = shouldApplyCoverageToAllDays()
+                                            // La consulta es el bloque: todos los días marcados, una sola vez. Asignar directo sigue siendo el día que se está editando.
+                                            const diasBloque = sortedActiveDates.length > 0
                                                 ? sortedActiveDates
-                                                : (vacancyEditingDay ? [vacancyEditingDay] : sortedActiveDates.slice(0, 1));
-                                            const jornadas = targetDays.map((d) => {
+                                                : (vacancyEditingDay ? [vacancyEditingDay] : []);
+                                            const jornadas = diasBloque.map((d) => {
                                                 const tit = resolveTitularForCoverageDay(d, splitReferenceDate || undefined);
                                                 return jornadaEventualDesdeBanda(d, tit?.code || 'M', { scheduleLabel: tit?.scheduleLabel, hours: tit?.hours });
                                             });
+                                            const diaAsignar = vacancyEditingDay && jornadas.some((j) => j.fecha === vacancyEditingDay)
+                                                ? vacancyEditingDay
+                                                : jornadas[0]?.fecha;
+                                            const jornadasAsignar = jornadas.filter((j) => j.fecha === diaAsignar);
                                             const objGeo = objLat && objLng ? { lat: objLat, lng: objLng } : null;
                                             return (
                                                 <div className="p-2">
                                                     <p className="text-[9px] font-bold text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 mb-2">
-                                                        Cubre {jornadas.map((j) => `${j.fecha.slice(8, 10)}/${j.fecha.slice(5, 7)} · ${j.code} ${j.horaInicio}–${j.horaFin}`).join(' · ')}. El eventual queda como suplente del día; al guardar se arma el contrato y el alta ARCA.
+                                                        {jornadas.length > 1
+                                                            ? 'La consulta es por el bloque completo: el primero que acepta cubre todos los días marcados. Al asignar directo, el suplente queda en el día que estás editando; al guardar se arma el contrato y el alta ARCA.'
+                                                            : `Cubre ${jornadas.map((j) => `${j.fecha.slice(8, 10)}/${j.fecha.slice(5, 7)} · ${j.code} ${j.horaInicio}–${j.horaFin}`).join(' · ')}. El eventual queda como suplente del día; al guardar se arma el contrato y el alta ARCA.`}
                                                     </p>
                                                     <EventualesCandidatosPanel
                                                         empresaId={empresaId || ''}
@@ -15961,13 +15968,13 @@ function PlanificacionDesktop() {
                                                                     objectiveName: getObjectiveName(selectedObjective || '') || null,
                                                                     clientId: selectedClient || null,
                                                                     positionName: vacancyGapPreferredPosition || null,
-                                                                    turnos: jornadas,
+                                                                    turnos: jornadasAsignar.length ? jornadasAsignar : jornadas,
                                                                     modo: 'LEGAJO',
                                                                 });
                                                                 applySubstituteToActiveDays(res.employeeId);
                                                                 setVacancyReplacementOpen(false);
                                                                 setVacancyEventualesOpen(false);
-                                                                toast.success(`${(res.nombre || candidato.nombre).split(',')[0]} (eventual) como suplente en ${targetDays.length} día(s).`);
+                                                                toast.success(`${(res.nombre || candidato.nombre).split(',')[0]} (eventual) como suplente en ${jornadasAsignar.length || 1} día(s).`);
                                                             } catch (e) {
                                                                 toast.error(eventualErrorMessage(e));
                                                             } finally {

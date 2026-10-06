@@ -12,10 +12,13 @@ import {
   TEXTO_MODO_PREGUNTAR,
   accionParaMotivo,
   linkFichaEventual,
+  horasDelBloque,
   textoBarraPreguntar,
   textoBotonEnviar,
   textoConfirmarAsignacion,
+  textoHorasBloque,
   textoNoDisponibles,
+  type JornadaCorta,
   type ModoEventuales,
 } from '@/lib/planificacion/coberturaEventualesUx';
 
@@ -29,6 +32,8 @@ export type CandidatoTarjeta = {
   distanciaKm: number | null;
   pruebasSinMarco?: boolean;
   horasMes?: { texto: string; aviso: boolean } | null;
+  /** El bloque de días no entra en el tope del mes. */
+  topeBloque?: string | null;
 };
 
 export function ModoEventualesSelector({ modo, onModo }: { modo: ModoEventuales; onModo: (m: ModoEventuales) => void }) {
@@ -101,6 +106,7 @@ export function TarjetaEventual({ c, modo, marcado, disabled, onToggle, onAsigna
         </span>
         <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[9px] font-bold text-slate-500">
           {c.horasMes && <span data-horas-mes className={c.horasMes.aviso ? 'text-amber-700' : ''}>{c.horasMes.texto}</span>}
+          {c.topeBloque && <span data-tope-bloque className="text-amber-800">{c.topeBloque}</span>}
           {c.distanciaKm != null && <span className="flex items-center gap-0.5"><MapPin size={9} />{c.distanciaKm} km</span>}
           {c.telefono && <span className="flex items-center gap-0.5"><Phone size={9} />{c.telefono}</span>}
         </span>
@@ -151,15 +157,17 @@ export function NoDisponiblesLista({ rows }: { rows: CandidatoTarjeta[] }) {
 
 export function BarraPreguntar({ n, jornadas, espera, onEspera, onEnviar, enviando }: {
   n: number;
-  jornadas: { fecha: string; code?: string | null; horaInicio: string; horaFin: string }[];
+  jornadas: JornadaCorta[];
   espera: number;
   onEspera: (minutos: number) => void;
   onEnviar: () => void;
   enviando?: boolean;
 }) {
+  const horasTxt = jornadas.length > 1 ? textoHorasBloque(horasDelBloque(jornadas)) : '';
   return (
     <div className="mx-1 mt-2 rounded-xl border border-indigo-200 bg-indigo-50/60 px-2.5 py-2" data-consulta-bar>
       <p className="text-[10px] font-black text-indigo-950" data-consulta-texto>{textoBarraPreguntar(n, jornadas)}</p>
+      {horasTxt && <p className="mt-0.5 text-[10px] font-bold text-slate-700" data-consulta-horas>{horasTxt}</p>}
       <div className="mt-1.5 flex flex-wrap items-center gap-2">
         <span className="text-[9px] font-bold text-slate-600">Esperar respuesta:</span>
         <div className="flex gap-1" role="radiogroup" data-consulta-espera={espera}>

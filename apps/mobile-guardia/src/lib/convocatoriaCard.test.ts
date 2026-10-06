@@ -6,7 +6,9 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import type { ObjectiveLocation, Shift } from '@cosp/portal-types';
 import {
+  armarPreguntaDisponibilidad,
   buildCoberturaCardModel,
+  buildDisponibilidadCardModel,
   buildEventoCardModel,
   buildInboxCardModel,
   buildRetencionCardModel,
@@ -275,6 +277,45 @@ describe('buildInboxCardModel (Alertas)', () => {
     assert.equal(ev?.kind, 'EVENTO');
     assert.equal(ev?.actions, 'NONE');
     assert.equal(buildInboxCardModel({ item: { id: 'p', type: 'CRONOGRAMA_PUBLICADO' } }), null);
+  });
+});
+
+describe('consulta de disponibilidad en bloque', () => {
+  it('pregunta por los N días, lista cada jornada y avisa si son dos contratos', () => {
+    const uno = armarPreguntaDisponibilidad({
+      objetivo: 'Peaje',
+      jornadas: [{ fecha: '2026-10-06', code: 'M', horaInicio: '07:00', horaFin: '15:00' }],
+    });
+    assert.equal(uno, null);
+    const bloque = armarPreguntaDisponibilidad({
+      objetivo: 'Peaje 9 Norte',
+      puesto: 'Puesto 1',
+      jornadas: [
+        { fecha: '2026-10-15', code: 'M', horaInicio: '07:00', horaFin: '15:00' },
+        { fecha: '2026-10-06', code: 'M', horaInicio: '07:00', horaFin: '15:00' },
+      ],
+    });
+    assert.equal(bloque?.pregunta, '¿Podés cubrir 2 días (06/10 → 15/10) en Peaje 9 Norte · Puesto 1?');
+    assert.deepEqual(bloque?.detalle, ['06/10 · M 07:00–15:00', '15/10 · M 07:00–15:00']);
+    assert.equal(bloque?.contratos, null);
+    const cruza = armarPreguntaDisponibilidad({
+      objetivo: 'Peaje',
+      jornadas: [
+        { fecha: '2026-10-28', code: 'M', horaInicio: '07:00', horaFin: '15:00' },
+        { fecha: '2026-11-03', code: 'T', horaInicio: '15:00', horaFin: '23:00' },
+      ],
+    });
+    assert.match(cruza?.contratos || '', /Son dos contratos \(octubre 2026 y noviembre 2026\)/);
+    const model = buildDisponibilidadCardModel({
+      id: 'c1',
+      title: '¿Podés cubrir?',
+      message: `${bloque?.pregunta}`,
+      detalle: bloque?.detalle,
+    });
+    assert.equal(model.kind, 'DISPONIBILIDAD');
+    assert.equal(model.title, '¿Podés cubrir?');
+    assert.deepEqual(model.detalle, ['06/10 · M 07:00–15:00', '15/10 · M 07:00–15:00']);
+    assert.equal(model.acceptLabel, 'Sí, puedo');
   });
 });
 

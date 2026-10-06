@@ -21,9 +21,30 @@ export function textoJornadas(jornadas) {
   }).filter(Boolean).join(', ');
 }
 
+const MESES_CONSULTA = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+
+function contratosDelBloque(jornadas) {
+  const meses = [...new Set((Array.isArray(jornadas) ? jornadas : []).map((j) => String(j?.fecha || '').slice(0, 7)).filter((m) => m.length >= 7))].sort();
+  if (meses.length < 2) return '';
+  const nombres = meses.map((mes) => {
+    const [y, m] = mes.split('-');
+    return `${MESES_CONSULTA[Number(m) - 1] || mes} ${y}`;
+  });
+  return meses.length === 2
+    ? ` Son dos contratos (${nombres[0]} y ${nombres[1]}).`
+    : ` Son ${meses.length} contratos (${nombres.join(', ')}).`;
+}
+
 export function textoConsulta({ cliente, objetivo, puesto, jornadas }) {
   const lugar = [cliente, objetivo, puesto].map((s) => String(s || '').trim()).filter(Boolean).join(' · ');
-  const cuando = textoJornadas(jornadas);
+  const list = (Array.isArray(jornadas) ? jornadas : []).slice().sort((a, b) => String(a?.fecha || '').localeCompare(String(b?.fecha || '')));
+  if (list.length > 1) {
+    const desde = textoJornadas([list[0]]).split(' ')[0];
+    const hasta = textoJornadas([list[list.length - 1]]).split(' ')[0];
+    const detalle = textoJornadas(list);
+    return `¿Podés cubrir ${list.length} días (${desde} → ${hasta})${lugar ? ` en ${lugar}` : ''}? ${detalle}.${contratosDelBloque(list)}`.replace(/\s+\./g, '.').trim();
+  }
+  const cuando = textoJornadas(list);
   return `¿Estás disponible${cuando ? ` ${cuando}` : ''}${lugar ? ` en ${lugar}` : ''}?`;
 }
 

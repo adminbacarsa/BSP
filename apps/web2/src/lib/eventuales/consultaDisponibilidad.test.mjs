@@ -62,6 +62,25 @@ describe('consulta de disponibilidad', () => {
     });
     assert.match(texto, /02\/11 M 08:00–16:00/);
     assert.match(texto, /Norte · Peaje · Puesto 1/);
+    assert.match(texto, /^¿Estás disponible /);
+    const bloque = textoConsulta({
+      cliente: null, objetivo: 'Peaje 9 Norte', puesto: 'Puesto 1',
+      jornadas: [
+        { fecha: '2026-10-06', code: 'M', horaInicio: '07:00', horaFin: '15:00' },
+        { fecha: '2026-10-15', code: 'M', horaInicio: '07:00', horaFin: '15:00' },
+      ],
+    });
+    assert.equal(bloque, '¿Podés cubrir 2 días (06/10 → 15/10) en Peaje 9 Norte · Puesto 1? 06/10 M 07:00–15:00, 15/10 M 07:00–15:00.');
+    const cruza = textoConsulta({
+      objetivo: 'Peaje', puesto: null,
+      jornadas: [
+        { fecha: '2026-10-28', code: 'M', horaInicio: '07:00', horaFin: '15:00' },
+        { fecha: '2026-11-03', code: 'T', horaInicio: '15:00', horaFin: '23:00' },
+      ],
+    });
+    assert.match(cruza, /^¿Podés cubrir 2 días \(28\/10 → 03\/11\) en Peaje\?/);
+    assert.match(cruza, /28\/10 M 07:00–15:00, 03\/11 T 15:00–23:00/);
+    assert.match(cruza, /Son dos contratos \(octubre 2026 y noviembre 2026\)/);
     const linea = textoEstadoConsulta([
       { nombre: 'Pérez, Ana', estado: 'ASIGNADO', hora: '10:42' },
       { nombre: 'Gómez, Luis', estado: 'PENDIENTE' },

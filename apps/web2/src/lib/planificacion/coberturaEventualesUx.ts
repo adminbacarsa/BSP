@@ -57,22 +57,117 @@ export function linkFichaEventual(cuil: string): string {
   return `/admin/rrhh/eventuales/?cuil=${encodeURIComponent(String(cuil || ''))}`;
 }
 
-type JornadaCorta = { fecha: string; code?: string | null; horaInicio: string; horaFin: string };
+export type JornadaCorta = { fecha: string; code?: string | null; horaInicio: string; horaFin: string; horas?: number };
+
+const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+
+function ddmm(fecha: string): string {
+  const [, m, d] = String(fecha || '').split('-');
+  return d && m ? `${d}/${m}` : String(fecha || '');
+}
+
+function ordenarJornadas<T extends { fecha: string }>(jornadas: T[]): T[] {
+  return [...jornadas].sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)));
+}
+
+function horasReloj(j: { horaInicio?: string; horaFin?: string }): number {
+  const ini = String(j.horaInicio || '').slice(0, 5).split(':').map(Number);
+  const fin = String(j.horaFin || '').slice(0, 5).split(':').map(Number);
+  if (ini.length < 2 || fin.length < 2 || ini.some((n) => !Number.isFinite(n)) || fin.some((n) => !Number.isFinite(n))) return 0;
+  let span = (fin[0] * 60 + fin[1]) - (ini[0] * 60 + ini[1]);
+  if (span <= 0) span += 24 * 60;
+  return Math.round((span / 60) * 100) / 100;
+}
+
+function fmtHoras(n: number): string {
+  const r = Math.round(n * 100) / 100;
+  return Number.isFinite(r) ? String(r) : '0';
+}
+
+export function horasDeJornadaCorta(j: JornadaCorta): number {
+  const directo = Number(j.horas);
+  if (Number.isFinite(directo) && directo > 0) return Math.round(directo * 100) / 100;
+  return horasReloj(j);
+}
+
+/** Suma de las jornadas del bloque (las horas del turno, o el reloj si faltan). */
+export function horasDelBloque(jornadas: JornadaCorta[]): number {
+  return Math.round(jornadas.reduce((acc, j) => acc + horasDeJornadaCorta(j), 0) * 100) / 100;
+}
+
+export function textoHorasBloque(horas: number): string {
+  return horas > 0 ? `El bloque suma ${fmtHoras(horas)} h` : '';
+}
+
+function nombreMes(yyyyMm: string): string {
+  const [y, m] = String(yyyyMm || '').split('-');
+  const nombre = MESES[Number(m) - 1] || yyyyMm;
+  return y ? `${nombre} ${y}` : nombre;
+}
+
+/** Meses calendario distintos. Un bloque que cruza de mes son dos contratos (cada mes, su alta). */
+export function textoDosContratos(jornadas: JornadaCorta[]): string | null {
+  const porMes = new Map<string, number>();
+  for (const j of jornadas) {
+    const mes = String(j.fecha || '').slice(0, 7);
+    if (mes.length < 7) continue;
+    porMes.set(mes, (porMes.get(mes) || 0) + horasDeJornadaCorta(j));
+  }
+  const meses = [...porMes.keys()].sort();
+  if (meses.length < 2) return null;
+  const partes = meses.map((mes) => `${nombreMes(mes)} ${fmtHoras(porMes.get(mes) || 0)} h`);
+  if (meses.length === 2) return `Son dos contratos (${partes[0]} y ${partes[1]}).`;
+  return `Son ${meses.length} contratos (${partes.join(', ')}).`;
+}
 
 export function textoJornadaCorta(j: JornadaCorta): string {
-  const [, m, d] = String(j.fecha || '').split('-');
-  const dia = d && m ? `${d}/${m}` : String(j.fecha || '');
+  const dia = ddmm(j.fecha);
   const code = String(j.code || '').trim();
   return `${dia} · ${code ? `${code} ` : ''}${String(j.horaInicio || '').slice(0, 5)}–${String(j.horaFin || '').slice(0, 5)}`;
 }
 
-/** Siempre un lugar por día: el primero que acepte cubre. Con varios días, los cubre todos. */
+function horarioDelBloque(jornadas: JornadaCorta[]): string {
+  const clave = (j: JornadaCorta) => `${String(j.code || '').trim().toUpperCase()}|${String(j.horaInicio || '').slice(0, 5)}|${String(j.horaFin || '').slice(0, 5)}`;
+  const primero = jornadas[0];
+  if (jornadas.every((j) => clave(j) === clave(primero))) {
+    const code = String(primero.code || '').trim();
+    return `${code ? `${code} ` : ''}${String(primero.horaInicio || '').slice(0, 5)}–${String(primero.horaFin || '').slice(0, 5)}`;
+  }
+  return jornadas.map(textoJornadaCorta).join(' · ');
+}
+
+/**
+ * Siempre un lugar: el primero que acepte cubre.
+ * Con varios días la consulta es el bloque entero (06/10 → 15/10). Si los horarios difieren, se listan.
+ */
 export function textoBarraPreguntar(n: number, jornadas: JornadaCorta[]): string {
   if (n <= 0) return 'Marcá a quién preguntar';
-  const que = jornadas.length === 1
-    ? textoJornadaCorta(jornadas[0])
-    : `los ${jornadas.length} días marcados`;
-  return `Preguntar a ${n} · el primero que acepte cubre ${que}`;
+  const orden = ordenarJornadas(jornadas);
+  if (orden.length <= 1) {
+    return `Preguntar a ${n} · el primero que acepte cubre ${orden[0] ? textoJornadaCorta(orden[0]) : 'el turno'}`;
+  }
+  const desde = ddmm(orden[0].fecha);
+  const hasta = ddmm(orden[orden.length - 1].fecha);
+  const contratos = textoDosContratos(orden);
+  const base = `Preguntar a ${n} · El primero que acepte cubre los ${orden.length} días marcados (${desde} → ${hasta}) · ${horarioDelBloque(orden)}`;
+  return contratos ? `${base} · ${contratos.replace(/\.$/, '')}` : base;
+}
+
+/**
+ * Marca de la tarjeta: el bloque (mismo mes) no entra en el tope.
+ * Si cruza de mes, el tope lo resuelve el servidor por período; acá no se suma todo contra un solo mes.
+ */
+export function textoTopeBloque(
+  horasMes: { usadas: number; tope: number } | null | undefined,
+  jornadas: JornadaCorta[],
+): string | null {
+  if (!horasMes || !(Number(horasMes.tope) > 0) || jornadas.length === 0) return null;
+  const meses = new Set(jornadas.map((j) => String(j.fecha || '').slice(0, 7)).filter((m) => m.length >= 7));
+  if (meses.size !== 1) return null;
+  const horas = horasDelBloque(jornadas);
+  if (!(horas > 0)) return null;
+  if (Number(horasMes.usadas) + horas <= Number(horasMes.tope) + 1e-9) return null;
+  return `El bloque (${fmtHoras(horas)} h) no entra en el tope (${fmtHoras(Number(horasMes.usadas))}/${fmtHoras(Number(horasMes.tope))} h)`;
 }
 
 export function textoBotonEnviar(n: number): string {

@@ -18,9 +18,13 @@ import {
   linkFichaEventual,
   resumenConsultaDia,
   separarCandidatos,
+  horasDelBloque,
   textoBarraPreguntar,
   textoBotonEnviar,
   textoConfirmarAsignacion,
+  textoDosContratos,
+  textoHorasBloque,
+  textoTopeBloque,
 } from '@/lib/planificacion/coberturaEventualesUx';
 
 const JORNADA = { fecha: '2026-10-06', code: 'M', horaInicio: '10:45', horaFin: '12:00' };
@@ -54,18 +58,42 @@ test('el motivo que se resuelve en la ficha trae su acción y link; descanso o s
   assert.equal(linkFichaEventual('20222222223'), '/admin/rrhh/eventuales/?cuil=20222222223');
 });
 
-test('la barra de preguntar nombra el turno, sin «Lugares»; con varios días dice cuántos cubre', () => {
+test('la barra de preguntar nombra el turno, sin «Lugares»; el bloque junta los días, las horas y los dos contratos', () => {
   assert.equal(textoBarraPreguntar(0, [JORNADA]), 'Marcá a quién preguntar');
   assert.equal(textoBarraPreguntar(3, [JORNADA]), 'Preguntar a 3 · el primero que acepte cubre 06/10 · M 10:45–12:00');
-  assert.equal(textoBarraPreguntar(2, [JORNADA, { ...JORNADA, fecha: '2026-10-07' }, { ...JORNADA, fecha: '2026-10-08' }]), 'Preguntar a 2 · el primero que acepte cubre los 3 días marcados');
+  const mismo = [
+    { ...JORNADA, fecha: '2026-10-06', horaInicio: '07:00', horaFin: '15:00', horas: 8 },
+    { ...JORNADA, fecha: '2026-10-15', horaInicio: '07:00', horaFin: '15:00', horas: 8 },
+  ];
+  assert.equal(textoBarraPreguntar(2, mismo), 'Preguntar a 2 · El primero que acepte cubre los 2 días marcados (06/10 → 15/10) · M 07:00–15:00');
+  assert.equal(horasDelBloque(mismo), 16);
+  assert.equal(textoHorasBloque(16), 'El bloque suma 16 h');
+  const distintos = [
+    { fecha: '2026-10-06', code: 'M', horaInicio: '07:00', horaFin: '15:00', horas: 8 },
+    { fecha: '2026-10-07', code: 'T', horaInicio: '15:00', horaFin: '23:00', horas: 8 },
+  ];
+  assert.match(textoBarraPreguntar(1, distintos), /06\/10 · M 07:00–15:00 · 07\/10 · T 15:00–23:00/);
+  const cruza = [
+    { fecha: '2026-10-28', code: 'M', horaInicio: '07:00', horaFin: '15:00', horas: 8 },
+    { fecha: '2026-11-03', code: 'M', horaInicio: '07:00', horaFin: '15:00', horas: 8 },
+  ];
+  assert.equal(textoDosContratos(cruza), 'Son dos contratos (octubre 2026 8 h y noviembre 2026 8 h).');
+  assert.match(textoBarraPreguntar(1, cruza), /Son dos contratos \(octubre 2026 8 h y noviembre 2026 8 h\)/);
+  assert.equal(textoTopeBloque({ usadas: 40, tope: 50 }, mismo), 'El bloque (16 h) no entra en el tope (40/50 h)');
+  assert.equal(textoTopeBloque({ usadas: 10, tope: 50 }, mismo), null);
+  assert.equal(textoTopeBloque({ usadas: 40, tope: 50 }, cruza), null);
   assert.equal(textoBotonEnviar(0), 'Marcá a quién preguntar');
   assert.equal(textoBotonEnviar(3), 'Enviar consulta (3)');
-  const html = renderToStaticMarkup(<BarraPreguntar n={3} jornadas={[JORNADA]} espera={30} onEspera={() => {}} onEnviar={() => {}} />);
+  const html = renderToStaticMarkup(<BarraPreguntar n={2} jornadas={mismo} espera={30} onEspera={() => {}} onEnviar={() => {}} />);
   assert.doesNotMatch(html, /Lugares/);
+  assert.match(html, /06\/10 → 15\/10/);
+  assert.match(html, /data-consulta-horas[^>]*>El bloque suma 16 h/);
   assert.match(html, /Esperar respuesta:/);
-  assert.match(html, /30 min/);
-  assert.match(html, /hasta el inicio/);
-  assert.match(html, /Enviar consulta \(3\)/);
+  assert.match(html, /Enviar consulta \(2\)/);
+  const marcada = renderToStaticMarkup(
+    <TarjetaEventual c={{ ...aballay, topeBloque: 'El bloque (16 h) no entra en el tope (40/50 h)' }} modo="preguntar" marcado={false} onToggle={() => {}} onAsignar={() => {}} />,
+  );
+  assert.match(marcada, /data-tope-bloque[^>]*>El bloque \(16 h\) no entra en el tope \(40\/50 h\)/);
   const vacia = renderToStaticMarkup(<BarraPreguntar n={0} jornadas={[JORNADA]} espera={30} onEspera={() => {}} onEnviar={() => {}} />);
   assert.match(vacia, /<button[^>]*disabled=""[^>]*data-consulta-enviar[^>]*>Marcá a quién preguntar<\/button>/);
 });
