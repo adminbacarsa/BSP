@@ -1,4 +1,5 @@
 import { isAvisoEntrante } from './avisosCc';
+import { esNotifRetencion } from './retencionTarjeta';
 
 /**
  * Estado de la tarjeta de alerta. Cierra Aceptar/Rechazar/Me enteré cuando
@@ -46,6 +47,8 @@ export type AlertaCardInput = {
   conv?: AlertaConvocatoriaVista | null;
   local?: { kind: AlertaLocalKind; atMs: number } | null;
   nowMs: number;
+  closedAt?: unknown;
+  closedMotivo?: string;
 };
 
 export type AlertaCardState = {
@@ -134,6 +137,9 @@ export function resolveAlertaCard(input: AlertaCardInput): AlertaCardState {
   };
 
   const typeUp = String(input.type || '').trim().toUpperCase();
+  if (esNotifRetencion(typeUp) && (ms(input.closedAt) > 0 || String(input.closedMotivo || '').trim())) {
+    return closed(String(input.closedMotivo || '').trim() || 'Retención terminada', ms(input.closedAt) || null);
+  }
   if (typeUp === 'CONSULTA_CUBIERTA') return closed('Ya se asignó a otra persona', null);
   if (typeUp === 'CONSULTA_CANCELADA') return closed('Ya no hace falta', null);
 

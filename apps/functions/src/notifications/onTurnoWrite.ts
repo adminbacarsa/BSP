@@ -6,6 +6,8 @@ import { updateLiquidacionOnTurnoComplete } from '../liquidacion/updateLiquidaci
 import { enqueueShiftNotifDigest, type DigestEventType } from './shiftNotifDigest';
 import { guardFirstName } from '../common/pushGreeting';
 import { handlePublishedShiftModifiedWithin12h } from '../coverage/shiftModificationWithin12h';
+import { cerrarAvisosRetencionDelTurno } from '../ops/cerrarAvisosRetencion';
+import { retencionTermino } from '../ops/retencionTarjetaPura';
 
 function formatDate(ts: any): string {
   if (!ts) return '';
@@ -161,6 +163,14 @@ export const onTurnoWrite = functions
     // Empresa sandbox de capacitación: no emitir notificaciones ni liquidar
     if (String((after || before)?.empresaId ?? '') === 'capacitacion') return;
 
+    if (retencionTermino(before, after)) {
+      try {
+        await cerrarAvisosRetencionDelTurno(db, change.after.id);
+      } catch (e) {
+        console.warn('[onTurnoWrite] cerrar avisos retención:', (e as Error)?.message);
+      }
+    }
+
     try {
       await updateLiquidacionOnTurnoComplete(db, change.after.id, after, before);
     } catch (e) {
@@ -290,7 +300,20 @@ export const onTurnoWrite = functions
       [...byEmpId.docs, ...byUid.docs].forEach(d => { const t = d.data()?.token; if (typeof t === 'string' && t.length > 10) tokenSet.add(t); });
       const tokens = Array.from(tokenSet);
       const turnoId = change.after.id;
-      await db.collection('user_notifications').add({ uid: empUid || null, employeeId, title: retMsg.title, body: retMsg.body, type: 'RETENCION_AUTO', target: 'employee', turnoId, read: false, readAt: null, createdAt: admin.firestore.FieldValue.serverTimestamp() });
+      await db.collection('user_notifications').add({
+        uid: empUid || null,
+        employeeId,
+        title: retMsg.title,
+        body: retMsg.body,
+        type: 'RETENCION_AUTO',
+        target: 'employee',
+        turnoId,
+        shiftId: turnoId,
+        empresaId: after.empresaId || null,
+        read: false,
+        readAt: null,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
       if (tokens.length) {
         await admin.messaging().sendEachForMulticast({ tokens, notification: { title: retMsg.title, body: retMsg.body }, webpush: { notification: { icon: '/icons/icon-192x192.png', requireInteraction: true }, fcmOptions: { link: '/app/' } } }).catch(e => console.warn('[onTurnoWrite] Retención push error:', e));
       }

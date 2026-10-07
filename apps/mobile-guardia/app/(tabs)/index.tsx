@@ -35,7 +35,7 @@ import {
 import { resolveShiftPlacement } from '../../src/lib/shiftPlacement';
 import { appRoutes } from '../../src/lib/appRoutes';
 import { firmarAnexoDelTurno } from '../../src/lib/heroShiftCard';
-import { getPortalFirebase } from '../../src/lib/portal';
+import { getPortalCallables, getPortalFirebase } from '../../src/lib/portal';
 import { CommandButton } from '../../src/components/ui/CommandButton';
 import { CommandCard } from '../../src/components/ui/CommandCard';
 import { ConvocatoriasBanner } from '../../src/components/ConvocatoriasBanner';
@@ -46,9 +46,8 @@ import { argsPreviewConsulta, textoRespuestaCerrada } from '../../src/lib/consul
 import { CoberturaConvocatoriasBanner } from '../../src/components/CoberturaConvocatoriasBanner';
 import { LlegadaTardeVenisBanner } from '../../src/components/LlegadaTardeVenisBanner';
 import { RetencionAvisoCard } from '../../src/components/RetencionAvisoCard';
-import { isRetencionAviso } from '../../src/lib/avisosCc';
+import { textoTarjetaRetencion, turnoMuestraTarjetaRetencion } from '../../src/lib/retencionTarjeta';
 import { ConvocadoRecordatorioBanner } from '../../src/components/ConvocadoRecordatorioBanner';
-import { RetentionBanner } from '../../src/components/RetentionBanner';
 import { PreviewModeBanner } from '../../src/components/PreviewModeBanner';
 import { EnableWebPushButton } from '../../src/components/EnableWebPushButton';
 import { PendingAaCertificatesCard } from '../../src/components/PendingAaCertificatesCard';
@@ -141,11 +140,16 @@ function HoyScreenContent() {
     responder: responderCobertura,
   } = useConvocatoriasCobertura(empDocId, user?.uid ?? null);
   const { eventosMap } = useEventosMap(employee?.empresaId);
-  const { items: inboxItems, unreadCount } = usePortalInbox(user, previewEmpDocId);
-  const retencionAvisos = useMemo(
-    () => inboxItems.filter((n) => isRetencionAviso(n.type)),
-    [inboxItems],
+  const turnosPropios = allShifts ?? shifts;
+  const { items: inboxItems, unreadCount } = usePortalInbox(user, previewEmpDocId, {
+    shifts: turnosPropios,
+    shiftsReady: !loading,
+  });
+  const turnoRetencion = useMemo(
+    () => (turnosPropios ?? []).find((row) => turnoMuestraTarjetaRetencion(row)) ?? null,
+    [turnosPropios],
   );
+  const [acuseBusy, setAcuseBusy] = useState(false);
   const avisoBodyById = useMemo(() => {
     const map: Record<string, string> = {};
     for (const n of inboxItems) {
@@ -539,11 +543,27 @@ function HoyScreenContent() {
             />
           ) : null}
 
-          {retencionAvisos.length > 0 ? (
+          {turnoRetencion ? (
             <RetencionAvisoCard
-              avisos={retencionAvisos}
-              shifts={allShifts ?? shifts}
-              objectivesMap={objectivesMap}
+              texto={textoTarjetaRetencion(turnoRetencion as unknown as Record<string, unknown>)}
+              acuseAt={(turnoRetencion as { retencionAcuseAt?: unknown }).retencionAcuseAt}
+              busy={acuseBusy}
+              onEntendido={() => {
+                if (!turnoRetencion?.id || acuseBusy) return;
+                setAcuseBusy(true);
+                void (async () => {
+                  try {
+                    await getPortalCallables().acusarRetencion({
+                      shiftId: turnoRetencion.id,
+                      ...(isPreviewMode && empDocId ? { asEmployeeId: empDocId } : {}),
+                    });
+                  } catch {
+                    appAlert('No se pudo', 'No quedó registrado el entendido.');
+                  } finally {
+                    setAcuseBusy(false);
+                  }
+                })();
+              }}
             />
           ) : null}
 
@@ -603,10 +623,6 @@ function HoyScreenContent() {
               onAccept={(sol) => void onResponderConvocatoria(sol, true)}
               onReject={(sol) => void onResponderConvocatoria(sol, false)}
             />
-          ) : null}
-
-          {isRetentionHero && mainShift ? (
-            <RetentionBanner objectiveName={placement.objective} />
           ) : null}
 
           <PendingAaCertificatesCard

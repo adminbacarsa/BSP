@@ -5,6 +5,7 @@ import { ShiftCodeBadge } from '@/components/operaciones/ShiftCodeBadge';
 import { SinNotificacionesMark } from '@/components/operaciones/SinNotificacionesMark';
 import { canRevertAbsenceNow } from '@/lib/operaciones/revertAbsenceWindow';
 import { formatRetentionDuration, formatRetentionLine, estadoAusenciaCc } from '@cosp/ops-core';
+import { textoAcuseRetencion } from '@/lib/operaciones/retencionAcuse';
 import { ESTADO_AUSENCIA_HEX } from '@/components/operaciones/EstadoAusenciaChip';
 import { estadoGuardiaEvento, eventServicioLabel } from '@/lib/operaciones/eventoCc';
 import { REVERTIR_VENCIDO_TEXTO } from '@/lib/operaciones/guardCardEstado';
@@ -540,6 +541,11 @@ export function OperacionesMapPopup({
                     }}
                   >
                     {formatRetentionLine(shift.retentionWait)}
+                  </div>
+                )}
+                {textoAcuseRetencion((shift as { retencionAcuseAt?: unknown }).retencionAcuseAt) && (shift.isRetention || shift.retentionWait) && (
+                  <div data-ops-retencion-acuse="1" style={{ flex: '1 0 100%', fontSize: '10px', fontWeight: 700, color: '#c2410c', paddingLeft: '2px', lineHeight: 1.3 }}>
+                    {textoAcuseRetencion((shift as { retencionAcuseAt?: unknown }).retencionAcuseAt)}
                   </div>
                 )}
                 {shift.relevoAusenteAviso && (

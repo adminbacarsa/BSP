@@ -104,6 +104,10 @@ export function createPortalCallables(functions: Functions) {
       { contratoId: string; metodo?: 'SESION' | 'OTP' | 'BIOMETRIA'; deviceId?: string; docSha256?: string },
       { ok?: boolean; success?: boolean }
     >(functions, PORTAL_CALLABLES.acusarReciboContrato),
+    acusarRetencion: httpsCallable<
+      { shiftId: string; asEmployeeId?: string },
+      { ok?: boolean; already?: boolean; retencionAcuseAtMs?: number; preview?: boolean }
+    >(functions, PORTAL_CALLABLES.acusarRetencion),
   };
 }
 

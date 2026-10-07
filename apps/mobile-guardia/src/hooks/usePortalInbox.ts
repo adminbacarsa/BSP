@@ -18,6 +18,7 @@ import { normalizePortalInboxItem, type PortalInboxNormalized } from '@cosp/port
 import { getPortalFirebase } from '../lib/portal';
 import { isEmployeeFacingAlert, alertNeedsAck } from '../lib/notificationNavigation';
 import { alertaCuentaSinLeer, type AlertaConvocatoriaVista } from '../lib/alertaCardState';
+import { notifRetencionEsHistorial } from '../lib/retencionTarjeta';
 import { usePortalAuth } from '../context/PortalAuthContext';
 
 export type PortalInboxItem = PortalInboxNormalized;
@@ -75,7 +76,11 @@ function inboxTimestampMs(value: unknown): number {
  * @param previewEmpDocId En preview SuperAdmin solo escuchamos ese legajo
  * (no el uid del admin, que trae alertas de Operaciones).
  */
-export function usePortalInbox(user: User | null, previewEmpDocId?: string | null) {
+export function usePortalInbox(
+  user: User | null,
+  previewEmpDocId?: string | null,
+  opts?: { shifts?: { id?: string }[] | null; shiftsReady?: boolean },
+) {
   const { db } = getPortalFirebase();
   const { deviceVerified, isPreviewMode, isEventual, eventualLegajos } = usePortalAuth();
   const previewLegajosKey =
@@ -245,24 +250,27 @@ export function usePortalInbox(user: User | null, previewEmpDocId?: string | nul
     };
   }, [user?.uid, previewEmpDocId, previewLegajosKey, db, deviceVerified]);
 
-  const unreadCount = useMemo(
-    () =>
-      items.filter((n) =>
-        alertaCuentaSinLeer({
-          type: n.type,
-          read: n.read,
-          needsAck: alertNeedsAck(n),
-          ackedAt: n.ackedAt,
-          response: n.response,
-          respondedAt: n.respondedAt,
-          endTime: n.endTime,
-          timeoutAt: n.timeoutAt,
-          conv: n.convocatoriaId ? coberturaById[n.convocatoriaId] : null,
-          nowMs: Date.now(),
-        }),
-      ).length,
-    [items, coberturaById],
-  );
+  const unreadCount = useMemo(() => {
+    const nowMs = Date.now();
+    const shifts = opts?.shiftsReady ? (opts.shifts ?? []) : null;
+    return items.filter((n) => {
+      if (notifRetencionEsHistorial(n, shifts, nowMs)) return false;
+      return alertaCuentaSinLeer({
+        type: n.type,
+        read: n.read,
+        needsAck: alertNeedsAck(n),
+        ackedAt: n.ackedAt,
+        response: n.response,
+        respondedAt: n.respondedAt,
+        endTime: n.endTime,
+        timeoutAt: n.timeoutAt,
+        closedAt: n.closedAt,
+        closedMotivo: n.closedMotivo,
+        conv: n.convocatoriaId ? coberturaById[n.convocatoriaId] : null,
+        nowMs,
+      });
+    }).length;
+  }, [items, coberturaById, opts?.shifts, opts?.shiftsReady]);
 
   const markRead = async (id: string) => {
     try {

@@ -6,6 +6,7 @@ import { formatOpsNotaLine, type OpsNota } from '@/lib/operaciones/opsNota';
 import { guardTone, type GuardFlags } from '@/lib/movil/guardTone';
 import { isEventShift } from '@/lib/operaciones/eventoCc';
 import { textoSinNotificacionesDe } from '@/lib/operaciones/pushAviso';
+import { textoAcuseRetencion } from '@/lib/operaciones/retencionAcuse';
 
 type TsLike = { seconds?: number; toMillis?: () => number; toDate?: () => Date } | Date | string | number | null | undefined;
 
@@ -38,6 +39,7 @@ export interface GuardDetalleShift extends GuardFlags {
   /** «CIERRA HH:MM · sin franja siguiente»: fin vencido sin continuidad. No es retención. */
   cierreSinFranja?: string | null;
   retentionWait?: RetentionWaitInfo | null;
+  retencionAcuseAt?: unknown;
   lateArrivalEtaLabel?: string | null;
   /** HH:MM de la respuesta del guardia al aviso (classifyOpsShift). */
   lateArrivalRespondedLabel?: string | null;
@@ -82,6 +84,8 @@ export interface GuardDetalle {
   relevaA: string | null;
   /** Quién lo releva al salir (o a quién espera si está retenido). */
   loReleva: string | null;
+  /** «vio la retención HH:MM» si el guardia acusó. */
+  acuse: string | null;
   /** EN CAMINO · llega ~HH:MM · recordatorio · DEMORADO. */
   convocatoria: string | null;
   /** Cubre a X · EXT hasta HH:MM / Cubierto por X. */
@@ -291,6 +295,7 @@ export function guardDetalle(shift: GuardDetalleShift, siblings: readonly GuardD
     estado: estadoDe(shift, nowMs),
     relevaA,
     loReleva,
+    acuse: (tone === 'ret' || shift.retentionWait) ? textoAcuseRetencion(shift.retencionAcuseAt) : null,
     convocatoria,
     cobertura: coberturaDe(shift),
     nota: formatOpsNotaLine(shift.opsNota as Partial<OpsNota> | null | undefined),

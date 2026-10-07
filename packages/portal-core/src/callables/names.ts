@@ -21,6 +21,7 @@ export const PORTAL_CALLABLES = {
   listarTurnosEventual: 'listarTurnosEventual',
   /** Acuse de recibo del contrato (§3.3). Pendiente en el servidor. */
   acusarReciboContrato: 'acusarReciboContrato',
+  acusarRetencion: 'acusarRetencion',
 } as const;
 
 export type PortalCallableName = (typeof PORTAL_CALLABLES)[keyof typeof PORTAL_CALLABLES];

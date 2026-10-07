@@ -520,6 +520,7 @@ export function GuardDetalleLines({ shift, siblings = [], now, showObjective = t
       {d.estado && <p className={`truncate text-[11px] font-semibold ${TONE_TEXT[tone]}`}>{d.estado}</p>}
       {d.relevaA && <p className="truncate text-[11px] font-medium text-slate-600">{d.relevaA}</p>}
       {d.loReleva && <p className="truncate text-[11px] font-medium text-slate-600">{d.loReleva}</p>}
+      {d.acuse && <p className="truncate text-[11px] font-semibold text-orange-700" data-movil-retencion-acuse="1">{d.acuse}</p>}
       {d.convocatoria && <p className="truncate text-[11px] font-semibold text-slate-700">{d.convocatoria}</p>}
       {d.cobertura && <p className="truncate text-[11px] font-semibold text-slate-700">{d.cobertura}</p>}
       {d.nota && <p className="truncate text-[11px] font-medium text-slate-600" data-movil-nota-linea="1">{d.nota}</p>}
