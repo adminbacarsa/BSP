@@ -374,7 +374,7 @@ async function run() {
         && src?.isDeleted === true
         && src?.deletedReason === 'CONVERTIDO_EN_COBERTURA'
         && src?.convertedToCoverageDocId === covId
-        && src?.coverageUsed !== true;
+        && src?.coverageUsed === true;
       report(2, ok, ok ? 'REF convertido (baja lógica) + ops_cov en obj titular' : `cov.obj=${cov?.objectiveId} srcDel=${src?.isDeleted}`);
     }
 

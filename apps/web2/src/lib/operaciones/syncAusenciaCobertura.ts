@@ -463,7 +463,7 @@ export async function applyCoverage(
         adjustedStartTime: params.adjustedStartTime,
       });
     } else if (ct === 'ESC' || ct === 'REF' || ct === 'RET') {
-      batch.update(doc(db, 'turnos', sourceId), { ...parcheFuenteAnulada(covDocId, titularId), ...(srcData ? buildEscRefSourceConvertedPatch(srcData, covDocId) : {}) });
+      batch.update(doc(db, 'turnos', sourceId), { ...(srcData ? buildEscRefSourceConvertedPatch(srcData, covDocId) : {}), ...parcheFuenteAnulada(covDocId, titularId) });
     } else if (ct === 'FT') {
       // FT conserva el franco origen (P9e): el FT real vive en el ops_cov.
       const srcCode = String(srcData?.code || srcData?.shiftCode || '').trim().toUpperCase();
