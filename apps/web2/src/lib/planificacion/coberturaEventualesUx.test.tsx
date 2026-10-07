@@ -14,6 +14,7 @@ import {
   CoberturaBarra,
   CoberturaDias,
   CoberturaFranja,
+  CoberturaOpsBox,
   CoberturaPie,
   CoberturaTabs,
   ConsultaDiaBox,
@@ -23,6 +24,12 @@ import {
 } from '@/components/planificacion/CoberturaModalV2';
 import { CandidatosHueco } from '@/components/movil/PlanificacionMovilView';
 import { dedupeNomina } from '@/lib/planificacion/nominaPersonas.mjs';
+import {
+  coberturaExistenteDelDia,
+  decisionPrincipalCobertura,
+  draftDeCobertura,
+  recolectarTurnosDelDia,
+} from '@/lib/planificacion/coberturaExistente';
 import { buildBrandCSS, buildCompanyTheme, companyButtonColor } from '@/lib/companyTheme';
 import {
   TEXTO_EVENTUALES_SOLO_CONSULTA,
@@ -614,6 +621,101 @@ test('un día con consulta abierta no guarda el suplente local y la celda avisa'
   );
   assert.match(celda, /data-consulta-celda="1"/);
   assert.match(celda, /Consulta enviada · vence 11:15/);
+});
+
+test('un día ya cubierto por Operaciones no se muestra como Sin cubrir y no se vuelve a asignar', () => {
+  const titular = {
+    id: 'shift-baez',
+    employeeId: 'baez',
+    code: 'AA',
+    operacionallyCovered: true,
+    coverageStatus: 'COVERED',
+    coverageType: 'REF',
+    coveredByEmployeeName: 'LALLANA Fabian Alberto',
+    coveredByEmployeeId: 'lallana',
+    resolvedBy: 'OPERACIONES',
+    coverageDocId: 'ops_cov_shift-baez_lallana',
+    startTime: '2026-10-07T13:45:00.000Z',
+    endTime: '2026-10-07T15:00:00.000Z',
+  };
+  const ops = {
+    id: 'ops_cov_shift-baez_lallana',
+    employeeId: 'lallana',
+    employeeName: 'LALLANA Fabian Alberto',
+    origin: 'OPERATIONS_COVERAGE',
+    code: 'REF',
+    coverageType: 'REF',
+    absenceShiftId: 'shift-baez',
+    checkInAt: '2026-10-07T13:47:00.000Z',
+  };
+  const cubierto = coberturaExistenteDelDia({
+    titularEmployeeId: 'baez',
+    titularName: 'BAEZ, Carlos',
+    date: '2026-10-07',
+    titular,
+    turnosDelDia: [titular, ops],
+  });
+  assert.equal(cubierto.origen, 'operaciones');
+  if (cubierto.origen !== 'operaciones') return;
+  assert.equal(cubierto.estado, 'CUBIERTO');
+  assert.equal(cubierto.texto, 'Cubierto · LALLANA (REF) · desde Operaciones 10:47');
+  const estado = estadoDiaCobertura({ activo: true, cobertura: { mode: 'none' }, ops: { estado: 'CUBIERTO', texto: cubierto.texto } });
+  assert.deepEqual(estado, { tipo: 'operaciones', tono: 'emerald', texto: 'Cubierto · LALLANA (REF) · desde Operaciones 10:47' });
+  const box = renderToStaticMarkup(<CoberturaOpsBox texto={cubierto.texto} detalle="LALLANA Fabian Alberto · REF · desde 10:47" />);
+  assert.match(box, /data-cobertura-ops="cubierto"/);
+  assert.match(box, /Cubierto · LALLANA \(REF\) · desde Operaciones 10:47/);
+  assert.match(box, /Lo cubrió Operaciones/);
+  assert.doesNotMatch(box, /Asignar/);
+  assert.doesNotMatch(box, /data-cobertura-tab/);
+
+  const parcial = coberturaExistenteDelDia({
+    titularEmployeeId: 'baez',
+    date: '2026-10-07',
+    titular: { ...titular, operacionallyCovered: false, coverageStatus: 'PARTIAL', coverageType: 'EXTEND' },
+    turnosDelDia: [{ ...ops, coverageType: 'EXTEND', code: 'M' }],
+  });
+  assert.equal(parcial.origen, 'operaciones');
+  if (parcial.origen === 'operaciones') {
+    assert.equal(parcial.estado, 'PARCIAL');
+    assert.equal(parcial.texto, 'Parcial · LALLANA (EXT) · falta 11:22–12:00');
+  }
+
+  const plan = coberturaExistenteDelDia({
+    titularEmployeeId: 'baez',
+    titularName: 'BAEZ, Carlos',
+    date: '2026-10-07',
+    titular: { id: 'shift-baez', employeeId: 'baez', coveredBy: 'GUERRERO, Marcos', coverageType: 'substitute', coverageStatus: 'COVERED' },
+    turnosDelDia: [{ employeeId: 'guerrero', employeeName: 'GUERRERO, Marcos', coversEmployeeId: 'baez', comments: 'Cubriendo a BAEZ, Carlos' }],
+  });
+  assert.equal(plan.origen, 'planificada');
+  if (plan.origen === 'planificada') {
+    assert.deepEqual(plan.cobertura, { mode: 'substitute', employeeId: 'guerrero' });
+    assert.equal(plan.texto, 'Suplente · GUERRERO');
+  }
+  assert.equal(coberturaExistenteDelDia({ titularEmployeeId: 'baez', date: '2026-10-07', titular: { id: 'shift-baez', employeeId: 'baez', code: 'AA' } }).origen, 'ninguna');
+
+  const pack = recolectarTurnosDelDia({
+    date: '2026-10-07',
+    titularEmployeeId: 'baez',
+    shiftsMap: { 'baez_2026-10-07': titular },
+    cellTurnosMap: { 'lallana_2026-10-07': [ops], 'baez_2026-10-07': [titular] },
+    pendingChanges: {},
+  });
+  assert.equal(pack.titular?.coverageType, 'REF');
+  assert.equal(pack.turnos.some((t) => t.origin === 'OPERATIONS_COVERAGE'), true);
+
+  assert.equal(decisionPrincipalCobertura([
+    { activo: true, ops: 'CUBIERTO', consulta: false, planificada: false, draft: 'none' },
+  ]), 'cerrar');
+  assert.equal(decisionPrincipalCobertura([
+    { activo: true, ops: null, consulta: false, planificada: false, draft: 'none' },
+  ]), 'vacante');
+  assert.equal(decisionPrincipalCobertura([
+    { activo: true, ops: 'CUBIERTO', consulta: false, planificada: false, draft: 'none' },
+    { activo: true, ops: null, consulta: false, planificada: true, draft: 'nuevo' },
+  ]), 'confirmar');
+  assert.equal(draftDeCobertura({ mode: 'none' }, plan), 'quitada');
+  assert.equal(draftDeCobertura(plan.origen === 'planificada' ? plan.cobertura : undefined, plan), 'igual');
 });
 
 test('la nómina lista una fila por persona aunque tenga dos legajos o dos turnos', () => {

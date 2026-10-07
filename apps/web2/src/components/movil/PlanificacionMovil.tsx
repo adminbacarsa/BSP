@@ -27,6 +27,7 @@ import { enqueueFirestoreWrite, movilWriteQueue } from '@/lib/movil/writeQueue';
 import {
   aplicarCambios,
   bandaParaCubrir,
+  aplicarCoberturaExistenteMovil,
   candidatosParaHueco,
   companerosCompatibles,
   conflictosDeHorario,
@@ -187,14 +188,13 @@ export function PlanificacionMovil() {
           migracionCompleta,
           (input: { toDate?: () => Date }) => getDateKeyInTimezone(input?.toDate ? input.toDate() : new Date(input as unknown as string)),
         );
+        const views = Object.values(ingested.cellTurnosMap).flat() as Array<Record<string, unknown> & { id: string }>;
         const rows: TurnoMovil[] = [];
-        for (const list of Object.values(ingested.cellTurnosMap)) {
-          for (const view of list as Array<Record<string, unknown> & { id: string }>) {
-            const row = turnoMovilDesdeDoc(String(view.id), view);
-            if (row) rows.push(row);
-          }
+        for (const view of views) {
+          const row = turnoMovilDesdeDoc(String(view.id), view);
+          if (row) rows.push(row);
         }
-        bags.set(ym, rows);
+        bags.set(ym, aplicarCoberturaExistenteMovil(rows, views));
         setTurnos([...bags.values()].flat());
         setReadyTurnos(true);
       });

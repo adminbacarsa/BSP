@@ -276,6 +276,7 @@ import {
     CoberturaBarra,
     CoberturaDias,
     CoberturaFranja,
+    CoberturaOpsBox,
     CoberturaPie,
     CoberturaTabs,
     ConsultaDiaBox,
@@ -306,7 +307,6 @@ import {
     novedadesDeConsultas,
     quitarBorradorQuePisaConsulta,
     resumenConsultaDia,
-    textoAccionPrincipal,
     textoAvisoAsignadoDia,
     textoBarraAsignar,
     textoBarraSplit,
@@ -319,6 +319,15 @@ import {
     type CoberturaDiaIn,
     type ConsultaCurso,
 } from '@/lib/planificacion/coberturaEventualesUx';
+import {
+    coberturaExistenteDelDia,
+    coberturaInicialPlanificada,
+    decisionPrincipalCobertura,
+    draftDeCobertura,
+    recolectarTurnosDelDia,
+    textoDecisionCobertura,
+    type CoberturaExistente,
+} from '@/lib/planificacion/coberturaExistente';
 import { alignVacancyGapBand } from '@/lib/planificacion/vacancySplitBands';
 import {
     listVacancyGapBandOptions,
@@ -1777,7 +1786,23 @@ function PlanificacionDesktop() {
         const focus = vacancyData.focusDate as string | undefined;
         const initialDates = focus && all.includes(focus) ? [focus] : all;
         setVacancyActiveDates(new Set(initialDates.length ? initialDates : all));
-        setVacancyDayCoverages({});
+        const titularId = String(vacancyData.employeeId || '');
+        setVacancyDayCoverages(coberturaInicialPlanificada(all, (d) => {
+            const pack = recolectarTurnosDelDia({
+                date: d,
+                titularEmployeeId: titularId,
+                shiftsMap,
+                cellTurnosMap,
+                pendingChanges,
+            });
+            return coberturaExistenteDelDia({
+                titularEmployeeId: titularId,
+                titularName: vacancyData.employeeName,
+                date: d,
+                titular: pack.titular,
+                turnosDelDia: pack.turnos,
+            });
+        }));
         setVacancyTemplateDay(null);
         setVacancyAuthMarks({});
         // Modal v2: siempre hay un día elegido y la columna derecha abierta.
@@ -7599,11 +7624,39 @@ function PlanificacionDesktop() {
             }
             return { dateStr, coverage: { mode: 'none' as const } };
         });
-        const daysParaAplicar = days.map((d) => (
-            diaLoResuelveConsulta(vacancyConsultas, d.dateStr)
-                ? { dateStr: d.dateStr, coverage: { mode: 'none' as const } }
-                : d
-        ));
+        const existenteDia = (dateStr: string): CoberturaExistente => {
+            const pack = recolectarTurnosDelDia({
+                date: dateStr,
+                titularEmployeeId: String(vacancyData.employeeId || ''),
+                shiftsMap,
+                cellTurnosMap,
+                pendingChanges,
+            });
+            return coberturaExistenteDelDia({
+                titularEmployeeId: String(vacancyData.employeeId || ''),
+                titularName: vacancyData.employeeName,
+                date: dateStr,
+                titular: pack.titular,
+                turnosDelDia: pack.turnos,
+                consulta: consultaDelDia(vacancyConsultas, dateStr),
+            });
+        };
+        // Operaciones completa no se reescribe. Un parcial sin suplente nuevo tampoco. La planificada sin cambios se deja como está.
+        const daysParaAplicar = days.flatMap((d) => {
+            if (diaLoResuelveConsulta(vacancyConsultas, d.dateStr)) {
+                return [{ dateStr: d.dateStr, coverage: { mode: 'none' as const } }];
+            }
+            const ex = existenteDia(d.dateStr);
+            const draft = draftDeCobertura(vacancyDayCoverages[d.dateStr], ex);
+            if (ex.origen === 'operaciones' && ex.estado === 'CUBIERTO') return [];
+            if (ex.origen === 'operaciones' && ex.estado === 'PARCIAL' && d.coverage.mode === 'none') return [];
+            if (draft === 'igual') return [];
+            return [d];
+        });
+        if (daysParaAplicar.length === 0) {
+            finalizeVacancyModal();
+            return;
+        }
 
         const runApplyVacancy = (authorizeFranco: boolean) => {
             try {
@@ -15240,8 +15293,28 @@ function PlanificacionDesktop() {
                     };
                     const resolveDayCoverageForUi = (dateStr: string) =>
                         resolveVacancyDayCoverage(dateStr, vacancyDayCoverages, '');
-                    const willAssignAny = [...vacancyActiveDates].some((d) => vacancyDayHasCoverage(resolveDayCoverageForUi(d)));
-                    const vacancyEmptyActiveDays = sortedActiveDates.filter((d) => !vacancyDayHasCoverage(resolveDayCoverageForUi(d))).length;
+                    const existenteDe = (dateStr: string): CoberturaExistente => {
+                        const pack = recolectarTurnosDelDia({
+                            date: dateStr,
+                            titularEmployeeId: String(vacancyData?.employeeId || ''),
+                            shiftsMap,
+                            cellTurnosMap,
+                            pendingChanges,
+                        });
+                        return coberturaExistenteDelDia({
+                            titularEmployeeId: String(vacancyData?.employeeId || ''),
+                            titularName: vacancyData?.employeeName,
+                            date: dateStr,
+                            titular: pack.titular,
+                            turnosDelDia: pack.turnos,
+                            consulta: consultaDelDia(vacancyConsultas, dateStr),
+                        });
+                    };
+                    const opsVista = (dateStr: string) => {
+                        const ex = existenteDe(dateStr);
+                        return ex.origen === 'operaciones' ? ex : null;
+                    };
+                    const vacancyEmptyActiveDays = sortedActiveDates.filter((d) => !vacancyDayHasCoverage(resolveDayCoverageForUi(d)) && !opsVista(d)).length;
                     const getTypicalShiftForTitular = (empId: string) => {
                         const yr = currentDate.getFullYear(); const mo = currentDate.getMonth();
                         const daysInMo = new Date(yr, mo + 1, 0).getDate();
@@ -15739,6 +15812,7 @@ function PlanificacionDesktop() {
                         const incoming: Record<string, VacancyDayCoverage> = {};
                         const missing: string[] = [];
                         for (const day of sortedActiveDates) {
+                            if (opsVista(day)?.estado === 'CUBIERTO') continue;
                             const cov = day === vacancyEditingDay ? base : materializeOnDay(day, base, false);
                             if (!cov) missing.push(formatShortDay(day));
                             else incoming[day] = cov;
@@ -15755,6 +15829,7 @@ function PlanificacionDesktop() {
                         if (!tplDay || !tpl || !vacancyDayHasCoverage(tpl)) return;
                         const incoming: Record<string, VacancyDayCoverage> = {};
                         for (const day of emptyDays(sortedActiveDates, vacancyDayCoverages)) {
+                            if (opsVista(day)) continue;
                             const cov = materializeOnDay(day, tpl, false);
                             if (cov) incoming[day] = cov;
                         }
@@ -15930,7 +16005,21 @@ function PlanificacionDesktop() {
                         const cov = resolveDayCoverageForUi(d);
                         if (cov.mode === 'substitute') return { mode: 'substitute', nombre: nombreDe(cov.employeeId) };
                         if (cov.mode === 'split') return { mode: 'split', ext: nombreDe(cov.extEmpId), adel: nombreDe(cov.adelEmpId) };
+                        // «Quitar» deja mode none a propósito: no se vuelve a leer la planificada guardada.
+                        if (vacancyDayCoverages[d]?.mode === 'none') return { mode: 'none' };
+                        const ex = existenteDe(d);
+                        if (ex.origen === 'planificada' && ex.cobertura.mode === 'substitute') return { mode: 'substitute', nombre: nombreDe(ex.cobertura.employeeId) };
+                        if (ex.origen === 'planificada' && ex.cobertura.mode === 'split') return { mode: 'split', ext: nombreDe(ex.cobertura.extEmpId), adel: nombreDe(ex.cobertura.adelEmpId) };
                         return { mode: 'none' };
+                    };
+                    const estadoDe = (d: string) => {
+                        const ops = opsVista(d);
+                        return estadoDiaCobertura({
+                            activo: vacancyActiveDates.has(d),
+                            cobertura: coberturaIn(d),
+                            consulta: ops?.estado === 'CUBIERTO' ? null : consultaViva(d),
+                            ops: ops ? { estado: ops.estado, texto: ops.texto } : null,
+                        });
                     };
                     const consultaViva = (d: string) => {
                         const c = consultaDelDia(vacancyConsultas, d);
@@ -15939,21 +16028,31 @@ function PlanificacionDesktop() {
                     };
                     const diaSel = vacancyEditingDay || sortedActiveDates[0] || absenceDateRange[0] || null;
                     const titSel = diaSel ? resolveEffectiveTitularForDay(diaSel) : null;
-                    const consultaSel = diaSel ? consultaViva(diaSel) : null;
-                    const estadoSel = diaSel ? estadoDiaCobertura({ activo: vacancyActiveDates.has(diaSel), cobertura: coberturaIn(diaSel), consulta: consultaSel }) : null;
+                    const opsSel = diaSel ? opsVista(diaSel) : null;
+                    const consultaSel = diaSel && opsSel?.estado !== 'CUBIERTO' ? consultaViva(diaSel) : null;
+                    const estadoSel = diaSel ? estadoDe(diaSel) : null;
                     const diasFilas: DiaFila[] = absenceDateRange.map((d) => ({
                         date: d,
                         label: diaCorto(d),
                         activo: vacancyActiveDates.has(d),
                         seleccionado: d === diaSel,
-                        estado: estadoDiaCobertura({ activo: vacancyActiveDates.has(d), cobertura: coberturaIn(d), consulta: consultaViva(d) }),
-                        puedeQuitar: vacancyActiveDates.has(d) && vacancyDayHasCoverage(resolveDayCoverageForUi(d)) && !consultaViva(d),
+                        estado: estadoDe(d),
+                        puedeQuitar: vacancyActiveDates.has(d) && vacancyDayHasCoverage(resolveDayCoverageForUi(d)) && !consultaViva(d) && opsVista(d)?.estado !== 'CUBIERTO',
                     }));
-                    const hayConsultaActiva = sortedActiveDates.some((d) => !!consultaViva(d));
-                    const accionPrincipal = textoAccionPrincipal(willAssignAny || hayConsultaActiva);
+                    const decision = decisionPrincipalCobertura(absenceDateRange.map((d) => {
+                        const ex = existenteDe(d);
+                        return {
+                            activo: vacancyActiveDates.has(d),
+                            ops: ex.origen === 'operaciones' ? ex.estado : null,
+                            consulta: !!consultaViva(d) && ex.origen !== 'operaciones',
+                            planificada: ex.origen === 'planificada',
+                            draft: draftDeCobertura(vacancyDayCoverages[d], ex),
+                        };
+                    }));
+                    const accionPrincipal = textoDecisionCobertura(decision);
                     const cerrarModal = () => {
-                        if (vacancyActiveDates.size > 0 && (willAssignAny || hayConsultaActiva)) handleProcessVacancy();
-                        else finalizeVacancyModal();
+                        if (decision === 'cerrar') finalizeVacancyModal();
+                        else handleProcessVacancy();
                     };
                     const bandaAuto = titSel ? `${titSel.code}__${titSel.positionName}` : '';
                     const bandas = vacancyGapBandOptions.map((opt) => ({
@@ -16058,7 +16157,7 @@ function PlanificacionDesktop() {
                                         onTodos={() => setVacancyActiveDates(new Set(absenceDateRange))}
                                         onNinguno={() => setVacancyActiveDates(new Set())}
                                         onQuitar={(d) => {
-                                            setVacancyDayCoverages((prev) => clearDayCoverage(prev, d));
+                                            setVacancyDayCoverages((prev) => ({ ...prev, [d]: { mode: 'none' } }));
                                             setVacancyTemplateDay((cur) => (cur === d ? null : cur));
                                             if (diaSel === d) loadPickerFields(undefined);
                                         }}
@@ -16071,6 +16170,11 @@ function PlanificacionDesktop() {
                                         <p className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-6 text-center text-xs font-bold text-slate-500">
                                             {absenceDateRange.length ? 'Marcá el día en la lista para configurar su cobertura.' : 'Sin días para cubrir.'}
                                         </p>
+                                    ) : opsSel?.estado === 'CUBIERTO' ? (
+                                        <CoberturaOpsBox
+                                            texto={opsSel.texto}
+                                            detalle={[opsSel.nombre, opsSel.codigo, opsSel.desdeHm ? `desde ${opsSel.desdeHm}` : null].filter(Boolean).join(' · ')}
+                                        />
                                     ) : estadoSel && consultaSel ? (
                                         <>
                                             <ConsultaDiaBox
@@ -16094,6 +16198,11 @@ function PlanificacionDesktop() {
                                         </>
                                     ) : (
                                         <>
+                                            {opsSel?.estado === 'PARCIAL' && (
+                                                <AvisoCobertura>
+                                                    {opsSel.texto}. Podés cubrir el tramo que falta. El cambio de lo que ya cubrió Operaciones se hace desde Operaciones.
+                                                </AvisoCobertura>
+                                            )}
                                             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                                                 <CoberturaTabs tab={tabActual} onTab={setTab} eventuales={canConvocarEventual || canConsultarEventual} split={!!splitTitularShift || vacancyGapBandOptions.length > 0} />
                                                 {tabActual === 'nomina' && <NominaAyuda />}
@@ -16316,8 +16425,9 @@ function PlanificacionDesktop() {
                             <CoberturaPie
                                 accion={accionPrincipal}
                                 accionDisabled={vacancyActiveDates.size === 0}
-                                onAccion={handleProcessVacancy}
+                                onAccion={cerrarModal}
                                 onCerrar={cerrarModal}
+                                hint={decision === 'cerrar' ? 'Estos días ya están cubiertos. Cerrar no cambia el cronograma.' : undefined}
                             />
                         </div>
                     </div>

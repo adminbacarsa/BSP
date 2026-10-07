@@ -468,8 +468,8 @@ export function consultasVisiblesEnCurso<T extends ConsultaCurso>(list: T[]): T[
 
 // ── Modal de cobertura v2 (escritorio): dos columnas, una franja arriba y un pie de dos botones ──
 
-export type TonoEstadoDia = 'rose' | 'emerald' | 'violet' | 'indigo' | 'slate';
-export type TipoEstadoDia = 'sin_cubrir' | 'suplente' | 'split' | 'consultando' | 'acepto' | 'no_procesa';
+export type TonoEstadoDia = 'rose' | 'emerald' | 'violet' | 'indigo' | 'slate' | 'amber';
+export type TipoEstadoDia = 'sin_cubrir' | 'suplente' | 'split' | 'consultando' | 'acepto' | 'no_procesa' | 'operaciones' | 'parcial';
 export type EstadoDiaCobertura = { tipo: TipoEstadoDia; tono: TonoEstadoDia; texto: string };
 
 export type CoberturaDiaIn =
@@ -481,8 +481,15 @@ export type CoberturaDiaIn =
  * Lo que dice cada día en la columna izquierda. La consulta en vivo manda sobre el borrador:
  * si alguien aceptó, ese es el suplente; si está abierta, el día lo resuelve la consulta.
  */
-export function estadoDiaCobertura(p: { activo: boolean; cobertura: CoberturaDiaIn; consulta?: ConsultaResumenIn | null }): EstadoDiaCobertura {
+export function estadoDiaCobertura(p: {
+  activo: boolean;
+  cobertura: CoberturaDiaIn;
+  consulta?: ConsultaResumenIn | null;
+  /** Cobertura de Operaciones ya escrita. Completa manda sobre el borrador y la consulta. */
+  ops?: { estado: 'CUBIERTO' | 'PARCIAL'; texto: string } | null;
+}): EstadoDiaCobertura {
   if (!p.activo) return { tipo: 'no_procesa', tono: 'slate', texto: 'No se procesa' };
+  if (p.ops?.estado === 'CUBIERTO') return { tipo: 'operaciones', tono: 'emerald', texto: p.ops.texto };
   const consulta = p.consulta || null;
   if (consulta) {
     const acepto = (consulta.respuestas || []).find((r) => r.estado === 'ASIGNADO');
@@ -494,6 +501,7 @@ export function estadoDiaCobertura(p: { activo: boolean; cobertura: CoberturaDia
   }
   if (p.cobertura.mode === 'substitute') return { tipo: 'suplente', tono: 'emerald', texto: `Suplente · ${apellidoDe(p.cobertura.nombre)}` };
   if (p.cobertura.mode === 'split') return { tipo: 'split', tono: 'violet', texto: `Ext+Adel · ${apellidoDe(p.cobertura.ext)} / ${apellidoDe(p.cobertura.adel)}` };
+  if (p.ops?.estado === 'PARCIAL') return { tipo: 'parcial', tono: 'amber', texto: p.ops.texto };
   // La consulta se cerró sin que le llegara a nadie (sin app ni mail): el día sigue sin cubrir y se dice por qué.
   if (consulta && consulta.status === 'SIN_DESTINATARIOS') return { tipo: 'sin_cubrir', tono: 'rose', texto: 'Sin cubrir · no le llegó a nadie' };
   return { tipo: 'sin_cubrir', tono: 'rose', texto: 'Sin cubrir' };

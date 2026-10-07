@@ -8,6 +8,7 @@ import { shiftCountsForEmployeeCronoHours } from '@/lib/planificacion/deployment
 import { haversineKm } from '@/lib/operaciones/coverageGeo';
 import { calcPlanificadorShiftHours, hoursBetweenClockTimes } from '@/lib/planificacion/planningScheduledHours';
 import { planningHourLimits } from '@/lib/planning/planning-rules.runtime';
+import { coberturaExistenteDelDia, type TurnoDiaIn } from '@/lib/planificacion/coberturaExistente';
 
 export const TOPE_JORNADA_MIN = 12 * 60 + 59;
 const LICENCIA = new Set(['V', 'L', 'E', 'A', 'AA', 'PG', 'ART']);
@@ -179,6 +180,38 @@ export function turnoMovilDesdeDoc(id: string, data: Record<string, unknown>): T
       : null,
     francoUsado: franco && data.coverageUsed === true,
   };
+}
+
+/**
+ * Licencia o vacante ya cubierta por Operaciones: no se ofrece para cubrir.
+ * Un parcial sigue siendo hueco (falta un tramo). La planificada conserva `coveredBy`.
+ */
+export function aplicarCoberturaExistenteMovil(
+  turnos: TurnoMovil[],
+  views: ReadonlyArray<TurnoDiaIn & { id?: string }>,
+): TurnoMovil[] {
+  const viewPorId = new Map(views.map((v) => [String(v.id || ''), v]));
+  const porFecha = new Map<string, TurnoDiaIn[]>();
+  for (const t of turnos) {
+    const v = viewPorId.get(t.id);
+    if (!v) continue;
+    const list = porFecha.get(t.date) || [];
+    list.push(v);
+    porFecha.set(t.date, list);
+  }
+  return turnos.map((t) => {
+    if (!t.licencia && !t.vacante) return t;
+    const ex = coberturaExistenteDelDia({
+      titularEmployeeId: t.employeeId,
+      titularName: t.employeeName,
+      date: t.date,
+      titular: viewPorId.get(t.id) || null,
+      turnosDelDia: porFecha.get(t.date) || [],
+    });
+    if (ex.origen === 'operaciones' && ex.estado === 'CUBIERTO') return { ...t, coveredBy: ex.nombre };
+    if (ex.origen === 'operaciones' && ex.estado === 'PARCIAL') return { ...t, coveredBy: '' };
+    return t;
+  });
 }
 
 /** «{evento} · {servicio} · HH:MM–HH:MM» del turno EV. */

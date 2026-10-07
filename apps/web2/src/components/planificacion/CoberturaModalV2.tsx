@@ -25,6 +25,7 @@ const TONO_TEXTO: Record<TonoEstadoDia, string> = {
   violet: 'text-violet-700',
   indigo: 'text-indigo-700',
   slate: 'text-slate-400',
+  amber: 'text-amber-700',
 };
 
 const TONO_PUNTO: Record<TonoEstadoDia, string> = {
@@ -33,6 +34,7 @@ const TONO_PUNTO: Record<TonoEstadoDia, string> = {
   violet: 'bg-violet-500',
   indigo: 'bg-indigo-500',
   slate: 'bg-slate-300',
+  amber: 'bg-amber-500',
 };
 
 export function CoberturaFranja(props: {
@@ -246,6 +248,26 @@ export function CoberturaBarra(props: {
       >
         {props.busy ? 'Un momento…' : props.boton}
       </button>
+    </div>
+  );
+}
+
+/** Día ya cubierto por Operaciones: solo lectura. El cambio se hace en el Centro de Control. */
+export function CoberturaOpsBox(props: { texto: string; detalle?: string | null }) {
+  return (
+    <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3" data-cobertura-ops="cubierto">
+      <div className="flex items-start gap-3">
+        <div className="mt-0.5 rounded-xl bg-emerald-100 p-2 text-emerald-700">
+          <UserCheck size={16} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-black text-emerald-900" data-cobertura-ops-texto>{props.texto}</p>
+          {props.detalle && <p className="mt-0.5 text-[11px] font-bold text-slate-700">{props.detalle}</p>}
+          <p className="mt-1 text-[10px] font-bold text-slate-500">
+            Lo cubrió Operaciones. Para cambiarlo, hacelo desde Operaciones.
+          </p>
+        </div>
+      </div>
     </div>
   );
 }

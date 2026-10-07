@@ -8,6 +8,7 @@ import { buildMovilTheme } from '@/lib/companyTheme';
 import { AVISO_MES_SIN_PUBLICAR, mesPublicadoDe, puedeCorregirEnCelular } from '@/lib/movil/planificacionSemana';
 import {
   aplicarCambios,
+  aplicarCoberturaExistenteMovil,
   candidatosParaHueco,
   conflictosDeAsignacion,
   conflictosDeHorario,
@@ -55,6 +56,32 @@ function turno(partial: Partial<TurnoMovil> & Pick<TurnoMovil, 'id' | 'employeeI
     ...partial,
   };
 }
+
+test('una licencia cubierta por Operaciones no se ofrece para cubrir; el parcial sí', () => {
+  const baez = turno({ id: 'shift-baez', employeeId: 'baez', code: 'AA', date: '2026-10-07', licencia: true, start: '10:45', end: '12:00', coveredBy: 'LALLANA Fabian Alberto' });
+  const views = [{
+    id: 'shift-baez',
+    employeeId: 'baez',
+    employeeName: 'BAEZ, Carlos',
+    operacionallyCovered: true,
+    coverageStatus: 'COVERED',
+    coverageType: 'REF',
+    coveredByEmployeeName: 'LALLANA Fabian Alberto',
+    resolvedBy: 'OPERACIONES',
+  }];
+  const cubierto = aplicarCoberturaExistenteMovil([baez], views);
+  assert.equal(cubierto[0].coveredBy, 'LALLANA Fabian Alberto');
+  assert.equal(huecosSemana([], cubierto), 0);
+  assert.equal(franjasDe(cubierto, ['2026-10-07']).find((f) => f.id === 'shift-baez')?.kind, 'ok');
+
+  const parcial = aplicarCoberturaExistenteMovil(
+    [{ ...baez, coveredBy: 'LALLANA Fabian Alberto' }],
+    [{ ...views[0], operacionallyCovered: false, coverageStatus: 'PARTIAL', coverageType: 'EXTEND' }],
+  );
+  assert.equal(parcial[0].coveredBy, '');
+  assert.equal(huecosSemana([], parcial), 1);
+  assert.equal(franjasDe(parcial, ['2026-10-07']).find((f) => f.id === 'shift-baez')?.kind, 'licencia');
+});
 
 const dias = ['2026-10-03', '2026-10-04', '2026-10-05', '2026-10-06'];
 const PEAJE = { id: 'obj-peaje', name: 'Peaje 9 Norte', clientId: 'cli', clientName: 'Peaje' };
