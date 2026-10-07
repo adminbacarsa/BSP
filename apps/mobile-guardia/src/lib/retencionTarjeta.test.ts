@@ -8,6 +8,7 @@ import {
   textoTarjetaRetencion,
   textoVioRetencion,
   turnoMuestraTarjetaRetencion,
+  vistaRetencionHero,
 } from './retencionTarjeta';
 
 const ar = (ymd: string, hm: string) => new Date(`${ymd}T${hm}:00-03:00`).getTime();
@@ -55,9 +56,13 @@ describe('tarjeta de retención sale del turno', () => {
     assert.equal(turnoMuestraTarjetaRetencion(vivo, now), true);
     const texto = textoTarjetaRetencion(vivo);
     assert.match(texto, /Quedás retenido/);
-    assert.match(texto, /desde 15:00/);
-    assert.match(texto, /Esperando a BRIZUELA \(llega 15:45\)/);
-    assert.match(texto, /tope 00:29/);
+    const vista = vistaRetencionHero(vivo, now);
+    assert.ok(vista);
+    assert.equal(vista.lineaEstado, 'terminó 15:15 · retenido desde 15:00');
+    assert.equal(vista.hace, 'hace 10 min');
+    assert.equal(vista.espera, 'Esperando a BRIZUELA, llega ~15:45');
+    assert.equal(vista.tope, 'podés quedarte hasta 00:29');
+    assert.equal(vistaRetencionHero({ ...vivo, realEndTime: ar('2026-10-07', '15:20') }, now), null);
     assert.equal(turnoMuestraTarjetaRetencion({ ...vivo, realEndTime: ar('2026-10-07', '15:20') }, now), false);
     assert.equal(retencionTermino(vivo, { ...vivo, realEndTime: ar('2026-10-07', '15:20'), isCompleted: true, isRetention: false }, now), true);
   });
@@ -73,8 +78,23 @@ describe('tarjeta de retención sale del turno', () => {
       endTime: ar('2026-10-07', '15:15'),
     };
     assert.equal(turnoMuestraTarjetaRetencion(saliente, now), true);
-    assert.match(textoTarjetaRetencion(saliente), /Esperá al relevo/);
-    assert.match(textoTarjetaRetencion(saliente), /desde 15:15/);
+    const vista = vistaRetencionHero(saliente, now);
+    assert.equal(vista?.espera, 'sin relevo confirmado');
+    assert.equal(vista?.lineaEstado, 'terminó 15:15 · retenido desde 15:15');
+    const desde = ar('2026-10-07', '10:30');
+    const doce = vistaRetencionHero(
+      {
+        ...saliente,
+        isRetention: true,
+        startTime: desde,
+        checkInAt: desde,
+        retentionStartedAt: ar('2026-10-07', '15:03'),
+        endTime: ar('2026-10-07', '15:15'),
+      },
+      ar('2026-10-07', '15:15'),
+    );
+    assert.equal(doce?.hace, 'hace 12 min');
+    assert.equal(doce?.tope, 'podés quedarte hasta 23:29');
   });
 });
 

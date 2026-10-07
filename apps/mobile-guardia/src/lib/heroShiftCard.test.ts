@@ -110,8 +110,10 @@ describe('buildHeroShiftCardModel · puesto / retenido / convocado', () => {
       isRetention: true,
     });
     assert.equal(ret.kind, 'retenido');
-    assert.match(ret.kicker, /RETENIDO · HOY/);
-    assert.match(ret.whereTitle || '', /Retenido en Plaza/);
+    assert.equal(ret.kicker, 'RETENIDO');
+    assert.equal(ret.fileteTone, 'retention');
+    assert.equal(ret.whereTitle, 'Caminos · Plaza de la Musica');
+    assert.equal(ret.timeRange, '15:00–23:00');
 
     const cov = buildHeroShiftCardModel({
       sectionBase: 'Próximo turno',

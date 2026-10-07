@@ -75,6 +75,48 @@ export function retencionTermino(before: unknown, after: unknown, now = Date.now
   return !turnoMuestraTarjetaRetencion(after, now);
 }
 
+export type VistaRetencionHero = {
+  lineaEstado: string | null;
+  hace: string | null;
+  espera: string;
+  tope: string | null;
+};
+
+function textoHace(sinceMs: number, now: number): string {
+  const min = Math.max(0, Math.floor((now - sinceMs) / 60000));
+  if (min < 1) return 'hace menos de 1 min';
+  if (min < 60) return `hace ${min} min`;
+  const h = Math.floor(min / 60);
+  const rest = min % 60;
+  if (rest === 0) return `hace ${h} h`;
+  return `hace ${h} h ${String(rest).padStart(2, '0')} min`;
+}
+
+export function vistaRetencionHero(shift: unknown, now = Date.now()): VistaRetencionHero | null {
+  if (!turnoMuestraTarjetaRetencion(shift, now)) return null;
+  const row = shift as Record<string, unknown>;
+  const fin = aMs(row.endTime);
+  const since = aMs(row.retentionStartedAt) || fin;
+  const start = aMs(row.checkInAt) || aMs(row.realStartTime) || aMs(row.startTime);
+  const cap = start > 0 ? start + CAP_MS : 0;
+  const quien = String(row.lateReliefIncomingName || '').trim();
+  const eta = aMs(row.lateReliefEtaAt);
+  const espera = quien
+    ? eta > 0
+      ? `Esperando a ${quien}, llega ~${horaAr(eta)}`
+      : `Esperando a ${quien}`
+    : 'sin relevo confirmado';
+  const linea = [fin > 0 ? `terminó ${horaAr(fin)}` : '', since > 0 ? `retenido desde ${horaAr(since)}` : '']
+    .filter(Boolean)
+    .join(' · ');
+  return {
+    lineaEstado: linea || null,
+    hace: since > 0 ? textoHace(since, now) : null,
+    espera,
+    tope: cap > 0 ? `podés quedarte hasta ${horaAr(cap)}` : null,
+  };
+}
+
 export function textoTarjetaRetencion(shift: Record<string, unknown>): string {
   const since = aMs(shift.retentionStartedAt) || aMs(shift.endTime);
   const start = aMs(shift.checkInAt) || aMs(shift.realStartTime) || aMs(shift.startTime);

@@ -27,7 +27,6 @@ import { useConvocatoriasCobertura } from '../../src/hooks/useConvocatoriasCober
 import { usePendingAaCertificates } from '../../src/hooks/usePendingAaCertificates';
 import {
   heroShift,
-  isActiveRetentionShift,
   isShiftInProgress,
   shiftStartsToday,
   pickTodayAbsentShift,
@@ -45,8 +44,7 @@ import { responderConsultaDisponibilidad } from '../../src/lib/responderConsulta
 import { argsPreviewConsulta, textoRespuestaCerrada } from '../../src/lib/consultasDisponibilidadQuery';
 import { CoberturaConvocatoriasBanner } from '../../src/components/CoberturaConvocatoriasBanner';
 import { LlegadaTardeVenisBanner } from '../../src/components/LlegadaTardeVenisBanner';
-import { RetencionAvisoCard } from '../../src/components/RetencionAvisoCard';
-import { textoTarjetaRetencion, turnoMuestraTarjetaRetencion } from '../../src/lib/retencionTarjeta';
+import { turnoMuestraTarjetaRetencion, vistaRetencionHero } from '../../src/lib/retencionTarjeta';
 import { ConvocadoRecordatorioBanner } from '../../src/components/ConvocadoRecordatorioBanner';
 import { PreviewModeBanner } from '../../src/components/PreviewModeBanner';
 import { EnableWebPushButton } from '../../src/components/EnableWebPushButton';
@@ -145,10 +143,6 @@ function HoyScreenContent() {
     shifts: turnosPropios,
     shiftsReady: !loading,
   });
-  const turnoRetencion = useMemo(
-    () => (turnosPropios ?? []).find((row) => turnoMuestraTarjetaRetencion(row)) ?? null,
-    [turnosPropios],
-  );
   const [acuseBusy, setAcuseBusy] = useState(false);
   const avisoBodyById = useMemo(() => {
     const map: Record<string, string> = {};
@@ -329,7 +323,8 @@ function HoyScreenContent() {
   const isHeroToday = !!mainShift && shiftStartsToday(mainShift, now);
   const isOpsHero =
     !!mainShift && String(mainShift.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE';
-  const isRetentionHero = isActiveRetentionShift(mainShift);
+  const isRetentionHero = !!mainShift && turnoMuestraTarjetaRetencion(mainShift, now.getTime());
+  const retencionHero = isRetentionHero ? vistaRetencionHero(mainShift, now.getTime()) : null;
   const extendDuty = !!mainShift && isExtendedDutyShift(mainShift as never);
   const heroSectionBase = todayAbsentShift
     ? 'Ausente'
@@ -543,30 +538,6 @@ function HoyScreenContent() {
             />
           ) : null}
 
-          {turnoRetencion ? (
-            <RetencionAvisoCard
-              texto={textoTarjetaRetencion(turnoRetencion as unknown as Record<string, unknown>)}
-              acuseAt={(turnoRetencion as { retencionAcuseAt?: unknown }).retencionAcuseAt}
-              busy={acuseBusy}
-              onEntendido={() => {
-                if (!turnoRetencion?.id || acuseBusy) return;
-                setAcuseBusy(true);
-                void (async () => {
-                  try {
-                    await getPortalCallables().acusarRetencion({
-                      shiftId: turnoRetencion.id,
-                      ...(isPreviewMode && empDocId ? { asEmployeeId: empDocId } : {}),
-                    });
-                  } catch {
-                    appAlert('No se pudo', 'No quedó registrado el entendido.');
-                  } finally {
-                    setAcuseBusy(false);
-                  }
-                })();
-              }}
-            />
-          ) : null}
-
           {llegadaTardePendientes.length > 0 ? (
             <LlegadaTardeVenisBanner
               convocatorias={llegadaTardePendientes}
@@ -667,6 +638,29 @@ function HoyScreenContent() {
               ev={todayAbsentShift ? null : mainShiftEv}
               mapsUrl={heroMapsUrl}
               isRetention={isRetentionHero && !todayAbsentShift}
+              retencion={todayAbsentShift ? null : retencionHero}
+              acuseAt={(mainShift as { retencionAcuseAt?: unknown } | undefined)?.retencionAcuseAt}
+              acuseBusy={acuseBusy}
+              onEntendido={
+                isRetentionHero && mainShift
+                  ? () => {
+                      if (!mainShift.id || acuseBusy) return;
+                      setAcuseBusy(true);
+                      void (async () => {
+                        try {
+                          await getPortalCallables().acusarRetencion({
+                            shiftId: mainShift.id,
+                            ...(isPreviewMode && empDocId ? { asEmployeeId: empDocId } : {}),
+                          });
+                        } catch {
+                          appAlert('No se pudo', 'No quedó registrado el entendido.');
+                        } finally {
+                          setAcuseBusy(false);
+                        }
+                      })();
+                    }
+                  : undefined
+              }
               isConvocado={convocadoHero && !convocadoProximo && !todayAbsentShift}
               empresaLabel={heroEmpresaLabel}
               accentColor={empresaColor}
