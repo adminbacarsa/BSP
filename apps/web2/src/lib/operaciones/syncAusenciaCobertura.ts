@@ -462,13 +462,32 @@ export async function applyCoverage(
         isEarlyStart: true,
         adjustedStartTime: params.adjustedStartTime,
       });
-    } else if (ct === 'ESC' || ct === 'REF' || ct === 'RET' || ct === 'FT') {
+    } else if (ct === 'ESC' || ct === 'REF' || ct === 'RET') {
       batch.update(doc(db, 'turnos', sourceId), parcheFuenteAnulada(covDocId, titularId));
+    } else if (ct === 'FT') {
+      // FT conserva el franco origen (P9e): el FT real vive en el ops_cov.
+      const srcCode = String(srcData?.code || srcData?.shiftCode || '').trim().toUpperCase();
+      const francoCode = srcData?.isFranco === true || srcCode === 'F' || srcCode === 'FF' || srcCode === 'FP';
+      const comment = /franco trabajado\s*\(cobertura/i.test(String(srcData?.comments || ''));
+      const franco = francoCode || comment || srcCode === 'FT';
+      batch.update(doc(db, 'turnos', sourceId), {
+        ...usedBase,
+        coverageUsed: true,
+        coverageUsedForShiftId: titularId,
+        ...(franco
+          ? {
+            isFranco: true,
+            isFrancoTrabajado: false,
+            code: francoCode ? srcCode : 'F',
+            comments: `Franco Trabajado (cobertura ${covDocId})`,
+          }
+          : {}),
+      });
     } else {
       batch.update(doc(db, 'turnos', sourceId), usedBase);
     }
   }
-  const moverPresencia = !!srcData && (ct === 'REF' || ct === 'ESC' || ct === 'RET' || ct === 'FT') && fuenteYaFicho(srcData);
+  const moverPresencia = !!srcData && (ct === 'REF' || ct === 'ESC' || ct === 'RET') && fuenteYaFicho(srcData);
 
   batch.set(
     doc(db, 'turnos', covDocId),

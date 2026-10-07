@@ -506,7 +506,8 @@ export async function applyCoverage(
       extensionEndTime: admin.firestore.FieldValue.delete(),
       adjustedEndTime: admin.firestore.FieldValue.delete(),
     };
-    const anularFuente = ct === 'REF' || ct === 'ESC' || ct === 'RET' || ct === 'FT';
+    // FT conserva el franco origen (P9e): el FT real vive en el ops_cov. Solo REF/ESC/RET se convierten.
+    const anularFuente = ct === 'REF' || ct === 'ESC' || ct === 'RET';
     const quitarReloj = anularFuente ? parcheFuenteSinHoras(covDocId, titularId) : null;
     if (sameCovOnSource && (ct === 'EXTEND' || ct === 'ADVANCE')) {
       // Reintento / resync: origen ya vinculado a este ops_cov.
@@ -529,10 +530,26 @@ export async function applyCoverage(
         { ...buildEscRefSourceConvertedPatch(srcData, covDocId), ...(quitarReloj || {}) },
       );
     } else if (ct === 'FT') {
-      batch.update(db.collection('turnos').doc(sourceId), quitarReloj || {
+      const srcCode = String(srcData.code || srcData.shiftCode || '').trim().toUpperCase();
+      const comment = /franco trabajado\s*\(cobertura/i.test(String(srcData.comments || ''));
+      const franco = srcData.isFranco === true
+        || isFrancoShiftCode(srcCode)
+        || comment
+        || isFrancoCoverageOriginDoc(srcData);
+      const keepCode = isFrancoShiftCode(srcCode) ? srcCode : 'F';
+      batch.update(db.collection('turnos').doc(sourceId), {
         ...usedBase,
+        ...clearAdvanceMarkers,
         coverageUsed: true,
         coverageUsedForShiftId: titularId,
+        ...(franco
+          ? {
+            isFranco: true,
+            isFrancoTrabajado: false,
+            code: keepCode,
+            comments: `Franco Trabajado (cobertura ${covDocId})`,
+          }
+          : {}),
       });
     } else if (ct === 'RET' && (params.retAsignacionDirecta || params.coberturaAnticipada || params.coberturaUrgente)) {
       batch.update(
@@ -585,7 +602,7 @@ export async function applyCoverage(
   const realStartMs = (existingCov?.realStartTime as { toMillis?: () => number } | undefined)?.toMillis?.() ?? 0;
   const keepPresence = existingCov?.isPresent === true || realStartMs > 0;
   const moverPresencia = !!srcData
-    && ['REF', 'ESC', 'RET', 'FT'].includes(ct)
+    && ['REF', 'ESC', 'RET'].includes(ct)
     && yaFicho(srcData)
     && !keepPresence;
 
