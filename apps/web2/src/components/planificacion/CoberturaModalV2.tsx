@@ -5,17 +5,19 @@
  * Sin Firestore ni lógica de negocio: lo que decide quién puede cubrir sigue en la página.
  */
 import React from 'react';
-import { AlertTriangle, ChevronDown, Clock, UserCheck, X } from 'lucide-react';
+import { AlertTriangle, BellOff, ChevronDown, Clock, UserCheck, X } from 'lucide-react';
+import { TOOLTIP_SIN_PUSH } from '@/lib/eventuales/consultaCanal.mjs';
 import {
   TEXTO_CERRAR_GUARDA,
+  TEXTO_NOMINA_AYUDA,
   textoAplicarMarcados,
   textoNoDisponibles,
+  type AccionCobertura,
   type EstadoDiaCobertura,
   type TonoEstadoDia,
 } from '@/lib/planificacion/coberturaEventualesUx';
 
 export type CoberturaTab = 'nomina' | 'eventuales' | 'split';
-export type ModoCobertura = 'preguntar' | 'asignar';
 
 const TONO_TEXTO: Record<TonoEstadoDia, string> = {
   rose: 'text-rose-700',
@@ -208,18 +210,10 @@ export function CoberturaTabs(props: { tab: CoberturaTab; onTab: (t: CoberturaTa
   );
 }
 
-export function ModoCoberturaSwitch(props: { modo: ModoCobertura; onModo: (m: ModoCobertura) => void; puedePreguntar: boolean }) {
-  if (!props.puedePreguntar) return null;
-  const base = 'rounded-lg px-2.5 py-1 text-[10px] font-black transition-colors';
+/** Reemplaza al switch Preguntar / Asignar directo (06/10): la acción la decide el tipo de cada fila. */
+export function NominaAyuda() {
   return (
-    <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-0.5" role="radiogroup" data-cobertura-modo={props.modo}>
-      <button type="button" role="radio" aria-checked={props.modo === 'preguntar'} onClick={() => props.onModo('preguntar')} data-modo="preguntar" className={`${base} ${props.modo === 'preguntar' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>
-        Preguntar
-      </button>
-      <button type="button" role="radio" aria-checked={props.modo === 'asignar'} onClick={() => props.onModo('asignar')} data-modo="asignar" className={`${base} ${props.modo === 'asignar' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>
-        Asignar directo
-      </button>
-    </div>
+    <p className="text-[10px] font-bold text-slate-500" data-nomina-ayuda>{TEXTO_NOMINA_AYUDA}</p>
   );
 }
 
@@ -301,19 +295,14 @@ export type CandidatoNominaFila = {
   nombre: string;
   /** «Libre · 142 h · 3 km». */
   meta: string;
-  /** Franco (PIN) · Retén · ESC · Libre. */
+  /** Franco · FT · Retén · ESC · REF · Libre. */
   tag: string;
-  tono: 'violet' | 'amber' | 'sky' | 'emerald';
-  /** Un franco se consulta como FT. */
+  tono: 'violet' | 'amber' | 'sky' | 'emerald' | 'indigo';
+  /** «se asigna directo» · «solo se consulta · franco trabajado (PIN si hace falta)». */
   nota?: string | null;
-  /** Canal de la consulta (`canalDeConsulta`): sin app ni mail no se puede tildar en Preguntar. */
+  /** `sinPush`: no tiene la app instalada. No bloquea la casilla. */
   canal?: {
-    chip?: string | null;
-    motivoApp?: string | null;
-    porMail?: boolean;
-    sinCanal?: boolean;
-    /** Link a la ficha para crear el acceso (solo si no tiene canal). */
-    crearAccesoHref?: string | null;
+    sinPush?: boolean;
   } | null;
 };
 
@@ -322,11 +311,17 @@ const TAG_CLASES: Record<CandidatoNominaFila['tono'], string> = {
   amber: 'border-amber-200 bg-amber-50 text-amber-800',
   sky: 'border-sky-200 bg-sky-50 text-sky-800',
   emerald: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+  indigo: 'border-indigo-200 bg-indigo-50 text-indigo-800',
 };
 
+/**
+ * Una fila de la Nómina. La acción la decide el tipo (`accion`): RET · libre · ESC · REF llevan el botón
+ * «Asignar» (una persona por día: la elegida queda marcada y la barra dice «Asignar a X»); el franco
+ * lleva casilla para consultarlo como FT. No hay switch global.
+ */
 export function FilaCandidatoNomina(props: {
   c: CandidatoNominaFila;
-  modo: ModoCobertura;
+  accion: AccionCobertura;
   marcado: boolean;
   seleccionado: boolean;
   disabled?: boolean;
@@ -335,25 +330,24 @@ export function FilaCandidatoNomina(props: {
   extra?: React.ReactNode;
 }) {
   const { c } = props;
-  const preguntar = props.modo === 'preguntar';
-  const sinCanal = preguntar && !!c.canal?.sinCanal;
-  const activo = preguntar ? props.marcado && !sinCanal : props.seleccionado;
+  const preguntar = props.accion === 'preguntar';
+  const activo = preguntar ? props.marcado : props.seleccionado;
   return (
     <div
-      className={`flex items-center gap-2.5 rounded-xl border px-2.5 py-2 transition-colors ${activo ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200 bg-white hover:bg-slate-50'} ${props.disabled ? 'opacity-50' : ''}`}
+      className={`flex items-center gap-2.5 rounded-xl border px-2.5 py-2 transition-colors ${activo ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
       data-candidato={c.id}
+      data-candidato-accion={props.accion}
       data-candidato-activo={activo ? '1' : undefined}
-      data-candidato-sin-canal={sinCanal ? '1' : undefined}
     >
       {preguntar ? (
         <input
           type="checkbox"
           checked={activo}
-          disabled={props.disabled || sinCanal}
-          title={sinCanal ? 'No le va a llegar: llamalo o creá su acceso' : undefined}
+          disabled={props.disabled}
           onChange={props.onToggle}
           aria-label={`Preguntar a ${c.nombre}`}
-          className="h-4 w-4 shrink-0 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+          className="h-4 w-4 shrink-0 cursor-pointer rounded border-2 border-slate-500 bg-white accent-indigo-600 disabled:cursor-not-allowed"
+          style={{ WebkitAppearance: 'auto', appearance: 'auto' }}
           data-consulta-nomina={c.id}
         />
       ) : (
@@ -362,7 +356,7 @@ export function FilaCandidatoNomina(props: {
       <button
         type="button"
         disabled={props.disabled}
-        onClick={props.modo === 'preguntar' ? props.onToggle : props.onElegir}
+        onClick={preguntar ? props.onToggle : props.onElegir}
         className="min-w-0 flex-1 text-left"
         data-candidato-elegir={c.id}
       >
@@ -372,20 +366,25 @@ export function FilaCandidatoNomina(props: {
         </div>
         <div className="truncate text-[10px] font-bold text-slate-500">{c.meta}{c.nota ? ` · ${c.nota}` : ''}</div>
       </button>
-      {preguntar && c.canal?.chip && (
-        <span data-sin-app={c.id} title="No le va a llegar: llamalo o creá su acceso" className="shrink-0 rounded-md border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[9px] font-black text-amber-800">
-          {c.canal.chip}{c.canal.motivoApp ? ` · ${c.canal.motivoApp}` : ''}
+      {preguntar && c.canal?.sinPush && (
+        <span data-sin-push={c.id} title={TOOLTIP_SIN_PUSH} className="inline-flex shrink-0 items-center gap-0.5 text-[9px] font-bold text-slate-400">
+          <BellOff size={12} aria-hidden />
+          sin push
         </span>
       )}
-      {preguntar && c.canal?.porMail && (
-        <span data-por-mail={c.id} className="shrink-0 text-[9px] font-bold text-slate-500">Le llega por mail</span>
-      )}
-      {sinCanal && c.canal?.crearAccesoHref && (
-        <a href={c.canal.crearAccesoHref} target="_blank" rel="noreferrer" data-crear-acceso={c.id} className="shrink-0 text-[9px] font-black text-indigo-700 underline">
-          Crear acceso a la app
-        </a>
-      )}
       <span className={`shrink-0 rounded-md border px-1.5 py-0.5 text-[9px] font-black ${TAG_CLASES[c.tono]}`}>{c.tag}</span>
+      {!preguntar && (
+        <button
+          type="button"
+          disabled={props.disabled}
+          onClick={props.onElegir}
+          data-fila-asignar={c.id}
+          aria-pressed={props.seleccionado}
+          className={`shrink-0 rounded-lg border px-2.5 py-1 text-[10px] font-black transition-colors ${props.seleccionado ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-300 bg-white text-slate-700 hover:bg-indigo-50'} disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400`}
+        >
+          {props.seleccionado ? 'Elegido' : 'Asignar'}
+        </button>
+      )}
     </div>
   );
 }

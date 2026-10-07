@@ -123,25 +123,49 @@ async function main() {
   const tipos = new Set(eventos.docs.map((d) => d.data().tipo));
   report('auditoría CREADA, RESPUESTA, ASIGNADO y CERRADA', parent?.status === 'COMPLETA' && ['CREADA', 'RESPUESTA', 'ASIGNADO', 'CERRADA'].every((t) => tipos.has(t)), `${parent?.status} ${[...tipos].join(',')}`);
 
-  const pinId = 'emp-pin';
-  await empleado({ employeeId: pinId, uid: 'uid-pin', nombre: 'Ríos, Nico' });
-  await db.collection('turnos').doc('ayer-pin').set({
-    empresaId: EMP, employeeId: pinId, code: 'T', hours: 8, scheduleDate: '2026-11-09',
-    startTime: ts('2026-11-09T18:00:00.000Z'), endTime: ts('2026-11-10T02:00:00.000Z'),
-    objectiveId: OBJ, positionName: 'Puesto 1',
+  // Regla 06/10: retén, libre, ESC y REF se asignan directo; la consulta los rechaza.
+  const libreId = 'emp-libre';
+  await empleado({ employeeId: libreId, uid: 'uid-libre', nombre: 'Ríos, Nico' });
+  const soloLibre = await intentar(() => crearConsultaDisponibilidad.run(pedido([{ employeeId: libreId, tipo: 'LIBRE', nombre: 'Ríos, Nico' }]), PLANNER));
+  report('el guardia libre no se consulta: se asigna directo', !soloLibre.ok && /se asigna directo/.test(String(soloLibre.message)), soloLibre.message || JSON.stringify(soloLibre.value));
+  const soloRet = await intentar(() => crearConsultaDisponibilidad.run(pedido([{ employeeId: libreId, tipo: 'RET', nombre: 'Ríos, Nico' }]), PLANNER));
+  report('el retén tampoco', !soloRet.ok && /retén se asigna directo/.test(String(soloRet.message)), soloRet.message || JSON.stringify(soloRet.value));
+  await db.collection('turnos').doc(`franco-${libreId}`).set({
+    empresaId: EMP, employeeId: libreId, employeeName: 'Ríos, Nico', code: 'F', isFranco: true, hours: 0, scheduleDate: FECHA,
+    startTime: ts('2026-11-10T03:00:00.000Z'), endTime: ts('2026-11-11T02:59:00.000Z'), objectiveId: OBJ, positionName: 'Puesto 1', draft: true,
   });
-  const jornadaCorta = [{ fecha: FECHA, horaInicio: '09:00', horaFin: '17:00', horas: 8, code: 'M' }];
-  const sinPin = await intentar(() => crearConsultaDisponibilidad.run(pedido(
-    [{ employeeId: pinId, tipo: 'LIBRE' }],
-    { jornadas: jornadaCorta },
-  ), PLANNER));
-  report('descanso de 8 a 12 h sin PIN no se consulta', !sinPin.ok && /PIN|8/.test(String(sinPin.message)), sinPin.message);
+  const mixta = await intentar(() => crearConsultaDisponibilidad.run(pedido([
+    { employeeId: libreId, tipo: 'FT', nombre: 'Ríos, Nico' },
+    { employeeId: ANA.employeeId, tipo: 'ESC', nombre: ANA.nombre },
+  ]), PLANNER));
+  const omitidoEsc = (mixta.value?.omitidos || []).find((o) => o.employeeId === ANA.employeeId);
+  report('en una lista mixta el ESC queda afuera con motivo y el franco sí se consulta', mixta.ok && mixta.value?.consultados === 1 && /turno escuela se asigna directo/.test(String(omitidoEsc?.motivo)), JSON.stringify(mixta.value || mixta.message));
+  if (mixta.value?.consultaId) {
+    await db.collection('consultas_disponibilidad').doc(mixta.value.consultaId).update({ status: 'CANCELADA' });
+  }
+
+  // El PIN sigue en la consulta del franco: tope > 200 h en el mes.
+  const pinId = 'emp-pin';
+  await empleado({ employeeId: pinId, uid: 'uid-pin', nombre: 'Pérez, Lía' });
+  await franco({ employeeId: pinId, uid: 'uid-pin', nombre: 'Pérez, Lía' });
+  // 25 turnos de 8 h = 200 h; el franco trabajado del 10 lo dejaría en 208.
+  for (let d = 1; d <= 26; d += 1) {
+    if (d === 10) continue;
+    const dia = `2026-11-${String(d).padStart(2, '0')}`;
+    await db.collection('turnos').doc(`pin-${dia}`).set({
+      empresaId: EMP, employeeId: pinId, code: 'M', hours: 8, scheduleDate: dia,
+      startTime: ts(`${dia}T11:00:00.000Z`), endTime: ts(`${dia}T19:00:00.000Z`),
+      objectiveId: OBJ, positionName: 'Puesto 1',
+    });
+  }
+  const sinPin = await intentar(() => crearConsultaDisponibilidad.run(pedido([{ employeeId: pinId, tipo: 'FT', nombre: 'Pérez, Lía' }]), PLANNER));
+  report('franco con más de 200 h sin PIN no se consulta', !sinPin.ok && /PIN|200/.test(String(sinPin.message)), sinPin.message || JSON.stringify(sinPin.value));
 
   const conPin = await intentar(() => crearConsultaDisponibilidad.run(pedido(
-    [{ employeeId: pinId, tipo: 'LIBRE' }],
-    { jornadas: jornadaCorta, autorizaciones: [{ employeeId: pinId, kind: 'DESCANSO', motivo: 'viene de otro objetivo', autorizadoPor: 'Supervisor' }] },
+    [{ employeeId: pinId, tipo: 'FT', nombre: 'Pérez, Lía' }],
+    { autorizaciones: [{ employeeId: pinId, kind: 'TOPE', motivo: 'cierre de mes', autorizadoPor: 'Supervisor' }] },
   ), PLANNER));
-  report('con el PIN concedido al enviar, sí se consulta', conPin.ok && conPin.value?.consultados === 1, JSON.stringify(conPin.value || conPin.message));
+  report('con el PIN de tope concedido al enviar, sí se consulta', conPin.ok && conPin.value?.consultados === 1, JSON.stringify(conPin.value || conPin.message));
 
   await db.collection('roles').doc('solo-update').set({ permissions: { PLANNING: ['update'] } });
   await db.collection('system_users').doc('uid-upd').set({ role: 'solo-update' });

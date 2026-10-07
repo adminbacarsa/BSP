@@ -6,8 +6,9 @@
  * el cruce 12 h con otras empresas del grupo se muestra como motivo). Escribe nada: el `onSelect`
  * decide (asignar / sustituir) y llama a la callable correspondiente.
  *
- * Con `consulta` (cobertura de licencia) hay dos modos: «Preguntar disponibilidad» (recomendado, se
- * marca a quién y se manda la consulta; un lugar por día) y «Asignar directo» (con confirmación).
+ * Con `consulta` (cobertura de licencia, hueco de planificación) al eventual SOLO se le pregunta
+ * (regla 06/10): se marca a quién y se manda la consulta, un lugar por día, el primero que acepte
+ * cubre. No hay asignación directa en ese caso; `onSelect` queda para Eventos y Sustituir.
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import { httpsCallable } from 'firebase/functions';
@@ -19,9 +20,8 @@ import { GrupoCandidatosHeader, SinEspecificarAviso, type GrupoCupoUi } from '@/
 import { grupoDeGenero } from '@/lib/eventuales/cupoGenero.mjs';
 import { ConsultaDisponibilidadEstado } from '@/components/eventuales/ConsultaDisponibilidadEstado';
 import {
+    AvisoEventualesSoloConsulta,
     BarraPreguntar,
-    ConfirmarAsignacion,
-    ModoEventualesSelector,
     NoDisponiblesLista,
     TarjetaEventual,
     type CandidatoTarjeta,
@@ -84,10 +84,10 @@ type Props = {
         positionName?: string | null;
         titularEmployeeId?: string | null;
     } | null;
-    /** Modo controlado desde afuera (modal v2 del escritorio): el panel no dibuja su propio selector. */
-    modo?: ModoEventuales;
     /** Sin estado de la consulta adentro: la página lo muestra en otro lugar. */
     sinEstadoConsulta?: boolean;
+    /** Sin la línea «A los eventuales solo se les pregunta…» (la página ya lo dice arriba). */
+    sinAvisoSoloConsulta?: boolean;
 };
 
 export function jornadasKey(jornadas: JornadaEventual[]): string {
@@ -98,7 +98,7 @@ const TIPO_LABEL: Record<string, string> = { credencial: 'Credencial', apto: 'Ap
 
 export default function EventualesCandidatosPanel({
     empresaId, objectiveId, clientId, objetivoGeo, jornadas, excluirTurnoIds, excluirCuil, canConvocar, busy, onSelect, compact, cupo, consulta,
-    modo: modoControlado, sinEstadoConsulta,
+    sinEstadoConsulta, sinAvisoSoloConsulta,
 }: Props) {
     const [rows, setRows] = useState<CandidatoEventual[]>([]);
     const [loading, setLoading] = useState(false);
@@ -111,21 +111,17 @@ export default function EventualesCandidatosPanel({
     const [marcados, setMarcados] = useState<string[]>([]);
     const [venceMinutos, setVenceMinutos] = useState(ESPERA_DEFAULT_MIN);
     const [enviando, setEnviando] = useState(false);
-    /** Sin consulta (eventos, sustituir) solo existe asignar; con consulta arranca en preguntar. */
-    const [modo, setModo] = useState<ModoEventuales>(consulta ? 'preguntar' : 'asignar');
-    const [confirmando, setConfirmando] = useState<CandidatoEventual | null>(null);
     const key = jornadasKey(jornadas);
     const veLista = canConvocar || !!consulta;
     const puedePreguntar = !!consulta;
-    const modoEfectivo: ModoEventuales = !puedePreguntar ? 'asignar' : !canConvocar ? 'preguntar' : (modoControlado || modo);
-    useEffect(() => { setConfirmando(null); }, [modoControlado]);
+    /** Con consulta (cobertura) al eventual solo se le pregunta; sin consulta (eventos, sustituir) se asigna. */
+    const modoEfectivo: ModoEventuales = puedePreguntar ? 'preguntar' : 'asignar';
 
     useEffect(() => {
         if (!veLista || !empresaId || jornadas.length === 0) { setRows([]); return; }
         let alive = true;
         setLoading(true);
         setError(null);
-        setConfirmando(null);
         const call = httpsCallable<Record<string, unknown>, { candidatos: CandidatoEventual[] }>(functions, 'listarCandidatosEventuales');
         call({ empresaId, objectiveId: objectiveId || null, clientId: clientId || null, objetivoGeo: objetivoGeo || null, jornadas, excluirTurnoIds: excluirTurnoIds || [] })
             .then(res => { if (alive) setRows((res.data?.candidatos || []).filter(c => c.cuil !== excluirCuil)); })
@@ -151,21 +147,11 @@ export default function EventualesCandidatosPanel({
     }
 
     const toggleMarcado = (cuil: string) => {
-        const row = rows.find((r) => r.cuil === cuil);
-        if (row?.canal?.sinCanal && !marcados.includes(cuil)) {
-            toast.message(`${row.nombre}: no le va a llegar. Llamalo o creá su acceso.`);
-            return;
-        }
         setMarcados((prev) => (prev.includes(cuil) ? prev.filter((c) => c !== cuil) : [...prev, cuil]));
     };
 
     const enviarConsulta = async () => {
         if (!consulta || marcados.length === 0 || enviando) return;
-        const elegidos = rows.filter((r) => marcados.includes(r.cuil));
-        if (elegidos.length > 0 && elegidos.every((r) => r.canal?.sinCanal)) {
-            toast.message('A nadie le va a llegar: no tienen la app ni mail.');
-            return;
-        }
         setEnviando(true);
         try {
             const call = httpsCallable<Record<string, unknown>, { resumen?: string; status?: string; omitidos?: { motivo: string }[] }>(functions, 'crearConsultaDisponibilidad');
@@ -215,9 +201,9 @@ export default function EventualesCandidatosPanel({
         };
     };
 
+    /** Solo sin consulta (eventos, sustituir). En cobertura la tarjeta tilda, no asigna. */
     const elegirDirecto = (c: CandidatoEventual) => {
-        if (!canConvocar || busy) return;
-        if (puedePreguntar) { setConfirmando(c); return; }
+        if (!canConvocar || busy || puedePreguntar) return;
         onSelect(c);
     };
 
@@ -243,7 +229,7 @@ export default function EventualesCandidatosPanel({
 
     return (
         <div className="flex flex-col min-h-0">
-            {puedePreguntar && canConvocar && !modoControlado && <ModoEventualesSelector modo={modoEfectivo} onModo={(m) => { setModo(m); setConfirmando(null); }} />}
+            {puedePreguntar && !sinAvisoSoloConsulta && <AvisoEventualesSoloConsulta />}
             <div className="px-1 pb-2 shrink-0">
                 <div className="flex items-center gap-2 bg-slate-50 rounded-lg px-2.5 py-1.5 border border-slate-200">
                     <Search size={12} className="text-slate-400 shrink-0"/>
@@ -367,14 +353,6 @@ export default function EventualesCandidatosPanel({
                     onEspera={setVenceMinutos}
                     onEnviar={() => { void enviarConsulta(); }}
                     enviando={enviando}
-                />
-            )}
-            {confirmando && modoEfectivo === 'asignar' && (
-                <ConfirmarAsignacion
-                    nombre={confirmando.nombre}
-                    busy={busy}
-                    onConfirmar={() => { const c = confirmando; setConfirmando(null); onSelect(c); }}
-                    onCancelar={() => setConfirmando(null)}
                 />
             )}
             {consulta && !sinEstadoConsulta && (

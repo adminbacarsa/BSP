@@ -1,5 +1,6 @@
 import React, { useState, type ReactNode } from 'react';
-import { CalendarX2, Check, ChevronDown, ChevronUp } from 'lucide-react';
+import { BellOff, CalendarX2, Check, ChevronDown, ChevronUp } from 'lucide-react';
+import { TOOLTIP_SIN_PUSH } from '@/lib/eventuales/consultaCanal.mjs';
 import type { CandidatoMovil, FranjaMovil, TabCandidato } from '@/lib/movil/planificacionBasica';
 import { AVISO_MES_SIN_PUBLICAR, type OpcionTurno } from '@/lib/movil/planificacionSemana';
 import type { CronogramaGrupo, CronogramaItem } from '@/lib/movil/cronogramaAlertas';
@@ -24,7 +25,7 @@ export type EventualMovil = {
   motivoCodigo?: string | null;
   elegible: boolean;
   horasMes?: { usadas: number; tope: number; texto: string; aviso: boolean; cerca?: boolean; alcanzado?: boolean } | null;
-  canal?: { chip: string | null; motivo: string | null; sinCanal: boolean; porMail: boolean } | null;
+  canal?: { chip?: string | null; motivo?: string | null; sinCanal?: boolean; porMail?: boolean; sinPush?: boolean } | null;
 };
 
 /** Igual a `esOcultoPorTope` del motor: cerca del tope o lo pasa con este turno → no se ofrece. */
@@ -221,6 +222,10 @@ export function PlanificacionMovilView(props: {
   );
 }
 
+/**
+ * Regla 06/10: Plantel y Otros (RET, libre, ESC, REF) se asignan directo con «Confirmar»; FT y
+ * Eventuales solo se consultan (casilla + «Enviar consulta»). No hay asignación directa para ellos.
+ */
 export function CandidatosHueco(props: {
   tab: TabCandidato | 'eventuales';
   onTab: (tab: TabCandidato | 'eventuales') => void;
@@ -236,7 +241,10 @@ export function CandidatosHueco(props: {
   onToggleConsulta?: (cuil: string) => void;
   /** Cobertura de un hueco: siempre un lugar, el primero que acepte cubre. */
   onConsultar?: (cuils: string[]) => void;
-  puedeAsignarEventual?: boolean;
+  /** Francos marcados para consultarlos como FT (legajos). */
+  consultaFtIds?: string[];
+  onToggleConsultaFt?: (employeeId: string) => void;
+  onConsultarFt?: (employeeIds: string[]) => void;
   /** Turno del SLA que se cubre: con más de una opción el operador puede cambiarlo. */
   opciones?: OpcionTurno[];
   opcionId?: string | null;
@@ -246,6 +254,8 @@ export function CandidatosHueco(props: {
   const opcion = props.opciones?.find((o) => o.id === props.opcionId) || null;
   const [verOcultosTope, setVerOcultosTope] = useState(false);
   const consultaCuils = props.consultaCuils || [];
+  const consultaFtIds = props.consultaFtIds || [];
+  const soloConsulta = props.tab === 'eventuales' || props.tab === 'ft';
   const ocultosTope = props.eventuales.filter(eventualOcultoPorTope);
   const eventualesBase = verOcultosTope ? props.eventuales : props.eventuales.filter((ev) => !eventualOcultoPorTope(ev));
   // Elegibles arriba; los bloqueados colapsados con su motivo.
@@ -275,24 +285,31 @@ export function CandidatosHueco(props: {
         {TABS.map((tab) => <Chip key={tab.id} on={props.tab === tab.id} onClick={() => props.onTab(tab.id)} attrs={{ 'data-plan-tab': tab.id }}>{tab.label}</Chip>)}
       </div>
       {props.tab === 'ft' && !props.puedeFt && <p className="text-xs font-medium text-slate-500">Hace falta el permiso de franco trabajado.</p>}
+      {props.tab === 'ft' && props.puedeFt && <p className="mb-2 text-[11px] font-medium text-slate-500" data-ft-solo-consulta>Al franco se le pregunta: marcá a quién y enviá la consulta. El primero que acepte cubre como franco trabajado.</p>}
       {props.tab === 'eventuales' && !props.puedeEventuales && <p className="text-xs font-medium text-slate-500">Hace falta el permiso para convocar eventuales.</p>}
-      {props.tab === 'eventuales' && props.puedeEventuales && eventualesVisibles.map((ev) => fila(props.elegidoId === ev.cuil, !ev.elegible, () => props.onElegir(ev.cuil), ev.cuil, (
+      {props.tab === 'eventuales' && props.puedeEventuales && <p className="mb-2 text-[11px] font-medium text-slate-500" data-eventuales-solo-consulta>A los eventuales solo se les pregunta. El primero que acepte queda como suplente; el contrato y el alta ARCA se arman al guardar.</p>}
+      {props.tab === 'eventuales' && props.puedeEventuales && eventualesVisibles.map((ev) => fila(consultaCuils.includes(ev.cuil), !ev.elegible || !props.onToggleConsulta, () => props.onToggleConsulta?.(ev.cuil), ev.cuil, (
         <>
           <span className="flex items-center gap-2 text-sm font-semibold text-slate-900">
             {ev.elegible && props.onToggleConsulta && (
               <input
                 type="checkbox"
                 checked={consultaCuils.includes(ev.cuil)}
-                disabled={!!ev.canal?.sinCanal}
                 onClick={(e) => e.stopPropagation()}
-                onChange={() => { if (!ev.canal?.sinCanal) props.onToggleConsulta?.(ev.cuil); }}
+                onChange={() => props.onToggleConsulta?.(ev.cuil)}
                 aria-label={`Consultar a ${ev.nombre}`}
                 data-consulta-cuil={ev.cuil}
-                className="h-4 w-4 accent-indigo-600 text-base"
+                className="h-4 w-4 shrink-0 cursor-pointer rounded border-2 border-slate-500 bg-white accent-indigo-600 text-base"
+                style={{ WebkitAppearance: 'auto', appearance: 'auto' }}
               />
             )}
             {ev.nombre}<PuntajeChip sujetoId={ev.cuil} />
-            {ev.canal?.chip && <span data-sin-app={ev.cuil} className="text-[11px] font-semibold text-amber-800">{ev.canal.chip}{ev.canal.motivo ? ` · ${ev.canal.motivo}` : ''}</span>}
+            {ev.canal?.sinPush && (
+              <span data-sin-push={ev.cuil} title={TOOLTIP_SIN_PUSH} className="inline-flex items-center gap-0.5 text-[11px] font-semibold text-slate-400">
+                <BellOff size={12} aria-hidden />
+                sin push
+              </span>
+            )}
           </span>
           <span className="block text-[11px] font-medium tabular-nums text-slate-500">{ev.distanciaKm != null ? `${ev.distanciaKm} km` : 'sin distancia'} · bolsa</span>
           {ev.horasMes && (
@@ -301,12 +318,6 @@ export function CandidatosHueco(props: {
               {eventualOcultoPorTope(ev) && <span data-chip-tope={ev.horasMes.alcanzado ? 'alcanzado' : 'cerca'} className={`ml-1 ${ev.horasMes.alcanzado ? MOVIL_TEXT.rose : MOVIL_TEXT.amber}`}>· {ev.horasMes.alcanzado ? 'Tope alcanzado' : 'Cerca del tope'}</span>}
             </span>
           )}
-          {ev.canal?.sinCanal && (
-            <a href={`/admin/rrhh/eventuales/?cuil=${ev.cuil}`} data-crear-acceso={ev.cuil} onClick={(e) => e.stopPropagation()} className="block text-[11px] font-semibold text-amber-800 underline">
-              No le va a llegar: llamalo o creá su acceso
-            </a>
-          )}
-          {ev.canal?.porMail && <span data-por-mail={ev.cuil} className="block text-[11px] font-semibold text-slate-500">Le llega por mail</span>}
           {ev.motivo && <span className={`block text-[11px] font-semibold ${MOVIL_TEXT.rose}`}>{ev.motivo}</span>}
         </>
       ), { 'data-plan-candidato': ev.cuil }))}
@@ -332,7 +343,28 @@ export function CandidatosHueco(props: {
           <button type="button" data-ocultos-tope-ver onClick={() => setVerOcultosTope((v) => !v)} className={`rounded border px-2 py-1 text-[11px] font-semibold ${MOVIL_BTN_SECONDARY}`}>{verOcultosTope ? 'Ocultar' : 'Ver'}</button>
         </div>
       )}
-      {props.tab !== 'eventuales' && lista.map((c) => fila(props.elegidoId === c.employeeId, c.blocked || (props.tab === 'ft' && !props.puedeFt), () => props.onElegir(c.employeeId), c.employeeId, (
+      {props.tab === 'ft' && props.puedeFt && lista.map((c) => fila(consultaFtIds.includes(c.employeeId), c.blocked || !props.onToggleConsultaFt, () => props.onToggleConsultaFt?.(c.employeeId), c.employeeId, (
+        <>
+          <span className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+            {!c.blocked && props.onToggleConsultaFt && (
+              <input
+                type="checkbox"
+                checked={consultaFtIds.includes(c.employeeId)}
+                onClick={(e) => e.stopPropagation()}
+                onChange={() => props.onToggleConsultaFt?.(c.employeeId)}
+                aria-label={`Consultar a ${c.name}`}
+                data-consulta-ft={c.employeeId}
+                className="h-4 w-4 shrink-0 cursor-pointer rounded border-2 border-slate-500 bg-white accent-indigo-600 text-base"
+                style={{ WebkitAppearance: 'auto', appearance: 'auto' }}
+              />
+            )}
+            {c.name}<PuntajeChip sujetoId={c.employeeId} />
+          </span>
+          <span className="block text-[11px] font-medium tabular-nums text-slate-500">{Math.round(c.monthHours)}/{c.cap} h{c.km != null ? ` · ${c.km} km` : ''} · franco trabajado</span>
+          {c.reason && <span className={`block text-[11px] font-semibold ${MOVIL_TEXT.rose}`} data-plan-conflicto={c.employeeId}>{c.reason}</span>}
+        </>
+      ), { 'data-plan-candidato': c.employeeId }))}
+      {(props.tab === 'plantel' || props.tab === 'otros') && lista.map((c) => fila(props.elegidoId === c.employeeId, c.blocked, () => props.onElegir(c.employeeId), c.employeeId, (
         <>
           <span className="flex items-center gap-1 text-sm font-semibold text-slate-900">{c.name}<PuntajeChip sujetoId={c.employeeId} /></span>
           <span className="block text-[11px] font-medium tabular-nums text-slate-500">{Math.round(c.monthHours)}/{c.cap} h{c.km != null ? ` · ${c.km} km` : ''}</span>
@@ -340,10 +372,12 @@ export function CandidatosHueco(props: {
         </>
       ), { 'data-plan-candidato': c.employeeId }))}
       {props.tab !== 'eventuales' && lista.length === 0 && <p className="py-4 text-center text-[12px] font-medium text-slate-400">Sin candidatos en esta pestaña.</p>}
-      <button type="button" disabled={!props.elegidoId || (props.tab === 'eventuales' && props.puedeAsignarEventual === false)} onClick={props.onConfirmar} data-plan-confirmar="1" className={`mt-2 min-h-12 w-full rounded text-sm font-semibold ${MOVIL_BTN_PRIMARY} disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-500`}>
-        Confirmar
-      </button>
-      {props.tab === 'eventuales' && props.onConsultar && (
+      {!soloConsulta && (
+        <button type="button" disabled={!props.elegidoId} onClick={props.onConfirmar} data-plan-confirmar="1" className={`mt-2 min-h-12 w-full rounded text-sm font-semibold ${MOVIL_BTN_PRIMARY} disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-500`}>
+          Confirmar
+        </button>
+      )}
+      {props.tab === 'eventuales' && props.puedeEventuales && props.onConsultar && (
         <div className="mt-2" data-consulta-bar>
           <p className="mb-1 text-[11px] font-semibold text-slate-600" data-consulta-texto>
             {consultaCuils.length > 0 ? `Preguntar a ${consultaCuils.length} · el primero que acepte cubre el turno` : 'Marcá a quién preguntar'}
@@ -359,7 +393,23 @@ export function CandidatosHueco(props: {
           </button>
         </div>
       )}
-      <p className="mt-2 text-[11px] font-medium text-slate-400">Un toque elige. El segundo confirma.</p>
+      {props.tab === 'ft' && props.puedeFt && props.onConsultarFt && (
+        <div className="mt-2" data-consulta-bar="ft">
+          <p className="mb-1 text-[11px] font-semibold text-slate-600" data-consulta-texto>
+            {consultaFtIds.length > 0 ? `Preguntar a ${consultaFtIds.length} · el primero que acepte cubre el turno como franco trabajado` : 'Marcá a quién preguntar'}
+          </p>
+          <button
+            type="button"
+            disabled={consultaFtIds.length === 0}
+            onClick={() => props.onConsultarFt?.(consultaFtIds)}
+            data-consulta-enviar="ft"
+            className={`min-h-12 w-full rounded border text-sm font-semibold ${MOVIL_BTN_SECONDARY} disabled:opacity-50`}
+          >
+            {consultaFtIds.length > 0 ? `Enviar consulta (${consultaFtIds.length})` : 'Marcá a quién preguntar'}
+          </button>
+        </div>
+      )}
+      {!soloConsulta && <p className="mt-2 text-[11px] font-medium text-slate-400">Un toque elige. El segundo confirma. Al publicar la corrección recibe el aviso por la app.</p>}
     </div>
   );
 }

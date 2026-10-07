@@ -1,6 +1,6 @@
 /**
- * Entrega de la consulta: push si hay app, mail si hay casilla.
- * Si a nadie le llega, cierra SIN_DESTINATARIOS y avisa a Planificación en el momento.
+ * Entrega de la consulta: bandeja siempre, push si hay token, mail si hay casilla.
+ * No cerrar SIN_DESTINATARIOS por no tener la app.
  */
 import * as admin from 'firebase-admin';
 import { MailNotConfiguredError, sendSystemMail } from '../common/mailer';
@@ -15,6 +15,7 @@ type Canal = {
   motivoApp: string | null;
   sinApp: boolean;
   sinCanal: boolean;
+  sinPush: boolean;
   puedeRecibir: boolean;
   chip: string | null;
   porMail: boolean;
@@ -23,9 +24,11 @@ type Canal = {
 type LibCanal = {
   canalDeConsulta: (p: { uid?: string; mail?: string; pushEstado?: string; tieneToken?: boolean }) => Canal;
   textoMailConsulta: (texto: string) => string;
-  textoNoLlego: (nombre: string, motivo: string) => string;
-  cierreSiNadieRecibio: (entregados: number) => { cerrar: boolean; status: string };
-  entregaTrasFcm: (p: { mailOk: boolean; fcmOk: boolean }) => { llego: boolean; motivo?: string };
+  entregaDeConsulta: (p: { app: boolean; mailOk: boolean }) => {
+    pushEnviado: boolean;
+    entregaPush: string;
+    entregaMail: string | null;
+  };
 };
 
 type Respuesta = {
@@ -38,6 +41,9 @@ type Respuesta = {
   hora: string | null;
   motivo: string | null;
   entregaNota?: string | null;
+  pushEnviado?: boolean;
+  entregaPush?: string | null;
+  entregaMail?: string | null;
 };
 
 export type DestinoEntrega = {
@@ -98,7 +104,7 @@ export async function tieneTokenConsulta(uid: string, employeeId: string | null)
   return false;
 }
 
-/** Lo que ve el panel: chip y si se puede tildar. Sin el token crudo. */
+/** Lo que ve el panel: ícono «sin push» si no hay token. Sin el token crudo. Todos se pueden tildar. */
 export async function canalVisible(p: { uid: string; mail: string; pushEstado: string; employeeId: string | null }) {
   const reglas = await lib();
   const canal = reglas.canalDeConsulta({
@@ -110,10 +116,11 @@ export async function canalVisible(p: { uid: string; mail: string; pushEstado: s
   return {
     sinApp: canal.sinApp,
     motivo: canal.motivoApp,
-    sinCanal: canal.sinCanal,
-    puedeRecibir: canal.puedeRecibir,
-    chip: canal.chip,
-    porMail: canal.porMail,
+    sinCanal: false,
+    puedeRecibir: true,
+    chip: null,
+    porMail: false,
+    sinPush: canal.sinPush,
   };
 }
 
@@ -132,8 +139,8 @@ function esDestino(r: Respuesta, d: DestinoEntrega): boolean {
 }
 
 /**
- * Manda push y/o mail y reescribe las respuestas.
- * Quien no recibe queda NO_LLEGO (no sigue PENDIENTE). Si nadie recibió, cierra.
+ * Bandeja para todos. Push si hay token. Mail además, si hay casilla.
+ * La invitación queda PENDIENTE: la persona la ve al entrar a la app.
  */
 export async function aplicarEntregasConsulta(ctx: ContextoEntrega, destinos: DestinoEntrega[]): Promise<{
   resumen: string;
@@ -151,44 +158,39 @@ export async function aplicarEntregasConsulta(ctx: ContextoEntrega, destinos: De
     const canal = reglas.canalDeConsulta({
       uid: d.uid, mail: d.mail, pushEstado: d.pushEstado, tieneToken,
     });
-    let llego = false;
-    let estado = 'NO_LLEGO';
-    let motivo: string | null = canal.motivoApp || 'sin canal';
     const canalesOk: string[] = [];
+    const uid = String(d.uid || '').trim();
+    const notif: Record<string, unknown> = {
+      employeeId: d.employeeId || null,
+      empresaId: ctx.empresaId,
+      type: 'CONSULTA_DISPONIBILIDAD',
+      target: 'employee',
+      title: '¿Estás disponible?',
+      body: d.texto,
+      consultaId: ctx.consultaId,
+      invitacionId: d.invitacionId,
+      jornadas: Array.isArray(data.jornadas) ? data.jornadas : [],
+      objectiveId: ctx.objectiveId,
+      objectiveName: ctx.objectiveName,
+      positionName: ctx.positionName,
+      clientName: ctx.clientName,
+      read: false,
+      readAt: null,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    if (uid) notif.uid = uid;
+    await db().collection('user_notifications').add(notif);
+    const previo = reglas.entregaDeConsulta({ app: canal.app, mailOk: false });
+    await evento(ctx.consultaId, 'PUSH', {
+      bolsaCuil: d.bolsaCuil,
+      employeeId: d.employeeId,
+      uid: uid || null,
+      resultado: canal.app ? 'ENVIADO' : (canal.codigoApp || 'SIN_PUSH'),
+      entrega: previo.entregaPush,
+    });
+    if (canal.app) canalesOk.push('PUSH');
 
-    if (canal.app) {
-      await db().collection('user_notifications').add({
-        uid: d.uid,
-        employeeId: d.employeeId,
-        empresaId: ctx.empresaId,
-        type: 'CONSULTA_DISPONIBILIDAD',
-        target: 'employee',
-        title: '¿Estás disponible?',
-        body: d.texto,
-        consultaId: ctx.consultaId,
-        invitacionId: d.invitacionId,
-        jornadas: Array.isArray(data.jornadas) ? data.jornadas : [],
-        objectiveId: ctx.objectiveId,
-        objectiveName: ctx.objectiveName,
-        positionName: ctx.positionName,
-        clientName: ctx.clientName,
-        read: false,
-        readAt: null,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
-      await evento(ctx.consultaId, 'PUSH', {
-        bolsaCuil: d.bolsaCuil, employeeId: d.employeeId, uid: d.uid, resultado: 'ENVIADO',
-      });
-      llego = true;
-      estado = 'PENDIENTE';
-      motivo = null;
-      canalesOk.push('PUSH');
-    } else {
-      await evento(ctx.consultaId, 'PUSH', {
-        bolsaCuil: d.bolsaCuil, employeeId: d.employeeId, uid: d.uid || null, resultado: canal.codigoApp || 'SIN_CANAL',
-      });
-    }
-
+    let mailOk = false;
     if (canal.mail) {
       try {
         await sendSystemMail({
@@ -196,135 +198,58 @@ export async function aplicarEntregasConsulta(ctx: ContextoEntrega, destinos: De
           subject: '¿Estás disponible?',
           text: reglas.textoMailConsulta(d.texto),
         });
-        await evento(ctx.consultaId, 'MAIL', { bolsaCuil: d.bolsaCuil, employeeId: d.employeeId, resultado: 'ENVIADO' });
+        await evento(ctx.consultaId, 'MAIL', {
+          bolsaCuil: d.bolsaCuil, employeeId: d.employeeId, resultado: 'ENVIADO', entrega: 'mail enviado',
+        });
         canalesOk.push('MAIL');
-        llego = true;
-        if (!canal.app) {
-          estado = 'AVISO_MAIL';
-          motivo = 'no tiene la app';
-        }
+        mailOk = true;
       } catch (err) {
         const codigo = err instanceof MailNotConfiguredError ? 'MAIL_NO_CONFIGURADO' : 'MAIL_ERROR';
         await evento(ctx.consultaId, 'MAIL', {
           bolsaCuil: d.bolsaCuil, employeeId: d.employeeId, resultado: codigo,
         });
-        if (!llego) {
-          estado = 'NO_LLEGO';
-          motivo = canal.sinApp ? (canal.motivoApp || 'sin canal') : 'no se pudo enviar el mail';
-        }
       }
     }
 
+    const nota = reglas.entregaDeConsulta({ app: canal.app, mailOk });
     const idx = respuestas.findIndex((r) => esDestino(r, d));
-    if (idx >= 0) respuestas[idx] = { ...respuestas[idx], estado, motivo };
+    if (idx >= 0) {
+      respuestas[idx] = {
+        ...respuestas[idx],
+        estado: 'PENDIENTE',
+        motivo: null,
+        pushEnviado: nota.pushEnviado,
+        entregaPush: nota.entregaPush,
+        entregaMail: nota.entregaMail,
+      };
+    }
     const venceAtMs = Number(data.venceAtMs || data.venceAt?.toMillis?.() || 0);
     await db().collection(INV).doc(d.invitacionId).set({
-      estado,
-      motivo,
+      estado: 'PENDIENTE',
+      motivo: null,
       canales: canalesOk,
-      mailOk: canalesOk.includes('MAIL'),
+      mailOk,
+      pushEnviado: nota.pushEnviado,
+      entregaPush: nota.entregaPush,
+      entregaMail: nota.entregaMail,
       ...(venceAtMs > 0 ? { venceAtMs } : {}),
     }, { merge: true });
   }
 
-  const entregados = respuestas.filter((r) => r.estado === 'PENDIENTE' || r.estado === 'AVISO_MAIL').length;
-  const cierre = reglas.cierreSiNadieRecibio(entregados);
   const resumen = await textoEstado(respuestas);
-  const patch: Record<string, unknown> = { respuestas, resumen, status: cierre.status };
-  if (cierre.cerrar) {
-    patch.venceAt = admin.firestore.FieldValue.delete();
-    patch.cerradaAt = admin.firestore.FieldValue.serverTimestamp();
-  }
-  await parentRef.update(patch);
-
-  if (cierre.cerrar) {
-    await evento(ctx.consultaId, 'SIN_DESTINATARIOS', { actorUid: ctx.actorUid });
-    await db().collection('novedades').add({
-      type: 'CONSULTA_DISPONIBILIDAD_SIN_DESTINATARIOS',
-      status: 'PENDIENTE',
-      empresaId: ctx.empresaId,
-      objectiveId: ctx.objectiveId,
-      objectiveName: ctx.objectiveName,
-      positionName: ctx.positionName,
-      clientName: ctx.clientName,
-      description: `La consulta de disponibilidad en ${ctx.lugar} no llegó a nadie. ${resumen}`,
-      createdAt: admin.firestore.Timestamp.now(),
-      source: 'PLANIFICACION',
-      consultaId: ctx.consultaId,
-    });
-    await db().collection('audit_logs').add({
-      action: 'CONSULTA_DISPONIBILIDAD_SIN_DESTINATARIOS',
-      module: 'PLANNING',
-      actorUid: ctx.actorUid,
-      actorName: ctx.actorUid,
-      empresaId: ctx.empresaId,
-      details: resumen,
-      timestamp: admin.firestore.FieldValue.serverTimestamp(),
-      consultaId: ctx.consultaId,
-    });
-    const { cerrarInvitacionesConsulta } = await import('./consultaDisponibilidad');
-    await cerrarInvitacionesConsulta(ctx.consultaId, 'SIN_DESTINATARIOS');
-  }
-
-  return { resumen, status: cierre.status, entregados };
+  await parentRef.update({ respuestas, resumen, status: 'ABIERTA' });
+  return { resumen, status: 'ABIERTA', entregados: respuestas.length };
 }
 
-/** El trigger de FCM no pudo entregar. Si tampoco hubo mail, esa persona queda en el estado. */
+/**
+ * El trigger de FCM no pudo entregar el push.
+ * La bandeja ya está: no se pasa a NO_LLEGO ni se cierra la consulta.
+ */
 export async function anotarFalloPushConsulta(p: { consultaId: string; invitacionId: string; motivo: string }) {
-  const reglas = await lib();
-  const estadoTxt = await import('../eventuales-shared/consultaDisponibilidad.mjs') as {
-    textoEstadoConsulta: (rows: Respuesta[]) => string;
-  };
-  const fallo = reglas.entregaTrasFcm({ mailOk: false, fcmOk: false });
   const invRef = db().collection(INV).doc(p.invitacionId);
-  const parentRef = db().collection(COL).doc(p.consultaId);
-  let cerrar = false;
-  let empresaId = '';
-  let resumen = '';
-  let lugar = '';
-  await db().runTransaction(async (tx) => {
-    const invSnap = await tx.get(invRef);
-    const parentSnap = await tx.get(parentRef);
-    if (!invSnap.exists || !parentSnap.exists) return;
-    const inv = invSnap.data() || {};
-    if (inv.mailOk === true) return;
-    const data = parentSnap.data() || {};
-    if (String(data.status || '') !== 'ABIERTA') return;
-    const nota = reglas.textoNoLlego(String(inv.nombre || ''), fallo.motivo || p.motivo);
-    const respuestas = ((data.respuestas || []) as Respuesta[]).map((r) => {
-      const misma = inv.tipo === 'GUARDIA'
-        ? r.tipo === 'GUARDIA' && String(r.employeeId || '') === String(inv.employeeId || '')
-        : r.tipo !== 'GUARDIA' && r.cuil === String(inv.bolsaCuil || '');
-      if (!misma) return r;
-      return { ...r, estado: 'NO_LLEGO', motivo: fallo.motivo || p.motivo, entregaNota: nota };
-    });
-    const entregados = respuestas.filter((r) => r.estado === 'PENDIENTE' || r.estado === 'AVISO_MAIL').length;
-    const cierre = reglas.cierreSiNadieRecibio(entregados);
-    empresaId = String(data.empresaId || '');
-    lugar = [data.clientName, data.objectiveName, data.positionName].map((s) => String(s || '').trim()).filter(Boolean).join(' · ') || 'el puesto';
-    resumen = estadoTxt.textoEstadoConsulta(respuestas);
-    const patch: Record<string, unknown> = { respuestas, resumen, status: cierre.status };
-    if (cierre.cerrar) {
-      patch.venceAt = admin.firestore.FieldValue.delete();
-      patch.cerradaAt = admin.firestore.FieldValue.serverTimestamp();
-      cerrar = true;
-    }
-    tx.update(parentRef, patch);
-    const vence = Number(inv.venceAtMs || data.venceAtMs || 0);
-    const invPatch: Record<string, unknown> = { estado: 'NO_LLEGO', motivo: fallo.motivo || p.motivo, pushFallo: p.motivo };
-    if (vence > 0) invPatch.venceAtMs = vence;
-    tx.update(invRef, invPatch);
-  });
-  if (!cerrar) return;
-  await db().collection('novedades').add({
-    type: 'CONSULTA_DISPONIBILIDAD_SIN_DESTINATARIOS',
-    status: 'PENDIENTE',
-    empresaId,
-    description: `La consulta de disponibilidad en ${lugar} no llegó a nadie. ${resumen}`,
-    createdAt: admin.firestore.Timestamp.now(),
-    source: 'PLANIFICACION',
-    consultaId: p.consultaId,
-  });
-  const { cerrarInvitacionesConsulta } = await import('./consultaDisponibilidad');
-  await cerrarInvitacionesConsulta(p.consultaId, 'SIN_DESTINATARIOS');
+  const inv = await invRef.get();
+  if (!inv.exists) return;
+  const estado = String(inv.data()?.estado || '');
+  if (estado !== 'PENDIENTE' && estado !== 'AVISO_MAIL') return;
+  await invRef.set({ pushFallo: p.motivo }, { merge: true });
 }

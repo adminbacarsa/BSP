@@ -12,6 +12,48 @@ const FRANCO = new Set(FRANCO_CODES);
 const LICENCIA = new Set(LICENCIA_CODES);
 const CAP_DEFAULT = 200;
 
+/**
+ * Regla de Mauro (06/10) para la cobertura en Planificación:
+ * RET, guardia sin turno (libre), ESC y REF se ASIGNAN directo y reciben el aviso de turno asignado
+ * al guardar; al franco (FT) y al eventual SOLO se les consulta. No hay asignación directa para ellos.
+ */
+export const TIPOS_ASIGNAN_DIRECTO = ['RET', 'LIBRE', 'ESC', 'REF'];
+export const TIPOS_SOLO_CONSULTA = ['FT', 'EVENTUAL'];
+export const MOTIVO_SE_ASIGNA_DIRECTO = 'Se asigna directo, no se consulta.';
+export const MOTIVO_SOLO_CONSULTA = 'Solo se consulta, no se asigna directo.';
+
+/** 'asignar' (RET · libre · ESC · REF) o 'preguntar' (franco · eventual). */
+export function accionPorTipo(tipo) {
+  const t = String(tipo || '').toUpperCase();
+  if (TIPOS_SOLO_CONSULTA.includes(t)) return 'preguntar';
+  if (TIPOS_ASIGNAN_DIRECTO.includes(t)) return 'asignar';
+  return null;
+}
+
+export function seConsultaGuardia(tipo) {
+  return accionPorTipo(tipo) === 'preguntar';
+}
+
+export function seAsignaDirecto(tipo) {
+  return accionPorTipo(tipo) === 'asignar';
+}
+
+/** Motivo con el que el servidor y la pantalla rechazan consultar a quien se asigna directo. */
+export function motivoNoConsultable(tipo) {
+  const t = String(tipo || '').toUpperCase();
+  if (seConsultaGuardia(t)) return null;
+  const quien = t === 'RET' ? 'El retén' : t === 'ESC' ? 'El turno escuela' : t === 'REF' ? 'El refuerzo' : t === 'LIBRE' ? 'El guardia sin turno' : 'Ese guardia';
+  return `${quien} ${MOTIVO_SE_ASIGNA_DIRECTO.charAt(0).toLowerCase()}${MOTIVO_SE_ASIGNA_DIRECTO.slice(1)}`;
+}
+
+/** Aviso que recibe el guardia asignado directo cuando se guarda el cronograma (bandeja + push si hay app). */
+export function textoAvisoAsignado({ fecha, code, horario, puesto }) {
+  const banda = [String(code || '').trim(), String(horario || '').trim()].filter(Boolean).join(' ');
+  const partes = [String(fecha || '').trim(), banda].filter(Boolean).join(' ');
+  const donde = String(puesto || '').trim();
+  return `Se te asignó cubrir ${partes}${donde ? ` · ${donde}` : ''}`.replace(/\s+/g, ' ').trim();
+}
+
 export function tipoDeTurnoPropio(shift) {
   if (!shift || shift.isDeleted) return 'LIBRE';
   const code = String(shift.code || '').toUpperCase();
@@ -200,6 +242,11 @@ export function planEnvioGuardias({ candidatos, evaluaciones, autorizados = {}, 
   const omitidos = [];
   for (const c of candidatos || []) {
     const id = String(c.employeeId || '');
+    const noConsultable = motivoNoConsultable(c.tipo);
+    if (noConsultable) {
+      omitidos.push({ employeeId: id, motivo: noConsultable });
+      continue;
+    }
     if (c.tipo === 'FT' && !puedeFt) {
       omitidos.push({ employeeId: id, motivo: 'Sin permiso para franco trabajado.' });
       continue;

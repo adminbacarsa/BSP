@@ -122,10 +122,10 @@ describe('consulta de disponibilidad', () => {
     assert.match(cruza, /28\/10 M 07:00–15:00, 03\/11 T 15:00–23:00/);
     assert.match(cruza, /Son dos contratos \(octubre 2026 y noviembre 2026\)/);
     const linea = textoEstadoConsulta([
-      { nombre: 'Pérez, Ana', estado: 'ASIGNADO', hora: '10:42' },
-      { nombre: 'Gómez, Luis', estado: 'PENDIENTE' },
+      { nombre: 'Pérez, Ana', estado: 'ASIGNADO', hora: '10:42', pushEnviado: true },
+      { nombre: 'Gómez, Luis', estado: 'PENDIENTE', pushEnviado: false },
     ]);
-    assert.equal(linea, '2 consultados · 1 sí (Pérez 10:42) · 1 pendiente');
+    assert.equal(linea, 'Consultados: 2 · 1 con aviso push · 1 sí (Pérez 10:42)');
     assert.ok(huecoKeyDe({ empresaId: 'e', objectiveId: 'o', positionName: 'P1', jornadas: [{ fecha: '2026-11-02', horaInicio: '08:00', horaFin: '16:00' }] }).startsWith('e|o|P1|'));
   });
 });

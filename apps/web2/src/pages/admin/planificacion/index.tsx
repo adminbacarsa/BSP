@@ -280,29 +280,34 @@ import {
     CoberturaTabs,
     ConsultaDiaBox,
     FilaCandidatoNomina,
-    ModoCoberturaSwitch,
+    NominaAyuda,
     NoDisponiblesNomina,
-    type CandidatoNominaFila,
     type CoberturaTab,
     type DiaFila,
-    type ModoCobertura,
 } from '@/components/planificacion/CoberturaModalV2';
 import { BarraPreguntar } from '@/components/eventuales/EventualesCandidatosUx';
 import { ConsultasEnCursoPill, IndicadorConsultaCelda } from '@/components/planificacion/ConsultasEnCurso';
 import { useConsultasDisponibilidadObjetivo, type ConsultaObjetivo } from '@/hooks/useConsultasDisponibilidadObjetivo';
 import {
+    TEXTO_AVISO_ASIGNADO_AL_GUARDAR,
     TEXTO_BOTON_SPLIT,
+    TEXTO_EVENTUALES_SOLO_CONSULTA,
+    accionCobertura,
     cambiosManualesSobreConsulta,
     consultaAbiertaEnFecha,
     consultaDelDia,
     diaLoResuelveConsulta,
     estadoDiaCobertura,
+    etiquetaTipoNomina,
     fechaDeClavePendiente,
     fmtHorasAr,
+    modoBarraNomina,
+    notaFilaNomina,
     novedadesDeConsultas,
     quitarBorradorQuePisaConsulta,
     resumenConsultaDia,
     textoAccionPrincipal,
+    textoAvisoAsignadoDia,
     textoBarraAsignar,
     textoBarraSplit,
     textoBotonAsignar,
@@ -310,6 +315,7 @@ import {
     textoIndicadorConsulta,
     textoRangoDias,
     textoTooltipConsulta,
+    tipoDesdeRolDia,
     type CoberturaDiaIn,
     type ConsultaCurso,
 } from '@/lib/planificacion/coberturaEventualesUx';
@@ -384,6 +390,7 @@ import { experienciaBadgeForReplacement, patchExperienciaForTurno } from '@/lib/
 import EventualesCandidatosPanel, { type CandidatoEventual } from '@/components/eventuales/EventualesCandidatosPanel';
 import { planEnvioGuardias } from '@/lib/eventuales/consultaGuardia.mjs';
 import { canalDeConsulta } from '@/lib/eventuales/consultaCanal.mjs';
+import { clavesPersonaNomina, dedupeNomina } from '@/lib/planificacion/nominaPersonas.mjs';
 import { asignarEventualPlanificacion, canConsultarDisponibilidad, canConvocarEventuales, eventualErrorMessage, sustituirEventualPlanificacion } from '@/services/eventualesPlanificacionService';
 import { esLegajoEventual, jornadaEventualDesdeBanda } from '@/lib/eventuales/planificacionUi';
 import { gruposService, GrupoObjetivos } from '@/services/gruposService';
@@ -1679,11 +1686,8 @@ function PlanificacionDesktop() {
     const [vacancyEventualesOpen, setVacancyEventualesOpen] = useState(false);
     const [consultaNominaMarcados, setConsultaNominaMarcados] = useState<string[]>([]);
     const [consultaNominaVence, setConsultaNominaVence] = useState(120);
-    /** Modal v2: «Preguntar» (consulta por la app) o «Asignar directo», compartido por Nómina y Eventuales. */
-    const [vacancyModo, setVacancyModo] = useState<ModoCobertura>('preguntar');
     const [consultaCancelando, setConsultaCancelando] = useState<string | null>(null);
     const [consultaNominaEnviando, setConsultaNominaEnviando] = useState(false);
-    const [vacancyEventualBusy, setVacancyEventualBusy] = useState(false);
     /** Sustituir eventual desde la celda: titular (legajo + CUIL) y fecha desde la que se reemplaza. */
     const [eventualSustituir, setEventualSustituir] = useState<{ empId: string; cuil: string; name: string; dateStr: string } | null>(null);
     const [eventualSustituirBusy, setEventualSustituirBusy] = useState(false);
@@ -1780,7 +1784,6 @@ function PlanificacionDesktop() {
         const firstDay = initialDates[0] || all[0] || null;
         setVacancyEditingDay(firstDay);
         setVacancyReplacementOpen(!!firstDay);
-        setVacancyModo('preguntar');
         setConsultaNominaMarcados([]);
         setSelectedReplacement('');
         setVacancyPickerTab('substitute');
@@ -15359,7 +15362,7 @@ function PlanificacionDesktop() {
                     };
                     // Clasificar disponibilidad en la fecha de la ausencia
                     const NON_AVAILABLE = new Set(['F','FF','FP','FT','V','L','PG','A','E','AA','PAST','LOCKED']);
-                    type VacancyDayRole = 'RETEN' | 'ESC' | 'FREE' | 'FRANCO' | 'WORKING' | 'LICENCIA';
+                    type VacancyDayRole = 'RETEN' | 'ESC' | 'REF' | 'FREE' | 'FRANCO' | 'WORKING' | 'LICENCIA';
                     const LICENSE_DAY = new Set(['V', 'L', 'PG', 'A', 'E', 'AA', 'ART']);
                     const getEmpDayRole = (empId: string, dateStr: string): VacancyDayRole => {
                         const key = `${empId}_${dateStr}`;
@@ -15369,6 +15372,7 @@ function PlanificacionDesktop() {
                         if (s.isFrancoTrabajado === true || code === 'FT') return 'WORKING';
                         if (code === 'RET') return 'RETEN';
                         if (code === 'ESC') return 'ESC';
+                        if (code === 'REF') return 'REF';
                         if (LICENSE_DAY.has(code)) return 'LICENCIA';
                         if (code === 'F' || code === 'FF' || code === 'FP' || s.isFranco === true) return 'FRANCO';
                         if (NON_AVAILABLE.has(code)) return 'FREE';
@@ -15386,7 +15390,7 @@ function PlanificacionDesktop() {
                             km: employeeKmToObjective(e, objLat, objLng) ?? 9999,
                             expBadge: experienciaBadgeForReplacement(e.id, selectedObjective || '', e.experienciaObjetivos, e.preferredObjectiveId),
                         }))
-                        .filter(e => e.dayRole === 'RETEN' || e.dayRole === 'ESC' || e.dayRole === 'FREE' || e.dayRole === 'FRANCO');
+                        .filter(e => e.dayRole === 'RETEN' || e.dayRole === 'ESC' || e.dayRole === 'REF' || e.dayRole === 'FREE' || e.dayRole === 'FRANCO');
                     const q = vacancyReplacementSearch.toLowerCase().trim();
                     const matchesSearch = (e: typeof candidatos[0]) => {
                         if (!q) return true;
@@ -15395,6 +15399,7 @@ function PlanificacionDesktop() {
                     const francoCandidatos = candidatos.filter(e => e.dayRole === 'FRANCO' && matchesSearch(e)).sort(sortKm);
                     const retenCandidatos = candidatos.filter(e => e.dayRole === 'RETEN' && matchesSearch(e)).sort(sortKm);
                     const escCandidatos = candidatos.filter(e => e.dayRole === 'ESC' && matchesSearch(e)).sort(sortKm);
+                    const refCandidatos = candidatos.filter(e => e.dayRole === 'REF' && matchesSearch(e)).sort(sortKm);
                     const sinTurnoCandidatos = candidatos.filter(e => e.dayRole === 'FREE' && matchesSearch(e)).sort(sortKm);
                     const vacancySplitListCtx = {
                         positionStructure: effectivePosStructure as import('@/lib/planificacion/vacancySplitBands').VacancyPositionSla[],
@@ -15760,16 +15765,6 @@ function PlanificacionDesktop() {
                         }
                         writeDays(incoming, `Se completaron ${filled.length} día(s) sin cobertura con la de ${formatShortDay(tplDay)}.`, tplDay);
                     };
-                    const applySubstituteToActiveDays = (employeeId: string) => {
-                        setVacancyPickerTab('substitute');
-                        setSelectedReplacement(employeeId);
-                        if (!vacancyEditingDay) return;
-                        const day = vacancyEditingDay;
-                        const cov: VacancyDayCoverage = { mode: 'substitute', employeeId };
-                        writeDays({ [day]: cov }, `Cobertura del ${formatShortDay(day)} guardada.`, day, () => {
-                            goToDay(nextMarkedDay(sortedActiveDates, day));
-                        });
-                    };
                     const puedeConsultarNomina = canConsultarEventual || canAssignFT;
                     const jornadasNomina = sortedActiveDates.map((d) => {
                         const tit = resolveTitularForCoverageDay(d, splitReferenceDate || undefined);
@@ -15806,7 +15801,7 @@ function PlanificacionDesktop() {
                         return calcShiftHours(sh);
                     };
                     const despacharConsultaNomina = async (
-                        lista: { employeeId: string; tipo: 'FT' | 'RET' | 'LIBRE'; nombre: string }[],
+                        lista: { employeeId: string; tipo: 'FT'; nombre: string }[],
                         autorizaciones: { employeeId: string; kind: 'DESCANSO' | 'TOPE'; motivo: string; autorizadoPor: string }[],
                     ) => {
                         if (!lista.length || !empresaId) return;
@@ -15844,21 +15839,13 @@ function PlanificacionDesktop() {
                             return;
                         }
                         const porId = new Map(candidatos.map((e) => [e.id, e]));
+                        // Regla 06/10: por consulta solo va el franco (FT). Retén, libre, ESC y REF se asignan directo.
                         const candidatosEnvio = consultaNominaMarcados.flatMap((id) => {
                             const e = porId.get(id);
-                            if (!e || (e.dayRole !== 'FRANCO' && e.dayRole !== 'RETEN' && e.dayRole !== 'FREE')) return [];
-                            const tipo = e.dayRole === 'FRANCO' ? 'FT' as const : e.dayRole === 'RETEN' ? 'RET' as const : 'LIBRE' as const;
-                            return [{ employeeId: e.id, tipo, nombre: e.name || e.id }];
+                            if (!e || accionCobertura(tipoDesdeRolDia(e.dayRole)) !== 'preguntar') return [];
+                            return [{ employeeId: e.id, tipo: 'FT' as const, nombre: e.name || e.id }];
                         });
                         if (!candidatosEnvio.length) return;
-                        const nadieRecibe = candidatosEnvio.every((c) => {
-                            const e = porId.get(c.employeeId) as { uid?: string; mail?: string; pushEstado?: string } | undefined;
-                            return canalDeConsulta({ uid: e?.uid, mail: e?.mail, pushEstado: e?.pushEstado }).sinCanal;
-                        });
-                        if (nadieRecibe) {
-                            toast.message('A nadie le va a llegar: no tienen la app ni mail.');
-                            return;
-                        }
                         const evaluaciones = candidatosEnvio.map((c) => {
                             const blocked: string[] = [];
                             const authorizations: CoverageAuthRequest[] = [];
@@ -15933,8 +15920,6 @@ function PlanificacionDesktop() {
                         setVacancyPickerTab('substitute');
                         setVacancyEventualesOpen(t === 'eventuales');
                     };
-                    const puedePreguntar = tabActual === 'eventuales' ? (canConsultarEventual && canConvocarEventual) : (tabActual === 'nomina' && puedeConsultarNomina);
-                    const modoEfectivo: ModoCobertura = puedePreguntar ? vacancyModo : 'asignar';
                     const diaCorto = (ymd: string) => {
                         const [y, m, d] = ymd.split('-').map(Number);
                         const wd = new Date(y, m - 1, d).toLocaleDateString('es-AR', { weekday: 'short' }).replace('.', '');
@@ -15978,24 +15963,28 @@ function PlanificacionDesktop() {
                     const motivoTxt = isVac ? 'Vacaciones' : isEnf ? (absType === 'ART' ? 'ART' : 'Ausencia médica') : isPG ? 'Permiso gremial' : isLic ? 'Licencia especial' : isInj ? 'Ausencia injustificada' : (absType || 'Ausencia');
                     const tplDay = templateDayForRemaining(sortedActiveDates, vacancyDayCoverages, vacancyTemplateDay);
                     const draftActual = draftNow();
-                    const tagDe = (role: string): { tag: string; tono: CandidatoNominaFila['tono']; tipo: 'FT' | 'RET' | 'LIBRE' | null } => {
-                        if (role === 'RETEN') return { tag: 'Retén', tono: 'amber', tipo: 'RET' };
-                        if (role === 'ESC') return { tag: 'ESC', tono: 'sky', tipo: null };
-                        if (role === 'FRANCO') return { tag: 'Franco · FT', tono: 'violet', tipo: 'FT' };
-                        return { tag: 'Libre', tono: 'emerald', tipo: 'LIBRE' };
+                    // Regla 06/10: RET · libre · ESC · REF se asignan directo; el franco solo se consulta (FT).
+                    const tagDe = (role: string) => {
+                        const tipo = tipoDesdeRolDia(role) || 'LIBRE';
+                        return { ...etiquetaTipoNomina(tipo), tipo, accion: accionCobertura(tipo) || 'asignar' };
                     };
-                    const nominaOrdenada = [...retenCandidatos, ...escCandidatos, ...sinTurnoCandidatos, ...francoCandidatos];
-                    const nominaNoDisponibles = employees
+                    const nominaOrdenada = dedupeNomina([...retenCandidatos, ...escCandidatos, ...refCandidatos, ...sinTurnoCandidatos, ...francoCandidatos]);
+                    const clavesNomina = new Set(nominaOrdenada.flatMap((e) => clavesPersonaNomina(e)));
+                    const nominaNoDisponibles = dedupeNomina(employees
                         .filter((e: any) => e.id && e.id !== vacancyData?.employeeId)
-                        .map((e: any) => ({ id: e.id as string, nombre: String(e.name || e.id), role: getEmpDayRole(e.id, candidateDate || vacancyData?.startDate || '') }))
-                        .filter((e) => (e.role === 'WORKING' || e.role === 'LICENCIA') && (!q || e.nombre.toLowerCase().includes(q)))
+                        .map((e: any) => ({ id: e.id as string, nombre: String(e.name || e.id), name: String(e.name || ''), uid: String(e.uid || ''), dni: String(e.dni || ''), role: getEmpDayRole(e.id, candidateDate || vacancyData?.startDate || '') }))
+                        .filter((e) => (e.role === 'WORKING' || e.role === 'LICENCIA') && (!q || e.nombre.toLowerCase().includes(q))))
+                        .filter((e) => !clavesPersonaNomina(e).some((k) => clavesNomina.has(k)))
                         .map((e) => ({ id: e.id, nombre: e.nombre, motivo: e.role === 'LICENCIA' ? 'De licencia ese día' : 'En servicio ese día' }));
-                    const seleccionadoNomina = selectedReplacement ? nominaOrdenada.find((e) => e.id === selectedReplacement) || null : null;
-                    // Sin app ni mail no se consulta: la casilla queda deshabilitada y no cuenta en «Preguntar a N».
-                    const marcadosNomina = consultaNominaMarcados.filter((id) => {
-                        const e = nominaOrdenada.find((x) => x.id === id) as { uid?: string; mail?: string; pushEstado?: string } | undefined;
-                        return !!e && !canalDeConsulta({ uid: e.uid, mail: e.mail, pushEstado: e.pushEstado }).sinCanal;
-                    });
+                    // Solo una persona de las que se asignan directo puede estar elegida; el franco no se asigna desde acá.
+                    const seleccionadoNomina = selectedReplacement
+                        ? nominaOrdenada.find((e) => e.id === selectedReplacement && tagDe(e.dayRole).accion === 'asignar') || null
+                        : null;
+                    const marcadosNomina = consultaNominaMarcados.filter((id) => nominaOrdenada.some((e) => e.id === id && tagDe(e.dayRole).accion === 'preguntar'));
+                    const barraNomina = modoBarraNomina({ seleccionado: !!seleccionadoNomina, marcados: marcadosNomina.length });
+                    const avisoAsignado = seleccionadoNomina && diaSel
+                        ? `${TEXTO_AVISO_ASIGNADO_AL_GUARDAR}: «${textoAvisoAsignadoDia(diaSel, titSel?.code, titSel?.scheduleLabel && titSel.scheduleLabel !== '—' ? titSel.scheduleLabel : null, titSel?.positionName)}»`
+                        : null;
                     const extSel = vacancySplitExtId ? (splitWorkerPoolExt.find((c) => c.id === vacancySplitExtId) || splitWorkerPoolAdel.find((c) => c.id === vacancySplitExtId)) : null;
                     const adelSel = vacancySplitAdelId ? splitWorkerPoolAdel.find((c) => c.id === vacancySplitAdelId) : null;
                     const diasBloque = sortedActiveDates.length > 0 ? sortedActiveDates : (diaSel ? [diaSel] : []);
@@ -16003,8 +15992,6 @@ function PlanificacionDesktop() {
                         const tit = resolveTitularForCoverageDay(d, splitReferenceDate || undefined);
                         return jornadaEventualDesdeBanda(d, tit?.code || 'M', { scheduleLabel: tit?.scheduleLabel, hours: tit?.hours });
                     });
-                    const diaAsignarEventual = diaSel && jornadasBloque.some((j) => j.fecha === diaSel) ? diaSel : jornadasBloque[0]?.fecha;
-                    const jornadasAsignar = jornadasBloque.filter((j) => j.fecha === diaAsignarEventual);
                     const objGeo = objLat && objLng ? { lat: objLat, lng: objLng } : null;
                     const buscador = (placeholder: string, autoFocus = false) => (
                         <div className="relative">
@@ -16109,7 +16096,7 @@ function PlanificacionDesktop() {
                                         <>
                                             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                                                 <CoberturaTabs tab={tabActual} onTab={setTab} eventuales={canConvocarEventual || canConsultarEventual} split={!!splitTitularShift || vacancyGapBandOptions.length > 0} />
-                                                <ModoCoberturaSwitch modo={modoEfectivo} onModo={setVacancyModo} puedePreguntar={puedePreguntar} />
+                                                {tabActual === 'nomina' && <NominaAyuda />}
                                             </div>
                                             {tabActual === 'nomina' && (
                                                 <>
@@ -16117,15 +16104,15 @@ function PlanificacionDesktop() {
                                                     <div className="mt-2 min-h-0 flex-1 space-y-1 overflow-y-auto custom-scrollbar pr-0.5" data-nomina-lista>
                                                         {nominaOrdenada.length === 0 && (
                                                             <p className="px-3 py-6 text-center text-xs text-slate-400">
-                                                                {q ? `Sin resultados para "${vacancyReplacementSearch}"` : 'No hay retenes, ESC, guardias libres ni francos ese día en el objetivo.'}
+                                                                {q ? `Sin resultados para "${vacancyReplacementSearch}"` : 'No hay retenes, ESC, REF, guardias libres ni francos ese día en el objetivo.'}
                                                             </p>
                                                         )}
                                                         {nominaOrdenada.map((e) => {
                                                             const t = tagDe(e.dayRole);
-                                                            const puedeCasilla = t.tipo === 'FT' ? canAssignFT : !!t.tipo && canConsultarEventual;
+                                                            // El franco se consulta como FT: hace falta el permiso de franco trabajado y poder consultar.
+                                                            const puedeCasilla = t.accion === 'preguntar' && canAssignFT && puedeConsultarNomina;
                                                             const km = formatKmLabel(e.km);
                                                             const canalNomina = canalDeConsulta({ uid: (e as { uid?: string }).uid, mail: (e as { mail?: string }).mail, pushEstado: (e as { pushEstado?: string }).pushEstado });
-                                                            const sinCanal = puedeCasilla && canalNomina.sinCanal;
                                                             return (
                                                                 <FilaCandidatoNomina
                                                                     key={e.id}
@@ -16135,33 +16122,40 @@ function PlanificacionDesktop() {
                                                                         meta: [`${e.monthHours} h este mes`, km ? `${km}` : null].filter(Boolean).join(' · '),
                                                                         tag: t.tag,
                                                                         tono: t.tono,
-                                                                        nota: t.tipo === 'FT' ? (modoEfectivo === 'preguntar' ? 'se consulta como FT' : 'franco trabajado · pide PIN') : t.tipo === null ? 'turno escuela: solo asignar' : null,
-                                                                        canal: puedeCasilla ? {
-                                                                            chip: canalNomina.chip,
-                                                                            motivoApp: canalNomina.motivoApp,
-                                                                            porMail: canalNomina.porMail,
-                                                                            sinCanal: canalNomina.sinCanal,
-                                                                            crearAccesoHref: `/admin/empleados/${e.id}`,
-                                                                        } : null,
+                                                                        nota: notaFilaNomina(t.tipo, { puedeFt: t.tipo === 'FT' ? puedeCasilla : undefined }),
+                                                                        canal: puedeCasilla ? { sinPush: canalNomina.sinPush } : null,
                                                                     }}
-                                                                    modo={modoEfectivo}
+                                                                    accion={t.accion}
                                                                     marcado={marcadosNomina.includes(e.id)}
-                                                                    seleccionado={selectedReplacement === e.id}
-                                                                    disabled={modoEfectivo === 'preguntar' && !puedeCasilla}
+                                                                    seleccionado={seleccionadoNomina?.id === e.id}
+                                                                    disabled={t.accion === 'preguntar' ? !puedeCasilla : false}
                                                                     onToggle={() => {
-                                                                        if (sinCanal) {
-                                                                            toast.message(`${e.name || 'El guardia'}: no le va a llegar. Llamalo o creá su acceso.`);
-                                                                            return;
-                                                                        }
+                                                                        // Tildar un franco deja de lado la persona a asignar: la barra sigue una sola cosa.
+                                                                        setSelectedReplacement('');
                                                                         setConsultaNominaMarcados((prev) => (prev.includes(e.id) ? prev.filter((id) => id !== e.id) : [...prev, e.id]));
                                                                     }}
-                                                                    onElegir={() => { setVacancyPickerTab('substitute'); setSelectedReplacement(e.id); }}
+                                                                    onElegir={() => {
+                                                                        setConsultaNominaMarcados([]);
+                                                                        setVacancyPickerTab('substitute');
+                                                                        setSelectedReplacement(e.id);
+                                                                    }}
                                                                 />
                                                             );
                                                         })}
                                                         <NoDisponiblesNomina rows={nominaNoDisponibles} />
                                                     </div>
-                                                    {modoEfectivo === 'preguntar' ? (
+                                                    {barraNomina === 'asignar' ? (
+                                                        <CoberturaBarra
+                                                            texto={textoBarraAsignar(seleccionadoNomina?.name, diaSel, titSel?.code, titSel?.scheduleLabel && titSel.scheduleLabel !== '—' ? titSel.scheduleLabel : null)}
+                                                            detalle={[
+                                                                seleccionadoNomina ? `${titSel?.positionName || ''}${titSel?.hours ? ` · ${fmtHorasAr(titSel.hours)} h` : ''}` : null,
+                                                                avisoAsignado,
+                                                            ].filter(Boolean).join(' · ') || null}
+                                                            boton={textoBotonAsignar(seleccionadoNomina?.name)}
+                                                            disabled={!seleccionadoNomina || !draftActual}
+                                                            onClick={applyThisDay}
+                                                        />
+                                                    ) : (
                                                         <BarraPreguntar
                                                             n={marcadosNomina.length}
                                                             jornadas={jornadasNomina}
@@ -16170,23 +16164,15 @@ function PlanificacionDesktop() {
                                                             onEnviar={enviarConsultaNomina}
                                                             enviando={consultaNominaEnviando}
                                                         />
-                                                    ) : (
-                                                        <CoberturaBarra
-                                                            texto={textoBarraAsignar(seleccionadoNomina?.name, diaSel, titSel?.code, titSel?.scheduleLabel && titSel.scheduleLabel !== '—' ? titSel.scheduleLabel : null)}
-                                                            detalle={seleccionadoNomina?.dayRole === 'FRANCO' ? 'Franco planificado: queda como franco trabajado y pide PIN de supervisor.' : seleccionadoNomina ? `${titSel?.positionName || ''}${titSel?.hours ? ` · ${fmtHorasAr(titSel.hours)} h` : ''}` : null}
-                                                            boton={textoBotonAsignar(seleccionadoNomina?.name)}
-                                                            disabled={!seleccionadoNomina || !draftActual}
-                                                            onClick={applyThisDay}
-                                                        />
                                                     )}
                                                 </>
                                             )}
                                             {tabActual === 'eventuales' && (
                                                 <div className="flex min-h-0 flex-1 flex-col" data-eventuales-tab>
-                                                    <p className="mb-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-[9px] font-bold text-slate-600">
+                                                    <p className="mb-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-[9px] font-bold text-slate-600" data-eventuales-solo-consulta>
                                                         {jornadasBloque.length > 1
-                                                            ? 'La consulta es por el bloque completo: el primero que acepta cubre todos los días marcados. Al asignar directo, el eventual queda en el día elegido; al guardar se arma el contrato y el alta ARCA.'
-                                                            : 'El eventual queda como suplente del día; al guardar se arma el contrato y el alta ARCA.'}
+                                                            ? `${TEXTO_EVENTUALES_SOLO_CONSULTA} La consulta es por el bloque completo: el primero que acepta cubre todos los días marcados.`
+                                                            : TEXTO_EVENTUALES_SOLO_CONSULTA}
                                                     </p>
                                                     <EventualesCandidatosPanel
                                                         empresaId={empresaId || ''}
@@ -16195,35 +16181,15 @@ function PlanificacionDesktop() {
                                                         objetivoGeo={objGeo}
                                                         jornadas={jornadasBloque}
                                                         canConvocar={canConvocarEventual}
-                                                        consulta={canConsultarEventual ? {
+                                                        consulta={{
                                                             objectiveName: getObjectiveName(selectedObjective || '') || null,
                                                             positionName: vacancyGapPreferredPosition || null,
                                                             titularEmployeeId: vacancyData?.employeeId || null,
-                                                        } : null}
-                                                        modo={modoEfectivo}
-                                                        sinEstadoConsulta
-                                                        busy={vacancyEventualBusy}
-                                                        onSelect={async (candidato) => {
-                                                            setVacancyEventualBusy(true);
-                                                            try {
-                                                                const res = await asignarEventualPlanificacion({
-                                                                    empresaId: empresaId || '',
-                                                                    cuil: candidato.cuil,
-                                                                    objectiveId: selectedObjective || null,
-                                                                    objectiveName: getObjectiveName(selectedObjective || '') || null,
-                                                                    clientId: selectedClient || null,
-                                                                    positionName: vacancyGapPreferredPosition || null,
-                                                                    turnos: jornadasAsignar.length ? jornadasAsignar : jornadasBloque,
-                                                                    modo: 'LEGAJO',
-                                                                });
-                                                                applySubstituteToActiveDays(res.employeeId);
-                                                                toast.success(`${(res.nombre || candidato.nombre).split(',')[0]} (eventual) como suplente en ${jornadasAsignar.length || 1} día(s).`);
-                                                            } catch (e) {
-                                                                toast.error(eventualErrorMessage(e));
-                                                            } finally {
-                                                                setVacancyEventualBusy(false);
-                                                            }
                                                         }}
+                                                        sinEstadoConsulta
+                                                        sinAvisoSoloConsulta
+                                                        // Regla 06/10: al eventual solo se le pregunta. No se llama a `asignarEventualPlanificacion` desde acá.
+                                                        onSelect={() => { toast.message('A los eventuales solo se les pregunta: marcá a quién y enviá la consulta.'); }}
                                                     />
                                                 </div>
                                             )}

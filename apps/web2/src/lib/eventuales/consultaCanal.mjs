@@ -1,8 +1,14 @@
 /**
  * Canal de una consulta de disponibilidad.
- * App = uid + token de device_tokens + pushEstado activo (si el campo no está, el token alcanza).
- * Mail es el otro canal. Sin los dos, no hay a quién avisarle.
+ * La bandeja de la app es el canal: se escribe siempre, tenga o no la app instalada.
+ * Push = uid + token + pushEstado activo (si el campo no está, el token alcanza).
+ * El mail suma, no reemplaza la bandeja.
  */
+
+export const ENTREGA_PUSH = 'push enviado';
+export const ENTREGA_SIN_PUSH = 'sin push (no tiene la app instalada)';
+export const ENTREGA_MAIL = 'mail enviado';
+export const TOOLTIP_SIN_PUSH = 'No tiene la app instalada: lo ve al entrar a la app; si es urgente, llamalo';
 
 export const LINK_APP_CONSULTA = 'https://comtroldata.web.app/app/';
 
@@ -45,7 +51,7 @@ export function canalDeConsulta(p = {}) {
     app = true;
   }
   const mail = mailDeConsulta(p.mail);
-  const canales = [];
+  const canales = ['BANDEJA'];
   if (app) canales.push('PUSH');
   if (mail) canales.push('MAIL');
   return {
@@ -55,10 +61,20 @@ export function canalDeConsulta(p = {}) {
     sinApp: !app,
     codigoApp: codigo,
     motivoApp: motivo,
-    puedeRecibir: canales.length > 0,
-    sinCanal: canales.length === 0,
-    chip: app ? null : 'Sin app',
-    porMail: !app && !!mail,
+    puedeRecibir: true,
+    sinCanal: false,
+    sinPush: !app,
+    chip: null,
+    porMail: false,
+  };
+}
+
+/** Dato de entrega. La bandeja no entra acá: siempre existe. */
+export function entregaDeConsulta({ app, mailOk }) {
+  return {
+    pushEnviado: !!app,
+    entregaPush: app ? ENTREGA_PUSH : ENTREGA_SIN_PUSH,
+    entregaMail: mailOk ? ENTREGA_MAIL : null,
   };
 }
 
@@ -74,16 +90,15 @@ export function textoMailConsulta(texto, link = LINK_APP_CONSULTA) {
   return `${String(texto || '').trim()}\n\nRespondé desde la app: ${link}`;
 }
 
-/** Nadie recibió push ni mail → se cierra ya, sin esperar el vencimiento. */
-export function cierreSiNadieRecibio(entregados) {
-  return Number(entregados) > 0
-    ? { cerrar: false, status: 'ABIERTA' }
-    : { cerrar: true, status: 'SIN_DESTINATARIOS' };
+/**
+ * La bandeja siempre existe: no cerrar `SIN_DESTINATARIOS` porque no haya push ni mail.
+ * El estado queda para consultas viejas que el cierre de invitaciones todavía entiende.
+ */
+export function cierreSiNadieRecibio() {
+  return { cerrar: false, status: 'ABIERTA' };
 }
 
-/** El FCM falló después de escribir la bandeja. Si el mail salió, igual le llegó. */
-export function entregaTrasFcm({ mailOk, fcmOk }) {
-  if (mailOk) return { llego: true };
-  if (fcmOk) return { llego: true };
-  return { llego: false, motivo: 'error al enviar el aviso' };
+/** El FCM falló después de escribir la bandeja. La persona igual la ve al abrir la app. */
+export function entregaTrasFcm({ fcmOk }) {
+  return { llego: true, pushFallo: !fcmOk };
 }

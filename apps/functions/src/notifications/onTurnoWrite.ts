@@ -21,6 +21,27 @@ function hmAr(ts: any): string {
   });
 }
 
+function ddmmAr(ts: any): string {
+  const d: Date | null = ts?.toDate ? ts.toDate() : ts ? new Date(ts) : null;
+  if (!d || Number.isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' });
+}
+
+/** Cobertura asignada desde Planificación (RET · libre · ESC · REF): el turno lleva a quién cubre. */
+function esCoberturaAsignada(turn: any): boolean {
+  if (!turn) return false;
+  if (String(turn.coversEmployeeId || '').trim()) return true;
+  return String(turn.comments || '').trim().startsWith('Cubriendo a');
+}
+
+/** «Se te asignó cubrir 08/10 M 10:45–12:00 · Puesto 1» (mismo texto que `textoAvisoAsignado` en el front). */
+function textoAvisoCubrir(p: { fecha: string; code?: string | null; horario?: string | null; puesto?: string | null }): string {
+  const banda = [String(p.code || '').trim(), String(p.horario || '').trim()].filter(Boolean).join(' ');
+  const partes = [String(p.fecha || '').trim(), banda].filter(Boolean).join(' ');
+  const donde = String(p.puesto || '').trim();
+  return `Se te asignó cubrir ${partes}${donde ? ` · ${donde}` : ''}`.replace(/\s+/g, ' ').trim();
+}
+
 function buildMessage(type: string, after: any, before: any, turnoId: string): { title: string; body: string } | null {
   const src = after || before;
   const dateStr = formatDate(src?.startTime);
@@ -30,6 +51,14 @@ function buildMessage(type: string, after: any, before: any, turnoId: string): {
   const to = hmAr(src?.endTime);
   const rango = from && to ? `${from}–${to}` : from;
   const cuando = [dateStr, rango].filter(Boolean).join(' ');
+
+  if ((type === 'TURNO_NUEVO' || type === 'TURNO_MODIFICADO') && after && esCoberturaAsignada(after) && !(after.isFranco || code === 'F')) {
+    const puesto = [after.positionName, objective].map((s: unknown) => String(s || '').trim()).filter(Boolean).join(' · ');
+    return {
+      title: type === 'TURNO_NUEVO' ? 'Tenés un turno nuevo' : 'Cambió tu cronograma',
+      body: textoAvisoCubrir({ fecha: ddmmAr(after.startTime), code: code && code !== 'F' ? code : null, horario: rango, puesto }),
+    };
+  }
 
   switch (type) {
     case 'TURNO_ELIMINADO':

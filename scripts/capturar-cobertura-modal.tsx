@@ -23,19 +23,25 @@ import {
   CoberturaTabs,
   ConsultaDiaBox,
   FilaCandidatoNomina,
-  ModoCoberturaSwitch,
+  NominaAyuda,
   NoDisponiblesNomina,
   type DiaFila,
 } from '../apps/web2/src/components/planificacion/CoberturaModalV2';
 import { BarraPreguntar } from '../apps/web2/src/components/eventuales/EventualesCandidatosUx';
 import {
+  TEXTO_AVISO_ASIGNADO_AL_GUARDAR,
+  accionCobertura,
   estadoDiaCobertura,
+  modoBarraNomina,
+  notaFilaNomina,
   resumenConsultaDia,
   textoAccionPrincipal,
+  textoAvisoAsignadoDia,
   textoBarraAsignar,
   textoBotonAsignar,
   textoCubrir,
   textoRangoDias,
+  type TipoCandidatoCobertura,
 } from '../apps/web2/src/lib/planificacion/coberturaEventualesUx';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -64,13 +70,14 @@ function chromium(): string {
   throw new Error('No encuentro Chromium en ms-playwright: definí CHROME_BIN.');
 }
 
-type Cand = { id: string; nombre: string; meta: string; tag: string; tono: 'violet' | 'amber' | 'sky' | 'emerald'; nota?: string | null };
+type Cand = { id: string; nombre: string; meta: string; tag: string; tono: 'violet' | 'amber' | 'sky' | 'emerald' | 'indigo'; tipo: TipoCandidatoCobertura };
 const candidatos: Cand[] = [
-  { id: 'e1', nombre: 'GUERRERO, Marcos', meta: '136 h este mes · 2 km', tag: 'Retén', tono: 'amber' },
-  { id: 'e2', nombre: 'FERRERO, Juan', meta: '142 h este mes · 3 km', tag: 'Libre', tono: 'emerald' },
-  { id: 'e3', nombre: 'BOSIO, Ana', meta: '148 h este mes · 6 km', tag: 'Libre', tono: 'emerald' },
-  { id: 'e4', nombre: 'FONTANA, Luis', meta: '160 h este mes · 4 km', tag: 'Franco · FT', tono: 'violet', nota: 'se consulta como FT' },
-  { id: 'e5', nombre: 'LOPEZ, Raúl', meta: '152 h este mes · 11 km', tag: 'Franco · FT', tono: 'violet', nota: 'se consulta como FT' },
+  { id: 'e1', nombre: 'GUERRERO, Marcos', meta: '136 h este mes · 2 km', tag: 'Retén', tono: 'amber', tipo: 'RET' },
+  { id: 'e6', nombre: 'RIOS, Nicolás', meta: '120 h este mes · 5 km', tag: 'REF', tono: 'indigo', tipo: 'REF' },
+  { id: 'e2', nombre: 'FERRERO, Juan', meta: '142 h este mes · 3 km', tag: 'Libre', tono: 'emerald', tipo: 'LIBRE' },
+  { id: 'e3', nombre: 'BOSIO, Ana', meta: '148 h este mes · 6 km', tag: 'Libre', tono: 'emerald', tipo: 'LIBRE' },
+  { id: 'e4', nombre: 'FONTANA, Luis', meta: '160 h este mes · 4 km', tag: 'Franco · FT', tono: 'violet', tipo: 'FT' },
+  { id: 'e5', nombre: 'LOPEZ, Raúl', meta: '152 h este mes · 11 km', tag: 'Franco · FT', tono: 'violet', tipo: 'FT' },
 ];
 const noDisponibles = [
   { id: 'n1', nombre: 'FARIAS, Diego', motivo: 'En servicio ese día' },
@@ -95,14 +102,16 @@ function Modal(p: { franja: React.ReactNode; dias: React.ReactNode; derecha: Rea
   );
 }
 
-function Nomina(p: { modo: 'preguntar' | 'asignar'; marcados: string[]; seleccionado: string | null; dia: string }) {
+// Regla 06/10: RET, libre, ESC y REF llevan «Asignar»; el franco lleva casilla (se le pregunta como FT).
+function Nomina(p: { marcados: string[]; seleccionado: string | null; dia: string }) {
   const sel = candidatos.find((c) => c.id === p.seleccionado) || null;
+  const barra = modoBarraNomina({ seleccionado: !!sel, marcados: p.marcados.length });
   return (
     <>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <CoberturaTabs tab="nomina" onTab={() => {}} eventuales split />
-        <ModoCoberturaSwitch modo={p.modo} onModo={() => {}} puedePreguntar />
       </div>
+      <NominaAyuda />
       <div className="relative">
         <input className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm font-bold outline-none" placeholder="Buscar por nombre o legajo…" readOnly />
       </div>
@@ -110,8 +119,8 @@ function Nomina(p: { modo: 'preguntar' | 'asignar'; marcados: string[]; seleccio
         {candidatos.map((c) => (
           <FilaCandidatoNomina
             key={c.id}
-            c={{ ...c, nota: p.modo === 'asignar' && c.tono === 'violet' ? 'franco trabajado · pide PIN' : c.nota }}
-            modo={p.modo}
+            c={{ id: c.id, nombre: c.nombre, meta: c.meta, tag: c.tag, tono: c.tono, nota: notaFilaNomina(c.tipo, { puedeFt: c.tipo === 'FT' ? true : undefined }) }}
+            accion={accionCobertura(c.tipo) || 'asignar'}
             marcado={p.marcados.includes(c.id)}
             seleccionado={p.seleccionado === c.id}
             onToggle={() => {}}
@@ -120,12 +129,12 @@ function Nomina(p: { modo: 'preguntar' | 'asignar'; marcados: string[]; seleccio
         ))}
         <NoDisponiblesNomina rows={noDisponibles} />
       </div>
-      {p.modo === 'preguntar' ? (
+      {barra === 'preguntar' ? (
         <BarraPreguntar n={p.marcados.length} jornadas={[JORNADA]} espera={30} onEspera={() => {}} onEnviar={() => {}} />
       ) : (
         <CoberturaBarra
           texto={textoBarraAsignar(sel?.nombre, p.dia, 'M', '10:45–12:00')}
-          detalle={sel ? 'Puesto 1 · 1,25 h' : null}
+          detalle={sel ? `Puesto 1 · 1,25 h · ${TEXTO_AVISO_ASIGNADO_AL_GUARDAR}: «${textoAvisoAsignadoDia(p.dia, 'M', '10:45–12:00', 'Puesto 1')}»` : null}
           boton={textoBotonAsignar(sel?.nombre)}
           disabled={!sel}
           onClick={() => {}}
@@ -162,7 +171,7 @@ const estados: { nombre: string; jsx: React.ReactNode }[] = [
       <Modal
         franja={franja(textoRangoDias(['2026-10-06']), '06/10')}
         dias={<CoberturaDias dias={[fila('2026-10-06', 'mar 06/10', SIN, true)]} onSeleccionar={() => {}} onMarcar={() => {}} onTodos={() => {}} onNinguno={() => {}} onQuitar={() => {}} aplicarMarcados={null} completar={null} />}
-        derecha={<Nomina modo="preguntar" marcados={['e1', 'e2']} seleccionado={null} dia="2026-10-06" />}
+        derecha={<Nomina marcados={['e4', 'e5']} seleccionado={null} dia="2026-10-06" />}
         accion={textoAccionPrincipal(false)}
       />
     ),
@@ -186,7 +195,7 @@ const estados: { nombre: string; jsx: React.ReactNode }[] = [
             completar={{ texto: 'Completar 3 día(s) sin cobertura con la de 06/10', onClick: () => {} }}
           />
         )}
-        derecha={<Nomina modo="asignar" marcados={[]} seleccionado="e2" dia="2026-10-08" />}
+        derecha={<Nomina marcados={[]} seleccionado="e2" dia="2026-10-08" />}
         accion={textoAccionPrincipal(true)}
       />
     ),

@@ -1,6 +1,6 @@
 /**
  * Consultas de disponibilidad del objetivo, en vivo, para pintar el estado por día en el modal de
- * cobertura («Consultados: 3 · esperando respuesta», «ABALLAY aceptó 10:42 → suplente»).
+ * cobertura («Consultados: 3 · 1 con aviso push», «ABALLAY aceptó 10:42 → suplente»).
  * Solo lectura; las escribe el servidor.
  */
 import { useEffect, useState } from 'react';

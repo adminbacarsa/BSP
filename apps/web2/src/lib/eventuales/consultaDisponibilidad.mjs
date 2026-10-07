@@ -3,7 +3,6 @@
  * El primero que dice que sí toma el lugar 1, el segundo el 2, y así.
  * Sin Firestore: el servidor y los tests usan estas mismas decisiones.
  */
-import { textoAvisoMail, textoNoLlego } from './consultaCanal.mjs';
 
 export const VENCE_DEFAULT_MIN = 120;
 export const VENCE_MAX_MIN = 24 * 60;
@@ -150,25 +149,23 @@ export function tomadosTrasNoElegible(respuestas, cuil) {
   return (respuestas || []).filter((r) => r.cuil !== cuil && (r.estado === 'ASIGNADO' || r.estado === 'RESERVADO')).length;
 }
 
+export function conAvisoPush(respuestas) {
+  const list = Array.isArray(respuestas) ? respuestas : [];
+  return list.filter((r) => r.pushEnviado === true).length;
+}
+
 export function textoEstadoConsulta(respuestas) {
   const list = Array.isArray(respuestas) ? respuestas : [];
   const n = list.length;
   const sis = list.filter((r) => r.estado === 'ASIGNADO' || r.estado === 'SI' || r.estado === 'RESERVADO');
-  const pend = list.filter((r) => r.estado === 'PENDIENTE');
   const no = list.filter((r) => r.estado === 'NO').length;
   const siTxt = sis.map((r) => {
     const apellido = String(r.nombre || '').split(',')[0].trim();
     return `${apellido}${r.hora ? ` ${r.hora}` : ''}`.trim();
   }).filter(Boolean).join(', ');
-  const partes = [`${n} consultado${n === 1 ? '' : 's'}`];
+  const partes = [`Consultados: ${n} · ${conAvisoPush(list)} con aviso push`];
   if (sis.length) partes.push(`${sis.length} sí${siTxt ? ` (${siTxt})` : ''}`);
-  if (pend.length) partes.push(`${pend.length} pendiente${pend.length === 1 ? '' : 's'}`);
   if (no) partes.push(`${no} no`);
-  for (const r of list) {
-    if (r.estado === 'NO_LLEGO') partes.push(textoNoLlego(r.nombre, r.motivo));
-    else if (r.estado === 'AVISO_MAIL') partes.push(textoAvisoMail(r.nombre));
-    else if (r.entregaNota) partes.push(String(r.entregaNota));
-  }
   return partes.join(' · ');
 }
 

@@ -1,5 +1,5 @@
 /**
- * Estado en vivo de las consultas de un hueco: «2 consultados · 1 sí (Pérez 10:42) · 1 pendiente».
+ * Estado en vivo de las consultas de un hueco: «Consultados: 2 · 1 con aviso push».
  * Al expandir, la línea de tiempo de la subcolección `eventos`.
  */
 import React, { useEffect, useState } from 'react';

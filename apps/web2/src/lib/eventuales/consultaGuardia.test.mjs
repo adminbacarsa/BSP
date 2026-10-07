@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
-  camposTurnoGuardia, evaluarGuardiaConsulta, horasMesSinDias, lugarDeGuardia, planEnvioGuardias, textoPushGuardia, tipoDeTurnoPropio,
+  accionPorTipo, camposTurnoGuardia, evaluarGuardiaConsulta, horasMesSinDias, lugarDeGuardia, motivoNoConsultable, planEnvioGuardias,
+  seAsignaDirecto, seConsultaGuardia, textoAvisoAsignado, textoPushGuardia, tipoDeTurnoPropio,
 } from './consultaGuardia.mjs';
 
 const dia = { fecha: '2026-11-10', code: 'M', horaInicio: '08:00', horaFin: '16:00', horas: 8 };
@@ -74,22 +75,50 @@ describe('consulta de guardias propios', () => {
     assert.match(yaNo.motivo, /franco/);
   });
 
-  it('el PIN se pide al enviar: quien no se autoriza no se consulta', () => {
+  it('RET, libre, ESC y REF se asignan directo; franco y eventual solo se consultan', () => {
+    for (const t of ['RET', 'LIBRE', 'ESC', 'REF', 'ret', 'esc']) {
+      assert.equal(accionPorTipo(t), 'asignar', t);
+      assert.equal(seAsignaDirecto(t), true, t);
+      assert.equal(seConsultaGuardia(t), false, t);
+      assert.match(motivoNoConsultable(t), /se asigna directo, no se consulta\./i, t);
+    }
+    for (const t of ['FT', 'EVENTUAL']) {
+      assert.equal(accionPorTipo(t), 'preguntar', t);
+      assert.equal(seConsultaGuardia(t), true, t);
+      assert.equal(seAsignaDirecto(t), false, t);
+      assert.equal(motivoNoConsultable(t), null, t);
+    }
+    assert.equal(accionPorTipo('LICENCIA'), null);
+    assert.equal(accionPorTipo(null), null);
+    assert.equal(motivoNoConsultable('RET'), 'El retén se asigna directo, no se consulta.');
+    assert.equal(motivoNoConsultable('LIBRE'), 'El guardia sin turno se asigna directo, no se consulta.');
+    assert.equal(motivoNoConsultable('REF'), 'El refuerzo se asigna directo, no se consulta.');
+    assert.equal(textoAvisoAsignado({ fecha: '08/10', code: 'M', horario: '10:45–12:00', puesto: 'Puesto 1' }), 'Se te asignó cubrir 08/10 M 10:45–12:00 · Puesto 1');
+    assert.equal(textoAvisoAsignado({ fecha: '08/10', code: 'T', horario: null, puesto: '' }), 'Se te asignó cubrir 08/10 T');
+  });
+
+  it('el PIN se pide al enviar: quien no se autoriza no se consulta; RET y libre no entran en la consulta', () => {
     const candidatos = [
       { employeeId: 'a', tipo: 'FT', nombre: 'A' },
       { employeeId: 'b', tipo: 'FT', nombre: 'B' },
-      { employeeId: 'c', tipo: 'LIBRE', nombre: 'C' },
-      { employeeId: 'd', tipo: 'RET', nombre: 'D' },
+      { employeeId: 'c', tipo: 'FT', nombre: 'C' },
+      { employeeId: 'd', tipo: 'FT', nombre: 'D' },
+      { employeeId: 'r', tipo: 'RET', nombre: 'R' },
+      { employeeId: 'l', tipo: 'LIBRE', nombre: 'L' },
     ];
     const evaluaciones = [
       { employeeId: 'a', blocked: [], authorizations: [{ kind: 'DESCANSO' }] },
       { employeeId: 'b', blocked: ['Licencia V ese día.'], authorizations: [] },
       { employeeId: 'c', blocked: [], authorizations: [{ kind: 'TOPE' }] },
       { employeeId: 'd', blocked: [], authorizations: [] },
+      { employeeId: 'r', blocked: [], authorizations: [] },
+      { employeeId: 'l', blocked: [], authorizations: [] },
     ];
     const sinPin = planEnvioGuardias({ candidatos, evaluaciones, puedeFt: true });
     assert.deepEqual(sinPin.consultables.map((c) => c.employeeId), ['d']);
-    assert.equal(sinPin.omitidos.length, 3);
+    assert.equal(sinPin.omitidos.length, 5);
+    assert.match(sinPin.omitidos.find((o) => o.employeeId === 'r').motivo, /retén se asigna directo/);
+    assert.match(sinPin.omitidos.find((o) => o.employeeId === 'l').motivo, /sin turno se asigna directo/);
 
     const conPin = planEnvioGuardias({
       candidatos, evaluaciones, puedeFt: true,
@@ -97,10 +126,10 @@ describe('consulta de guardias propios', () => {
       topeMes: { c: true },
     });
     assert.deepEqual(conPin.consultables.map((c) => c.employeeId), ['a', 'c', 'd']);
-    assert.deepEqual(conPin.omitidos.map((o) => o.employeeId), ['b']);
+    assert.deepEqual(conPin.omitidos.map((o) => o.employeeId), ['b', 'r', 'l']);
 
     const sinFt = planEnvioGuardias({ candidatos: [candidatos[3], candidatos[0]], evaluaciones, puedeFt: false });
-    assert.deepEqual(sinFt.consultables.map((c) => c.employeeId), ['d']);
+    assert.deepEqual(sinFt.consultables.map((c) => c.employeeId), []);
     assert.match(sinFt.omitidos[0].motivo, /franco trabajado/);
   });
 

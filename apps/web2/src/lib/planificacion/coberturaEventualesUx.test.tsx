@@ -3,9 +3,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import {
+  AvisoEventualesSoloConsulta,
   BarraPreguntar,
-  ConfirmarAsignacion,
-  ModoEventualesSelector,
   NoDisponiblesLista,
   TarjetaEventual,
   type CandidatoTarjeta,
@@ -19,22 +18,30 @@ import {
   CoberturaTabs,
   ConsultaDiaBox,
   FilaCandidatoNomina,
-  ModoCoberturaSwitch,
+  NominaAyuda,
   NoDisponiblesNomina,
 } from '@/components/planificacion/CoberturaModalV2';
 import { CandidatosHueco } from '@/components/movil/PlanificacionMovilView';
+import { dedupeNomina } from '@/lib/planificacion/nominaPersonas.mjs';
 import { buildBrandCSS, buildCompanyTheme, companyButtonColor } from '@/lib/companyTheme';
 import {
+  TEXTO_EVENTUALES_SOLO_CONSULTA,
+  TEXTO_NOMINA_AYUDA,
+  accionCobertura,
   accionParaMotivo,
   cambiosManualesSobreConsulta,
   consultaAbiertaEnFecha,
   consultaDelDia,
   diaLoResuelveConsulta,
   estadoDiaCobertura,
+  etiquetaTipoNomina,
   linkFichaEventual,
+  modoBarraNomina,
+  notaFilaNomina,
   novedadesDeConsultas,
   quitarBorradorQuePisaConsulta,
   textoAccionPrincipal,
+  textoAvisoAsignadoDia,
   textoBarraAsignar,
   textoBarraSplit,
   textoBotonAsignar,
@@ -43,12 +50,12 @@ import {
   textoRangoDias,
   textoToastAcepto,
   textoTooltipConsulta,
+  tipoDesdeRolDia,
   resumenConsultaDia,
   separarCandidatos,
   horasDelBloque,
   textoBarraPreguntar,
   textoBotonEnviar,
-  textoConfirmarAsignacion,
   textoDosContratos,
   textoHorasBloque,
   textoTopeBloque,
@@ -125,17 +132,41 @@ test('la barra de preguntar nombra el turno, sin «Lugares»; el bloque junta lo
   assert.match(vacia, /<button[^>]*disabled=""[^>]*data-consulta-enviar[^>]*>Marcá a quién preguntar<\/button>/);
 });
 
-test('asignar directo pide confirmación corta y avisa que no se le pregunta', () => {
-  assert.equal(textoConfirmarAsignacion('ABALLAY, Juan'), 'Asignar a ABALLAY sin preguntarle. Se arma el contrato y el alta ARCA al guardar.');
-  const sel = renderToStaticMarkup(<ModoEventualesSelector modo="asignar" onModo={() => {}} />);
-  assert.match(sel, /data-eventuales-modo="asignar"/);
-  assert.match(sel, /Preguntar disponibilidad/);
-  assert.match(sel, /recomendado/);
-  assert.match(sel, /No se le pregunta: al tocar la tarjeta queda asignado\./);
-  const conf = renderToStaticMarkup(<ConfirmarAsignacion nombre="ABALLAY, Juan" onConfirmar={() => {}} onCancelar={() => {}} />);
-  assert.match(conf, /data-asignar-confirmar/);
-  assert.match(conf, /Asignar a ABALLAY sin preguntarle/);
-  assert.match(conf, /data-asignar-ok/);
+test('regla 06/10: RET, libre, ESC y REF se asignan directo; franco y eventual solo se consultan', () => {
+  // Rol del día de la grilla → tipo de candidato.
+  assert.equal(tipoDesdeRolDia('RETEN'), 'RET');
+  assert.equal(tipoDesdeRolDia('ESC'), 'ESC');
+  assert.equal(tipoDesdeRolDia('REF'), 'REF');
+  assert.equal(tipoDesdeRolDia('FREE'), 'LIBRE');
+  assert.equal(tipoDesdeRolDia('FRANCO'), 'FT');
+  assert.equal(tipoDesdeRolDia('WORKING'), null);
+  assert.equal(tipoDesdeRolDia('LICENCIA'), null);
+  // Acción por tipo.
+  for (const t of ['RET', 'LIBRE', 'ESC', 'REF'] as const) assert.equal(accionCobertura(t), 'asignar', t);
+  for (const t of ['FT', 'EVENTUAL'] as const) assert.equal(accionCobertura(t), 'preguntar', t);
+  assert.equal(accionCobertura(null), null);
+  // Etiqueta y nota de la fila.
+  assert.deepEqual(etiquetaTipoNomina('REF'), { tag: 'REF', tono: 'indigo' });
+  assert.deepEqual(etiquetaTipoNomina('FT'), { tag: 'Franco · FT', tono: 'violet' });
+  assert.equal(notaFilaNomina('RET'), 'retén · se asigna directo');
+  assert.equal(notaFilaNomina('LIBRE'), 'se asigna directo');
+  assert.equal(notaFilaNomina('FT'), 'solo se consulta · franco trabajado (PIN si hace falta)');
+  assert.equal(notaFilaNomina('FT', { puedeFt: false }), 'solo se consulta · falta el permiso de franco trabajado');
+  // La barra sigue lo elegido: una persona a asignar manda sobre los marcados.
+  assert.equal(modoBarraNomina({ seleccionado: true, marcados: 2 }), 'asignar');
+  assert.equal(modoBarraNomina({ seleccionado: false, marcados: 2 }), 'preguntar');
+  assert.equal(modoBarraNomina({ seleccionado: false, marcados: 0 }), 'preguntar');
+  // Aviso que recibe el asignado directo al guardar.
+  assert.equal(textoAvisoAsignadoDia('2026-10-08', 'M', '10:45–12:00', 'Puesto 1'), 'Se te asignó cubrir 08/10 M 10:45–12:00 · Puesto 1');
+  // Sin switch global: una línea de ayuda en Nómina y otra en Eventuales.
+  const ayuda = renderToStaticMarkup(<NominaAyuda />);
+  assert.match(ayuda, /data-nomina-ayuda/);
+  assert.match(ayuda, new RegExp(TEXTO_NOMINA_AYUDA.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.doesNotMatch(ayuda, /Asignar directo/);
+  const aviso = renderToStaticMarkup(<AvisoEventualesSoloConsulta />);
+  assert.match(aviso, /data-eventuales-solo-consulta/);
+  assert.match(aviso, /A los eventuales solo se les pregunta/);
+  assert.equal(TEXTO_EVENTUALES_SOLO_CONSULTA.includes('contrato y el alta ARCA'), true);
 });
 
 test('la tarjeta es compacta: nombre, horas del mes, distancia y teléfono; la casilla solo al preguntar', () => {
@@ -146,6 +177,13 @@ test('la tarjeta es compacta: nombre, horas del mes, distancia y teléfono; la c
   assert.match(preguntar, /351-555/);
   assert.doesNotMatch(preguntar, /text-rose/);
   assert.doesNotMatch(preguntar, /Confiabilidad/);
+  const sinPushTarjeta = renderToStaticMarkup(
+    <TarjetaEventual c={{ ...aballay, canal: { sinPush: true } }} modo="preguntar" marcado onToggle={() => {}} onAsignar={() => {}} />,
+  );
+  assert.match(sinPushTarjeta, /data-sin-push="20111111112"/);
+  assert.match(sinPushTarjeta, /No tiene la app instalada: lo ve al entrar a la app; si es urgente, llamalo/);
+  assert.doesNotMatch(sinPushTarjeta, /Sin app/);
+  assert.doesNotMatch(sinPushTarjeta, /Le llega por mail/);
   const asignar = renderToStaticMarkup(<TarjetaEventual c={aballay} modo="asignar" marcado={false} onToggle={() => {}} onAsignar={() => {}} />);
   assert.doesNotMatch(asignar, /data-consulta-cuil/);
   assert.match(asignar, /title="Asignar a ABALLAY, Juan"/);
@@ -170,10 +208,19 @@ test('el resumen del día muestra la consulta en vivo: esperando, aceptó, venci
       { nombre: 'CASAS, Luis', estado: 'NO', hora: '10:20' },
     ],
   };
-  assert.equal(resumenConsultaDia(abierta), 'Consultados: 3 · esperando respuesta (vence 11:15) · 1 no');
+  assert.equal(resumenConsultaDia(abierta), 'Consultados: 3 · 0 con aviso push · esperando (vence 11:15) · 1 no');
+  const conPush = {
+    ...abierta,
+    respuestas: [
+      { nombre: 'ABALLAY, Juan', estado: 'PENDIENTE', hora: null, pushEnviado: true },
+      { nombre: 'BRIZUELA, Ana', estado: 'PENDIENTE', hora: null, pushEnviado: false },
+      { nombre: 'CASAS, Luis', estado: 'NO', hora: '10:20', pushEnviado: false },
+    ],
+  };
+  assert.equal(resumenConsultaDia(conPush), 'Consultados: 3 · 1 con aviso push · esperando (vence 11:15) · 1 no');
   const aceptada = { ...abierta, status: 'COMPLETA', respuestas: [{ nombre: 'ABALLAY, Juan', estado: 'ASIGNADO', hora: '10:42' }, { nombre: 'BRIZUELA, Ana', estado: 'CUBIERTO', hora: null }] };
   assert.equal(resumenConsultaDia(aceptada), 'ABALLAY aceptó 10:42 → suplente');
-  assert.equal(resumenConsultaDia({ ...abierta, status: 'VENCIDA' }), 'Consultados: 3 · venció sin respuesta · 1 no');
+  assert.equal(resumenConsultaDia({ ...abierta, status: 'VENCIDA' }), 'Consultados: 3 · 0 con aviso push · venció sin respuesta · 1 no');
   assert.equal(resumenConsultaDia(null), null);
   // Estado «no le llegó»: sin app ni mail (NO_LLEGO con motivo) y aviso por mail; la consulta cerrada sin destinatarios.
   const noLlego = {
@@ -186,7 +233,7 @@ test('el resumen del día muestra la consulta en vivo: esperando, aceptó, venci
   };
   assert.equal(
     resumenConsultaDia(noLlego),
-    'Consultados: 3 · esperando respuesta (vence 11:15) · A ABALLAY no le llegó: no tiene la app · A Pérez le avisamos por mail: no tiene la app',
+    'Consultados: 3 · 0 con aviso push · esperando (vence 11:15)',
   );
   const sinDestinatarios = { ...abierta, status: 'SIN_DESTINATARIOS', respuestas: [{ nombre: 'ABALLAY ROLON', estado: 'NO_LLEGO', hora: null, motivo: 'permiso denegado' }] };
   assert.equal(resumenConsultaDia(sinDestinatarios), 'Consultados: 1 · no le llegó a nadie · A ABALLAY no le llegó: permiso denegado');
@@ -219,7 +266,7 @@ test('el resumen del día muestra la consulta en vivo: esperando, aceptó, venci
   );
   assert.match(box, /data-consulta-dia="consultando"/);
   assert.match(box, /Consultando · vence 11:15/);
-  assert.match(box, /Consultados: 3 · esperando respuesta \(vence 11:15\) · 1 no/);
+  assert.match(box, /Consultados: 3 · 0 con aviso push · esperando \(vence 11:15\) · 1 no/);
   assert.match(box, /data-consulta-dia-cancelar/);
   assert.match(box, /Cancelar consulta/);
   const boxOk = renderToStaticMarkup(<ConsultaDiaBox estado={acepto} resumen={resumenConsultaDia(aceptada)} abierta={false} onCancelar={() => {}} />);
@@ -319,64 +366,75 @@ test('la columna de días marca, selecciona, quita y aplica a los marcados; el p
   assert.match(tabs, /Ext \+ Adel/);
   const sinEventuales = renderToStaticMarkup(<CoberturaTabs tab="nomina" onTab={() => {}} eventuales={false} split />);
   assert.doesNotMatch(sinEventuales, /data-cobertura-tab="eventuales"/);
-  const modo = renderToStaticMarkup(<ModoCoberturaSwitch modo="preguntar" onModo={() => {}} puedePreguntar />);
-  assert.match(modo, /data-cobertura-modo="preguntar"/);
-  assert.match(modo, /Asignar directo/);
-  assert.equal(renderToStaticMarkup(<ModoCoberturaSwitch modo="asignar" onModo={() => {}} puedePreguntar={false} />), '');
-
+  // El franco lleva casilla (se consulta como FT); no tiene botón «Asignar».
   const fila = renderToStaticMarkup(
     <FilaCandidatoNomina
-      c={{ id: 'e1', nombre: 'FERRERO, Juan', meta: '142 h este mes · 3 km', tag: 'Libre', tono: 'emerald' }}
-      modo="preguntar" marcado seleccionado={false} onToggle={() => {}} onElegir={() => {}}
+      c={{ id: 'e1', nombre: 'FERRERO, Juan', meta: '142 h este mes · 3 km', tag: 'Franco · FT', tono: 'violet', nota: notaFilaNomina('FT') }}
+      accion="preguntar" marcado seleccionado={false} onToggle={() => {}} onElegir={() => {}}
     />,
   );
+  assert.match(fila, /data-candidato-accion="preguntar"/);
   assert.match(fila, /data-consulta-nomina="e1"[^>]*checked=""/);
   assert.match(fila, /FERRERO, Juan/);
+  assert.match(fila, /solo se consulta · franco trabajado/);
+  assert.doesNotMatch(fila, /data-fila-asignar/);
+  // Retén, libre, ESC y REF: botón «Asignar» (una persona por día), sin casilla.
   const filaAsignar = renderToStaticMarkup(
     <FilaCandidatoNomina
-      c={{ id: 'e2', nombre: 'GOMEZ, Ana', meta: '160 h este mes', tag: 'Franco · FT', tono: 'violet', nota: 'franco trabajado · pide PIN' }}
-      modo="asignar" marcado={false} seleccionado onToggle={() => {}} onElegir={() => {}}
+      c={{ id: 'e2', nombre: 'GOMEZ, Ana', meta: '160 h este mes', tag: 'Retén', tono: 'amber', nota: notaFilaNomina('RET') }}
+      accion="asignar" marcado={false} seleccionado={false} onToggle={() => {}} onElegir={() => {}}
     />,
   );
+  assert.match(filaAsignar, /data-candidato-accion="asignar"/);
   assert.doesNotMatch(filaAsignar, /type="checkbox"/);
-  assert.match(filaAsignar, /data-candidato-activo="1"/);
-  assert.match(filaAsignar, /pide PIN/);
-  // Sin app ni mail: chip «Sin app», casilla deshabilitada aunque esté marcado, link para crear el acceso.
-  const sinApp = renderToStaticMarkup(
+  assert.match(filaAsignar, /<button[^>]*data-fila-asignar="e2"[^>]*>Asignar<\/button>/);
+  assert.match(filaAsignar, /retén · se asigna directo/);
+  const filaElegida = renderToStaticMarkup(
+    <FilaCandidatoNomina
+      c={{ id: 'e6', nombre: 'RIOS, Nico', meta: '120 h este mes', tag: 'REF', tono: 'indigo', nota: notaFilaNomina('REF') }}
+      accion="asignar" marcado={false} seleccionado onToggle={() => {}} onElegir={() => {}}
+    />,
+  );
+  assert.match(filaElegida, /data-candidato-activo="1"/);
+  assert.match(filaElegida, /<button[^>]*data-fila-asignar="e6"[^>]*>Elegido<\/button>/);
+  assert.match(filaElegida, /refuerzo · se asigna directo/);
+  // Sin push: casilla visible y tildable, ícono gris, sin chip amarillo.
+  const sinPush = renderToStaticMarkup(
     <FilaCandidatoNomina
       c={{
-        id: 'e4', nombre: 'DIAZ, Pedro', meta: '120 h este mes', tag: 'Libre', tono: 'emerald',
-        canal: { chip: 'Sin app', motivoApp: 'no tiene la app', porMail: false, sinCanal: true, crearAccesoHref: '/admin/empleados/e4' },
+        id: 'e4', nombre: 'DIAZ, Pedro', meta: '120 h este mes', tag: 'Franco · FT', tono: 'violet',
+        canal: { sinPush: true },
       }}
-      modo="preguntar" marcado seleccionado={false} onToggle={() => {}} onElegir={() => {}}
+      accion="preguntar" marcado seleccionado={false} onToggle={() => {}} onElegir={() => {}}
     />,
   );
-  assert.match(sinApp, /data-candidato-sin-canal="1"/);
-  assert.match(sinApp, /data-sin-app="e4"/);
-  assert.match(sinApp, /Sin app · no tiene la app/);
-  assert.match(sinApp, /data-crear-acceso="e4"/);
-  assert.match(sinApp, /type="checkbox"[^>]*disabled=""/);
-  assert.doesNotMatch(sinApp, /checked=""/);
-  // Sin app pero con mail: se puede tildar y dice que le llega por mail.
-  const porMail = renderToStaticMarkup(
+  assert.match(sinPush, /data-sin-push="e4"/);
+  assert.match(sinPush, /sin push/);
+  assert.match(sinPush, /No tiene la app instalada: lo ve al entrar a la app; si es urgente, llamalo/);
+  assert.match(sinPush, /type="checkbox"/);
+  assert.match(sinPush, /appearance:\s*auto/);
+  assert.match(sinPush, /checked=""/);
+  assert.doesNotMatch(sinPush, /disabled=""/);
+  assert.doesNotMatch(sinPush, /Sin app/);
+  assert.doesNotMatch(sinPush, /Le llega por mail/);
+  const conPushFila = renderToStaticMarkup(
     <FilaCandidatoNomina
-      c={{ id: 'e5', nombre: 'SOSA, Ana', meta: '100 h este mes', tag: 'Libre', tono: 'emerald', canal: { chip: 'Sin app', motivoApp: 'no tiene la app', porMail: true, sinCanal: false } }}
-      modo="preguntar" marcado seleccionado={false} onToggle={() => {}} onElegir={() => {}}
+      c={{ id: 'e5', nombre: 'SOSA, Ana', meta: '100 h este mes', tag: 'Franco · FT', tono: 'violet', canal: { sinPush: false } }}
+      accion="preguntar" marcado={false} seleccionado={false} onToggle={() => {}} onElegir={() => {}}
     />,
   );
-  assert.match(porMail, /data-por-mail="e5"/);
-  assert.match(porMail, /Le llega por mail/);
-  assert.match(porMail, /checked=""/);
-  assert.doesNotMatch(porMail, /data-crear-acceso/);
-  // En Asignar directo el canal no importa: se puede elegir igual.
-  const asignarSinApp = renderToStaticMarkup(
+  assert.match(conPushFila, /type="checkbox"/);
+  assert.doesNotMatch(conPushFila, /data-sin-push/);
+  assert.doesNotMatch(conPushFila, /disabled=""/);
+  // Al que se asigna directo no se le muestra el canal: no se le pregunta.
+  const asignarSinPush = renderToStaticMarkup(
     <FilaCandidatoNomina
-      c={{ id: 'e4', nombre: 'DIAZ, Pedro', meta: '120 h este mes', tag: 'Libre', tono: 'emerald', canal: { chip: 'Sin app', sinCanal: true } }}
-      modo="asignar" marcado={false} seleccionado onToggle={() => {}} onElegir={() => {}}
+      c={{ id: 'e4', nombre: 'DIAZ, Pedro', meta: '120 h este mes', tag: 'Libre', tono: 'emerald', canal: { sinPush: true } }}
+      accion="asignar" marcado={false} seleccionado onToggle={() => {}} onElegir={() => {}}
     />,
   );
-  assert.match(asignarSinApp, /data-candidato-activo="1"/);
-  assert.doesNotMatch(asignarSinApp, /data-sin-app/);
+  assert.match(asignarSinPush, /data-candidato-activo="1"/);
+  assert.doesNotMatch(asignarSinPush, /data-sin-push/);
   const noDisp = renderToStaticMarkup(<NoDisponiblesNomina rows={[{ id: 'e3', nombre: 'LOPEZ, Raul', motivo: 'En servicio ese día' }]} />);
   assert.match(noDisp, /data-no-disponibles="1"/);
   assert.match(noDisp, /No disponibles \(1\)/);
@@ -409,7 +467,7 @@ test('el celular cubre un hueco sin «Lugares» y colapsa a los no disponibles',
         onTab={() => {}}
         candidatos={[]}
         eventuales={[
-          { cuil: '20111111112', nombre: 'ABALLAY, Juan', distanciaKm: 4.2, motivo: null, elegible: true },
+          { cuil: '20111111112', nombre: 'ABALLAY, Juan', distanciaKm: 4.2, motivo: null, elegible: true, canal: { sinPush: true } },
           { cuil: '20222222223', nombre: 'BRIZUELA, Ana', distanciaKm: null, motivo: 'Sin contrato marco vigente.', motivoCodigo: 'SIN_MARCO', elegible: false },
         ]}
         elegidoId={null}
@@ -427,9 +485,59 @@ test('el celular cubre un hueco sin «Lugares» y colapsa a los no disponibles',
   assert.doesNotMatch(html, /data-consulta-lugares/);
   assert.match(html, /Preguntar a 1 · el primero que acepte cubre el turno/);
   assert.match(html, /Enviar consulta \(1\)/);
+  assert.match(html, /data-sin-push="20111111112"/);
+  const casilla = html.match(/<input[^>]*data-consulta-cuil="20111111112"[^>]*>/)?.[0] || '';
+  assert.match(casilla, /type="checkbox"/);
+  assert.doesNotMatch(casilla, /disabled/);
+  assert.doesNotMatch(html, /Sin app/);
+  assert.doesNotMatch(html, /Le llega por mail/);
   assert.match(html, /data-no-disponibles="1"/);
   assert.match(html, /No disponibles \(1\)/);
   assert.doesNotMatch(html, /data-plan-candidato="20222222223"/);
+  // Regla 06/10: al eventual solo se le pregunta. No hay «Confirmar» en esa pestaña.
+  assert.doesNotMatch(html, /data-plan-confirmar/);
+  assert.match(html, /data-eventuales-solo-consulta/);
+});
+
+test('el celular: FT solo se consulta (casilla + enviar), plantel y otros se asignan con Confirmar', () => {
+  const cands = [
+    { employeeId: 'g1', name: 'GUERRERO, Luis', tab: 'plantel' as const, monthHours: 40, cap: 200, km: 1.2, blocked: false, reason: null },
+    { employeeId: 'f1', name: 'FONTANA, Ana', tab: 'ft' as const, monthHours: 150, cap: 200, km: 3, blocked: false, reason: null },
+    { employeeId: 'f2', name: 'LOPEZ, Raul', tab: 'ft' as const, monthHours: 198, cap: 200, km: 5, blocked: true, reason: 'Quedaría en 206 h. Tope 200.' },
+  ];
+  const ft = renderToStaticMarkup(
+    <CandidatosHueco
+      tab="ft" onTab={() => {}} candidatos={cands} eventuales={[]} elegidoId={null} puedeFt puedeEventuales
+      onElegir={() => {}} onConfirmar={() => {}}
+      consultaFtIds={['f1']} onToggleConsultaFt={() => {}} onConsultarFt={() => {}}
+    />,
+  );
+  assert.match(ft, /data-ft-solo-consulta/);
+  const casilla = ft.match(/<input[^>]*data-consulta-ft="f1"[^>]*>/)?.[0] || '';
+  assert.match(casilla, /type="checkbox"/);
+  assert.match(casilla, /checked=""/);
+  assert.doesNotMatch(ft, /data-consulta-ft="f2"/, 'el bloqueado no tiene casilla');
+  assert.match(ft, /Quedaría en 206 h/);
+  assert.doesNotMatch(ft, /data-plan-confirmar/);
+  assert.match(ft, /data-consulta-bar="ft"/);
+  assert.match(ft, /Preguntar a 1 · el primero que acepte cubre el turno como franco trabajado/);
+  assert.match(ft, /<button[^>]*data-consulta-enviar="ft"[^>]*>Enviar consulta \(1\)<\/button>/);
+  assert.doesNotMatch(ft, /data-plan-candidato="g1"/);
+
+  const plantel = renderToStaticMarkup(
+    <CandidatosHueco
+      tab="plantel" onTab={() => {}} candidatos={cands} eventuales={[]} elegidoId="g1" puedeFt puedeEventuales
+      onElegir={() => {}} onConfirmar={() => {}}
+      consultaFtIds={[]} onToggleConsultaFt={() => {}} onConsultarFt={() => {}}
+    />,
+  );
+  assert.match(plantel, /data-plan-candidato="g1"/);
+  const confirmar = plantel.match(/<button[^>]*data-plan-confirmar="1"[^>]*>Confirmar<\/button>/)?.[0] || '';
+  assert.ok(confirmar, 'hay botón Confirmar');
+  assert.doesNotMatch(confirmar, /\sdisabled=""/);
+  assert.doesNotMatch(plantel, /data-consulta-bar/);
+  assert.doesNotMatch(plantel, /type="checkbox"/);
+  assert.match(plantel, /recibe el aviso por la app/);
 });
 
 test('un día con consulta abierta no guarda el suplente local y la celda avisa', () => {
@@ -506,4 +614,18 @@ test('un día con consulta abierta no guarda el suplente local y la celda avisa'
   );
   assert.match(celda, /data-consulta-celda="1"/);
   assert.match(celda, /Consulta enviada · vence 11:15/);
+});
+
+test('la nómina lista una fila por persona aunque tenga dos legajos o dos turnos', () => {
+  const filas = dedupeNomina([
+    { id: 'a', name: 'PEREZ, ANA', dayRole: 'RETEN', km: 4, uid: 'u1' },
+    { id: 'b', name: 'PEREZ ANA', dayRole: 'FRANCO', km: 1, uid: '' },
+    { id: 'c', name: 'SOSA, LUIS', dayRole: 'FREE', km: 8 },
+    { id: 'c', name: 'SOSA, LUIS', dayRole: 'ESC', km: 2 },
+  ]);
+  assert.equal(filas.length, 2);
+  assert.equal(filas[0].id, 'a');
+  assert.equal(filas[0].dayRole, 'RETEN');
+  assert.equal(filas[1].id, 'c');
+  assert.equal(filas[1].dayRole, 'ESC');
 });

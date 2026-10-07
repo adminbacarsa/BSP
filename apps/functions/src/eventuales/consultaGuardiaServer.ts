@@ -14,11 +14,18 @@ const INV = 'consultas_disponibilidad_invitaciones';
 const FRANCO = new Set(['F', 'FF', 'FP']);
 
 type JornadaIn = { fecha: string; horaInicio: string; horaFin: string; horas?: number; code?: string; name?: string; positionName?: string };
-type GuardiaIn = { employeeId: string; tipo: 'FT' | 'RET' | 'LIBRE'; nombre?: string };
+/**
+ * Regla 06/10: por consulta solo entra el franco (FT). RET, libre, ESC y REF se asignan directo en la grilla
+ * y la callable los rechaza con «se asigna directo». Los tipos viejos siguen en el tipo para revalidar
+ * consultas ya abiertas.
+ */
+type GuardiaIn = { employeeId: string; tipo: 'FT' | 'RET' | 'LIBRE' | 'ESC' | 'REF'; nombre?: string };
 type AuthIn = { employeeId: string; kind: 'DESCANSO' | 'TOPE'; motivo: string; autorizadoPor?: string };
 
 type LibGuardia = {
   evaluarGuardiaConsulta: (p: Record<string, unknown>) => { ok: boolean; codigo?: string; motivo?: string; marcas?: Record<string, unknown> };
+  seConsultaGuardia: (tipo: string) => boolean;
+  motivoNoConsultable: (tipo: string) => string | null;
   textoPushGuardia: (p: { dias: number; tipo: string; lugar: string }) => string;
   camposTurnoGuardia: (p: { tipo: string; code: string; nombreCubierto?: string }) => {
     code: string; isFranco: boolean; isFrancoTrabajado: boolean; coveredFromFranco: boolean; comments: string;
@@ -169,16 +176,17 @@ async function topeMesDe(empresaId: string, employeeId: string, meses: string[])
 export async function evaluarGuardiaEnServidor(p: {
   empresaId: string;
   employeeId: string;
-  tipo: 'FT' | 'RET' | 'LIBRE';
+  tipo: GuardiaIn['tipo'];
   jornadas: JornadaIn[];
   autorizaciones: AuthIn[];
 }): Promise<{ ok: boolean; codigo?: string; motivo?: string; marcas?: Record<string, unknown> }> {
   const reglas = await libGuardia();
   const fechas = p.jornadas.map((j) => j.fecha).sort();
   const desde = sumarDias(fechas[0], -4);
-  const hasta = fechas[fechas.length - 1];
   const meses = [...new Set(fechas.map((f) => f.slice(0, 7)))];
   const mesDesde = `${meses[0]}-01`;
+  // El tope de 200 h se mira contra todo el mes (también lo planificado después del hueco), como la grilla.
+  const hasta = `${meses[meses.length - 1]}-31`;
   const turnos = await turnosEnVentana(p.employeeId, p.empresaId, mesDesde < desde ? mesDesde : desde, hasta);
   const topeMes = await topeMesDe(p.empresaId, p.employeeId, meses);
   return reglas.evaluarGuardiaConsulta({
@@ -195,7 +203,7 @@ export async function asignarGuardiaDeConsulta(p: {
   empresaId: string;
   employeeId: string;
   nombre: string;
-  tipo: 'FT' | 'RET' | 'LIBRE';
+  tipo: GuardiaIn['tipo'];
   jornadas: JornadaIn[];
   objectiveId: string | null;
   objectiveName: string | null;
@@ -293,16 +301,23 @@ export async function crearConsultaGuardias(data: Record<string, unknown>, conte
   const consulta = await libConsulta();
   const empresaId = String(data?.empresaId || '');
   const jornadas = ((data?.jornadas || []) as Partial<JornadaIn>[]).filter(validarJornada);
-  const pedidos = ((data?.guardias || []) as Partial<GuardiaIn>[])
+  const pedidosTodos = ((data?.guardias || []) as Partial<GuardiaIn>[])
     .map((g) => ({
       employeeId: String(g?.employeeId || '').trim(),
       tipo: String(g?.tipo || '').toUpperCase() as GuardiaIn['tipo'],
       nombre: g?.nombre ? String(g.nombre) : '',
     }))
-    .filter((g) => g.employeeId && (g.tipo === 'FT' || g.tipo === 'RET' || g.tipo === 'LIBRE'));
+    .filter((g) => g.employeeId && g.tipo);
+  // RET, libre, ESC y REF no se consultan: se asignan directo desde la grilla.
+  const directos = pedidosTodos.filter((g) => !reglas.seConsultaGuardia(g.tipo));
+  const pedidos = pedidosTodos.filter((g) => reglas.seConsultaGuardia(g.tipo));
   const unicos = [...new Map(pedidos.map((g) => [g.employeeId, g])).values()];
   if (!empresaId || !jornadas.length) throw new functions.https.HttpsError('invalid-argument', 'Faltan empresa o jornadas.');
-  if (!unicos.length) throw new functions.https.HttpsError('invalid-argument', 'Elegí al menos un guardia.');
+  if (!unicos.length) {
+    const motivoDirecto = directos.length ? reglas.motivoNoConsultable(directos[0].tipo) : null;
+    if (motivoDirecto) throw new functions.https.HttpsError('failed-precondition', motivoDirecto);
+    throw new functions.https.HttpsError('invalid-argument', 'Elegí al menos un guardia.');
+  }
   if (unicos.length > 30) throw new functions.https.HttpsError('invalid-argument', 'Máximo 30 guardias por consulta.');
   const jornadasNorm: JornadaIn[] = jornadas.map((j) => ({
     fecha: j.fecha,
@@ -330,7 +345,10 @@ export async function crearConsultaGuardias(data: Record<string, unknown>, conte
   const lugar = [clientName, objectiveName, positionName].map((s) => String(s || '').trim()).filter(Boolean).join(' · ');
 
   const elegibles: { employeeId: string; tipo: GuardiaIn['tipo']; nombre: string; uid: string; mail: string; pushEstado: string }[] = [];
-  const omitidos: { employeeId: string; motivo: string }[] = [];
+  const omitidos: { employeeId: string; motivo: string }[] = directos.map((g) => ({
+    employeeId: g.employeeId,
+    motivo: reglas.motivoNoConsultable(g.tipo) || 'Se asigna directo, no se consulta.',
+  }));
   for (const g of unicos) {
     if (g.tipo === 'FT' && !permiso.ft) {
       omitidos.push({ employeeId: g.employeeId, motivo: 'Sin permiso para franco trabajado.' });

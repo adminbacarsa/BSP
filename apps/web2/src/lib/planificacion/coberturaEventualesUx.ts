@@ -1,10 +1,69 @@
 /**
- * Solapa «Eventuales (bolsa)» del modal de cobertura: dos modos (preguntar o asignar directo),
- * elegibles arriba y bloqueados aparte, y el estado de la consulta en el resumen del día.
- * Sin Firestore: lo que decide la pantalla se prueba acá.
+ * Modal de cobertura de Planificación (Nómina · Eventuales · Ext+Adel): qué acción tiene cada fila
+ * según el tipo de candidato (regla 06/10: RET, libre, ESC y REF se asignan directo; franco y
+ * eventual solo se consultan), elegibles arriba y bloqueados aparte, y el estado de la consulta en el
+ * resumen del día. Sin Firestore: lo que decide la pantalla se prueba acá.
  */
+import { accionPorTipo, textoAvisoAsignado } from '@/lib/eventuales/consultaGuardia.mjs';
 
+/** `asignar` sigue existiendo para Eventos y Sustituir (sin consulta); en cobertura es siempre `preguntar`. */
 export type ModoEventuales = 'preguntar' | 'asignar';
+
+export type TipoCandidatoCobertura = 'RET' | 'LIBRE' | 'ESC' | 'REF' | 'FT' | 'EVENTUAL';
+export type AccionCobertura = 'asignar' | 'preguntar';
+
+/** Rol del día en la grilla (`getEmpDayRole`) → tipo de candidato. WORKING y LICENCIA no son candidatos. */
+export function tipoDesdeRolDia(role: string | null | undefined): TipoCandidatoCobertura | null {
+  switch (String(role || '').toUpperCase()) {
+    case 'RETEN': return 'RET';
+    case 'ESC': return 'ESC';
+    case 'REF': return 'REF';
+    case 'FREE': return 'LIBRE';
+    case 'FRANCO': return 'FT';
+    default: return null;
+  }
+}
+
+/** RET · libre · ESC · REF → `asignar`; franco · eventual → `preguntar`. */
+export function accionCobertura(tipo: TipoCandidatoCobertura | string | null | undefined): AccionCobertura | null {
+  return accionPorTipo(tipo) as AccionCobertura | null;
+}
+
+export function etiquetaTipoNomina(tipo: TipoCandidatoCobertura): { tag: string; tono: 'violet' | 'amber' | 'sky' | 'emerald' | 'indigo' } {
+  switch (tipo) {
+    case 'RET': return { tag: 'Retén', tono: 'amber' };
+    case 'ESC': return { tag: 'ESC', tono: 'sky' };
+    case 'REF': return { tag: 'REF', tono: 'indigo' };
+    case 'FT': return { tag: 'Franco · FT', tono: 'violet' };
+    default: return { tag: 'Libre', tono: 'emerald' };
+  }
+}
+
+/** Nota corta de la fila: qué pasa con esa persona. */
+export function notaFilaNomina(tipo: TipoCandidatoCobertura, opts?: { puedeFt?: boolean }): string | null {
+  if (tipo === 'FT') {
+    if (opts && opts.puedeFt === false) return 'solo se consulta · falta el permiso de franco trabajado';
+    return 'solo se consulta · franco trabajado (PIN si hace falta)';
+  }
+  if (tipo === 'ESC') return 'turno escuela · se asigna directo';
+  if (tipo === 'REF') return 'refuerzo · se asigna directo';
+  if (tipo === 'RET') return 'retén · se asigna directo';
+  return 'se asigna directo';
+}
+
+/** La barra de abajo sigue lo elegido: una persona a asignar manda; si no, la consulta a los marcados. */
+export function modoBarraNomina(p: { seleccionado: boolean; marcados: number }): AccionCobertura {
+  return p.seleccionado ? 'asignar' : 'preguntar';
+}
+
+export const TEXTO_NOMINA_AYUDA = 'Retén, libre, ESC y REF: Asignar (una persona por día). Franco: se le pregunta.';
+export const TEXTO_EVENTUALES_SOLO_CONSULTA = 'A los eventuales solo se les pregunta. El primero que acepte queda como suplente; el contrato y el alta ARCA se arman al guardar.';
+export const TEXTO_AVISO_ASIGNADO_AL_GUARDAR = 'Al guardar el cronograma recibe el aviso por la app';
+
+/** «Se te asignó cubrir 08/10 M 10:45–12:00 · Puesto 1»: lo que le llega al asignado directo al guardar. */
+export function textoAvisoAsignadoDia(fecha: string, code?: string | null, horario?: string | null, puesto?: string | null): string {
+  return textoAvisoAsignado({ fecha: ddmm(fecha), code, horario, puesto });
+}
 
 export const ESPERA_OPCIONES: { minutos: number; label: string }[] = [
   { minutos: 30, label: '30 min' },
@@ -13,9 +72,6 @@ export const ESPERA_OPCIONES: { minutos: number; label: string }[] = [
   { minutos: 0, label: 'hasta el inicio' },
 ];
 export const ESPERA_DEFAULT_MIN = 30;
-
-export const TEXTO_MODO_PREGUNTAR = 'Se les manda la consulta a la app. El primero que acepte queda como suplente.';
-export const TEXTO_MODO_ASIGNAR = 'No se le pregunta: al tocar la tarjeta queda asignado.';
 
 type CandidatoBase = { elegible: boolean; motivoCodigo?: string | null };
 
@@ -178,16 +234,12 @@ export function apellidoDe(nombre: string): string {
   return String(nombre || '').split(',')[0].trim() || String(nombre || '').trim();
 }
 
-export function textoConfirmarAsignacion(nombre: string): string {
-  return `Asignar a ${apellidoDe(nombre)} sin preguntarle. Se arma el contrato y el alta ARCA al guardar.`;
-}
-
 export type ConsultaResumenIn = {
   status: string;
   venceAtMs?: number | null;
   jornadas?: { fecha: string }[];
-  /** `NO_LLEGO` trae `motivo` («no tiene la app», «permiso denegado»); `AVISO_MAIL` = le avisamos por mail. */
-  respuestas: { nombre: string; estado: string; hora?: string | null; motivo?: string | null }[];
+  /** `pushEnviado` cuenta en «M con aviso push». `NO_LLEGO` queda solo en consultas viejas. */
+  respuestas: { nombre: string; estado: string; hora?: string | null; motivo?: string | null; pushEnviado?: boolean }[];
 };
 
 /** «Pérez, Ana» → Pérez; «ABALLAY ROLON» → ABALLAY (igual que `apellidoDe` de `lib/eventuales/consultaCanal.mjs`). */
@@ -232,7 +284,7 @@ export function consultaDelDia<T extends ConsultaResumenIn>(consultas: T[], fech
 }
 
 /**
- * Línea del resumen del día: «Consultados: 3 · esperando respuesta (vence 11:15)»
+ * Línea del resumen del día: «Consultados: 3 · 1 con aviso push»
  * y, cuando alguien acepta, «ABALLAY aceptó 10:42 → suplente».
  */
 export function resumenConsultaDia(consulta: ConsultaResumenIn | null | undefined): string | null {
@@ -243,17 +295,20 @@ export function resumenConsultaDia(consulta: ConsultaResumenIn | null | undefine
     return aceptaron.map((r) => `${apellidoDe(r.nombre)} aceptó${r.hora ? ` ${r.hora}` : ''} → suplente`).join(' · ');
   }
   const n = respuestas.length;
+  const conPush = respuestas.filter((r) => r.pushEnviado === true).length;
   const no = respuestas.filter((r) => r.estado === 'NO').length;
   const noTxt = no ? ` · ${no} no` : '';
-  const entrega = textoEntregaConsulta(respuestas);
-  const entregaTxt = entrega ? ` · ${entrega}` : '';
+  const base = `Consultados: ${n} · ${conPush} con aviso push`;
   if (consulta.status === 'ABIERTA') {
     const vence = horaArDe(consulta.venceAtMs);
-    return `Consultados: ${n} · esperando respuesta${vence ? ` (vence ${vence})` : ''}${noTxt}${entregaTxt}`;
+    return `${base}${vence ? ` · esperando (vence ${vence})` : ''}${noTxt}`;
   }
-  if (consulta.status === 'VENCIDA') return `Consultados: ${n} · venció sin respuesta${noTxt}${entregaTxt}`;
-  if (consulta.status === 'SIN_DESTINATARIOS') return `Consultados: ${n} · no le llegó a nadie${entregaTxt}`;
-  return `Consultados: ${n} · sin suplente${noTxt}${entregaTxt}`;
+  if (consulta.status === 'VENCIDA') return `${base} · venció sin respuesta${noTxt}`;
+  if (consulta.status === 'SIN_DESTINATARIOS') {
+    const entrega = textoEntregaConsulta(respuestas);
+    return `Consultados: ${n} · no le llegó a nadie${entrega ? ` · ${entrega}` : ''}`;
+  }
+  return `${base} · sin suplente${noTxt}`;
 }
 
 const AUSENCIA_LOCAL = new Set(['V', 'L', 'E', 'A', 'AA', 'PG', 'ART', 'SGS', 'SUS']);

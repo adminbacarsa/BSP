@@ -80,7 +80,7 @@ import { ingestPlanningTurnosSnapshot } from '@/lib/planificacion/planningTurnos
 import { belongsToEmpresaView, empresaCollectionQuery, fetchPlanificacionPublishStatus } from '@/lib/multiempresa';
 import type { SlaPlanningRow } from '@/lib/slaPlanningMatch';
 import { shouldScopeQueriesToEmpresa } from '@/lib/tenantScope';
-import { asignarEventualPlanificacion, canConsultarDisponibilidad, canConvocarEventuales, eventualErrorMessage } from '@/services/eventualesPlanificacionService';
+import { canConsultarDisponibilidad, canConvocarEventuales, eventualErrorMessage } from '@/services/eventualesPlanificacionService';
 
 type ObjGeo = { id: string; name: string; clientId: string; clientName: string; lat: number | null; lng: number | null };
 type Sheet =
@@ -146,6 +146,8 @@ export function PlanificacionMovil() {
   const puedeConsultar = canConsultarDisponibilidad(isSuperAdmin, rolePermissions);
   const veBolsa = puedeEventuales || puedeConsultar;
   const [consultaCuils, setConsultaCuils] = useState<string[]>([]);
+  /** Francos marcados para consultarlos como FT (regla 06/10: al franco se le pregunta, no se asigna). */
+  const [consultaFtIds, setConsultaFtIds] = useState<string[]>([]);
   const actorName = user?.displayName || user?.email || 'Planificación celular';
   const cronograma = useCronogramaSinPublicar(empresaId, puedeLeer);
 
@@ -382,6 +384,8 @@ export function PlanificacionMovil() {
     setCompaneroId(null);
     setTab('plantel');
     setEventuales([]);
+    setConsultaCuils([]);
+    setConsultaFtIds([]);
   };
 
   /**
@@ -427,34 +431,18 @@ export function PlanificacionMovil() {
       if (sintetico) stage({ kind: 'nuevo', franja: { ...franjaAbierta, ...banda }, employeeId, employeeName, ft, bolsaCuil });
       else stage({ kind: 'asignar', franjaId: franjaAbierta.id, employeeId, employeeName, ft, bolsaCuil, banda });
     };
+    // Regla 06/10: al eventual y al franco solo se les pregunta; no hay asignación directa desde acá.
     if (tab === 'eventuales') {
-      const ev = eventuales.find((row) => row.cuil === elegido);
-      try {
-        const res = await runCallableOnline('Asignar eventual', () => asignarEventualPlanificacion({
-          empresaId,
-          cuil: elegido,
-          modo: 'LEGAJO',
-          objectiveId: franjaAbierta.objectiveId,
-          objectiveName: franjaAbierta.objectiveName,
-          clientId: franjaAbierta.clientId || objetivo?.clientId,
-          clientName: franjaAbierta.clientName || objetivo?.clientName,
-          positionName: franjaAbierta.positionName,
-          objetivoGeo: objetivo?.lat != null && objetivo.lng != null ? { lat: objetivo.lat, lng: objetivo.lng } : null,
-          turnos: [{ fecha: franjaAbierta.date, horaInicio: banda.start, horaFin: banda.end, horas: banda.hours, code: banda.code, positionName: franjaAbierta.positionName }],
-        }));
-        emitir(res.employeeId, res.nombre || ev?.nombre || 'Eventual', false, elegido);
-      } catch (error) {
-        toast.error(eventualErrorMessage(error, 'La bolsa requiere conexión.'));
-      }
+      toast.message('A los eventuales solo se les pregunta: marcá a quién y enviá la consulta.');
       return;
     }
     const cand = candidatos.find((c) => c.employeeId === elegido);
     if (!cand || cand.blocked) return;
-    if (cand.tab === 'ft' && !puedeFt) {
-      toast.error('Falta el permiso de franco trabajado.');
+    if (cand.tab === 'ft') {
+      toast.message('Al franco se le pregunta: marcá a quién y enviá la consulta.');
       return;
     }
-    emitir(cand.employeeId, cand.name, cand.tab === 'ft');
+    emitir(cand.employeeId, cand.name, false);
   };
 
   useEffect(() => {
@@ -480,11 +468,6 @@ export function PlanificacionMovil() {
 
   const consultarDisponibilidad = async (cuils: string[]) => {
     if (!franjaAbierta || cuils.length === 0) return;
-    const recibibles = cuils.filter((cuil) => !eventuales.find((ev) => ev.cuil === cuil)?.canal?.sinCanal);
-    if (!recibibles.length) {
-      toast.message('A nadie le va a llegar: no tienen la app ni mail.');
-      return;
-    }
     const banda = bandaCubrir ?? bandaParaCubrir(franjaAbierta);
     try {
       await runCallableOnline('Consultar disponibilidad', async () => {
@@ -498,7 +481,7 @@ export function PlanificacionMovil() {
           positionName: franjaAbierta.positionName,
           objetivoGeo: objetivo?.lat != null && objetivo.lng != null ? { lat: objetivo.lat, lng: objetivo.lng } : null,
           jornadas: [{ fecha: franjaAbierta.date, horaInicio: banda.start, horaFin: banda.end, horas: banda.hours, code: banda.code, positionName: franjaAbierta.positionName }],
-          cuils: recibibles,
+          cuils,
           titularEmployeeId: franjaAbierta.employeeId && franjaAbierta.employeeId !== 'VACANTE' ? franjaAbierta.employeeId : null,
           // Un hueco de un puesto: siempre un lugar, el primero que acepte cubre.
           lugares: 1,
@@ -511,6 +494,50 @@ export function PlanificacionMovil() {
           toast.message('Podés cerrar esta ventana. El día queda en espera.');
         }
         setConsultaCuils([]);
+      });
+    } catch (error) {
+      toast.error(eventualErrorMessage(error, 'La consulta requiere conexión.'));
+    }
+  };
+
+  /**
+   * Consulta a los francos como FT por la misma callable (`guardias`). El PIN de descanso o tope lo
+   * resuelve el escritorio; acá, si el servidor lo pide, se muestra el motivo.
+   */
+  const consultarFrancos = async (employeeIds: string[]) => {
+    if (!franjaAbierta || employeeIds.length === 0) return;
+    if (!puedeFt) {
+      toast.error('Falta el permiso de franco trabajado.');
+      return;
+    }
+    const banda = bandaCubrir ?? bandaParaCubrir(franjaAbierta);
+    const guardias = employeeIds.map((employeeId) => ({
+      employeeId,
+      tipo: 'FT' as const,
+      nombre: candidatos.find((c) => c.employeeId === employeeId)?.name || employeeId,
+    }));
+    try {
+      await runCallableOnline('Consultar francos', async () => {
+        const call = httpsCallable<Record<string, unknown>, { resumen?: string; status?: string; omitidos?: { motivo: string }[] }>(functions, 'crearConsultaDisponibilidad');
+        const res = await call({
+          empresaId,
+          objectiveId: franjaAbierta.objectiveId,
+          objectiveName: franjaAbierta.objectiveName,
+          clientId: franjaAbierta.clientId || objetivo?.clientId || null,
+          clientName: franjaAbierta.clientName || objetivo?.clientName || null,
+          positionName: franjaAbierta.positionName,
+          jornadas: [{ fecha: franjaAbierta.date, horaInicio: banda.start, horaFin: banda.end, horas: banda.hours, code: banda.code, positionName: franjaAbierta.positionName }],
+          guardias,
+          cubreEmployeeId: franjaAbierta.employeeId && franjaAbierta.employeeId !== 'VACANTE' ? franjaAbierta.employeeId : null,
+          cubreNombre: franjaAbierta.employeeId && franjaAbierta.employeeId !== 'VACANTE' ? franjaAbierta.employeeName : null,
+          lugares: 1,
+          venceMinutos: 120,
+        });
+        toast.success(res.data?.resumen || 'Consulta enviada.');
+        const omitidos = res.data?.omitidos || [];
+        if (omitidos.length) toast.message(omitidos.slice(0, 3).map((o) => o.motivo).join(' · '), { duration: 8000 });
+        toast.message('Podés cerrar esta ventana. El día queda en espera.');
+        setConsultaFtIds([]);
       });
     } catch (error) {
       toast.error(eventualErrorMessage(error, 'La consulta requiere conexión.'));
@@ -746,17 +773,16 @@ export function PlanificacionMovil() {
             elegidoId={elegido}
             puedeFt={puedeFt}
             puedeEventuales={veBolsa}
-            puedeAsignarEventual={puedeEventuales}
             consultaCuils={consultaCuils}
             onToggleConsulta={puedeConsultar ? (cuil) => {
-              const ev = eventuales.find((row) => row.cuil === cuil);
-              if (ev?.canal?.sinCanal) {
-                toast.message(`${ev.nombre}: no le va a llegar. Llamalo o creá su acceso.`);
-                return;
-              }
               setConsultaCuils((prev) => (prev.includes(cuil) ? prev.filter((c) => c !== cuil) : [...prev, cuil]));
             } : undefined}
             onConsultar={puedeConsultar ? (cuils) => { void consultarDisponibilidad(cuils); } : undefined}
+            consultaFtIds={consultaFtIds}
+            onToggleConsultaFt={puedeConsultar && puedeFt ? (id) => {
+              setConsultaFtIds((prev) => (prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id]));
+            } : undefined}
+            onConsultarFt={puedeConsultar && puedeFt ? (ids) => { void consultarFrancos(ids); } : undefined}
             onElegir={setElegido}
             onConfirmar={() => { void confirmarCandidato(); }}
           />

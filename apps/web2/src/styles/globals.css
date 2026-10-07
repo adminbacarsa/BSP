@@ -412,10 +412,17 @@ body:not(.dark) .text-slate-400 { color: #64748b; }
 :root { color-scheme: light; }
 .dark { color-scheme: dark; }
 
-/* Evitar que Chrome oscurezca inputs/selects con su propio dark mode */
+/* Evitar que Chrome oscurezca inputs/selects con su propio dark mode.
+   La casilla y el radio conservan el control nativo: si no, en Preguntar no se ve. */
 input, select, textarea, button {
   -webkit-appearance: none;
   appearance: none;
+}
+input[type="checkbox"],
+input[type="radio"] {
+  -webkit-appearance: auto;
+  appearance: auto;
+  accent-color: #4f46e5;
 }
 
 /* ═══════════════════════════════════════════════════════════════

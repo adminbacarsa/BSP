@@ -1,7 +1,7 @@
 /**
- * Consulta que no tiene a quién llegarle.
- * Sin uid y sin mail → se cierra al toque y avisa a Planificación.
- * Uno con app y otro sin → se envía al que tiene y el estado nombra al otro.
+ * La consulta se notifica por la bandeja aunque no tengan la app.
+ * Sin uid ni mail → sigue ABIERTA, invitación PENDIENTE y user_notifications.
+ * Uno con token y otro sin → «Consultados: 2 · 1 con aviso push».
  *   firebase emulators:exec --only firestore --config firebase.e2e-p2.json --project demo-consulta-sin-app "node scripts/eval-consulta-sin-app-emulator.mjs"
  */
 import { createRequire } from 'module';
@@ -69,12 +69,15 @@ async function main() {
   const novedades = await db.collection('novedades').where('empresaId', '==', EMP).get();
   const aviso = novedades.docs.some((d) => d.data().type === 'CONSULTA_DISPONIBILIDAD_SIN_DESTINATARIOS' && d.data().consultaId === solaId);
   const pushes = solaId ? await db.collection('user_notifications').where('consultaId', '==', solaId).get() : { empty: true, size: 0 };
+  const solaNotif = pushes.empty ? null : pushes.docs.map((d) => d.data())[0];
   report(
-    'sin app ni mail se cierra y avisa ya',
-    sola.ok && sola.value?.status === 'SIN_DESTINATARIOS' && solaDoc?.status === 'SIN_DESTINATARIOS'
-      && /no le llegó: no tiene la app/.test(String(solaDoc?.resumen || ''))
-      && solaInv?.estado === 'CANCELADA' && typeof solaInv?.venceAtMs === 'number' && solaInv.venceAtMs > 0 && solaInv?.cerradaAt
-      && aviso && pushes.empty && !solaDoc?.venceAt,
+    'sin app ni mail queda en la bandeja y no se cierra',
+    sola.ok && sola.value?.status === 'ABIERTA' && solaDoc?.status === 'ABIERTA'
+      && /Consultados: 1 · 0 con aviso push/.test(String(solaDoc?.resumen || ''))
+      && solaInv?.estado === 'PENDIENTE' && solaInv?.entregaPush === 'sin push (no tiene la app instalada)'
+      && typeof solaInv?.venceAtMs === 'number' && solaInv.venceAtMs > 0
+      && !aviso && pushes.size === 1 && solaNotif && Object.prototype.hasOwnProperty.call(solaNotif, 'employeeId') && !solaNotif.uid
+      && solaNotif?.type === 'CONSULTA_DISPONIBILIDAD',
     `${sola.value?.status || sola.message} resumen=${solaDoc?.resumen} inv=${solaInv?.estado} aviso=${aviso} push=${pushes.size}`,
   );
 
@@ -91,12 +94,13 @@ async function main() {
     ? (await db.collection('user_notifications').where('consultaId', '==', mixId).get()).docs.map((d) => d.data())
     : [];
   report(
-    'se envía al que tiene la app y el estado nombra al que no',
-    mezcla.ok && mixDoc?.status === 'ABIERTA' && invCon?.estado === 'PENDIENTE' && invSin?.estado === 'NO_LLEGO'
-      && /QUIROGA/.test(String(mixDoc?.resumen || '')) && /no le llegó/.test(String(mixDoc?.resumen || ''))
+    'los dos quedan pendientes y el resumen cuenta el push',
+    mezcla.ok && mixDoc?.status === 'ABIERTA' && invCon?.estado === 'PENDIENTE' && invSin?.estado === 'PENDIENTE'
+      && invCon?.entregaPush === 'push enviado' && invSin?.entregaPush === 'sin push (no tiene la app instalada)'
+      && String(mixDoc?.resumen || '') === 'Consultados: 2 · 1 con aviso push'
       && notif.some((n) => n.uid === CON.uid && n.type === 'CONSULTA_DISPONIBILIDAD')
-      && !notif.some((n) => n.uid === '' || n.uid == null),
-    `${mixDoc?.status} ${mixDoc?.resumen} con=${invCon?.estado} sin=${invSin?.estado} push=${notif.length}`,
+      && notif.some((n) => !n.uid && n.type === 'CONSULTA_DISPONIBILIDAD'),
+    `${mixDoc?.status} ${mixDoc?.resumen} con=${invCon?.estado}/${invCon?.entregaPush} sin=${invSin?.estado}/${invSin?.entregaPush} push=${notif.length}`,
   );
 
   const guardiaId = 'emp-sin-app';
@@ -119,12 +123,16 @@ async function main() {
   }, PLANNER));
   const gId = guardia.value?.consultaId;
   const gDoc = gId ? (await db.collection('consultas_disponibilidad').doc(gId).get()).data() : null;
+  const gInv = gId ? (await db.collection('consultas_disponibilidad_invitaciones').doc(`${gId}_emp_${guardiaId}`).get()).data() : null;
+  const gNotif = gId ? (await db.collection('user_notifications').where('consultaId', '==', gId).get()).docs.map((d) => d.data()) : [];
   const gNov = (await db.collection('novedades').where('consultaId', '==', gId || 'ninguna').get()).docs
     .some((d) => d.data().type === 'CONSULTA_DISPONIBILIDAD_SIN_DESTINATARIOS');
   report(
-    'guardia propio sin app: mismo cierre',
-    guardia.ok && gDoc?.status === 'SIN_DESTINATARIOS' && /MOLINA/.test(String(gDoc?.resumen || '')) && gNov,
-    `${guardia.value?.status || guardia.message} ${gDoc?.resumen} aviso=${gNov}`,
+    'guardia propio sin app: bandeja con employeeId y sigue abierta',
+    guardia.ok && gDoc?.status === 'ABIERTA' && /Consultados: 1 · 0 con aviso push/.test(String(gDoc?.resumen || ''))
+      && gInv?.estado === 'PENDIENTE' && gInv?.entregaPush === 'sin push (no tiene la app instalada)'
+      && gNotif.some((n) => n.employeeId === guardiaId && !n.uid) && !gNov,
+    `${guardia.value?.status || guardia.message} ${gDoc?.resumen} inv=${gInv?.estado} aviso=${gNov} notif=${gNotif.length}`,
   );
 
   const falla = results.filter((r) => !r.ok).length;
