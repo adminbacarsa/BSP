@@ -30,6 +30,9 @@ export type PortalInboxNormalized = {
   contratoId?: string;
   consultaId?: string;
   invitacionId?: string;
+  turnoId?: string;
+  closedAt?: unknown;
+  closedMotivo?: string;
   jornadas?: { fecha?: string; code?: string; horaInicio?: string; horaFin?: string }[];
 };
 
@@ -55,7 +58,10 @@ export function normalizePortalInboxItem(
     requiresAck: raw.requiresAck === true,
     ackedAt: raw.ackedAt,
     createdAt: raw.createdAt,
-    shiftId: asOptionalString(raw.shiftId),
+    shiftId: asOptionalString(raw.shiftId) || asOptionalString(raw.turnoId),
+    turnoId: asOptionalString(raw.turnoId),
+    closedAt: raw.closedAt,
+    closedMotivo: asOptionalString(raw.closedMotivo),
     objectiveId: asOptionalString(raw.objectiveId),
     objectiveName: asOptionalString(raw.objectiveName ?? raw.objetivoNombre),
     positionName: asOptionalString(raw.positionName ?? raw.puestoNombre ?? raw.puesto),

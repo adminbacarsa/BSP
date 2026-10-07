@@ -110,9 +110,71 @@ describe('HeroShiftPanel · puesto y retenido (accent claro)', () => {
       accentColor: '#D32F2F',
     });
     const t = text(html);
-    assert.match(t, /RETENIDO · HOY/);
-    assert.match(t, /Retenido en Plaza de la Musica/);
+    assert.match(t, /RETENIDO/);
+    assert.doesNotMatch(t, /TURNO ACTUAL/);
+    assert.match(t, /Caminos · Plaza de la Musica/);
+    assert.match(html, /line-through|text-decoration/);
+    assert.match(html, /#b91c1c/);
     assert.equal((html.match(/Cómo llegar/g) || []).length, 0);
+  });
+
+  it('retenido: horario tachado, contador, relevo, tope y Entendido en la misma tarjeta', () => {
+    const html = render({
+      sectionLabel: 'Turno actual',
+      isToday: true,
+      timeRange: '11:30–15:15',
+      placement: {
+        client: 'Caminos',
+        objective: 'Peaje 9 Norte',
+        position: 'Puesto 2',
+        line: 'Caminos · Peaje 9 Norte · Puesto 2',
+        objectiveLocation: null,
+      },
+      isRetention: true,
+      accentColor: '#D32F2F',
+      retencion: {
+        lineaEstado: 'terminó 15:15 · retenido desde 15:15',
+        hace: 'hace 12 min',
+        espera: 'Esperando a BRIZUELA, llega ~15:45',
+        tope: 'podés quedarte hasta 23:29',
+      },
+      onEntendido: () => {},
+    });
+    const t = text(html);
+    assert.match(t, /^RETENIDO|RETENIDO/);
+    assert.doesNotMatch(t, /TURNO ACTUAL/);
+    assert.match(t, /11:30–15:15/);
+    assert.match(html, /line-through|text-decoration/);
+    assert.match(t, /terminó 15:15 · retenido desde 15:15/);
+    assert.match(t, /hace 12 min/);
+    assert.match(t, /Esperando a BRIZUELA, llega ~15:45/);
+    assert.match(t, /podés quedarte hasta 23:29/);
+    assert.match(t, /Entendido/);
+    assert.match(t, /Peaje 9 Norte/);
+    assert.match(html, /#b91c1c/);
+    assert.equal((t.match(/Cómo llegar/g) || []).length, 0);
+  });
+
+  it('retenido sin relevo: sin relevo confirmado; con acuse no hay botón', () => {
+    const html = render({
+      sectionLabel: 'Turno actual',
+      isToday: true,
+      timeRange: '11:30–15:15',
+      placement: peaje,
+      isRetention: true,
+      retencion: {
+        lineaEstado: 'terminó 15:15 · retenido desde 15:00',
+        hace: 'hace 12 min',
+        espera: 'sin relevo confirmado',
+        tope: 'podés quedarte hasta 00:29',
+      },
+      acuseAt: new Date('2026-10-07T15:08:00-03:00').getTime(),
+      onEntendido: () => {},
+    });
+    const t = text(html);
+    assert.match(t, /sin relevo confirmado/);
+    assert.match(t, /Entendido · 15:08/);
+    assert.equal((html.match(/<button/g) || []).length, 0);
   });
 
   it('convocatoria aceptada futura: EN CAMINO + cliente·objetivo', () => {

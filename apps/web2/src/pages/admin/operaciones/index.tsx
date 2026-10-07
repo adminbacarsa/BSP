@@ -81,6 +81,7 @@ import { convocadoEnCaminoLabel } from '@/lib/operaciones/convocadoVentana';
 import { formatOpsNotaLine } from '@/lib/operaciones/opsNota';
 import { ConvocatoriaTimeline } from '@/components/operaciones/ConvocatoriaTimeline';
 import { isExtraNonReliefShift, isReliefEligibleShift, isStandbyRetDisponible, formatRetentionDuration, formatRetentionLine, addShiftToOpsBucket, objectiveVisibleOnOpsTab, opsObjectiveHasActivity, estadoAusenciaCc, contadorAusLabel } from '@cosp/ops-core';
+import { textoAcuseRetencion } from '@/lib/operaciones/retencionAcuse';
 import {
     isEventShift,
     eventGroupKey as getEventGroupKey,
@@ -1249,6 +1250,9 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                 {shift.isPresent && shift.retentionWait && !shift.cierreSinFranja && (
                     <p className="text-[9px] font-bold leading-snug text-orange-700 break-words" title={formatRetentionLine(shift.retentionWait) || ''}>{formatRetentionLine(shift.retentionWait)}</p>
                 )}
+                {textoAcuseRetencion((shift as { retencionAcuseAt?: unknown }).retencionAcuseAt) && (shift.isRetention || shift.retentionWait) && (
+                    <p className="text-[9px] font-bold leading-snug text-orange-700 break-words" data-ops-retencion-acuse="1">{textoAcuseRetencion((shift as { retencionAcuseAt?: unknown }).retencionAcuseAt)}</p>
+                )}
                 {shift.relevoAusenteAviso && (
                     <p className="text-[9px] font-bold leading-snug text-slate-600 break-words" data-relevo-ausente="1">{shift.relevoAusenteAviso}</p>
                 )}
@@ -1336,6 +1340,9 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                 </div>
                 {shift.isPresent && shift.retentionWait && !shift.cierreSinFranja && (
                     <p className="text-[10px] font-bold text-orange-700 mb-1.5 pl-10">{formatRetentionLine(shift.retentionWait)}</p>
+                )}
+                {textoAcuseRetencion((shift as { retencionAcuseAt?: unknown }).retencionAcuseAt) && (shift.isRetention || shift.retentionWait) && (
+                    <p className="text-[10px] font-bold text-orange-700 mb-1.5 pl-10" data-ops-retencion-acuse="1">{textoAcuseRetencion((shift as { retencionAcuseAt?: unknown }).retencionAcuseAt)}</p>
                 )}
                 {shift.relevoAusenteAviso && (
                     <p className="text-[10px] font-bold text-slate-600 mb-1.5 pl-10" data-relevo-ausente="1">{shift.relevoAusenteAviso}</p>

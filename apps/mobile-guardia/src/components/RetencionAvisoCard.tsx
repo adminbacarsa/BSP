@@ -1,33 +1,39 @@
 import { StyleSheet, Text, View } from 'react-native';
-import type { ObjectiveLocation, Shift } from '@cosp/portal-types';
 import { radius, spacing } from '../theme/tokens';
 import { useTheme } from '../theme/ThemeContext';
-import { buildRetencionCardModel, type RetencionCardInput } from '../lib/convocatoriaCard';
-import { ConvocatoriaCard } from './ConvocatoriaCard';
+import { CommandButton } from './ui/CommandButton';
+import { aMs, horaAr } from '../lib/retencionTarjeta';
 
 type Props = {
-  avisos: RetencionCardInput['aviso'][];
-  shifts?: Shift[];
-  objectivesMap?: Record<string, ObjectiveLocation>;
+  texto: string;
+  acuseAt?: unknown;
+  busy?: boolean;
+  onEntendido: () => void;
 };
 
-/** RETENCION_AVISO: el CC avisa que seguís retenido. No se responde. */
-export function RetencionAvisoCard({ avisos, shifts = [], objectivesMap = {} }: Props) {
+/** Retención viva del turno. No se rechaza. */
+export function RetencionAvisoCard({ texto, acuseAt, busy, onEntendido }: Props) {
   const { palette } = useTheme();
-  if (avisos.length === 0) return null;
-  const nowMs = Date.now();
+  const acuseMs = aMs(acuseAt);
 
   return (
-    <View style={[styles.wrap, { backgroundColor: palette.card, borderColor: '#b91c1c' }]}>
+    <View style={[styles.wrap, { backgroundColor: palette.card, borderColor: '#b91c1c' }]} testID="retencion-turno-card">
       <Text style={[styles.kicker, { color: '#b91c1c' }]}>Retención</Text>
-      {avisos.map((n) => (
-        <ConvocatoriaCard
-          key={n.id}
-          model={buildRetencionCardModel({ aviso: n, shifts, objectivesMap })}
-          nowMs={nowMs}
-          highlighted
+      <Text style={[styles.body, { color: palette.onSurface }]}>{texto}</Text>
+      {acuseMs > 0 ? (
+        <Text style={[styles.acuse, { color: palette.onSurfaceMuted }]} testID="retencion-acuse">
+          Entendido · {horaAr(acuseMs)}
+        </Text>
+      ) : (
+        <CommandButton
+          label="Entendido"
+          variant="secondary"
+          loading={busy}
+          disabled={busy}
+          onPress={onEntendido}
+          testID="retencion-entendido"
         />
-      ))}
+      )}
     </View>
   );
 }
@@ -44,5 +50,14 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 0.8,
     textTransform: 'uppercase',
+  },
+  body: {
+    fontSize: 15,
+    fontWeight: '700',
+    lineHeight: 21,
+  },
+  acuse: {
+    fontSize: 13,
+    fontWeight: '600',
   },
 });

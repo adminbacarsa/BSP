@@ -1494,6 +1494,28 @@ export const avisarGuardiaOperaciones = functions.https.onCall(async (data, cont
   return r;
 });
 
+/** El guardia acusa que vio la retención. No se rechaza: es obligatoria. */
+export const acusarRetencion = functions.https.onCall(async (data, context) => {
+  if (!context.auth?.uid) {
+    throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');
+  }
+  const { acusarRetencion: run } = await import('./ops/acusarRetencion');
+  const r = await run(admin.firestore(), {
+    shiftId: String(data?.shiftId || ''),
+    authUid: context.auth.uid,
+    actorName: String(context.auth.token.name || context.auth.token.email || 'Vigilador'),
+    role: context.auth.token.role,
+    type: context.auth.token.type,
+    asEmployeeId: data?.asEmployeeId ? String(data.asEmployeeId) : null,
+  });
+  if (r.ok === false) {
+    if (r.reason === 'NOT_FOUND') throw new functions.https.HttpsError('not-found', 'Turno no encontrado.');
+    if (r.reason === 'NO_ES_TUYO') throw new functions.https.HttpsError('permission-denied', 'Ese turno no es tuyo.');
+    throw new functions.https.HttpsError('failed-precondition', 'La retención ya terminó.');
+  }
+  return r;
+});
+
 export const revertirAusencia = functions.https.onCall(async (data, context) => {
   if (!context.auth?.uid) {
     throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');

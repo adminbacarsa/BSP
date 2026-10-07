@@ -15,6 +15,8 @@ import {
   type HeroShiftCardModel,
 } from '../../lib/heroShiftCard';
 import { formatCuandoTurno } from '../../lib/fechaTurno';
+import { aMs, horaAr, type VistaRetencionHero } from '../../lib/retencionTarjeta';
+import { CommandButton } from './CommandButton';
 
 const TZ = 'America/Argentina/Buenos_Aires';
 
@@ -60,6 +62,11 @@ type Props = {
   ev?: HeroEvDisplay | null;
   mapsUrl?: string | null;
   isRetention?: boolean;
+  /** Detalle vivo de la retención. Si falta, el encabezado RETENIDO igual cambia el filete. */
+  retencion?: VistaRetencionHero | null;
+  acuseAt?: unknown;
+  acuseBusy?: boolean;
+  onEntendido?: () => void;
   isConvocado?: boolean;
   empresaLabel?: string | null;
   /** Color de empresa (filete); si es claro se oscurece para AA. */
@@ -90,6 +97,10 @@ export function HeroShiftPanel({
   ev = null,
   mapsUrl = null,
   isRetention = false,
+  retencion = null,
+  acuseAt,
+  acuseBusy = false,
+  onEntendido,
   isConvocado = false,
   empresaLabel = null,
   accentColor = null,
@@ -125,6 +136,8 @@ export function HeroShiftPanel({
 
   const accent = resolveHeroAccentColor(accentColor, palette.primary);
   const filete = fileteColor(model, accent);
+  const retenido = model.kind === 'retenido';
+  const acuseMs = aMs(acuseAt);
 
   return (
     <View
@@ -139,7 +152,9 @@ export function HeroShiftPanel({
     >
       <View style={[styles.filete, { backgroundColor: filete }]} />
       <View style={[styles.inner, isCompact && styles.innerCompact]}>
-        <Text style={[styles.kicker, { color: palette.onSurfaceMuted }]}>{model.kicker}</Text>
+        <Text style={[styles.kicker, { color: retenido ? HERO_FILETE.retention : palette.onSurfaceMuted }]}>
+          {model.kicker}
+        </Text>
 
         {model.timeRange ? (
           <Text
@@ -147,10 +162,37 @@ export function HeroShiftPanel({
               styles.time,
               isCompact && styles.timeCompact,
               { color: palette.onSurface },
+              retenido && styles.timeStruck,
             ]}
           >
             {model.timeRange}
           </Text>
+        ) : null}
+
+        {retenido && retencion?.lineaEstado ? (
+          <Text style={[styles.retLine, { color: HERO_FILETE.retention }]}>{retencion.lineaEstado}</Text>
+        ) : null}
+        {retenido && retencion?.hace ? (
+          <Text style={[styles.retHace, { color: palette.onSurface }]}>{retencion.hace}</Text>
+        ) : null}
+        {retenido && retencion?.espera ? (
+          <Text style={[styles.retLine, { color: palette.onSurface }]}>{retencion.espera}</Text>
+        ) : null}
+        {retenido && retencion?.tope ? (
+          <Text style={[styles.retLine, { color: palette.onSurfaceMuted }]}>{retencion.tope}</Text>
+        ) : null}
+        {retenido && onEntendido ? (
+          acuseMs > 0 ? (
+            <Text style={[styles.retAcuse, { color: palette.onSurfaceMuted }]}>Entendido · {horaAr(acuseMs)}</Text>
+          ) : (
+            <CommandButton
+              label="Entendido"
+              variant="secondary"
+              loading={acuseBusy}
+              disabled={acuseBusy}
+              onPress={onEntendido}
+            />
+          )
         ) : null}
 
         {model.whereTitle ? (
@@ -264,6 +306,26 @@ const styles = StyleSheet.create({
   },
   timeCompact: {
     fontSize: 26,
+  },
+  timeStruck: {
+    textDecorationLine: 'line-through',
+    fontSize: 22,
+    fontWeight: '700',
+    opacity: 0.55,
+  },
+  retLine: {
+    fontSize: 15,
+    fontWeight: '700',
+    lineHeight: 21,
+  },
+  retHace: {
+    fontSize: 22,
+    fontWeight: '900',
+    letterSpacing: -0.3,
+  },
+  retAcuse: {
+    fontSize: 14,
+    fontWeight: '700',
   },
   whereTitle: {
     fontSize: 16,

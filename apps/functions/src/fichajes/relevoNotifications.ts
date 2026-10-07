@@ -200,6 +200,7 @@ export async function notifyRetencionAvisoRelevoTarde(
       type: 'RETENCION_AVISO',
       target: 'employee',
       turnoId: outDocId,
+      shiftId: outDocId,
       empresaId: empresaId || null,
       lateReliefEtaAtMs: etaAtMs,
       read: false,

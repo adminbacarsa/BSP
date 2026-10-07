@@ -10,6 +10,8 @@ import { radius, spacing } from '../../src/theme/tokens';
 import { useTheme } from '../../src/theme/ThemeContext';
 import { useResponsiveLayout } from '../../src/hooks/useResponsiveLayout';
 import { usePortalInbox, type PortalInboxItem } from '../../src/hooks/usePortalInbox';
+import { useEmployeeShifts } from '../../src/hooks/useEmployeeShifts';
+import { notifRetencionEsHistorial } from '../../src/lib/retencionTarjeta';
 import { useClockNow } from '../../src/hooks/useClockNow';
 import {
   alertaCuentaPorConfirmar,
@@ -69,7 +71,9 @@ function cardInput(
   coberturaById: Record<string, { status?: string; type?: string; timeoutAt?: unknown; endTime?: unknown; cancelReason?: string; respondedAt?: unknown; cancelledAt?: unknown }>,
   local: LocalReply | undefined,
   nowMs: number,
+  shifts: { id?: string }[] | null,
 ) {
+  const historial = notifRetencionEsHistorial(n, shifts, nowMs);
   return {
     type: n.type,
     title: n.title,
@@ -80,6 +84,8 @@ function cardInput(
     respondedAt: n.respondedAt,
     endTime: n.endTime,
     timeoutAt: n.timeoutAt,
+    closedAt: n.closedAt,
+    closedMotivo: n.closedMotivo || (historial ? 'Retención terminada' : undefined),
     conv: n.convocatoriaId ? coberturaById[n.convocatoriaId] ?? null : null,
     local: local ?? null,
     nowMs,
@@ -122,8 +128,9 @@ function AlertasScreenContent() {
   const { objectivesMap } = useObjectivesMap();
   const { palette } = useTheme();
   const { contentMaxWidth, horizontalPadding, isCompact } = useResponsiveLayout();
+  const { allShifts, loading: shiftsLoading } = useEmployeeShifts(empDocId, user?.uid ?? null);
   const { items, loading, coberturaById, markRead, acknowledge, respond, dismiss, markAllUnreadRead, dismissAll } =
-    usePortalInbox(user, previewEmpDocId);
+    usePortalInbox(user, previewEmpDocId, { shifts: allShifts, shiftsReady: !shiftsLoading });
   const now = useClockNow(15_000);
   const [localReply, setLocalReply] = useState<Record<string, LocalReply>>({});
   const showTestPush = isEmulatorMode() || isPreviewMode || isSuperAdmin;
@@ -182,12 +189,12 @@ function AlertasScreenContent() {
     let unread = 0;
     let confirm = 0;
     for (const n of items) {
-      const input = cardInput(n, coberturaById, localReply[n.id], nowMs);
+      const input = cardInput(n, coberturaById, localReply[n.id], nowMs, shiftsLoading ? null : allShifts);
       if (alertaCuentaSinLeer(input)) unread += 1;
       if (alertaCuentaPorConfirmar(input)) confirm += 1;
     }
     return { unread, confirm };
-  }, [items, coberturaById, localReply, now]);
+  }, [items, coberturaById, localReply, now, allShifts, shiftsLoading]);
   const unreadCount = attention.unread;
   const pendingAck = attention.confirm;
 
@@ -709,7 +716,7 @@ function AlertasScreenContent() {
           });
           const card = lineaCierre
             ? { closed: true as const, showCoverageButtons: false, showVenisButton: false, showAckButton: false, label: lineaCierre, atMs: null }
-            : resolveAlertaCard(cardInput(n, coberturaById, localReply[n.id], now.getTime()));
+            : resolveAlertaCard(cardInput(n, coberturaById, localReply[n.id], now.getTime(), shiftsLoading ? null : allShifts));
           const settled = !!lineaCierre || card.closed || (!needsAck && !isCoverage && !esConsulta && (n.read || !!n.ackedAt));
           const receivedAt = n.createdAt ? formatDateTimeAr(n.createdAt as never) : '';
           const resultLine = card.closed

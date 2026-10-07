@@ -131,7 +131,7 @@ function buildKicker(input: BuildHeroShiftCardInput, kind: HeroCardKind): string
       base = today ? `AUSENTE · ${today}` : 'AUSENTE';
       break;
     case 'retenido':
-      base = today ? `RETENIDO · ${today}` : 'RETENIDO';
+      base = 'RETENIDO';
       break;
     case 'convocado':
       base = today ? `EN CAMINO · ${today}` : 'EN CAMINO';
@@ -211,13 +211,16 @@ export function buildHeroShiftCardModel(input: BuildHeroShiftCardInput): HeroShi
   }
 
   if (kind === 'retenido') {
-    const obj = clean(input.placement.objective);
+    const client = clean(input.placement.client);
+    const objective = clean(input.placement.objective);
+    const position = clean(input.placement.position);
+    const whereTitle = [client, objective].filter(Boolean).join(' · ') || objective || client || 'Tu puesto';
     return {
       kind,
       kicker,
       timeRange,
-      whereTitle: obj ? `Retenido en ${obj}` : 'Retenido en tu puesto',
-      wherePlace: dedupePlace(input.placement.position, obj),
+      whereTitle,
+      wherePlace: dedupePlace(position, whereTitle),
       note: null,
       mapsUrl: clean(input.mapsUrl) || null,
       fileteTone: 'retention',
@@ -258,7 +261,7 @@ export function buildHeroShiftCardModel(input: BuildHeroShiftCardInput): HeroShi
 export const HERO_FILETE: Record<HeroShiftCardModel['fileteTone'], string> = {
   active: '', // se pisa con accent de empresa
   warning: '#d97706',
-  retention: '#c2410c',
+  retention: '#b91c1c',
   absent: '#b45309',
   neutral: '#94a3b8',
 };

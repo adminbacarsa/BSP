@@ -18,6 +18,7 @@ import { opsLateArrivalBadgeLabel } from '@/lib/operaciones/opsLateArrivalMonito
 import { formatIngresoLine } from '@/lib/operaciones/ingresoLabel';
 import { ALTA_ARCA_AVISO_TEXTO, ALTA_ARCA_AVISO_TITLE, altaArcaPendienteVisible } from '@/lib/operaciones/guardCardEstado';
 import { isExtraNonReliefShift, isReliefEligibleShift, formatRetentionDuration, formatRetentionLine, contadorAusLabel } from '@cosp/ops-core';
+import { textoAcuseRetencion } from '@/lib/operaciones/retencionAcuse';
 import { SeriesReliefPicker } from '@/components/operaciones/SeriesReliefPicker';
 import { ShiftCodeBadge } from '@/components/operaciones/ShiftCodeBadge';
 import { shiftHardCapAt } from '@/lib/operaciones/shiftHardCap';
@@ -1345,6 +1346,7 @@ export default function TacticalMapView() {
                                                     <p className="text-[10px] font-bold text-amber-700" title={ALTA_ARCA_AVISO_TITLE}>{ALTA_ARCA_AVISO_TEXTO}</p>
                                                 )}
                                                 {s.isPresent && s.retentionWait && !s.cierreSinFranja ? <p className="text-[10px] font-bold text-orange-700">{formatRetentionLine(s.retentionWait)}</p> : null}
+                                                {textoAcuseRetencion(s.retencionAcuseAt) && (s.isRetention || s.retentionWait) ? <p className="text-[10px] font-bold text-orange-700" data-ops-retencion-acuse="1">{textoAcuseRetencion(s.retencionAcuseAt)}</p> : null}
                                                 {s.relevoAusenteAviso ? <p className="text-[10px] font-bold text-slate-600" data-relevo-ausente="1">{s.relevoAusenteAviso}</p> : null}
                                                 {s.isPresent && formatIngresoLine(s) ? <p className="text-[10px] font-bold text-emerald-700">{formatIngresoLine(s)}</p> : null}
                                             </div>
