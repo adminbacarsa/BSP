@@ -6,6 +6,8 @@
  * verificación, UI) sea consistente y robusta frente a docs antiguos.
  */
 
+import { esAvisoPortalOperativo } from '@/lib/rrhh/avisoPortal.mjs';
+
 export const ABSENCE_TYPE_TO_CODE: Record<string, string> = {
     // Vacaciones
     'vacaciones': 'V',
@@ -239,6 +241,8 @@ export function isActiveAbsence(doc: any): boolean {
     // Confirmada: hecho operativo automático (No Presentación AA) — siempre activo
     if (st === 'confirmada') return true;
     if (st === 'en verificación' || st === 'en verificacion') return true;
+    // El aviso del portal («Ausencia con aviso») ya es ausencia, aunque haya quedado Pendiente.
+    if (esAvisoPortalOperativo(doc)) return true;
     // Pendiente: licencias/vacaciones esperan autorización; enfermedad/ART ya impactan planificación
     if (st === 'pendiente' || st === 'pending') return absenceNeedsMedicalVerification(doc);
     return true;

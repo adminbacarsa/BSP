@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Redirect, Stack, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -9,6 +9,7 @@ import {
   absenceTypeEmployeeHint,
   classifyAbsenceForEmployee,
   dateKeyLocal,
+  defaultAbsenceType,
   filterAbsenceTypesForFeatures,
   type AbsenceType,
 } from '@cosp/portal-core';
@@ -54,12 +55,16 @@ export default function NovedadScreen() {
     [portalFeatures.reportAbsence, portalFeatures.requestLicense],
   );
 
-  const [absenceType, setAbsenceType] = useState<AbsenceType>(typeOptions[0] ?? 'Ausencia con aviso');
+  const [absenceType, setAbsenceType] = useState<AbsenceType>(() => defaultAbsenceType(typeOptions));
   const [startDate, setStartDate] = useState(todayKey());
   const [endDate, setEndDate] = useState(todayKey());
   const [reason, setReason] = useState('');
   const [certificate, setCertificate] = useState<LocalCertificateFile | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    setAbsenceType((current) => (typeOptions.includes(current) ? current : defaultAbsenceType(typeOptions)));
+  }, [typeOptions]);
 
   const displayName = useMemo(() => {
     if (employee?.lastName || employee?.firstName) {
@@ -117,6 +122,7 @@ export default function NovedadScreen() {
         employeeId: employeeKey,
         employeeName: displayName,
         type: absenceType,
+        ...(absenceType === 'Ausencia con aviso' ? { avisoPortal: true, absenceType: 'AA' } : {}),
         startDate,
         endDate,
         status: 'Pendiente',

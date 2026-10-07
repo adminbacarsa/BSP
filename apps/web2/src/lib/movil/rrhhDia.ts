@@ -37,8 +37,9 @@ export function esAusenciaInjustificada(row: Pick<AusenciaDia, 'type' | 'absence
   const status = String(row.status || '').trim();
   if (status === 'Justificada' || status === 'Rechazada' || status === 'Autorizada') return false;
   if (String(row.absenceType || '').toUpperCase() === 'AA') return true;
+  if (status === 'Avisada') return true;
   const type = String(row.type || '').toLowerCase();
-  return type.includes('injustificada') || type.includes('no presentaci') || type.includes('ausencia injustificada');
+  return type.includes('injustificada') || type.includes('no presentaci') || type.includes('ausencia injustificada') || type.includes('ausencia con aviso');
 }
 
 export type TipoJustificacion = { id: string; label: string; code: string };

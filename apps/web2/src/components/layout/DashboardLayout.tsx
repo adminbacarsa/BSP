@@ -31,6 +31,7 @@ import { MovilMenuModulos } from '@/components/movil/MovilMenuModulos';
 import { useMovilMode } from '@/lib/movil/useMovilMode';
 import { GuardiaPuntajeProvider } from '@/context/GuardiaPuntajeContext';
 import { movilModuleForPath, movilRouteHasMobileVersion } from '@/lib/movil/navItems';
+import { useAusenciasPorRevisar } from '@/hooks/useAusenciasPorRevisar';
 
 /** Título del header según el módulo (ruta) actual */
 function getTitleByPath(pathname: string): string | null {
@@ -69,6 +70,7 @@ function BottomNav() {
   const { canReadModule } = useAuth();
   const { empresaId } = useEmpresa();
   const { count: guardDevicePendingCount } = usePendingGuardDeviceCount();
+  const { count: ausenciasPorRevisar } = useAusenciasPorRevisar(empresaId);
   const isActive = (href: string) => router.pathname.startsWith(href);
   return (
     <nav
@@ -87,12 +89,25 @@ function BottomNav() {
           }}
         >
           <Icon size={20} strokeWidth={isActive(href) ? 2.5 : 1.8} />
-          {href === '/admin/rrhh' && guardDevicePendingCount > 0 && (
-            <span
-              title="Dispositivos pendientes de aprobación"
-              className="absolute top-1.5 right-[calc(50%-22px)] min-w-[16px] h-4 px-1 bg-indigo-600 text-white text-[8px] font-black rounded-full flex items-center justify-center"
-            >
-              {guardDevicePendingCount > 99 ? '99+' : guardDevicePendingCount}
+          {href === '/admin/rrhh' && (guardDevicePendingCount > 0 || ausenciasPorRevisar > 0) && (
+            <span className="absolute top-1.5 right-[calc(50%-22px)] flex items-center gap-0.5">
+              {ausenciasPorRevisar > 0 && (
+                <span
+                  data-rrhh-por-revisar={ausenciasPorRevisar}
+                  title="Ausencias por revisar"
+                  className="min-w-[16px] h-4 px-1 bg-amber-500 text-white text-[8px] font-black rounded-full flex items-center justify-center"
+                >
+                  {ausenciasPorRevisar > 99 ? '99+' : ausenciasPorRevisar}
+                </span>
+              )}
+              {guardDevicePendingCount > 0 && (
+                <span
+                  title="Dispositivos pendientes de aprobación"
+                  className="min-w-[16px] h-4 px-1 bg-indigo-600 text-white text-[8px] font-black rounded-full flex items-center justify-center"
+                >
+                  {guardDevicePendingCount > 99 ? '99+' : guardDevicePendingCount}
+                </span>
+              )}
             </span>
           )}
           <span className="text-[9px] font-black uppercase tracking-wide">{label}</span>
@@ -413,6 +428,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
   const canViewOps = canReadModule('OPERATIONS') || canReadModule('DASHBOARD') || canReadModule('PLANNING');
   const canViewRrhh = canReadModule('RRHH');
   const { count: guardDevicePendingCount } = usePendingGuardDeviceCount();
+  const { count: ausenciasPorRevisar } = useAusenciasPorRevisar(canViewRrhh ? empresaId : null);
 
   useEffect(() => {
     if (!empresaId || !canViewSupervision || !user?.uid) return;
@@ -788,10 +804,19 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
               <Users size={18} className="shrink-0" />
               {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap flex-1">RRHH</span>}
               {isTraining && isModuleLocked('RRHH') && <Lock size={11} className="shrink-0 ml-auto opacity-60" />}
-              {(guardDevicePendingCount > 0 || rfzEstructuralCount > 0) && (
+              {(guardDevicePendingCount > 0 || rfzEstructuralCount > 0 || ausenciasPorRevisar > 0) && (
                 <span
                   className={`flex items-center gap-1 shrink-0 ${sidebarOpen ? '' : 'absolute -top-1 -right-1'}`}
                 >
+                  {ausenciasPorRevisar > 0 && (
+                    <span
+                      data-rrhh-por-revisar={ausenciasPorRevisar}
+                      title="Ausencias por revisar"
+                      className="min-w-[18px] h-[18px] px-1 bg-amber-500 text-white text-[9px] font-black rounded-full flex items-center justify-center"
+                    >
+                      {ausenciasPorRevisar > 99 ? '99+' : ausenciasPorRevisar}
+                    </span>
+                  )}
                   {guardDevicePendingCount > 0 && (
                     <span
                       title="Dispositivos pendientes de aprobación"

@@ -14,6 +14,7 @@ import { MENU_TURNOS_ADELANTE_MS, MENU_TURNOS_ATRAS_MS, resumenTurnosMenu, type 
 import { writeMovilChoice } from '@/lib/movil/useMovilMode';
 import { novedadYaResuelta } from '@/lib/operaciones/novedadAlertDisplay';
 import { belongsToEmpresaView, shouldScopeQueriesToEmpresa } from '@/lib/tenantScope';
+import { useAusenciasPorRevisar } from '@/hooks/useAusenciasPorRevisar';
 
 const ALERTAS_VENTANA_MS = 24 * 60 * 60 * 1000;
 
@@ -37,6 +38,7 @@ export function MovilMenuModulos({ entrada = false }: { entrada?: boolean }) {
   const router = useRouter();
   const { canReadModule, isSuperAdmin } = useAuth();
   const { empresaId, empresa } = useEmpresa();
+  const { count: ausenciasPorRevisar } = useAusenciasPorRevisar(canReadModule('RRHH') ? empresaId : null);
   const empresaSheet = useEmpresaSheet();
   const modulos = modulosMovil(canReadModule, isSuperAdmin);
   const { unico } = menuMovil(modulos);
@@ -114,14 +116,17 @@ export function MovilMenuModulos({ entrada = false }: { entrada?: boolean }) {
     if (resumen) {
       out.operacion = { activos: resumen.activos };
       out.supervision = { activos: resumen.activos };
-      out.rrhh = { ausentesHoy: resumen.ausentesHoy };
+      out.rrhh = { ausentesHoy: resumen.ausentesHoy, porRevisar: ausenciasPorRevisar };
       out.planificacion = { huecos: resumen.huecos, sinCronograma };
     } else if (sinCronograma > 0) {
       out.planificacion = { sinCronograma };
     }
     out.eventuales = { arcaPendientes: arca };
+    if (ausenciasPorRevisar > 0) {
+      out.rrhh = { ...(out.rrhh || {}), porRevisar: ausenciasPorRevisar, ausentesHoy: out.rrhh?.ausentesHoy };
+    }
     return out;
-  }, [turnos, novedades, cronograma.gruposPlanificacion]);
+  }, [turnos, novedades, cronograma.gruposPlanificacion, ausenciasPorRevisar]);
 
   if (entrada && unico) return <div className="min-h-screen bg-[#f7f8fa]" />;
   return (

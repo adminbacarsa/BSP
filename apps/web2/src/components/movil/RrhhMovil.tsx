@@ -319,7 +319,13 @@ export function RrhhMovil() {
         nombreReal,
       });
       const certificado = certificateUrl ? { certificateUrl, certificateName: archivo?.name || null, certificateStoragePath } : {};
-      const cambios: Partial<Absence> & { absenceType: string } = { ...patch, ...certificado };
+      const eraAviso = ausencia.type === 'Ausencia con aviso' || ausencia.status === 'Avisada';
+      const cambios: Partial<Absence> & { absenceType: string } = {
+        ...patch,
+        ...certificado,
+        revisionEstado: patch.status === 'En verificación' ? 'POR_REVISAR' : 'JUSTIFICADA',
+        ...(eraAviso ? { avisoPortal: true } : {}),
+      };
       const dataToSave: Absence & { absenceType: string } = {
         employeeId: ausencia.employeeId || '',
         employeeName: ausencia.employeeName,

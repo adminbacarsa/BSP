@@ -2589,6 +2589,7 @@ export const detectarAusencias = functions
     for (const docSnap of snap.docs) {
       const shift = docSnap.data();
 
+      if (String(shift.absenceDetectedBy || '') === 'AVISO_PORTAL') continue;
       if (turnoFueraDeCentroDeControl(shift, excludedObjectives)) continue;
       if (!cc.isEnabled(shift.empresaId)) continue;
       if (cc.isDemo(shift.empresaId)) continue; // Demo genera presentes/ausentes/tardes
@@ -3442,6 +3443,13 @@ export const onAusenciaCreatedFromPortal = functions
   .onCreate(async (snap) => {
     const data = snap.data();
     if (!data || data.source !== 'EMPLEADO') return null;
+
+    try {
+      const { aplicarAvisoPortal } = await import('./attendance/avisoPortal');
+      await aplicarAvisoPortal(admin.firestore(), snap.id, data);
+    } catch (e) {
+      console.error('[onAusenciaCreatedFromPortal] aviso', snap.id, e);
+    }
 
     const absenceCase: string = data.absenceCase || 'PROGRAMADA';
     if (absenceCase === 'PROGRAMADA') return null; // sin urgencia, no genera novedad operativa

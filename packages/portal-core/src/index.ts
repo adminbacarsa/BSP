@@ -87,6 +87,7 @@ export {
   absenceTypeEmployeeHint,
   classifyAbsenceForEmployee,
   dateKeyLocal,
+  defaultAbsenceType,
   filterAbsenceTypesForFeatures,
 } from './absences/employeeAbsence';
 export type { AbsenceType, AbsenceCase, ClassifiedAbsence } from './absences/employeeAbsence';
