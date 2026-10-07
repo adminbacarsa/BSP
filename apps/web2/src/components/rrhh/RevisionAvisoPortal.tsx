@@ -10,7 +10,10 @@ type Aviso = {
   startDate?: string;
   endDate?: string;
   certificateUrl?: string;
+  certificateDriveLink?: string;
   status?: string;
+  justificadaPor?: string;
+  certificadoIa?: { decision?: string; texto?: string; dudas?: string[] } | null;
 };
 
 function fechaCorta(value: unknown): string {
@@ -31,6 +34,9 @@ export function RevisionAvisoPortal({
   onClose,
   onJustificar,
   onInjustificada,
+  onAprobarPropuesta,
+  onRechazarPropuesta,
+  onRevertirIa,
 }: {
   aviso: Aviso;
   tipos?: TipoJustificacion[];
@@ -38,6 +44,9 @@ export function RevisionAvisoPortal({
   onClose: () => void;
   onJustificar: (tipo: TipoJustificacion, archivo: File | null) => void;
   onInjustificada: () => void;
+  onAprobarPropuesta?: () => void;
+  onRechazarPropuesta?: () => void;
+  onRevertirIa?: () => void;
 }) {
   const [tipoId, setTipoId] = useState(tipos[0]?.id || 'E');
   const [archivo, setArchivo] = useState<File | null>(null);
@@ -62,13 +71,22 @@ export function RevisionAvisoPortal({
           <p className="text-sm text-slate-700 dark:text-slate-200">
             <span className="font-black">Motivo. </span>{aviso.reason || 'Sin motivo'}
           </p>
-          {aviso.certificateUrl ? (
-            <a href={aviso.certificateUrl} target="_blank" rel="noreferrer" className="text-sm font-bold text-indigo-600 hover:underline">
+          {aviso.certificateDriveLink || aviso.certificateUrl ? (
+            <a href={aviso.certificateDriveLink || aviso.certificateUrl} target="_blank" rel="noreferrer" className="text-sm font-bold text-indigo-600 hover:underline">
               Ver certificado
             </a>
           ) : (
             <p className="text-xs text-slate-400">No subió certificado.</p>
           )}
+          {aviso.certificadoIa?.texto && aviso.certificadoIa.decision !== 'RECHAZADA' ? (
+            <div data-revision-propuesta className="rounded-2xl border border-indigo-100 bg-indigo-50 px-3 py-3">
+              <p className="text-[10px] font-black uppercase text-indigo-700">Propuesta</p>
+              <p className="text-sm font-bold text-slate-800 mt-1">{aviso.certificadoIa.texto}</p>
+              {(aviso.certificadoIa.dudas || []).length > 0 ? (
+                <p className="text-xs text-amber-800 mt-1">{aviso.certificadoIa.dudas?.join(' · ')}</p>
+              ) : null}
+            </div>
+          ) : null}
           <div>
             <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Justificar como</label>
             <select
@@ -94,6 +112,39 @@ export function RevisionAvisoPortal({
           </label>
         </div>
         <div className="px-5 py-4 border-t border-slate-100 dark:border-slate-700 flex flex-col gap-2">
+          {aviso.certificadoIa?.decision === 'PROPUESTA' || aviso.certificadoIa?.decision === 'DUDA' ? (
+            <div className="flex gap-2">
+              <button
+                type="button"
+                data-revision-aprobar-ia
+                disabled={ocupado}
+                onClick={onAprobarPropuesta}
+                className="flex-1 py-3 rounded-2xl bg-emerald-600 text-white font-black text-sm shadow-sm hover:bg-emerald-700 disabled:opacity-50"
+              >
+                Aprobar
+              </button>
+              <button
+                type="button"
+                data-revision-rechazar-ia
+                disabled={ocupado}
+                onClick={onRechazarPropuesta}
+                className="flex-1 py-3 rounded-2xl border border-slate-200 text-slate-600 font-black text-sm hover:bg-slate-50 disabled:opacity-50"
+              >
+                Rechazar
+              </button>
+            </div>
+          ) : null}
+          {aviso.justificadaPor === 'IA' ? (
+            <button
+              type="button"
+              data-revision-revertir-ia
+              disabled={ocupado}
+              onClick={onRevertirIa}
+              className="w-full py-3 rounded-2xl border border-amber-200 text-amber-800 font-black text-sm hover:bg-amber-50 disabled:opacity-50"
+            >
+              Revertir justificación de la IA
+            </button>
+          ) : null}
           <button
             type="button"
             data-revision-justificar

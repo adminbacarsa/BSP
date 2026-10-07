@@ -19,7 +19,7 @@ import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { geocodeAddress } from '@/lib/employees/geocodeAddress';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { getFunctions, httpsCallable } from 'firebase/functions';
-import { collection, getDocs, getDoc, query, where, Timestamp, addDoc, updateDoc, doc, deleteDoc, writeBatch, serverTimestamp, deleteField, limit } from 'firebase/firestore';
+import { collection, getDocs, getDoc, query, where, Timestamp, addDoc, updateDoc, doc, deleteDoc, writeBatch, serverTimestamp, deleteField, limit, arrayUnion } from 'firebase/firestore';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { useAuth } from '@/context/AuthContext';
 import { belongsToEmpresa, empresaScopedQuery, filterRowsByEmpresa, shouldScopeQueriesToEmpresa, belongsToEmpresaView, deleteEmployeeForEmpresa, queryAndDeleteForEmpresa, stampEmpresaId, updateDocForEmpresa, TenantIsolationError } from '@/lib/multiempresa';
@@ -1271,12 +1271,20 @@ export default function EmployeesPage() {
         tieneCertificado: !!certificateUrl,
         requiereVerificacionMedica: absenceNeedsMedicalVerification({ type: tipo.label }),
       });
+      const textoRevision = patch.status === 'En verificación'
+        ? 'Certificado en verificación'
+        : `Justificada (${tipo.label})`;
       await absenceService.update(aviso.id, {
         ...patch,
         certificateUrl,
         certificateName,
         certificateStoragePath,
         status: patch.status,
+        historial: arrayUnion({
+          texto: textoRevision,
+          por: currentUserName,
+          at: new Date().toISOString(),
+        }),
       } as Partial<Absence>, { empresaId, migracionCompleta });
       await marcarTurnosDelAviso(aviso.id, String(patch.absenceType || tipo.code));
       if (absenceReplicatesToPlanning({ ...aviso, ...patch })) {
@@ -1312,12 +1320,36 @@ export default function EmployeesPage() {
     }
   };
 
+  const decidirPropuestaIa = async (decision: 'aprobar' | 'rechazar' | 'revertir') => {
+    const aviso = revisionAviso;
+    if (!aviso?.id) return;
+    setRevisionOcupada(true);
+    try {
+      const fn = httpsCallable(getFunctions(), 'decidirCertificadoIa');
+      await fn({ ausenciaId: aviso.id, decision });
+      addToast(decision === 'aprobar' ? 'Propuesta aprobada' : decision === 'rechazar' ? 'Propuesta rechazada' : 'Justificación revertida', 'success');
+      setRevisionAviso(null);
+      loadData();
+    } catch (e) {
+      addToast(e instanceof Error ? e.message : 'No se pudo guardar la decisión', 'error');
+    } finally {
+      setRevisionOcupada(false);
+    }
+  };
+
   const dejarAvisoInjustificado = async () => {
     const aviso = revisionAviso;
     if (!aviso?.id || !empresaId) return;
     setRevisionOcupada(true);
     try {
-      await absenceService.update(aviso.id, patchDejarInjustificada() as Partial<Absence>, { empresaId, migracionCompleta });
+      await absenceService.update(aviso.id, {
+        ...patchDejarInjustificada(),
+        historial: arrayUnion({
+          texto: 'Injustificada',
+          por: currentUserName,
+          at: new Date().toISOString(),
+        }),
+      } as Partial<Absence>, { empresaId, migracionCompleta });
       addToast('Quedó como ausencia con aviso, sin justificar', 'success');
       setRevisionAviso(null);
     } catch (e) {
@@ -3527,6 +3559,9 @@ export default function EmployeesPage() {
                 onClose={() => { if (!revisionOcupada) setRevisionAviso(null); }}
                 onJustificar={(tipo, archivo) => { void justificarAvisoPortal(tipo, archivo); }}
                 onInjustificada={() => { void dejarAvisoInjustificado(); }}
+                onAprobarPropuesta={() => { void decidirPropuestaIa('aprobar'); }}
+                onRechazarPropuesta={() => { void decidirPropuestaIa('rechazar'); }}
+                onRevertirIa={() => { void decidirPropuestaIa('revertir'); }}
             />,
             document.body,
         )}
