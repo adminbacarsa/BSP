@@ -605,7 +605,13 @@ export function listExtensionCandidates(
   const { extensionBand } = listCtx?.positionStructure?.length
     ? neighborBandsForVacancyGap(listCtx.positionStructure, positionName, targetBand)
     : neighborBandsForTarget(targetBand);
-  const ctx = { ...listCtx, gapBand: targetBand, gapPositionName: positionName ?? listCtx?.gapPositionName };
+  // Como el adelanto: todos los puestos del objetivo, no solo el del hueco (el mismo puesto va primero).
+  const ctx = {
+    ...listCtx,
+    gapBand: targetBand,
+    gapPositionName: positionName ?? listCtx?.gapPositionName,
+    preferSamePosition: false,
+  };
   let rows: SegmentCandidateRow[] = listSegmentCandidatesWithBandFallback(
     dateStr,
     objectiveId,
@@ -616,6 +622,7 @@ export function listExtensionCandidates(
     extensionBand,
     ctx,
   );
+  rows = samePositionFirst(rows, ctx.gapPositionName);
   const target = String(targetBand || '').toUpperCase();
   const extBand = String(extensionBand || '').toUpperCase();
   if (target === 'M' || extBand === 'N') {
@@ -666,7 +673,7 @@ export function listEarlyStartCandidates(
   if ((target === 'N' || target === 'N12') && adelBand === 'M') {
     return [];
   }
-  return listSegmentCandidates(
+  const rows = listSegmentCandidates(
     dateStr,
     objectiveId,
     employees,
@@ -682,6 +689,12 @@ export function listEarlyStartCandidates(
       strictNeighborBand: true,
     },
   );
+  return samePositionFirst(rows, positionName ?? listCtx?.gapPositionName);
+}
+
+function samePositionFirst<T extends { positionName: string }>(rows: T[], pos: string | null | undefined): T[] {
+  if (!pos) return rows;
+  return [...rows.filter((r) => r.positionName === pos), ...rows.filter((r) => r.positionName !== pos)];
 }
 
 export function defaultSplitForBand(band: string): { ext: { from: string; to: string }; adel: { from: string; to: string }; gap: { from: string; to: string } } {
