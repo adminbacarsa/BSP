@@ -66,6 +66,8 @@ export type RetainOutgoingOpts = {
   reportedBy?: string;
   /** Reloj de la pasada (el cron). Sin esto, la hora real. */
   nowMs?: number;
+  /** Quien cubre no llega al inicio: retener ya, aunque el hueco todavía no haya empezado. */
+  holdNow?: boolean;
 };
 
 export type RetainOutgoingResult = {
@@ -124,7 +126,7 @@ export async function retainOutgoingForGap(
   }
 
   const nowMs = typeof opts.nowMs === 'number' && Number.isFinite(opts.nowMs) ? opts.nowMs : Date.now();
-  const gapInFuture = gapStartMs > nowMs;
+  const gapInFuture = gapStartMs > nowMs && opts.holdNow !== true;
 
   const existing = await db
     .collection('turnos')

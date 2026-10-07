@@ -13,6 +13,7 @@ import {
   coberturaAceptadaLine,
   extendUntilLine,
   formatEnCaminoLine,
+  escenarioCobertura,
   isRecordatorioPendiente,
   planConvocadoArrival,
   parseConvocadoRecordatorioPush,
@@ -88,9 +89,25 @@ describe('recordatorio convocado', () => {
     const prev = Date.now;
     Date.now = () => ahora.getTime();
     try {
+      assert.equal(escenarioCobertura({ gapStartMs: start.getTime(), nowMs: start.getTime() - 61 * 60_000 }), 'ANTICIPADA');
+      assert.equal(escenarioCobertura({ gapStartMs: start.getTime(), nowMs: start.getTime() - 59 * 60_000 }), 'URGENTE');
+      assert.equal(isRecordatorioPendiente({
+        status: 'ACCEPTED',
+        type: 'FT',
+        reminderSentAt: sent,
+        startTime: start,
+      }), false);
       assert.equal(isRecordatorioPendiente({
         status: 'ACCEPTED',
         type: 'REF',
+        escenarioCobertura: 'URGENTE',
+        reminderSentAt: sent,
+        startTime: start,
+      }), true);
+      assert.equal(isRecordatorioPendiente({
+        status: 'ACCEPTED',
+        type: 'RET',
+        escenarioCobertura: 'ANTICIPADA',
         reminderSentAt: sent,
         startTime: start,
       }), false);

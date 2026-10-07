@@ -175,6 +175,55 @@ export function clearSourceCoverageUsedPatch(): Record<string, unknown> {
   };
 }
 
+function relojMs(v: unknown): number {
+  const t = v as { toMillis?: () => number; seconds?: number } | undefined;
+  return t?.toMillis?.() ?? (typeof t?.seconds === 'number' ? t.seconds * 1000 : 0);
+}
+
+function fuenteYaFicho(shift: Record<string, unknown> | null | undefined): boolean {
+  if (!shift) return false;
+  if (shift.isPresent === true) return true;
+  if (String(shift.status || '').toUpperCase() === 'PRESENT') return true;
+  return relojMs(shift.checkInAt) > 0 || relojMs(shift.realStartTime) > 0;
+}
+
+/** Una sola representación: el ops_cov es el turno del titular. La fuente no se ficha, no se ve y no computa. */
+export function parcheFuenteAnulada(covDocId: string, titularShiftId: string): Record<string, unknown> {
+  const del = deleteField();
+  return {
+    coverageUsed: true,
+    coverageDocId: covDocId,
+    coverageUsedForShiftId: titularShiftId,
+    isPresent: false,
+    isLate: false,
+    lateMinutes: 0,
+    isDeleted: true,
+    status: 'CANCELLED',
+    deletedReason: DELETED_REASON_CONVERTED_COVERAGE,
+    convertedToCoverageDocId: covDocId,
+    checkInAt: del,
+    checkInTime: del,
+    realStartTime: del,
+    checkInMethod: del,
+    checkInCoords: del,
+    checkInRecordedAt: del,
+  };
+}
+
+function camposPresenciaFuente(shift: Record<string, unknown>): Record<string, unknown> {
+  return {
+    isPresent: true,
+    status: 'PRESENT',
+    isAwaitingCoverageCheckIn: false,
+    ...(relojMs(shift.checkInAt) > 0 ? { checkInAt: shift.checkInAt } : {}),
+    ...(shift.checkInTime ? { checkInTime: shift.checkInTime } : {}),
+    ...(relojMs(shift.realStartTime) > 0 ? { realStartTime: shift.realStartTime } : {}),
+    ...(shift.checkInMethod ? { checkInMethod: shift.checkInMethod } : {}),
+    isLate: shift.isLate === true,
+    lateMinutes: Number(shift.lateMinutes) || 0,
+  };
+}
+
 /** REF/ESC: el turno planificado se convierte en cobertura (baja lógica); el ops_cov lleva banda del titular. */
 export function buildEscRefSourceConvertedPatch(
   srcData: Record<string, unknown>,
@@ -367,21 +416,23 @@ export async function applyCoverage(
   const isRet = ct === 'RET';
 
   const sourceId = String(params.sourceShiftId || '').trim();
+  let srcData: Record<string, unknown> | null = null;
   if (sourceId) {
     const srcSnap = await getDoc(doc(db, 'turnos', sourceId));
     if (!srcSnap.exists()) {
       throw new CoverageApplyError('NOT_FOUND', 'Turno origen no encontrado');
     }
-    const srcData = srcSnap.data() as Record<string, unknown>;
+    const fuente = srcSnap.data() as Record<string, unknown>;
+    srcData = fuente;
     const sameCovOnSource =
-      String(srcData.coverageDocId || '').trim() === covDocId
-      && (srcData.coverageUsed === true || ct === 'EXTEND' || ct === 'ADVANCE');
+      String(fuente.coverageDocId || '').trim() === covDocId
+      && (fuente.coverageUsed === true || ct === 'EXTEND' || ct === 'ADVANCE');
     if (['REF', 'ESC', 'RET'].includes(ct) && !sameCovOnSource) {
       const gap = gapFromAbsenceLikeShift(titular as Record<string, unknown>);
       const window = gap && remainder
         ? { ...gap, startMs: remainder.startMs, endMs: remainder.endMs }
         : gap;
-      if (!window || !sourceShiftEligibleForCoverageGap(srcData, window)) {
+      if (!window || !sourceShiftEligibleForCoverageGap(fuente, window)) {
         throw new CoverageApplyError(
           'INVALID_SOURCE',
           'El turno de origen no solapa el hueco (banda/horario). Elegí otro REF/ESC/RET.',
@@ -411,33 +462,13 @@ export async function applyCoverage(
         isEarlyStart: true,
         adjustedStartTime: params.adjustedStartTime,
       });
-    } else if (ct === 'ESC' || ct === 'REF') {
-      batch.update(
-        doc(db, 'turnos', sourceId),
-        buildEscRefSourceConvertedPatch(srcData, covDocId),
-      );
-    } else if (ct === 'FT') {
-      const srcCode = String(srcData.code || srcData.shiftCode || '').trim().toUpperCase();
-      const francoCode = srcData.isFranco === true || srcCode === 'F' || srcCode === 'FF' || srcCode === 'FP';
-      const comment = /franco trabajado\s*\(cobertura/i.test(String(srcData.comments || ''));
-      const franco = francoCode || comment || srcCode === 'FT';
-      batch.update(doc(db, 'turnos', sourceId), {
-        ...usedBase,
-        coverageUsed: true,
-        coverageUsedForShiftId: titularId,
-        ...(franco
-          ? {
-            isFranco: true,
-            isFrancoTrabajado: false,
-            code: francoCode ? srcCode : 'F',
-            comments: `Franco Trabajado (cobertura ${covDocId})`,
-          }
-          : {}),
-      });
+    } else if (ct === 'ESC' || ct === 'REF' || ct === 'RET' || ct === 'FT') {
+      batch.update(doc(db, 'turnos', sourceId), parcheFuenteAnulada(covDocId, titularId));
     } else {
       batch.update(doc(db, 'turnos', sourceId), usedBase);
     }
   }
+  const moverPresencia = !!srcData && (ct === 'REF' || ct === 'ESC' || ct === 'RET' || ct === 'FT') && fuenteYaFicho(srcData);
 
   batch.set(
     doc(db, 'turnos', covDocId),
@@ -464,14 +495,19 @@ export async function applyCoverage(
           : {}),
         startTime: startTs,
         endTime: endTs,
-        status: 'PENDING',
+        status: moverPresencia ? 'PRESENT' : 'PENDING',
         origin: 'OPERATIONS_COVERAGE',
         resolvedBy: params.resolvedBy,
         coverageType: ct,
         ...linkFields,
         sourceShiftId: sourceId || null,
-        isPresent: false,
-        isAwaitingCoverageCheckIn: ct !== 'EXTEND',
+        coverageForShiftId: titularId,
+        ...(srcData && (ct === 'REF' || ct === 'ESC' || ct === 'RET' || ct === 'FT')
+          ? { codigoOriginal: String(srcData.code || srcData.shiftCode || ct).trim().toUpperCase() }
+          : {}),
+        ...(moverPresencia && srcData
+          ? camposPresenciaFuente(srcData)
+          : { isPresent: false, isAwaitingCoverageCheckIn: ct !== 'EXTEND' }),
         coverageSuperseded: false,
         ...(ct === 'EXTEND' || ct === 'ADVANCE' ? { coverageHoursOnSource: true } : {}),
         createdAt: typeof process !== 'undefined' && process.env.NEXT_PUBLIC_USE_EMULATOR === 'true'

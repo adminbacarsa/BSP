@@ -141,7 +141,7 @@ export function etiquetaCeldaOpsCoverage(shift: { code?: unknown; coverageType?:
 } {
   const code = String(shift?.code || '').trim().toUpperCase();
   const ct = String(shift?.coverageType || '').trim().toUpperCase();
-  if (ct === 'REF' || ct === 'ESC') return { content: code || 'M', esRefEsc: true };
+  if (ct === 'REF' || ct === 'ESC' || ct === 'RET') return { content: code || 'M', esRefEsc: true };
   return { content: code ? `COB ${code}` : 'COB', esRefEsc: false };
 }
 

@@ -161,8 +161,8 @@ export const onTurnoWrite = functions
     // Empresa sandbox de capacitación: no emitir notificaciones ni liquidar
     if (String((after || before)?.empresaId ?? '') === 'capacitacion') return;
 
-    // REF/ESC del mismo objetivo: el aviso informativo ya salió en la asignación. Sin «turno nuevo».
-    if (!before && after?.refEscAsignacionDirecta === true) return;
+    // REF/ESC mismo objetivo y RET directo: el aviso ya salió en la asignación. Sin «turno nuevo».
+    if (!before && (after?.refEscAsignacionDirecta === true || after?.retAsignacionDirecta === true || after?.coberturaAnticipada === true || after?.coberturaUrgente === true)) return;
 
     try {
       await updateLiquidacionOnTurnoComplete(db, change.after.id, after, before);

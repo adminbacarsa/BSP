@@ -28,7 +28,7 @@ import {
   isEventoShift,
 } from '../eventos/eventoCoverage';
 import { loadEventualesParaHueco, registrarAsignacionEventualEnBatch } from '../eventos/eventualesParaHuecoServer';
-import { asignarRefEscSiMismoObjetivo } from './refEscDirecto';
+import { resolverCoberturaRefEscRet } from './refEscDirecto';
 import { CONVOCATORIA_TIMEOUT_MINUTES } from './convocatoriaTimeout';
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
@@ -325,8 +325,9 @@ export async function crearConvocatoriaDoc(
     createdBy: string;
     createdByName?: string;
   },
+  opts?: { now?: Timestamp },
 ): Promise<string> {
-  const directa = await asignarRefEscSiMismoObjetivo(db, {
+  const directaInput = {
     empresaId: data.empresaId,
     shiftId: data.shiftId,
     objectiveId: data.objectiveId,
@@ -342,7 +343,8 @@ export async function crearConvocatoriaDoc(
     candidateEmployeeName: data.candidateEmployeeName,
     candidateShiftId: data.candidateShiftId,
     createdBy: data.createdBy,
-  });
+  };
+  const directa = await resolverCoberturaRefEscRet(db, directaInput, opts);
   if (directa) return `directa:${directa}`;
 
   const now = Timestamp.now();

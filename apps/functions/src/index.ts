@@ -2603,6 +2603,8 @@ export const detectarAusencias = functions
       if (SKIP_CODES.has((shift.code || '').toUpperCase())) continue;
       if (!shift.employeeId || shift.employeeId === 'VACANTE') continue;
       if (isRetShift(shift as Record<string, unknown>) || isZeroDurationShift(shift as Record<string, unknown>)) continue;
+      // Cobertura urgente: sin AA automática. La anticipada sí (T+30, como un turno planificado).
+      if (shift.coberturaUrgente === true) continue;
 
       const startMs: number = shift.startTime?.toMillis?.() ?? 0;
       if (!startMs) continue;

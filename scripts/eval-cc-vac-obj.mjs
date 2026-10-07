@@ -205,7 +205,7 @@ check('bandeja de alertas: cubierto no entra', movil.includes('estado.kind !== \
 check('novedad atendida o vista no vuelve a alertas', page.includes('novedadYaResuelta(n)') && page.includes('novedadDeAusenciaCubierta(n, logic.processedData)') && mapView.includes('novedadYaResuelta(n)') && mapView.includes('novedadDeAusenciaCubierta(n, logic.processedData)'));
 const planif = readFileSync(new URL('../apps/web2/src/pages/admin/planificacion/index.tsx', import.meta.url), 'utf8');
 const sem = readFileSync(new URL('../apps/web2/src/lib/cosp/coverageSemantics.ts', import.meta.url), 'utf8');
-check('grilla: REF/ESC usado como cobertura se ve con el código del titular', planif.includes('etiquetaCeldaOpsCoverage(opsShiftForCell)') && sem.includes("ct === 'REF' || ct === 'ESC'") && sem.includes('esRefEsc: true'));
+check('grilla: REF/ESC/RET usado como cobertura se ve con el código del titular', planif.includes('etiquetaCeldaOpsCoverage(opsShiftForCell)') && sem.includes("ct === 'REF' || ct === 'ESC' || ct === 'RET'") && sem.includes('esRefEsc: true'));
 
 if (failed) {
   console.error(`\n${failed} falla(s)`);

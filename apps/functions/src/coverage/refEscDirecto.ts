@@ -4,6 +4,17 @@
  */
 import * as admin from 'firebase-admin';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
+import { guardFirstName } from '../common/pushGreeting';
+import {
+  convocadoTravelEta,
+  escenarioCobertura,
+  haversineKm,
+  planConvocadoArrival,
+  retenerSalientePorLlegada,
+  UMBRAL_COBERTURA_ANTICIPADA_MIN,
+  type EscenarioCobertura,
+} from '../common/convocadoEta';
+import { retainOutgoingForGap } from './coverageRetention';
 import {
   gapWindowFromConvocatoria,
   sourceShiftEligibleForCoverageGap,
@@ -33,6 +44,10 @@ export function esRefOEsc(type: unknown): boolean {
   return t === 'REF' || t === 'ESC';
 }
 
+export function esRet(type: unknown): boolean {
+  return String(type || '').trim().toUpperCase() === 'RET';
+}
+
 export function textoTurnoActualizado(input: {
   code?: string | null;
   objectiveName?: string | null;
@@ -49,7 +64,7 @@ export function textoTurnoActualizado(input: {
 
 /**
  * Mismo objetivo y el turno origen solapa el hueco (banda u horario).
- * RET no entra: sigue siendo asignación por retención.
+ * RET no entra acá: se asigna directo en cualquier objetivo (`asignarRetDirecto`).
  */
 export function refEscMismoObjetivo(input: {
   type: unknown;
@@ -112,10 +127,66 @@ function resolvedByDe(createdBy: string): 'OPERACIONES' | 'AUTO' | 'MODO_DEMO' {
   return 'OPERACIONES';
 }
 
-async function avisarTurnoActualizado(
+/** Hora Argentina HH:MM (24 h). */
+export function horaArHm(ms: number): string {
+  if (!ms) return '';
+  return new Date(ms).toLocaleTimeString('es-AR', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+    timeZone: 'America/Argentina/Buenos_Aires',
+  });
+}
+
+/**
+ * RET directo. Hueco futuro: «Presentate a las HH:MM.» Si ya empezó: «lo antes posible».
+ */
+export function textoAsignacionRet(input: {
+  nombre?: string | null;
+  clientName?: string | null;
+  objectiveName?: string | null;
+  positionName?: string | null;
+  code?: string | null;
+  desde: string;
+  hasta: string;
+  huecoFuturo: boolean;
+  horaLlegada?: string | null;
+}): string {
+  const code = String(input.code || '').trim().toUpperCase() || 'M';
+  const lugar = [input.clientName, input.objectiveName, input.positionName]
+    .map((s) => String(s || '').trim())
+    .filter(Boolean)
+    .join(' · ');
+  const banda = `${code} ${input.desde}–${input.hasta}`;
+  const cuando = input.huecoFuturo && input.horaLlegada
+    ? `Presentate a las ${input.horaLlegada}.`
+    : 'Presentate lo antes posible.';
+  const cuerpo = `se te asignó cubrir ${lugar}${lugar ? ', ' : ''}${banda}. ${cuando}`;
+  const nombre = String(input.nombre || '').trim();
+  if (!nombre) return cuerpo.charAt(0).toLocaleUpperCase('es-AR') + cuerpo.slice(1);
+  return `${nombre}, ${cuerpo}`;
+}
+
+function numCoord(v: unknown): number | null {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function parCoords(obj: Record<string, unknown> | undefined): { lat: number; lng: number } | null {
+  if (!obj) return null;
+  const nested = obj.domicilio as Record<string, unknown> | undefined;
+  const lat = numCoord(obj.lat ?? obj.latitude ?? nested?.lat ?? nested?.latitude);
+  const lng = numCoord(obj.lng ?? obj.longitude ?? obj.lon ?? nested?.lng ?? nested?.longitude);
+  if (lat == null || lng == null) return null;
+  return { lat, lng };
+}
+
+async function avisarEmpleado(
   db: admin.firestore.Firestore,
   employeeId: string,
+  title: string,
   body: string,
+  type: string,
   turnoId: string,
   empresaId: string,
 ): Promise<void> {
@@ -124,9 +195,9 @@ async function avisarTurnoActualizado(
   await db.collection('user_notifications').add({
     uid: uid || null,
     employeeId,
-    title: 'Turno actualizado',
+    title,
     body,
-    type: 'TURNO_ACTUALIZADO',
+    type,
     target: 'employee',
     turnoId,
     empresaId: empresaId || null,
@@ -148,38 +219,92 @@ async function avisarTurnoActualizado(
   try {
     await admin.messaging().sendEachForMulticast({
       tokens: [...tokens],
-      notification: { title: 'Turno actualizado', body },
-      data: { type: 'TURNO_ACTUALIZADO', turnoId },
+      notification: { title, body },
+      data: { type, turnoId },
     });
   } catch {
     /* sin FCM (emulador o sin token válido) el aviso queda en la bandeja */
   }
 }
 
+function diaAviso(gapMs: number, nowMs: number): string {
+  const day = (ms: number) => new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Argentina/Buenos_Aires',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(ms));
+  const g = day(gapMs);
+  if (g === day(nowMs)) return 'hoy';
+  if (g === day(nowMs + 24 * 60 * 60 * 1000)) return 'mañana';
+  const [y, m, d] = g.split('-');
+  void y;
+  return `el ${d}/${m}`;
+}
+
+/** RET anticipada: «hoy/mañana a las HH:MM cubrís …». */
+export function textoRetAnticipado(input: {
+  nombre?: string | null;
+  cuando: string;
+  hora: string;
+  clientName?: string | null;
+  objectiveName?: string | null;
+  positionName?: string | null;
+  code?: string | null;
+  desde: string;
+  hasta: string;
+}): string {
+  const code = String(input.code || '').trim().toUpperCase() || 'M';
+  const lugar = [input.clientName, input.objectiveName, input.positionName]
+    .map((s) => String(s || '').trim())
+    .filter(Boolean)
+    .join(' · ');
+  const banda = `${code} ${input.desde}–${input.hasta}`;
+  const cuerpo = `${input.cuando} a las ${input.hora} cubrís ${lugar}${lugar ? ', ' : ''}${banda}.`;
+  const nombre = String(input.nombre || '').trim();
+  if (!nombre) return cuerpo.charAt(0).toLocaleUpperCase('es-AR') + cuerpo.slice(1);
+  return `${nombre}, ${cuerpo}`;
+}
+
+export async function umbralCoberturaMin(db: admin.firestore.Firestore, empresaId: string): Promise<number> {
+  if (!empresaId) return UMBRAL_COBERTURA_ANTICIPADA_MIN;
+  const snap = await db.collection('empresas').doc(empresaId).get();
+  const n = Number(snap.data()?.coberturaAnticipadaMin);
+  return Number.isFinite(n) && n >= 0 ? n : UMBRAL_COBERTURA_ANTICIPADA_MIN;
+}
+
 /**
- * Si el REF/ESC está en el mismo objetivo y cubre el hueco, aplica la cobertura
- * y avisa. Devuelve el id del ops_cov. Si no corresponde, null (hay que convocar).
+ * REF/ESC/RET. Anticipada: turno planificado, sin convocatoria.
+ * Urgente en el mismo objetivo (y todo RET): convocado directo.
+ * Urgente de REF/ESC en otro objetivo: null (hay que pedir aceptación).
  */
-export async function asignarRefEscSiMismoObjetivo(
+export async function resolverCoberturaRefEscRet(
   db: admin.firestore.Firestore,
   data: DirectaInput,
+  opts?: { now?: Timestamp },
 ): Promise<string | null> {
-  if (!esRefOEsc(data.type)) return null;
-  const sourceId = String(data.candidateShiftId || '').trim();
-  if (!sourceId || !data.shiftId || !data.candidateEmployeeId) return null;
-  const srcSnap = await db.collection('turnos').doc(sourceId).get();
-  if (!srcSnap.exists) return null;
-  const source = srcSnap.data() as Record<string, unknown>;
-  if (!refEscMismoObjetivo({
+  if (!esRefOEsc(data.type) && !esRet(data.type)) return null;
+  if (!data.shiftId || !data.candidateEmployeeId || !data.startTime) return null;
+  const now = opts?.now || Timestamp.now();
+  const nowMs = now.toMillis();
+  const umbral = await umbralCoberturaMin(db, data.empresaId);
+  const gapStartMs = data.startTime.toMillis();
+  const escenario: EscenarioCobertura = escenarioCobertura({ gapStartMs, nowMs, umbralMin: umbral });
+  const mismo = esRet(data.type) || refEscMismoObjetivo({
     type: data.type,
-    source,
+    source: data.candidateShiftId
+      ? (await db.collection('turnos').doc(data.candidateShiftId).get()).data() as Record<string, unknown> | undefined
+      : null,
     objectiveId: data.objectiveId,
     startTime: data.startTime,
     endTime: data.endTime,
     shiftCode: data.shiftCode,
-  })) return null;
+  });
+  if (esRefOEsc(data.type) && !mismo && escenario === 'URGENTE') return null;
 
+  const sourceId = String(data.candidateShiftId || '').trim();
   const resolvedBy = resolvedByDe(data.createdBy);
+  const anticipada = escenario === 'ANTICIPADA';
   const batch = db.batch();
   let covDocId = '';
   try {
@@ -187,7 +312,7 @@ export async function asignarRefEscSiMismoObjetivo(
       titularShiftId: data.shiftId,
       candidateEmployeeId: data.candidateEmployeeId,
       candidateEmployeeName: data.candidateEmployeeName,
-      sourceShiftId: sourceId,
+      ...(sourceId ? { sourceShiftId: sourceId } : {}),
       coverageType: String(data.type).toUpperCase(),
       resolvedBy,
       empresaId: data.empresaId,
@@ -200,7 +325,11 @@ export async function asignarRefEscSiMismoObjetivo(
       clientId: data.clientId,
       clientName: data.clientName,
       titularCloseMode: 'FULL',
-      refEscAsignacionDirecta: true,
+      acceptedAt: now,
+      coberturaAnticipada: anticipada,
+      coberturaUrgente: !anticipada,
+      escenarioCobertura: escenario,
+      retAsignacionDirecta: !anticipada && esRet(data.type),
     });
     await syncAusenciaCoberturaGestionada(db, {
       shiftId: data.shiftId,
@@ -218,13 +347,137 @@ export async function asignarRefEscSiMismoObjetivo(
   }
   await batch.commit();
 
-  const texto = textoTurnoActualizado({
-    code: data.shiftCode,
+  const empSnap = await db.collection('empleados').doc(data.candidateEmployeeId).get();
+  const emp = empSnap.exists ? empSnap.data() as Record<string, unknown> : undefined;
+  const nombre = guardFirstName({ firstName: emp?.firstName, employeeName: data.candidateEmployeeName });
+  const desde = horaArHm(gapStartMs);
+  const hasta = horaArHm(data.endTime?.toMillis?.() ?? 0);
+
+  if (anticipada) {
+    const texto = esRet(data.type)
+      ? textoRetAnticipado({
+        nombre,
+        cuando: diaAviso(gapStartMs, nowMs),
+        hora: desde,
+        clientName: data.clientName,
+        objectiveName: data.objectiveName,
+        positionName: data.positionName,
+        code: data.shiftCode,
+        desde,
+        hasta,
+      })
+      : textoTurnoActualizado({
+        code: data.shiftCode,
+        objectiveName: data.objectiveName,
+        positionName: data.positionName,
+      });
+    await avisarEmpleado(
+      db, data.candidateEmployeeId,
+      esRet(data.type) ? 'Turno asignado' : 'Turno actualizado',
+      texto,
+      esRet(data.type) ? 'TURNO_ASIGNADO' : 'TURNO_ACTUALIZADO',
+      covDocId, data.empresaId,
+    ).catch((err) => console.warn('[cobertura anticipada] aviso:', (err as Error).message));
+    return covDocId;
+  }
+
+  const tit = (await db.collection('turnos').doc(data.shiftId).get()).data() as Record<string, unknown> | undefined;
+  const home = parCoords(emp);
+  const dest = parCoords(tit);
+  const km = home && dest ? haversineKm(home.lat, home.lng, dest.lat, dest.lng) : null;
+  const travel = convocadoTravelEta({
+    coverageType: String(data.type).toUpperCase(),
+    sameObjective: esRefOEsc(data.type) && mismo,
+    distanceKm: km,
+  });
+  const gapEndMs = data.endTime?.toMillis?.() ?? 0;
+  const plan = planConvocadoArrival({
+    acceptedAtMs: nowMs,
+    gapStartMs,
+    etaMinutes: travel.etaMinutes,
+    escenario: 'URGENTE',
+  });
+  await db.collection('turnos').doc(covDocId).set({
+    acceptedAt: now,
+    originCoords: home ? { lat: home.lat, lng: home.lng } : null,
+    originSource: home ? 'DOMICILIO' : 'SIN_COORD',
+    etaMinutes: travel.etaMinutes,
+    expectedArrivalAt: Timestamp.fromMillis(plan.expectedArrivalMs),
+    convocadoReminderAt: Timestamp.fromMillis(plan.reminderAtMs),
+    coberturaUrgente: true,
+    escenarioCobertura: 'URGENTE',
+  }, { merge: true });
+  await db.collection('convocatorias_cobertura').doc().set({
+    empresaId: data.empresaId,
+    shiftId: data.shiftId,
+    objectiveId: data.objectiveId,
+    objectiveName: data.objectiveName || '',
+    positionName: data.positionName || '',
+    clientId: data.clientId || '',
+    clientName: data.clientName || '',
+    shiftCode: data.shiftCode || '',
+    startTime: data.startTime,
+    endTime: data.endTime,
+    type: String(data.type).toUpperCase(),
+    urgency: 'URGENTE',
+    cascadeStep: 0,
+    candidateEmployeeId: data.candidateEmployeeId,
+    candidateEmployeeName: data.candidateEmployeeName,
+    ...(sourceId ? { candidateShiftId: sourceId } : {}),
+    status: 'ACCEPTED',
+    asignacionDirecta: true,
+    timeoutAt: now,
+    createdAt: now,
+    createdBy: data.createdBy || 'AUTO',
+    respondedAt: now,
+    acceptedAt: now,
+    originSource: home ? 'DOMICILIO' : 'SIN_COORD',
+    etaMinutes: travel.etaMinutes,
+    expectedArrivalAt: Timestamp.fromMillis(plan.expectedArrivalMs),
+    reminderAt: Timestamp.fromMillis(plan.reminderAtMs),
+    reminderPending: true,
+    delayAlertPending: true,
+    escenarioCobertura: 'URGENTE',
+    ...(gapStartMs > 0 ? { gapStartAt: Timestamp.fromMillis(gapStartMs) } : {}),
+    ...(gapEndMs > 0 ? { gapEndAt: Timestamp.fromMillis(gapEndMs) } : {}),
+  });
+  const texto = textoAsignacionRet({
+    nombre,
+    clientName: data.clientName,
     objectiveName: data.objectiveName,
     positionName: data.positionName,
+    code: data.shiftCode,
+    desde,
+    hasta,
+    huecoFuturo: false,
   });
-  await avisarTurnoActualizado(db, data.candidateEmployeeId, texto, covDocId, data.empresaId).catch((err) => {
-    console.warn('[refEscDirecto] aviso:', (err as Error).message);
-  });
+  await avisarEmpleado(
+    db, data.candidateEmployeeId, 'Turno asignado', texto, 'TURNO_ASIGNADO', covDocId, data.empresaId,
+  ).catch((err) => console.warn('[cobertura urgente] aviso:', (err as Error).message));
+
+  if (retenerSalientePorLlegada({ gapStartMs, nowMs, etaMinutes: travel.etaMinutes }) && tit) {
+    await retainOutgoingForGap(db, { ...tit, id: data.shiftId }, {
+      nowMs,
+      holdNow: gapStartMs > nowMs,
+      sendPush: true,
+    }).catch((err) => console.warn('[cobertura urgente] retención:', (err as Error).message));
+  }
   return covDocId;
+}
+
+export async function asignarRefEscSiMismoObjetivo(
+  db: admin.firestore.Firestore,
+  data: DirectaInput,
+): Promise<string | null> {
+  if (!esRefOEsc(data.type)) return null;
+  return resolverCoberturaRefEscRet(db, data);
+}
+
+export async function asignarRetDirecto(
+  db: admin.firestore.Firestore,
+  data: DirectaInput,
+  opts?: { now?: Timestamp },
+): Promise<string | null> {
+  if (!esRet(data.type)) return null;
+  return resolverCoberturaRefEscRet(db, data, opts);
 }

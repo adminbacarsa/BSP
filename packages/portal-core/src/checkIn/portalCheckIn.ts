@@ -291,8 +291,9 @@ export function getCheckInTiming(
     const open = convocadoPunchOpenMs(recEarly);
     const gap = timestampLikeToMillis(recEarly.startTime);
     const eta = Number(recEarly.etaMinutes);
-    const futureByEta = gap > 0 && accepted > 0 && Number.isFinite(eta) && eta > 0 && gap > accepted + eta * 60_000;
-    const lejos = gap > 0 && accepted > 0 && gap > accepted + 15 * 60_000;
+    const marcadoUrgente = recEarly.coberturaUrgente === true || recEarly.escenarioCobertura === 'URGENTE';
+    const futureByEta = !marcadoUrgente && gap > 0 && accepted > 0 && Number.isFinite(eta) && eta > 0 && gap > accepted + eta * 60_000;
+    const lejos = !marcadoUrgente && gap > 0 && accepted > 0 && gap > accepted + 15 * 60_000;
     const future = futureByEta || lejos;
     const depart = futureByEta ? gap - eta * 60_000 : lejos ? gap - 15 * 60_000 : accepted;
     const ended = capMs > 0 && nowMs > capMs;

@@ -3,6 +3,7 @@ import { isFrancoCoverageOriginDoc } from './coverageTraceShift';
 import { isFrancoShiftCode } from '../common/simulableShift';
 import { resolveCoverageBandCode } from './coverageExtAdvSegments';
 import { isEventoShift } from '../eventos/eventoCoverage';
+import { camposPresencia, parcheFuenteSinHoras, yaFicho } from '../fichajes/fichadaSobreCobertura';
 import { asegurarObjetivoDeEvento, camposTurnoEvento } from '../eventos/turnoEvento';
 import {
   gapWindowFromTitularShift,
@@ -376,6 +377,16 @@ export type ApplyCoverageParams = {
    * no la del convocado. El aviso lo manda asignarRefEscSiMismoObjetivo.
    */
   refEscAsignacionDirecta?: boolean;
+  /**
+   * RET asignado directo (cualquier objetivo): el origen se convierte como un REF
+   * y el ops_cov usa la ventana del convocado, no la del turno planificado.
+   */
+  retAsignacionDirecta?: boolean;
+  /** Más de 1 h antes del inicio: turno planificado (T−15 / T−5 / T / AA a T+30). */
+  coberturaAnticipada?: boolean;
+  /** 1 h o menos, o hueco ya empezado: ventana del convocado. */
+  coberturaUrgente?: boolean;
+  escenarioCobertura?: 'ANTICIPADA' | 'URGENTE';
 };
 
 /** Escritura única de cobertura (espejo web2). */
@@ -458,12 +469,13 @@ export async function applyCoverage(
   const writtenCode = eventGap ? 'EV' : (ct === 'FT' ? 'FT' : bandCode);
 
   const sourceId = String(params.sourceShiftId || '').trim();
+  let srcData: Record<string, unknown> | null = null;
   if (sourceId) {
     const srcSnap = await db.collection('turnos').doc(sourceId).get();
     if (!srcSnap.exists) {
       throw new CoverageApplyError('NOT_FOUND', 'Turno origen no encontrado');
     }
-    const srcData = srcSnap.data() as Record<string, unknown>;
+    srcData = srcSnap.data() as Record<string, unknown>;
     const linkedToThis = String(srcData.coverageDocId || '').trim() === covDocId;
     const sameCovOnSource =
       linkedToThis && (srcData.coverageUsed === true || ct === 'EXTEND' || ct === 'ADVANCE');
@@ -494,7 +506,8 @@ export async function applyCoverage(
       extensionEndTime: admin.firestore.FieldValue.delete(),
       adjustedEndTime: admin.firestore.FieldValue.delete(),
     };
-    const srcCode = String(srcData.code || srcData.shiftCode || '').trim().toUpperCase();
+    const anularFuente = ct === 'REF' || ct === 'ESC' || ct === 'RET' || ct === 'FT';
+    const quitarReloj = anularFuente ? parcheFuenteSinHoras(covDocId, titularId) : null;
     if (sameCovOnSource && (ct === 'EXTEND' || ct === 'ADVANCE')) {
       // Reintento / resync: origen ya vinculado a este ops_cov.
     } else if (ct === 'EXTEND' && params.extensionEndTime) {
@@ -513,33 +526,24 @@ export async function applyCoverage(
     } else if (ct === 'ESC' || ct === 'REF') {
       batch.update(
         db.collection('turnos').doc(sourceId),
-        buildEscRefSourceConvertedPatch(srcData, covDocId),
+        { ...buildEscRefSourceConvertedPatch(srcData, covDocId), ...(quitarReloj || {}) },
       );
     } else if (ct === 'FT') {
-      const comment = /franco trabajado\s*\(cobertura/i.test(String(srcData.comments || ''));
-      const franco = srcData.isFranco === true
-        || isFrancoShiftCode(srcCode)
-        || comment
-        || isFrancoCoverageOriginDoc(srcData);
-      const keepCode = isFrancoShiftCode(srcCode) ? srcCode : 'F';
-      batch.update(db.collection('turnos').doc(sourceId), {
+      batch.update(db.collection('turnos').doc(sourceId), quitarReloj || {
         ...usedBase,
-        ...clearAdvanceMarkers,
         coverageUsed: true,
         coverageUsedForShiftId: titularId,
-        ...(franco
-          ? {
-            isFranco: true,
-            isFrancoTrabajado: false,
-            code: keepCode,
-            comments: `Franco Trabajado (cobertura ${covDocId})`,
-          }
-          : {}),
       });
+    } else if (ct === 'RET' && (params.retAsignacionDirecta || params.coberturaAnticipada || params.coberturaUrgente)) {
+      batch.update(
+        db.collection('turnos').doc(sourceId),
+        { ...buildEscRefSourceConvertedPatch(srcData, covDocId), ...(quitarReloj || {}) },
+      );
     } else if (ct === 'RET') {
       batch.update(db.collection('turnos').doc(sourceId), {
         ...usedBase,
         ...clearAdvanceMarkers,
+        ...(quitarReloj || {}),
       });
     } else {
       batch.update(db.collection('turnos').doc(sourceId), usedBase);
@@ -580,6 +584,10 @@ export async function applyCoverage(
     : null;
   const realStartMs = (existingCov?.realStartTime as { toMillis?: () => number } | undefined)?.toMillis?.() ?? 0;
   const keepPresence = existingCov?.isPresent === true || realStartMs > 0;
+  const moverPresencia = !!srcData
+    && ['REF', 'ESC', 'RET', 'FT'].includes(ct)
+    && yaFicho(srcData)
+    && !keepPresence;
 
   batch.set(
     db.collection('turnos').doc(covDocId),
@@ -602,20 +610,30 @@ export async function applyCoverage(
       coverageType: ct,
       ...linkFields,
       sourceShiftId: sourceId || null,
+      coverageForShiftId: titularId,
+      ...(srcData && (ct === 'REF' || ct === 'ESC' || ct === 'RET' || ct === 'FT')
+        ? { codigoOriginal: String(srcData.code || srcData.shiftCode || ct).trim().toUpperCase() }
+        : {}),
       coverageSuperseded: false,
       coverageHoursOnSource: ct === 'EXTEND' || ct === 'ADVANCE',
       empresaId: empresaId || null,
-      ...(keepPresence
-        ? {}
-        : {
-          status: 'PENDING',
-          isPresent: false,
-          isAwaitingCoverageCheckIn: ct !== 'EXTEND',
-        }),
+      ...(moverPresencia && srcData
+        ? camposPresencia(srcData)
+        : keepPresence
+          ? {}
+          : {
+            status: 'PENDING',
+            isPresent: false,
+            isAwaitingCoverageCheckIn: ct !== 'EXTEND',
+          }),
       ...(existingCov ? {} : { createdAt: coverageServerTime() }),
       ...(existingCov?.acceptedAt ? {} : { acceptedAt: params.acceptedAt || coverageServerTime() }),
       ...(params.convocatoriaId ? { assignedByConvocatoria: params.convocatoriaId } : {}),
       ...(params.refEscAsignacionDirecta ? { refEscAsignacionDirecta: true } : {}),
+      ...(params.retAsignacionDirecta ? { retAsignacionDirecta: true } : {}),
+      ...(params.coberturaAnticipada ? { coberturaAnticipada: true, refEscAsignacionDirecta: true } : {}),
+      ...(params.coberturaUrgente ? { coberturaUrgente: true } : {}),
+      ...(params.escenarioCobertura ? { escenarioCobertura: params.escenarioCobertura } : {}),
     },
     { merge: true },
   );

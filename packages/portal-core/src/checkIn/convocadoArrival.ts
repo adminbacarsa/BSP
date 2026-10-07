@@ -22,9 +22,11 @@ export type RecordatorioConvocadoLike = {
   /** Cuándo toca el recordatorio y cuándo se envió. */
   reminderAt?: unknown;
   reminderSentAt?: unknown;
-  /** Inicio del hueco. Si falta más de 5 min, la tarjeta no pregunta asistencia. */
+  /** Inicio del hueco. Fuera de REF/ESC/RET, si falta más de 5 min la tarjeta no pregunta. */
   gapStartAt?: unknown;
   startTime?: unknown;
+  escenarioCobertura?: 'ANTICIPADA' | 'URGENTE' | string;
+  coberturaAnticipada?: boolean;
   /** Respuesta del convocado al recordatorio. */
   convocadoReply?: 'ON_WAY' | 'PROBLEM' | string;
   convocadoReplyAt?: unknown;
@@ -56,7 +58,10 @@ export function isRecordatorioPendiente(
   const sentMs = timestampLikeToMillis(c.reminderSentAt);
   if (sentMs <= 0) return false;
   const gap = timestampLikeToMillis(c.gapStartAt) || timestampLikeToMillis((c as { startTime?: unknown }).startTime);
-  if (gap > Date.now() + 5 * 60_000) return false;
+  // REF/ESC: nada de «¿Seguís en camino?» con el hueco a más de 5 min. El RET directo sí
+  // usa el recordatorio del convocado (puede caer antes de T−5).
+  if (c.escenarioCobertura === 'ANTICIPADA' || c.coberturaAnticipada === true) return false;
+  if (type !== 'RET' && type !== 'REF' && type !== 'ESC' && gap > Date.now() + 5 * 60_000) return false;
   const replyMs = timestampLikeToMillis(c.convocadoReplyAt);
   if (replyMs > 0 && replyMs >= sentMs) return false;
   return true;
@@ -136,11 +141,31 @@ export function coberturaAceptadaLine(input: {
   return `Cobertura aceptada · ${day} ${formatTimeAr(input.gapStart)}${end}${place ? ` · ${place}` : ''}`;
 }
 
+/** Más de este margen antes del inicio: la cobertura es un cambio de planificación. */
+export const UMBRAL_COBERTURA_ANTICIPADA_MIN = 60;
+
+export type EscenarioCobertura = 'ANTICIPADA' | 'URGENTE';
+
+/** Espejo de `escenarioCobertura` en functions. */
+export function escenarioCobertura(input: {
+  gapStartMs: number;
+  nowMs: number;
+  umbralMin?: number | null;
+}): EscenarioCobertura {
+  const raw = Number(input.umbralMin);
+  const umbral = Number.isFinite(raw) && raw >= 0 ? raw : UMBRAL_COBERTURA_ANTICIPADA_MIN;
+  const gap = input.gapStartMs;
+  const now = input.nowMs;
+  if (gap > 0 && now > 0 && gap - now > umbral * 60_000) return 'ANTICIPADA';
+  return 'URGENTE';
+}
+
 /** Espejo de `planConvocadoArrival` en functions (paridad). */
 export function planConvocadoArrival(input: {
   acceptedAtMs: number;
   gapStartMs: number;
   etaMinutes: number;
+  escenario?: EscenarioCobertura | null;
 }): {
   future: boolean;
   expectedArrivalMs: number;
@@ -152,6 +177,24 @@ export function planConvocadoArrival(input: {
   const travelMs = eta * 60_000;
   const accepted = input.acceptedAtMs;
   const gap = input.gapStartMs;
+  if (input.escenario === 'URGENTE') {
+    return {
+      future: false,
+      expectedArrivalMs: accepted + travelMs,
+      reminderAtMs: accepted + Math.round((eta * 2) / 3) * 60_000,
+      departAtMs: accepted,
+      punchOpenMs: accepted,
+    };
+  }
+  if (input.escenario === 'ANTICIPADA') {
+    return {
+      future: false,
+      expectedArrivalMs: gap,
+      reminderAtMs: 0,
+      departAtMs: gap,
+      punchOpenMs: gap > 0 ? gap - 15 * 60_000 : accepted,
+    };
+  }
   const future = gap > 0 && accepted > 0 && gap > accepted + travelMs;
   if (!future) {
     return {

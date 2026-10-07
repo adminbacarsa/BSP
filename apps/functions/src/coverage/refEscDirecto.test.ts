@@ -3,17 +3,58 @@
  */
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { escenarioCobertura, retenerSalientePorLlegada } from '../common/convocadoEta.ts';
 import {
   asistenciaAntesDeVentana,
   esRefOEsc,
+  esRet,
   fichadaAbreMs,
   refEscMismoObjetivo,
+  textoAsignacionRet,
+  textoRetAnticipado,
   textoTurnoActualizado,
 } from './refEscDirecto.ts';
 
 const ts = (iso: string) => ({ toMillis: () => new Date(iso).getTime() });
 const start = ts('2026-10-07T10:45:00-03:00');
 const end = ts('2026-10-07T12:00:00-03:00');
+
+describe('escenario de cobertura', () => {
+  const gap = new Date('2026-10-07T10:45:00-03:00').getTime();
+  const min = 60_000;
+
+  it('61 min es anticipada, 59 min y ya empezado son urgente', () => {
+    assert.equal(escenarioCobertura({ gapStartMs: gap, nowMs: gap - 61 * min }), 'ANTICIPADA');
+    assert.equal(escenarioCobertura({ gapStartMs: gap, nowMs: gap - 60 * min }), 'URGENTE');
+    assert.equal(escenarioCobertura({ gapStartMs: gap, nowMs: gap - 59 * min }), 'URGENTE');
+    assert.equal(escenarioCobertura({ gapStartMs: gap, nowMs: gap + 5 * min }), 'URGENTE');
+  });
+
+  it('el umbral de la empresa mueve la frontera', () => {
+    assert.equal(escenarioCobertura({ gapStartMs: gap, nowMs: gap - 31 * min, umbralMin: 30 }), 'ANTICIPADA');
+    assert.equal(escenarioCobertura({ gapStartMs: gap, nowMs: gap - 30 * min, umbralMin: 30 }), 'URGENTE');
+  });
+
+  it('retiene al saliente si el hueco ya empezó o empieza antes de la llegada', () => {
+    assert.equal(retenerSalientePorLlegada({ gapStartMs: gap, nowMs: gap + min, etaMinutes: 5 }), true);
+    assert.equal(retenerSalientePorLlegada({ gapStartMs: gap, nowMs: gap - 3 * min, etaMinutes: 5 }), true);
+    assert.equal(retenerSalientePorLlegada({ gapStartMs: gap, nowMs: gap - 59 * min, etaMinutes: 5 }), false);
+  });
+
+  it('aviso anticipado del RET', () => {
+    assert.equal(textoRetAnticipado({
+      nombre: 'Laura',
+      cuando: 'hoy',
+      hora: '10:45',
+      clientName: 'Cliente',
+      objectiveName: 'Peaje 9 Norte',
+      positionName: 'Puesto 1',
+      code: 'M',
+      desde: '10:45',
+      hasta: '12:00',
+    }), 'Laura, hoy a las 10:45 cubrís Cliente · Peaje 9 Norte · Puesto 1, M 10:45–12:00.');
+  });
+});
 
 describe('REF/ESC mismo objetivo', () => {
   const source = {
@@ -48,7 +89,9 @@ describe('REF/ESC mismo objetivo', () => {
     }), false);
   });
 
-  it('RET no se toca', () => {
+  it('RET no es el atajo de REF mismo objetivo', () => {
+    assert.equal(esRet('RET'), true);
+    assert.equal(esRet('ref'), false);
     assert.equal(refEscMismoObjetivo({
       type: 'RET',
       source,
@@ -57,6 +100,26 @@ describe('REF/ESC mismo objetivo', () => {
       endTime: end,
       shiftCode: 'M',
     }), false);
+  });
+
+  it('aviso del RET: a las HH:MM si el hueco es futuro, lo antes posible si ya empezó', () => {
+    const lugar = {
+      nombre: 'Laura',
+      clientName: 'Cliente',
+      objectiveName: 'Peaje 9 Norte',
+      positionName: 'Puesto 1',
+      code: 'M',
+      desde: '10:45',
+      hasta: '12:00',
+    };
+    assert.equal(
+      textoAsignacionRet({ ...lugar, huecoFuturo: true, horaLlegada: '10:45' }),
+      'Laura, se te asignó cubrir Cliente · Peaje 9 Norte · Puesto 1, M 10:45–12:00. Presentate a las 10:45.',
+    );
+    assert.equal(
+      textoAsignacionRet({ ...lugar, huecoFuturo: false }),
+      'Laura, se te asignó cubrir Cliente · Peaje 9 Norte · Puesto 1, M 10:45–12:00. Presentate lo antes posible.',
+    );
   });
 
   it('aviso informativo', () => {
