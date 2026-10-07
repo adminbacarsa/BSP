@@ -74,7 +74,17 @@ export async function aplicarAvisoPortal(
   const patch = lib.patchActivacionAviso(data);
   const ref = db.collection('ausencias').doc(ausenciaId);
   if (patch) {
-    await ref.update({ ...patch, operativo: true, updatedAt: FieldValue.serverTimestamp() });
+    const historial = Array.isArray(data.historial) ? data.historial : [];
+    const primera = historial.length === 0
+      ? {
+          historial: [{
+            texto: 'Registrada · RRHH revisando',
+            por: String(data.employeeName || 'Guardia'),
+            at: new Date().toISOString(),
+          }],
+        }
+      : {};
+    await ref.update({ ...patch, ...primera, operativo: true, updatedAt: FieldValue.serverTimestamp() });
   }
 
   const employeeId = String(data.employeeId || '').trim();
@@ -96,7 +106,7 @@ export async function aplicarAvisoPortal(
     if (empresaId && String(turno.empresaId || '').trim() && String(turno.empresaId || '').trim() !== empresaId) continue;
     if (!entraEnAviso(turno, id, data, lib)) continue;
     if (!sePuedeMarcar(turno, lib)) continue;
-    await db.collection('turnos').doc(id).update({
+    const patchTurno: Record<string, unknown> = {
       isAbsent: true,
       status: 'ABSENT',
       absenceType: 'AA',
@@ -105,7 +115,29 @@ export async function aplicarAvisoPortal(
       ausenciaId,
       notifiedAbsent: true,
       ausenciaConAviso: true,
-    });
+    };
+    const cuil = String(turno.bolsaCuil || data.bolsaCuil || '').trim();
+    if (turno.esEventual === true || cuil) {
+      const inicio = (turno.startTime as { toMillis?: () => number } | undefined)?.toMillis?.() || 0;
+      const horasAntes = inicio > Date.now() ? (inicio - Date.now()) / 3600000 : 0;
+      const tipo = horasAntes >= 24 ? 'CANCELACION_ANTICIPADA' : 'CANCELACION_TARDIA';
+      patchTurno.pagaJornada = false;
+      patchTurno.eventualDesempeno = tipo;
+      patchTurno.eventualNoSePresentoMotivo = 'NO_PUEDE_ASISTIR';
+      await db.collection('guardia_desempeno_eventos').doc(`${tipo}_${id}`).set({
+        empleadoId: String(turno.employeeId || employeeId),
+        bolsaCuil: cuil || null,
+        tipo,
+        fecha: ymdTurno(turno) || String(data.startDate || ''),
+        turnoId: id,
+        eventoId: turno.eventoId || null,
+        empresaId: String(turno.empresaId || empresaId || ''),
+        esEventual: true,
+        aviso: true,
+        createdAt: now,
+      }, { merge: true });
+    }
+    await db.collection('turnos').doc(id).update(patchTurno);
     turnos += 1;
   }
 
@@ -168,4 +200,62 @@ export async function aplicarJustificacionAviso(
     }
   }
   return { ok: true };
+}
+
+/**
+ * El portal adjuntó un certificado a una ausencia que ya existía.
+ * No justifica ni paga: deja la revisión abierta para RRHH y anota el historial.
+ * Si el mismo write cambió el tipo o el estado (lo hizo RRHH), no reabre.
+ */
+export async function aplicarCertificadoSubido(
+  db: Firestore,
+  ausenciaId: string,
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+): Promise<{ aplicado: boolean }> {
+  const urlNueva = String(after.certificateUrl || '') !== '' && String(after.certificateUrl || '') !== String(before.certificateUrl || '');
+  const pathNuevo = String(after.certificateStoragePath || '') !== '' && String(after.certificateStoragePath || '') !== String(before.certificateStoragePath || '');
+  if (!urlNueva && !pathNuevo) return { aplicado: false };
+  if (String(before.status || '') !== String(after.status || '')) return { aplicado: false };
+  if (String(before.type || '') !== String(after.type || '')) return { aplicado: false };
+  if (String(after.revisionEstado || '') === 'JUSTIFICADA' || after.status === 'Justificada') return { aplicado: false };
+
+  const ref = db.collection('ausencias').doc(ausenciaId);
+  await ref.update({
+    revisionEstado: 'POR_REVISAR',
+    historial: FieldValue.arrayUnion({
+      texto: 'Subió certificado',
+      por: String(after.employeeName || 'Guardia'),
+      at: new Date().toISOString(),
+    }),
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  const novId = `aviso_portal_${ausenciaId}`;
+  const novRef = db.collection('novedades').doc(novId);
+  const ya = await novRef.get();
+  const nombre = String(after.employeeName || 'Guardia');
+  const descripcion = `${nombre} subió un certificado. RRHH lo revisa.`;
+  if (ya.exists) {
+    await novRef.set({
+      status: 'pending',
+      description: descripcion,
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+  } else {
+    await novRef.set({
+      type: 'AVISO_AUSENCIA_PORTAL',
+      source: 'AUSENCIA',
+      status: 'pending',
+      handledBy: 'RRHH',
+      title: 'Certificado para revisar',
+      description: descripcion,
+      employeeId: after.employeeId || '',
+      employeeName: nombre,
+      empresaId: after.empresaId || null,
+      ausenciaId,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+  }
+  return { aplicado: true };
 }

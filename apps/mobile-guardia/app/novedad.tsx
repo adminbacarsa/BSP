@@ -40,7 +40,7 @@ function typeAcceptsCertificate(type: AbsenceType): boolean {
 
 export default function NovedadScreen() {
   const router = useRouter();
-  const { user, employee, empDocId, portalFeatures, initializing } = usePortalAuth();
+  const { user, employee, empDocId, bolsaCuil, portalFeatures, initializing } = usePortalAuth();
   const { shifts } = useEmployeeShifts(empDocId, user?.uid ?? null);
   const { db } = getPortalFirebase();
   const { palette } = useTheme();
@@ -61,6 +61,7 @@ export default function NovedadScreen() {
   const [reason, setReason] = useState('');
   const [certificate, setCertificate] = useState<LocalCertificateFile | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [confirmacion, setConfirmacion] = useState('');
 
   useEffect(() => {
     setAbsenceType((current) => (typeOptions.includes(current) ? current : defaultAbsenceType(typeOptions)));
@@ -132,6 +133,12 @@ export default function NovedadScreen() {
         certificateStoragePath,
         reason: reason.trim(),
         source: 'EMPLEADO',
+        ...(bolsaCuil ? { bolsaCuil } : {}),
+        historial: [{
+          texto: 'Registrada · RRHH revisando',
+          por: displayName,
+          at: new Date().toISOString(),
+        }],
         createdAt: serverTimestamp(),
         absenceCase: classified.absenceCase,
         minutesBeforeShift: classified.minutesBeforeShift,
@@ -147,9 +154,7 @@ export default function NovedadScreen() {
 
       const certNote = fileUrl ? ' El certificado quedó adjunto.' : '';
       const toastMsg = absenceSubmitToastMessageForType(absenceType, classified.absenceCase);
-      appAlert('Enviado', `${toastMsg}${certNote}`, [
-        { text: 'OK', onPress: () => router.back() },
-      ]);
+      setConfirmacion(`${toastMsg}${certNote}`);
       setReason('');
       setCertificate(null);
       setStartDate(todayKey());
@@ -179,6 +184,26 @@ export default function NovedadScreen() {
               Tu empresa no tiene activas ausencias o licencias en el portal.
             </Text>
             <CommandButton label="Volver" variant="secondary" onPress={() => router.back()} />
+          </View>
+        </SafeAreaView>
+      </>
+    );
+  }
+
+  if (confirmacion) {
+    return (
+      <>
+        <Stack.Screen options={{ title: 'Novedad enviada' }} />
+        <SafeAreaView style={[styles.safe, { backgroundColor: palette.background }]} edges={['bottom']}>
+          <View style={styles.scroll}>
+            <CommandCard title="Quedó registrada">
+              <Text style={[styles.blockedBody, { color: palette.onSurface }]}>{confirmacion}</Text>
+              <Text style={[styles.blockedBody, { color: palette.onSurfaceMuted }]}>
+                RRHH la revisa. Podés ver el estado y subir el certificado desde Mis novedades.
+              </Text>
+              <CommandButton label="Ver mis novedades" onPress={() => router.replace('/mis-novedades')} />
+              <CommandButton label="Volver" variant="secondary" onPress={() => router.back()} />
+            </CommandCard>
           </View>
         </SafeAreaView>
       </>

@@ -128,6 +128,8 @@ async function run() {
   await c.seed('turnos/tE', shift(A, 'legE', 'cA'));
   await c.seed('ausencias/aA', { empresaId: A, employeeId: 'legG', type: 'AA' });
   await c.seed('ausencias/aB', { empresaId: B, employeeId: 'legB', type: 'AA' });
+  await c.seed('ausencias/aE', { empresaId: A, employeeId: 'legE', bolsaCuil: '20111111112', type: 'Ausencia con aviso', source: 'EMPLEADO', status: 'Avisada' });
+  await c.seed('ausencias/aCuil', { empresaId: A, employeeId: 'otroLegajo', bolsaCuil: '20111111112', type: 'Enfermedad', status: 'Pendiente' });
   await c.seed('sesiones_operador/sA', { empresaId: A, operatorId: 'uA', status: 'ACTIVO' });
   await c.seed('sesiones_operador/sB', { empresaId: B, operatorId: 'uB', status: 'ACTIVO' });
   await c.seed('eventuales_bolsa/20111111112', { nombre: 'Eventual', grupoId: 'g1' });
@@ -177,6 +179,21 @@ async function run() {
   add('guardia no lee turno ajeno', await c.get(tok.g, 'turnos/tA'), false);
   add('guardia no escribe turno', await c.update(tok.g, 'turnos/tG', { positionName: 'X' }), false);
   add('guardia lee ausencia', await c.get(tok.g, 'ausencias/aA'), true);
+  add('guardia no lee ausencia ajena', await c.get(tok.g, 'ausencias/aB'), false);
+  add('guardia no lee ausencia del eventual', await c.get(tok.g, 'ausencias/aE'), false);
+  add('guardia no cambia el estado', await c.update(tok.g, 'ausencias/aA', { status: 'Justificada' }), false);
+  add('guardia sube certificado propio', await c.update(tok.g, 'ausencias/aA', { certificateUrl: 'https://cert', hasCertificate: true }), true);
+  add('guardia crea su aviso', await c.create(tok.g, 'ausencias', 'nuevaG', {
+    employeeId: 'legG', source: 'EMPLEADO', status: 'Pendiente', empresaId: A, type: 'Ausencia con aviso',
+  }), true);
+  add('guardia no crea ausencia ajena', await c.create(tok.g, 'ausencias', 'nuevaAjena', {
+    employeeId: 'legB', source: 'EMPLEADO', status: 'Pendiente', empresaId: B,
+  }), false);
+  add('eventual lee su ausencia', await c.get(tok.e, 'ausencias/aE'), true);
+  add('eventual lee por bolsaCuil', await c.get(tok.e, 'ausencias/aCuil'), true);
+  add('eventual no lee ausencia del guardia', await c.get(tok.e, 'ausencias/aA'), false);
+  add('eventual no justifica', await c.update(tok.e, 'ausencias/aE', { status: 'Justificada' }), false);
+  add('eventual sube certificado propio', await c.update(tok.e, 'ausencias/aE', { certificateUrl: 'https://cert-e', hasCertificate: true }), true);
 
   add('eventual lee su turno', await c.get(tok.e, 'turnos/tE'), true);
   add('eventual no lee turno ajeno', await c.get(tok.e, 'turnos/tG'), false);

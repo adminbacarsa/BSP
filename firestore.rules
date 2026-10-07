@@ -255,6 +255,36 @@ service cloud.firestore {
       );
     }
 
+    // Mis novedades: el guardia lee por su legajo; el eventual, por su legajo o por bolsaCuil.
+    function portalLeeAusencia(data) {
+      return isPortalGuardia() && (
+        empleadoDocOwnedByAuth(data.get('employeeId', ''))
+        || (
+          isEventualClaim()
+          && data.get('bolsaCuil', '') != ''
+          && data.get('bolsaCuil', '') == request.auth.token.bolsaCuil
+        )
+      );
+    }
+
+    function portalCreaAusencia() {
+      return isPortalGuardia()
+        && request.resource.data.source == 'EMPLEADO'
+        && request.resource.data.status == 'Pendiente'
+        && portalLeeAusencia(request.resource.data);
+    }
+
+    function portalAdjuntaCertificado() {
+      return portalLeeAusencia(resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'certificateUrl',
+          'certificateName',
+          'certificateStoragePath',
+          'certificateUploadedAt',
+          'hasCertificate'
+        ]);
+    }
+
     // Portal guardia: hero e historial leen turnos con where employeeId == legajo o uid.
     // Alertas no leen turnos (user_notifications). client_users siguen por clientId.
     function employeeReadsOwnTurno(data) {
@@ -326,9 +356,9 @@ service cloud.firestore {
     }
 
     match /ausencias/{absenceId} {
-      allow read: if tenantAdminRead() || isPortalGuardia();
-      allow create: if tenantAdminCreate() || isPortalGuardia();
-      allow update: if tenantAdminUpdate() || isPortalGuardia();
+      allow read: if tenantAdminRead() || portalLeeAusencia(resource.data);
+      allow create: if tenantAdminCreate() || portalCreaAusencia();
+      allow update: if tenantAdminUpdate() || portalAdjuntaCertificado();
       allow delete: if tenantAdminDelete();
     }
 
