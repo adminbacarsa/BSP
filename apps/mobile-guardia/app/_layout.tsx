@@ -52,6 +52,8 @@ function RootNavigator() {
         <Stack.Screen name="eventos" options={{ title: 'Eventos' }} />
         <Stack.Screen name="permutas" options={{ title: 'Permutas' }} />
         <Stack.Screen name="novedad" options={{ title: 'Novedad' }} />
+        <Stack.Screen name="mis-novedades/index" options={{ title: 'Mis novedades' }} />
+        <Stack.Screen name="mis-novedades/[id]" options={{ title: 'Novedad' }} />
         <Stack.Screen name="credencial" options={{ title: 'Credencial' }} />
         <Stack.Screen name="play-capturas/[frame]" options={{ headerShown: false, title: 'Capturas' }} />
         <Stack.Screen name="contratos" options={{ title: 'Mis contratos' }} />

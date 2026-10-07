@@ -87,8 +87,21 @@ export {
   absenceTypeEmployeeHint,
   classifyAbsenceForEmployee,
   dateKeyLocal,
+  defaultAbsenceType,
   filterAbsenceTypesForFeatures,
 } from './absences/employeeAbsence';
+export {
+  CAMPOS_CERTIFICADO_PORTAL,
+  clavesDeLectura,
+  diaCorto,
+  estadoNovedadEnPalabras,
+  historialVisible,
+  millisNovedad,
+  ordenarNovedades,
+  puedeSubirCertificado,
+  rangoDias,
+} from './absences/misNovedades';
+export type { ClavesLectura, HistorialLinea, NovedadComoDoc } from './absences/misNovedades';
 export type { AbsenceType, AbsenceCase, ClassifiedAbsence } from './absences/employeeAbsence';
 export {
   isEventoActivo,

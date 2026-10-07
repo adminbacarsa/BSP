@@ -98,7 +98,6 @@ export function usePendingAaCertificates(params: {
           certificateStoragePath: uploaded.storagePath,
           certificateUploadedAt: serverTimestamp(),
           hasCertificate: true,
-          status: 'Confirmada',
         });
         await refresh();
         return { ok: true as const, message: 'Certificado enviado — RRHH fue notificado.' };

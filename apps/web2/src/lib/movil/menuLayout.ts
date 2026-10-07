@@ -64,6 +64,8 @@ export interface MenuDatos {
   /** Guardias presentes ahora. */
   activos?: number;
   ausentesHoy?: number;
+  /** Avisos del portal sin revisar + certificados en verificación. */
+  porRevisar?: number;
   /** Turnos sin asignar hasta mañana. */
   huecos?: number;
   arcaPendientes?: number;
@@ -106,11 +108,16 @@ export function estadoModulo(id: string, datos: MenuDatos | null | undefined): M
       return { texto: partes.join(' · '), tono: partes[0] === 'Al día' ? 'gris' : 'ambar' };
     }
     case 'rrhh': {
-      if (datos.ausentesHoy === undefined) return null;
-      const count = n(datos.ausentesHoy);
-      return count > 0
-        ? { texto: plural(count, 'ausencia hoy', 'ausencias hoy'), tono: 'ambar' }
-        : { texto: 'Sin ausencias hoy', tono: 'gris' };
+      if (datos.ausentesHoy === undefined && datos.porRevisar === undefined) return null;
+      const partes: string[] = [];
+      if (n(datos.porRevisar) > 0) partes.push(plural(n(datos.porRevisar), 'por revisar', 'por revisar'));
+      if (datos.ausentesHoy !== undefined) {
+        const count = n(datos.ausentesHoy);
+        partes.push(count > 0 ? plural(count, 'ausencia hoy', 'ausencias hoy') : 'Sin ausencias hoy');
+      }
+      if (partes.length === 0) return null;
+      const tono = partes.length === 1 && partes[0] === 'Sin ausencias hoy' ? 'gris' : 'ambar';
+      return { texto: partes.join(' · '), tono };
     }
     case 'eventuales': {
       if (datos.arcaPendientes === undefined) return null;

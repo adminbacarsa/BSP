@@ -3,7 +3,7 @@
   "scripts": {
     "lint": "eslint --ext .ts,.js src/",
     "prebuild": "node ../../scripts/build-hours-core.mjs && node ../../scripts/sync-hours-core-to-functions.mjs && node ../../scripts/bundle-hours-ledger.mjs && node ../../scripts/sync-eventuales-to-functions.mjs",
-    "build": "tsc && node ../../scripts/copy-hours-ledger-bundle.mjs && node ../../scripts/sync-eventuales-to-functions.mjs --lib",
+    "build": "tsc && node ../../scripts/copy-hours-ledger-bundle.mjs && node ../../scripts/sync-eventuales-to-functions.mjs --lib && node -e \"require('fs').copyFileSync('src/attendance/avisoPortal.mjs','lib/attendance/avisoPortal.mjs'); require('fs').copyFileSync('src/rrhh/certificadoIa.mjs','lib/rrhh/certificadoIa.mjs')\"",
     "check:standalone": "node ../../scripts/check-functions-standalone.mjs",
     "build:watch": "tsc --watch",
     "serve": "npm run build && firebase emulators:start --only functions",

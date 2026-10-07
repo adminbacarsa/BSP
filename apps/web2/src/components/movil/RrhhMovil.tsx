@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
-import { collection, getDocs, query, Timestamp, where } from 'firebase/firestore';
+import { arrayUnion, collection, getDocs, query, Timestamp, where } from 'firebase/firestore';
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { toast } from 'sonner';
 import { MovilBottomNav } from '@/components/movil/MovilBottomNav';
@@ -319,7 +319,18 @@ export function RrhhMovil() {
         nombreReal,
       });
       const certificado = certificateUrl ? { certificateUrl, certificateName: archivo?.name || null, certificateStoragePath } : {};
-      const cambios: Partial<Absence> & { absenceType: string } = { ...patch, ...certificado };
+      const eraAviso = ausencia.type === 'Ausencia con aviso' || ausencia.status === 'Avisada';
+      const cambios = {
+        ...patch,
+        ...certificado,
+        revisionEstado: patch.status === 'En verificación' ? 'POR_REVISAR' : 'JUSTIFICADA',
+        ...(eraAviso ? { avisoPortal: true } : {}),
+        historial: arrayUnion({
+          texto: patch.status === 'En verificación' ? 'Certificado en verificación' : `Justificada (${tipo.label})`,
+          por: nombreReal,
+          at: new Date().toISOString(),
+        }),
+      } as Partial<Absence> & { absenceType: string };
       const dataToSave: Absence & { absenceType: string } = {
         employeeId: ausencia.employeeId || '',
         employeeName: ausencia.employeeName,

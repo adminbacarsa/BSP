@@ -160,15 +160,15 @@ function MasScreenContent() {
           </CommandCard>
         ) : null}
 
-        {canNovedad ? (
-          <CommandCard title="Novedades RRHH">
-            <Text style={[styles.cardSub, { color: palette.onSurfaceMuted }]}>
-              Ausencias, licencias y avisos («Hoy no me presento») con la misma clasificación que el
-              portal web.
-            </Text>
+        <CommandCard title="Mis novedades">
+          <Text style={[styles.cardSub, { color: palette.onSurfaceMuted }]}>
+            Las que avisaste y las que cargó RRHH, con el estado de cada una.
+          </Text>
+          <CommandButton label="Ver mis novedades" variant="secondary" onPress={() => router.push('/mis-novedades')} />
+          {canNovedad ? (
             <CommandButton label="Solicitar novedad" onPress={() => router.push('/novedad')} />
-          </CommandCard>
-        ) : null}
+          ) : null}
+        </CommandCard>
 
         <CommandCard title="Privacidad">
           <Text style={[styles.cardSub, { color: palette.onSurfaceMuted }]}>

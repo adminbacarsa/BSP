@@ -11,6 +11,7 @@ export const appRoutes = {
   eventos: '/eventos' as Href,
   permutas: '/permutas' as Href,
   novedad: '/novedad' as Href,
+  misNovedades: '/mis-novedades' as Href,
   credencial: '/credencial' as Href,
   contratos: '/contratos' as Href,
 } as const;

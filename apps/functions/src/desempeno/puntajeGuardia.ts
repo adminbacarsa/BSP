@@ -113,6 +113,9 @@ export interface FuenteAusencia {
   origin?: string | null;
   fechaMs: number;
   reverted?: boolean;
+  /** Aviso desde la app o certificado cargado: no es falta sin aviso. */
+  conAviso?: boolean;
+  conCertificado?: boolean;
 }
 
 const AUSENCIA_ESTADOS_SIN_EFECTO = new Set(['REVERTIDA', 'REVERTED', 'ANULADA', 'ANULADO', 'CANCELADA', 'CANCELLED', 'RECHAZADA']);
@@ -237,6 +240,7 @@ export function hechosDesdeFuentes(fuentes: FuentesDesempeno): HechoDesempeno[] 
     const eventual = aus.esEventual === true;
     const code = codigo(aus.code);
     const origin = codigo(aus.origin);
+    if (eventual && (aus.conAviso === true || aus.conCertificado === true)) continue;
     if (!eventual && LICENCIAS_JUSTIFICADAS.has(code)) continue;
     const falta = code === 'AA' || origin === 'AUTO_T30' || origin === 'AUSENCIA_AUTO';
     if (!eventual && !falta) continue;

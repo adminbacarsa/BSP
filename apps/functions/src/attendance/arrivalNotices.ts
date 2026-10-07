@@ -31,7 +31,12 @@ function horaAr(ms: number): string {
   });
 }
 
+export function shiftEligibleForArrivalNotice(shift: Record<string, unknown>): boolean {
+  return eligibleShift(shift);
+}
+
 function eligibleShift(shift: Record<string, unknown>): boolean {
+  if (String(shift.absenceDetectedBy || '') === 'AVISO_PORTAL') return false;
   if (shift.draft === true || shift.isPresent === true || shift.isCompleted === true || shift.isAbsent === true) {
     return false;
   }
@@ -58,6 +63,7 @@ async function claimFlag(
     if (!snap.exists) return false;
     const data = snap.data() || {};
     if (data[field]) return false;
+    if (String(data.absenceDetectedBy || '') === 'AVISO_PORTAL') return false;
     if (data.isPresent === true || data.isAbsent === true || data.isCompleted === true) return false;
     tx.update(ref, { [field]: now });
     return true;
@@ -182,7 +188,7 @@ export async function runShiftArrivalNotices(
       if (!cc.isEnabled(empresaId)) continue;
       if (cc.isDemo(empresaId)) continue;
       if (turnoFueraDeCentroDeControl(shift, excludedObjectives)) continue;
-      if (!eligibleShift(shift)) continue;
+      if (!shiftEligibleForArrivalNotice(shift)) continue;
       const startMs = (shift.startTime as Timestamp | undefined)?.toMillis?.() ?? 0;
       if (classifyArrivalNotice(startMs, nowMs) !== kind) continue;
       const flag = kind === 'HEADS_UP' ? 'preStartArrivalNoticeAt' : 'earlyRetentionAlertAt';

@@ -97,6 +97,7 @@ service firebase.storage {
       allow read: if canUploadBackupRestore(empresaId);
     }
 
+    // El portal sube el certificado en su propia carpeta (uid). No lee ni escribe la de otro.
     match /absences/{userId}/{fileName} {
       allow read, write: if isSignedIn() && request.auth.uid == userId;
     }

@@ -14,11 +14,12 @@ import { aptitudTypeService } from '@/services/aptitudTypeService';
 import { type AptitudType, type EmpleadoAptitud, APTITUD_SEEDS, CATEGORIA_LABELS } from '@/lib/rrhh/aptitudTypes';
 import { holidayService, Holiday } from '@/services/holidayService';
 import { agreementService } from '@/services/agreementService';
-import { db, onSnapshotFresh } from '@/lib/firebase';
+import { db, onSnapshotFresh, storage } from '@/lib/firebase';
+import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { geocodeAddress } from '@/lib/employees/geocodeAddress';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { getFunctions, httpsCallable } from 'firebase/functions';
-import { collection, getDocs, getDoc, query, where, Timestamp, addDoc, updateDoc, doc, deleteDoc, writeBatch, serverTimestamp, deleteField, limit } from 'firebase/firestore';
+import { collection, getDocs, getDoc, query, where, Timestamp, addDoc, updateDoc, doc, deleteDoc, writeBatch, serverTimestamp, deleteField, limit, arrayUnion } from 'firebase/firestore';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { useAuth } from '@/context/AuthContext';
 import { belongsToEmpresa, empresaScopedQuery, filterRowsByEmpresa, shouldScopeQueriesToEmpresa, belongsToEmpresaView, deleteEmployeeForEmpresa, queryAndDeleteForEmpresa, stampEmpresaId, updateDocForEmpresa, TenantIsolationError } from '@/lib/multiempresa';
@@ -34,6 +35,9 @@ import {
     BellRing, MessageCircle, ClipboardEdit, Eye, EyeOff, Shuffle, Tag, Smartphone
 } from 'lucide-react';
 import { GuardDeviceApprovalBell, GuardDeviceApprovalPanel } from '@/components/rrhh/GuardDeviceApprovalPanel';
+import { RevisionAvisoPortal } from '@/components/rrhh/RevisionAvisoPortal';
+import { useAusenciasPorRevisar } from '@/hooks/useAusenciasPorRevisar';
+import { esAvisoParaActivar, patchDejarInjustificada, patchJustificarAviso } from '@/lib/rrhh/avisoPortal.mjs';
 import CorreccionesTab from '@/components/admin/rrhh/CorreccionesTab';
 import AusenciasTab from '@/components/admin/rrhh/AusenciasTab';
 import { useAbsenceTurnoCoverage } from '@/hooks/useAbsenceTurnoCoverage';
@@ -379,6 +383,9 @@ export default function EmployeesPage() {
   const [holidays, setHolidays] = useState<Holiday[]>([]);
 
   const [showAbsenceModal, setShowAbsenceModal] = useState(false);
+  const [revisionAviso, setRevisionAviso] = useState<any>(null);
+  const [revisionOcupada, setRevisionOcupada] = useState(false);
+  const ausenciasPorRevisar = useAusenciasPorRevisar(empresaId);
   const initialAbsenceForm: Absence = { employeeId: '', employeeName: '', type: 'Vacaciones', startDate: new Date().toISOString().split('T')[0], endDate: new Date().toISOString().split('T')[0], status: 'Pendiente', hasCertificate: false, reason: '', comments: '', rejectionReason: '', alternativePeriodStart: '', alternativePeriodEnd: '' };
   const [absenceForm, setAbsenceForm] = useState<Absence>(initialAbsenceForm);
   const [isEditingAbsence, setIsEditingAbsence] = useState(false);
@@ -530,6 +537,12 @@ export default function EmployeesPage() {
     );
     return () => unsub();
   }, [empresaId, scopeEmpresa]);
+  const campanaAusencias = useMemo(() => {
+    const byId = new Map<string, any>();
+    for (const row of pendingPortalRequests) byId.set(String(row.id), row);
+    for (const row of ausenciasPorRevisar.filas) byId.set(row.id, row);
+    return [...byId.values()].sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
+  }, [pendingPortalRequests, ausenciasPorRevisar.filas]);
   useEffect(() => { const activeAbs = absences.filter(a => a.status === 'Pendiente' || a.status === 'Justificada').length; const nextHols = holidays.filter(h => new Date(h.date) >= new Date()).length; setGlobalStats({ totalEmployees: employees.length, activeAbsences: activeAbs, nextHolidays: nextHols }); }, [employees, absences, holidays]);
   useEffect(() => {
     const term = searchTerm.toLowerCase();
@@ -1232,6 +1245,120 @@ export default function EmployeesPage() {
     setShowAbsenceModal(true);
   };
 
+  const marcarTurnosDelAviso = async (ausenciaId: string, absenceType: string) => {
+    const snap = await getDocs(query(collection(db, 'turnos'), where('ausenciaId', '==', ausenciaId)));
+    await Promise.all(snap.docs.map((row) => updateDoc(row.ref, { absenceType })));
+  };
+
+  const justificarAvisoPortal = async (tipo: { code: string; label: string }, archivo: File | null) => {
+    const aviso = revisionAviso;
+    if (!aviso?.id || !empresaId) return;
+    setRevisionOcupada(true);
+    try {
+      let certificateUrl = aviso.certificateUrl || null;
+      let certificateStoragePath = aviso.certificateStoragePath || null;
+      let certificateName = aviso.certificateName || null;
+      if (archivo) {
+        certificateStoragePath = `absences/${empresaId}/${Date.now()}_${archivo.name.replace(/\s+/g, '_')}`;
+        const fileRef = ref(storage, certificateStoragePath);
+        await uploadBytes(fileRef, archivo);
+        certificateUrl = await getDownloadURL(fileRef);
+        certificateName = archivo.name;
+      }
+      const patch = patchJustificarAviso({
+        code: tipo.code,
+        label: tipo.label,
+        tieneCertificado: !!certificateUrl,
+        requiereVerificacionMedica: absenceNeedsMedicalVerification({ type: tipo.label }),
+      });
+      const textoRevision = patch.status === 'En verificación'
+        ? 'Certificado en verificación'
+        : `Justificada (${tipo.label})`;
+      await absenceService.update(aviso.id, {
+        ...patch,
+        certificateUrl,
+        certificateName,
+        certificateStoragePath,
+        status: patch.status,
+        historial: arrayUnion({
+          texto: textoRevision,
+          por: currentUserName,
+          at: new Date().toISOString(),
+        }),
+      } as Partial<Absence>, { empresaId, migracionCompleta });
+      await marcarTurnosDelAviso(aviso.id, String(patch.absenceType || tipo.code));
+      if (absenceReplicatesToPlanning({ ...aviso, ...patch })) {
+        await replicarAusenciaPlanificador({
+          empresaId,
+          migracionCompleta,
+          absenceId: aviso.id,
+          data: { ...aviso, ...patch, employeeId: aviso.employeeId || '', employeeName: aviso.employeeName || '' },
+          employees,
+          objectives: allObjectives,
+          notify: (message) => addToast(message, 'warning'),
+        });
+      }
+      await avisarNovedadDeAusencia({
+        empresaId,
+        ausenciaId: aviso.id,
+        reportedBy: currentUserName,
+        data: {
+          type: String(patch.type || tipo.label),
+          employeeId: aviso.employeeId || '',
+          employeeName: aviso.employeeName || '',
+          startDate: aviso.startDate || '',
+          endDate: aviso.endDate || aviso.startDate || '',
+        },
+      });
+      addToast(patch.status === 'En verificación' ? 'Quedó en verificación' : 'Ausencia justificada', 'success');
+      setRevisionAviso(null);
+      loadData();
+    } catch (e) {
+      addToast(e instanceof Error ? e.message : 'No se pudo justificar', 'error');
+    } finally {
+      setRevisionOcupada(false);
+    }
+  };
+
+  const decidirPropuestaIa = async (decision: 'aprobar' | 'rechazar' | 'revertir') => {
+    const aviso = revisionAviso;
+    if (!aviso?.id) return;
+    setRevisionOcupada(true);
+    try {
+      const fn = httpsCallable(getFunctions(), 'decidirCertificadoIa');
+      await fn({ ausenciaId: aviso.id, decision });
+      addToast(decision === 'aprobar' ? 'Propuesta aprobada' : decision === 'rechazar' ? 'Propuesta rechazada' : 'Justificación revertida', 'success');
+      setRevisionAviso(null);
+      loadData();
+    } catch (e) {
+      addToast(e instanceof Error ? e.message : 'No se pudo guardar la decisión', 'error');
+    } finally {
+      setRevisionOcupada(false);
+    }
+  };
+
+  const dejarAvisoInjustificado = async () => {
+    const aviso = revisionAviso;
+    if (!aviso?.id || !empresaId) return;
+    setRevisionOcupada(true);
+    try {
+      await absenceService.update(aviso.id, {
+        ...patchDejarInjustificada(),
+        historial: arrayUnion({
+          texto: 'Injustificada',
+          por: currentUserName,
+          at: new Date().toISOString(),
+        }),
+      } as Partial<Absence>, { empresaId, migracionCompleta });
+      addToast('Quedó como ausencia con aviso, sin justificar', 'success');
+      setRevisionAviso(null);
+    } catch (e) {
+      addToast(e instanceof Error ? e.message : 'No se pudo guardar', 'error');
+    } finally {
+      setRevisionOcupada(false);
+    }
+  };
+
   const absenceEmployeeLabel = (empId: string, fallbackName?: string) => {
     const emp = employees.find(e => e.id === empId);
     if (emp) return `${emp.lastName}, ${emp.firstName}`;
@@ -1905,12 +2032,12 @@ export default function EmployeesPage() {
                             <button
                                 onClick={() => setShowRRHHAlerts(v => !v)}
                                 title="Solicitudes del portal de empleados"
-                                className={`relative p-2 rounded-xl transition-colors ${pendingPortalRequests.length > 0 ? 'bg-rose-100 text-rose-600 hover:bg-rose-200 dark:bg-rose-900/30 dark:text-rose-400' : 'bg-slate-100 text-slate-400 hover:bg-slate-200 dark:bg-slate-700'}`}
+                                className={`relative p-2 rounded-xl transition-colors ${campanaAusencias.length > 0 ? 'bg-rose-100 text-rose-600 hover:bg-rose-200 dark:bg-rose-900/30 dark:text-rose-400' : 'bg-slate-100 text-slate-400 hover:bg-slate-200 dark:bg-slate-700'}`}
                             >
-                                <BellRing size={17} className={pendingPortalRequests.length > 0 ? 'animate-pulse' : ''}/>
-                                {pendingPortalRequests.length > 0 && (
+                                <BellRing size={17} className={campanaAusencias.length > 0 ? 'animate-pulse' : ''}/>
+                                {campanaAusencias.length > 0 && (
                                     <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-rose-500 text-white text-[8px] font-black rounded-full flex items-center justify-center">
-                                        {pendingPortalRequests.length}
+                                        {campanaAusencias.length}
                                     </span>
                                 )}
                             </button>
@@ -1921,11 +2048,11 @@ export default function EmployeesPage() {
                                         <span className="font-black text-sm text-slate-800 dark:text-white flex-1">Solicitudes pendientes</span>
                                         <button onClick={() => setShowRRHHAlerts(false)} className="text-slate-400 hover:text-slate-600"><X size={14}/></button>
                                     </div>
-                                    {pendingPortalRequests.length === 0 ? (
+                                    {campanaAusencias.length === 0 ? (
                                         <div className="p-6 text-center text-slate-400 text-xs font-bold">Sin solicitudes pendientes</div>
                                     ) : (
                                         <div className="max-h-72 overflow-y-auto">
-                                            {pendingPortalRequests.map((a: any) => {
+                                            {campanaAusencias.map((a: any) => {
                                                 const typeColors: Record<string, string> = {
                                                     'Vacaciones': 'bg-teal-100 text-teal-700',
                                                     'Enfermedad': 'bg-rose-100 text-rose-700',
@@ -1938,7 +2065,15 @@ export default function EmployeesPage() {
                                                 return (
                                                     <button
                                                         key={a.id}
-                                                        onClick={() => { setShowRRHHAlerts(false); setActiveTab('ausencias'); handleOpenAbsenceModal(a); }}
+                                                        onClick={() => {
+                                                            setShowRRHHAlerts(false);
+                                                            if (esAvisoParaActivar(a) || a.status === 'Avisada' || a.revisionEstado === 'POR_REVISAR') {
+                                                                setRevisionAviso(a);
+                                                                return;
+                                                            }
+                                                            setActiveTab('ausencias');
+                                                            handleOpenAbsenceModal(a);
+                                                        }}
                                                         className="w-full px-4 py-3 flex items-start gap-3 hover:bg-slate-50 dark:hover:bg-slate-700 border-b border-slate-50 dark:border-slate-700 text-left transition-colors"
                                                     >
                                                         <span className={`text-[9px] font-black px-1.5 py-0.5 rounded mt-0.5 shrink-0 ${tc}`}>{a.type}</span>
@@ -1954,7 +2089,7 @@ export default function EmployeesPage() {
                                         </div>
                                     )}
                                     <div className="px-4 py-2 border-t border-slate-100 dark:border-slate-700 flex justify-between items-center">
-                                        <span className="text-[9px] text-slate-400">{pendingPortalRequests.length} pendiente{pendingPortalRequests.length !== 1 ? 's' : ''}</span>
+                                        <span className="text-[9px] text-slate-400">{campanaAusencias.length} pendiente{campanaAusencias.length !== 1 ? 's' : ''}</span>
                                         <button onClick={() => { setShowRRHHAlerts(false); setActiveTab('ausencias'); }} className="text-[10px] font-black text-indigo-600 hover:text-indigo-800">Ver todas →</button>
                                     </div>
                                 </div>
@@ -3417,6 +3552,19 @@ export default function EmployeesPage() {
                 </div>
             )}
         </div>
+        {revisionAviso && createPortal(
+            <RevisionAvisoPortal
+                aviso={revisionAviso}
+                ocupado={revisionOcupada}
+                onClose={() => { if (!revisionOcupada) setRevisionAviso(null); }}
+                onJustificar={(tipo, archivo) => { void justificarAvisoPortal(tipo, archivo); }}
+                onInjustificada={() => { void dejarAvisoInjustificado(); }}
+                onAprobarPropuesta={() => { void decidirPropuestaIa('aprobar'); }}
+                onRechazarPropuesta={() => { void decidirPropuestaIa('rechazar'); }}
+                onRevertirIa={() => { void decidirPropuestaIa('revertir'); }}
+            />,
+            document.body,
+        )}
         {showAbsenceModal && createPortal(
             <div className="fixed inset-0 z-[200] bg-black/70 flex items-center justify-center p-4" onClick={e => e.target === e.currentTarget && setShowAbsenceModal(false)}>
                 <div className="bg-white dark:bg-slate-800 p-8 rounded-xl w-full max-w-lg shadow-2xl">
@@ -3538,7 +3686,10 @@ export default function EmployeesPage() {
                                     }}
                                     className="w-full p-3 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl font-bold text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-400"
                                 >
-                                    {activeNovedadLabels.map(t => <option key={t} value={t}>{t}</option>)}
+                                    {(absenceForm.type && !activeNovedadLabels.includes(absenceForm.type)
+                                      ? [absenceForm.type, ...activeNovedadLabels]
+                                      : activeNovedadLabels
+                                    ).map(t => <option key={t} value={t}>{t}</option>)}
                                 </select>
                             </div>
                             <div>
@@ -3554,9 +3705,10 @@ export default function EmployeesPage() {
                                         const medical = configured
                                           ? configured.medicalVerification
                                           : absenceNeedsMedicalVerification(absenceForm);
-                                        return medical
+                                        const base = medical
                                           ? ['En verificación', 'Justificada', 'Injustificada', 'Rechazada']
                                           : ['Pendiente', 'Autorizada', 'Justificada', 'Injustificada', 'Rechazada'];
+                                        return base.includes(absenceForm.status) ? base : [absenceForm.status, ...base];
                                     })()).map(s => <option key={s} value={s}>{s}</option>)}
                                 </select>
                             </div>

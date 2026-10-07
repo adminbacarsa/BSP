@@ -9,6 +9,7 @@ import { addDoc, collection, doc, getDocs, query, serverTimestamp, updateDoc, wh
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { FirebaseError } from 'firebase/app';
 import { httpsCallable } from 'firebase/functions';
+import CertificadosEmpresaCard from '@/components/admin/config/CertificadosEmpresaCard';
 import EmpresaAfipSection from '@/components/admin/config/EmpresaAfipSection';
 import EmpresaAvisosSection from '@/components/admin/config/EmpresaAvisosSection';
 import { persistGoogleMapsApiKey } from '@/lib/googleMapsConfig';
@@ -694,6 +695,8 @@ export default function EmpresasTab() {
           </div>
         </div>
       )}
+
+      {empresa && isSuperAdmin && <CertificadosEmpresaCard />}
 
       {empresa && (
         <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">

@@ -66,7 +66,6 @@ import { ClientService } from './data-management/client.service';
 import { EmployeeService } from './data-management/employee.service';
 import { SystemUserService } from './data-management/system-user.service';
 import { AbsenceService } from './data-management/absence.service';
-import { migrateAbsenceCertificateToDrive } from './rrhh/migrateAbsenceCertificateToDrive';
 import { loadCentroControlState } from './ops/centroControlGuard';
 import { PatternService } from './scheduling/pattern.service';
 import { LaborAgreementService } from './data-management/labor-agreement.service';
@@ -2611,6 +2610,7 @@ export const detectarAusencias = functions
     for (const docSnap of snap.docs) {
       const shift = docSnap.data();
 
+      if (String(shift.absenceDetectedBy || '') === 'AVISO_PORTAL') continue;
       if (turnoFueraDeCentroDeControl(shift, excludedObjectives)) continue;
       if (!cc.isEnabled(shift.empresaId)) continue;
       if (cc.isDemo(shift.empresaId)) continue; // Demo genera presentes/ausentes/tardes
@@ -3465,6 +3465,13 @@ export const onAusenciaCreatedFromPortal = functions
     const data = snap.data();
     if (!data || data.source !== 'EMPLEADO') return null;
 
+    try {
+      const { aplicarAvisoPortal } = await import('./attendance/avisoPortal');
+      await aplicarAvisoPortal(admin.firestore(), snap.id, data);
+    } catch (e) {
+      console.error('[onAusenciaCreatedFromPortal] aviso', snap.id, e);
+    }
+
     const absenceCase: string = data.absenceCase || 'PROGRAMADA';
     if (absenceCase === 'PROGRAMADA') return null; // sin urgencia, no genera novedad operativa
 
@@ -3931,9 +3938,11 @@ export const scheduledAutoInjustificada = functions
 // 20. TRIGGER: CERTIFICADO PRESENTADO → DRIVE + NOVEDAD RRHH
 // =========================================================
 // Sube certificado a Google Drive (híbrido), libera Storage y avisa a RRHH.
-export const onAusenciaCertificado = functions
-  .region('us-central1')
-  .runWith({ timeoutSeconds: 120, memory: '256MB' })
+const certificadoIaBuilder = process.env.FUNCTIONS_EMULATOR === 'true'
+  ? functions.region('us-central1').runWith({ timeoutSeconds: 180, memory: '512MB' })
+  : functions.region('us-central1').runWith({ timeoutSeconds: 180, memory: '512MB', secrets: ['GEMINI_API_KEY'] });
+
+export const onAusenciaCertificado = certificadoIaBuilder
   .firestore.document('ausencias/{ausenciaId}')
   .onUpdate(async (change) => {
     const before = change.before.data();
@@ -3949,25 +3958,18 @@ export const onAusenciaCertificado = functions
       !after.certificateDriveFileId &&
       (!!after.certificateUrl || !!after.certificateStoragePath);
 
-    if (shouldMigrate) {
-      try {
-        const result = await migrateAbsenceCertificateToDrive(change.after.id, after);
-        if (result.ok) {
-          viewLink = result.driveLink;
-        } else if (result.ok === false && result.skipped === false) {
-          await change.after.ref.update({
-            certificateDriveMigrateError: String(result.error).slice(0, 500),
-          });
-        }
-      } catch (e) {
-        console.error('[onAusenciaCertificado] migrate Drive', e);
-        await change.after.ref.update({
-          certificateDriveMigrateError: String((e as Error).message || e).slice(0, 500),
-        }).catch(() => {});
-      }
-    }
-
     if (certSignalNew) {
+      const statusCambio = String(before.status || '') !== String(after.status || '')
+        || String(before.type || '') !== String(after.type || '');
+      const yaJustificada = String(after.revisionEstado || '') === 'JUSTIFICADA' || after.status === 'Justificada';
+      if (!statusCambio && !yaJustificada) {
+        try {
+          const { aplicarCertificadoSubido } = await import('./attendance/avisoPortal');
+          await aplicarCertificadoSubido(admin.firestore(), change.after.id, before, after);
+        } catch (e) {
+          console.error('[onAusenciaCertificado] revision', change.after.id, e);
+        }
+      }
       const db = admin.firestore();
       const now = admin.firestore.Timestamp.now();
 
@@ -3996,6 +3998,70 @@ export const onAusenciaCertificado = functions
       });
 
       console.log(`[onAusenciaCertificado] Novedad creada para ausencia ${change.after.id}`);
+    }
+
+    const hayArchivo = !!after.certificateUrl || !!after.certificateStoragePath;
+    const faltaArchivar = shouldMigrate && after.certificateDrivePendiente !== true && hayArchivo;
+    if (certSignalNew || faltaArchivar) {
+      try {
+        const { procesarCertificadoSubido } = await import('./rrhh/certificadoLegajo');
+        let bytes: Buffer | null = null;
+        const storagePath = String(after.certificateStoragePath || '').trim();
+        if (storagePath) {
+          const file = admin.storage().bucket().file(storagePath);
+          const [exists] = await file.exists().catch(() => [false]);
+          if (exists) {
+            const [buf] = await file.download();
+            bytes = buf;
+          }
+        }
+        await procesarCertificadoSubido(admin.firestore(), change.after.id, after, {
+          bytes,
+          mime: String(after.certificateName || '').toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg',
+        });
+      } catch (e) {
+        console.error('[onAusenciaCertificado] archivo/IA', change.after.id, e);
+      }
+    }
+    return null;
+  });
+
+export const decidirCertificadoIa = functions
+  .region('us-central1')
+  .https.onCall(async (data, context) => {
+    if (!context.auth?.uid) throw new functions.https.HttpsError('unauthenticated', 'Tenés que entrar.');
+    const role = String(context.auth.token.role || '').toUpperCase();
+    const permitido = ['SUPERADMIN', 'SUPER_ADMIN', 'RRHH', 'HR_MANAGER', 'ADMIN', 'ADMIN_EMPRESA'].includes(role);
+    if (!permitido) throw new functions.https.HttpsError('permission-denied', 'Solo RRHH.');
+    const ausenciaId = String(data?.ausenciaId || '').trim();
+    const decision = String(data?.decision || '').trim();
+    if (!ausenciaId || !['aprobar', 'rechazar', 'revertir'].includes(decision)) {
+      throw new functions.https.HttpsError('invalid-argument', 'Falta la ausencia o la decisión.');
+    }
+    const { aplicarDecisionCertificado } = await import('./rrhh/certificadoLegajo');
+    const actor = String(context.auth.token.name || context.auth.token.email || 'RRHH');
+    return aplicarDecisionCertificado(admin.firestore(), {
+      ausenciaId,
+      decision: decision as 'aprobar' | 'rechazar' | 'revertir',
+      actor,
+    });
+  });
+
+/** Cuando se carga la carpeta raíz, archiva los certificados que habían quedado en Storage. */
+export const onLegajosDriveConfigurado = functions
+  .region('us-central1')
+  .runWith({ timeoutSeconds: 300, memory: '512MB' })
+  .firestore.document('empresas/{empresaId}')
+  .onUpdate(async (change) => {
+    const antes = String(change.before.data()?.legajosDriveFolderId || '').trim();
+    const despues = String(change.after.data()?.legajosDriveFolderId || '').trim();
+    if (!despues || antes === despues) return null;
+    try {
+      const { reintentarCertificadosPendientes } = await import('./rrhh/certificadoLegajo');
+      const n = await reintentarCertificadosPendientes(admin.firestore(), change.after.id);
+      console.log(`[onLegajosDriveConfigurado] ${change.after.id} reintento ${n}`);
+    } catch (e) {
+      console.error('[onLegajosDriveConfigurado]', change.after.id, e);
     }
     return null;
   });

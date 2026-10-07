@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Redirect, Stack, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -9,6 +9,7 @@ import {
   absenceTypeEmployeeHint,
   classifyAbsenceForEmployee,
   dateKeyLocal,
+  defaultAbsenceType,
   filterAbsenceTypesForFeatures,
   type AbsenceType,
 } from '@cosp/portal-core';
@@ -39,7 +40,7 @@ function typeAcceptsCertificate(type: AbsenceType): boolean {
 
 export default function NovedadScreen() {
   const router = useRouter();
-  const { user, employee, empDocId, portalFeatures, initializing } = usePortalAuth();
+  const { user, employee, empDocId, bolsaCuil, portalFeatures, initializing } = usePortalAuth();
   const { shifts } = useEmployeeShifts(empDocId, user?.uid ?? null);
   const { db } = getPortalFirebase();
   const { palette } = useTheme();
@@ -54,12 +55,17 @@ export default function NovedadScreen() {
     [portalFeatures.reportAbsence, portalFeatures.requestLicense],
   );
 
-  const [absenceType, setAbsenceType] = useState<AbsenceType>(typeOptions[0] ?? 'Ausencia con aviso');
+  const [absenceType, setAbsenceType] = useState<AbsenceType>(() => defaultAbsenceType(typeOptions));
   const [startDate, setStartDate] = useState(todayKey());
   const [endDate, setEndDate] = useState(todayKey());
   const [reason, setReason] = useState('');
   const [certificate, setCertificate] = useState<LocalCertificateFile | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [confirmacion, setConfirmacion] = useState('');
+
+  useEffect(() => {
+    setAbsenceType((current) => (typeOptions.includes(current) ? current : defaultAbsenceType(typeOptions)));
+  }, [typeOptions]);
 
   const displayName = useMemo(() => {
     if (employee?.lastName || employee?.firstName) {
@@ -117,6 +123,7 @@ export default function NovedadScreen() {
         employeeId: employeeKey,
         employeeName: displayName,
         type: absenceType,
+        ...(absenceType === 'Ausencia con aviso' ? { avisoPortal: true, absenceType: 'AA' } : {}),
         startDate,
         endDate,
         status: 'Pendiente',
@@ -126,6 +133,12 @@ export default function NovedadScreen() {
         certificateStoragePath,
         reason: reason.trim(),
         source: 'EMPLEADO',
+        ...(bolsaCuil ? { bolsaCuil } : {}),
+        historial: [{
+          texto: 'Registrada · RRHH revisando',
+          por: displayName,
+          at: new Date().toISOString(),
+        }],
         createdAt: serverTimestamp(),
         absenceCase: classified.absenceCase,
         minutesBeforeShift: classified.minutesBeforeShift,
@@ -141,9 +154,7 @@ export default function NovedadScreen() {
 
       const certNote = fileUrl ? ' El certificado quedó adjunto.' : '';
       const toastMsg = absenceSubmitToastMessageForType(absenceType, classified.absenceCase);
-      appAlert('Enviado', `${toastMsg}${certNote}`, [
-        { text: 'OK', onPress: () => router.back() },
-      ]);
+      setConfirmacion(`${toastMsg}${certNote}`);
       setReason('');
       setCertificate(null);
       setStartDate(todayKey());
@@ -173,6 +184,26 @@ export default function NovedadScreen() {
               Tu empresa no tiene activas ausencias o licencias en el portal.
             </Text>
             <CommandButton label="Volver" variant="secondary" onPress={() => router.back()} />
+          </View>
+        </SafeAreaView>
+      </>
+    );
+  }
+
+  if (confirmacion) {
+    return (
+      <>
+        <Stack.Screen options={{ title: 'Novedad enviada' }} />
+        <SafeAreaView style={[styles.safe, { backgroundColor: palette.background }]} edges={['bottom']}>
+          <View style={styles.scroll}>
+            <CommandCard title="Quedó registrada">
+              <Text style={[styles.blockedBody, { color: palette.onSurface }]}>{confirmacion}</Text>
+              <Text style={[styles.blockedBody, { color: palette.onSurfaceMuted }]}>
+                RRHH la revisa. Podés ver el estado y subir el certificado desde Mis novedades.
+              </Text>
+              <CommandButton label="Ver mis novedades" onPress={() => router.replace('/mis-novedades')} />
+              <CommandButton label="Volver" variant="secondary" onPress={() => router.back()} />
+            </CommandCard>
           </View>
         </SafeAreaView>
       </>

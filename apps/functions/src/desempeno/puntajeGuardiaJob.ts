@@ -86,9 +86,11 @@ export async function fuentesDePersona(db: Firestore, clave: ClavePuntaje, desde
       id: String(row.id),
       employeeId: empleadoId,
       shiftId: row.shiftId ? String(row.shiftId) : null,
-      esEventual: row.esEventual === true,
-      code: row.code ? String(row.code) : row.type ? String(row.type) : null,
+      esEventual: row.esEventual === true || !!row.bolsaCuil,
+      code: row.code ? String(row.code) : row.absenceType ? String(row.absenceType) : row.type ? String(row.type) : null,
       origin: row.origin ? String(row.origin) : null,
+      conAviso: row.avisoPortal === true || row.absenceDetectedBy === 'AVISO_PORTAL',
+      conCertificado: row.conCertificado === true || row.hasCertificate === true || !!row.certificateDriveFileId,
       fechaMs,
       reverted: ausenciaSinEfecto(row),
     }];

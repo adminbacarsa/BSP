@@ -11,7 +11,10 @@ export interface Absence {
   type: string;
   startDate: string;
   endDate: string;
-  status: 'Pendiente' | 'En verificación' | 'Autorizada' | 'Justificada' | 'Injustificada' | 'Rechazada';
+  status: 'Pendiente' | 'Avisada' | 'En verificación' | 'Autorizada' | 'Justificada' | 'Injustificada' | 'Rechazada';
+  absenceType?: string;
+  avisoPortal?: boolean;
+  revisionEstado?: string;
   hasCertificate: boolean;
   certificateUrl?: string | null;
   certificateName?: string | null;

@@ -162,9 +162,15 @@ export function absenceSubmitToastMessageForType(
     if (absenceCase === 'ANTICIPADA') {
       return 'Aviso enviado: no vas a asistir. RRHH y Planificación fueron notificados.';
     }
-    return 'Aviso registrado: informaste que no vas a asistir. RRHH revisará el pedido.';
+    return 'Aviso registrado: informaste que no vas a asistir. RRHH lo controla.';
   }
   return absenceSubmitToastMessage(absenceCase);
+}
+
+/** Si el guardia puede avisar que no va, el formulario arranca en ese aviso y no en Vacaciones. */
+export function defaultAbsenceType(options: readonly AbsenceType[]): AbsenceType {
+  if (options.includes('Ausencia con aviso')) return 'Ausencia con aviso';
+  return options[0] ?? 'Ausencia con aviso';
 }
 
 export function filterAbsenceTypesForFeatures(opts: {
