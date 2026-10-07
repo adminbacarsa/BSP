@@ -371,6 +371,11 @@ export type ApplyCoverageParams = {
   coveredByLabel?: string | null;
   /** No cancela otras coberturas activas del mismo hueco (p. ej. un EXT hermano). */
   preserveSiblingOpsCov?: boolean;
+  /**
+   * REF/ESC del mismo objetivo: el ops_cov usa la ventana del titular (T−15 / T−5 / T),
+   * no la del convocado. El aviso lo manda asignarRefEscSiMismoObjetivo.
+   */
+  refEscAsignacionDirecta?: boolean;
 };
 
 /** Escritura única de cobertura (espejo web2). */
@@ -610,6 +615,7 @@ export async function applyCoverage(
       ...(existingCov ? {} : { createdAt: coverageServerTime() }),
       ...(existingCov?.acceptedAt ? {} : { acceptedAt: params.acceptedAt || coverageServerTime() }),
       ...(params.convocatoriaId ? { assignedByConvocatoria: params.convocatoriaId } : {}),
+      ...(params.refEscAsignacionDirecta ? { refEscAsignacionDirecta: true } : {}),
     },
     { merge: true },
   );

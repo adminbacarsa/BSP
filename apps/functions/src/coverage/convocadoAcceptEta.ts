@@ -8,6 +8,7 @@ import {
   haversineKm,
   planConvocadoArrival,
 } from '../common/convocadoEta';
+import { asistenciaAntesDeVentana } from './refEscDirecto';
 
 export type OriginCoords = { lat?: number; lng?: number; accuracy?: number };
 
@@ -101,7 +102,8 @@ export async function recordConvocadoAcceptEta(
     etaTraveled: travel.traveled,
     expectedArrivalAt: Timestamp.fromMillis(plan.expectedArrivalMs),
     reminderAt: Timestamp.fromMillis(plan.reminderAtMs),
-    reminderPending: true,
+    // Hueco todavía lejos: el aviso es T−5 y ¿Venís? a T. No «¿Seguís en camino?» al aceptar.
+    reminderPending: !asistenciaAntesDeVentana(gapStartMs, nowMs),
     delayAlertPending: true,
     convocadoGapFuture: plan.future,
     ...(gapStartMs > 0 ? { gapStartAt: Timestamp.fromMillis(gapStartMs) } : {}),

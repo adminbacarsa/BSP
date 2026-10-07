@@ -22,6 +22,9 @@ export type RecordatorioConvocadoLike = {
   /** Cuándo toca el recordatorio y cuándo se envió. */
   reminderAt?: unknown;
   reminderSentAt?: unknown;
+  /** Inicio del hueco. Si falta más de 5 min, la tarjeta no pregunta asistencia. */
+  gapStartAt?: unknown;
+  startTime?: unknown;
   /** Respuesta del convocado al recordatorio. */
   convocadoReply?: 'ON_WAY' | 'PROBLEM' | string;
   convocadoReplyAt?: unknown;
@@ -52,6 +55,8 @@ export function isRecordatorioPendiente(
   if (String(c.status || '').trim().toUpperCase() !== 'ACCEPTED') return false;
   const sentMs = timestampLikeToMillis(c.reminderSentAt);
   if (sentMs <= 0) return false;
+  const gap = timestampLikeToMillis(c.gapStartAt) || timestampLikeToMillis((c as { startTime?: unknown }).startTime);
+  if (gap > Date.now() + 5 * 60_000) return false;
   const replyMs = timestampLikeToMillis(c.convocadoReplyAt);
   if (replyMs > 0 && replyMs >= sentMs) return false;
   return true;

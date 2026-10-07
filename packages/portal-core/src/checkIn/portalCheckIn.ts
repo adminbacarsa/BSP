@@ -291,8 +291,10 @@ export function getCheckInTiming(
     const open = convocadoPunchOpenMs(recEarly);
     const gap = timestampLikeToMillis(recEarly.startTime);
     const eta = Number(recEarly.etaMinutes);
-    const future = gap > 0 && accepted > 0 && Number.isFinite(eta) && eta > 0 && gap > accepted + eta * 60_000;
-    const depart = future ? gap - eta * 60_000 : accepted;
+    const futureByEta = gap > 0 && accepted > 0 && Number.isFinite(eta) && eta > 0 && gap > accepted + eta * 60_000;
+    const lejos = gap > 0 && accepted > 0 && gap > accepted + 15 * 60_000;
+    const future = futureByEta || lejos;
+    const depart = futureByEta ? gap - eta * 60_000 : lejos ? gap - 15 * 60_000 : accepted;
     const ended = capMs > 0 && nowMs > capMs;
     const beforeOpen = open > 0 && nowMs < open;
     const canCheckIn = !ended && !beforeOpen;

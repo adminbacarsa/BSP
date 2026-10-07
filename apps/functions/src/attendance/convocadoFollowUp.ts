@@ -5,6 +5,7 @@ import { logConvocatoriaEvento } from '../coverage/convocatoriaEventos';
 import { buildOpsCoverageDocId } from '../coverage/syncAusenciaCobertura';
 import { guardFirstName, guardLead } from '../common/pushGreeting';
 import { groupTokensByShiftAlertChannel, shiftAlertPlatformConfig, type DeviceTokenRow } from '../notifications/shiftAlertFcm';
+import { asistenciaAntesDeVentana } from '../coverage/refEscDirecto';
 
 const PAGE = 50;
 const MAX_PAGES = 20;
@@ -173,6 +174,11 @@ export async function runConvocadoFollowUp(db: Firestore, now: Timestamp = Times
       continue;
     }
     if (await closeIfDone(db, doc, conv, nowMs, now)) continue;
+    const gapStart = ms(conv.gapStartAt) || ms(conv.startTime);
+    if (asistenciaAntesDeVentana(gapStart, nowMs)) {
+      await doc.ref.update({ reminderPending: false });
+      continue;
+    }
     if (conv.reminderSentAt) {
       await doc.ref.update({ reminderPending: false });
       continue;

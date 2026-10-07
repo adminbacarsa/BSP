@@ -189,6 +189,8 @@ function HoyScreenContent() {
     if (known && checked(known.shiftId)) return pending;
     // Push recibido antes de que el snapshot traiga reminderSentAt / si ya respondió: no lo repite.
     if (known && timestampLikeToMillis(known.convocadoReplyAt) > 0) return pending;
+    const gapMs = timestampLikeToMillis(known?.startTime);
+    if (gapMs > Date.now() + 5 * 60_000) return pending;
     return [
       {
         ...(known ?? { id: highlightConvocatoriaId, type: 'RET', status: 'ACCEPTED' }),

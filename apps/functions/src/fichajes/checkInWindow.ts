@@ -44,6 +44,9 @@ export function convocadoPunchAnchorMs(shift: Record<string, unknown>): number {
 export function convocadoPunchOpenMs(shift: Record<string, unknown>): number {
   const gap = startMs(shift);
   const accepted = convocadoPunchAnchorMs(shift);
+  if (gap > 0 && accepted > 0 && gap > accepted + 15 * 60_000) {
+    return gap - 15 * 60 * 1000;
+  }
   const eta = Number(shift.etaMinutes);
   if (gap > 0 && accepted > 0 && Number.isFinite(eta) && eta > 0 && gap > accepted + eta * 60_000) {
     return gap - 15 * 60 * 1000;
@@ -180,7 +183,7 @@ export function evaluateServerCheckInWindow(
   if (origin === 'OPERATIONS_COVERAGE' && ct === 'EXTEND') {
     return { allowed: false, rejectCode: 'EXT_NO_CHECKIN' };
   }
-  if (origin === 'OPERATIONS_COVERAGE') {
+  if (origin === 'OPERATIONS_COVERAGE' && shift.refEscAsignacionDirecta !== true) {
     const anchor = convocadoPunchOpenMs(shift);
     const cap = convocadoPunchCapMs(shift);
     if (anchor > 0 && nowMs < anchor) return { allowed: false, rejectCode: 'TOO_EARLY' };

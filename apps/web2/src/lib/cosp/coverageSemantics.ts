@@ -131,6 +131,20 @@ export function opsCoverageDocCountsBillableHours(
   return !isOpsCoverageHoursOnSourceDoc(data);
 }
 
+/**
+ * REF/ESC usado como cobertura se muestra con el código del titular (M), no «COB M».
+ * El turno origen queda dado de baja: una sola representación, sin duplicar horas.
+ */
+export function etiquetaCeldaOpsCoverage(shift: { code?: unknown; coverageType?: unknown } | null | undefined): {
+  content: string;
+  esRefEsc: boolean;
+} {
+  const code = String(shift?.code || '').trim().toUpperCase();
+  const ct = String(shift?.coverageType || '').trim().toUpperCase();
+  if (ct === 'REF' || ct === 'ESC') return { content: code || 'M', esRefEsc: true };
+  return { content: code ? `COB ${code}` : 'COB', esRefEsc: false };
+}
+
 /** Turno OPERATIONS_COVERAGE del guardia en el objetivo del cronograma (puede ser 2º doc del día). */
 export function pickOpsCoverageShiftForPlanningCell(
   cellTurnos: unknown[] | undefined,
