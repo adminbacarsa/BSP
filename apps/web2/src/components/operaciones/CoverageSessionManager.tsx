@@ -872,7 +872,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
         callableType = convocatoriaTypeForInternalKind(coverageKind);
       }
 
-      const { convocatoriaId, shiftId: titularShiftId } = await invokeCrearConvocatoriaCobertura({
+      const { convocatoriaId, shiftId: titularShiftId, aplicadaDirecta } = await invokeCrearConvocatoriaCobertura({
         absenceShift,
         candidateEmployeeId: empId,
         type: callableType,
@@ -881,6 +881,13 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
         ...(callableType !== 'FT' && callableType !== 'EVENTUAL' && turnoId ? { candidateShiftId: turnoId } : {}),
         ...(callableType === 'EVENTUAL' ? { bolsaCuil: String((cand as { cuil?: string }).cuil || empId) } : {}),
       });
+
+      if (aplicadaDirecta) {
+        onUpd({ status: 'CONFIRMED', pending: null, awaitingPhone: false });
+        toast.success('Asignado. El turno quedó actualizado, sin convocatoria.');
+        setTimeout(onClose, 1200);
+        return;
+      }
 
       onUpd({
         status: 'PENDING',

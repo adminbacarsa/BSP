@@ -13,6 +13,7 @@ import { seriesCodeOf, seriesHandoffKind } from '../common/shiftSeries';
 import { buildAutoClosePatch, clearRetentionOnReliefClose, shiftHardCapAtMs } from '../scheduling/shiftClose';
 import { claimFinTurnoAviso, notifyTurnoFinalizadoRelevo } from './relevoNotifications';
 import { isExcluidoDeOperacion } from '../common/excluirDeOperacion';
+import { cerrarFuenteSiCorresponde, resolverDestinoFichada } from './fichadaSobreCobertura';
 
 export type PresenciaSource =
   | 'PORTAL_GPS'
@@ -94,6 +95,17 @@ export async function registrarPresencia(
   if (!shiftDoc.exists) throw new Error('TURNO_NOT_FOUND');
   const shiftData = shiftDoc.data()!;
 
+  const destino = await resolverDestinoFichada(db, shiftId, shiftData as Record<string, unknown>);
+  if (destino.fuenteId) {
+    if (destino.yaMovida) {
+      await cerrarFuenteSiCorresponde(db, destino);
+      return { success: true, alreadyPresent: true, relieved: null };
+    }
+    const result = await registrarPresencia(db, { ...input, shiftId: destino.shiftId });
+    await cerrarFuenteSiCorresponde(db, destino);
+    return result;
+  }
+
   if (shiftData.isAbsent === true || shiftData.status === 'ABSENT') {
     if (!isReversibleLateAbsence(shiftData as Record<string, unknown>, Date.now())) {
       throw new Error('SHIFT_ABSENT');
@@ -141,7 +153,11 @@ export async function registrarPresencia(
   const scheduledStartMs = scheduledStartTs?.toMillis?.() ?? 0;
   const originUp = String(shiftData.origin || '').toUpperCase();
   const covTypeUp = String(shiftData.coverageType || '').toUpperCase();
-  const convocadoPunch = originUp === 'OPERATIONS_COVERAGE' && covTypeUp !== 'EXTEND';
+  const anticipadaPay = shiftData.refEscAsignacionDirecta === true || shiftData.coberturaAnticipada === true;
+  const convocadoPunch = !anticipadaPay && (
+    shiftData.coberturaUrgente === true
+    || (originUp === 'OPERATIONS_COVERAGE' && covTypeUp !== 'EXTEND')
+  );
   const adjustedStartMs = shiftData.adjustedStartTime?.toMillis?.() ?? 0;
   const payAnchorMs = windowEval.useAdjustedStart && adjustedStartMs > 0
     ? adjustedStartMs

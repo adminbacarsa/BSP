@@ -28,6 +28,7 @@ import {
   isEventoShift,
 } from '../eventos/eventoCoverage';
 import { loadEventualesParaHueco, registrarAsignacionEventualEnBatch } from '../eventos/eventualesParaHuecoServer';
+import { resolverCoberturaRefEscRet } from './refEscDirecto';
 import { CONVOCATORIA_TIMEOUT_MINUTES } from './convocatoriaTimeout';
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
@@ -324,7 +325,28 @@ export async function crearConvocatoriaDoc(
     createdBy: string;
     createdByName?: string;
   },
+  opts?: { now?: Timestamp },
 ): Promise<string> {
+  const directaInput = {
+    empresaId: data.empresaId,
+    shiftId: data.shiftId,
+    objectiveId: data.objectiveId,
+    objectiveName: data.objectiveName,
+    positionName: data.positionName,
+    clientId: data.clientId,
+    clientName: data.clientName,
+    shiftCode: data.shiftCode,
+    startTime: data.startTime,
+    endTime: data.endTime,
+    type: data.type,
+    candidateEmployeeId: data.candidateEmployeeId,
+    candidateEmployeeName: data.candidateEmployeeName,
+    candidateShiftId: data.candidateShiftId,
+    createdBy: data.createdBy,
+  };
+  const directa = await resolverCoberturaRefEscRet(db, directaInput, opts);
+  if (directa) return `directa:${directa}`;
+
   const now = Timestamp.now();
   const timeoutAt = Timestamp.fromMillis(now.toMillis() + TIMEOUT_MINUTES * 60 * 1000);
 
@@ -1191,6 +1213,9 @@ export const crearConvocatoriaCobertura = functions
       createdByName: callerName,
     });
 
+    if (convId.startsWith('directa:')) {
+      return { success: true, aplicadaDirecta: true, covDocId: convId.slice('directa:'.length), convocatoriaId: null };
+    }
     return { success: true, convocatoriaId: convId };
   });
 

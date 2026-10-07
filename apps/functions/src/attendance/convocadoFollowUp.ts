@@ -5,6 +5,7 @@ import { logConvocatoriaEvento } from '../coverage/convocatoriaEventos';
 import { buildOpsCoverageDocId } from '../coverage/syncAusenciaCobertura';
 import { guardFirstName, guardLead } from '../common/pushGreeting';
 import { groupTokensByShiftAlertChannel, shiftAlertPlatformConfig, type DeviceTokenRow } from '../notifications/shiftAlertFcm';
+import { asistenciaAntesDeVentana } from '../coverage/refEscDirecto';
 
 const PAGE = 50;
 const MAX_PAGES = 20;
@@ -173,6 +174,14 @@ export async function runConvocadoFollowUp(db: Firestore, now: Timestamp = Times
       continue;
     }
     if (await closeIfDone(db, doc, conv, nowMs, now)) continue;
+    const gapStart = ms(conv.gapStartAt) || ms(conv.startTime);
+    // RET directo: el recordatorio es el del convocado (salida − 10 min), aunque falten más de 5 min.
+    const tipoCov = String(conv.type || '').toUpperCase();
+    const esRefEscRet = tipoCov === 'RET' || tipoCov === 'REF' || tipoCov === 'ESC';
+    if (!esRefEscRet && asistenciaAntesDeVentana(gapStart, nowMs)) {
+      await doc.ref.update({ reminderPending: false });
+      continue;
+    }
     if (conv.reminderSentAt) {
       await doc.ref.update({ reminderPending: false });
       continue;
@@ -198,6 +207,36 @@ export async function runConvocadoFollowUp(db: Firestore, now: Timestamp = Times
       continue;
     }
     await raiseDelay(db, doc, conv, now);
+    n += 1;
+  }
+
+  const sueltos = await db.collection('turnos').where('reminderPending', '==', true).limit(40).get();
+  for (const doc of sueltos.docs) {
+    const shift = doc.data() as Conv;
+    if (shift.coberturaUrgente !== true) continue;
+    if (seen.has(doc.id)) continue;
+    seen.add(doc.id);
+    const gapStart = ms(shift.startTime);
+    if (punched(shift)) {
+      await doc.ref.update(convocadoFollowUpClosePatch('FICHO', now));
+      continue;
+    }
+    const end = ms(shift.endTime);
+    if (end > 0 && end <= nowMs) {
+      await doc.ref.update(convocadoFollowUpClosePatch('HUECO_TERMINADO', now));
+      continue;
+    }
+    if (ms(shift.reminderAt) > nowMs) continue;
+    if (shift.reminderSentAt) {
+      await doc.ref.update({ reminderPending: false });
+      continue;
+    }
+    await sendReminder(db, doc, {
+      ...shift,
+      candidateEmployeeId: shift.employeeId,
+      candidateEmployeeName: shift.employeeName,
+      type: shift.coverageType || 'RET',
+    }, now);
     n += 1;
   }
 

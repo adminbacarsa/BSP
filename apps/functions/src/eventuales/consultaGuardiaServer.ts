@@ -6,6 +6,8 @@
 import * as admin from 'firebase-admin';
 import * as functions from 'firebase-functions/v1';
 import { aplicarEntregasConsulta, type DestinoEntrega } from './consultaCanalServer';
+import { escenarioCobertura, planConvocadoArrival } from '../common/convocadoEta';
+import { umbralCoberturaMin } from '../coverage/refEscDirecto';
 
 const AR_OFFSET = '-03:00';
 const SUPER = ['SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP'];
@@ -228,6 +230,8 @@ export async function asignarGuardiaDeConsulta(p: {
   const batch = db().batch();
   const turnoIds: string[] = [];
   const publicado = new Map<string, boolean>();
+  const umbral = p.tipo === 'RET' ? await umbralCoberturaMin(db(), p.empresaId) : 60;
+  const ahoraMs = Date.now();
   for (const j of p.jornadas) {
     const campos = reglas.camposTurnoGuardia({ tipo: p.tipo, code: String(j.code || 'M'), nombreCubierto: p.cubreNombre || undefined });
     let draft = false;
@@ -274,6 +278,27 @@ export async function asignarGuardiaDeConsulta(p: {
       createdBy: 'CONSULTA_GUARDIA',
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     };
+    if (p.tipo === 'RET') {
+      const escenario = escenarioCobertura({ gapStartMs: start.toMillis(), nowMs: ahoraMs, umbralMin: umbral });
+      payload.escenarioCobertura = escenario;
+      if (escenario === 'ANTICIPADA') {
+        payload.coberturaAnticipada = true;
+      } else {
+        const plan = planConvocadoArrival({
+          acceptedAtMs: ahoraMs,
+          gapStartMs: start.toMillis(),
+          etaMinutes: 10,
+          escenario: 'URGENTE',
+        });
+        payload.coberturaUrgente = true;
+        payload.acceptedAt = admin.firestore.Timestamp.fromMillis(ahoraMs);
+        payload.etaMinutes = 10;
+        payload.reminderAt = admin.firestore.Timestamp.fromMillis(plan.reminderAtMs);
+        payload.reminderPending = true;
+        payload.delayAlertPending = true;
+        payload.expectedArrivalAt = admin.firestore.Timestamp.fromMillis(plan.expectedArrivalMs);
+      }
+    }
     if (marcas.descansoReducido) {
       payload.descansoReducido = true;
       payload.descansoHoras = marcas.descansoHoras ?? null;

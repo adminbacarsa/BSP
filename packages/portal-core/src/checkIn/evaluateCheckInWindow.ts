@@ -58,6 +58,8 @@ export function isConvocadoCoverageShift(
   data: Record<string, unknown> | null | undefined,
 ): boolean {
   if (!data) return false;
+  if (data.refEscAsignacionDirecta === true || data.coberturaAnticipada === true) return false;
+  if (data.coberturaUrgente === true || data.escenarioCobertura === 'URGENTE') return true;
   if (String(data.origin || '').toUpperCase() !== 'OPERATIONS_COVERAGE') return false;
   return !isCoverageHoursOnSourceDoc(data);
 }
@@ -123,6 +125,10 @@ export function convocadoPunchAnchorMs(shift: Record<string, unknown>): number {
 export function convocadoPunchOpenMs(shift: Record<string, unknown>): number {
   const gap = startMs(shift);
   const accepted = convocadoPunchAnchorMs(shift);
+  if (shift.coberturaUrgente === true || shift.escenarioCobertura === 'URGENTE') return accepted;
+  if (gap > 0 && accepted > 0 && gap > accepted + 15 * 60_000) {
+    return gap - 15 * 60 * 1000;
+  }
   const eta = Number(shift.etaMinutes);
   if (gap > 0 && accepted > 0 && Number.isFinite(eta) && eta > 0 && gap > accepted + eta * 60_000) {
     return gap - 15 * 60 * 1000;
@@ -247,7 +253,9 @@ export function evaluateCheckInWindow(
   if (origin === 'OPERATIONS_COVERAGE' && ct === 'EXTEND') {
     return { allowed: false, rejectCode: 'EXT_NO_CHECKIN' };
   }
-  if (origin === 'OPERATIONS_COVERAGE') {
+  const anticipada = shift.refEscAsignacionDirecta === true || shift.coberturaAnticipada === true;
+  const urgente = shift.coberturaUrgente === true || shift.escenarioCobertura === 'URGENTE';
+  if (!anticipada && (urgente || origin === 'OPERATIONS_COVERAGE')) {
     const anchor = convocadoPunchOpenMs(shift);
     const cap = convocadoPunchCapMs(shift);
     if (anchor > 0 && nowMs < anchor) return { allowed: false, rejectCode: 'TOO_EARLY' };

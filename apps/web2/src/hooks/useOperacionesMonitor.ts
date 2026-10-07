@@ -11,6 +11,7 @@ import { shouldScopeQueriesToEmpresa, belongsToEmpresaView, updateDocForEmpresa,
 import { combinedContiguousRangeLabel, isTuraContiguousToParent, findParentShiftForTura } from '@/lib/refuerzo/turaContiguity';
 import { planningMonthHasActiveSla } from '@/lib/slaPlanningMatch';
 import { isFinServicioSinCronograma, shiftCountsInOpsHeader } from '@/lib/operaciones/opsHeaderCounts';
+import { heredarFichadaDeFuente } from '@/lib/operaciones/fichadaCoberturaFuente';
 import { stableVirtualVacancies } from '@/lib/operaciones/virtualVacancyStability';
 import { buildEventosMap, buildObjetivoGeoMap, eventServicioLabel, eventoEnrichFields, isEventShift, type EventoDocLite } from '@/lib/operaciones/eventoCc';
 import {
@@ -948,6 +949,12 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             seenIds.add(s.id);
             return true;
         });
+        const fuenteCubierta = heredarFichadaDeFuente(dedupByIdShifts);
+        if (fuenteCubierta.size) {
+            for (let i = dedupByIdShifts.length - 1; i >= 0; i--) {
+                if (fuenteCubierta.has(String(dedupByIdShifts[i].id))) dedupByIdShifts.splice(i, 1);
+            }
+        }
 
         // ── P9b: a quién espera el retenido / saliente con fin vencido (relevo de la serie o vacante).
         const shiftsByObjective = new Map<string, any[]>();

@@ -199,6 +199,8 @@ export const onTurnoWrite = functions
         console.warn('[onTurnoWrite] cerrar avisos retención:', (e as Error)?.message);
       }
     }
+    // REF/ESC mismo objetivo y RET directo: el aviso ya salió en la asignación. Sin «turno nuevo».
+    if (!before && (after?.refEscAsignacionDirecta === true || after?.retAsignacionDirecta === true || after?.coberturaAnticipada === true || after?.coberturaUrgente === true)) return;
 
     try {
       await updateLiquidacionOnTurnoComplete(db, change.after.id, after, before);

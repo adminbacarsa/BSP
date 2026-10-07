@@ -194,6 +194,7 @@ import {
 import { formatShiftClockRange, isTuraContiguousToParent } from '@/lib/refuerzo/turaContiguity';
 import { buildOpsCoverageCellTooltip } from '@/lib/planificacion/opsCoverageCellTooltip';
 import {
+  etiquetaCeldaOpsCoverage,
   isTitularCoverageAssigned,
   pickOpsCoverageShiftForPlanningCell,
   resolveCoverGuardDisplayName,
@@ -11199,8 +11200,11 @@ function PlanificacionDesktop() {
                                             isCoverageSourceUsed && isOpsCoverageCell && !!opsShiftForCell;
                                         if (isOpsCoverageCell && opsShiftForCell) {
                                             const opsCodeRaw = String(opsShiftForCell.code || '').trim().toUpperCase();
-                                            content = opsCodeRaw ? `COB ${opsCodeRaw}` : 'COB';
-                                            style = `${getDefaultStyle(opsCodeRaw || 'M')} ${OPS_COVERAGE_CELL_RING}`;
+                                            const opsEtiqueta = etiquetaCeldaOpsCoverage(opsShiftForCell);
+                                            content = opsEtiqueta.content;
+                                            style = opsEtiqueta.esRefEsc
+                                                ? getDefaultStyle(opsCodeRaw || 'M')
+                                                : `${getDefaultStyle(opsCodeRaw || 'M')} ${OPS_COVERAGE_CELL_RING}`;
                                             isFT = false;
                                             isFF = false;
                                         }

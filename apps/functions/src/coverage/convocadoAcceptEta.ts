@@ -5,9 +5,13 @@ import {
   CONVOCADO_ETA_SPEED_KMH,
   CONVOCADO_ETA_WAIT_MIN,
   convocadoTravelEta,
+  escenarioCobertura,
   haversineKm,
   planConvocadoArrival,
+  retenerSalientePorLlegada,
 } from '../common/convocadoEta';
+import { retainOutgoingForGap } from './coverageRetention';
+import { umbralCoberturaMin, asistenciaAntesDeVentana } from './refEscDirecto';
 
 export type OriginCoords = { lat?: number; lng?: number; accuracy?: number };
 
@@ -91,7 +95,10 @@ export async function recordConvocadoAcceptEta(
   });
   const etaMinutes = travel.etaMinutes;
   const gapStartMs = num((tit?.startTime as Timestamp | undefined)?.toMillis?.()) ?? 0;
-  const plan = planConvocadoArrival({ acceptedAtMs: nowMs, gapStartMs, etaMinutes });
+  const esCobertura = ct === 'REF' || ct === 'ESC' || ct === 'RET';
+  const umbral = esCobertura ? await umbralCoberturaMin(db, String(conv.empresaId || '')) : null;
+  const escenario = esCobertura ? escenarioCobertura({ gapStartMs, nowMs, umbralMin: umbral }) : null;
+  const plan = planConvocadoArrival({ acceptedAtMs: nowMs, gapStartMs, etaMinutes, escenario });
 
   const gapEndMs = num((tit?.endTime as Timestamp | undefined)?.toMillis?.()) ?? 0;
   const patch = {
@@ -101,8 +108,10 @@ export async function recordConvocadoAcceptEta(
     etaTraveled: travel.traveled,
     expectedArrivalAt: Timestamp.fromMillis(plan.expectedArrivalMs),
     reminderAt: Timestamp.fromMillis(plan.reminderAtMs),
-    reminderPending: true,
-    delayAlertPending: true,
+    // REF/ESC/RET anticipada: sin recordatorio de convocado. Urgente: recordatorio a los 2/3.
+    reminderPending: escenario === 'URGENTE' ? true : escenario === 'ANTICIPADA' ? false : !asistenciaAntesDeVentana(gapStartMs, nowMs),
+    delayAlertPending: escenario !== 'ANTICIPADA',
+    ...(escenario ? { escenarioCobertura: escenario } : {}),
     convocadoGapFuture: plan.future,
     ...(gapStartMs > 0 ? { gapStartAt: Timestamp.fromMillis(gapStartMs) } : {}),
     ...(gapEndMs > 0 ? { gapEndAt: Timestamp.fromMillis(gapEndMs) } : {}),
@@ -119,7 +128,16 @@ export async function recordConvocadoAcceptEta(
       etaMinutes,
       convocadoReminderAt: patch.reminderAt,
       acceptedAt: patch.acceptedAt,
+      ...(escenario === 'URGENTE' ? { coberturaUrgente: true, escenarioCobertura: 'URGENTE' } : {}),
+      ...(escenario === 'ANTICIPADA' ? { coberturaAnticipada: true, refEscAsignacionDirecta: true, escenarioCobertura: 'ANTICIPADA' } : {}),
     });
+  }
+
+  if (escenario === 'URGENTE' && tit && retenerSalientePorLlegada({ gapStartMs, nowMs, etaMinutes })) {
+    await retainOutgoingForGap(db, { ...tit, id: titId }, {
+      nowMs,
+      holdNow: gapStartMs > nowMs,
+    }).catch(() => undefined);
   }
 
   await logConvocatoriaEvento(db, id, {

@@ -5,6 +5,7 @@ import { registrarPresencia } from './registrarPresencia';
 import { isReversibleLateAbsence } from '../attendance/lateAbsenceWindow';
 import { evaluateServerCheckInWindow } from './checkInWindow';
 import { isOpsCoverageHoursOnSourceDoc } from '../coverage/coverageTraceShift';
+import { cerrarFuenteSiCorresponde, resolverDestinoFichada } from './fichadaSobreCobertura';
 
 /**
  * Registra fichaje CHECK_IN idempotente y consolida en el documento turno
@@ -21,7 +22,17 @@ export async function processPortalCheckIn(
   if (!shiftDoc.exists) {
     throw new Error('TURNO_NOT_FOUND');
   }
-  const shiftData = shiftDoc.data()!;
+  let shiftData = shiftDoc.data()!;
+  let targetId = shiftId;
+  const destino = await resolverDestinoFichada(db, shiftId, shiftData as Record<string, unknown>);
+  if (destino.yaMovida) {
+    await cerrarFuenteSiCorresponde(db, destino);
+    return { success: true, fichajeId: '', alreadyApplied: true };
+  }
+  if (destino.shiftId !== shiftId) {
+    targetId = destino.shiftId;
+    shiftData = destino.data as typeof shiftData;
+  }
 
   if (
     (shiftData.isAbsent === true || shiftData.status === 'ABSENT')
@@ -53,7 +64,7 @@ export async function processPortalCheckIn(
     return { success: true, fichajeId: '', alreadyApplied: true };
   }
 
-  const key = idempotencyKey?.trim() || `ci_${shiftId}_${recordedAt || Date.now()}`;
+  const key = idempotencyKey?.trim() || `ci_${targetId}_${recordedAt || Date.now()}`;
   const fichajeRef = db.collection('fichajes').doc(fichajeDocIdFromKey(key));
   const now = FieldValue.serverTimestamp();
 
@@ -72,7 +83,7 @@ export async function processPortalCheckIn(
     {
       tipo: 'CHECK_IN',
       status: 'PENDING',
-      shiftId,
+      shiftId: targetId,
       employeeId: empId,
       empresaId: shiftData.empresaId || null,
       coords: coords || null,
@@ -87,7 +98,7 @@ export async function processPortalCheckIn(
 
   try {
     const result = await registrarPresencia(db, {
-      shiftId,
+      shiftId: targetId,
       empId,
       coords: coords || null,
       recordedAt: recordedAt || null,
@@ -95,6 +106,7 @@ export async function processPortalCheckIn(
       fichadaRemota,
     });
 
+    if (destino.fuenteId) await cerrarFuenteSiCorresponde(db, destino);
     await fichajeRef.update({
       status: 'APPLIED',
       appliedAt: now,

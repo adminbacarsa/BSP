@@ -8,6 +8,7 @@ import type { loadCentroControlState } from '../ops/centroControlGuard';
 import { guardFirstName } from '../common/pushGreeting';
 import { isEventoShift, eventoTieneFranjasEncadenadas } from '../eventos/eventoCoverage';
 import { isRetShift, isZeroDurationShift } from '../common/retShift';
+import { fuenteDeCoberturaYaFicho } from '../fichajes/fichadaSobreCobertura';
 import {
   classifyArrivalNotice,
   headsUpBody,
@@ -47,6 +48,8 @@ function eligibleShift(shift: Record<string, unknown>): boolean {
   if (!emp || emp === 'VACANTE') return false;
   if (SKIP_CODES.has(String(shift.code || '').toUpperCase())) return false;
   if (isRetShift(shift) || isZeroDurationShift(shift)) return false;
+  // RET asignado directo: viene de su casa. El seguimiento es el del convocado, no T−5 / ¿Venís?.
+  if (shift.retAsignacionDirecta === true || shift.coberturaUrgente === true) return false;
   if (SKIP_STATUSES.has(String(shift.status || '').toUpperCase())) return false;
   if (shift.lateArrivalAt || shift.lateArrivalConfirmed) return false;
   return true;
@@ -189,6 +192,7 @@ export async function runShiftArrivalNotices(
       if (cc.isDemo(empresaId)) continue;
       if (turnoFueraDeCentroDeControl(shift, excludedObjectives)) continue;
       if (!shiftEligibleForArrivalNotice(shift)) continue;
+      if (await fuenteDeCoberturaYaFicho(db, shift)) continue;
       const startMs = (shift.startTime as Timestamp | undefined)?.toMillis?.() ?? 0;
       if (classifyArrivalNotice(startMs, nowMs) !== kind) continue;
       const flag = kind === 'HEADS_UP' ? 'preStartArrivalNoticeAt' : 'earlyRetentionAlertAt';

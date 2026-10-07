@@ -13,6 +13,7 @@ import {
   coberturaAceptadaLine,
   extendUntilLine,
   formatEnCaminoLine,
+  escenarioCobertura,
   isRecordatorioPendiente,
   planConvocadoArrival,
   parseConvocadoRecordatorioPush,
@@ -80,6 +81,40 @@ describe('getCheckInTiming convocado', () => {
 
 describe('recordatorio convocado', () => {
   const sent = new Date('2026-09-14T20:20:00-03:00');
+
+  it('hueco a más de 5 min: no pregunta ¿Seguís en camino? aunque haya recordatorio', () => {
+    const sent = new Date('2026-10-07T10:30:00-03:00');
+    const start = new Date('2026-10-07T10:45:00-03:00');
+    const ahora = new Date('2026-10-07T10:31:00-03:00');
+    const prev = Date.now;
+    Date.now = () => ahora.getTime();
+    try {
+      assert.equal(escenarioCobertura({ gapStartMs: start.getTime(), nowMs: start.getTime() - 61 * 60_000 }), 'ANTICIPADA');
+      assert.equal(escenarioCobertura({ gapStartMs: start.getTime(), nowMs: start.getTime() - 59 * 60_000 }), 'URGENTE');
+      assert.equal(isRecordatorioPendiente({
+        status: 'ACCEPTED',
+        type: 'FT',
+        reminderSentAt: sent,
+        startTime: start,
+      }), false);
+      assert.equal(isRecordatorioPendiente({
+        status: 'ACCEPTED',
+        type: 'REF',
+        escenarioCobertura: 'URGENTE',
+        reminderSentAt: sent,
+        startTime: start,
+      }), true);
+      assert.equal(isRecordatorioPendiente({
+        status: 'ACCEPTED',
+        type: 'RET',
+        escenarioCobertura: 'ANTICIPADA',
+        reminderSentAt: sent,
+        startTime: start,
+      }), false);
+    } finally {
+      Date.now = prev;
+    }
+  });
 
   it('pendiente = ACCEPTED + reminderSentAt + sin respuesta posterior + sin fichar', () => {
     assert.equal(isRecordatorioPendiente({ status: 'ACCEPTED', type: 'RET', reminderSentAt: sent }), true);

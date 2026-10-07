@@ -86,7 +86,7 @@ export async function invokeCrearConvocatoriaCobertura(params: {
   advanceShiftId?: string;
   ftShiftId?: string;
   bolsaCuil?: string;
-}): Promise<{ convocatoriaId: string; shiftId: string }> {
+}): Promise<{ convocatoriaId: string; shiftId: string; aplicadaDirecta?: boolean }> {
   const empresaId = String(params.empresaId || '').trim();
   const shiftId = await ensureRealAbsenceShiftId(params.absenceShift, empresaId);
   const fn = httpsCallable(functions, 'crearConvocatoriaCobertura');
@@ -102,7 +102,9 @@ export async function invokeCrearConvocatoriaCobertura(params: {
   if (params.ftShiftId) payload.ftShiftId = params.ftShiftId;
   if (params.bolsaCuil) payload.bolsaCuil = params.bolsaCuil;
   const res = await fn(payload);
-  const convocatoriaId = String((res.data as { convocatoriaId?: string })?.convocatoriaId || '').trim();
+  const data = (res.data || {}) as { convocatoriaId?: string | null; aplicadaDirecta?: boolean };
+  if (data.aplicadaDirecta) return { convocatoriaId: '', shiftId, aplicadaDirecta: true };
+  const convocatoriaId = String(data.convocatoriaId || '').trim();
   if (!convocatoriaId) {
     throw new Error('La callable no devolvió convocatoriaId');
   }
