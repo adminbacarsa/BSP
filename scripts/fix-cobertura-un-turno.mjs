@@ -21,7 +21,8 @@ const apply = args.includes('--apply');
 const allowProd = args.includes('--allow-prod');
 const empIdx = args.indexOf('--empresa');
 const empresaId = empIdx >= 0 ? String(args[empIdx + 1] || '').trim() : 'pruebas_sa';
-const TIPOS = new Set(['REF', 'ESC', 'RET', 'FT']);
+// FT conserva el franco origen (P9e): no se anula. Solo REF/ESC/RET se convierten.
+const TIPOS = new Set(['REF', 'ESC', 'RET']);
 
 admin.initializeApp({ credential: admin.credential.applicationDefault(), projectId: 'comtroldata' });
 const db = admin.firestore();
