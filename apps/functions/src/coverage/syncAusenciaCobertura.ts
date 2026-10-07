@@ -527,7 +527,7 @@ export async function applyCoverage(
     } else if (ct === 'ESC' || ct === 'REF') {
       batch.update(
         db.collection('turnos').doc(sourceId),
-        { ...buildEscRefSourceConvertedPatch(srcData, covDocId), ...(quitarReloj || {}) },
+        { ...(quitarReloj || {}), ...buildEscRefSourceConvertedPatch(srcData, covDocId) },
       );
     } else if (ct === 'FT') {
       const srcCode = String(srcData.code || srcData.shiftCode || '').trim().toUpperCase();
@@ -554,7 +554,7 @@ export async function applyCoverage(
     } else if (ct === 'RET' && (params.retAsignacionDirecta || params.coberturaAnticipada || params.coberturaUrgente)) {
       batch.update(
         db.collection('turnos').doc(sourceId),
-        { ...buildEscRefSourceConvertedPatch(srcData, covDocId), ...(quitarReloj || {}) },
+        { ...(quitarReloj || {}), ...buildEscRefSourceConvertedPatch(srcData, covDocId) },
       );
     } else if (ct === 'RET') {
       batch.update(db.collection('turnos').doc(sourceId), {

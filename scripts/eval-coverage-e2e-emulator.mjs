@@ -312,7 +312,7 @@ async function run() {
   const runId = `cov_e2e_${Date.now()}`;
 
   try {
-    // Caso 1 — RET mismo objetivo
+    // Caso 1 — RET mismo objetivo (07/10: el RET se convierte en el turno del titular, como REF/ESC)
     {
       const s = await seedBase(`${runId}_c1`);
       const batch = db.batch();
@@ -341,12 +341,13 @@ async function run() {
       const ok =
         tit?.coverageStatus === 'COVERED'
         && tit?.coverageDocId === covId
-        && src?.coverageUsed === true
-        && src?.isDeleted !== true
+        && src?.isDeleted === true
+        && src?.deletedReason === 'CONVERTIDO_EN_COBERTURA'
+        && src?.convertedToCoverageDocId === covId
         && cov?.origin === 'OPERATIONS_COVERAGE'
         && cov?.coverageType === 'RET'
         && aus?.coberturaEstado === 'GESTIONADA';
-      report(1, ok, ok ? 'titular COVERED + RET usado + ops_cov + RRHH GESTIONADA' : JSON.stringify({ tit: tit?.coverageStatus, src: src?.coverageUsed, aus: aus?.coberturaEstado }));
+      report(1, ok, ok ? 'titular COVERED + RET convertido + ops_cov + RRHH GESTIONADA' : JSON.stringify({ tit: tit?.coverageStatus, srcDel: src?.isDeleted, aus: aus?.coberturaEstado }));
     }
 
     // Caso 2 — REF otro objetivo
