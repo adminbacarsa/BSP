@@ -83,6 +83,8 @@ type FranjaProps = {
   repetir?: { texto: string } | null;
   /** Ya se aplicó: queda el resumen con lo salteado y el botón Listo. */
   terminado?: boolean;
+  /** Extensión sola o adelanto solo, cuando del otro lado no hay nadie. */
+  solo?: { texto: string; onAplicar: () => void } | null;
   onBusqueda: (q: string) => void;
   onToggleFuera: () => void;
   onElegirFuera: (id: string) => void;
@@ -100,6 +102,7 @@ export function FranjaModoElegir({
   fuera,
   repetir,
   terminado,
+  solo,
   onBusqueda,
   onToggleFuera,
   onElegirFuera,
@@ -124,6 +127,16 @@ export function FranjaModoElegir({
             data-franja-fuera
           >
             <Search size={12} /> Buscar fuera del cronograma
+          </button>
+        )}
+        {solo && !repetir && !terminado && (
+          <button
+            type="button"
+            onClick={solo.onAplicar}
+            className="flex shrink-0 items-center gap-1 rounded-xl bg-violet-600 px-3 py-1.5 text-[11px] font-black text-white hover:bg-violet-700"
+            data-franja-solo
+          >
+            {solo.texto}
           </button>
         )}
         {repetir && (

@@ -171,6 +171,12 @@ function queSeCubre(m: ModoElegirTexto): string {
   return `${apellidoMarca(m.titular)}${codigo} · ${fechaCorta(m.dateStr)} · ${franja}`;
 }
 
+/** «Nadie arranca a las 16:30 · Aplicar solo la extensión hasta 16:30». */
+export function textoTramoSolo(lado: 'ext' | 'adel', hm: string): string {
+  if (lado === 'ext') return `Nadie arranca a las ${hm} · Aplicar solo la extensión hasta ${hm}`;
+  return `Nadie termina a las ${hm} · Aplicar solo el adelanto desde ${hm}`;
+}
+
 /** Texto de la franja fija mientras la grilla espera el clic. */
 export function textoFranjaElegir(m: ModoElegirTexto): string {
   if (m.accion === 'asignar') return `Elegí quién cubre ${m.clase === 'hueco' ? '' : 'a '}${queSeCubre(m)}`;
@@ -194,6 +200,12 @@ export type ClicElegir = {
   /** Ext / Adel: quién puede extender o adelantar ese día (las listas del modal). */
   candidatosBanda?: readonly string[];
   bandaHueco?: string | null;
+  /** Inicio y fin reales del hueco, y del turno tocado. */
+  inicioHueco?: string | null;
+  finHueco?: string | null;
+  finTurno?: string | null;
+  inicioTurno?: string | null;
+  nombreCandidato?: string | null;
   extId?: string | null;
   /** Lo que `evaluateCoverageDayGuards` dejó en blocked (descanso < 8 h, licencia). */
   bloqueos?: readonly string[];
@@ -224,13 +236,15 @@ export function validarClicElegir(c: ClicElegir): ResultadoClic {
     }
     const lista = c.candidatosBanda || [];
     if (!lista.includes(c.candidatoId)) {
-      const banda = c.bandaHueco ? ` ${c.bandaHueco}` : '';
-      return {
-        ok: false,
-        motivo: c.paso === 'ext'
-          ? `Para extender tiene que tener ese día la franja anterior al hueco${banda}`
-          : `Para adelantar tiene que tener ese día la franja siguiente al hueco${banda}`,
-      };
+      const quien = c.nombreCandidato ? `${c.nombreCandidato} ` : '';
+      if (c.paso === 'ext') {
+        const hora = c.inicioHueco || 'la hora de inicio';
+        const detalle = c.finTurno ? `. ${quien}termina ${c.finTurno}` : '';
+        return { ok: false, motivo: `Para extender, su turno tiene que terminar cerca de las ${hora} (±30 min)${detalle}` };
+      }
+      const hora = c.finHueco || 'la hora de fin';
+      const detalle = c.inicioTurno ? `. ${quien}arranca ${c.inicioTurno}` : '';
+      return { ok: false, motivo: `Para adelantar, su turno tiene que arrancar cerca de las ${hora} (±30 min)${detalle}` };
     }
   }
   if (c.bloqueos && c.bloqueos.length) return { ok: false, motivo: c.bloqueos[0] };

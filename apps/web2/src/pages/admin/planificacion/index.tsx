@@ -357,6 +357,7 @@ import {
     rolDesdeTurno,
     textoFranjaElegir,
     textoMarcaMenuRapido,
+    textoTramoSolo,
     textoRepetir,
     validarClicElegir,
     type AccionElegir,
@@ -397,6 +398,7 @@ import {
     neighborBandsForTargetAtPosition,
     collectSplitFrancoConflicts,
     formatFrancoConflictSummary,
+    rangoHorario,
     resolveEmployeeShift,
     type FrancoCoverageConflict,
 } from '@/lib/planificacion/planningRecompositionApply';
@@ -413,7 +415,7 @@ import PlanningCoverageModal from '@/components/planificacion/PlanningCoverageMo
 import PlanningRecompositionModal from '@/components/planificacion/PlanningRecompositionModal';
 import PlanningSlaGapCloseModal, { type SlaGapCloseModalData } from '@/components/planificacion/PlanningSlaGapCloseModal';
 import PlanningShiftExtendModal, { type ShiftExtendModalData } from '@/components/planificacion/PlanningShiftExtendModal';
-import { isShiftEligibleForExtension } from '@/lib/planificacion/shiftExtensionApply';
+import { aplicarTramoSolo, isShiftEligibleForExtension } from '@/lib/planificacion/shiftExtensionApply';
 import PlanningCronogramasOverviewModal from '@/components/planificacion/PlanningCronogramasOverviewModal';
 import { touchPlanificacionEstadoActivity } from '@/lib/planificacion/planningCronogramaOverview';
 import type { PendingAbsenceNovedad, RecompositionPackage } from '@/lib/planificacion/planningRecomposition.types';
@@ -8235,10 +8237,13 @@ function PlanificacionDesktop() {
         const fin = typeof shift?.endTime === 'string' ? shift.endTime : '';
         const turnoTexto = shift?.code ? `${shift.code}${ini && fin ? ` ${ini}–${fin}` : ''}` : null;
         const titularId = ctx.clase === 'ausente' ? ctx.empId : null;
+        const rangoHueco = rangoHorario(ctx.horario);
         const listCtx = {
             positionStructure: effectivePosStructure as import('@/lib/planificacion/vacancySplitBands').VacancyPositionSla[],
             gapPositionName: ctx.positionName,
             gapBand: ctx.gapBand,
+            gapStart: rangoHueco?.from,
+            gapEnd: rangoHueco?.to,
             preferSamePosition: true as const,
         };
         const excl = titularId ? [titularId] : [];
@@ -8274,6 +8279,11 @@ function PlanificacionDesktop() {
             turnoTexto,
             candidatosBanda,
             bandaHueco: ctx.gapBand,
+            inicioHueco: rangoHueco?.from,
+            finHueco: rangoHueco?.to,
+            finTurno: fin || null,
+            inicioTurno: ini || null,
+            nombreCandidato: apellidoMarca(nombreEmpleadoMenu(personaId)),
             extId,
             bloqueos: guard.blocked,
         });
@@ -8461,10 +8471,10 @@ function PlanificacionDesktop() {
                 guard = e.guard;
             } else {
                 const ex = evaluarClicMenu(c, 'ext', cov.extId, '');
-                if (!ex.res.ok) motivo = `${apellidoMarca(nombreEmpleadoMenu(cov.extId))}: ${ex.res.motivo}`;
+                if (!ex.res.ok) motivo = ex.res.motivo?.startsWith('Para ') ? ex.res.motivo : `${apellidoMarca(nombreEmpleadoMenu(cov.extId))}: ${ex.res.motivo}`;
                 else {
                     const ad = evaluarClicMenu(c, 'adel', cov.adelId, cov.extId);
-                    if (!ad.res.ok) motivo = `${apellidoMarca(nombreEmpleadoMenu(cov.adelId))}: ${ad.res.motivo}`;
+                    if (!ad.res.ok) motivo = ad.res.motivo?.startsWith('Para ') ? ad.res.motivo : `${apellidoMarca(nombreEmpleadoMenu(cov.adelId))}: ${ad.res.motivo}`;
                     guard = ad.guard;
                 }
             }
@@ -8561,16 +8571,74 @@ function PlanificacionDesktop() {
         };
         return diasParaRepetir(bloqueAusencia(ctx.dateStr, misma), ctx.dateStr, (d) => diaCubiertoMenu(ctx, d));
     };
+    const aplicarSolaMenu = (lado: 'ext' | 'adel', empId: string) => {
+        const m = modoElegir;
+        if (!m || !selectedObjective) return;
+        const rango = rangoHorario(m.ctx.horario);
+        if (!rango) {
+            setModoElegir((prev) => (prev ? { ...prev, aviso: 'El hueco no tiene horario' } : prev));
+            return;
+        }
+        const employeesById: Record<string, any> = {};
+        employees.forEach((e: any) => { if (e.id) employeesById[e.id] = e; });
+        try {
+            const changes = aplicarTramoSolo(pendingChanges, {
+                shiftsMap,
+                positionStructure: effectivePosStructure,
+                employeesById,
+                objectiveId: selectedObjective,
+                clientId: selectedClient || undefined,
+            }, {
+                lado,
+                empId,
+                titularId: m.ctx.clase === 'ausente' ? m.ctx.empId : null,
+                dateStr: m.ctx.dateStr,
+                gapStart: rango.from,
+                gapEnd: rango.to,
+                gapBand: m.ctx.gapBand,
+                gapPosition: m.ctx.positionName,
+                gapHours: m.ctx.horas,
+            });
+            setPendingChanges(changes);
+            const quien = apellidoMarca(nombreEmpleadoMenu(empId));
+            toast.success(lado === 'ext'
+                ? `${quien} extiende hasta las ${rango.to}. Guardá el cronograma.`
+                : `${quien} adelanta desde las ${rango.from}. Guardá el cronograma.`);
+            setModoElegir(null);
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : 'No se pudo aplicar';
+            setModoElegir((prev) => (prev ? { ...prev, aviso: msg } : prev));
+        }
+    };
     const clicPersonaModoElegir = (personaId: string) => {
         const m = modoElegir;
         if (!m || m.repetir || m.resultado) return;
         const paso = pasoDeModo(m.accion, m.extId);
-        const { res } = evaluarClicMenu(m.ctx, paso, personaId, m.extId);
+        const rango = rangoHorario(m.ctx.horario);
+        const listCtxHueco = {
+            positionStructure: effectivePosStructure as import('@/lib/planificacion/vacancySplitBands').VacancyPositionSla[],
+            gapPositionName: m.ctx.positionName,
+            gapBand: m.ctx.gapBand,
+            gapStart: rango?.from,
+            gapEnd: rango?.to,
+        };
+        const excl = m.ctx.clase === 'ausente' ? [m.ctx.empId] : [];
+        const hayExt = m.accion === 'split'
+            ? listExtensionCandidates(m.ctx.gapBand, m.ctx.dateStr, selectedObjective || '', employees, shiftsMap, pendingChanges, excl, listCtxHueco)
+            : [];
+        const pasoReal: PasoElegir = paso === 'ext' && hayExt.length === 0 ? 'adel' : paso;
+        const { res } = evaluarClicMenu(m.ctx, pasoReal, personaId, m.extId);
         if (!res.ok) {
-            setModoElegir((prev) => (prev ? { ...prev, aviso: `${apellidoMarca(nombreEmpleadoMenu(personaId))}: ${res.motivo}` } : prev));
+            const motivo = res.motivo || '';
+            const aviso = motivo.startsWith('Para ') ? motivo : `${apellidoMarca(nombreEmpleadoMenu(personaId))}: ${motivo}`;
+            setModoElegir((prev) => (prev ? { ...prev, aviso } : prev));
             return;
         }
-        if (paso === 'ext') {
+        if (pasoReal === 'adel' && !m.extId) {
+            aplicarSolaMenu('adel', personaId);
+            return;
+        }
+        if (pasoReal === 'ext') {
             setModoElegir((prev) => (prev ? { ...prev, extId: personaId, aviso: null } : prev));
             return;
         }
@@ -12530,7 +12598,25 @@ function PlanificacionDesktop() {
                         modoElegir.busqueda,
                     )
                     : [];
-                const texto = textoFranjaElegir({
+                const rangoFranja = rangoHorario(modoElegir.ctx.horario);
+                const listCtxFranja = {
+                    positionStructure: effectivePosStructure as import('@/lib/planificacion/vacancySplitBands').VacancyPositionSla[],
+                    gapPositionName: modoElegir.ctx.positionName,
+                    gapBand: modoElegir.ctx.gapBand,
+                    gapStart: rangoFranja?.from,
+                    gapEnd: rangoFranja?.to,
+                };
+                const exclFranja = modoElegir.ctx.clase === 'ausente' ? [modoElegir.ctx.empId] : [];
+                const sinExtender = modoElegir.accion === 'split' && !modoElegir.extId && rangoFranja
+                    ? listExtensionCandidates(modoElegir.ctx.gapBand, modoElegir.ctx.dateStr, selectedObjective || '', employees, shiftsMap, pendingChanges, exclFranja, listCtxFranja).length === 0
+                    : false;
+                const sinAdelantar = modoElegir.accion === 'split' && !!modoElegir.extId && rangoFranja
+                    ? listEarlyStartCandidates(modoElegir.ctx.gapBand, modoElegir.ctx.dateStr, selectedObjective || '', employees, shiftsMap, pendingChanges, [...exclFranja, modoElegir.extId], listCtxFranja).length === 0
+                    : false;
+                const solo = sinAdelantar && rangoFranja && modoElegir.extId
+                    ? { texto: textoTramoSolo('ext', rangoFranja.to), onAplicar: () => aplicarSolaMenu('ext', modoElegir.extId) }
+                    : null;
+                const textoBase = textoFranjaElegir({
                     accion: modoElegir.accion,
                     clase: modoElegir.ctx.clase,
                     titular: modoElegir.ctx.empName,
@@ -12542,6 +12628,11 @@ function PlanificacionDesktop() {
                     extNombre: modoElegir.extId ? nombreEmpleadoMenu(modoElegir.extId) : null,
                     extTramo: modoElegir.extId ? tramoExtMenu(modoElegir.ctx, modoElegir.extId) : null,
                 });
+                const texto = sinAdelantar && rangoFranja
+                    ? `Extiende ${apellidoMarca(nombreEmpleadoMenu(modoElegir.extId))}. ${textoTramoSolo('ext', rangoFranja.to)}`
+                    : sinExtender && rangoFranja
+                        ? `${textoTramoSolo('adel', rangoFranja.from)}. Elegí quién adelanta`
+                        : textoBase;
                 return (
                     <FranjaModoElegir
                         texto={modoElegir.repetir || modoElegir.resultado ? `${texto.replace(/^Elegí quién cubre/, 'Cubre').replace(/ → ahora elegí quién adelanta$/, ` · adelanta ${apellidoMarca(modoElegir.repetir?.cov.mode === 'split' ? nombreEmpleadoMenu(modoElegir.repetir.cov.adelId) : '')}`)}` : texto}
@@ -12552,6 +12643,7 @@ function PlanificacionDesktop() {
                         fuera={fuera}
                         repetir={modoElegir.repetir ? { texto: modoElegir.repetir.texto } : null}
                         terminado={!!modoElegir.resultado}
+                        solo={solo}
                         onBusqueda={(q) => setModoElegir((m) => (m ? { ...m, busqueda: q } : m))}
                         onToggleFuera={() => setModoElegir((m) => (m ? { ...m, fueraAbierto: !m.fueraAbierto, busqueda: '' } : m))}
                         onElegirFuera={clicPersonaModoElegir}
@@ -16316,8 +16408,23 @@ function PlanificacionDesktop() {
                                 splitWorkBand.positionName,
                             )
                             : null);
+                    const hmPlano = (v: unknown) => {
+                        if (typeof v !== 'string') return '';
+                        const m = v.match(/(\d{1,2}):(\d{2})/);
+                        return m ? `${m[1].padStart(2, '0')}:${m[2]}` : '';
+                    };
+                    const rangoSplit = rangoHorario(splitTitularShift?.scheduleLabel)
+                        || (splitTitularShift?.rawShift
+                            ? rangoHorario(`${hmPlano(splitTitularShift.rawShift.startTime)}–${hmPlano(splitTitularShift.rawShift.endTime)}`)
+                            : null);
                     const splitListCtxWithGap = splitWorkBand
-                        ? { ...vacancySplitListCtx, gapPositionName: splitWorkBand.positionName, gapBand: splitGapBand }
+                        ? {
+                            ...vacancySplitListCtx,
+                            gapPositionName: splitWorkBand.positionName,
+                            gapBand: splitGapBand,
+                            gapStart: rangoSplit?.from,
+                            gapEnd: rangoSplit?.to,
+                        }
                         : vacancySplitListCtx;
                     const splitWorkerPoolExt = splitWorkBand && splitReferenceDate
                         ? listExtensionCandidates(
@@ -16330,12 +16437,7 @@ function PlanificacionDesktop() {
                             [vacancyData?.employeeId].filter(Boolean) as string[],
                             splitListCtxWithGap,
                         )
-                            .filter((c) => {
-                                const want = String(splitPlan?.extBand || splitNeighbors?.extensionBand || '').toUpperCase();
-                                if (!want) return true;
-                                return String(c.code || '').toUpperCase() === want;
-                            })
-                            .filter((c) => !q || c.name.toLowerCase().includes(q))
+                            .filter((c) => !q || c.name.toLowerCase().includes(q) || (c.textoFila || '').toLowerCase().includes(q))
                         : [];
                     const splitWorkerPoolAdel = splitWorkBand && splitReferenceDate
                         ? listEarlyStartCandidates(
@@ -16348,12 +16450,7 @@ function PlanificacionDesktop() {
                             [vacancyData?.employeeId, vacancySplitExtId].filter(Boolean) as string[],
                             splitListCtxWithGap,
                         )
-                            .filter((c) => {
-                                const want = String(splitPlan?.adelBand || splitNeighbors?.earlyStartBand || '').toUpperCase();
-                                if (!want) return true;
-                                return String(c.code || '').toUpperCase() === want;
-                            })
-                            .filter((c) => !q || c.name.toLowerCase().includes(q))
+                            .filter((c) => !q || c.name.toLowerCase().includes(q) || (c.textoFila || '').toLowerCase().includes(q))
                         : [];
                     const splitManualExtraHours = vacancySplitUsesManualExtraHours({
                         extExtraHours: vacancySplitExtExtraHours,
@@ -16911,7 +17008,7 @@ function PlanificacionDesktop() {
                                         data-split-candidato={c.id}
                                         className={`w-full rounded-lg border px-2.5 py-2 text-left text-xs font-bold transition-colors ${value === c.id ? 'border-violet-500 bg-violet-50 text-violet-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}
                                     >
-                                        {c.name} · {c.code} · {c.positionName}
+                                        {c.textoFila || `${c.name} · ${c.code} · ${c.positionName}`}
                                     </button>
                                 ))}
                             </div>
@@ -17099,19 +17196,19 @@ function PlanificacionDesktop() {
                                                                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                                                                     {listaSplit(
                                                                         `1.er tramo — extensión (${splitExtSegmentLabel})`,
-                                                                        `Solo banda ${splitPlan?.extBand || 'anterior'}: el turno que termina cuando empieza el hueco.`,
+                                                                        `Termina a ±30 min de las ${rangoSplit?.from || 'inicio'}. Mismo puesto primero.`,
                                                                         splitWorkerPoolExt,
-                                                                        `No hay guardias en banda ${splitPlan?.extBand || 'anterior'} ese día en el objetivo.`,
+                                                                        'Nadie termina cerca del inicio del hueco.',
                                                                         vacancySplitExtId,
                                                                         setVacancySplitExtId,
                                                                     )}
                                                                     {listaSplit(
                                                                         `2.º tramo — adelanto (${splitSecondSegmentLabel})`,
-                                                                        `Solo banda ${splitPlan?.adelBand || 'posterior'}: el turno que empieza cuando termina el hueco.`,
+                                                                        `Arranca a ±30 min de las ${rangoSplit?.to || 'fin'}. Mismo puesto primero.`,
                                                                         splitWorkerPoolAdel,
                                                                         vacancySplitExtId
-                                                                            ? `No hay guardias en banda ${splitPlan?.adelBand || 'posterior'} ese día (distintos del 1.er tramo).`
-                                                                            : `No hay guardias en banda ${splitPlan?.adelBand || 'posterior'} ese día en el objetivo.`,
+                                                                            ? 'Nadie arranca cerca del fin (distinto de quien extiende).'
+                                                                            : 'Nadie arranca cerca del fin del hueco.',
                                                                         vacancySplitAdelId,
                                                                         setVacancySplitAdelId,
                                                                     )}
@@ -17190,13 +17287,58 @@ function PlanificacionDesktop() {
                                                             </div>
                                                             <CoberturaBarra
                                                                 tono="violet"
-                                                                texto={textoBarraSplit(extSel?.name, adelSel?.name)}
+                                                                texto={splitWorkerPoolAdel.length === 0 && extSel
+                                                                    ? textoTramoSolo('ext', rangoSplit?.to || '')
+                                                                    : splitWorkerPoolExt.length === 0 && adelSel
+                                                                        ? textoTramoSolo('adel', rangoSplit?.from || '')
+                                                                        : textoBarraSplit(extSel?.name, adelSel?.name)}
                                                                 detalle={splitDualPreview
                                                                     ? `Hueco ${splitDualPreview.gap.from}–${splitDualPreview.gap.to} · 1.º ${splitDualPreview.first.from}–${splitDualPreview.first.to} · 2.º ${splitDualPreview.second.from}–${splitDualPreview.second.to}`
                                                                     : (splitPlan ? `Hueco ${splitPlan.gapLabel} · Ext ${splitPlan.extBand} ${splitPlan.extSegment} · Adel ${splitPlan.adelBand} ${splitPlan.adelSegment}` : null)}
-                                                                boton={TEXTO_BOTON_SPLIT}
-                                                                disabled={!draftActual}
-                                                                onClick={applyThisDay}
+                                                                boton={splitWorkerPoolAdel.length === 0 && extSel
+                                                                    ? 'Aplicar solo la extensión'
+                                                                    : splitWorkerPoolExt.length === 0 && adelSel
+                                                                        ? 'Aplicar solo el adelanto'
+                                                                        : TEXTO_BOTON_SPLIT}
+                                                                disabled={splitWorkerPoolAdel.length === 0 ? !extSel : splitWorkerPoolExt.length === 0 ? !adelSel : !draftActual}
+                                                                onClick={() => {
+                                                                    const sola = splitWorkerPoolAdel.length === 0 && extSel
+                                                                        ? 'ext' as const
+                                                                        : splitWorkerPoolExt.length === 0 && adelSel
+                                                                            ? 'adel' as const
+                                                                            : null;
+                                                                    if (!sola || !rangoSplit || !diaSel) {
+                                                                        applyThisDay();
+                                                                        return;
+                                                                    }
+                                                                    const employeesById: Record<string, any> = {};
+                                                                    employees.forEach((e: any) => { if (e.id) employeesById[e.id] = e; });
+                                                                    try {
+                                                                        const changes = aplicarTramoSolo(pendingChanges, {
+                                                                            shiftsMap,
+                                                                            positionStructure: effectivePosStructure,
+                                                                            employeesById,
+                                                                            objectiveId: selectedObjective || '',
+                                                                            clientId: selectedClient || undefined,
+                                                                        }, {
+                                                                            lado: sola,
+                                                                            empId: sola === 'ext' ? extSel!.id : adelSel!.id,
+                                                                            titularId: vacancyData?.employeeId || null,
+                                                                            dateStr: diaSel,
+                                                                            gapStart: rangoSplit.from,
+                                                                            gapEnd: rangoSplit.to,
+                                                                            gapBand: splitGapBand || splitWorkBand?.code || '',
+                                                                            gapPosition: splitWorkBand?.positionName || '',
+                                                                            gapHours: splitTitularShift?.hours,
+                                                                        });
+                                                                        setPendingChanges(changes);
+                                                                        toast.success(sola === 'ext'
+                                                                            ? `Extensión hasta las ${rangoSplit.to}. Guardá el cronograma.`
+                                                                            : `Adelanto desde las ${rangoSplit.from}. Guardá el cronograma.`);
+                                                                    } catch (err) {
+                                                                        toast.error(err instanceof Error ? err.message : 'No se pudo aplicar');
+                                                                    }
+                                                                }}
                                                             />
                                                         </>
                                                     )}

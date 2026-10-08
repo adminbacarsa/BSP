@@ -1,3 +1,4 @@
+import { isReliefEligibleShift } from '@cosp/ops-core';
 import type { RecompositionPackage, RecompositionPendingMeta } from './planningRecomposition.types';
 import {
   defaultSplitTimesCct,
@@ -5,6 +6,7 @@ import {
   isVacancySegmentWorkCode,
   neighborBandsCct,
   neighborBandsForVacancyGap,
+  shiftTimeWindowFromSla,
   vacancySecondSegmentIsTailExtension,
   type VacancySplitListContext,
   type VacancyPositionSla,
@@ -39,6 +41,12 @@ export type SegmentCandidateRow = {
   positionName: string;
   /** Si la extensión se aplica en otra celda (ej. N del día anterior). */
   extensionApplyDate?: string;
+  /** «11:30–15:15». */
+  scheduleLabel?: string;
+  /** Fin (ext) o inicio (adel) menos el borde del hueco, en minutos. Negativo = antes. */
+  deltaMin?: number;
+  /** «FERRERO · M 11:30–15:15 · termina 15 min antes». */
+  textoFila?: string;
 };
 
 function empDisplayName(emp: { name?: string; apellido?: string; nombre?: string; firstName?: string; lastName?: string } | undefined, id: string) {
@@ -590,7 +598,200 @@ export function listVacancySplitWorkersForDay(
   ];
 }
 
-/** Extensión: guardias de la banda **anterior** (ej. cubrir M → turnos N). Incluye N del día anterior si cubre madrugada del hueco. */
+/** Misma ventana que el CC (`COVERAGE_JOIN_TOLERANCE_MS`): el borde del turno a ±30 min del borde del hueco. */
+export const CONTIGUO_MIN = 30;
+
+/** «15:30–16:30» o «15:30-16:30». */
+export function rangoHorario(label: string | null | undefined): { from: string; to: string } | null {
+  if (!label) return null;
+  const m = String(label).match(/(\d{1,2}):(\d{2})\s*[–-]\s*(\d{1,2}):(\d{2})/);
+  if (!m) return null;
+  return { from: `${m[1].padStart(2, '0')}:${m[2]}`, to: `${m[3].padStart(2, '0')}:${m[4]}` };
+}
+
+const EXTRA_NO_PUESTO = new Set(['REF', 'ESC', 'RET', 'FT']);
+
+function hmDeValor(v: unknown): string | null {
+  if (typeof v === 'string') {
+    const directo = v.trim().match(/^(\d{1,2}):(\d{2})/);
+    if (directo) return `${directo[1].padStart(2, '0')}:${directo[2]}`;
+    const d = new Date(v);
+    if (!Number.isNaN(d.getTime())) {
+      const hm = new Intl.DateTimeFormat('es-AR', {
+        hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Argentina/Buenos_Aires',
+      }).format(d);
+      const m = hm.match(/(\d{1,2}):(\d{2})/);
+      return m ? `${m[1].padStart(2, '0')}:${m[2]}` : null;
+    }
+    return null;
+  }
+  if (v && typeof v === 'object') {
+    const o = v as { toDate?: () => Date; seconds?: number };
+    if (typeof o.toDate === 'function') return hmDeValor(o.toDate().toISOString());
+    if (typeof o.seconds === 'number') return hmDeValor(new Date(o.seconds * 1000).toISOString());
+  }
+  return null;
+}
+
+function minDeHm(hm: string | null | undefined): number | null {
+  if (!hm) return null;
+  const m = hm.match(/^(\d{2}):(\d{2})$/);
+  if (!m) return null;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+
+function ventanaCct(code: string): { from: string; to: string } | null {
+  const c = String(code || '').toUpperCase();
+  if (c === 'M') return { from: '07:00', to: '15:00' };
+  if (c === 'T') return { from: '15:00', to: '23:00' };
+  if (c === 'N') return { from: '23:00', to: '07:00' };
+  if (c === 'D12') return { from: '07:00', to: '19:00' };
+  if (c === 'N12') return { from: '19:00', to: '07:00' };
+  return null;
+}
+
+/** Horario real del doc. Si no tiene horas, la franja SLA del puesto y el código. CCT solo si tampoco hay SLA. */
+function horarioDelTurno(
+  shift: Record<string, any> | null | undefined,
+  positionStructure: VacancyPositionSla[] | undefined,
+): { from: string; to: string; startMin: number; endMin: number } | null {
+  if (!shift) return null;
+  const desdeDoc = hmDeValor(shift.startTime);
+  const hastaDoc = hmDeValor(shift.endTime);
+  if (desdeDoc && hastaDoc && !(desdeDoc === '00:00' && hastaDoc === '00:00')) {
+    const startMin = minDeHm(desdeDoc)!;
+    let endMin = minDeHm(hastaDoc)!;
+    if (endMin <= startMin) endMin += 24 * 60;
+    return { from: desdeDoc, to: hastaDoc, startMin, endMin };
+  }
+  const code = String(shift.code || '').toUpperCase();
+  const posName = String(shift.positionName || '');
+  const pos = positionStructure?.find((p) => p.positionName === posName);
+  const band = pos?.shifts?.find((s) => String(s.code || '').toUpperCase() === code);
+  if (band) {
+    const w = shiftTimeWindowFromSla(band);
+    return { from: w.from.slice(0, 5), to: w.to.slice(0, 5), startMin: w.startMin, endMin: w.endMin };
+  }
+  const cct = ventanaCct(code);
+  if (!cct) return null;
+  const startMin = minDeHm(cct.from)!;
+  let endMin = minDeHm(cct.to)!;
+  if (endMin <= startMin) endMin += 24 * 60;
+  return { from: cct.from, to: cct.to, startMin, endMin };
+}
+
+function ventanaDelHueco(
+  targetBand: string,
+  listCtx: VacancySplitListContext | undefined,
+): { start: number; end: number; from: string; to: string } | null {
+  const desde = hmDeValor(listCtx?.gapStart);
+  const hasta = hmDeValor(listCtx?.gapEnd);
+  if (desde && hasta) {
+    const start = minDeHm(desde)!;
+    let end = minDeHm(hasta)!;
+    if (end <= start) end += 24 * 60;
+    return { start, end, from: desde, to: hasta };
+  }
+  const sla = horarioDelTurno(
+    { code: targetBand, positionName: listCtx?.gapPositionName, startTime: '', endTime: '' },
+    listCtx?.positionStructure,
+  );
+  if (sla && (listCtx?.positionStructure?.length || ventanaCct(targetBand))) {
+    return { start: sla.startMin, end: sla.endMin, from: sla.from, to: sla.to };
+  }
+  return null;
+}
+
+/** Turno de puesto: no licencia, no franco, no RET/ESC/REF, no ops_cov, no ya extendido. */
+function esTurnoDePuestoParaExtender(shift: Record<string, any> | null | undefined): boolean {
+  if (!shift || shift.isDeleted || shift.draft === true || shift.isVirtual === true) return false;
+  if (shift.isAbsent === true) return false;
+  if (shift.isExtended || shift.isEarlyStart) return false;
+  if (String(shift.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE') return false;
+  if (isPlannedFrancoShift(shift)) return false;
+  const code = String(shift.code || '').toUpperCase();
+  const orig = String(shift.codigoOriginal || '').toUpperCase();
+  if (EXTRA_NO_PUESTO.has(code) || EXTRA_NO_PUESTO.has(orig)) return false;
+  return isReliefEligibleShift(shift);
+}
+
+export function textoFilaHorario(p: {
+  name: string;
+  code: string;
+  from: string;
+  to: string;
+  deltaMin: number;
+  lado: 'ext' | 'adel';
+}): string {
+  const apellido = String(p.name || '').split(',')[0].trim().split(/\s+/)[0] || p.name;
+  const abs = Math.abs(p.deltaMin);
+  const cuando = p.deltaMin === 0
+    ? (p.lado === 'ext' ? 'termina a la hora' : 'arranca a la hora')
+    : p.lado === 'ext'
+      ? (p.deltaMin < 0 ? `termina ${abs} min antes` : `termina ${abs} min después`)
+      : (p.deltaMin < 0 ? `arranca ${abs} min antes` : `arranca ${abs} min después`);
+  return `${apellido} · ${p.code} ${p.from}–${p.to} · ${cuando}`;
+}
+
+function listarContiguos(
+  lado: 'ext' | 'adel',
+  targetBand: string,
+  dateStr: string,
+  objectiveId: string,
+  employees: { id: string; name?: string }[],
+  shiftsMap: Record<string, any>,
+  pendingChanges: Record<string, any>,
+  excludeIds: string[],
+  listCtx: VacancySplitListContext | undefined,
+): SegmentCandidateRow[] {
+  const hueco = ventanaDelHueco(targetBand, listCtx);
+  if (!hueco) return [];
+  const exclude = new Set(excludeIds);
+  const borde = lado === 'ext' ? hueco.start : hueco.end;
+  const dias = lado === 'ext' ? [dateStr, previousCalendarDayStr(dateStr)] : [dateStr];
+  const porPersona = new Map<string, SegmentCandidateRow & { abs: number; mismo: boolean }>();
+  for (const dia of dias) {
+    const offset = dia === dateStr ? 0 : -1;
+    for (const emp of employees) {
+      if (!emp.id || exclude.has(emp.id)) continue;
+      const shift = resolveEmployeeShift(emp.id, dia, shiftsMap, pendingChanges);
+      if (!esTurnoDePuestoParaExtender(shift)) continue;
+      const shiftObj = shift?.objectiveId;
+      if (shiftObj != null && shiftObj !== '' && String(shiftObj) !== String(objectiveId)) continue;
+      const horario = horarioDelTurno(shift, listCtx?.positionStructure);
+      if (!horario) continue;
+      const punta = (lado === 'ext' ? horario.endMin : horario.startMin) + offset * 24 * 60;
+      const delta = punta - borde;
+      if (Math.abs(delta) > CONTIGUO_MIN) continue;
+      const name = empDisplayName(emp, emp.id);
+      const code = String(shift?.code || '').toUpperCase();
+      const positionName = String(shift?.positionName || 'General');
+      const row: SegmentCandidateRow & { abs: number; mismo: boolean } = {
+        id: emp.id,
+        name: offset < 0 ? `${name} · ${code} ${dia.slice(8)}/${dia.slice(5, 7)}→` : name,
+        code,
+        positionName,
+        scheduleLabel: `${horario.from}–${horario.to}`,
+        deltaMin: delta,
+        textoFila: textoFilaHorario({ name, code, from: horario.from, to: horario.to, deltaMin: delta, lado }),
+        abs: Math.abs(delta),
+        mismo: !!listCtx?.gapPositionName && positionName === listCtx.gapPositionName,
+        ...(offset < 0 ? { extensionApplyDate: dia } : {}),
+      };
+      const prev = porPersona.get(emp.id);
+      if (!prev || row.abs < prev.abs) porPersona.set(emp.id, row);
+    }
+  }
+  return [...porPersona.values()]
+    .sort((a, b) => {
+      if (a.mismo !== b.mismo) return a.mismo ? -1 : 1;
+      if (a.abs !== b.abs) return a.abs - b.abs;
+      return a.name.localeCompare(b.name, 'es');
+    })
+    .map(({ abs: _a, mismo: _m, ...row }) => row);
+}
+
+/** Extensión: quien termina a ±30 min del inicio del hueco. El código no importa. Incluye la N del día anterior. */
 export function listExtensionCandidates(
   targetBand: string,
   dateStr: string,
@@ -601,58 +802,10 @@ export function listExtensionCandidates(
   excludeIds: string[] = [],
   listCtx?: VacancySplitListContext,
 ): SegmentCandidateRow[] {
-  const positionName = listCtx?.gapPositionName ?? null;
-  const { extensionBand } = listCtx?.positionStructure?.length
-    ? neighborBandsForVacancyGap(listCtx.positionStructure, positionName, targetBand)
-    : neighborBandsForTarget(targetBand);
-  // Como el adelanto: todos los puestos del objetivo, no solo el del hueco (el mismo puesto va primero).
-  const ctx = {
-    ...listCtx,
-    gapBand: targetBand,
-    gapPositionName: positionName ?? listCtx?.gapPositionName,
-    preferSamePosition: false,
-  };
-  let rows: SegmentCandidateRow[] = listSegmentCandidatesWithBandFallback(
-    dateStr,
-    objectiveId,
-    employees,
-    shiftsMap,
-    pendingChanges,
-    excludeIds,
-    extensionBand,
-    ctx,
-  );
-  rows = samePositionFirst(rows, ctx.gapPositionName);
-  const target = String(targetBand || '').toUpperCase();
-  const extBand = String(extensionBand || '').toUpperCase();
-  if (target === 'M' || extBand === 'N') {
-    const prev = previousCalendarDayStr(dateStr);
-    const prevRows = listSegmentCandidatesWithBandFallback(
-      prev,
-      objectiveId,
-      employees,
-      shiftsMap,
-      pendingChanges,
-      excludeIds,
-      extensionBand,
-      ctx,
-    );
-    const ids = new Set(rows.map((r) => r.id));
-    for (const r of prevRows) {
-      if (ids.has(r.id)) continue;
-      const [, mo, dd] = prev.split('-');
-      rows.unshift({
-        ...r,
-        name: `${r.name} · N ${dd}/${mo}→`,
-        extensionApplyDate: prev,
-      });
-      ids.add(r.id);
-    }
-  }
-  return rows;
+  return listarContiguos('ext', targetBand, dateStr, objectiveId, employees, shiftsMap, pendingChanges, excludeIds, listCtx);
 }
 
-/** Adelanto: solo la banda **inmediata siguiente** (cubrir T → N). Nunca M ya pasada ni mañana del otro día. */
+/** Adelanto: quien arranca a ±30 min del fin del hueco. El código no importa. No toma el día siguiente. */
 export function listEarlyStartCandidates(
   targetBand: string,
   dateStr: string,
@@ -662,34 +815,8 @@ export function listEarlyStartCandidates(
   pendingChanges: Record<string, any>,
   excludeIds: string[] = [],
   listCtx?: VacancySplitListContext,
-) {
-  const positionName = listCtx?.gapPositionName ?? null;
-  const { earlyStartBand } = listCtx?.positionStructure?.length
-    ? neighborBandsForVacancyGap(listCtx.positionStructure, positionName, targetBand)
-    : neighborBandsForTarget(targetBand);
-  const target = String(targetBand || '').toUpperCase();
-  const adelBand = String(earlyStartBand || '').toUpperCase();
-  // Cubrir N con “adelanto M” del mismo día = turno ya ocurrido. La M del día siguiente no se usa acá.
-  if ((target === 'N' || target === 'N12') && adelBand === 'M') {
-    return [];
-  }
-  const rows = listSegmentCandidates(
-    dateStr,
-    objectiveId,
-    employees,
-    shiftsMap,
-    pendingChanges,
-    excludeIds,
-    adelBand,
-    {
-      ...listCtx,
-      gapBand: targetBand,
-      gapPositionName: positionName ?? listCtx?.gapPositionName,
-      preferSamePosition: false,
-      strictNeighborBand: true,
-    },
-  );
-  return samePositionFirst(rows, positionName ?? listCtx?.gapPositionName);
+): SegmentCandidateRow[] {
+  return listarContiguos('adel', targetBand, dateStr, objectiveId, employees, shiftsMap, pendingChanges, excludeIds, listCtx);
 }
 
 function samePositionFirst<T extends { positionName: string }>(rows: T[], pos: string | null | undefined): T[] {
