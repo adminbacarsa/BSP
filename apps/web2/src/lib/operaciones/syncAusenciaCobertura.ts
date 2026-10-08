@@ -1,9 +1,11 @@
 import {
+  addDoc,
   collection,
   deleteField,
   doc,
   getDoc,
   query,
+  updateDoc,
   where,
   getDocs,
   limit,
@@ -110,6 +112,71 @@ export class CoverageApplyError extends Error {
     super(message);
     this.code = code;
   }
+}
+
+function coberturaEsPorAusenciaCliente(titular: Record<string, unknown> | null | undefined): boolean {
+  if (!titular) return false;
+  const emp = String(titular.employeeId || '').trim();
+  if (!emp || emp === 'VACANTE') return false;
+  const origin = String(titular.origin || '').toUpperCase();
+  if (origin === 'OPERATIONS_COVERAGE' || origin === 'SLA_VIRTUAL' || origin === 'RETEN') return false;
+  const absent = titular.isAbsent === true || String(titular.status || '').toUpperCase() === 'ABSENT';
+  if (!absent && titular.isUnassigned === true) return false;
+  if (!absent && titular.isPresent === true) return false;
+  return true;
+}
+
+async function registrarAusenciaAntesDeCubrir(
+  db: Firestore,
+  titularId: string,
+  titular: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  if (!coberturaEsPorAusenciaCliente(titular)) return titular;
+  if (String(titular.absenceType || '').trim()) return titular;
+  const previa = await getDocs(query(collection(db, 'ausencias'), where('shiftId', '==', titularId), limit(1)));
+  if (!previa.empty) return { ...titular, isAbsent: true, status: 'ABSENT' };
+  let serverApplied = false;
+  try {
+    const { app } = await import('@/lib/firebase');
+    const { getFunctions, httpsCallable } = await import('firebase/functions');
+    const fn = httpsCallable(getFunctions(app, 'us-central1'), 'marcarAusenciaOperaciones');
+    const res = await fn({ shiftId: titularId }) as { data?: { success?: boolean } };
+    serverApplied = res?.data?.success === true;
+  } catch (err) {
+    console.warn('[applyCoverage] marcarAusenciaOperaciones', err);
+  }
+  if (!serverApplied) {
+    const startMs = (titular.startTime as { toMillis?: () => number } | undefined)?.toMillis?.()
+      || (titular.shiftDateObj instanceof Date ? titular.shiftDateObj.getTime() : Date.now());
+    const dayStart = new Date(startMs);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(startMs);
+    dayEnd.setHours(23, 59, 59, 999);
+    const empresaId = String(titular.empresaId || '').trim();
+    await updateDoc(doc(db, 'turnos', titularId), {
+      status: 'ABSENT',
+      isAbsent: true,
+      absenceType: 'MANUAL_OPS',
+      absenceDetectedBy: 'MANUAL_OPS',
+      absenceConfirmedBy: 'OPERACIONES',
+      absenceConfirmedAt: serverTimestamp(),
+    });
+    await addDoc(collection(db, 'ausencias'), stampEmpresaId({
+      employeeId: titular.employeeId || null,
+      employeeName: titular.employeeName || '',
+      clientId: titular.clientId || null,
+      type: 'NO_PRESENTACION',
+      startDate: Timestamp.fromDate(dayStart),
+      endDate: Timestamp.fromDate(dayEnd),
+      status: 'Pendiente',
+      reason: `No presentación en turno — ${titular.objectiveName || ''} (${titular.positionName || ''})`,
+      hasCertificate: false,
+      createdAt: serverTimestamp(),
+      origin: 'OPERACIONES',
+      shiftId: titularId,
+    }, empresaId));
+  }
+  return { ...titular, isAbsent: true, status: 'ABSENT', absenceType: String(titular.absenceType || 'AA') };
 }
 
 /** Payload estándar para marcar el turno titular ausente/vacante como cubierto. */
@@ -545,6 +612,9 @@ export async function applyCoverage(
   );
 
   const closeMode = params.titularCloseMode ?? 'FULL';
+  if (closeMode !== 'NONE') {
+    titular = await registrarAusenciaAntesDeCubrir(db, titularId, titular);
+  }
   if (closeMode !== 'NONE') {
     const isAbsence =
       titular.isAbsent === true || String(titular.status || '').toUpperCase() === 'ABSENT';

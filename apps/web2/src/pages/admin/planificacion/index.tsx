@@ -245,6 +245,7 @@ import {
     type ObjectiveCoveragePreflight,
 } from '@/lib/planificacion/objectiveCoverageDemand';
 import { inferAbsenceCode, isActiveAbsence, buildAbsencesMapFromDocs, toCalendarDateStr, iterateCalendarDateRange, validateAbsenceDateRange, absenceGridDisplayCode } from '@/lib/planificacion/absenceCodes';
+import { codigoGrillaAusenteSinRegistro, turnoDelCronoEnPantalla } from '@/lib/planificacion/ausenteSinRegistroCelda';
 import { isEmployeeOnLeave, shouldShowLeaveConflictSiren } from '@/lib/planificacion/leaveCoverage';
 import {
     listDateRangeInclusive,
@@ -1188,9 +1189,16 @@ function calcularCeldaGrilla(e: EntradaCeldaGrilla, emp: any, isGuest: boolean, 
     const grupoUnifiedMode = e.grupoUnifiedMode;
     const cellDateStr = getDateKey(day);
     const key = `${emp.id}_${cellDateStr}`;
-    const { s, p } = resolveCellShiftDisplay(
+    const displayShift = resolveCellShiftDisplay(
         emp.id, cellDateStr, selectedObjective, selectedGrupo, grupoUnifiedMode, e.pendingChanges, e.shiftsMap,
     );
+    let s = displayShift.s;
+    const p = displayShift.p;
+    const grupoIds = selectedGrupo && grupoUnifiedMode ? selectedGrupo.objectiveIds : null;
+    const rawTurno = e.shiftsMap[key];
+    if (!s && !(p && !p.isDeleted) && codigoGrillaAusenteSinRegistro(rawTurno) && turnoDelCronoEnPantalla(rawTurno, selectedObjective, grupoIds)) {
+        s = rawTurno;
+    }
     const rfzOnCell = e.rfzByEmpDate[key];
     const isLockedDate = e.fechaBloqueada(cellDateStr);
     const isCellWeekend = [0, 6].includes(day.getDay());
@@ -1203,6 +1211,16 @@ function calcularCeldaGrilla(e: EntradaCeldaGrilla, emp: any, isGuest: boolean, 
     const plannedNov = s?.plannedNovedad || p?.plannedNovedad;
     let absence = e.absencesMap[key];
     if (absence && ((absence.inferredCode as string) || inferAbsenceCode(absence)) === 'AA' && !e.planPublicado) absence = null as any;
+    if (!absence) {
+        const codigoSinDoc = codigoGrillaAusenteSinRegistro(s);
+        if (codigoSinDoc && turnoDelCronoEnPantalla(s, selectedObjective, grupoIds)) {
+            absence = {
+                absenceType: codigoSinDoc,
+                inferredCode: codigoSinDoc,
+                type: codigoSinDoc === 'AA' ? 'No Presentacion' : codigoSinDoc,
+            };
+        }
+    }
     const effectiveCode = p?.code || s?.code;
     const coveredByCell = p?.coveredBy || s?.coveredBy || s?.coveredByEmployeeName || p?.coveredByEmployeeName;
     const hasConflict = shouldShowLeaveConflictSiren({

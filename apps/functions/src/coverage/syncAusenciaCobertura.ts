@@ -12,6 +12,7 @@ import {
   sourceShiftEligibleForCoverageGap,
 } from './coverageSourceShiftForGap';
 import { completesPartialSegment, uncoveredRemainderMs } from './partialSegment';
+import { ausenciaYaRegistrada, coberturaEsPorAusencia, markShiftAbsent } from '../attendance/markShiftAbsent';
 
 function coverageServerTime(): admin.firestore.Timestamp | admin.firestore.FieldValue {
   if (process.env.FIRESTORE_EMULATOR_HOST) {
@@ -658,6 +659,16 @@ export async function applyCoverage(
   );
 
   const closeMode = params.titularCloseMode ?? 'FULL';
+  if (closeMode !== 'NONE' && coberturaEsPorAusencia(titular)) {
+    const registrada = await ausenciaYaRegistrada(db, titularId, titular);
+    if (!registrada) {
+      await markShiftAbsent(db, titularId, {
+        reason: 'MANUAL_OPS',
+        by: String(params.resolvedBy || 'COBERTURA'),
+      });
+      titular = { ...titular, isAbsent: true, status: 'ABSENT', absenceType: 'AA' };
+    }
+  }
   if (closeMode !== 'NONE') {
     const isAbsence =
       titular.isAbsent === true || String(titular.status || '').toUpperCase() === 'ABSENT';

@@ -845,6 +845,9 @@ export const onTurnoAbsenciaDetectada = onDocumentUpdatedV2(
 
     // Solo cuando isAbsent cambia de false/undefined a true
     if (before.isAbsent === after.isAbsent || !after.isAbsent) return;
+    if (after.absenceCascadeSkip === true || String(after.absenceDetectedBy || '').toUpperCase() === 'FIX_SIN_REGISTRO') {
+      return;
+    }
     // Ignorar borradores y turnos virtuales
     if (after.draft || after.isVirtual) return;
     if (skipAbsencePipelineForShift(after as Record<string, unknown>)) return;
