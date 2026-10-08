@@ -21,6 +21,7 @@ import {
   type ColumnaOrdenCronograma,
   type OrdenCronograma,
 } from '@/lib/planificacion/cronogramaOrden';
+import { detalleArmado, textoArmado } from '@/lib/planificacion/armadoCronograma';
 
 function formatActivityDate(d: Date | null): string {
   if (!d) return '—';
@@ -53,6 +54,8 @@ type Props = {
   scopeEmpresa: boolean;
   clients: { id: string; name?: string; razonSocial?: string; objetivos?: { id?: string; name?: string }[] }[];
   onNavigateToObjective: (clientId: string, objectiveId: string, year: number, month: number) => void;
+  /** Columna Armado: solo SuperAdmin. */
+  verArmado?: boolean;
 };
 
 function ThOrden({
@@ -120,6 +123,7 @@ export default function PlanningCronogramasOverviewModal({
   scopeEmpresa,
   clients,
   onNavigateToObjective,
+  verArmado = false,
 }: Props) {
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState<CronogramaOverviewRow[]>([]);
@@ -210,16 +214,18 @@ export default function PlanningCronogramasOverviewModal({
     });
   };
 
+  const ordenVisible = verArmado || orden?.columna !== 'armado' ? orden : null;
+
   const vista = useMemo(() => {
-    if (agrupaPorCliente(orden)) {
+    if (agrupaPorCliente(ordenVisible)) {
       const groups = groupByClient(filtered);
       return {
         plana: false as const,
-        groups: orden?.columna === 'cliente' ? ordenarGruposPorCliente(groups, orden.direccion) : groups,
+        groups: ordenVisible?.columna === 'cliente' ? ordenarGruposPorCliente(groups, ordenVisible.direccion) : groups,
       };
     }
-    return { plana: true as const, filas: ordenarFilasCronograma(filtered, orden!, horasDe) };
-  }, [filtered, orden, horasDe]);
+    return { plana: true as const, filas: ordenarFilasCronograma(filtered, ordenVisible!, horasDe) };
+  }, [filtered, ordenVisible, horasDe]);
 
   const shiftMonth = (delta: number) => {
     const d = new Date(year, month - 1 + delta, 1);
@@ -314,6 +320,20 @@ export default function PlanningCronogramasOverviewModal({
           <span className="text-slate-200 text-[10px]">—</span>
         )}
       </td>
+      {verArmado ? (
+        <td className="px-2 py-2.5 border-r border-slate-100 text-center" data-armado-fila={r.lookupKey}>
+          {textoArmado(r.armado) ? (
+            <span
+              className="inline-flex max-w-[9.5rem] text-[9px] font-black leading-tight text-indigo-800 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded-lg"
+              title={detalleArmado(r.armado)}
+            >
+              {textoArmado(r.armado)}
+            </span>
+          ) : (
+            <span className="text-slate-200 text-[10px]">—</span>
+          )}
+        </td>
+      ) : null}
       <td className="px-2 py-2.5 text-center">
         <button
           type="button"
@@ -464,7 +484,7 @@ export default function PlanningCronogramasOverviewModal({
             </div>
           ) : (
             <div className="flex-1 min-h-0 overflow-y-auto overflow-x-auto rounded-2xl border border-slate-200 shadow-sm bg-white overscroll-contain">
-              <table className="w-full text-[11px] border-collapse min-w-[900px]" data-orden={orden ? `${orden.columna}:${orden.direccion}` : 'agrupado'}>
+              <table className="w-full text-[11px] border-collapse min-w-[900px]" data-orden={ordenVisible ? `${ordenVisible.columna}:${ordenVisible.direccion}` : 'agrupado'}>
                 <thead className="sticky top-0 z-20">
                   <tr className="bg-slate-100 border-b-2 border-slate-200 shadow-sm">
                     <ThOrden col="cliente" label="Cliente" orden={orden} onOrden={elegirOrden} align="left" className="text-left text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[16%] bg-slate-100" />
@@ -477,6 +497,9 @@ export default function PlanningCronogramasOverviewModal({
                     <ThOrden col="modificacion" label="Últ. modificación" orden={orden} onOrden={elegirOrden} align="left" className="text-left text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[12%] bg-slate-100" />
                     <ThOrden col="modificadoPor" label="Modificado por" orden={orden} onOrden={elegirOrden} align="left" className="text-left text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[12%] bg-slate-100" />
                     <ThOrden col="descanso" label="Desc. <12h" orden={orden} onOrden={elegirOrden} align="center" className="text-center text-[9px] font-black uppercase tracking-wider text-amber-700 px-2 py-3 border-r border-slate-200 w-[8%] bg-amber-50/70" title="Art. 197 LCT: menos de 12 h entre el fin del turno (planificado, o el real si ya cerró) y el siguiente, también en otro objetivo. No bloquea." />
+                    {verArmado ? (
+                      <ThOrden col="armado" label="Armado" orden={orden} onOrden={elegirOrden} align="center" className="text-center text-[9px] font-black uppercase tracking-wider text-indigo-700 px-2 py-3 border-r border-slate-200 w-[10%] bg-indigo-50/70" title="Minutos activos de armado. Una pausa de más de 5 min no cuenta." />
+                    ) : null}
                     <th className="text-center text-[9px] font-black uppercase tracking-wider text-slate-500 px-2 py-3 w-[4%] bg-slate-100">
                       Ir
                     </th>

@@ -18,7 +18,8 @@ export type ColumnaOrdenCronograma =
   | 'publicado'
   | 'modificacion'
   | 'modificadoPor'
-  | 'descanso';
+  | 'descanso'
+  | 'armado';
 
 export type DireccionOrden = 'asc' | 'desc';
 
@@ -29,7 +30,7 @@ export type OrdenCronograma = {
 
 const COLUMNAS = new Set<ColumnaOrdenCronograma>([
   'cliente', 'objetivo', 'estado', 'hs', 'turnos', 'coberturas',
-  'publicado', 'modificacion', 'modificadoPor', 'descanso',
+  'publicado', 'modificacion', 'modificadoPor', 'descanso', 'armado',
 ]);
 
 export const ORDEN_CRONOGRAMA_KEY = 'cosp-planif-cronogramas-orden';
@@ -105,6 +106,11 @@ function comparar(
       return conVacios(fechaMs(a.lastModifiedAt) == null, fechaMs(b.lastModifiedAt) == null, (fechaMs(a.lastModifiedAt) ?? 0) - (fechaMs(b.lastModifiedAt) ?? 0), dir);
     case 'modificadoPor':
       return conVacios(!a.lastModifiedBy.trim(), !b.lastModifiedBy.trim(), texto(a.lastModifiedBy, b.lastModifiedBy), dir);
+    case 'armado': {
+      const va = a.armado?.iniciadoAt ? a.armado.minutosActivos : null;
+      const vb = b.armado?.iniciadoAt ? b.armado.minutosActivos : null;
+      return conVacios(va == null, vb == null, (va ?? 0) - (vb ?? 0), dir);
+    }
     default:
       return 0;
   }

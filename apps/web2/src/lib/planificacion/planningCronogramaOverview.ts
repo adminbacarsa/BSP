@@ -1,4 +1,4 @@
-import { collection, doc, getDocs, query, serverTimestamp, setDoc, Timestamp, where } from 'firebase/firestore';
+import { collection, doc, getDocs, query, runTransaction, serverTimestamp, setDoc, Timestamp, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import {
   belongsToEmpresaView,
@@ -10,6 +10,13 @@ import {
 import { sumPublishedPlanHours } from '@cosp/hours-core';
 import { findLctRestGaps, type LctShiftInput } from '@/lib/planificacion/lctRestGap';
 import { mesCerrado } from '@/lib/planificacion/mesCerradoPlanif';
+import {
+  acumularArmado,
+  parseArmado,
+  registrarPublicacionArmado,
+  type AccionArmado,
+  type ArmadoCronograma,
+} from '@/lib/planificacion/armadoCronograma';
 
 export type CronogramaEstado =
   | 'PUBLICADO'
@@ -43,6 +50,8 @@ export interface CronogramaOverviewRow {
   /** Pares del legajo con menos de 12 h entre el tope de cierre y el turno siguiente (art. 197). Aviso, no bloquea. */
   shortRestGaps: number;
   shortRestDetail: string;
+  /** Cronómetro del armado. Solo se muestra a SuperAdmin. */
+  armado?: ArmadoCronograma | null;
 }
 
 function isOperationalOriginShift(data: Record<string, unknown>): boolean {
@@ -141,6 +150,69 @@ export async function touchPlanificacionEstadoActivity(params: {
   }, { merge: true });
 }
 
+function refEstadoPlanificacion(empresaId: string, objectiveId: string, year: number, month: number) {
+  return doc(db, 'planificacion_estados', buildPlanificacionEstadoDocId(empresaId, objectiveId, year, month));
+}
+
+function semillaEstado(empresaId: string, objectiveId: string, year: number, month: number) {
+  return {
+    empresaId,
+    objectiveId,
+    objetivoId: objectiveId,
+    year,
+    month,
+    año: year,
+    mes: month,
+  };
+}
+
+/** Lee el armado, lo acumula y lo vuelve a escribir en el mismo doc. No pisa el resto. */
+export async function persistirArmadoAccion(params: {
+  empresaId: string;
+  objectiveId: string;
+  year: number;
+  month: number;
+  accionesMs: number[];
+  accion: AccionArmado;
+}): Promise<ArmadoCronograma> {
+  const { empresaId, objectiveId, year, month, accionesMs, accion } = params;
+  const ref = refEstadoPlanificacion(empresaId, objectiveId, year, month);
+  let result = acumularArmado(null, accionesMs, accion);
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    const previo = parseArmado(snap.exists() ? snap.data().armado : null);
+    result = acumularArmado(previo, accionesMs, accion);
+    tx.set(ref, {
+      ...(snap.exists() ? {} : semillaEstado(empresaId, objectiveId, year, month)),
+      armado: result,
+    }, { merge: true });
+  });
+  return result;
+}
+
+/** Anota la publicación en el armado aunque el mes no esté completo. */
+export async function persistirPublicacionArmado(params: {
+  empresaId: string;
+  objectiveId: string;
+  year: number;
+  month: number;
+  ahoraMs: number;
+}): Promise<ArmadoCronograma> {
+  const { empresaId, objectiveId, year, month, ahoraMs } = params;
+  const ref = refEstadoPlanificacion(empresaId, objectiveId, year, month);
+  let result = registrarPublicacionArmado(null, ahoraMs);
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    const previo = parseArmado(snap.exists() ? snap.data().armado : null);
+    result = registrarPublicacionArmado(previo, ahoraMs);
+    tx.set(ref, {
+      ...(snap.exists() ? {} : semillaEstado(empresaId, objectiveId, year, month)),
+      armado: result,
+    }, { merge: true });
+  });
+  return result;
+}
+
 /** SuperAdmin: panorama de cronogramas por objetivo en un mes (cualquier estado). */
 export async function loadCronogramaOverview(params: {
   empresaId: string;
@@ -159,6 +231,7 @@ export async function loadCronogramaOverview(params: {
     publishedAt: Date | null;
     lastModifiedAt: Date | null;
     lastModifiedBy: string;
+    armado: ArmadoCronograma | null;
   }>();
 
   const planifSnap = await getDocs(
@@ -181,6 +254,7 @@ export async function loadCronogramaOverview(params: {
       publishedAt,
       lastModifiedAt,
       lastModifiedBy,
+      armado: parseArmado(data.armado),
     });
   });
 
@@ -310,6 +384,7 @@ export async function loadCronogramaOverview(params: {
         lookupKey,
         shortRestGaps: restByObj.get(objectiveId)?.n || 0,
         shortRestDetail: (restByObj.get(objectiveId)?.names || []).join(' · '),
+        armado: pub?.armado ?? null,
       });
     }
   }

@@ -430,7 +430,16 @@ import PlanningSlaGapCloseModal, { type SlaGapCloseModalData } from '@/component
 import PlanningShiftExtendModal, { type ShiftExtendModalData } from '@/components/planificacion/PlanningShiftExtendModal';
 import { aplicarTramoSolo, isShiftEligibleForExtension } from '@/lib/planificacion/shiftExtensionApply';
 import PlanningCronogramasOverviewModal from '@/components/planificacion/PlanningCronogramasOverviewModal';
-import { touchPlanificacionEstadoActivity } from '@/lib/planificacion/planningCronogramaOverview';
+import { persistirArmadoAccion, persistirPublicacionArmado, touchPlanificacionEstadoActivity } from '@/lib/planificacion/planningCronogramaOverview';
+import {
+    detalleArmado,
+    parseArmado,
+    proyectarArmadoEnCurso,
+    slaMesCompleto,
+    textoArmado,
+    type ArmadoCronograma,
+    type OrigenArmado,
+} from '@/lib/planificacion/armadoCronograma';
 import type { PendingAbsenceNovedad, RecompositionPackage } from '@/lib/planificacion/planningRecomposition.types';
 import { extractPackagesFromPending, emitRecompositionNotifications } from '@/lib/planificacion/planningRecompositionNotify';
 import { canUseSixPlusOne } from '@/lib/planificacion/sixPlusOneEngine';
@@ -1582,6 +1591,12 @@ function PlanificacionDesktop() {
     const [showAjustarCronoModal, setShowAjustarCronoModal] = useState(false);
     const [showEquilibrarModal, setShowEquilibrarModal] = useState(false);
     const [backgroundSaveCount, setBackgroundSaveCount] = useState(0);
+    const [armadoGuardado, setArmadoGuardado] = useState<ArmadoCronograma | null>(null);
+    const [marcasVersion, setMarcasVersion] = useState(0);
+    const marcasAccionRef = useRef<number[]>([]);
+    const origenArranqueRef = useRef<OrigenArmado | null>(null);
+    const guardandoArmadoRef = useRef(false);
+    const pendingSigRef = useRef('');
     const [sortBy, setSortBy] = useState<'name' | 'activity' | 'client' | 'band' | 'position'>('activity');
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
     const [sortDropOpen, setSortDropOpen] = useState(false);
@@ -5529,6 +5544,10 @@ function PlanificacionDesktop() {
     // Resetear guard de auto-rotación al cambiar objetivo o mes para que vuelva a pre-cargar
     useEffect(() => {
         autoRotAppliedRef.current = '';
+        marcasAccionRef.current = [];
+        origenArranqueRef.current = null;
+        guardandoArmadoRef.current = false;
+        pendingSigRef.current = '';
     }, [selectedObjective, currentDate.getFullYear(), currentDate.getMonth()]);
 
     // Auto-aplicar rotación cuando el mes está vacío y hay rotación configurada en el SLA
@@ -5577,6 +5596,7 @@ function PlanificacionDesktop() {
                 Object.assign(rotAdditions, condChanges);
             }
         }
+        if (!origenArranqueRef.current && !armadoGuardado?.iniciadoAt) origenArranqueRef.current = 'ROTACION_SLA';
         commitPendingChanges((prev: Record<string, any>) => {
             // No sobreescribir si el usuario ya tiene cambios manuales en curso
             if (Object.values(prev).some((v: any) => v && !v._isAutoRotation && !v._isAutoCondition)) return prev;
@@ -5587,6 +5607,28 @@ function PlanificacionDesktop() {
         const hint = desactCount > 0 ? ` (${rotacionesActivas.length}/${totalCount} activas)` : '';
         toast.info(`Rotación pre-cargada${hint} — revisá y guardá cuando estés listo`, { duration: 4000 });
     }, [activeSlaServiceRotations, mesRotacionesDesactivadas, hasActiveSLA, shiftsMap, shiftsMapLoaded, currentDate, selectedObjective, positionStructure, commitPendingChanges, activeSlaServiceRules, employees, selectedGrupo, grupoUnifiedMode]);
+
+    useEffect(() => {
+        const keys = Object.keys(pendingChanges);
+        const sig = keys.slice().sort().join('|');
+        if (sig === pendingSigRef.current) return;
+        pendingSigRef.current = sig;
+        if (!sig) {
+            if (!guardandoArmadoRef.current && !armadoGuardado?.iniciadoAt) {
+                marcasAccionRef.current = [];
+                origenArranqueRef.current = null;
+            }
+            guardandoArmadoRef.current = false;
+            return;
+        }
+        marcasAccionRef.current.push(Date.now());
+        if (!armadoGuardado?.iniciadoAt && !origenArranqueRef.current) {
+            const vals = Object.values(pendingChanges) as Array<{ _isAutoRotation?: boolean; _isAutoCondition?: boolean }>;
+            const allRot = vals.length > 0 && vals.every((v) => v?._isAutoRotation || v?._isAutoCondition);
+            origenArranqueRef.current = allRot ? 'ROTACION_SLA' : 'MANUAL';
+        }
+        setMarcasVersion((v) => v + 1);
+    }, [pendingChanges, armadoGuardado?.iniciadoAt]);
 
     // Carga SLA de todos los objetivos del grupo activo (para cobertura y modal en vista unificada)
     useEffect(() => {
@@ -6014,7 +6056,10 @@ function PlanificacionDesktop() {
         syncPublishStatus();
 
         const unsubs: Array<() => void> = [
-            onSnapshotFresh(doc(db, 'planificacion_estados', primaryId), syncPublishStatus, () => {}),
+            onSnapshotFresh(doc(db, 'planificacion_estados', primaryId), (snap) => {
+                syncPublishStatus();
+                setArmadoGuardado(parseArmado(snap.data()?.armado));
+            }, () => {}),
         ];
         if (legacyId !== primaryId) {
             unsubs.push(onSnapshotFresh(doc(db, 'planificacion_estados', legacyId), syncPublishStatus, () => {}));
@@ -7112,6 +7157,15 @@ function PlanificacionDesktop() {
             const jobPackages = [...pendingRecompositionPackages];
             const jobCount = jobKeys.length;
 
+            const marcasArmado = marcasAccionRef.current.length
+                ? [...marcasAccionRef.current, Date.now()]
+                : [Date.now()];
+            marcasAccionRef.current = [];
+            guardandoArmadoRef.current = true;
+            const valsArmado = Object.values(jobPending) as Array<{ _isAutoRotation?: boolean; _isAutoCondition?: boolean }>;
+            const origenArmado: OrigenArmado = origenArranqueRef.current
+                ?? (valsArmado.length > 0 && valsArmado.every((v) => v?._isAutoRotation || v?._isAutoCondition) ? 'ROTACION_SLA' : 'MANUAL');
+            const slaCompletoArmado = slaMesCompleto(objectiveCoverageGapReport);
             setPendingChanges((prev) => {
                 const next = { ...prev };
                 for (const k of jobKeys) delete next[k];
@@ -7651,6 +7705,24 @@ function PlanificacionDesktop() {
                         month: touchMonth,
                         actorName: realActorName,
                     }).catch((err) => console.warn('[plan] touch lastModified', err));
+                    void persistirArmadoAccion({
+                        empresaId,
+                        objectiveId: selectedObjective,
+                        year: touchYear,
+                        month: touchMonth,
+                        accionesMs: marcasArmado,
+                        accion: {
+                            cambios: jobCount,
+                            uid: auth.currentUser?.uid || '',
+                            nombre: realActorName,
+                            origen: origenArmado,
+                            contarCorreccion: isPublished,
+                            slaCompleto: slaCompletoArmado,
+                        },
+                    }).then((armado) => {
+                        setArmadoGuardado(armado);
+                        if (armado.iniciadoAt) origenArranqueRef.current = armado.origen;
+                    }).catch((err) => console.warn('[plan] armado', err));
                 }
 
                 if (isPublished) {
@@ -7881,6 +7953,14 @@ function PlanificacionDesktop() {
                 lastModifiedBy: actorName,
                 empresaId,
             }, { merge: true });
+            void persistirPublicacionArmado({
+                empresaId,
+                objectiveId: selectedObjective,
+                year,
+                month,
+                ahoraMs: Date.now(),
+            }).then((armado) => setArmadoGuardado(armado))
+                .catch((err) => console.warn('[plan] armado publicación', err));
             // 2. Buscar todos los turnos draft del objetivo+mes y actualizarlos a draft:false
             const firstDay = new Date(year, month - 1, 1);
             const lastDay = new Date(year, month, 0, 23, 59, 59);
@@ -10468,6 +10548,9 @@ function PlanificacionDesktop() {
                 newChanges[key] = { ...rest, isTemp: true, employeeId: shift.employeeId, objectiveId: selectedObjective };
                 applied++;
             });
+            if (applied > 0 && !origenArranqueRef.current && !armadoGuardado?.iniciadoAt) {
+                origenArranqueRef.current = 'COPIA_MES_ANTERIOR';
+            }
             setPendingChanges(newChanges);
             toast.success(`Plantilla aplicada: ${applied} turnos importados${skipped > 0 ? `, ${skipped} omitidos (ya tenían turno)` : ''}`);
         } catch (e) {
@@ -13760,6 +13843,23 @@ function PlanificacionDesktop() {
                                     <span className={`px-1.5 font-black text-[10px] w-11 text-center uppercase ${planningMonthTier === 'warm' ? 'text-amber-700' : ''}`}>{currentDate.toLocaleDateString('es-AR', { month: 'short' }).replace('.', '')}</span>
                                     <button onClick={() => { if (goToPlanningMonth(currentDate.getFullYear(), currentDate.getMonth()+1)) setAutoGeneratedReady(false); }} aria-label="Mes siguiente" className="p-1 hover:bg-white rounded-lg"><ChevronRight size={14} aria-hidden="true"/></button>
                                 </div>
+
+                                {isSuperAdmin && selectedObjective && (() => {
+                                    void marcasVersion;
+                                    const vista = proyectarArmadoEnCurso(armadoGuardado, marcasAccionRef.current);
+                                    const texto = textoArmado(vista);
+                                    if (!texto) return null;
+                                    return (
+                                        <span
+                                            data-armado-chip
+                                            title={detalleArmado(vista)}
+                                            className="inline-flex items-center gap-1 px-2 py-1 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-800 text-[10px] font-black shadow-sm tabular-nums shrink-0 max-w-[16rem]"
+                                        >
+                                            <Timer size={11} className="shrink-0" />
+                                            <span className="truncate">{texto}</span>
+                                        </span>
+                                    );
+                                })()}
 
                                 <button
                                     onClick={applyPrevMonthTemplate}
@@ -18510,6 +18610,7 @@ function PlanificacionDesktop() {
                         scopeEmpresa={scopeEmpresa}
                         clients={clients}
                         onNavigateToObjective={navigateToObjectiveFromOverview}
+                        verArmado={isSuperAdmin}
                     />,
                     document.body,
                 )}

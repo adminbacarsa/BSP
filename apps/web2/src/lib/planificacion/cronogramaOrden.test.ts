@@ -70,6 +70,18 @@ describe('orden de Estado de cronogramas', () => {
     assert.deepEqual(desc, ['z', 'm', 'a', 'v']);
   });
 
+  it('armado ordena por minutos activos y deja sin cronómetro al final', () => {
+    const rows = [
+      fila({ lookupKey: 'v' }),
+      fila({ lookupKey: 'largo', armado: { iniciadoAt: '2026-10-01T13:00:00.000Z', completadoAt: '2026-10-04T13:00:00.000Z', publicadoAt: null, minutosActivos: 42, minutosTranscurridos: 4320, cambios: 10, usuarios: [], origen: 'MANUAL', correccionesPostPublicacion: 0, ultimaAccionAt: '2026-10-04T13:00:00.000Z' } }),
+      fila({ lookupKey: 'corto', armado: { iniciadoAt: '2026-10-08T13:00:00.000Z', completadoAt: null, publicadoAt: null, minutosActivos: 18, minutosTranscurridos: 18, cambios: 2, usuarios: [], origen: 'MANUAL', correccionesPostPublicacion: 0, ultimaAccionAt: '2026-10-08T13:18:00.000Z' } }),
+    ];
+    const asc = ordenarFilasCronograma(rows, { columna: 'armado', direccion: 'asc' }).map((r) => r.lookupKey);
+    assert.deepEqual(asc, ['corto', 'largo', 'v']);
+    const desc = ordenarFilasCronograma(rows, { columna: 'armado', direccion: 'desc' }).map((r) => r.lookupKey);
+    assert.deepEqual(desc, ['largo', 'corto', 'v']);
+  });
+
   it('el primer clic en la fecha muestra la más nueva; el segundo invierte', () => {
     assert.deepEqual(siguienteOrden(null, 'modificacion'), { columna: 'modificacion', direccion: 'desc' });
     assert.deepEqual(siguienteOrden({ columna: 'modificacion', direccion: 'desc' }, 'modificacion'), { columna: 'modificacion', direccion: 'asc' });
