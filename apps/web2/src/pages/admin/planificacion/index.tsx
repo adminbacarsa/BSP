@@ -6820,6 +6820,25 @@ function PlanificacionDesktop() {
         });
     };
 
+    // Una línea por persona y motivo («SCHOOP — tope 200 h · 9 días»), no una por día.
+    const agruparAutorizacionesPorPersona = (items: CoverageAuthRequest[]) => {
+        const grupos = new Map<string, { name: string; kind: string; cap?: number; dias: Set<string>; horas: number; descansoMin: number }>();
+        for (const i of items) {
+            const key = `${i.employeeId}|${i.kind}`;
+            const g = grupos.get(key) || { name: i.name, kind: i.kind, cap: i.cap, dias: new Set<string>(), horas: 0, descansoMin: Infinity };
+            g.dias.add(i.dateStr);
+            if (i.kind === 'TOPE') g.horas = Math.max(g.horas, i.monthHours || 0);
+            else g.descansoMin = Math.min(g.descansoMin, i.restHours ?? Infinity);
+            grupos.set(key, g);
+        }
+        return [...grupos.values()].map((g) => {
+            const dias = g.dias.size > 1 ? ` · ${g.dias.size} días` : '';
+            return g.kind === 'TOPE'
+                ? { name: g.name, hours: g.horas, detail: `tope ${g.cap} h${g.horas ? ` (${g.horas} h)` : ''}${dias}` }
+                : { name: g.name, hours: Number.isFinite(g.descansoMin) ? Math.round(g.descansoMin * 10) / 10 : 0, detail: `descanso reducido${Number.isFinite(g.descansoMin) ? ` (${Math.round(g.descansoMin * 10) / 10} h)` : ''}${dias}` };
+        });
+    };
+
     const requestSupervisorLaborAuth = (
         items: CoverageAuthRequest[],
         onAuthorized: () => void | Promise<void>,
@@ -6844,11 +6863,7 @@ function PlanificacionDesktop() {
         setAuthModal({
             pendingFn: async () => { await onAuthorized(); },
             topeAltas: [...altas.values()],
-            employees: items.map((i) => ({
-                name: i.name,
-                hours: i.kind === 'TOPE' ? (i.monthHours || 0) : Math.round((i.restHours || 0) * 10) / 10,
-                detail: i.kind === 'TOPE' ? `tope ${i.cap} h` : 'descanso reducido',
-            })),
+            employees: agruparAutorizacionesPorPersona(items),
             description: (
                 <>
                     {descanso.length > 0 && <>Descanso entre <strong>8 y 12 h</strong>. </>}
@@ -17222,17 +17237,17 @@ function PlanificacionDesktop() {
 
                 {/* MODAL AUTORIZACIÓN SUPERVISOR 200H */}
                 {authModal.pendingFn && createPortal(
-                    <div className="fixed inset-0 z-[11000] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md">
-                        <div className="bg-white dark:bg-slate-800 rounded-xl w-full max-w-md p-8 shadow-2xl animate-in zoom-in-95 border dark:border-slate-700">
+                    <div className="fixed inset-0 z-[11000] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md overflow-y-auto">
+                        <div className="bg-white dark:bg-slate-800 rounded-xl w-full max-w-md p-8 shadow-2xl animate-in zoom-in-95 border dark:border-slate-700 max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain">
                             <div className="text-center mb-6">
                                 <div className="w-16 h-16 bg-amber-100 rounded-xl flex items-center justify-center mx-auto mb-4">
                                     <ShieldAlert size={32} className="text-amber-600"/>
                                 </div>
                                 <h3 className="font-black text-xl text-slate-900 dark:text-white">Autorización Requerida</h3>
                                 <p className="text-sm text-slate-500 mt-1">{authModal.description || <>El siguiente empleado superará las <strong>200 hs</strong> mensuales:</>}</p>
-                                <div className="mt-3 flex flex-col gap-1 items-center">
-                                    {authModal.employees.map(e => (
-                                        <span key={`${e.name}-${e.detail || e.hours}`} className="text-xs bg-amber-100 text-amber-700 px-3 py-1 rounded-full font-bold">
+                                <div className="mt-3 flex flex-col gap-1 items-center max-h-48 overflow-y-auto">
+                                    {authModal.employees.map((e, idx) => (
+                                        <span key={`${e.name}-${e.detail || e.hours}-${idx}`} className="text-xs bg-amber-100 text-amber-700 px-3 py-1 rounded-full font-bold">
                                             {e.name}
                                             {e.detail
                                                 ? <> — <span className="text-amber-900">{e.detail}</span></>
