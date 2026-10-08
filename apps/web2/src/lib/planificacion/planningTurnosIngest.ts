@@ -1,5 +1,6 @@
 import type { QueryDocumentSnapshot } from 'firebase/firestore';
 import { belongsToEmpresaView } from '@/lib/multiempresa';
+import { elegirVistaCelda } from '@/lib/planificacion/bandaLicencia';
 
 export function planningShiftViewFromSnap(d: QueryDocumentSnapshot): any {
     const data = d.data();
@@ -122,6 +123,11 @@ export function ingestPlanningTurnosSnapshot(
             map[key] = normalized;
         }
     });
+
+    for (const [key, docs] of Object.entries(cellTurnos)) {
+        const vista = elegirVistaCelda(docs);
+        if (vista) map[key] = vista;
+    }
 
     return {
         shiftsMap: map,

@@ -19,6 +19,7 @@ import {
   type FrancoCoverageConflict,
 } from './planningRecompositionApply';
 import type { RecompositionPackage, RecompositionTarget } from './planningRecomposition.types';
+import { camposBandaConservada, resolverBandaACubrir } from './bandaLicencia';
 
 export const VACANCY_ABSENCE_TYPE_CODES: Record<string, string> = {
   Vacaciones: 'V',
@@ -57,7 +58,7 @@ export type TitularVacancyWorkShift = {
   positionName: string;
   scheduleLabel: string;
   hours: number;
-  source: 'saved_day' | 'adjacent_day' | 'weekday_pattern' | 'month_typical' | 'history_inferred' | 'user_selected';
+  source: 'saved_day' | 'adjacent_day' | 'weekday_pattern' | 'month_typical' | 'history_inferred' | 'user_selected' | 'sla_faltante' | 'ciclo';
   sourceLabel: string;
   rawShift?: Record<string, any>;
 };
@@ -118,7 +119,15 @@ export function resolveTitularVacancyWorkShift(
   pendingChanges: Record<string, any>,
   getTypicalShift?: (empId: string) => Record<string, any> | null,
   getSlaBlocks?: (positionName: string, code: string) => Array<{ startTime: string; endTime: string }> | null,
-  options?: { absenceBlockStart?: string },
+  options?: {
+    absenceBlockStart?: string;
+    /** El patrón del día anterior adivina M en un ciclo N,N,T,T,M,M,F,F. Solo si se pide. */
+    usarPatronAnterior?: boolean;
+    positionName?: string;
+    positionStructure?: VacancyPositionSla[];
+    bandasFaltantes?: string[];
+    turnosDelDia?: Array<Record<string, any>>;
+  },
 ): TitularVacancyWorkShift | null {
   const toResult = (
     shift: Record<string, any>,
@@ -140,10 +149,36 @@ export function resolveTitularVacancyWorkShift(
     };
   };
 
-  const direct = readWorkShift(titularId, dateStr, shiftsMap, pendingChanges);
-  if (direct) {
-    return toResult(direct, 'saved_day', 'Turno planificado ese día (antes de la licencia)');
+  const directa = resolverBandaACubrir({
+    titularId,
+    dateStr,
+    shiftsMap,
+    pendingChanges,
+    turnosDelDia: options?.turnosDelDia,
+    positionName: options?.positionName,
+    positionStructure: options?.positionStructure,
+    bandasFaltantes: options?.bandasFaltantes,
+  });
+  if (directa) {
+    const source = directa.source === 'dia' ? 'saved_day' : directa.source;
+    return toResult(
+      {
+        code: directa.code,
+        positionName: directa.positionName,
+        startTime: directa.startTime,
+        endTime: directa.endTime,
+        hours: directa.hours,
+        originalCode: directa.code,
+        originalPositionName: directa.positionName,
+        originalStartTime: directa.startTime,
+        originalEndTime: directa.endTime,
+      },
+      source,
+      directa.sourceLabel,
+    );
   }
+
+  if (!options?.usarPatronAnterior) return null;
 
   const anchor = options?.absenceBlockStart || dateStr;
   for (let delta = -1; delta >= -31; delta--) {
@@ -456,6 +491,8 @@ export type ProcessVacancyInput = {
   authorizeFrancoTrabajado?: boolean;
   /** Banda SLA a cubrir cuando el titular no tiene turno asignado (override manual del modal). */
   fallbackGapBand?: string;
+  /** Misma resolución que la franja, el menú y la tarjeta. */
+  resolverBanda?: (dateStr: string) => TitularVacancyWorkShift | null;
 };
 
 export function collectVacancyFrancoConflicts(
@@ -547,31 +584,17 @@ function deriveFallbackWorkShift(
   overrideBand?: string | null,
   overridePosition?: string | null,
 ): { code: string; hours: number; startTime: string; positionName: string; objectiveId?: string } | null {
-  const code = String(overrideBand || input.fallbackGapBand || '').toUpperCase() || undefined;
+  const code = String(overrideBand || input.fallbackGapBand || '').toUpperCase();
+  if (!code) return null;
   const activePos = String(overridePosition || input.activePosition || '').trim();
   const pos = input.positionStructure?.find(p => String(p.positionName || '') === activePos)
     ?? input.positionStructure?.[0];
 
-  if (code) {
-    const shift = pos?.shifts?.find(s => String(s.code || '').toUpperCase() === code);
-    return {
-      code,
-      hours: Number(shift?.hours) || 8,
-      startTime: shift?.startTime || '00:00',
-      positionName: String(pos?.positionName || activePos || 'General'),
-      objectiveId: input.selectedObjective,
-    };
-  }
-  // Fallback: primer turno laboral de la posición activa
-  const firstShift = pos?.shifts?.find(s => {
-    const c = String(s.code || '').toUpperCase();
-    return c && !VACANCY_NON_WORK_CODES.has(c);
-  });
-  if (!firstShift) return null;
+  const shift = pos?.shifts?.find(s => String(s.code || '').toUpperCase() === code);
   return {
-    code: String(firstShift.code || '').toUpperCase(),
-    hours: Number(firstShift.hours) || 8,
-    startTime: firstShift.startTime || '00:00',
+    code,
+    hours: Number(shift?.hours) || (code === 'D12' || code === 'N12' ? 12 : 8),
+    startTime: shift?.startTime || '00:00',
     positionName: String(pos?.positionName || activePos || 'General'),
     objectiveId: input.selectedObjective,
   };
@@ -639,15 +662,17 @@ export function applyVacancyCoverageToChanges(
   for (const day of input.days) {
     const { dateStr, coverage } = day;
     const titularKey = `${titularId}_${dateStr}`;
-    const workInfo = resolveTitularVacancyWorkShift(
-      titularId,
-      dateStr,
-      input.shiftsMap,
-      newChanges,
-      input.getTypicalShift,
-      undefined,
-      { absenceBlockStart: input.vacancyData.startDate },
-    );
+    const workInfo = input.resolverBanda
+      ? input.resolverBanda(dateStr)
+      : resolveTitularVacancyWorkShift(
+        titularId,
+        dateStr,
+        input.shiftsMap,
+        newChanges,
+        input.getTypicalShift,
+        undefined,
+        { absenceBlockStart: input.vacancyData.startDate },
+      );
     // workInfo ya filtró códigos no-laborales; no usar getTypicalShift como fallback porque
     // puede devolver F/E del titular (RRHH) y bloquear deriveFallbackWorkShift
     const workShift = workInfo?.rawShift ?? null;
@@ -709,8 +734,12 @@ export function applyVacancyCoverageToChanges(
             coverageType: coverage.mode === 'substitute' ? 'substitute' : coverage.mode === 'split' ? 'split' : undefined,
           }
         : {}),
-      ...(originalCode ? { originalCode } : {}),
-      ...(originalPositionName ? { originalPositionName } : {}),
+      ...camposBandaConservada({
+        code: originalCode,
+        positionName: originalPositionName,
+        startTime: effectiveWorkShift?.startTime || workInfo?.rawShift?.originalStartTime || workInfo?.rawShift?.startTime,
+        endTime: workInfo?.rawShift?.originalEndTime || workInfo?.rawShift?.endTime,
+      }),
     };
 
     if (coverage.mode === 'substitute' && coverage.employeeId && effectiveWorkShift) {
@@ -737,7 +766,7 @@ export function applyVacancyCoverageToChanges(
     } else if (coverage.mode === 'split' && coverage.extEmpId && coverage.adelEmpId && effectiveWorkShift) {
       const gapBand = coverage.gapBand
         || alignVacancyGapBand(
-          String(effectiveWorkShift.code || workInfo?.code || 'M'),
+          String(effectiveWorkShift.code || workInfo?.code || ''),
           coverage.gapPosition || effectiveWorkShift.positionName,
           input.positionStructure,
           effectiveWorkShift as any,

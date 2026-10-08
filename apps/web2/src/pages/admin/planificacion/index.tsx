@@ -262,6 +262,7 @@ import {
     VACANCY_ABSENCE_TYPE_CODES,
     type VacancyDayCoverage,
 } from '@/lib/planificacion/vacancyCoverage';
+import { camposBandaConservada, esLicencia } from '@/lib/planificacion/bandaLicencia';
 import {
     clearDayCoverage,
     daysOverwritten,
@@ -385,7 +386,6 @@ import { format as formatFecha } from 'date-fns';
 import { alignVacancyGapBand } from '@/lib/planificacion/vacancySplitBands';
 import {
     listVacancyGapBandOptions,
-    inferTitularGapBandFromHistory,
     resolveEffectiveVacancyGapTitular,
     buildTitularVacancyFromGapOption,
 } from '@/lib/planificacion/vacancyGapBands';
@@ -6230,6 +6230,41 @@ function PlanificacionDesktop() {
     };
 
     const getEmpDefaultPos = (empId: string) => empDefaultPos[`${empId}___${selectedObjective}`] || null;
+
+    const bandaTitularDelDia = (empId: string, dateStr: string, positionHint?: string | null) => {
+        const key = `${empId}_${dateStr}`;
+        const pending = pendingChanges[key];
+        const cell = pending && !pending.isDeleted ? pending : shiftsMap[key];
+        const bruto = String(
+            positionHint
+            || cell?.originalPositionName
+            || cell?.positionName
+            || getEmpDefaultPos(empId)
+            || '',
+        ).trim();
+        const report = buildDayCoverageReport(dateStr);
+        let pos = bruto === 'General' || bruto === 'Retén' ? String(getEmpDefaultPos(empId) || '').trim() : bruto;
+        if (!pos && report) {
+            const abiertos = report.positions.filter((p) => (p.missingUnits || 0) > 0);
+            if (abiertos.length === 1) pos = String(abiertos[0].positionName || '');
+        }
+        const gap = pos ? report?.positions?.find((p) => p.positionName === pos) : null;
+        const bandasFaltantes = (gap?.missingBandsPrimary || []).map((b) => String(b.code || '').toUpperCase()).filter(Boolean);
+        return resolveTitularVacancyWorkShift(
+            empId,
+            dateStr,
+            shiftsMap,
+            pendingChanges,
+            undefined,
+            (positionName, code) => slaBlocksForPositionShift(effectivePosStructure, positionName, code),
+            {
+                positionName: pos || undefined,
+                positionStructure: effectivePosStructure,
+                bandasFaltantes,
+                turnosDelDia: cellTurnosMap[key],
+            },
+        );
+    };
     const getEmpDefaultShift = (empId: string) => empDefaultShift[`${empId}___${selectedObjective}`] || null;
 
     const clearAllPositions = async () => {
@@ -7344,6 +7379,7 @@ function PlanificacionDesktop() {
                             swapDate: safeSwapDate,
                             createdAt: serverTimestamp(),
                             comments: change.comments || change.coverageNote || 'Carga Masiva',
+                            ...(esLicencia(change.code) ? camposBandaConservada(change.originalCode ? change : existing) : {}),
                             isExtended: change.isExtended || false,
                             isEarlyStart: change.isEarlyStart || false,
                             plannedNovedad: change.plannedNovedad || null,
@@ -7898,7 +7934,7 @@ function PlanificacionDesktop() {
         const code = absenceCodes[rrhhData.type] || 'AA';
         const key = `${selectedCell.empId}_${selectedCell.dateStr}`;
         const empName = employees.find((e: any) => e.id === selectedCell.empId)?.name || '';
-        setPendingChanges(prev => ({ ...prev, [key]: { code, name: rrhhData.type, isTemp: true, isNovedad: true, hours: 0, startTime: '00:00' } }));
+        setPendingChanges(prev => ({ ...prev, [key]: { code, name: rrhhData.type, isTemp: true, isNovedad: true, hours: 0, startTime: '00:00', ...camposBandaConservada(selectedCell.currentShift) } }));
         setPendingNovedades(prev => ({ ...prev, [key]: { employeeId: selectedCell.empId, employeeName: empName, startDate: selectedCell.dateStr, endDate: selectedCell.dateStr, type: rrhhData.type, reason: rrhhData.reason, status: 'APPROVED' } }));
         toast.success("Novedad pendiente — recordá guardar los cambios");
         setShowRRHHModal(false);
@@ -7947,37 +7983,11 @@ function PlanificacionDesktop() {
             if (resolved.mode === 'substitute') {
                 const emp = employees.find((e: any) => e.id === resolved.employeeId);
                 // Misma resolución que el modal («Cubrir: M») para que el FT herede esa banda
-                const rawTitular = resolveTitularVacancyWorkShift(
-                    vacancyData.employeeId,
-                    dateStr,
-                    shiftsMap,
-                    pendingChanges,
-                    getTypicalShift,
-                    (positionName, code) => slaBlocksForPositionShift(effectivePosStructure, positionName, code),
-                    { absenceBlockStart: vacancyData.startDate },
-                );
+                const rawTitular = bandaTitularDelDia(vacancyData.employeeId, dateStr, activePosition);
                 const prefPos = activePosition || rawTitular?.positionName || undefined;
                 const gapOptions = listVacancyGapBandOptions(effectivePosStructure, prefPos || null);
-                const hist = !rawTitular
-                    ? inferTitularGapBandFromHistory(
-                        vacancyData.employeeId,
-                        vacancyData.startDate,
-                        effectivePosStructure,
-                        prefPos || null,
-                        shiftsMap,
-                        pendingChanges,
-                    )
-                    : null;
-                const inferred = hist
-                    ? buildTitularVacancyFromGapOption(
-                        hist,
-                        'history_inferred',
-                        'Patrón previo al bloque (cronograma)',
-                        undefined,
-                    )
-                    : rawTitular;
                 const effectiveTitular = resolveEffectiveVacancyGapTitular(
-                    inferred,
+                    rawTitular,
                     vacancyGapBandOverride,
                     gapOptions,
                     effectivePosStructure,
@@ -8069,7 +8079,8 @@ function PlanificacionDesktop() {
                     },
                     positionStructure: effectivePosStructure,
                     authorizeFrancoTrabajado: authorizeFranco,
-                    fallbackGapBand: (vacancyGapBandOverride ? vacancyGapBandOverride.split('__')[0] : null) || resolveSuggestedGapBandForPosition(activeDays[0] || '', activePosition || '') || undefined,
+                    fallbackGapBand: vacancyGapBandOverride ? vacancyGapBandOverride.split('__')[0] : undefined,
+                    resolverBanda: (dateStr) => bandaTitularDelDia(vacancyData.employeeId, dateStr, activePosition),
                 });
                 const { count, covered, splitCovered, cleared } = applied;
                 const sinPisar = quitarBorradorQuePisaConsulta(applied.changes, vacancyConsultas);
@@ -8182,10 +8193,14 @@ function PlanificacionDesktop() {
         ev.preventDefault();
         ev.stopPropagation();
         setModoElegir(null);
-        const work = resolveTitularVacancyWorkShift(celda.emp.id, celda.dateStr, shiftsMap, pendingChanges);
-        const gapRows = dayReport ? flattenDayGapsForUi(dayReport) : [];
-        const gapRow = gapRows.find((g) => g.positionName === posPreferida) || gapRows[0];
-        const gapBand = String(work?.code || inferGapBandForClose(gapRow || {}) || 'M').toUpperCase();
+        const work = celda.isLeave ? bandaTitularDelDia(celda.emp.id, celda.dateStr, posPreferida) : null;
+        const huecosPuesto = !work && dayReport
+            ? flattenDayGapsForUi(dayReport).filter((g) => !posPreferida || g.positionName === posPreferida)
+            : [];
+        const unicaFaltante = huecosPuesto.length === 1
+            ? String(huecosPuesto[0].gapBand || '').toUpperCase()
+            : '';
+        const gapBand = String(work?.code || unicaFaltante).toUpperCase();
         const positionName = work?.positionName || posPreferida || 'General';
         const opt = listVacancyGapBandOptions(effectivePosStructure, positionName).find((o) => o.code === gapBand);
         const horario = work?.scheduleLabel && work.scheduleLabel !== '—'
@@ -8250,7 +8265,7 @@ function PlanificacionDesktop() {
     };
     const ctxMenuDelDia = (ctx: CtxMenuRapido, dia: string): CtxMenuRapido => {
         if (dia === ctx.dateStr || ctx.clase !== 'ausente') return { ...ctx, dateStr: dia };
-        const work = resolveTitularVacancyWorkShift(ctx.empId, dia, shiftsMap, pendingChanges);
+        const work = bandaTitularDelDia(ctx.empId, dia, ctx.positionName);
         const horario = work?.scheduleLabel && work.scheduleLabel !== '—' ? work.scheduleLabel : ctx.horario;
         return {
             ...ctx,
@@ -8400,6 +8415,7 @@ function PlanificacionDesktop() {
             positionStructure: effectivePosStructure,
             authorizeFrancoTrabajado: false,
             fallbackGapBand: ctx.gapBand,
+            resolverBanda: (dateStr) => bandaTitularDelDia(ctx.empId, dateStr, ctx.positionName),
         };
         const titularKey = `${ctx.empId}_${ctx.dateStr}`;
         if (cov.mode === 'substitute') {
@@ -8997,6 +9013,7 @@ function PlanificacionDesktop() {
                     isTemp: true,
                     oldObjectiveId: effectiveExisting?.objectiveId,
                     isFrancoTrabajado: cellIsFT,
+                    ...(esLicencia(codeUpper) ? camposBandaConservada(effectiveExisting) : {}),
                     positionName: assignPos,
                     objectiveId: covObjId || undefined,
                     ...(codeUpper === 'REF' || codeUpper === 'ESC'
@@ -14870,6 +14887,9 @@ function PlanificacionDesktop() {
                                     cellTurnosMap,
                                     pendingChanges,
                                 });
+                                const bandaCard = (absence || isRRHHCode)
+                                    ? bandaTitularDelDia(selectedCell.empId, selectedCell.dateStr, coveredPosition)
+                                    : null;
                                 const resumenDia = (absence || isRRHHCode) ? resumenAusenciaDia({
                                     titularEmployeeId: selectedCell.empId,
                                     titularName: employeeName,
@@ -14878,6 +14898,7 @@ function PlanificacionDesktop() {
                                     turnosDelDia: packDia.turnos,
                                     ausencia: absence,
                                     consulta: consultaDelDia(vacancyConsultas, selectedCell.dateStr),
+                                    banda: bandaCard,
                                 }) : null;
                                 const originalWorkShift = resumenDia?.turno
                                     ? {
@@ -14963,6 +14984,9 @@ function PlanificacionDesktop() {
                                                         <div className="p-4 space-y-4">
                                                             <div>
                                                                 <p className="text-[10px] font-black uppercase text-slate-400 mb-1.5">1 · Turno que tenía</p>
+                                                                {resumenDia?.textoTurno ? (
+                                                                    <p className="text-sm font-black text-slate-800">{resumenDia.textoTurno}</p>
+                                                                ) : null}
                                                                 {originalWorkShift ? (
                                                                     <div className="rounded-lg bg-slate-50 border border-slate-200 p-3">
                                                                         <div className="flex items-center gap-2 flex-wrap">
@@ -16256,29 +16280,10 @@ function PlanificacionDesktop() {
                         return ex.origen === 'operaciones' ? ex : null;
                     };
                     const vacancyEmptyActiveDays = sortedActiveDates.filter((d) => !vacancyDayHasCoverage(resolveDayCoverageForUi(d)) && !opsVista(d)).length;
-                    const getTypicalShiftForTitular = (empId: string) => {
-                        const yr = currentDate.getFullYear(); const mo = currentDate.getMonth();
-                        const daysInMo = new Date(yr, mo + 1, 0).getDate();
-                        const freq: Record<string, { count: number; shift: any }> = {};
-                        for (let d = 1; d <= daysInMo; d++) {
-                            const k = `${empId}_${yr}-${String(mo + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-                            const pending = pendingChanges[k];
-                            const s = (pending && !pending.isDeleted) ? pending : shiftsMap[k];
-                            if (s?.code && !VACANCY_NON_WORK_CODES.has(String(s.code).toUpperCase())) {
-                                if (!freq[s.code]) freq[s.code] = { count: 0, shift: s };
-                                freq[s.code].count++;
-                            }
-                        }
-                        return Object.values(freq).sort((a, b) => b.count - a.count)[0]?.shift || null;
-                    };
-                    const resolveTitularShiftForDay = (dateStr: string) => resolveTitularVacancyWorkShift(
+                    const resolveTitularShiftForDay = (dateStr: string) => bandaTitularDelDia(
                         vacancyData?.employeeId || '',
                         dateStr,
-                        shiftsMap,
-                        pendingChanges,
-                        getTypicalShiftForTitular,
-                        (positionName, code) => slaBlocksForPositionShift(effectivePosStructure, positionName, code),
-                        { absenceBlockStart: vacancyData?.startDate },
+                        activePosition,
                     );
                     const loadPickerFields = (cov: VacancyDayCoverage | undefined) => {
                         if (cov?.mode === 'split') {
@@ -16324,30 +16329,8 @@ function PlanificacionDesktop() {
                     const vacancyGapBandOptions = listVacancyGapBandOptions(vacancyPosSla, null);
                     const resolveEffectiveTitularForDay = (dateStr: string) => {
                         const raw = resolveTitularShiftForDay(dateStr);
-                        const prefPos = activePosition || raw?.positionName || vacancyGapPreferredPosition;
-                        const options = listVacancyGapBandOptions(vacancyPosSla, prefPos);
-                        // Solo usar historial si NO hay turno del día (ni originalCode en la celda V/E).
-                        // Si tenía T ese día, el default debe ser T — no el patrón más frecuente del mes.
-                        const hist = !raw
-                            ? inferTitularGapBandFromHistory(
-                                vacancyData?.employeeId || '',
-                                vacancyData?.startDate,
-                                vacancyPosSla,
-                                prefPos,
-                                shiftsMap,
-                                pendingChanges,
-                            )
-                            : null;
-                        const inferred = hist
-                            ? buildTitularVacancyFromGapOption(
-                                hist,
-                                'history_inferred',
-                                'Patrón previo al bloque (cronograma)',
-                                undefined,
-                            )
-                            : null;
                         return resolveEffectiveVacancyGapTitular(
-                            raw || inferred,
+                            raw,
                             vacancyGapBandOverride,
                             vacancyGapBandOptions,
                             vacancyPosSla,
@@ -16938,6 +16921,7 @@ function PlanificacionDesktop() {
                             turnosDelDia: pack.turnos,
                             ausencia: vacancyData,
                             consulta: consultaDelDia(vacancyConsultas, diaSel),
+                            banda: titSel,
                         });
                     })();
                     const turnoFranja = vacancyGapBandOverride

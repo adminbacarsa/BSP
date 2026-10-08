@@ -2,6 +2,7 @@ import { addDoc, collection, doc, getDocs, query, serverTimestamp, Timestamp, wh
 import { db } from '@/lib/firebase';
 import { belongsToEmpresaView, queryAndDeleteForEmpresa, stampEmpresaId, TenantIsolationError } from '@/lib/multiempresa';
 import { inferAbsenceCode, validateAbsenceDateRange } from '@/lib/planificacion/absenceCodes';
+import { camposBandaConservada, ymdLocalDeValor } from '@/lib/planificacion/bandaLicencia';
 import type { Absence } from '@/services/absenceService';
 
 type EmpleadoRef = { id?: string; preferredObjectiveId?: string };
@@ -48,6 +49,7 @@ export async function replicarAusenciaPlanificador(input: {
       (objectiveId ? `Objetivo ${objectiveId}` : `NOVEDAD - ${data.type}`);
     const absenceCreatedAt = new Date().toISOString();
     const batch = writeBatch(store);
+    const bandaPorDia = new Map<string, Record<string, string>>();
 
     const rangeStartTs = Timestamp.fromDate(new Date(sY, sM - 1, sD, 0, 0, 0));
     const rangeEndTs = Timestamp.fromDate(new Date(eY, eM - 1, eD, 23, 59, 59));
@@ -62,6 +64,9 @@ export async function replicarAusenciaPlanificador(input: {
         const t = docSnap.data();
         if (!belongsToEmpresaView(t, empresaId, migracionCompleta)) return;
         if (t.type === 'NOVEDAD' || t.hasNovedad || t.isAbsent || t.isFranco) return;
+        const ymd = ymdLocalDeValor(t.startTime);
+        const banda = camposBandaConservada(t);
+        if (ymd && banda.originalCode && !bandaPorDia.has(ymd)) bandaPorDia.set(ymd, banda);
         batch.update(docSnap.ref, {
           hasNovedad: true,
           isAbsent: true,
@@ -75,6 +80,7 @@ export async function replicarAusenciaPlanificador(input: {
     }
 
     for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      const ymd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
       const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
       const isPeriodOnly = code === 'V';
       const dayEnd = isPeriodOnly
@@ -95,6 +101,7 @@ export async function replicarAusenciaPlanificador(input: {
         hasNovedad: true,
         plannedNovedad: data.type?.includes('Licencia') ? 'LICENCIA' : 'AVISO',
         comments: data.reason || '',
+        ...(bandaPorDia.get(ymd) || {}),
       };
       if (objectiveId) turnoPayload.objectiveId = objectiveId;
       if (objectiveName) turnoPayload.objectiveName = objectiveName;

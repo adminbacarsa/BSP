@@ -39,6 +39,8 @@ export type TurnoDiaIn = {
   endTime?: unknown;
   originalCode?: string;
   originalPositionName?: string;
+  originalStartTime?: unknown;
+  originalEndTime?: unknown;
   positionName?: string;
   hours?: number;
   isAbsent?: boolean;
@@ -217,7 +219,11 @@ function planificadaDe(titular: TurnoDiaIn | null, turnos: TurnoDiaIn[], titular
       mode: 'split',
       extEmpId: String(ext.employeeId),
       adelEmpId: String(segundo.employeeId),
-      gapBand: String(titular?.originalCode || ext.code || 'M').toUpperCase(),
+      gapBand: String(
+        (esTurnoDeTrabajo(titular?.originalCode) ? titular?.originalCode : '')
+        || (esTurnoDeTrabajo(ext.coversBandCode) ? ext.coversBandCode : '')
+        || (esTurnoDeTrabajo(ext.code) ? ext.code : ''),
+      ).toUpperCase(),
       gapPosition: String(titular?.originalPositionName || ext.positionName || titular?.positionName || 'General'),
     };
     const a = apellidoCorto(String(ext.employeeName || ext.employeeId));
@@ -409,6 +415,8 @@ export type AusenciaDiaIn = {
 
 export type ResumenAusenciaDia = {
   turno: TurnoQueTenia | null;
+  /** «N · Puesto 2 · 23:00–07:00». Vacío si no hay banda de trabajo. */
+  textoTurno: string;
   cobertura: CoberturaExistente;
   /** Línea de la tarjeta. Null si no hay cobertura. */
   cubiertoPor: string | null;
@@ -449,20 +457,39 @@ function bandaDelOps(ops: TurnoDiaIn | null): string | null {
   return code;
 }
 
+function horarioDeTrabajo(start: unknown, end: unknown): { label: string; hours: number } | null {
+  const h = horarioDe(start, end);
+  if (!h || h.hours >= 20) return null;
+  return h;
+}
+
 function turnoQueTenia(titular: TurnoDiaIn | null, turnos: TurnoDiaIn[], titularEmp: string): TurnoQueTenia | null {
   const titularId = String(titular?.id || '').trim();
   const ops = turnos.find((t) => ligaOps(t, titularId, titularEmp) || (titular?.coverageDocId && String(t.id || '') === String(titular.coverageDocId) && esOpsCoverageDoc(t))) || null;
+  const hermano = turnos.find((t) => {
+    if (!t || t.isDeleted || esOpsCoverageDoc(t)) return false;
+    if (titularId && String(t.id || '') === titularId) return false;
+    if (String(t.employeeId || '') !== titularEmp) return false;
+    return esTurnoDeTrabajo(t.code);
+  }) || null;
   const code = (esTurnoDeTrabajo(titular?.originalCode) ? String(titular?.originalCode).toUpperCase() : '')
     || (esTurnoDeTrabajo(titular?.code) ? String(titular?.code).toUpperCase() : '')
     || (esTurnoDeTrabajo(titular?.deploymentBand) ? String(titular?.deploymentBand).toUpperCase() : '')
+    || (esTurnoDeTrabajo(hermano?.code) ? String(hermano?.code).toUpperCase() : '')
     || bandaDelOps(ops)
     || '';
-  const positionName = String(titular?.originalPositionName || titular?.positionName || ops?.positionName || ops?.originalPositionName || '').trim();
-  const horario = horarioDe(titular?.startTime, titular?.endTime) || horarioDe(ops?.startTime, ops?.endTime);
-  const hours = horasDelTurno(titular?.hours ?? ops?.hours, horario);
-  if (!code && !horario && !positionName) return null;
+  if (!esTurnoDeTrabajo(code)) return null;
+  const propio = esTurnoDeTrabajo(titular?.code);
+  const horario = horarioDeTrabajo(titular?.originalStartTime, titular?.originalEndTime)
+    || horarioDeTrabajo(titular?.startTime, titular?.endTime)
+    || horarioDeTrabajo(hermano?.startTime, hermano?.endTime)
+    || horarioDeTrabajo(ops?.startTime, ops?.endTime);
+  const positionName = String(
+    titular?.originalPositionName || hermano?.positionName || (propio ? titular?.positionName : '') || ops?.positionName || ops?.originalPositionName || '',
+  ).trim();
+  const hours = horasDelTurno(titular?.hours ?? hermano?.hours ?? ops?.hours, horario);
   return {
-    code: code || '—',
+    code,
     positionName: positionName || 'General',
     scheduleLabel: horario?.label || '—',
     hours,
@@ -530,6 +557,8 @@ export function resumenAusenciaDia(p: {
   turnosDelDia?: TurnoDiaIn[] | null;
   ausencia?: AusenciaDiaIn | null;
   consulta?: ConsultaResumenIn | null;
+  /** Banda ya resuelta (SLA faltante o ciclo) cuando el doc no guardó originalCode. */
+  banda?: { code?: string | null; positionName?: string | null; scheduleLabel?: string | null; hours?: number | null } | null;
 }): ResumenAusenciaDia {
   const emp = String(p.titularEmployeeId || '').trim();
   const turnos = p.turnosDelDia || [];
@@ -544,8 +573,21 @@ export function resumenAusenciaDia(p: {
   });
   const novedad = estadoNovedadAusencia(p.ausencia);
   const esOperaciones = cobertura.origen === 'operaciones' && cobertura.estado === 'CUBIERTO';
+  let turno = turnoQueTenia(titular, turnos, emp);
+  if (!turno && p.banda && esTurnoDeTrabajo(p.banda.code)) {
+    turno = {
+      code: String(p.banda.code).toUpperCase(),
+      positionName: String(p.banda.positionName || '').trim() || 'General',
+      scheduleLabel: String(p.banda.scheduleLabel || '').trim() || '—',
+      hours: Number(p.banda.hours) || 0,
+    };
+  }
+  const textoTurno = turno && esTurnoDeTrabajo(turno.code)
+    ? [turno.code, turno.positionName, turno.scheduleLabel && turno.scheduleLabel !== '—' ? turno.scheduleLabel : ''].filter(Boolean).join(' · ')
+    : '';
   return {
-    turno: turnoQueTenia(titular, turnos, emp),
+    turno,
+    textoTurno,
     cobertura,
     cubiertoPor: lineaCubierto(cobertura, turnos),
     esOperaciones,
