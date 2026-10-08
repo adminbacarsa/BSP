@@ -535,7 +535,9 @@ export async function applyCoverage(
         acceptedAt: typeof process !== 'undefined' && process.env.NEXT_PUBLIC_USE_EMULATOR === 'true'
           ? Timestamp.now()
           : serverTimestamp(),
-        ...(params.convocatoriaId ? { assignedByConvocatoria: params.convocatoriaId } : {}),
+        ...(params.convocatoriaId
+          ? { assignedByConvocatoria: params.convocatoriaId, coverageConvocatoriaId: params.convocatoriaId }
+          : {}),
       },
       empresaId,
     ),

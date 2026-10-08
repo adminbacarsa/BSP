@@ -14,7 +14,10 @@ import {
   extendUntilLine,
   formatEnCaminoLine,
   escenarioCobertura,
+  guardiaPresenteEnHueco,
+  huecoTerminado,
   isRecordatorioPendiente,
+  opsCoverageDocId,
   planConvocadoArrival,
   parseConvocadoRecordatorioPush,
   resolveExpectedArrivalAt,
@@ -104,16 +107,63 @@ describe('recordatorio convocado', () => {
         reminderSentAt: sent,
         startTime: start,
       }), true);
+    assert.equal(isRecordatorioPendiente({
+      status: 'ACCEPTED',
+      type: 'RET',
+      escenarioCobertura: 'ANTICIPADA',
+      reminderSentAt: sent,
+      startTime: start,
+    }), false);
+    } finally {
+      Date.now = prev;
+    }
+  });
+
+  it('cerrada, hueco terminado o fichado en el ops_cov no pregunta', () => {
+    const sent = new Date('2026-10-08T10:40:00-03:00');
+    const emp = 'GqKjdyDi9yYeLNDXEDjA';
+    const tit = 'qpcoNHVzCV4zQI0Qefqz';
+    const prev = Date.now;
+    Date.now = () => new Date('2026-10-08T13:00:00-03:00').getTime();
+    try {
       assert.equal(isRecordatorioPendiente({
         status: 'ACCEPTED',
-        type: 'RET',
-        escenarioCobertura: 'ANTICIPADA',
+        type: 'REF',
+        escenarioCobertura: 'URGENTE',
         reminderSentAt: sent,
-        startTime: start,
+        followUpClosedAt: new Date('2026-10-08T10:43:00-03:00'),
+        followUpClosedReason: 'FICHO',
+      }), false);
+      assert.equal(huecoTerminado({
+        gapEndAt: new Date('2026-10-08T12:00:00-03:00'),
+        endTime: new Date('2026-10-08T12:00:00-03:00'),
+      }), true);
+      assert.equal(isRecordatorioPendiente({
+        status: 'ACCEPTED',
+        type: 'REF',
+        escenarioCobertura: 'URGENTE',
+        reminderSentAt: sent,
+        gapEndAt: new Date('2026-10-08T12:00:00-03:00'),
+        endTime: new Date('2026-10-08T12:00:00-03:00'),
       }), false);
     } finally {
       Date.now = prev;
     }
+    const covId = opsCoverageDocId(tit, emp);
+    assert.equal(guardiaPresenteEnHueco([
+      { id: tit, employeeId: 'baez', isPresent: false, status: 'ABSENT' },
+      { id: covId, employeeId: emp, isPresent: true, status: 'PRESENT', absenceShiftId: tit },
+    ], tit, emp), true);
+    assert.equal(guardiaPresenteEnHueco([
+      { id: tit, employeeId: 'baez', isPresent: false, status: 'ABSENT' },
+    ], tit, emp), false);
+    assert.equal(isRecordatorioPendiente({
+      status: 'ACCEPTED',
+      type: 'REF',
+      escenarioCobertura: 'URGENTE',
+      reminderSentAt: sent,
+      shiftId: tit,
+    }, true), false);
   });
 
   it('pendiente = ACCEPTED + reminderSentAt + sin respuesta posterior + sin fichar', () => {

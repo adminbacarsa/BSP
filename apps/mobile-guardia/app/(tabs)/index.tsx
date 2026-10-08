@@ -7,7 +7,8 @@ import {
   getCheckInTiming,
   isExtendedDutyShift,
   isRecordatorioPendiente,
-  isShiftPresent,
+  guardiaPresenteEnHueco,
+  huecoTerminado,
   mapsSearchUrl,
   timestampLikeToMillis,
   resolveCheckInUiStatus,
@@ -175,16 +176,13 @@ function HoyScreenContent() {
   const etaFromPush = Number(params.etaMinutes);
 
   const recordatorios = useMemo(() => {
-    const pool = allShifts ?? shifts;
-    const checked = (shiftId?: string) => {
-      const row = pool.find((s) => s.id === shiftId);
-      return !!row && isShiftPresent(row);
-    };
-    const pending = aceptadas.filter((c) => isRecordatorioPendiente(c, checked(c.shiftId)));
+    const pool = allShifts ?? shifts ?? [];
+    const presente = (shiftId?: string) => guardiaPresenteEnHueco(pool, shiftId, empDocId);
+    const pending = aceptadas.filter((c) => isRecordatorioPendiente(c, presente(c.shiftId) || huecoTerminado(c)));
     if (!focusRecordatorio || !highlightConvocatoriaId) return pending;
     if (pending.some((c) => c.id === highlightConvocatoriaId)) return pending;
     const known = aceptadas.find((c) => c.id === highlightConvocatoriaId);
-    if (known && checked(known.shiftId)) return pending;
+    if (known && (presente(known.shiftId) || huecoTerminado(known) || timestampLikeToMillis(known.followUpClosedAt) > 0)) return pending;
     // Push recibido antes de que el snapshot traiga reminderSentAt / si ya respondió: no lo repite.
     if (known && timestampLikeToMillis(known.convocadoReplyAt) > 0) return pending;
     const gapMs = timestampLikeToMillis(known?.startTime);
@@ -200,7 +198,14 @@ function HoyScreenContent() {
       },
       ...pending,
     ];
-  }, [aceptadas, allShifts, shifts, focusRecordatorio, highlightConvocatoriaId, etaFromPush]);
+  }, [aceptadas, allShifts, shifts, empDocId, focusRecordatorio, highlightConvocatoriaId, etaFromPush]);
+
+  const venisVisibles = useMemo(() => {
+    const pool = allShifts ?? shifts ?? [];
+    return llegadaTardePendientes.filter((c) => (
+      !guardiaPresenteEnHueco(pool, c.shiftId, empDocId) && !huecoTerminado(c)
+    ));
+  }, [llegadaTardePendientes, allShifts, shifts, empDocId]);
 
   async function onResponderConvocatoria(sol: SolicitudEvento, acepta: boolean) {
     const result = await responderConvocatoria(sol, acepta);
@@ -542,9 +547,9 @@ function HoyScreenContent() {
             />
           ) : null}
 
-          {llegadaTardePendientes.length > 0 ? (
+          {venisVisibles.length > 0 ? (
             <LlegadaTardeVenisBanner
-              convocatorias={llegadaTardePendientes}
+              convocatorias={venisVisibles}
               shifts={allShifts ?? shifts}
               objectivesMap={objectivesMap}
               busyId={coberturaBusyId}

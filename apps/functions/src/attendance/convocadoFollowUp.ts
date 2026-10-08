@@ -40,7 +40,13 @@ async function covDoc(db: Firestore, conv: Conv): Promise<Record<string, unknown
 }
 
 function punched(cov: Record<string, unknown> | null): boolean {
-  return cov?.isPresent === true || String(cov?.status || '').toUpperCase() === 'PRESENT';
+  if (!cov || cov.isDeleted === true) return false;
+  const st = String(cov.status || '').toUpperCase();
+  if (st === 'CANCELLED') return false;
+  return cov.isPresent === true
+    || st === 'PRESENT'
+    || ms(cov.checkInAt) > 0
+    || ms(cov.realStartTime) > 0;
 }
 
 /** Fin del hueco: `gapEndAt` de la convocatoria, si no el fin del ops_cov o del titular. */
@@ -63,6 +69,41 @@ export function convocadoFollowUpClosePatch(reason: 'FICHO' | 'HUECO_TERMINADO' 
     followUpClosedAt: now,
     followUpClosedReason: reason,
   };
+}
+
+/**
+ * Cierra el seguimiento de las convocatorias ACCEPTED de este hueco y este guardia.
+ * Si el ops_cov no trae `coverageConvocatoriaId`, las busca por `shiftId` del titular.
+ */
+export async function cerrarSeguimientoPorFichada(
+  db: Firestore,
+  input: { convIds?: string[]; titularShiftId?: string; employeeId: string; now: Timestamp },
+): Promise<string[]> {
+  const ids = new Set((input.convIds || []).map((id) => String(id || '').trim()).filter(Boolean));
+  const titular = String(input.titularShiftId || '').trim();
+  const employeeId = String(input.employeeId || '').trim();
+  if (titular && employeeId) {
+    const snap = await db.collection('convocatorias_cobertura').where('shiftId', '==', titular).limit(20).get();
+    for (const doc of snap.docs) {
+      const conv = doc.data() as Conv;
+      if (String(conv.status || '') !== 'ACCEPTED') continue;
+      if (String(conv.candidateEmployeeId || '') !== employeeId) continue;
+      ids.add(doc.id);
+    }
+  }
+  const closed: string[] = [];
+  for (const id of ids) {
+    const ref = db.collection('convocatorias_cobertura').doc(id);
+    const snap = await ref.get();
+    if (!snap.exists) continue;
+    const conv = snap.data() as Conv;
+    if (String(conv.status || '') !== 'ACCEPTED') continue;
+    if (ms(conv.followUpClosedAt) > 0) continue;
+    await ref.update({ ...convocadoFollowUpClosePatch('FICHO', input.now), checkedInAt: input.now });
+    await logConvocatoriaEvento(db, id, { type: 'FICHO', at: input.now }).catch(() => undefined);
+    closed.push(id);
+  }
+  return closed;
 }
 
 async function closeIfDone(
@@ -169,6 +210,10 @@ export async function runConvocadoFollowUp(db: Firestore, now: Timestamp = Times
     if (seen.has(doc.id)) continue;
     seen.add(doc.id);
     const conv = doc.data() as Conv;
+    if (ms(conv.followUpClosedAt) > 0) {
+      await doc.ref.update({ reminderPending: false, delayAlertPending: false });
+      continue;
+    }
     if (String(conv.type || '') === 'EXTEND' || String(conv.type || '') === 'LLEGADA_TARDE') {
       await doc.ref.update({ reminderPending: false, delayAlertPending: false });
       continue;
@@ -197,6 +242,10 @@ export async function runConvocadoFollowUp(db: Firestore, now: Timestamp = Times
     .where('expectedArrivalAt', '<=', delayCut);
   for await (const doc of paginate(delayBase, 'expectedArrivalAt')) {
     const conv = doc.data() as Conv;
+    if (ms(conv.followUpClosedAt) > 0) {
+      await doc.ref.update({ reminderPending: false, delayAlertPending: false });
+      continue;
+    }
     if (String(conv.type || '') === 'EXTEND' || String(conv.type || '') === 'LLEGADA_TARDE') {
       await doc.ref.update({ reminderPending: false, delayAlertPending: false });
       continue;
