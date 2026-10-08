@@ -7517,16 +7517,18 @@ function PlanificacionDesktop() {
                 }
                 planToastSaved(jobCount);
 
+                // El historial nunca frena el guardado: addDoc tira sincrónico si un campo es undefined
+                // (cambios del menú rápido / coberturas con campos opcionales), así que va limpio y diferido.
                 const postSaveTasks: Promise<unknown>[] = [
-                    addDoc(collection(db, 'planificaciones_historial'), {
+                    Promise.resolve().then(() => addDoc(collection(db, 'planificaciones_historial'), {
                         timestamp: serverTimestamp(),
-                        user: realActorName,
+                        user: realActorName || 'Desconocido',
                         period: `${currentDate.getMonth()+1}-${currentDate.getFullYear()}`,
-                        objectiveId: selectedObjective,
-                        changes: logData,
+                        objectiveId: selectedObjective || null,
+                        changes: JSON.parse(JSON.stringify(logData ?? [])),
                         count: jobCount,
                         snapshot: JSON.stringify(snapshotData),
-                    }).catch((err) => { console.warn('[plan] historial', err); }),
+                    })).catch((err) => { console.warn('[plan] historial', err); }),
                 ];
 
                 if (isPublished && empresaId) {
