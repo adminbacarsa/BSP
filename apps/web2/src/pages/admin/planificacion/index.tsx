@@ -10,7 +10,7 @@ import {
     ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Search, Plus,
     Users, Clock, X, UserPlus, ArrowRight, Eye, EyeOff, 
     CheckCircle, Trash2, ShieldAlert, User, Briefcase, Layers,
-    Bell, Calendar, CalendarX, Loader2, Stethoscope, MapPin, Lock, ShieldCheck, UserMinus,
+    Bell, Calendar, CalendarX, Loader2, MapPin, Lock, ShieldCheck, UserMinus,
     Save, Undo, History, MousePointer2, AlertTriangle, Grip, LayoutGrid, MonitorPlay,
     Printer, Download, Grid, RefreshCw, Edit3, Shield, ArrowRightCircle, Info, ArrowDownWideNarrow, ArrowDownAZ,
     BadgePercent, ArrowLeftRight, CalendarSearch, CheckSquare, XCircle, Search as SearchIcon, RefreshCcw, UserCheck, Split, Ban,
@@ -200,6 +200,16 @@ import {
   resolveCoverGuardDisplayName,
 } from '@/lib/cosp/coverageSemantics';
 import { PlanningCoverageLegend } from '@/components/planificacion/PlanningCoverageLegend';
+import { inicioRenderGrilla, registrarCommitGrilla } from '@/lib/planificacion/perfGrilla';
+import {
+    CeldaGrilla,
+    TooltipCeldaGrilla,
+    reusarVista,
+    useControlTooltipCelda,
+    type ControlCeldas,
+    type DatosTooltipCelda,
+    type VistaCelda,
+} from '@/components/planificacion/GrillaCelda';
 import {
     compareObjectiveMonthSchedules,
     formatCompareObjectiveMonthsReport,
@@ -290,7 +300,7 @@ import {
     type DiaFila,
 } from '@/components/planificacion/CoberturaModalV2';
 import { BarraPreguntar } from '@/components/eventuales/EventualesCandidatosUx';
-import { ConsultasEnCursoPill, IndicadorConsultaCelda } from '@/components/planificacion/ConsultasEnCurso';
+import { ConsultasEnCursoPill } from '@/components/planificacion/ConsultasEnCurso';
 import { useConsultasDisponibilidadObjetivo, type ConsultaObjetivo } from '@/hooks/useConsultasDisponibilidadObjetivo';
 import {
     TEXTO_AVISO_ASIGNADO_AL_GUARDAR,
@@ -1108,6 +1118,314 @@ const rfzDocToShiftView = (rfz: any) => ({
     employeeName: rfz.employeeName,
 });
 
+const CELDA_BORRADA = { borrada: true } as const;
+
+type EntradaCeldaGrilla = {
+    selectedObjective: any;
+    selectedGrupo: any;
+    grupoUnifiedMode: boolean;
+    pendingChanges: Record<string, any>;
+    shiftsMap: Record<string, any>;
+    rfzByEmpDate: Record<string, any>;
+    absencesMap: Record<string, any>;
+    planPublicado: boolean;
+    cellTurnosMap: Record<string, any[]>;
+    turaMap: Record<string, any>;
+    lctRestByCell: Record<string, string>;
+    excludedPositionsByDate: Record<string, string[]>;
+    vacancyConsultas: any;
+    isServiceLocked: boolean;
+    fechaBloqueada: (dateStr: string) => boolean;
+    nombreObjetivo: (objId: string) => string;
+};
+
+type CtxCeldaGrilla = {
+    emp: any;
+    dateStr: string;
+    dayIndex: number;
+    p: any;
+    s: any;
+    absence: any;
+    activeShift: any;
+    cellShift: any;
+    rfzOnCell: any;
+    evOverlay: any;
+    cellCode: string | null;
+    leaveCellCode: string;
+    isLeaveCell: boolean;
+    coveredByCell: any;
+    cellPosName: string | null;
+    cellPosExcluded: boolean;
+    isOtherObjectiveShift: boolean;
+    isOpsCoverageCell: boolean;
+    opsTooltipShift: any;
+    coverageSourceShift: any;
+    isCoverageSourceUsed: boolean;
+    planDualUsedAndCob: boolean;
+    isEarly: boolean;
+    isExtended: boolean;
+    covRole: any;
+    covNote: any;
+    isExclusionCol: boolean;
+    excludedOnDay: string[];
+    lctRest: string;
+    tieneTurno: boolean;
+};
+
+function esInvitadoEnGrilla(emp: any, selectedObjective: any, selectedGrupo: any, grupoUnifiedMode: boolean, slaIdToObjId: Record<string, string>): boolean {
+    return !!(selectedObjective && (
+        (selectedGrupo && grupoUnifiedMode)
+            ? !(selectedGrupo.objectiveIds.includes(emp.preferredObjectiveId) ||
+                (slaIdToObjId[emp.preferredObjectiveId] && selectedGrupo.objectiveIds.includes(slaIdToObjId[emp.preferredObjectiveId])))
+            : emp.preferredObjectiveId !== selectedObjective
+    ));
+}
+
+function calcularCeldaGrilla(e: EntradaCeldaGrilla, emp: any, isGuest: boolean, day: Date, dayIndex: number): { vista: VistaCelda; ctx: CtxCeldaGrilla } {
+    const selectedObjective = e.selectedObjective;
+    const selectedGrupo = e.selectedGrupo;
+    const grupoUnifiedMode = e.grupoUnifiedMode;
+    const cellDateStr = getDateKey(day);
+    const key = `${emp.id}_${cellDateStr}`;
+    const { s, p } = resolveCellShiftDisplay(
+        emp.id, cellDateStr, selectedObjective, selectedGrupo, grupoUnifiedMode, e.pendingChanges, e.shiftsMap,
+    );
+    const rfzOnCell = e.rfzByEmpDate[key];
+    const isLockedDate = e.fechaBloqueada(cellDateStr);
+    const isCellWeekend = [0, 6].includes(day.getDay());
+    let content: any = null; let style = "";
+    let isFT = s?.isFrancoTrabajado || p?.isFrancoTrabajado; let isFF = s?.isFrancoCompensatorio || p?.isFrancoCompensatorio;
+    const isExtended = s?.isExtended || p?.isExtended;
+    const isEarly = s?.isEarlyStart || p?.isEarlyStart || s?.isAdvanced || p?.isAdvanced;
+    const covRole = p?.coverageSegmentRole || s?.coverageSegmentRole;
+    const covNote = p?.coverageNote || s?.coverageNote;
+    const plannedNov = s?.plannedNovedad || p?.plannedNovedad;
+    let absence = e.absencesMap[key];
+    if (absence && ((absence.inferredCode as string) || inferAbsenceCode(absence)) === 'AA' && !e.planPublicado) absence = null as any;
+    const effectiveCode = p?.code || s?.code;
+    const coveredByCell = p?.coveredBy || s?.coveredBy || s?.coveredByEmployeeName || p?.coveredByEmployeeName;
+    const hasConflict = shouldShowLeaveConflictSiren({
+        shiftCode: effectiveCode,
+        absence,
+        coveredBy: coveredByCell,
+        hasNovedad: !!(s && s.hasNovedad),
+        shiftStatus: s?.status,
+    });
+    let statusIndicator: string | null = null;
+    if (s) {
+        const coveredAbs =
+            (s.status === 'ABSENT' || s.isAbsent) &&
+            isTitularCoverageAssigned(s);
+        if (coveredAbs) statusIndicator = 'bg-teal-500';
+        else if (s.status === 'PRESENT' || s.status === 'COMPLETED' || s.isPresent) statusIndicator = 'bg-emerald-500';
+        else if (s.status === 'ABSENT' || s.isAbsent) statusIndicator = 'bg-rose-500';
+    }
+    const isSwap = s?.swapWith || p?.swapWith;
+    const swapPending = !!(
+        isSwap &&
+        (
+            (s?.origin && s.origin !== 'PLANIFICADOR' && !s.swapAuthorized) ||
+            (p?.origin && p.origin !== 'PLANIFICADOR' && !p.swapAuthorized)
+        )
+    );
+    const swapStyle = swapPending ? SHIFT_STYLES['SWAP_PENDING'] : SHIFT_STYLES['SWAP'];
+    if (isLockedDate && !p) { style = SHIFT_STYLES['PAST']; if (s) content = s.code; }
+    else if (p) { if (p.isDeleted) { content = CELDA_BORRADA; style = "bg-rose-50 text-rose-300"; } else { if (isFT) { style = SHIFT_STYLES['FT']; content = "FT"; } else if (isFF) { style = SHIFT_STYLES['FF']; content = "FF"; } else { content = p.code; const baseStyle = SHIFT_STYLES[p.code]; style = baseStyle ? `${baseStyle} ring-2 ring-amber-400 ${isSwap ? swapStyle : ''}` : `bg-amber-100 text-amber-700 font-black ring-2 ring-amber-400 ${isSwap ? swapStyle : ''}`; if (content === 'REF' || content === 'ESC') content = cellLabelForDeployment(String(content), p.deploymentBand); } } }
+    else if (s) { if (!isLockedDate) { if (isFT) { style = SHIFT_STYLES['FT']; content = "FT"; } else if (isFF) { style = SHIFT_STYLES['FF']; content = "FF"; } else { style = `${getDefaultStyle(s.code)} ${isSwap ? swapStyle : ''}`; content = s.code; } } }
+    else if (rfzOnCell && !p) {
+        content = 'RFZ';
+        style = `${SHIFT_STYLES['RFZ']}${rfzOnCell.draft ? ' ring-2 ring-amber-400' : ''}`;
+    }
+    const _deployBand = (p && !p.isDeleted ? p.deploymentBand : s?.deploymentBand);
+    if (content === 'REF' || content === 'ESC') {
+        content = cellLabelForDeployment(String(content), _deployBand);
+    }
+    if (plannedNov === 'AVISO') { style += ' border-l-4 border-l-amber-500'; }
+    if (plannedNov === 'LICENCIA') { style += ' border-l-4 border-l-purple-500'; }
+    if (content === 'Ausencia con Aviso' || content === 'Injustificada') { content = 'AA'; style = SHIFT_STYLES['AA']; }
+    const _isRaCell = !!(
+        (p && !p.isDeleted && p.isRetiroAnticipado)
+        || (s && s.isRetiroAnticipado)
+    );
+    if (_isRaCell && content != null && typeof content === 'string' && !String(content).includes('/RA')) {
+        content = `${String(content).toUpperCase()}/RA`;
+        style += ' ring-1 ring-rose-400';
+    }
+    if (isGuest && (s || p)) { style += ' border-t-2 border-t-amber-400'; }
+    const opsShiftFromMulti = pickOpsCoverageShiftForPlanningCell(
+        e.cellTurnosMap[key],
+        selectedObjective,
+    );
+    const opsShiftForCell =
+        opsShiftFromMulti
+        || (s && selectedObjective && isOpsCoverageShiftForObjective(s, selectedObjective)
+            ? s
+            : null);
+    const activeShift = (p && !p.isDeleted) ? p : (s || (rfzOnCell ? rfzDocToShiftView(rfzOnCell) : null));
+    const isOpsCoverageCell = !!opsShiftForCell;
+    const opsTooltipShift = opsShiftForCell || activeShift;
+    const coverageSourceShift =
+        (p && !p.isDeleted) ? p : (s && !isOpsCoverageShiftForObjective(s, selectedObjective) ? s : null);
+    const isCoverageSourceUsed =
+        !!(coverageSourceShift?.coverageUsed === true && !absence);
+    const planDualUsedAndCob =
+        isCoverageSourceUsed && isOpsCoverageCell && !!opsShiftForCell;
+    if (isOpsCoverageCell && opsShiftForCell) {
+        const opsCodeRaw = String(opsShiftForCell.code || '').trim().toUpperCase();
+        const opsEtiqueta = etiquetaCeldaOpsCoverage(opsShiftForCell);
+        content = opsEtiqueta.content;
+        style = opsEtiqueta.esRefEsc
+            ? getDefaultStyle(opsCodeRaw || 'M')
+            : `${getDefaultStyle(opsCodeRaw || 'M')} ${OPS_COVERAGE_CELL_RING}`;
+        isFT = false;
+        isFF = false;
+    }
+    if (activeShift?.id && e.turaMap[activeShift.id]) { style = 'bg-red-500 text-white border-red-600 font-black'; }
+    const hasRfzOverlay = !!(rfzOnCell && (s || (p && !p.isDeleted)) && !absence);
+    const _rawOtherObj = isShiftAtOtherObjective(s, p, selectedObjective);
+    const _activeShiftObjId = ((p && !p.isDeleted) ? p : s)?.objectiveId;
+    const _cellIsRetAtOtherObj = _rawOtherObj && shiftPlanningCodeUpper(activeShift) === 'RET';
+    const isOtherObjectiveShift = !!(_rawOtherObj
+        && !_cellIsRetAtOtherObj
+        && !(selectedGrupo && grupoUnifiedMode && selectedGrupo.objectiveIds.includes(_activeShiftObjId)));
+    if (absence) { const absCode = absence.inferredCode || inferAbsenceCode(absence); const displayCode = absenceGridDisplayCode(absence); content = displayCode; style = SHIFT_STYLES[displayCode] || SHIFT_STYLES[absCode] || 'bg-rose-50 text-rose-700 font-bold border-rose-200'; }
+    if (isOtherObjectiveShift && content != null) {
+        style = OTHER_OBJECTIVE_CELL_STYLE;
+    }
+    if (_cellIsRetAtOtherObj && content != null) {
+        style = `${SHIFT_STYLES['RET']} ring-1 ring-amber-400/80`;
+    }
+    const evOverlay = absence ? null : eventoCellOverlay(e.cellTurnosMap[key], (p && !p.isDeleted) ? p : s);
+    if (evOverlay?.mode === 'EV') {
+        content = 'EV';
+        style = `${SHIFT_STYLES['EV']} ring-1 ring-yellow-600/70`;
+    } else if (evOverlay?.mode === 'FRANCO_USADO') {
+        const _fCode = String(evOverlay.franco?.code || evOverlay.franco?.type || 'F').toUpperCase();
+        content = FRANCO_CELL_CODES.has(String(content || '').toUpperCase()) ? content : _fCode;
+        style = `${SHIFT_STYLES[String(content)] || SHIFT_STYLES['F']} ring-1 ring-violet-500/90`;
+    }
+    const isCoverageSplitCell = !!(
+        !isFT
+        && !isFF
+        && !absence
+        && !isOtherObjectiveShift
+        && content != null
+        && !(activeShift?.id && e.turaMap[activeShift.id])
+        && (
+            isExtended
+            || isEarly
+            || covRole === 'EXTENSION'
+            || covRole === 'EARLY_START'
+        )
+    );
+    if (isCoverageSplitCell) {
+        style = `${SHIFT_STYLES['EXTENDED']} z-10`;
+    }
+    const sufijoUsado = (isCoverageSourceUsed && content != null && !planDualUsedAndCob) ? ' ring-1 ring-violet-500/90' : '';
+    const cellPosName = (p && !p.isDeleted ? p.positionName : s?.positionName) || rfzOnCell?.positionName || null;
+    const cellCode = (p && !p.isDeleted) ? (isFT ? 'FT' : isFF ? 'FF' : p.code) : s ? (isFT ? 'FT' : isFF ? 'FF' : s.code) : (rfzOnCell ? 'RFZ' : null);
+    const cellShift = (p && !p.isDeleted) ? p : s;
+    const lctRest = e.lctRestByCell[key] || '';
+    const excludedOnDay = e.excludedPositionsByDate[cellDateStr];
+    const isExclusionCol = !!excludedOnDay?.length;
+    const cellPosExcluded = !!(cellPosName && excludedOnDay?.includes(cellPosName));
+    const leaveCellCode = absence
+        ? String(absenceGridDisplayCode(absence) || content || '').toUpperCase()
+        : String(cellCode || '').toUpperCase();
+    const isLeaveCell = !!absence || LEAVE_CELL_CODES.has(leaveCellCode);
+    const consulta = consultaAbiertaEnFecha(e.vacancyConsultas, cellDateStr, emp.id, String(cellCode || leaveCellCode || ''));
+    const menuRol = p && !p.isDeleted ? p.menuRapidoRol : s?.menuRapidoRol;
+    const menuCubre = p && !p.isDeleted ? p.menuRapidoCubreA : s?.menuRapidoCubreA;
+    const cubierto = (((covRole === 'TARGET' || isLeaveCell) && coveredByCell) || (p?.menuRapidoTexto && !p?.menuRapidoRol) || (s?.menuRapidoTexto && !s?.menuRapidoRol));
+    let grupoColor: string | undefined;
+    let grupoNombre: string | undefined;
+    if (selectedGrupo && grupoUnifiedMode && content && !isOtherObjectiveShift && activeShift?.objectiveId && selectedGrupo.objectiveIds.includes(activeShift.objectiveId)) {
+        const _oi = selectedGrupo.objectiveIds.indexOf(activeShift.objectiveId!);
+        grupoColor = GRUPO_COLOR_HEX[_oi % GRUPO_COLOR_HEX.length];
+        grupoNombre = (selectedGrupo.objectiveNames[_oi] || '').trim().split(/\s+/).filter((w: string) => w.length > 1).pop()?.slice(0, 6).toUpperCase() || (selectedGrupo.objectiveNames[_oi] || '').slice(0, 5).toUpperCase();
+    }
+    const titulo = isOpsCoverageCell
+        ? undefined
+        : evOverlay
+            ? (evOverlay.mode === 'EV' ? evOverlay.tooltip : `${evOverlay.mode === 'FRANCO_USADO' ? 'Franco usado en evento' : 'También afectado al evento'}: ${evOverlay.tooltip}`)
+            : isExclusionCol && !s && !p
+                ? excludedPositionsTooltip(excludedOnDay, cellDateStr)
+                : isOtherObjectiveShift && activeShift?.objectiveId
+                    ? `Turno en ${e.nombreObjetivo(activeShift.objectiveId)}`
+                    : undefined;
+    const borrado = content === CELDA_BORRADA;
+    const vista: VistaCelda = {
+        key,
+        contenido: borrado ? null : content,
+        borrado,
+        estilo: style,
+        sufijoUsado,
+        ringExtra: lctRest ? 'ring-2 ring-amber-400' : cellPosExcluded ? 'ring-1 ring-rose-400/70' : '',
+        editable: !isLockedDate && !e.isServiceLocked && !isOpsCoverageCell,
+        fondo: isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : '',
+        evento: evOverlay ? evOverlay.mode : undefined,
+        titulo,
+        consulta: !!consulta,
+        consultaId: consulta ? (consulta as { id?: string }).id : undefined,
+        consultaTexto: consulta ? textoIndicadorConsulta(consulta) : undefined,
+        consultaTooltip: consulta ? textoTooltipConsulta(consulta) : undefined,
+        evBadge: !!(evOverlay && evOverlay.mode !== 'EV'),
+        evBadgeTitulo: evOverlay && evOverlay.mode !== 'EV' ? evOverlay.tooltip : undefined,
+        lct: lctRest || undefined,
+        puntoExclusion: !!(isExclusionCol && !content),
+        swap: isSwap ? (swapPending ? 'S!' : 'S') : '',
+        mas: !!(isExtended || isEarly || isCoverageSplitCell),
+        liberado: covRole === 'LIBERATED',
+        usado: isCoverageSourceUsed,
+        descansoReducido: !!cellShift?.descansoReducido,
+        topeExcedido: !!cellShift?.topeExcedido,
+        menuRol: menuRol || undefined,
+        menuMarca: menuRol ? marcaCeldaMenuRapido(menuRol, menuCubre) : undefined,
+        cubiertoTitulo: cubierto ? (p?.menuRapidoTexto || s?.menuRapidoTexto || (coveredByCell ? `Cubierto por ${coveredByCell}` : 'Cubierto')) : undefined,
+        estado: statusIndicator || undefined,
+        conflicto: !!hasConflict,
+        invitado: !!(isGuest && (s || p) && !absence && !isOtherObjectiveShift),
+        otroObjetivo: isOtherObjectiveShift,
+        grupoColor,
+        grupoNombre,
+        rfzOverlay: hasRfzOverlay,
+        rfzSinPublicar: !!(rfzOnCell && !s && !p && !absence && rfzOnCell.draft),
+    };
+    const ctx: CtxCeldaGrilla = {
+        emp,
+        dateStr: cellDateStr,
+        dayIndex,
+        p,
+        s,
+        absence,
+        activeShift,
+        cellShift,
+        rfzOnCell,
+        evOverlay,
+        cellCode,
+        leaveCellCode,
+        isLeaveCell,
+        coveredByCell,
+        cellPosName,
+        cellPosExcluded,
+        isOtherObjectiveShift,
+        isOpsCoverageCell,
+        opsTooltipShift,
+        coverageSourceShift,
+        isCoverageSourceUsed,
+        planDualUsedAndCob,
+        isEarly: !!isEarly,
+        isExtended: !!isExtended,
+        covRole,
+        covNote,
+        isExclusionCol,
+        excludedOnDay,
+        lctRest,
+        tieneTurno: !!((p && !p.isDeleted) || s || rfzOnCell),
+    };
+    return { vista, ctx };
+}
+
 function computeServiceRuleChanges(
     dateStr: string,
     rules: import('@/services/slaService').ServiceRule[],
@@ -1175,6 +1493,8 @@ function computeServiceRuleChanges(
 }
 
 function PlanificacionDesktop() {
+    const perfRenderInicio = inicioRenderGrilla();
+    useLayoutEffect(() => registrarCommitGrilla(perfRenderInicio, 'pagina'));
     const { empresaId, empresa, loadingEmpresa } = useEmpresa();
     const { rules: planningRules } = usePlanningRules(empresaId);
     const planningLimits = useMemo(
@@ -1236,23 +1556,6 @@ function PlanificacionDesktop() {
     const [toolbarMoreOpen, setToolbarMoreOpen] = useState(false);
     const [cronoFullscreen, setCronoFullscreen] = useState(false);
     const [statsBarCollapsed, setStatsBarCollapsed] = useState(false);
-    const [coverageLegendOpen, setCoverageLegendOpen] = useState(() => {
-        if (typeof window === 'undefined') return false;
-        try {
-            return sessionStorage.getItem('planif_coverage_legend_open') === '1';
-        } catch {
-            return false;
-        }
-    });
-    const toggleCoverageLegend = useCallback(() => {
-        setCoverageLegendOpen((prev) => {
-            const next = !prev;
-            try {
-                sessionStorage.setItem('planif_coverage_legend_open', next ? '1' : '0');
-            } catch { /* ignore */ }
-            return next;
-        });
-    }, []);
     const [statsHoursView, setStatsHoursView] = useState<'total' | 'detalle'>('total');
 
     const [isDataSyncing, setIsDataSyncing] = useState(false);
@@ -1284,7 +1587,6 @@ function PlanificacionDesktop() {
         try { return JSON.parse(localStorage.getItem('planif_emp_order') || '{}'); } catch { return {}; }
     });
     const [dragOverVisual, setDragOverVisual] = useState<number | null>(null);
-    const [shiftTooltip, setShiftTooltip] = useState<{ label: string | null; pos: string | null; range: string | null; x: number; y: number; restHours?: number | null; readOnlyOps?: boolean } | null>(null);
     const [opsCoverageDetailModal, setOpsCoverageDetailModal] = useState<{
         guardName: string;
         dateLabel: string;
@@ -2931,47 +3233,23 @@ function PlanificacionDesktop() {
         return result;
     }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, selectedObjective, selectedGrupo, grupoUnifiedMode]);
 
-    // Celdas con descanso insuficiente (<12h o <35h post-racha) respecto a turnos adyacentes.
-    const restViolationCells = useMemo(() => {
-        const violated = new Set<string>();
-        if (!displayedEmployees.length || !daysInMonth.length) return violated;
-        const NON_WORK = new Set(['F','FF','FP','FT','V','L','A','E','PG','AA','RET']);
-        const getShift = (empId: string, ds: string) => {
-            const k = `${empId}_${ds}`;
-            const p = pendingChanges[k];
-            if (p) return p.isDeleted ? null : p;
-            // Un EV del guardia ese día cuenta como turno aunque el doc principal sea un franco.
-            return pickShiftForRest(shiftsMap[k] || null, cellTurnosMap[k]);
-        };
-        const cfg = { minRestBetweenShiftsHours: 12, longRestAfterWorkedHours: 48, minLongRestHours: 35 };
-        for (const emp of displayedEmployees as any[]) {
-            for (const day of daysInMonth) {
-                const dateStr = getDateKey(day);
-                const sh = getShift(emp.id, dateStr);
-                if (!sh || sh.isDeleted) continue;
-                const code = String(sh.code || '').toUpperCase();
-                if (NON_WORK.has(code)) continue;
-                const violation = checkRestBetweenShiftsDetail({
-                    empId: emp.id, targetDateStr: dateStr,
-                    proposed: { code, startTime: sh.startTime || undefined, hours: Number(sh.hours) || undefined },
-                    getShift, cfg,
-                });
-                const band = classifyRestViolation(violation);
-                if (band === 'blocked' || (band === 'pin' && !sh.descansoReducido)) violated.add(`${emp.id}_${dateStr}`);
-            }
-        }
-        return violated;
-    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, cellTurnosMap]);
-
     // Art. 197 LCT: menos de 12 h entre el tope de cierre (inicio + 12:59) y el próximo turno, también de otro objetivo. Solo aviso.
+    // Cada legajo se calcula aparte: si sus turnos no cambiaron se reusa el resultado anterior.
+    const lctCacheRef = useRef<Map<string, { refs: unknown[]; gaps: Record<string, string> }>>(new Map());
     const lctRestByCell = useMemo(() => {
-        const list: LctShiftInput[] = [];
+        const porLegajo = new Map<string, { refs: unknown[]; list: LctShiftInput[] }>();
         const seen = new Set<string>();
         const push = (key: string, sh: any) => {
             if (!sh || sh.isDeleted) return;
             const dateStr = key.slice(-10);
             const employeeId = key.slice(0, Math.max(0, key.length - 11));
-            list.push({
+            let grupo = porLegajo.get(employeeId);
+            if (!grupo) {
+                grupo = { refs: [], list: [] };
+                porLegajo.set(employeeId, grupo);
+            }
+            grupo.refs.push(key, sh);
+            grupo.list.push({
                 employeeId,
                 employeeName: sh.employeeName || '',
                 dateStr,
@@ -3002,10 +3280,24 @@ function PlanificacionDesktop() {
             if (seen.has(key) || pending?.isDeleted) return;
             push(key, pending);
         });
+        const anterior = lctCacheRef.current;
+        const siguiente = new Map<string, { refs: unknown[]; gaps: Record<string, string> }>();
         const map: Record<string, string> = {};
-        findLctRestGaps(list).forEach((g) => {
-            g.cellKeys.forEach((c) => { map[c] = map[c] ? `${map[c]} | ${g.message}` : g.message; });
+        porLegajo.forEach((grupo, employeeId) => {
+            const prev = anterior.get(employeeId);
+            let gaps: Record<string, string>;
+            if (prev && prev.refs.length === grupo.refs.length && prev.refs.every((r, i) => r === grupo.refs[i])) {
+                gaps = prev.gaps;
+            } else {
+                gaps = {};
+                findLctRestGaps(grupo.list).forEach((g) => {
+                    g.cellKeys.forEach((c) => { gaps[c] = gaps[c] ? `${gaps[c]} | ${g.message}` : g.message; });
+                });
+            }
+            siguiente.set(employeeId, { refs: grupo.refs, gaps });
+            Object.assign(map, gaps);
         });
+        lctCacheRef.current = siguiente;
         return map;
     }, [cellTurnosMap, pendingChanges]);
 
@@ -11370,6 +11662,199 @@ function PlanificacionDesktop() {
         return displayedEmployees.filter((e: { id: string }) => ids.has(e.id));
     }, [comparingSnapshot, compareShowOnlyDiffs, planningCompareDiff, displayedEmployees]);
 
+    const planPublicadoGrilla = isPlanificacionPublished(publishStatusMap[planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1)]);
+    const fechaBloqueadaGrilla = useCallback(
+        (dateStr: string) => isPlanningDateLocked(dateStr) || isOutsideServiceRange(dateStr),
+        [isPlanningDateLocked, isOutsideServiceRange],
+    );
+    const nombreObjetivoRef = useRef(getObjectiveName);
+    nombreObjetivoRef.current = getObjectiveName;
+    const entradaCeldas: EntradaCeldaGrilla = {
+        selectedObjective,
+        selectedGrupo,
+        grupoUnifiedMode,
+        pendingChanges,
+        shiftsMap,
+        rfzByEmpDate,
+        absencesMap,
+        planPublicado: planPublicadoGrilla,
+        cellTurnosMap,
+        turaMap,
+        lctRestByCell,
+        excludedPositionsByDate,
+        vacancyConsultas,
+        isServiceLocked,
+        fechaBloqueada: fechaBloqueadaGrilla,
+        nombreObjetivo: (objId: string) => nombreObjetivoRef.current(objId),
+    };
+    const vistasPrevRef = useRef<Record<string, VistaCelda>>({});
+    const filasCeldas = comparingSnapshot ? compareGridEmployees : displayedEmployees;
+    const celdasGrilla = useMemo(() => {
+        const vistas: Record<string, VistaCelda> = {};
+        const ctx: Record<string, CtxCeldaGrilla> = {};
+        const prev = vistasPrevRef.current;
+        for (const emp of filasCeldas as any[]) {
+            const isGuest = esInvitadoEnGrilla(emp, selectedObjective, selectedGrupo, grupoUnifiedMode, slaIdToObjId);
+            daysInMonth.forEach((day, dayIndex) => {
+                const r = calcularCeldaGrilla(entradaCeldas, emp, isGuest, day, dayIndex);
+                vistas[r.vista.key] = reusarVista(prev[r.vista.key], r.vista);
+                ctx[r.vista.key] = r.ctx;
+            });
+        }
+        vistasPrevRef.current = vistas;
+        return { vistas, ctx };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [
+        filasCeldas, daysInMonth, selectedObjective, selectedGrupo, grupoUnifiedMode, slaIdToObjId,
+        pendingChanges, shiftsMap, rfzByEmpDate, absencesMap, planPublicadoGrilla, cellTurnosMap, turaMap,
+        lctRestByCell, excludedPositionsByDate, vacancyConsultas, isServiceLocked, fechaBloqueadaGrilla, clients,
+    ]);
+    const ctxCeldasExtraRef = useRef<Record<string, CtxCeldaGrilla>>({});
+    const celdaDeGrilla = (emp: any, isGuest: boolean, day: Date, dayIndex: number) => {
+        const key = `${emp.id}_${getDateKey(day)}`;
+        const vista = celdasGrilla.vistas[key];
+        if (vista) return vista;
+        const r = calcularCeldaGrilla(entradaCeldas, emp, !!isGuest, day, dayIndex);
+        ctxCeldasExtraRef.current[key] = r.ctx;
+        return r.vista;
+    };
+    const ctxDeCelda = (key: string): CtxCeldaGrilla | undefined => celdasGrilla.ctx[key] || ctxCeldasExtraRef.current[key];
+
+    const tooltipCeldaCtl = useControlTooltipCelda();
+
+    const construirTooltipCelda = (key: string): DatosTooltipCelda | null => {
+        const c = ctxDeCelda(key);
+        if (!c) return null;
+        const { emp, p, s, absence, activeShift, rfzOnCell, evOverlay, cellCode, leaveCellCode, coveredByCell, cellPosName } = c;
+        const _marca = (p && !p.isDeleted && p.menuRapidoTexto) || s?.menuRapidoTexto;
+        if (_marca) return { label: String(_marca), pos: null, range: null, restHours: null };
+        if (c.isLeaveCell) {
+            const absType = absence?.type || activeShift?.name || LEGEND_DESCRIPTIONS[leaveCellCode] || leaveCellCode;
+            const reason = absence?.reason || activeShift?.comments || p?.comments || '';
+            const covered = resolveTitularCoverageName(emp.id, emp.name || '', c.dateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell, cellTurnosMap);
+            return { label: buildLeaveCellTooltipLabel({ absenceType: absType, reason, coveredBy: covered }), pos: null, range: null, restHours: null };
+        }
+        if ((s || p || rfzOnCell || evOverlay) && !absence) {
+            const _cellShift = c.cellShift;
+            const _cellActualRange = (_cellShift?.startTime && _cellShift?.endTime)
+                ? `${formatTime(_cellShift.startTime)} - ${formatTime(_cellShift.endTime)}`
+                : null;
+            const _b2 = resolveCellSecondBlock(
+                key,
+                pendingChanges,
+                secondBlockMap,
+                cellPosName,
+                cellCode,
+                positionStructure,
+            );
+            const _b2Range = (_b2?.startTime && _b2?.endTime)
+                ? `${formatTime(_b2.startTime)} - ${formatTime(_b2.endTime)}`
+                : null;
+            const cellRange = cellCode
+                ? ((_cellActualRange && _b2Range)
+                    ? `${_cellActualRange} + ${_b2Range}`
+                    : (_cellActualRange || SHIFT_RANGES[cellCode] || null))
+                : null;
+            const { isEarly, isExtended, covRole, covNote, coverageSourceShift } = c;
+            const _covSegHint = isEarly || covRole === 'EARLY_START'
+                ? '\n⏩ Adelanto (cobertura)'
+                : (isExtended || covRole === 'EXTENSION')
+                    ? '\n⏱ Extensión (cobertura)'
+                    : '';
+            const _usedHint = c.isCoverageSourceUsed
+                ? (c.planDualUsedAndCob
+                    ? `\n🔗 ${String(coverageSourceShift?.code || 'Turno').toUpperCase()} usado en cobertura`
+                    + `\n🟠 COB: cubre a ${String(coverageSourceShift?.coverageUsedCoversEmployeeName || coverageSourceShift?.coversEmployeeName || 'titular').trim()}`
+                    + `${coverageSourceShift?.coverageUsedObjectiveName ? ` en ${coverageSourceShift.coverageUsedObjectiveName}` : ''}`
+                    : `\n🔗 Usado: cubrió a ${String(coverageSourceShift?.coverageUsedCoversEmployeeName || coverageSourceShift?.coversEmployeeName || 'titular').trim()}${coverageSourceShift?.coverageUsedObjectiveName ? ` en ${coverageSourceShift.coverageUsedObjectiveName}` : ''}`)
+                : '';
+            const _evHint = evOverlay
+                ? (evOverlay.mode === 'FRANCO_USADO'
+                    ? `\n🔗 Franco usado en evento: ${evOverlay.tooltip}`
+                    : evOverlay.mode === 'BADGE'
+                        ? `\n⚠ También afectado al evento: ${evOverlay.tooltip}`
+                        : '')
+                : '';
+            const _covHint = (covNote ? `\n📋 ${covNote}` : '') + _covSegHint + _usedHint + _evHint;
+            const _billBr = activeShift && shiftCountsForEmployeeCronoHours(activeShift)
+                ? planningShiftBillableBreakdown(activeShift, slaCodeHoursHint)
+                : null;
+            const _billHint = _billBr && _billBr.gross > 0
+                ? `\n📊 ${_billBr.base}h base${_billBr.extra > 0 ? ` + ${_billBr.extra}h cobertura = ${_billBr.gross}h` : ` (${_billBr.gross}h)`}`
+                : '';
+            const _authHint = `${_cellShift?.descansoReducido ? `\n⚠ Descanso reducido autorizado${_cellShift.descansoHoras != null ? ` (${_cellShift.descansoHoras} h)` : ''}` : ''}${_cellShift?.topeExcedido ? `\n⚠ Tope 200 h autorizado${_cellShift.horasMes != null ? ` (${_cellShift.horasMes} h)` : ''}` : ''}`;
+            const shiftLabel = evOverlay?.mode === 'EV'
+                ? evOverlay.tooltip
+                : (cellCode === 'EV' && (activeShift?.eventoNombre || activeShift?.servicioNombre))
+                    ? eventoTooltip(activeShift)
+                    : cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : (rfzOnCell ? 'Refuerzo cliente (RFZ)' : null);
+            const _isFrancoTip = cellCode ? ['F', 'FF', 'FP', 'FT'].includes(String(cellCode).toUpperCase()) : false;
+            const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, c.dayIndex) : null;
+            const _isRet = String(cellCode || '').toUpperCase() === 'RET';
+            const _exclHint = c.cellPosExcluded ? `\n⚠ Puesto excluido por SLA este día` : '';
+            const _otherObjHint = c.isOtherObjectiveShift && activeShift?.objectiveId ? `\n📍 Otro objetivo: ${getObjectiveName(activeShift.objectiveId)}` : '';
+            const _rfzHint = rfzOnCell ? `\n🔴 RFZ ${formatTime(rfzOnCell.startTime)}–${formatTime(rfzOnCell.endTime)}${rfzOnCell.positionName ? ` · ${rfzOnCell.positionName}` : ''}` : '';
+            const _linkedTura = activeShift?.id ? turaMap[activeShift.id] : null;
+            const _turaHint = _linkedTura ? `\n🟣 TURA ${isTuraContiguousToParent(activeShift, _linkedTura) ? 'seguido' : 'cortado'} ${formatShiftClockRange(_linkedTura)}${_linkedTura.positionName ? ` → ${_linkedTura.positionName}` : ''}` : '';
+            const _lctRest = c.lctRest;
+            const _tipLabel = c.isOpsCoverageCell
+                ? buildOpsCoverageCellTooltip(c.opsTooltipShift, opsCoverageTooltipCtxFor(c.opsTooltipShift, emp.name || ''))
+                : (shiftLabel
+                    ? `${shiftLabel}${_exclHint}${_otherObjHint}${_rfzHint}${_turaHint}${_covHint}${_billHint}${_authHint}${_lctRest ? `\n⚠ ${_lctRest}` : ''}`
+                    : (_exclHint || _otherObjHint || _rfzHint || _turaHint || _covHint || _billHint || _lctRest || null));
+            return {
+                label: _tipLabel,
+                readOnlyOps: c.isOpsCoverageCell,
+                pos: _isRet ? null : (cellPosName || rfzOnCell?.positionName || null),
+                range: _isRet ? null : (cellRange || (rfzOnCell ? `${formatTime(rfzOnCell.startTime)} - ${formatTime(rfzOnCell.endTime)}` : null)),
+                restHours: _restHrs,
+            };
+        }
+        if (c.isExclusionCol) {
+            return { label: excludedPositionsTooltip(c.excludedOnDay, c.dateStr), pos: null, range: null, restHours: null };
+        }
+        return null;
+    };
+
+    const ctlCeldas = useRef<ControlCeldas>(null as unknown as ControlCeldas);
+    ctlCeldas.current = {
+        contextMenu: (ev, key) => {
+            const c = ctxDeCelda(key);
+            if (!c) return;
+            tooltipCeldaCtl.current.ocultar();
+            abrirMenuRapidoCelda(ev, {
+                emp: c.emp,
+                dateStr: c.dateStr,
+                isLeave: c.isLeaveCell,
+                leaveCode: c.isLeaveCell ? c.leaveCellCode : null,
+                tieneTurno: c.tieneTurno,
+                positionName: c.cellPosName,
+            });
+        },
+        mouseDown: (ev, key, fila, col) => {
+            if (ev.button !== 0) return;
+            tooltipCeldaCtl.current.ocultar();
+            if (modoElegir) {
+                const c = ctxDeCelda(key);
+                ev.preventDefault();
+                ev.stopPropagation();
+                if (c) clicPersonaModoElegir(c.emp.id);
+                return;
+            }
+            handleMouseDown(fila, col);
+        },
+        mouseEnter: (ev, key, fila, col) => {
+            if (isDragging && allowPlanningMultiSelect) setSelection((pr) => ({ ...pr, end: { r: fila, c: col } }));
+            tooltipCeldaCtl.current.programar(() => construirTooltipCelda(key), ev.clientX, ev.clientY);
+        },
+        mouseMove: (ev) => tooltipCeldaCtl.current.mover(ev.clientX, ev.clientY),
+        mouseLeave: () => tooltipCeldaCtl.current.ocultar(),
+        abrirConsulta: (consultaId) => {
+            setConsultaFoco(consultaId);
+            setConsultaTick((n) => n + 1);
+        },
+    };
+
     const renderGrid = (
         isSnapshotView: boolean,
         snapshotData?: any,
@@ -11708,226 +12193,21 @@ function PlanificacionDesktop() {
                                         })()}
                                     </td>
                                     {daysInMonth.map((day, dayIndex) => {
+                                        const vistaCelda = celdaDeGrilla(emp, !!isGuest, day, dayIndex);
                                         const cellDateStr = getDateKey(day);
-                                        const key = `${emp.id}_${cellDateStr}`;
-                                        const { s, p } = resolveCellShiftDisplay(
-                                            emp.id, cellDateStr, selectedObjective, selectedGrupo, grupoUnifiedMode, pendingChanges, shiftsMap,
+                                        return (
+                                            <CeldaGrilla
+                                                key={vistaCelda.key}
+                                                vista={vistaCelda}
+                                                fila={idx}
+                                                col={dayIndex}
+                                                seleccionada={!!isCellSelected(idx, dayIndex)}
+                                                colElegir={!!modoElegir && cellDateStr === modoElegir.ctx.dateStr}
+                                                elegirActivo={!!modoElegir}
+                                                comparada={!!compareChangedKeys?.has(vistaCelda.key)}
+                                                ctl={ctlCeldas}
+                                            />
                                         );
-                                        const rfzOnCell = rfzByEmpDate[key];
-                                        const selected = !isSnapshotView && isCellSelected(idx, dayIndex);
-                                        const isLockedDate = !isSnapshotView && (isPlanningDateLocked(getDateKey(day)) || isOutsideServiceRange(getDateKey(day)));
-                                        const isCellWeekend = [0, 6].includes(day.getDay());
-                                        let content = null; let style = "";
-                                        let isFT = s?.isFrancoTrabajado || p?.isFrancoTrabajado; let isFF = s?.isFrancoCompensatorio || p?.isFrancoCompensatorio;
-                                        let isExtended = s?.isExtended || p?.isExtended;
-                                        let isEarly = s?.isEarlyStart || p?.isEarlyStart || s?.isAdvanced || p?.isAdvanced; 
-                                        const covRole = p?.coverageSegmentRole || s?.coverageSegmentRole;
-                                        const covNote = p?.coverageNote || s?.coverageNote;
-                                        let plannedNov = s?.plannedNovedad || p?.plannedNovedad; 
-                                        let absence = absencesMap[key];
-                                        if (absence && ((absence.inferredCode as string) || inferAbsenceCode(absence)) === 'AA' && !isPlanificacionPublished(publishStatusMap[planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1)])) absence = null as any;
-                                        const effectiveCode = p?.code || s?.code;
-                                        const coveredByCell = p?.coveredBy || s?.coveredBy || s?.coveredByEmployeeName || p?.coveredByEmployeeName;
-                                        let hasConflict = shouldShowLeaveConflictSiren({
-                                            shiftCode: effectiveCode,
-                                            absence,
-                                            coveredBy: coveredByCell,
-                                            hasNovedad: !!(s && s.hasNovedad),
-                                            shiftStatus: s?.status,
-                                        });
-                                        let statusIndicator = null;
-                                        const _planPublished = isPlanificacionPublished(publishStatusMap[planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1)]);
-                                        // Punto de estado: verde=presente, rojo=ausente sin cubrir, teal=ausente ya cubierto (NO confundir con presente).
-                                        if (s && !isSnapshotView) {
-                                            const coveredAbs =
-                                                (s.status === 'ABSENT' || s.isAbsent) &&
-                                                isTitularCoverageAssigned(s);
-                                            if (coveredAbs) statusIndicator = 'bg-teal-500';
-                                            else if (s.status === 'PRESENT' || s.status === 'COMPLETED' || s.isPresent) statusIndicator = 'bg-emerald-500';
-                                            else if (s.status === 'ABSENT' || s.isAbsent) statusIndicator = 'bg-rose-500';
-                                        }
-                                        let isSwap = s?.swapWith || p?.swapWith;
-                                        const swapPending = !!(
-                                            isSwap &&
-                                            (
-                                                (s?.origin && s.origin !== 'PLANIFICADOR' && !s.swapAuthorized) ||
-                                                (p?.origin && p.origin !== 'PLANIFICADOR' && !p.swapAuthorized)
-                                            )
-                                        );
-                                        const swapStyle = swapPending ? SHIFT_STYLES['SWAP_PENDING'] : SHIFT_STYLES['SWAP'];
-                                        if (isLockedDate && !p) { style = SHIFT_STYLES['PAST']; if (s) content = s.code; }
-                                        else if (p) { if(p.isDeleted) { content=<X size={12}/>; style="bg-rose-50 text-rose-300"; } else { if(isFT) { style=SHIFT_STYLES['FT']; content="FT"; } else if(isFF) { style=SHIFT_STYLES['FF']; content="FF"; } else { content=p.code; const baseStyle = SHIFT_STYLES[p.code]; style = baseStyle ? `${baseStyle} ring-2 ring-amber-400 ${isSwap ? swapStyle : ''}` : `bg-amber-100 text-amber-700 font-black ring-2 ring-amber-400 ${isSwap ? swapStyle : ''}`; if (content === 'REF' || content === 'ESC') content = cellLabelForDeployment(String(content), p.deploymentBand); } } }
-                                        else if (s) { if (!isLockedDate) { if(isFT) { style=SHIFT_STYLES['FT']; content="FT"; } else if(isFF) { style=SHIFT_STYLES['FF']; content="FF"; } else { style=`${getDefaultStyle(s.code)} ${isSwap ? swapStyle : ''}`; content=s.code; } } }
-                                        else if (rfzOnCell && !p) {
-                                            content = 'RFZ';
-                                            style = `${SHIFT_STYLES['RFZ']}${rfzOnCell.draft ? ' ring-2 ring-amber-400' : ''}`;
-                                        }
-                                        const _deployBand = (p && !p.isDeleted ? p.deploymentBand : s?.deploymentBand);
-                                        if (content === 'REF' || content === 'ESC') {
-                                            content = cellLabelForDeployment(String(content), _deployBand);
-                                        }
-                                        if (plannedNov === 'AVISO') { style += ' border-l-4 border-l-amber-500'; }
-                                        if (plannedNov === 'LICENCIA') { style += ' border-l-4 border-l-purple-500'; }
-                                        if (content === 'Ausencia con Aviso' || content === 'Injustificada') { content = 'AA'; style = SHIFT_STYLES['AA']; }
-                                        const _isRaCell = !!(
-                                            (p && !p.isDeleted && p.isRetiroAnticipado)
-                                            || (s && s.isRetiroAnticipado)
-                                        );
-                                        if (_isRaCell && content != null && typeof content === 'string' && !String(content).includes('/RA')) {
-                                            content = `${String(content).toUpperCase()}/RA`;
-                                            style += ' ring-1 ring-rose-400';
-                                        }
-                                        if (isGuest && (s || p)) { style += ' border-t-2 border-t-amber-400'; }
-                                        const opsShiftFromMulti = pickOpsCoverageShiftForPlanningCell(
-                                            cellTurnosMap[key],
-                                            selectedObjective,
-                                        );
-                                        const opsShiftForCell =
-                                            opsShiftFromMulti
-                                            || (s && selectedObjective && isOpsCoverageShiftForObjective(s, selectedObjective)
-                                                ? s
-                                                : null);
-                                        const activeShift = (p && !p.isDeleted) ? p : (s || (rfzOnCell ? rfzDocToShiftView(rfzOnCell) : null));
-                                        const isOpsCoverageCell = !!opsShiftForCell;
-                                        const opsTooltipShift = opsShiftForCell || activeShift;
-                                        const coverageSourceShift =
-                                            (p && !p.isDeleted) ? p : (s && !isOpsCoverageShiftForObjective(s, selectedObjective) ? s : null);
-                                        const isCoverageSourceUsed =
-                                            !!(coverageSourceShift?.coverageUsed === true && !absence);
-                                        const planDualUsedAndCob =
-                                            isCoverageSourceUsed && isOpsCoverageCell && !!opsShiftForCell;
-                                        if (isOpsCoverageCell && opsShiftForCell) {
-                                            const opsCodeRaw = String(opsShiftForCell.code || '').trim().toUpperCase();
-                                            const opsEtiqueta = etiquetaCeldaOpsCoverage(opsShiftForCell);
-                                            content = opsEtiqueta.content;
-                                            style = opsEtiqueta.esRefEsc
-                                                ? getDefaultStyle(opsCodeRaw || 'M')
-                                                : `${getDefaultStyle(opsCodeRaw || 'M')} ${OPS_COVERAGE_CELL_RING}`;
-                                            isFT = false;
-                                            isFF = false;
-                                        }
-                                        // TURA: turno agregado por cliente → fondo rojo en celda padre
-                                        if (activeShift?.id && turaMap[activeShift.id]) { style = 'bg-red-500 text-white border-red-600 font-black'; }
-                                        const hasRfzOverlay = !!(rfzOnCell && (s || (p && !p.isDeleted)) && !absence);
-                                        const _rawOtherObj = isShiftAtOtherObjective(s, p, selectedObjective);
-                                        const _activeShiftObjId = ((p && !p.isDeleted) ? p : s)?.objectiveId;
-                                        const _cellIsRetAtOtherObj = _rawOtherObj && shiftPlanningCodeUpper(activeShift) === 'RET';
-                                        const isOtherObjectiveShift = _rawOtherObj
-                                            && !_cellIsRetAtOtherObj
-                                            && !(selectedGrupo && grupoUnifiedMode && selectedGrupo.objectiveIds.includes(_activeShiftObjId));
-                                        if (absence) { const absCode = absence.inferredCode || inferAbsenceCode(absence); const displayCode = absenceGridDisplayCode(absence); content = displayCode; style = SHIFT_STYLES[displayCode] || SHIFT_STYLES[absCode] || 'bg-rose-50 text-rose-700 font-bold border-rose-200'; }
-                                        if (isOtherObjectiveShift && content != null) {
-                                            style = OTHER_OBJECTIVE_CELL_STYLE;
-                                        }
-                                        if (_cellIsRetAtOtherObj && content != null) {
-                                            style = `${SHIFT_STYLES['RET']} ring-1 ring-amber-400/80`;
-                                        }
-                                        // Evento (EV del servidor) en la fila del guardia: celda EV, franco usado o marca sobre otro turno.
-                                        const _evOverlay = (absence || isSnapshotView) ? null : eventoCellOverlay(cellTurnosMap[key], (p && !p.isDeleted) ? p : s);
-                                        if (_evOverlay?.mode === 'EV') {
-                                            content = 'EV';
-                                            style = `${SHIFT_STYLES['EV']} ring-1 ring-yellow-600/70`;
-                                        } else if (_evOverlay?.mode === 'FRANCO_USADO') {
-                                            const _fCode = String(_evOverlay.franco?.code || _evOverlay.franco?.type || 'F').toUpperCase();
-                                            content = FRANCO_CELL_CODES.has(String(content || '').toUpperCase()) ? content : _fCode;
-                                            style = `${SHIFT_STYLES[String(content)] || SHIFT_STYLES['F']} ring-1 ring-violet-500/90`;
-                                        }
-                                        const isCoverageSplitCell = !!(
-                                            !isFT
-                                            && !isFF
-                                            && !absence
-                                            && !isOtherObjectiveShift
-                                            && content != null
-                                            && !(activeShift?.id && turaMap[activeShift.id])
-                                            && (
-                                                isExtended
-                                                || isEarly
-                                                || covRole === 'EXTENSION'
-                                                || covRole === 'EARLY_START'
-                                            )
-                                        );
-                                        if (isCoverageSplitCell) {
-                                            style = `${SHIFT_STYLES['EXTENDED']} z-10`;
-                                        }
-                                        if (compareChangedKeys?.has(key)) {
-                                            style += isSnapshotView
-                                                ? ' ring-2 ring-amber-600 ring-offset-1 z-20'
-                                                : ' ring-2 ring-violet-600 ring-offset-1 z-20';
-                                        }
-                                        if (isCoverageSourceUsed && content != null && !planDualUsedAndCob) {
-                                            style += ' ring-1 ring-violet-500/90';
-                                        }
-                                        const cellPosName = (p && !p.isDeleted ? p.positionName : s?.positionName) || rfzOnCell?.positionName || null;
-                                        const cellCode = (p && !p.isDeleted) ? (isFT ? 'FT' : isFF ? 'FF' : p.code) : s ? (isFT ? 'FT' : isFF ? 'FF' : s.code) : (rfzOnCell ? 'RFZ' : null);
-                                        const _cellShift = (p && !p.isDeleted) ? p : s;
-                                        const _lctRest = lctRestByCell[key] || '';
-                                        const _cellActualRange = (_cellShift?.startTime && _cellShift?.endTime)
-                                            ? `${formatTime(_cellShift.startTime)} - ${formatTime(_cellShift.endTime)}`
-                                            : null;
-                                        const _b2 = resolveCellSecondBlock(
-                                            key,
-                                            pendingChanges,
-                                            secondBlockMap,
-                                            cellPosName,
-                                            cellCode,
-                                            positionStructure,
-                                        );
-                                        const _b2Range = (_b2?.startTime && _b2?.endTime)
-                                            ? `${formatTime(_b2.startTime)} - ${formatTime(_b2.endTime)}`
-                                            : null;
-                                        const cellRange = cellCode
-                                            ? ((_cellActualRange && _b2Range)
-                                                ? `${_cellActualRange} + ${_b2Range}`
-                                                : (_cellActualRange || SHIFT_RANGES[cellCode] || null))
-                                            : null;
-                                        const excludedOnDay = excludedPositionsByDate[cellDateStr];
-                                        const isExclusionCol = !!excludedOnDay?.length;
-                                        const cellPosExcluded = !!(cellPosName && excludedOnDay?.includes(cellPosName));
-                                        const leaveCellCode = absence
-                                            ? String(absenceGridDisplayCode(absence) || content || '').toUpperCase()
-                                            : String(cellCode || '').toUpperCase();
-                                        const isLeaveCell = !!absence || LEAVE_CELL_CODES.has(leaveCellCode);
-                                        const _covSegHint = isEarly || covRole === 'EARLY_START'
-                                            ? '\n⏩ Adelanto (cobertura)'
-                                            : (isExtended || covRole === 'EXTENSION')
-                                                ? '\n⏱ Extensión (cobertura)'
-                                                : '';
-                                        const _usedHint = isCoverageSourceUsed
-                                            ? (planDualUsedAndCob
-                                                ? `\n🔗 ${String(coverageSourceShift?.code || 'Turno').toUpperCase()} usado en cobertura`
-                                                + `\n🟠 COB: cubre a ${String(coverageSourceShift?.coverageUsedCoversEmployeeName || coverageSourceShift?.coversEmployeeName || 'titular').trim()}`
-                                                + `${coverageSourceShift?.coverageUsedObjectiveName ? ` en ${coverageSourceShift.coverageUsedObjectiveName}` : ''}`
-                                                : `\n🔗 Usado: cubrió a ${String(coverageSourceShift?.coverageUsedCoversEmployeeName || coverageSourceShift?.coversEmployeeName || 'titular').trim()}${coverageSourceShift?.coverageUsedObjectiveName ? ` en ${coverageSourceShift.coverageUsedObjectiveName}` : ''}`)
-                                            : '';
-                                        const _evHint = _evOverlay
-                                            ? (_evOverlay.mode === 'FRANCO_USADO'
-                                                ? `\n🔗 Franco usado en evento: ${_evOverlay.tooltip}`
-                                                : _evOverlay.mode === 'BADGE'
-                                                    ? `\n⚠ También afectado al evento: ${_evOverlay.tooltip}`
-                                                    : '')
-                                            : '';
-                                        const _covHint = (covNote ? `\n📋 ${covNote}` : '') + _covSegHint + _usedHint + _evHint;
-                                        const _billBr = activeShift && shiftCountsForEmployeeCronoHours(activeShift)
-                                            ? planningShiftBillableBreakdown(activeShift, slaCodeHoursHint)
-                                            : null;
-                                        const _billHint = _billBr && _billBr.gross > 0
-                                            ? `\n📊 ${_billBr.base}h base${_billBr.extra > 0 ? ` + ${_billBr.extra}h cobertura = ${_billBr.gross}h` : ` (${_billBr.gross}h)`}`
-                                            : '';
-                                        const _authHint = `${_cellShift?.descansoReducido ? `\n⚠ Descanso reducido autorizado${_cellShift.descansoHoras != null ? ` (${_cellShift.descansoHoras} h)` : ''}` : ''}${_cellShift?.topeExcedido ? `\n⚠ Tope 200 h autorizado${_cellShift.horasMes != null ? ` (${_cellShift.horasMes} h)` : ''}` : ''}`;
-                                        const _consultaCelda = consultaAbiertaEnFecha(vacancyConsultas, cellDateStr, emp.id, String(cellCode || leaveCellCode || ''));
-                                        return <td key={key} data-testid="grilla-celda" onContextMenu={(ev) => abrirMenuRapidoCelda(ev, { emp, dateStr: cellDateStr, isLeave: isLeaveCell, leaveCode: isLeaveCell ? leaveCellCode : null, tieneTurno: !!((p && !p.isDeleted) || s || rfzOnCell), positionName: cellPosName })} onMouseDown={(ev) => { if (ev.button !== 0) return; if (modoElegir) { ev.preventDefault(); ev.stopPropagation(); clicPersonaModoElegir(emp.id); return; } if (!isSnapshotView) handleMouseDown(idx, dayIndex); }} onMouseEnter={(e) => { if (!isSnapshotView && isDragging && allowPlanningMultiSelect) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); const _marca = (p && !p.isDeleted && p.menuRapidoTexto) || s?.menuRapidoTexto; if (_marca) { setShiftTooltip({ label: String(_marca), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); return; } if (isLeaveCell) { const absType = absence?.type || activeShift?.name || LEGEND_DESCRIPTIONS[leaveCellCode] || leaveCellCode; const reason = absence?.reason || activeShift?.comments || p?.comments || ''; const covered = resolveTitularCoverageName(emp.id, emp.name || '', cellDateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell, cellTurnosMap); setShiftTooltip({ label: buildLeaveCellTooltipLabel({ absenceType: absType, reason, coveredBy: covered }), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else if ((s || p || rfzOnCell || _evOverlay) && !absence) { const shiftLabel = _evOverlay?.mode === 'EV'
-                                                    ? _evOverlay.tooltip
-                                                    : (cellCode === 'EV' && (activeShift?.eventoNombre || activeShift?.servicioNombre))
-                                                    ? eventoTooltip(activeShift)
-                                                    : cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : (rfzOnCell ? 'Refuerzo cliente (RFZ)' : null); const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; const _exclHint = cellPosExcluded ? `\n⚠ Puesto excluido por SLA este día` : ''; const _otherObjHint = isOtherObjectiveShift && activeShift?.objectiveId ? `\n📍 Otro objetivo: ${getObjectiveName(activeShift.objectiveId)}` : ''; const _rfzHint = rfzOnCell ? `\n🔴 RFZ ${formatTime(rfzOnCell.startTime)}–${formatTime(rfzOnCell.endTime)}${rfzOnCell.positionName ? ` · ${rfzOnCell.positionName}` : ''}` : ''; const _linkedTura = activeShift?.id ? turaMap[activeShift.id] : null; const _turaHint = _linkedTura ? `\n🟣 TURA ${isTuraContiguousToParent(activeShift, _linkedTura) ? 'seguido' : 'cortado'} ${formatShiftClockRange(_linkedTura)}${_linkedTura.positionName ? ` → ${_linkedTura.positionName}` : ''}` : ''; const _tipLabel = isOpsCoverageCell ? buildOpsCoverageCellTooltip(opsTooltipShift, opsCoverageTooltipCtxFor(opsTooltipShift, emp.name || '')) : (shiftLabel ? `${shiftLabel}${_exclHint}${_otherObjHint}${_rfzHint}${_turaHint}${_covHint}${_billHint}${_authHint}${_lctRest ? `\n⚠ ${_lctRest}` : ''}` : (_exclHint || _otherObjHint || _rfzHint || _turaHint || _covHint || _billHint || _lctRest || null)); setShiftTooltip({ label: _tipLabel, readOnlyOps: isOpsCoverageCell, pos: _isRet ? null : (cellPosName || rfzOnCell?.positionName || null), range: _isRet ? null : (cellRange || (rfzOnCell ? `${formatTime(rfzOnCell.startTime)} - ${formatTime(rfzOnCell.endTime)}` : null)), x: e.clientX, y: e.clientY, restHours: _restHrs }); } else if (isExclusionCol) { setShiftTooltip({ label: excludedPositionsTooltip(excludedOnDay, cellDateStr), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} data-modo-elegir-col={modoElegir && cellDateStr === modoElegir.ctx.dateStr ? '1' : undefined} className={`border-b border-r p-0.5 ${modoElegir || (!isSnapshotView && !isLockedDate && !isServiceLocked && !isOpsCoverageCell) ? 'cursor-pointer' : 'cursor-default'} text-center relative ${modoElegir && cellDateStr === modoElegir.ctx.dateStr ? 'bg-indigo-100 dark:bg-indigo-900/40' : selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`} data-evento={_evOverlay ? _evOverlay.mode : undefined} title={isOpsCoverageCell ? undefined : _evOverlay ? (_evOverlay.mode === 'EV' ? _evOverlay.tooltip : `${_evOverlay.mode === 'FRANCO_USADO' ? 'Franco usado en evento' : 'También afectado al evento'}: ${_evOverlay.tooltip}`) : isExclusionCol && !s && !p ? excludedPositionsTooltip(excludedOnDay, cellDateStr) : isOtherObjectiveShift && activeShift?.objectiveId ? `Turno en ${getObjectiveName(activeShift.objectiveId)}` : undefined}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style} ${_lctRest ? 'ring-2 ring-amber-400' : cellPosExcluded ? 'ring-1 ring-rose-400/70' : ''}`}>{_consultaCelda ? <IndicadorConsultaCelda texto={textoIndicadorConsulta(_consultaCelda)} tooltip={textoTooltipConsulta(_consultaCelda)} onAbrir={() => { setConsultaFoco(_consultaCelda.id); setConsultaTick((n) => n + 1); }} /> : null}{_evOverlay && _evOverlay.mode !== 'EV' && (<div className="absolute -bottom-0.5 right-0 text-[6.5px] font-black bg-yellow-400 text-yellow-900 px-0.5 rounded z-10" title={_evOverlay.tooltip}>EV</div>)}{_lctRest ? (<span className="absolute top-0 left-0 w-1.5 h-1.5 rounded-full bg-amber-500 border border-white" title={_lctRest}/>) : null}{content}{isExclusionCol && !content && (<span className="absolute bottom-0 left-0 w-1.5 h-1.5 rounded-full bg-rose-400/80" title="Día con puesto(s) excluido(s)"/>)}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly || isCoverageSplitCell) && <div className="absolute -top-1 -right-1 text-[8px] bg-red-900 text-white px-1 rounded-full border border-white/40">+</div>}{covRole === 'LIBERATED' && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-emerald-600 text-white px-0.5 rounded">RET</div>}{isCoverageSourceUsed && <div className="absolute -top-1 -left-1 text-[7px] font-black bg-violet-600 text-white px-0.5 rounded z-10" title="Turno usado en cobertura operativa">U</div>}{_cellShift?.descansoReducido && <div className="absolute -top-1 left-0 text-[7px] font-black bg-amber-500 text-white px-0.5 rounded z-10" title="Descanso reducido autorizado">8–12</div>}{_cellShift?.topeExcedido && <div className="absolute -bottom-0.5 right-0 text-[7px] font-black bg-rose-600 text-white px-0.5 rounded z-10" title="Tope de 200 h autorizado">200</div>}{(() => { const _mr = p && !p.isDeleted ? p.menuRapidoRol : s?.menuRapidoRol; if (!_mr) return null; const _cubre = p && !p.isDeleted ? p.menuRapidoCubreA : s?.menuRapidoCubreA; return <div className={`absolute -top-1 left-1/2 -translate-x-1/2 max-w-full truncate text-[6.5px] font-black text-white px-0.5 rounded z-10 ${_mr === 'CUBRE' ? 'bg-indigo-600' : 'bg-emerald-600'}`} data-marca-menu={_mr}>{marcaCeldaMenuRapido(_mr, _cubre)}</div>; })()}{(((covRole === 'TARGET' || isLeaveCell) && coveredByCell) || (p?.menuRapidoTexto && !p?.menuRapidoRol) || (s?.menuRapidoTexto && !s?.menuRapidoRol)) && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-orange-500 text-white px-0.5 rounded" title={p?.menuRapidoTexto || s?.menuRapidoTexto || (coveredByCell ? `Cubierto por ${coveredByCell}` : 'Cubierto')}>✓</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && !isOtherObjectiveShift && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}{isOtherObjectiveShift && content && (<div className="absolute bottom-0 left-0"><MapPin size={7} className="text-slate-300 drop-shadow-sm"/></div>)}{selectedGrupo && grupoUnifiedMode && content && !isOtherObjectiveShift && activeShift?.objectiveId && selectedGrupo.objectiveIds.includes(activeShift.objectiveId) && (() => {
-                                                    const _oi = selectedGrupo.objectiveIds.indexOf(activeShift.objectiveId!);
-                                                    const _clr = GRUPO_COLOR_HEX[_oi % GRUPO_COLOR_HEX.length];
-                                                    const _nm = (selectedGrupo.objectiveNames[_oi] || '').trim().split(/\s+/).filter((w: string) => w.length > 1).pop()?.slice(0, 6).toUpperCase() || (selectedGrupo.objectiveNames[_oi] || '').slice(0, 5).toUpperCase();
-                                                    return (<>
-                                                        <div className="absolute top-0 left-0 bottom-0 w-0.5 opacity-80" style={{ backgroundColor: _clr }}/>
-                                                        <div className="absolute bottom-0 left-0.5 right-0 text-[5.5px] font-black text-white leading-tight text-center overflow-hidden" style={{ backgroundColor: _clr + 'cc' }}>{_nm}</div>
-                                                    </>);
-                                                })()}{hasRfzOverlay && (<div className="absolute top-0 right-0 text-[7px] font-black bg-red-600 text-white px-0.5 rounded-bl">RFZ</div>)}{rfzOnCell && !s && !p && !absence && rfzOnCell.draft && (<div className="absolute bottom-0 right-0 w-1.5 h-1.5 rounded-full bg-amber-400 border border-white" title="Sin publicar"/>)}</div></td>;
                                     })}
                                 </tr>
                             )}
@@ -11998,17 +12278,16 @@ function PlanificacionDesktop() {
                                     key={`eventos_${dayStr}`}
                                     className={`border-b border-r p-0.5 text-center ${isCellWeekend ? 'bg-rose-50/40 dark:bg-rose-950/20' : ''}`}
                                     onMouseEnter={(e) => {
-                                        if (!cell) { setShiftTooltip(null); return; }
-                                        setShiftTooltip({
+                                        if (!cell) { tooltipCeldaCtl.current.ocultar(); return; }
+                                        tooltipCeldaCtl.current.programar(() => ({
                                             label: tooltip,
                                             pos: 'Eventos',
                                             range: cell.entries.map((en) => `${en.nombre} ${en.hours}h`).join(' · '),
-                                            x: e.clientX,
-                                            y: e.clientY,
                                             restHours: null,
-                                        });
+                                        }), e.clientX, e.clientY);
                                     }}
-                                    onMouseLeave={() => setShiftTooltip(null)}
+                                    onMouseMove={(e) => tooltipCeldaCtl.current.mover(e.clientX, e.clientY)}
+                                    onMouseLeave={() => tooltipCeldaCtl.current.ocultar()}
                                 >
                                     {cell && (
                                         <div
@@ -12374,49 +12653,8 @@ function PlanificacionDesktop() {
                 />,
                 document.body,
             )}
-            {shiftTooltip && (
-                <div
-                    className="fixed z-[9999] pointer-events-none"
-                    style={{ left: shiftTooltip.x + 10, top: shiftTooltip.y - 64 }}
-                >
-                    <div className={`bg-slate-900 text-white text-[10px] font-black px-2.5 py-2 rounded-lg shadow-sm flex flex-col gap-1 max-w-[320px] ${shiftTooltip.label?.includes('\n') ? 'whitespace-pre-line' : 'whitespace-nowrap'}`}>
-                        {shiftTooltip.label && (
-                            <div className="flex items-start gap-1.5 text-white font-medium">
-                                {shiftTooltip.label.startsWith('Tipo:') ? (
-                                    <Stethoscope size={9} className="text-rose-300 shrink-0 mt-0.5" />
-                                ) : (
-                                    <Clock size={9} className="text-indigo-300 shrink-0 mt-0.5" />
-                                )}
-                                <span>{shiftTooltip.label}</span>
-                            </div>
-                        )}
-                        {shiftTooltip.pos && (
-                            <div className="flex items-center gap-1.5 text-slate-300 font-medium text-[9px]">
-                                <MapPin size={9} className="text-indigo-300 shrink-0" />
-                                {shiftTooltip.pos}
-                            </div>
-                        )}
-                        {shiftTooltip.range && (
-                            <div className="flex items-center gap-1.5 text-slate-300 font-medium text-[9px]">
-                                <span className="text-indigo-300">⏱</span>
-                                {shiftTooltip.range}
-                            </div>
-                        )}
-                        {shiftTooltip.restHours != null && (
-                            <div className="flex items-center gap-1.5 text-green-300 font-medium text-[9px]">
-                                <span className="text-green-400">⏸</span>
-                                Descanso total: <span className="font-black text-green-200">{shiftTooltip.restHours}h</span>
-                            </div>
-                        )}
-                        <div className="text-[8px] text-slate-500 font-medium pt-0.5 border-t border-slate-700">
-                            {shiftTooltip.readOnlyOps
-                                ? 'Solo lectura (Operaciones) — click en la celda para informe completo'
-                                : 'Click para ver detalle / Cambiar'}
-                        </div>
-                    </div>
-                    <div className="w-2 h-2 bg-slate-900 rotate-45 ml-2 -mt-1" />
-                </div>
-            )}
+            <TooltipCeldaGrilla controlRef={tooltipCeldaCtl} />
+
             {opsCoverageDetailModal && (
                 <div
                     className="fixed inset-0 z-[10000] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4"
@@ -12732,6 +12970,7 @@ function PlanificacionDesktop() {
                                     </button>
                                 )}
                                 {showLegend && renderLegend()}
+                                {!comparingSnapshot && <PlanningCoverageLegend />}
 
                                 {/* BELL — solo expandido */}
                                 {!toolbarCollapsed && (
@@ -13386,9 +13625,6 @@ function PlanificacionDesktop() {
                                 </div>
                             );
                         })()}
-                        {!comparingSnapshot && (
-                            <PlanningCoverageLegend open={coverageLegendOpen} onToggle={toggleCoverageLegend} />
-                        )}
                         {correctionMode && (
                             <>
                             <div className="mx-2 mb-1 flex items-center gap-2 bg-rose-600 text-white px-4 py-2 rounded-xl text-xs font-black no-print">
