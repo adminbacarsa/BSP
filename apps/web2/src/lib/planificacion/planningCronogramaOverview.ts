@@ -9,6 +9,7 @@ import {
 } from '@/lib/multiempresa';
 import { sumPublishedPlanHours } from '@cosp/hours-core';
 import { findLctRestGaps, type LctShiftInput } from '@/lib/planificacion/lctRestGap';
+import { mesCerrado } from '@/lib/planificacion/mesCerradoPlanif';
 
 export type CronogramaEstado =
   | 'PUBLICADO'
@@ -27,8 +28,10 @@ export interface CronogramaOverviewRow {
   draftShifts: number;
   publishedShifts: number;
   totalShifts: number;
-  /** Ausencias sin cobertura asignada (sin coveredBy). */
+  /** Ausencias sin cobertura asignada (sin coveredBy). En un mes cerrado queda en 0. */
   openVacancies: number;
+  /** Ausencias sin coveredBy de un mes ya terminado. No suma a «Coberturas abiertas». */
+  historicoSinCobertura?: number;
   /** Horas planificadas oficiales (solo publicado). El selector del modal puede mostrar el borrador. */
   plannedHours: number;
   planDraftHours: number;
@@ -296,7 +299,8 @@ export async function loadCronogramaOverview(params: {
         draftShifts: counts.draft,
         publishedShifts: counts.published,
         totalShifts: counts.draft + counts.published,
-        openVacancies: counts.openVacancies,
+        openVacancies: mesCerrado(year, month) ? 0 : counts.openVacancies,
+        historicoSinCobertura: mesCerrado(year, month) ? counts.openVacancies : 0,
         plannedHours,
         planDraftHours,
         publishedBy: pub?.publishedBy || '',

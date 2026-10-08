@@ -231,6 +231,7 @@ import {
     PLANNING_NON_BILLABLE_CODES,
     buildCodeCountsByPositionForDay,
     collectSplitBandCreditsForDay,
+    creditosSplitPorDia,
     lookupSplitCreditsForPosition,
 } from '@/lib/planificacion/positionCoverageUnits';
 import {
@@ -478,6 +479,8 @@ import {
     planningShiftBillableBreakdown,
 } from '@/lib/planificacion/planningScheduledHours';
 import { aporteDelTurnoAlDia, sumarDiasCalendario } from '@/lib/planificacion/coberturaDiaHueco';
+import { sumarAportePorDiaYPuesto } from '@/lib/planificacion/aporteCoberturaMes';
+import { AVISO_MES_CERRADO, mesCerrado } from '@/lib/planificacion/mesCerradoPlanif';
 import { computePlanningMonthHoursBreakdown } from '@/lib/planificacion/planningMonthHoursBreakdown';
 import { buildPlannerColumnHours } from '@/lib/planificacion/plannerColumnHours';
 import {
@@ -4377,7 +4380,7 @@ function PlanificacionDesktop() {
         if (obj.status === 'INACTIVE' || obj.active === false) return { status: 'INACTIVE', msg: '⛔ SERVICIO SUSPENDIDO / INACTIVO', icon: <PowerOff size={20}/> };
         if (!hasActiveSLA) {
             const hint = slaPlanningHint ? ` (${slaPlanningHint})` : '';
-            return { status: 'DELETED', msg: `⛔ SIN SERVICIO ACTIVO PARA ESTE MES — No se puede planificar${hint}`, icon: <Database size={20}/> };
+            return { status: 'SIN_SERVICIO', msg: `No hay servicio en este mes${hint}`, icon: <Database size={20}/> };
         }
         
         if (obj.endDate) {
@@ -4392,7 +4395,19 @@ function PlanificacionDesktop() {
         return { status: 'ACTIVE', msg: 'OK', icon: <CheckCircle size={20}/> };
     }, [selectedClient, selectedObjective, clients, currentDate, hasActiveSLA, slaPlanningHint, loadingEmpresa, isDataSyncing]);
 
-    const isServiceLocked = activeServiceStatus.status !== 'ACTIVE' && activeServiceStatus.status !== 'IDLE';
+    const sinServicioEnMes = activeServiceStatus.status === 'SIN_SERVICIO';
+    const isServiceLocked = activeServiceStatus.status !== 'ACTIVE' && activeServiceStatus.status !== 'IDLE' && activeServiceStatus.status !== 'SIN_SERVICIO';
+    const anioVista = currentDate.getFullYear();
+    const mesVista = currentDate.getMonth() + 1;
+    const vistaMesCerrado = mesCerrado(anioVista, mesVista);
+    const bloqueoMesCerrado = vistaMesCerrado && !(isSuperAdmin && correctionMode);
+    const msgBloqueoEdicion: string | null = isServiceLocked
+        ? (activeServiceStatus.msg || 'Bloqueado')
+        : sinServicioEnMes
+            ? 'No hay servicio en este mes'
+            : bloqueoMesCerrado
+                ? AVISO_MES_CERRADO
+                : null;
 
     const catalogReady = !loadingEmpresa && (clients.length > 0 || !isDataSyncing);
     const planningBusyLabel = !catalogReady
@@ -4402,6 +4417,47 @@ function PlanificacionDesktop() {
     // ============================================================================
     // 5. MOTORES DE CÁLCULO (NIVEL 4 - SLA INTELLIGENCE V9.00)
     // ============================================================================
+
+    const diasDelMes = useMemo(() => daysInMonth.map((d) => getDateKey(d)), [daysInMonth]);
+    const resolverTurnoMes = useCallback((empId: string, ds: string) => {
+        const k = `${empId}_${ds}`;
+        const pending = pendingChanges[k];
+        if (pending?.isDeleted) return null;
+        return pending ? pending : shiftsMap[k] || null;
+    }, [pendingChanges, shiftsMap]);
+    const creditosDelMes = useMemo(() => {
+        if (!selectedObjective || (selectedGrupo && grupoUnifiedMode)) return {} as Record<string, Record<string, Record<string, number>>>;
+        return creditosSplitPorDia(dotacionBaseEmployees, diasDelMes, resolverTurnoMes, {
+            selectedObjective,
+            isPendingChange: (empId, ds) => !!pendingChanges[`${empId}_${ds}`],
+            resolveOriginalShift: (empId, ds) => shiftsMap[`${empId}_${ds}`] || null,
+            shiftsMap,
+            pendingChanges,
+        });
+    }, [selectedObjective, selectedGrupo, grupoUnifiedMode, dotacionBaseEmployees, diasDelMes, resolverTurnoMes, pendingChanges, shiftsMap]);
+    const aportePorDiaYPuesto = useMemo(() => {
+        if (!selectedObjective) return {} as Record<string, Record<string, number>>;
+        return sumarAportePorDiaYPuesto({
+            employees: displayedEmployees,
+            dias: diasDelMes,
+            positions: positionStructure || [],
+            resolveShift: resolverTurnoMes,
+            isLeave: (empId, date, _shift) => {
+                const key = `${empId}_${date}`;
+                return isEmployeeOnLeave({ shiftCode: pendingChanges[key]?.code || shiftsMap[key]?.code, absence: absencesMap[key] });
+            },
+            objectiveIdOf: (empId, shift, date) => {
+                const emp = displayedEmployees.find((e: { id: string }) => e.id === empId);
+                const pending = pendingChanges[`${empId}_${date}`];
+                const explicitObj = pending?.objectiveId ?? shift.objectiveId;
+                if (explicitObj) return String(explicitObj);
+                return String(resolveNativeObjectiveInGrupo(emp || { id: empId }) || ((emp?.preferredObjectiveId === selectedObjective || slaIdToObjId[emp?.preferredObjectiveId] === selectedObjective) ? selectedObjective : ''));
+            },
+            selectedObjective,
+            dominantPositionName: dominantPosition?.positionName || 'General',
+            slaCodeHoursHint,
+        });
+    }, [selectedObjective, displayedEmployees, diasDelMes, positionStructure, resolverTurnoMes, pendingChanges, shiftsMap, absencesMap, resolveNativeObjectiveInGrupo, slaIdToObjId, dominantPosition, slaCodeHoursHint]);
 
     const calculateCoverageStats = (
         dateStr: string,
@@ -4431,6 +4487,18 @@ function PlanificacionDesktop() {
                 .map((s: any) => String(s.code || '').toUpperCase())
                 .filter((c: string) => c && isPlanningWorkShiftCode(c)),
         );
+
+        const mapaHoras = (!objectiveId || String(objectiveId) === String(selectedObjective))
+            && employeesList === displayedEmployees;
+        if (mapaHoras) {
+            return {
+                current: aportePorDiaYPuesto[dateStr]?.[positionName] || 0,
+                target,
+                pax,
+                isActiveDay: isDayActive && !isDayExcluded,
+                isExcludedDay: isDayExcluded,
+            };
+        }
 
         let current = 0;
         const dominant = structure.reduce((prev: any, current: any) => (prev.qty > current.qty) ? prev : current, structure[0] || { qty: 1, positionName: 'General' });
@@ -4522,7 +4590,10 @@ function PlanificacionDesktop() {
             codeCounts[code] = (codeCounts[code] || 0) + 1;
         });
 
-        const splitCredits = collectSplitBandCreditsForDay(
+        const precomputado = (!objectiveId || String(objectiveId) === String(selectedObjective))
+            ? creditosDelMes[dateStr]
+            : undefined;
+        const splitCredits = precomputado || collectSplitBandCreditsForDay(
             employeesList,
             dateStr,
             (empId, ds) => {
@@ -4601,6 +4672,7 @@ function PlanificacionDesktop() {
             isPendingChange: (empId, ds) => !!pendingChanges[`${empId}_${ds}`],
             existingShiftsMap: shiftsMap,
             pendingChangesMap: pendingChanges,
+            splitCredits: creditosDelMes[dateStr],
         },
     );
 
@@ -5962,8 +6034,8 @@ function PlanificacionDesktop() {
         );
         if (!isPlanificacionPublished(publishStatusMap[lookupKey])) return;
         setNeedsRepublishMap(prev => ({ ...prev, [lookupKey]: true }));
-        if (!opts?.republishOnly && canCorrectPlanning) setCorrectionMode(true);
-    }, [selectedObjective, currentDate, publishStatusMap, canCorrectPlanning]);
+        if (!opts?.republishOnly && canCorrectPlanning && !(mesCerrado(currentDate.getFullYear(), currentDate.getMonth() + 1) && !isSuperAdmin)) setCorrectionMode(true);
+    }, [selectedObjective, currentDate, publishStatusMap, canCorrectPlanning, isSuperAdmin]);
 
     useEffect(() => {
         if (!selectedObjective) return;
@@ -5982,8 +6054,8 @@ function PlanificacionDesktop() {
         if (asignadosSinPublicar) {
             setNeedsRepublishMap(prev => ({ ...prev, [lookupKey]: true }));
         }
-        if (canCorrectPlanning) setCorrectionMode(true);
-    }, [selectedObjective, currentDate, rfzTodos, publishStatusMap, canCorrectPlanning]);
+        if (canCorrectPlanning && !(mesCerrado(year, month) && !isSuperAdmin)) setCorrectionMode(true);
+    }, [selectedObjective, currentDate, rfzTodos, publishStatusMap, canCorrectPlanning, isSuperAdmin]);
 
     // Carga asignaciones de puesto: base desde empleados + overlay mensual desde planificacion_estados.
     // Si el mes actual no tiene datos propios, hereda del mes anterior (una sola vez al abrir el mes).
@@ -6678,7 +6750,7 @@ function PlanificacionDesktop() {
     }, [openDrop, repositionContextDropPanel]);
     const handleTransferEmployee = async (emp: any) => { if (!selectedObjective) return; if (!confirm(`¿Transferir a ${emp.name} a este objetivo?`)) return; try { await updateDoc(doc(db, 'empleados', emp.id), { preferredObjectiveId: selectedObjective }); await addDoc(collection(db, 'audit_logs'), stampEmpresaId({ action: 'TRANSFERENCIA_OBJETIVO', module: 'PLANIFICADOR', details: `Transfirió a ${emp.name} al objetivo ${getObjectiveName(selectedObjective)}`, timestamp: serverTimestamp(), actorName: activeActorName, actorUid: getAuth().currentUser?.uid, objectiveId: selectedObjective, objectiveName: getObjectiveName(selectedObjective) }, empresaId)); toast.success("Transferencia exitosa"); } catch (e) { toast.error("Error al transferir"); } };
     const handleDelete = async () => {
-        if (isServiceLocked) { toast.error(activeServiceStatus.msg); return; }
+        if (msgBloqueoEdicion) { toast.error(msgBloqueoEdicion); return; }
         if (!selectedCell) return;
         if (isPlanningDateLocked(selectedCell.dateStr)) { toast.warning("Bloqueado."); return; }
         if (isShiftConsolidated(selectedCell.currentShift)) { toast.warning("Turno consolidado/fichado: no se puede borrar desde el planificador."); return; }
@@ -6968,7 +7040,7 @@ function PlanificacionDesktop() {
     };
 
     const handleSaveAll = async () => {
-        if (isServiceLocked) { toast.error(activeServiceStatus.msg); return; }
+        if (msgBloqueoEdicion) { toast.error(msgBloqueoEdicion); return; }
         const saneado = quitarBorradorQuePisaConsulta(pendingChanges, vacancyConsultas);
         if (saneado.quitadas.length) {
             toast.message('Los días con consulta abierta no se guardan en el cronograma: los resuelve quien acepte.');
@@ -7721,6 +7793,7 @@ function PlanificacionDesktop() {
     };
 
     const openPublishConfirm = () => {
+        if (bloqueoMesCerrado) { toast.error(AVISO_MES_CERRADO); return; }
         if (!selectedObjective || !canPublishPlanning) return;
         const year = currentDate.getFullYear();
         const month = currentDate.getMonth() + 1;
@@ -7879,6 +7952,7 @@ function PlanificacionDesktop() {
     };
 
     const handleUnpublish = async () => {
+        if (bloqueoMesCerrado) { toast.error(AVISO_MES_CERRADO); return; }
         if (!selectedObjective || !isSuperAdmin || isUnpublishing) return;
         const year = currentDate.getFullYear();
         const month = currentDate.getMonth() + 1;
@@ -7967,7 +8041,7 @@ function PlanificacionDesktop() {
 
     const resolveConflict = async (type: 'SPLIT' | 'FULL_COVERAGE') => { if (!selectedCell?.currentShift) return; const batch = writeBatch(db); const shiftId = selectedCell.currentShift.id; if (selectedCell.absence) { batch.update(doc(db, 'turnos', shiftId), { status: 'ABSENT', comments: 'Cubierto por ausencia' }); } else { batch.update(doc(db, 'turnos', shiftId), { hasNovedad: false, comments: 'Novedad resuelta' }); } if (type === 'SPLIT') { if (conflictNeighbors?.prev) { batch.update(doc(db, 'turnos', conflictNeighbors.prev.id), { isExtended: true, comments: 'Extensión por cobertura' }); } if (conflictNeighbors?.next) { batch.update(doc(db, 'turnos', conflictNeighbors.next.id), { isEarlyStart: true, comments: 'Adelanto por cobertura' }); } toast.success("Cobertura aplicada: Extensión + Adelanto"); } else { setShowConflictModal(false); setFrancoMode('FT_SELECTION'); return; } await batch.commit(); setShowConflictModal(false); setSelectedCell(null); };
     const handleRRHHSubmit = () => {
-        if (isServiceLocked) { toast.error(activeServiceStatus.msg); return; }
+        if (msgBloqueoEdicion) { toast.error(msgBloqueoEdicion); return; }
         if (!selectedCell) return;
         const absenceCodes: Record<string, string> = { 'Vacaciones': 'V', 'Enfermedad': 'E', 'ART': 'A', 'Injustificada': 'AA', 'Licencia Esp.': 'L', 'PG Permiso Gremial': 'PG' };
         const code = absenceCodes[rrhhData.type] || 'AA';
@@ -7996,7 +8070,7 @@ function PlanificacionDesktop() {
     };
 
     const handleProcessVacancy = () => {
-        if (isServiceLocked) { toast.error(activeServiceStatus.msg); return; }
+        if (msgBloqueoEdicion) { toast.error(msgBloqueoEdicion); return; }
         if (!vacancyData?.startDate) return;
         const activeDays = [...vacancyActiveDates].sort();
         if (activeDays.length === 0) { toast.error('Seleccioná al menos un día a procesar'); return; }
@@ -8206,6 +8280,7 @@ function PlanificacionDesktop() {
         if (!selectedObjective) return false;
         const pubKey = planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1);
         const publicado = isPlanificacionPublished(publishStatusMap[pubKey]);
+        if (bloqueoMesCerrado || sinServicioEnMes) return false;
         return !isServiceLocked && !isPlanningDateLocked(dia) && (!publicado || (correctionMode && canCorrectPlanning));
     };
     const celdasDeLaSeleccion = () => {
@@ -8295,6 +8370,7 @@ function PlanificacionDesktop() {
             esHueco,
             cubiertoPorOps,
             puedeEditar: puedeEditarDiaMenu(celda.dateStr),
+            mesCerrado: bloqueoMesCerrado,
         });
         if (!opciones.visible) return;
         ev.preventDefault();
@@ -8976,7 +9052,7 @@ function PlanificacionDesktop() {
             toast.message('Cronograma publicado — activá modo Corregir para edición masiva.');
             return;
         }
-        if (isServiceLocked) { toast.error(activeServiceStatus.msg || 'Bloqueado'); return; }
+        if (msgBloqueoEdicion) { toast.error(msgBloqueoEdicion); return; }
         if (!selection.start || !selection.end) return;
         const startDay = daysInMonth[Math.min(selection.start.c, selection.end.c)];
         if (isPlanningDateLocked(getDateKey(startDay))) {
@@ -9303,7 +9379,7 @@ function PlanificacionDesktop() {
             toast.message('Cronograma publicado — activá modo Corregir para edición masiva.');
             return;
         }
-        if (isServiceLocked) { toast.error(activeServiceStatus.msg || 'Bloqueado'); return; }
+        if (msgBloqueoEdicion) { toast.error(msgBloqueoEdicion); return; }
         if (!selection.start || !selection.end) return;
 
         const getEmpBulkObjective = (emp: any): string | null => {
@@ -9755,7 +9831,7 @@ function PlanificacionDesktop() {
             toast.message('Cronograma publicado — activá modo Corregir para edición masiva.');
             return;
         }
-        if (isServiceLocked) { toast.error(activeServiceStatus.msg || 'Bloqueado'); return; }
+        if (msgBloqueoEdicion) { toast.error(msgBloqueoEdicion); return; }
         if (!selection.start || !selection.end) return;
         const minC = Math.min(selection.start.c, selection.end?.c ?? selection.start.c);
         const dateStr = daysInMonth[minC] ? getDateKey(daysInMonth[minC]) : null;
@@ -9830,7 +9906,7 @@ function PlanificacionDesktop() {
     };
 
     const handleAssignShift = async (shiftConfig: any, positionName: string) => {
-        if (isServiceLocked) { toast.error(activeServiceStatus.msg || 'Bloqueado'); return; } 
+        if (msgBloqueoEdicion) { toast.error(msgBloqueoEdicion); return; } 
         if (!selectedCell) return; 
         if (isOutsideServiceRange(selectedCell.dateStr) && !shiftConfig?.isDeleted) { toast.error(outsideServiceMsg); return; }
         if (isPlanningDateLocked(selectedCell.dateStr)) {
@@ -10010,7 +10086,7 @@ function PlanificacionDesktop() {
     };
 
     const executeSwap = () => {
-        if (isServiceLocked) { toast.error(activeServiceStatus.msg || 'Bloqueado'); return; }
+        if (msgBloqueoEdicion) { toast.error(msgBloqueoEdicion); return; }
         if (!selectedCell?.empId || !selectedCell?.dateStr || !selectedSwapTarget) return;
 
         const emp1 = selectedCell.empId;
@@ -10128,6 +10204,7 @@ function PlanificacionDesktop() {
     }, [allowPlanningMultiSelect, selection, displayedEmployees, daysInMonth, pendingChanges, shiftsMap]);
 
     const pasteClipboardAt = useCallback((targetRow: number, targetCol: number) => {
+        if (msgBloqueoEdicion) { toast.error(msgBloqueoEdicion); return; }
         if (!allowPlanningMultiSelect) {
             toast.message('Cronograma publicado — activá modo Corregir para pegar en masa.');
             return;
@@ -10166,14 +10243,14 @@ function PlanificacionDesktop() {
                 : `${pasted} turno(s) pegado(s) — portapapeles listo para repetir`,
         );
         if (clipboardIsCut) setClipboardIsCut(false);
-    }, [allowPlanningMultiSelect, clipboard, clipboardIsCut, commitPendingChanges, displayedEmployees, daysInMonth, shiftsMap, selectedObjective, isPlanningDateLocked, isOutsideServiceRange, selectedGrupo, grupoUnifiedMode, resolveObjectiveForEmp]);
+    }, [allowPlanningMultiSelect, clipboard, clipboardIsCut, commitPendingChanges, displayedEmployees, daysInMonth, shiftsMap, selectedObjective, isPlanningDateLocked, isOutsideServiceRange, selectedGrupo, grupoUnifiedMode, resolveObjectiveForEmp, msgBloqueoEdicion]);
 
     const cutSelection = useCallback(() => {
         if (!allowPlanningMultiSelect) {
             toast.message('Cronograma publicado — activá modo Corregir para edición masiva.');
             return;
         }
-        if (isServiceLocked) { toast.error(activeServiceStatus.msg || 'Bloqueado'); return; }
+        if (msgBloqueoEdicion) { toast.error(msgBloqueoEdicion); return; }
         const bounds = copySelectionToClipboard(true);
         if (!bounds) return;
         const prev = pendingChangesRef.current;
@@ -10246,7 +10323,12 @@ function PlanificacionDesktop() {
         setIsDragging(false);
         clearTimeout(longPressTimer.current);
         if (columnSelectMode) return; // keep selection visible for copy action
-        if (isServiceLocked) { toast.error(activeServiceStatus.msg); setSelection({ start: null, end: null }); return; }
+        if (msgBloqueoEdicion) {
+            if (!(bloqueoMesCerrado && selection.start && selection.end && (selection.start.r !== selection.end.r || selection.start.c !== selection.end.c))) {
+                setSelection({ start: null, end: null });
+            }
+            return;
+        }
         if (selection.start && selection.end && selection.start.r === selection.end.r && selection.start.c === selection.end.c) {
             const emp = displayedEmployees[selection.start.r]; 
             const day = daysInMonth[selection.start.c]; 
@@ -12778,17 +12860,21 @@ function PlanificacionDesktop() {
                         }
 
                         const isCovered = requiredPax > 0 && closedPax >= requiredPax;
-                        const cls = requiredPax === 0 ? 'bg-slate-50 text-slate-400' : (isCovered ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-600 cursor-pointer');
+                        const cls = bloqueoMesCerrado
+                            ? 'bg-slate-100 text-slate-400'
+                            : (requiredPax === 0 ? 'bg-slate-50 text-slate-400' : (isCovered ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-600 cursor-pointer'));
                         return (
                             <td
                                 key={dateStr}
                                 className={`text-center border-r border-b text-[10px] font-black ${cls}`}
                                 colSpan={1}
-                                title={requiredPax > 0
+                                title={bloqueoMesCerrado
+                                    ? AVISO_MES_CERRADO
+                                    : (requiredPax > 0
                                     ? `${closedPax} de ${requiredPax} puestos cerrados (1 pax = esquema SLA completo del día)`
-                                    : undefined}
+                                    : undefined)}
                                 onClick={(e) => {
-                                    if (isCovered || requiredPax === 0) return;
+                                    if (bloqueoMesCerrado || isCovered || requiredPax === 0) return;
                                     const codeCounts = buildDayCodeCountsByPosition(dateStr);
                                     const dayReport = analyzeDayCoverageGaps(
                                         positionStructure || [],
@@ -13567,8 +13653,8 @@ function PlanificacionDesktop() {
                                 {/* DIAGNÓSTICO COBERTURA — compacto, toolbar derecho */}
                                 {selectedObjective && !isServiceLocked && (selectedGrupo && grupoUnifiedMode ? grupoGapReport : objectiveCoverageGapReport) && (() => {
                                     const _rpt = (selectedGrupo && grupoUnifiedMode ? grupoGapReport : objectiveCoverageGapReport)!;
-                                    const _ok = _rpt.worstDays.length === 0;
-                                    const gapCount = _rpt.daysPartial + _rpt.daysEmpty;
+                                    const gapCount = bloqueoMesCerrado ? 0 : (_rpt.daysPartial + _rpt.daysEmpty);
+                                    const _ok = bloqueoMesCerrado || _rpt.worstDays.length === 0;
                                     const coberturaTitle = `Cobertura del mes · ${_rpt.daysFull} días OK${gapCount > 0 ? ` · ${gapCount} con huecos` : ''}`;
                                     return (
                                         <div className="relative hidden md:block shrink-0">
@@ -13627,7 +13713,7 @@ function PlanificacionDesktop() {
                                                     <Ghost size={14} aria-hidden/>
                                                 </span>
                                             )}
-                                            {canPublishPlanning && (!published || needsRepublish) && (
+                                            {canPublishPlanning && !bloqueoMesCerrado && (!published || needsRepublish) && (
                                                 <button
                                                     data-action="publicar-cronograma"
                                                     onClick={openPublishConfirm}
@@ -13640,7 +13726,7 @@ function PlanificacionDesktop() {
                                                     {isPublishing ? <Loader2 size={14} className="animate-spin"/> : <CalendarCheck size={14}/>}
                                                 </button>
                                             )}
-                                            {published && canCorrectPlanning && (
+                                            {published && (vistaMesCerrado ? isSuperAdmin : canCorrectPlanning) && (
                                                 <button
                                                     onClick={() => setCorrectionMode(v => !v)}
                                                     title="Modo Corrección: permite editar cronograma publicado sin FT/FF"
@@ -13649,7 +13735,7 @@ function PlanificacionDesktop() {
                                                     <ShieldAlert size={14}/>
                                                 </button>
                                             )}
-                                            {published && isSuperAdmin && (
+                                            {published && isSuperAdmin && !bloqueoMesCerrado && (
                                                 <button
                                                     onClick={handleUnpublish}
                                                     disabled={isUnpublishing}
@@ -13958,6 +14044,18 @@ function PlanificacionDesktop() {
                             </div>
                             </div>
 
+                            {sinServicioEnMes && (
+                                <div className="bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl flex items-center gap-3 no-print" data-sin-servicio>
+                                    <Database size={16} className="text-slate-500 shrink-0"/>
+                                    <p className="text-[10px] font-black text-slate-600 uppercase truncate">{activeServiceStatus.msg}</p>
+                                </div>
+                            )}
+                            {bloqueoMesCerrado && (
+                                <div className="bg-slate-100 border border-slate-200 px-3 py-2 rounded-xl flex items-center gap-3 no-print" data-mes-cerrado-aviso>
+                                    <LockKeyhole size={16} className="text-slate-500 shrink-0"/>
+                                    <p className="text-[10px] font-black text-slate-600 uppercase">{AVISO_MES_CERRADO} — solo lectura. Lo que no se cubrió queda como histórico.</p>
+                                </div>
+                            )}
                             {isServiceLocked && (
                                 <div className="bg-rose-50 border border-rose-200 px-3 py-2 rounded-xl flex items-center gap-3 animate-in slide-in-from-top shadow-sm no-print">
                                     <div className="p-1.5 bg-rose-100 rounded-lg text-rose-600 animate-pulse shrink-0"><PowerOff size={16}/></div>
@@ -14236,7 +14334,12 @@ function PlanificacionDesktop() {
                 </div>
 
                 {/* BARRA FLOTANTE */}
-                {!comparingSnapshot && !isServiceLocked && allowPlanningMultiSelect && (
+                {bloqueoMesCerrado && selection.start && (
+                    <div data-mes-cerrado className="absolute top-24 left-1/2 -translate-x-1/2 z-[100] bg-slate-700 text-white rounded-xl shadow-2xl border border-slate-500 px-4 py-2 text-xs font-black no-print">
+                        {AVISO_MES_CERRADO}
+                    </div>
+                )}
+                {!bloqueoMesCerrado && !sinServicioEnMes && !comparingSnapshot && !isServiceLocked && allowPlanningMultiSelect && (
                     (clipboard !== null) ||
                     (selection.start !== null && (selection.start.r !== selection.end?.r || selection.start.c !== selection.end?.c))
                 ) && (
@@ -15962,7 +16065,7 @@ function PlanificacionDesktop() {
                                                                 }, 0);
                                                             };
                                                             const assignServicio = async ({ evento, servicio }: { evento: Evento; servicio: ServicioEvento }) => {
-                                                                if (isServiceLocked) return;
+                                                                if (msgBloqueoEdicion) return;
                                                                 const guardHours = servicio.tipoTurno === '3x8' ? 8
                                                                     : servicio.tipoTurno === '2x12' ? 12
                                                                     : calcHorasEvento(servicio.horaInicio, servicio.horaFin);
@@ -16021,7 +16124,7 @@ function PlanificacionDesktop() {
                                                                 <div className="col-span-3">
                                                                     <button
                                                                         onClick={() => {
-                                                                            if (isServiceLocked) return;
+                                                                            if (msgBloqueoEdicion) return;
                                                                             if (srvsDia.length === 1) {
                                                                                 void assignServicio(srvsDia[0]);
                                                                             } else {

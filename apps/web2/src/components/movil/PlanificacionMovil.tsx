@@ -66,6 +66,7 @@ import {
   opcionesTurnoDelDia,
   plantelDe,
   puedeCorregirEnCelular,
+  AVISO_MES_CERRADO,
   puestoDe,
   semanaAnterior,
   semanaDe,
@@ -76,6 +77,7 @@ import {
   type SeleccionPlan,
 } from '@/lib/movil/planificacionSemana';
 import { canAssignFrancoTrabajado } from '@/lib/planificacion/francoTrabajadoAccess';
+import { mesCerrado } from '@/lib/planificacion/mesCerradoPlanif';
 import { buildPlanningMonthTurnosQuery } from '@/lib/planificacion/loadPlanningMonthShifts';
 import { ingestPlanningTurnosSnapshot } from '@/lib/planificacion/planningTurnosIngest';
 import { belongsToEmpresaView, empresaCollectionQuery, fetchPlanificacionPublishStatus } from '@/lib/multiempresa';
@@ -287,7 +289,9 @@ export function PlanificacionMovil() {
   const keyMes = objetivoSel ? `${objetivoSel.id}|${ymSemana}` : null;
   const estadoMes = keyMes ? publicado[keyMes] ?? null : null;
   /** Semana en solo lectura hasta que el mes figure publicado (sin estado = sin publicar). */
-  const semanaSoloLectura = estadoMes?.publishedAt !== true;
+  const [anioSemana, mesSemanaNum] = ymSemana.split('-').map(Number);
+  const semanaCerrada = mesCerrado(anioSemana, mesSemanaNum);
+  const semanaSoloLectura = semanaCerrada || estadoMes?.publishedAt !== true;
 
   useEffect(() => {
     const keys = new Set(turnos.map((t) => `${t.objectiveId}|${t.date.slice(0, 7)}`).filter((key) => key.split('|')[0]));
@@ -394,7 +398,8 @@ export function PlanificacionMovil() {
    */
   const exigirEdicion = (franja?: Pick<FranjaMovil, 'objectiveId' | 'date'> | null) => {
     const publicadoMes = franja ? mesPublicadoDe(publicado, franja.objectiveId, franja.date) : (estadoMes ? estadoMes.publishedAt : null);
-    const gate = puedeCorregirEnCelular(publicadoMes, puedeCorregir);
+    const fechaMes = franja?.date || lunes;
+    const gate = puedeCorregirEnCelular(publicadoMes, puedeCorregir, fechaMes);
     if (gate.ok) return true;
     if (gate.motivo === AVISO_MES_SIN_PUBLICAR) toast.message(gate.motivo);
     else toast.error(gate.motivo || 'No tenés permiso para modificar la planificación.');
@@ -742,7 +747,8 @@ export function PlanificacionMovil() {
       {panel === 'semana' && objetivoSel && (
         <BarraPublicar
           cambios={cambios.length}
-          publicado={!semanaSoloLectura}
+          publicado={semanaCerrada ? false : (estadoMes ? estadoMes.publishedAt : null)}
+          aviso={semanaCerrada ? AVISO_MES_CERRADO : undefined}
           puedeCorregir={puedeCorregir}
           onGuardar={() => { void guardarCambios(); }}
         />

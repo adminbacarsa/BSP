@@ -270,6 +270,10 @@ export default function PlanningCronogramasOverviewModal({
             <AlertTriangle size={9} />
             {r.openVacancies}
           </span>
+        ) : (r.historicoSinCobertura || 0) > 0 ? (
+          <span className="text-[10px] font-bold text-slate-400" title="sin cobertura registrada (histórico)">
+            {r.historicoSinCobertura}
+          </span>
         ) : (
           <span className="text-slate-200 text-[10px]">—</span>
         )}

@@ -19,6 +19,7 @@ import type { PlanningPositionShiftRow } from '@/lib/planningPositionDays';
 import { hoursBetweenClockTimes } from '@/lib/planificacion/planningScheduledHours';
 import { buscarClientes, clientesParaFiltro, type OpsClienteMovil } from '@/lib/movil/operacionFiltros';
 import { bandaDe, sumarDias, type FranjaMovil, type TurnoMovil } from '@/lib/movil/planificacionBasica';
+import { AVISO_MES_CERRADO, mesCerrado, mesDeFecha } from '@/lib/planificacion/mesCerradoPlanif';
 
 export { buscarClientes, type OpsClienteMovil };
 
@@ -31,6 +32,7 @@ export const DIAS_CORTOS = ['LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB', 'DOM'];
  * y se planifica y publica desde la computadora. Solo un mes publicado admite «Publicar corrección».
  */
 export const AVISO_MES_SIN_PUBLICAR = 'Mes sin publicar: se planifica y publica desde la computadora';
+export { AVISO_MES_CERRADO };
 
 export type EstadoPublicacion = { publishedAt: boolean; publishedBy: string | null };
 
@@ -45,8 +47,15 @@ export function mesPublicadoDe(
   return estado ? estado.publishedAt === true : null;
 }
 
-/** Desde el celular solo se toca un mes publicado (y con permiso `correct`). */
-export function puedeCorregirEnCelular(publicadoMes: boolean | null, puedeCorregir: boolean): { ok: boolean; motivo: string | null } {
+/** Desde el celular solo se toca un mes publicado y todavía abierto (permiso `correct`). Un mes terminado es solo lectura. */
+export function puedeCorregirEnCelular(
+  publicadoMes: boolean | null,
+  puedeCorregir: boolean,
+  fecha?: string | null,
+  now?: Date,
+): { ok: boolean; motivo: string | null } {
+  const mes = mesDeFecha(fecha);
+  if (mes && mesCerrado(mes.year, mes.month, now)) return { ok: false, motivo: AVISO_MES_CERRADO };
   if (publicadoMes !== true) return { ok: false, motivo: AVISO_MES_SIN_PUBLICAR };
   if (!puedeCorregir) return { ok: false, motivo: 'Falta el permiso para publicar la corrección.' };
   return { ok: true, motivo: null };

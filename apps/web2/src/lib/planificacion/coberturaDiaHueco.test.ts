@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { collectSplitBandCreditsForDay } from './positionCoverageUnits';
+import { collectSplitBandCreditsForDay, creditosSplitPorDia } from './positionCoverageUnits';
 import {
   aporteDelTurnoAlDia,
   diaAcreditacionCobertura,
@@ -137,6 +137,10 @@ describe('acreditación del día del hueco', () => {
     const opts = { selectedObjective: 'obj' };
     assert.equal(collectSplitBandCreditsForDay(emps, DIA12, leer, opts)['Puesto 2']?.N, 1);
     assert.equal(collectSplitBandCreditsForDay(emps, DIA13, leer, opts)['Puesto 2']?.N, undefined);
+    const mes = creditosSplitPorDia(emps, [DIA10, DIA11, DIA12, DIA13], leer, opts);
+    for (const dia of [DIA10, DIA11, DIA12, DIA13]) {
+      assert.deepEqual(mes[dia], collectSplitBandCreditsForDay(emps, dia, leer, opts));
+    }
   });
 
   it('el tooltip del día 31 y de la última fila queda dentro de la pantalla', () => {

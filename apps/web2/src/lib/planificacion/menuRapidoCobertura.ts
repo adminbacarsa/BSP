@@ -7,7 +7,7 @@
 import { addDays, format, parseISO } from 'date-fns';
 import { accionCobertura, tipoDesdeRolDia } from '@/lib/planificacion/coberturaEventualesUx';
 
-export type ClaseCeldaMenu = 'ausente' | 'hueco' | 'ops' | 'sin_permiso' | 'no_aplica';
+export type ClaseCeldaMenu = 'ausente' | 'hueco' | 'ops' | 'sin_permiso' | 'mes_cerrado' | 'no_aplica';
 
 export type OpcionesMenuRapido = {
   clase: ClaseCeldaMenu;
@@ -35,7 +35,19 @@ export function opcionesMenuRapido(input: {
   esHueco: boolean;
   cubiertoPorOps: boolean;
   puedeEditar: boolean;
+  mesCerrado?: boolean;
 }): OpcionesMenuRapido {
+  if (input.mesCerrado) {
+    return {
+      clase: 'mes_cerrado',
+      visible: true,
+      titulo: 'Mes cerrado',
+      asignar: false,
+      extAdel: false,
+      abrirCompleta: false,
+      soloLectura: true,
+    };
+  }
   const cubrible = input.esAusente || input.esHueco;
   if (!cubrible && !input.cubiertoPorOps) return VACIO;
   if (input.cubiertoPorOps) {

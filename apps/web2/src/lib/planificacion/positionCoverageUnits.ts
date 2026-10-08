@@ -41,6 +41,51 @@ export type PlanningShiftSlice = {
 
 type ShiftRow = PlanningShiftSlice & { employeeId: string };
 
+export type FilaAcreditada = { empId: string; diaTurno: string; shift: PlanningShiftSlice };
+
+function pareceTramoDeCobertura(shift: PlanningShiftSlice): boolean {
+    return !!shift.coveragePackageId
+        || shift.isExtended === true
+        || shift.isEarlyStart === true
+        || !!shift.coversPositionName
+        || !!String(shift.coveredBy || '').trim()
+        || !!shift.coverageSegmentRole;
+}
+
+/**
+ * Una pasada por empleado y fecha. Cada tramo queda en el día que acredita
+ * (`coversDateStr` o el deducido), no se vuelve a buscar día-1/día/día+1 por celda.
+ */
+export function indexarFilasAcreditadas(
+    employeesList: Array<{ id: string }>,
+    fechas: string[],
+    resolveShift: (empId: string, dateStr: string) => PlanningShiftSlice | null | undefined,
+): Map<string, FilaAcreditada[]> {
+    const map = new Map<string, FilaAcreditada[]>();
+    for (const emp of employeesList) {
+        for (const ds of fechas) {
+            const shift = resolveShift(emp.id, ds);
+            if (!shift || shift.isDeleted || !pareceTramoDeCobertura(shift)) continue;
+            const dia = diaAcreditacionCobertura(shift, ds);
+            const fila: FilaAcreditada = { empId: emp.id, diaTurno: ds, shift };
+            const list = map.get(dia);
+            if (list) list.push(fila);
+            else map.set(dia, [fila]);
+        }
+    }
+    return map;
+}
+
+export function fechasConBorde(dias: string[]): string[] {
+    if (!dias.length) return [];
+    const orden = [...dias].sort();
+    return [...new Set([
+        sumarDiasCalendario(orden[0], -1),
+        ...orden,
+        sumarDiasCalendario(orden[orden.length - 1], 1),
+    ])];
+}
+
 /** True si el turno pertenece al objetivo. Pending sin objectiveId → se asume del activo (vista individual). */
 function shiftBelongsToObjective(
     shift: { objectiveId?: string },
@@ -249,6 +294,7 @@ function collectLegacyExtAdelPairs(
     options: {
         selectedObjective: string;
         isPendingChange?: (empId: string, dateStr: string) => boolean;
+        filasAcreditadas?: FilaAcreditada[];
     },
     packagedEmpIds: Set<string>,
 ): Array<{ rows: ShiftRow[]; titularId?: string }> {
@@ -256,21 +302,29 @@ function collectLegacyExtAdelPairs(
     const adel: ShiftRow[] = [];
     const absentWithCover: ShiftRow[] = [];
 
-    const fechas = [sumarDiasCalendario(dateStr, -1), dateStr, sumarDiasCalendario(dateStr, 1)];
-    for (const emp of employeesList) {
-        if (packagedEmpIds.has(emp.id)) continue;
-        for (const ds of fechas) {
-        const shift = resolveShift(emp.id, ds);
-        if (!shift || shift.isDeleted) continue;
-        if (diaAcreditacionCobertura(shift, ds) !== dateStr) continue;
-        if (!shiftBelongsToObjective(shift, options.selectedObjective, options.isPendingChange?.(emp.id, ds))) continue;
-
-        const row: ShiftRow = { ...shift, employeeId: emp.id };
+    const tomar = (empId: string, ds: string, shift: PlanningShiftSlice) => {
+        if (packagedEmpIds.has(empId)) return;
+        if (!shift || shift.isDeleted) return;
+        if (!shiftBelongsToObjective(shift, options.selectedObjective, options.isPendingChange?.(empId, ds))) return;
+        const row: ShiftRow = { ...shift, employeeId: empId };
         const code = normBandCode(shift.code);
         if (shift.isExtended && !shift.isEarlyStart) ext.push(row);
         else if (shift.isEarlyStart && !shift.isExtended) adel.push(row);
         else if (ABSENCE_CODES.has(code) && String(shift.coveredBy || '').trim()) absentWithCover.push(row);
+    };
+
+    if (options.filasAcreditadas) {
+        for (const fila of options.filasAcreditadas) tomar(fila.empId, fila.diaTurno, fila.shift);
+    } else {
+    const fechas = [sumarDiasCalendario(dateStr, -1), dateStr, sumarDiasCalendario(dateStr, 1)];
+    for (const emp of employeesList) {
+        for (const ds of fechas) {
+        const shift = resolveShift(emp.id, ds);
+        if (!shift) continue;
+        if (diaAcreditacionCobertura(shift, ds) !== dateStr) continue;
+        tomar(emp.id, ds, shift);
         }
+    }
     }
 
     const pairs: Array<{ rows: ShiftRow[]; titularId?: string }> = [];
@@ -318,22 +372,31 @@ function collectDualExtensionOrphanGroups(
     options: {
         selectedObjective: string;
         isPendingChange?: (empId: string, dateStr: string) => boolean;
+        filasAcreditadas?: FilaAcreditada[];
     },
     skipEmpIds: Set<string>,
 ): ShiftRow[][] {
     const extRows: ShiftRow[] = [];
+    const tomar = (empId: string, ds: string, shift: PlanningShiftSlice) => {
+        if (skipEmpIds.has(empId)) return;
+        if (!shift || shift.isDeleted) return;
+        if (!shiftBelongsToObjective(shift, options.selectedObjective, options.isPendingChange?.(empId, ds))) return;
+        if (!shift.isExtended || shift.isEarlyStart) return;
+        if (shift.coverageSegmentRole === 'EARLY_START') return;
+        extRows.push({ ...shift, employeeId: empId });
+    };
+    if (options.filasAcreditadas) {
+        for (const fila of options.filasAcreditadas) tomar(fila.empId, fila.diaTurno, fila.shift);
+    } else {
     const fechas = [sumarDiasCalendario(dateStr, -1), dateStr, sumarDiasCalendario(dateStr, 1)];
     for (const emp of employeesList) {
-        if (skipEmpIds.has(emp.id)) continue;
         for (const ds of fechas) {
         const shift = resolveShift(emp.id, ds);
-        if (!shift || shift.isDeleted) continue;
+        if (!shift) continue;
         if (diaAcreditacionCobertura(shift, ds) !== dateStr) continue;
-        if (!shiftBelongsToObjective(shift, options.selectedObjective, options.isPendingChange?.(emp.id, ds))) continue;
-        if (!shift.isExtended || shift.isEarlyStart) continue;
-        if (shift.coverageSegmentRole === 'EARLY_START') continue;
-        extRows.push({ ...shift, employeeId: emp.id });
+        tomar(emp.id, ds, shift);
         }
+    }
     }
 
     const byPos = new Map<string, ShiftRow[]>();
@@ -378,6 +441,8 @@ export function collectSplitBandCreditsForDay(
         resolveOriginalShift?: (empId: string, dateStr: string) => PlanningShiftSlice | null | undefined;
         shiftsMap?: Record<string, PlanningShiftSlice | null | undefined>;
         pendingChanges?: Record<string, PlanningShiftSlice | null | undefined>;
+        /** Si viene, no se recorre día-1/día/día+1: ya están en el día que acreditan. */
+        filasAcreditadas?: FilaAcreditada[];
     },
 ): Record<string, Record<string, number>> {
     const packages = new Map<string, ShiftRow[]>();
@@ -392,26 +457,33 @@ export function collectSplitBandCreditsForDay(
             : undefined,
     };
 
-    const fechas = [sumarDiasCalendario(dateStr, -1), dateStr, sumarDiasCalendario(dateStr, 1)];
-    for (const emp of employeesList) {
-      for (const ds of fechas) {
-        const shift = resolveShift(emp.id, ds);
-        if (!shift || shift.isDeleted) continue;
+    const meter = (empId: string, ds: string, shift: PlanningShiftSlice) => {
+        if (!shift || shift.isDeleted) return;
         const isSplitSegment = !!shift.coveragePackageId
             || shift.isExtended
             || shift.isEarlyStart
             || !!shift.coversPositionName;
-        if (!isSplitSegment) continue;
-        if (diaAcreditacionCobertura(shift, ds) !== dateStr) continue;
-        if (!shiftBelongsToObjective(shift, options.selectedObjective, options.isPendingChange?.(emp.id, ds))) continue;
-
+        if (!isSplitSegment) return;
+        if (!shiftBelongsToObjective(shift, options.selectedObjective, options.isPendingChange?.(empId, ds))) return;
         const pkgId = shift.coveragePackageId;
         const key = pkgId
             || `legacy_${shift.coversEmployeeId || 'pair'}_${shift.coversPositionName || shift.positionName || 'general'}_${dateStr}`;
         const list = packages.get(key) || [];
-        list.push({ ...shift, employeeId: emp.id });
+        list.push({ ...shift, employeeId: empId });
         packages.set(key, list);
-      }
+    };
+    if (options.filasAcreditadas) {
+        for (const fila of options.filasAcreditadas) meter(fila.empId, fila.diaTurno, fila.shift);
+    } else {
+        const fechas = [sumarDiasCalendario(dateStr, -1), dateStr, sumarDiasCalendario(dateStr, 1)];
+        for (const emp of employeesList) {
+            for (const ds of fechas) {
+                const shift = resolveShift(emp.id, ds);
+                if (!shift) continue;
+                if (diaAcreditacionCobertura(shift, ds) !== dateStr) continue;
+                meter(emp.id, ds, shift);
+            }
+        }
     }
 
     const credits: Record<string, Record<string, number>> = {};
@@ -451,6 +523,30 @@ export function collectSplitBandCreditsForDay(
     }
 
     return credits;
+}
+
+/** Créditos Ext/Adel de todo el mes con una sola deducción de `coversDateStr` por turno. */
+export function creditosSplitPorDia(
+    employeesList: Array<{ id: string }>,
+    dias: string[],
+    resolveShift: (empId: string, dateStr: string) => PlanningShiftSlice | null | undefined,
+    options: {
+        selectedObjective: string;
+        isPendingChange?: (empId: string, dateStr: string) => boolean;
+        resolveOriginalShift?: (empId: string, dateStr: string) => PlanningShiftSlice | null | undefined;
+        shiftsMap?: Record<string, PlanningShiftSlice | null | undefined>;
+        pendingChanges?: Record<string, PlanningShiftSlice | null | undefined>;
+    },
+): Record<string, Record<string, Record<string, number>>> {
+    const index = indexarFilasAcreditadas(employeesList, fechasConBorde(dias), resolveShift);
+    const out: Record<string, Record<string, Record<string, number>>> = {};
+    for (const dia of dias) {
+        out[dia] = collectSplitBandCreditsForDay(employeesList, dia, resolveShift, {
+            ...options,
+            filasAcreditadas: index.get(dia) || [],
+        });
+    }
+    return out;
 }
 
 export function mergeBandCreditsIntoCodeCounts(
@@ -724,6 +820,8 @@ export function buildCodeCountsByPositionForDay(
         /** Turnos guardados (sin pending) para resolver banda original del titular en V/L. */
         existingShiftsMap?: Record<string, PlanningShiftSlice | null | undefined>;
         pendingChangesMap?: Record<string, PlanningShiftSlice | null | undefined>;
+        /** Créditos ya armados para este día (índice del mes). */
+        splitCredits?: Record<string, Record<string, number>>;
     },
 ): Record<string, Record<string, number>> {
     const byPos: Record<string, Record<string, number>> = {};
@@ -744,7 +842,7 @@ export function buildCodeCountsByPositionForDay(
         byPos[shiftPos][code] = (byPos[shiftPos][code] || 0) + 1;
     });
 
-    const splitCredits = collectSplitBandCreditsForDay(
+    const splitCredits = options.splitCredits || collectSplitBandCreditsForDay(
         employeesList,
         dateStr,
         (empId, ds) => resolveShift(empId, ds),

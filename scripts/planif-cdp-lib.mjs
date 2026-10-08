@@ -35,7 +35,7 @@ function chromePath() {
   throw new Error('No hay Chromium en la caché de Playwright');
 }
 
-export async function abrirPlanificacion({ objectiveId, clientId, year = 2026, month = 10, prefijo, port = 3011, devtoolsPort = 9333, scriptInicial = null }) {
+export async function abrirPlanificacion({ objectiveId, clientId, year = 2026, month = 10, prefijo, port = 3011, devtoolsPort = 9333, scriptInicial = null, email = 'admin@bacarsa.com.ar', password = 'admin1234' }) {
   const server = createServer((req, res) => {
     const url = decodeURIComponent((req.url || '/').split('?')[0]);
     if (url === '/sw.js' || url === '/firebase-messaging-sw.js') {
@@ -168,8 +168,8 @@ export async function abrirPlanificacion({ objectiveId, clientId, year = 2026, m
   await sleep(800);
   await evaluate(`(() => {
     const set = (el, v) => { const d = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value'); d.set.call(el, v); el.dispatchEvent(new Event('input', { bubbles: true })); };
-    set(document.querySelector('input[type=email]'), 'admin@bacarsa.com.ar');
-    set(document.querySelector('input[type=password]'), 'admin1234');
+    set(document.querySelector('input[type=email]'), ${JSON.stringify(email)});
+    set(document.querySelector('input[type=password]'), ${JSON.stringify(password)});
     const btn = [...document.querySelectorAll('button')].find((b) => /ingresar/i.test(b.textContent || ''));
     btn.click();
   })()`);

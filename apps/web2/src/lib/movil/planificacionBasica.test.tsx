@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { CronogramaSinPublicarCard, PlanificacionMovilView } from '@/components/movil/PlanificacionMovilView';
 import { BarraPublicar, CeldaSheetBody, SelectorObjetivoSheetBody, SemanaEncabezado, SemanaGrilla } from '@/components/movil/PlanificacionSemanaView';
 import { buildMovilTheme } from '@/lib/companyTheme';
-import { AVISO_MES_SIN_PUBLICAR, mesPublicadoDe, puedeCorregirEnCelular } from '@/lib/movil/planificacionSemana';
+import { AVISO_MES_CERRADO, AVISO_MES_SIN_PUBLICAR, mesPublicadoDe, puedeCorregirEnCelular } from '@/lib/movil/planificacionSemana';
 import {
   aplicarCambios,
   aplicarCoberturaExistenteMovil,
@@ -325,6 +325,11 @@ test('el celular no publica meses ni guarda borradores: solo lectura sin publica
   assert.equal(puedeCorregirEnCelular(false, true).motivo, AVISO_MES_SIN_PUBLICAR);
   assert.equal(puedeCorregirEnCelular(null, true).motivo, AVISO_MES_SIN_PUBLICAR);
   assert.match(puedeCorregirEnCelular(true, false).motivo || '', /permiso/);
+  const hoy = new Date('2026-10-08T15:00:00-03:00');
+  assert.equal(puedeCorregirEnCelular(true, true, '2026-08-15', hoy).motivo, AVISO_MES_CERRADO);
+  assert.equal(puedeCorregirEnCelular(true, true, '2026-08-15', hoy).ok, false);
+  assert.equal(puedeCorregirEnCelular(true, true, '2026-10-08', hoy).ok, true);
+  assert.equal(puedeCorregirEnCelular(true, false, '2026-08-01', hoy).motivo, AVISO_MES_CERRADO);
   assert.equal(mesPublicadoDe({ 'obj-peaje|2026-10': { publishedAt: true, publishedBy: 'x' } }, 'obj-peaje', '2026-10-05'), true);
   assert.equal(mesPublicadoDe({ 'obj-peaje|2026-10': { publishedAt: true, publishedBy: 'x' } }, 'obj-peaje', '2026-11-01'), null);
 });

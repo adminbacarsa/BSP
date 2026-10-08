@@ -304,12 +304,12 @@ export function SemanaEncabezado(props: {
 }
 
 /** Aviso fijo de solo lectura: el mes no está publicado y el celular no publica ni guarda borradores. */
-export function AvisoSoloLectura({ fijo = true }: { fijo?: boolean }) {
+export function AvisoSoloLectura({ fijo = true, texto = AVISO_MES_SIN_PUBLICAR }: { fijo?: boolean; texto?: string }) {
   return (
     <div className={fijo ? 'fixed bottom-16 left-0 right-0 z-40 mx-auto w-full max-w-[390px] px-3' : ''} data-plan-solo-lectura="1">
       <p className={`relative overflow-hidden px-3 py-2.5 pl-4 text-[12px] font-semibold ${MOVIL_CARD} ${MOVIL_TEXT.amber}`}>
         <span aria-hidden="true" className={`absolute inset-y-0 left-0 w-[3px] ${MOVIL_FILETE.amber}`} />
-        {AVISO_MES_SIN_PUBLICAR}
+        {texto}
       </p>
     </div>
   );
@@ -324,9 +324,10 @@ export function BarraPublicar(props: {
   publicado: boolean | null;
   puedeCorregir: boolean;
   onGuardar: () => void;
+  aviso?: string;
 }) {
   if (props.publicado === null) return null;
-  if (!props.publicado) return <AvisoSoloLectura />;
+  if (!props.publicado) return <AvisoSoloLectura texto={props.aviso} />;
   if (props.cambios === 0) return null;
   const n = `${props.cambios} cambio${props.cambios === 1 ? '' : 's'}`;
   return (

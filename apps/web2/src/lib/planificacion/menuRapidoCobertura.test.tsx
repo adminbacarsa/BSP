@@ -60,6 +60,11 @@ describe('opciones del menú rápido', () => {
 
   it('un turno laboral normal no abre el menú', () => {
     const op = opcionesMenuRapido({ esAusente: false, esHueco: false, cubiertoPorOps: false, puedeEditar: true });
+    const cerrado = opcionesMenuRapido({ esAusente: true, esHueco: false, cubiertoPorOps: false, puedeEditar: true, mesCerrado: true });
+    assert.equal(cerrado.titulo, 'Mes cerrado');
+    assert.equal(cerrado.asignar, false);
+    assert.equal(cerrado.extAdel, false);
+    assert.equal(cerrado.abrirCompleta, false);
     assert.equal(op.clase, 'no_aplica');
     assert.equal(op.visible, false);
   });
