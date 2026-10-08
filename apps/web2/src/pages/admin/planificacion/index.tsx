@@ -329,6 +329,17 @@ import {
     textoDecisionCobertura,
     type CoberturaExistente,
 } from '@/lib/planificacion/coberturaExistente';
+import MenuRapidoCobertura from '@/components/planificacion/MenuRapidoCobertura';
+import {
+    celdaEsHuecoSla,
+    listasAsignarMenu,
+    opcionesMenuRapido,
+    rolDesdeTurno,
+    textoMarcaMenuRapido,
+    type OpcionesMenuRapido,
+} from '@/lib/planificacion/menuRapidoCobertura';
+import { applyOperationalGapCloseToChanges } from '@/lib/planificacion/operationalGapCoverage';
+import { format as formatFecha } from 'date-fns';
 import { alignVacancyGapBand } from '@/lib/planificacion/vacancySplitBands';
 import {
     listVacancyGapBandOptions,
@@ -1685,6 +1696,21 @@ function PlanificacionDesktop() {
 
     const [showVacancyModal, setShowVacancyModal] = useState(false);
     const [vacancyData, setVacancyData] = useState<any>(null);
+    const [menuRapido, setMenuRapido] = useState<{
+        x: number;
+        y: number;
+        empId: string;
+        empName: string;
+        dateStr: string;
+        positionName: string;
+        gapBand: string;
+        opciones: OpcionesMenuRapido;
+        paso: 'raiz' | 'asignar' | 'ext' | 'adel';
+        extId: string;
+        adelId: string;
+        busqueda: string;
+        absence: any;
+    } | null>(null);
     const [selectedReplacement, setSelectedReplacement] = useState('');
     const [vacancyActiveDates, setVacancyActiveDates] = useState<Set<string>>(new Set());
     const [vacancyDayCoverages, setVacancyDayCoverages] = useState<Record<string, VacancyDayCoverage>>({});
@@ -6627,7 +6653,7 @@ function PlanificacionDesktop() {
             const pubMonth = currentDate.getMonth() + 1;
             const publishLookupKey = planificacionPublishLookupKey(selectedObjective, pubYear, pubMonth);
             const isPublished = isPlanificacionPublished(publishStatusMap[publishLookupKey]);
-            const logData: { empId: string; date: string; action: string; detail: string }[] = [];
+            const logData: { empId: string; date: string; action: string; detail: string; via?: string }[] = [];
             const employeesById: Record<string, any> = {};
             employees.forEach((e: any) => { employeesById[e.id] = e; });
             // snapshotData ya armado en doSave (grilla completa del mes)
@@ -6761,6 +6787,7 @@ function PlanificacionDesktop() {
                 actionDetail: string,
                 codigoAntes: string,
                 codigoDespues: string,
+                via?: string,
             ) => {
                 if (!correctionMode) return;
                 const [y, m, d] = dateStr.split('-').map(Number);
@@ -6769,7 +6796,7 @@ function PlanificacionDesktop() {
                     codigoAntes && codigoDespues && codigoAntes !== codigoDespues && codigoDespues !== '(eliminado)'
                         ? 'CORRECCION_CODIGO'
                         : 'CORRECCION_PLANIFICACION';
-                logData.push({ empId, date: dateStr, action: 'CORRECCION_SUPERADMIN' });
+                logData.push({ empId, date: dateStr, action: 'CORRECCION_SUPERADMIN', detail: actionDetail });
                 batch.set(doc(collection(db, 'audit_logs')), stampEmpresaId({
                     action: 'CORRECCION_SUPERADMIN',
                     module: 'PLANIFICADOR',
@@ -6780,6 +6807,7 @@ function PlanificacionDesktop() {
                     employeeId: empId,
                     employeeName: empName,
                     fecha: corrFechaTs,
+                    ...(via ? { via } : {}),
                 }, empresaId));
                 bumpBatchOp();
                 await flushBatchWhenFull();
@@ -6886,6 +6914,7 @@ function PlanificacionDesktop() {
                             actionDetail,
                             existing?.code || '',
                             '(eliminado)',
+                            change.menuRapidoVia,
                         );
                     } else {
                         if (
@@ -6974,6 +7003,7 @@ function PlanificacionDesktop() {
                             } : {}),
                             positionName: safePositionName,
                             coveredBy: change.coveredBy || null,
+                            ...(change.menuRapidoTexto ? { menuRapidoTexto: change.menuRapidoTexto, menuRapidoVia: change.menuRapidoVia || 'MENU_RAPIDO' } : {}),
                             draft: correctionMode ? false : !isPublished,
                             actorName: realActorName,
                             ...deploymentFieldsForFirestore(change),
@@ -7068,9 +7098,10 @@ function PlanificacionDesktop() {
                                 actionDetail,
                                 existing?.code || '',
                                 codigoNuevo,
+                                change.menuRapidoVia,
                             );
                         } else {
-                            logData.push({ empId, date: dateStr, action: actionType, detail: actionDetail });
+                            logData.push({ empId, date: dateStr, action: actionType, detail: actionDetail, via: change.menuRapidoVia || undefined });
                         }
                     }
                     await flushBatchWhenFull();
@@ -7102,6 +7133,7 @@ function PlanificacionDesktop() {
                                 objectiveId: selectedObjective,
                                 objectiveName: getObjectiveName(selectedObjective),
                                 clientId: selectedClient || undefined,
+                                ...(entry.via ? { via: entry.via } : {}),
                             }, empresaId));
                             bumpBatchOp();
                         }
@@ -7722,7 +7754,337 @@ function PlanificacionDesktop() {
         }
         runApplyVacancy(francoConflicts.length > 0 || vacancyFrancoAuthApproved);
     };
-    
+
+    const turnoMenuDe = (empId: string, dateStr: string) => {
+        const key = `${empId}_${dateStr}`;
+        const pending = pendingChanges[key];
+        if (pending?.isDeleted) return null;
+        return pending || shiftsMap[key] || null;
+    };
+    const abrirMenuRapidoCelda = (
+        ev: React.MouseEvent,
+        celda: {
+            emp: { id: string; name?: string };
+            dateStr: string;
+            isLeave: boolean;
+            tieneTurno: boolean;
+            positionName: string | null;
+        },
+    ) => {
+        if (comparingSnapshot || !selectedObjective) return;
+        const posPreferida = celda.positionName || getEmpDefaultPos(celda.emp.id) || '';
+        const dayReport = buildDayCoverageReport(celda.dateStr);
+        const faltaPax = !!(posPreferida && dayReport?.positions?.some((p: { positionName?: string; missingUnits?: number }) => p.positionName === posPreferida && (p.missingUnits || 0) > 0));
+        const esHueco = celdaEsHuecoSla({ tieneTurno: celda.tieneTurno, tieneAusencia: celda.isLeave, faltaPaxEnPuesto: faltaPax });
+        const pack = recolectarTurnosDelDia({
+            date: celda.dateStr,
+            titularEmployeeId: celda.emp.id,
+            shiftsMap,
+            cellTurnosMap,
+            pendingChanges,
+        });
+        const existente = coberturaExistenteDelDia({
+            titularEmployeeId: celda.emp.id,
+            titularName: celda.emp.name,
+            date: celda.dateStr,
+            titular: pack.titular,
+            turnosDelDia: pack.turnos,
+            consulta: null,
+        });
+        const cubiertoPorOps = existente.origen === 'operaciones' && existente.estado === 'CUBIERTO';
+        const pubKey = planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1);
+        const publicado = isPlanificacionPublished(publishStatusMap[pubKey]);
+        const puedeEditar = !isServiceLocked && !isPlanningDateLocked(celda.dateStr) && (!publicado || (correctionMode && canCorrectPlanning));
+        const opciones = opcionesMenuRapido({
+            esAusente: celda.isLeave,
+            esHueco,
+            cubiertoPorOps,
+            puedeEditar,
+        });
+        if (!opciones.visible) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        const work = resolveTitularVacancyWorkShift(celda.emp.id, celda.dateStr, shiftsMap, pendingChanges);
+        const gapRows = dayReport ? flattenDayGapsForUi(dayReport) : [];
+        const gapRow = gapRows.find((g) => g.positionName === posPreferida) || gapRows[0];
+        const gapBand = String(work?.code || inferGapBandForClose(gapRow || {}) || 'M').toUpperCase();
+        const positionName = work?.positionName || posPreferida || 'General';
+        setMenuRapido({
+            x: ev.clientX,
+            y: ev.clientY,
+            empId: celda.emp.id,
+            empName: celda.emp.name || 'Titular',
+            dateStr: celda.dateStr,
+            positionName,
+            gapBand,
+            opciones,
+            paso: 'raiz',
+            extId: '',
+            adelId: '',
+            busqueda: '',
+            absence: absencesMap[`${celda.emp.id}_${celda.dateStr}`] || null,
+        });
+    };
+    const cerrarMenuRapido = () => setMenuRapido(null);
+    const abrirCoberturaDesdeMenu = () => {
+        if (!menuRapido) return;
+        if (menuRapido.opciones.clase === 'hueco') {
+            setSlaGapCloseModal({ dateStr: menuRapido.dateStr, positionName: menuRapido.positionName, gapBand: menuRapido.gapBand });
+        } else {
+            const ausencia = menuRapido.absence;
+            setVacancyData(ausencia?.type
+                ? { ...ausencia, source: 'AUSENCIA', focusDate: menuRapido.dateStr, employeeId: menuRapido.empId, employeeName: menuRapido.empName }
+                : {
+                    employeeId: menuRapido.empId,
+                    employeeName: menuRapido.empName,
+                    startDate: menuRapido.dateStr,
+                    endDate: menuRapido.dateStr,
+                    type: 'L',
+                    source: 'AUSENCIA',
+                    focusDate: menuRapido.dateStr,
+                });
+            setShowVacancyModal(true);
+        }
+        cerrarMenuRapido();
+    };
+    const sellarMenuRapido = (changes: Record<string, any>, keys: string[], texto: string) => {
+        for (const key of keys) {
+            if (!changes[key] || changes[key].isDeleted) continue;
+            changes[key] = { ...changes[key], menuRapidoTexto: texto, menuRapidoVia: 'MENU_RAPIDO' };
+        }
+        return changes;
+    };
+    const auditarMenuRapido = async (texto: string, employeeId: string) => {
+        try {
+            await addDoc(collection(db, 'audit_logs'), stampEmpresaId({
+                action: 'ASIGNACION_MASIVA',
+                module: 'PLANIFICADOR',
+                details: texto,
+                via: 'MENU_RAPIDO',
+                timestamp: serverTimestamp(),
+                actorName: activeActorName,
+                actorUid: getAuth().currentUser?.uid,
+                objectiveId: selectedObjective,
+                objectiveName: getObjectiveName(selectedObjective),
+                employeeId,
+            }, empresaId));
+        } catch (err) {
+            console.error(err);
+        }
+    };
+    const escribirAsignacionMenu = (personaId: string, marks?: Record<string, ShiftAuthMark>) => {
+        if (!menuRapido || !selectedObjective) return;
+        const persona = employees.find((e: { id?: string; name?: string }) => e.id === personaId);
+        const nombre = String(persona?.name || personaId);
+        const cuando = formatFecha(new Date(), 'dd/MM HH:mm');
+        const tipo = tipoDesdeRolDia(rolDesdeTurno(turnoMenuDe(personaId, menuRapido.dateStr))) || 'LIBRE';
+        const texto = textoMarcaMenuRapido({
+            modo: 'asignar',
+            cubreA: menuRapido.opciones.clase === 'hueco' ? `${menuRapido.positionName} ${menuRapido.gapBand}` : menuRapido.empName,
+            tipo,
+            actor: activeActorName,
+            cuando,
+        });
+        const employeesById: Record<string, any> = {};
+        employees.forEach((e: any) => { if (e.id) employeesById[e.id] = e; });
+        let changes: Record<string, any>;
+        if (menuRapido.opciones.clase === 'ausente') {
+            const vacancy = menuRapido.absence?.type
+                ? { ...menuRapido.absence, employeeId: menuRapido.empId, employeeName: menuRapido.empName, startDate: menuRapido.absence.startDate || menuRapido.dateStr }
+                : { employeeId: menuRapido.empId, employeeName: menuRapido.empName, startDate: menuRapido.dateStr, endDate: menuRapido.dateStr, type: 'Injustificada' };
+            const applied = applyVacancyCoverageToChanges(pendingChanges, {
+                vacancyData: vacancy,
+                days: [{
+                    dateStr: menuRapido.dateStr,
+                    coverage: {
+                        mode: 'substitute',
+                        employeeId: personaId,
+                        employeeName: nombre,
+                        gapBand: menuRapido.gapBand,
+                        gapPosition: menuRapido.positionName,
+                    },
+                }],
+                selectedObjective,
+                activePosition: menuRapido.positionName,
+                shiftsMap,
+                getTypicalShift: () => null,
+                employeesById,
+                clientId: selectedClient || undefined,
+                defaultSplitForBand: (band, gapPosition) => {
+                    const times = defaultSplitForBandAtPosition(band, effectivePosStructure, gapPosition ?? null);
+                    return { ext: times.ext, adel: times.adel };
+                },
+                positionStructure: effectivePosStructure,
+                authorizeFrancoTrabajado: false,
+                fallbackGapBand: menuRapido.gapBand,
+            });
+            changes = sellarMenuRapido(applied.changes, [
+                `${menuRapido.empId}_${menuRapido.dateStr}`,
+                `${personaId}_${menuRapido.dateStr}`,
+            ], texto);
+        } else {
+            const opt = listVacancyGapBandOptions(effectivePosStructure, menuRapido.positionName).find((o) => o.code === menuRapido.gapBand);
+            const key = `${personaId}_${menuRapido.dateStr}`;
+            changes = {
+                ...pendingChanges,
+                [key]: {
+                    ...(pendingChanges[key] && !pendingChanges[key].isDeleted ? pendingChanges[key] : {}),
+                    code: menuRapido.gapBand,
+                    name: menuRapido.gapBand,
+                    isTemp: true,
+                    objectiveId: selectedObjective,
+                    hours: opt?.hours || 8,
+                    startTime: opt?.startTime || '07:00',
+                    endTime: opt?.endTime || '15:00',
+                    positionName: menuRapido.positionName,
+                    comments: `Cubre hueco SLA ${menuRapido.positionName} ${menuRapido.gapBand}`,
+                    menuRapidoTexto: texto,
+                    menuRapidoVia: 'MENU_RAPIDO',
+                },
+            };
+        }
+        if (marks) changes = stampShiftAuthMarks(changes, marks);
+        setPendingChanges(changes);
+        const tit = resolveTitularVacancyWorkShift(menuRapido.empId, menuRapido.dateStr, shiftsMap, pendingChanges);
+        const horario = menuRapido.opciones.clase === 'ausente' ? tit?.scheduleLabel : null;
+        toast.success(`${texto}. ${TEXTO_AVISO_ASIGNADO_AL_GUARDAR}: «${textoAvisoAsignadoDia(menuRapido.dateStr, menuRapido.gapBand, horario && horario !== '—' ? horario : null, menuRapido.positionName)}». Guardá el cronograma.`);
+        void auditarMenuRapido(texto, personaId);
+        cerrarMenuRapido();
+    };
+    const pedirPinYAsignar = (personaId: string) => {
+        if (!menuRapido) return;
+        const tit = resolveTitularVacancyWorkShift(menuRapido.empId, menuRapido.dateStr, shiftsMap, pendingChanges);
+        const horario = tit?.scheduleLabel && tit.scheduleLabel !== '—' ? tit.scheduleLabel : '';
+        const partes = horario.match(/(\d{1,2}:\d{2}).+(\d{1,2}:\d{2})/);
+        const opt = listVacancyGapBandOptions(effectivePosStructure, menuRapido.positionName).find((o) => o.code === menuRapido.gapBand);
+        const horas = tit?.hours || opt?.hours || 8;
+        const guard = evaluateCoverageDayGuards({
+            dateStr: menuRapido.dateStr,
+            proposedByEmp: {
+                [personaId]: {
+                    code: menuRapido.gapBand,
+                    startTime: partes?.[1] || opt?.startTime,
+                    endTime: partes?.[2] || opt?.endTime,
+                    hours: horas,
+                    addHours: horas,
+                },
+            },
+            shiftOf: (id, fecha) => turnoMenuDe(id, fecha),
+            monthHoursOf: (id) => empMonthlyHours[id] || 0,
+            nameOf: (id) => String(employees.find((e: { id?: string; name?: string }) => e.id === id)?.name || id),
+        });
+        if (guard.blocked.length) {
+            toast.error(guard.blocked.slice(0, 3).join(' · '), { duration: 9000 });
+            return;
+        }
+        const clasificado = clasificarPedidosPin(guard.authorizations, (empId, periodo) => {
+            const grant = topeGrants[empId];
+            return grant && grant.periodo === periodo ? grant : undefined;
+        });
+        for (const aviso of clasificado.avisos) toast.message(aviso, { duration: 6000 });
+        const granted: Record<string, ShiftAuthMark> = {};
+        for (const auth of guard.authorizations) {
+            if (auth.kind !== 'TOPE') continue;
+            const periodo = periodoTopeDeFecha(auth.dateStr);
+            const grant = topeGrants[auth.employeeId];
+            if (!grant || topeRequierePin(grant, periodo)) continue;
+            granted[`${auth.employeeId}_${auth.dateStr}`] = { topeExcedido: true, horasMes: grant.horasAlAutorizar, autorizacionMotivo: grant.motivo };
+        }
+        const pedir = guard.authorizations.filter((auth) => clasificado.pedir.some((p) => p.employeeId === auth.employeeId && p.dateStr === auth.dateStr && p.kind === auth.kind));
+        if (pedir.length) {
+            requestSupervisorLaborAuth(pedir, () => {
+                const motivo = authReasonRef.current;
+                const marks: Record<string, ShiftAuthMark> = { ...granted };
+                for (const auth of pedir) {
+                    const key = `${auth.employeeId}_${auth.dateStr}`;
+                    marks[key] = {
+                        ...(marks[key] || {}),
+                        autorizacionMotivo: motivo,
+                        ...(auth.kind === 'DESCANSO'
+                            ? { descansoReducido: true, descansoHoras: auth.restHours != null ? Math.round(auth.restHours * 10) / 10 : undefined }
+                            : {}),
+                        ...(auth.kind === 'TOPE' ? { topeExcedido: true, horasMes: auth.monthHours } : {}),
+                    };
+                }
+                escribirAsignacionMenu(personaId, marks);
+            });
+            return;
+        }
+        escribirAsignacionMenu(personaId, Object.keys(granted).length ? granted : undefined);
+    };
+    const escribirSplitMenu = () => {
+        if (!menuRapido || !menuRapido.extId || !menuRapido.adelId || !selectedObjective) return;
+        const ext = employees.find((e: { id?: string; name?: string }) => e.id === menuRapido.extId);
+        const adel = employees.find((e: { id?: string; name?: string }) => e.id === menuRapido.adelId);
+        const texto = textoMarcaMenuRapido({ modo: 'split', ext: ext?.name, adel: adel?.name });
+        const employeesById: Record<string, any> = {};
+        employees.forEach((e: any) => { if (e.id) employeesById[e.id] = e; });
+        const extShift = turnoMenuDe(menuRapido.extId, menuRapido.dateStr);
+        const adelShift = turnoMenuDe(menuRapido.adelId, menuRapido.dateStr);
+        let changes: Record<string, any>;
+        if (menuRapido.opciones.clase === 'ausente') {
+            const vacancy = menuRapido.absence?.type
+                ? { ...menuRapido.absence, employeeId: menuRapido.empId, employeeName: menuRapido.empName, startDate: menuRapido.absence.startDate || menuRapido.dateStr }
+                : { employeeId: menuRapido.empId, employeeName: menuRapido.empName, startDate: menuRapido.dateStr, endDate: menuRapido.dateStr, type: 'Injustificada' };
+            const applied = applyVacancyCoverageToChanges(pendingChanges, {
+                vacancyData: vacancy,
+                days: [{
+                    dateStr: menuRapido.dateStr,
+                    coverage: {
+                        mode: 'split',
+                        extEmpId: menuRapido.extId,
+                        adelEmpId: menuRapido.adelId,
+                        gapBand: menuRapido.gapBand,
+                        gapPosition: menuRapido.positionName,
+                        extHomePosition: extShift?.positionName,
+                        extBaseCode: extShift?.code,
+                        adelBaseCode: adelShift?.code,
+                    },
+                }],
+                selectedObjective,
+                activePosition: menuRapido.positionName,
+                shiftsMap,
+                getTypicalShift: () => null,
+                employeesById,
+                clientId: selectedClient || undefined,
+                defaultSplitForBand: (band, gapPosition) => {
+                    const times = defaultSplitForBandAtPosition(band, effectivePosStructure, gapPosition ?? null);
+                    return { ext: times.ext, adel: times.adel };
+                },
+                positionStructure: effectivePosStructure,
+                authorizeFrancoTrabajado: false,
+                fallbackGapBand: menuRapido.gapBand,
+            });
+            changes = sellarMenuRapido(applied.changes, [
+                `${menuRapido.empId}_${menuRapido.dateStr}`,
+                `${menuRapido.extId}_${menuRapido.dateStr}`,
+                `${menuRapido.adelId}_${menuRapido.dateStr}`,
+            ], texto);
+        } else {
+            changes = applyOperationalGapCloseToChanges(pendingChanges, {
+                objectiveId: selectedObjective,
+                clientId: selectedClient || undefined,
+                dateStr: menuRapido.dateStr,
+                gapPosition: menuRapido.positionName,
+                gapBand: menuRapido.gapBand,
+                extEmpId: menuRapido.extId,
+                secondEmpId: menuRapido.adelId,
+                extHomePosition: extShift?.positionName,
+                extBaseCode: extShift?.code,
+                secondBaseCode: adelShift?.code,
+                positionStructure: effectivePosStructure,
+            }, { shiftsMap, employeesById });
+            changes = sellarMenuRapido(changes, [
+                `${menuRapido.extId}_${menuRapido.dateStr}`,
+                `${menuRapido.adelId}_${menuRapido.dateStr}`,
+            ], texto);
+        }
+        setPendingChanges(changes);
+        toast.success(`${texto}. Guardá el cronograma.`);
+        void auditarMenuRapido(texto, menuRapido.extId);
+        cerrarMenuRapido();
+    };
+
     // Bulk: inyecta el puesto dueño del código SLA (no el default "Puesto 1") y respeta cupos de cobertura.
     const applyBulkChange = (shiftConfig: any, opts?: { onlyEmpId?: string }) => {
         if (!allowPlanningMultiSelect) {
@@ -11317,11 +11679,11 @@ function PlanificacionDesktop() {
                                             : '';
                                         const _authHint = `${_cellShift?.descansoReducido ? `\n⚠ Descanso reducido autorizado${_cellShift.descansoHoras != null ? ` (${_cellShift.descansoHoras} h)` : ''}` : ''}${_cellShift?.topeExcedido ? `\n⚠ Tope 200 h autorizado${_cellShift.horasMes != null ? ` (${_cellShift.horasMes} h)` : ''}` : ''}`;
                                         const _consultaCelda = consultaAbiertaEnFecha(vacancyConsultas, cellDateStr, emp.id, String(cellCode || leaveCellCode || ''));
-                                        return <td key={key} data-testid="grilla-celda" onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={(e) => { if (!isSnapshotView && isDragging && allowPlanningMultiSelect) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); if (isLeaveCell) { const absType = absence?.type || activeShift?.name || LEGEND_DESCRIPTIONS[leaveCellCode] || leaveCellCode; const reason = absence?.reason || activeShift?.comments || p?.comments || ''; const covered = resolveTitularCoverageName(emp.id, emp.name || '', cellDateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell, cellTurnosMap); setShiftTooltip({ label: buildLeaveCellTooltipLabel({ absenceType: absType, reason, coveredBy: covered }), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else if ((s || p || rfzOnCell || _evOverlay) && !absence) { const shiftLabel = _evOverlay?.mode === 'EV'
+                                        return <td key={key} data-testid="grilla-celda" onContextMenu={(ev) => abrirMenuRapidoCelda(ev, { emp, dateStr: cellDateStr, isLeave: isLeaveCell, tieneTurno: !!((p && !p.isDeleted) || s || rfzOnCell), positionName: cellPosName })} onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={(e) => { if (!isSnapshotView && isDragging && allowPlanningMultiSelect) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); const _marca = (p && !p.isDeleted && p.menuRapidoTexto) || s?.menuRapidoTexto; if (_marca) { setShiftTooltip({ label: String(_marca), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); return; } if (isLeaveCell) { const absType = absence?.type || activeShift?.name || LEGEND_DESCRIPTIONS[leaveCellCode] || leaveCellCode; const reason = absence?.reason || activeShift?.comments || p?.comments || ''; const covered = resolveTitularCoverageName(emp.id, emp.name || '', cellDateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell, cellTurnosMap); setShiftTooltip({ label: buildLeaveCellTooltipLabel({ absenceType: absType, reason, coveredBy: covered }), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else if ((s || p || rfzOnCell || _evOverlay) && !absence) { const shiftLabel = _evOverlay?.mode === 'EV'
                                                     ? _evOverlay.tooltip
                                                     : (cellCode === 'EV' && (activeShift?.eventoNombre || activeShift?.servicioNombre))
                                                     ? eventoTooltip(activeShift)
-                                                    : cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : (rfzOnCell ? 'Refuerzo cliente (RFZ)' : null); const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; const _exclHint = cellPosExcluded ? `\n⚠ Puesto excluido por SLA este día` : ''; const _otherObjHint = isOtherObjectiveShift && activeShift?.objectiveId ? `\n📍 Otro objetivo: ${getObjectiveName(activeShift.objectiveId)}` : ''; const _rfzHint = rfzOnCell ? `\n🔴 RFZ ${formatTime(rfzOnCell.startTime)}–${formatTime(rfzOnCell.endTime)}${rfzOnCell.positionName ? ` · ${rfzOnCell.positionName}` : ''}` : ''; const _linkedTura = activeShift?.id ? turaMap[activeShift.id] : null; const _turaHint = _linkedTura ? `\n🟣 TURA ${isTuraContiguousToParent(activeShift, _linkedTura) ? 'seguido' : 'cortado'} ${formatShiftClockRange(_linkedTura)}${_linkedTura.positionName ? ` → ${_linkedTura.positionName}` : ''}` : ''; const _tipLabel = isOpsCoverageCell ? buildOpsCoverageCellTooltip(opsTooltipShift, opsCoverageTooltipCtxFor(opsTooltipShift, emp.name || '')) : (shiftLabel ? `${shiftLabel}${_exclHint}${_otherObjHint}${_rfzHint}${_turaHint}${_covHint}${_billHint}${_authHint}${_lctRest ? `\n⚠ ${_lctRest}` : ''}` : (_exclHint || _otherObjHint || _rfzHint || _turaHint || _covHint || _billHint || _lctRest || null)); setShiftTooltip({ label: _tipLabel, readOnlyOps: isOpsCoverageCell, pos: _isRet ? null : (cellPosName || rfzOnCell?.positionName || null), range: _isRet ? null : (cellRange || (rfzOnCell ? `${formatTime(rfzOnCell.startTime)} - ${formatTime(rfzOnCell.endTime)}` : null)), x: e.clientX, y: e.clientY, restHours: _restHrs }); } else if (isExclusionCol) { setShiftTooltip({ label: excludedPositionsTooltip(excludedOnDay, cellDateStr), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked && !isOpsCoverageCell ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`} data-evento={_evOverlay ? _evOverlay.mode : undefined} title={isOpsCoverageCell ? undefined : _evOverlay ? (_evOverlay.mode === 'EV' ? _evOverlay.tooltip : `${_evOverlay.mode === 'FRANCO_USADO' ? 'Franco usado en evento' : 'También afectado al evento'}: ${_evOverlay.tooltip}`) : isExclusionCol && !s && !p ? excludedPositionsTooltip(excludedOnDay, cellDateStr) : isOtherObjectiveShift && activeShift?.objectiveId ? `Turno en ${getObjectiveName(activeShift.objectiveId)}` : undefined}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style} ${_lctRest ? 'ring-2 ring-amber-400' : cellPosExcluded ? 'ring-1 ring-rose-400/70' : ''}`}>{_consultaCelda ? <IndicadorConsultaCelda texto={textoIndicadorConsulta(_consultaCelda)} tooltip={textoTooltipConsulta(_consultaCelda)} onAbrir={() => { setConsultaFoco(_consultaCelda.id); setConsultaTick((n) => n + 1); }} /> : null}{_evOverlay && _evOverlay.mode !== 'EV' && (<div className="absolute -bottom-0.5 right-0 text-[6.5px] font-black bg-yellow-400 text-yellow-900 px-0.5 rounded z-10" title={_evOverlay.tooltip}>EV</div>)}{_lctRest ? (<span className="absolute top-0 left-0 w-1.5 h-1.5 rounded-full bg-amber-500 border border-white" title={_lctRest}/>) : null}{content}{isExclusionCol && !content && (<span className="absolute bottom-0 left-0 w-1.5 h-1.5 rounded-full bg-rose-400/80" title="Día con puesto(s) excluido(s)"/>)}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly || isCoverageSplitCell) && <div className="absolute -top-1 -right-1 text-[8px] bg-red-900 text-white px-1 rounded-full border border-white/40">+</div>}{covRole === 'LIBERATED' && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-emerald-600 text-white px-0.5 rounded">RET</div>}{isCoverageSourceUsed && <div className="absolute -top-1 -left-1 text-[7px] font-black bg-violet-600 text-white px-0.5 rounded z-10" title="Turno usado en cobertura operativa">U</div>}{_cellShift?.descansoReducido && <div className="absolute -top-1 left-0 text-[7px] font-black bg-amber-500 text-white px-0.5 rounded z-10" title="Descanso reducido autorizado">8–12</div>}{_cellShift?.topeExcedido && <div className="absolute -bottom-0.5 right-0 text-[7px] font-black bg-rose-600 text-white px-0.5 rounded z-10" title="Tope de 200 h autorizado">200</div>}{(covRole === 'TARGET' || isLeaveCell) && coveredByCell && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-orange-500 text-white px-0.5 rounded" title={coveredByCell ? `Cubierto por ${coveredByCell}` : 'Cubierto'}>✓</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && !isOtherObjectiveShift && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}{isOtherObjectiveShift && content && (<div className="absolute bottom-0 left-0"><MapPin size={7} className="text-slate-300 drop-shadow-sm"/></div>)}{selectedGrupo && grupoUnifiedMode && content && !isOtherObjectiveShift && activeShift?.objectiveId && selectedGrupo.objectiveIds.includes(activeShift.objectiveId) && (() => {
+                                                    : cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : (rfzOnCell ? 'Refuerzo cliente (RFZ)' : null); const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; const _exclHint = cellPosExcluded ? `\n⚠ Puesto excluido por SLA este día` : ''; const _otherObjHint = isOtherObjectiveShift && activeShift?.objectiveId ? `\n📍 Otro objetivo: ${getObjectiveName(activeShift.objectiveId)}` : ''; const _rfzHint = rfzOnCell ? `\n🔴 RFZ ${formatTime(rfzOnCell.startTime)}–${formatTime(rfzOnCell.endTime)}${rfzOnCell.positionName ? ` · ${rfzOnCell.positionName}` : ''}` : ''; const _linkedTura = activeShift?.id ? turaMap[activeShift.id] : null; const _turaHint = _linkedTura ? `\n🟣 TURA ${isTuraContiguousToParent(activeShift, _linkedTura) ? 'seguido' : 'cortado'} ${formatShiftClockRange(_linkedTura)}${_linkedTura.positionName ? ` → ${_linkedTura.positionName}` : ''}` : ''; const _tipLabel = isOpsCoverageCell ? buildOpsCoverageCellTooltip(opsTooltipShift, opsCoverageTooltipCtxFor(opsTooltipShift, emp.name || '')) : (shiftLabel ? `${shiftLabel}${_exclHint}${_otherObjHint}${_rfzHint}${_turaHint}${_covHint}${_billHint}${_authHint}${_lctRest ? `\n⚠ ${_lctRest}` : ''}` : (_exclHint || _otherObjHint || _rfzHint || _turaHint || _covHint || _billHint || _lctRest || null)); setShiftTooltip({ label: _tipLabel, readOnlyOps: isOpsCoverageCell, pos: _isRet ? null : (cellPosName || rfzOnCell?.positionName || null), range: _isRet ? null : (cellRange || (rfzOnCell ? `${formatTime(rfzOnCell.startTime)} - ${formatTime(rfzOnCell.endTime)}` : null)), x: e.clientX, y: e.clientY, restHours: _restHrs }); } else if (isExclusionCol) { setShiftTooltip({ label: excludedPositionsTooltip(excludedOnDay, cellDateStr), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked && !isOpsCoverageCell ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`} data-evento={_evOverlay ? _evOverlay.mode : undefined} title={isOpsCoverageCell ? undefined : _evOverlay ? (_evOverlay.mode === 'EV' ? _evOverlay.tooltip : `${_evOverlay.mode === 'FRANCO_USADO' ? 'Franco usado en evento' : 'También afectado al evento'}: ${_evOverlay.tooltip}`) : isExclusionCol && !s && !p ? excludedPositionsTooltip(excludedOnDay, cellDateStr) : isOtherObjectiveShift && activeShift?.objectiveId ? `Turno en ${getObjectiveName(activeShift.objectiveId)}` : undefined}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style} ${_lctRest ? 'ring-2 ring-amber-400' : cellPosExcluded ? 'ring-1 ring-rose-400/70' : ''}`}>{_consultaCelda ? <IndicadorConsultaCelda texto={textoIndicadorConsulta(_consultaCelda)} tooltip={textoTooltipConsulta(_consultaCelda)} onAbrir={() => { setConsultaFoco(_consultaCelda.id); setConsultaTick((n) => n + 1); }} /> : null}{_evOverlay && _evOverlay.mode !== 'EV' && (<div className="absolute -bottom-0.5 right-0 text-[6.5px] font-black bg-yellow-400 text-yellow-900 px-0.5 rounded z-10" title={_evOverlay.tooltip}>EV</div>)}{_lctRest ? (<span className="absolute top-0 left-0 w-1.5 h-1.5 rounded-full bg-amber-500 border border-white" title={_lctRest}/>) : null}{content}{isExclusionCol && !content && (<span className="absolute bottom-0 left-0 w-1.5 h-1.5 rounded-full bg-rose-400/80" title="Día con puesto(s) excluido(s)"/>)}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly || isCoverageSplitCell) && <div className="absolute -top-1 -right-1 text-[8px] bg-red-900 text-white px-1 rounded-full border border-white/40">+</div>}{covRole === 'LIBERATED' && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-emerald-600 text-white px-0.5 rounded">RET</div>}{isCoverageSourceUsed && <div className="absolute -top-1 -left-1 text-[7px] font-black bg-violet-600 text-white px-0.5 rounded z-10" title="Turno usado en cobertura operativa">U</div>}{_cellShift?.descansoReducido && <div className="absolute -top-1 left-0 text-[7px] font-black bg-amber-500 text-white px-0.5 rounded z-10" title="Descanso reducido autorizado">8–12</div>}{_cellShift?.topeExcedido && <div className="absolute -bottom-0.5 right-0 text-[7px] font-black bg-rose-600 text-white px-0.5 rounded z-10" title="Tope de 200 h autorizado">200</div>}{(((covRole === 'TARGET' || isLeaveCell) && coveredByCell) || p?.menuRapidoTexto || s?.menuRapidoTexto) && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-orange-500 text-white px-0.5 rounded" title={p?.menuRapidoTexto || s?.menuRapidoTexto || (coveredByCell ? `Cubierto por ${coveredByCell}` : 'Cubierto')}>✓</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && !isOtherObjectiveShift && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}{isOtherObjectiveShift && content && (<div className="absolute bottom-0 left-0"><MapPin size={7} className="text-slate-300 drop-shadow-sm"/></div>)}{selectedGrupo && grupoUnifiedMode && content && !isOtherObjectiveShift && activeShift?.objectiveId && selectedGrupo.objectiveIds.includes(activeShift.objectiveId) && (() => {
                                                     const _oi = selectedGrupo.objectiveIds.indexOf(activeShift.objectiveId!);
                                                     const _clr = GRUPO_COLOR_HEX[_oi % GRUPO_COLOR_HEX.length];
                                                     const _nm = (selectedGrupo.objectiveNames[_oi] || '').trim().split(/\s+/).filter((w: string) => w.length > 1).pop()?.slice(0, 6).toUpperCase() || (selectedGrupo.objectiveNames[_oi] || '').slice(0, 5).toUpperCase();
@@ -11624,6 +11986,84 @@ function PlanificacionDesktop() {
             <div className="no-print px-2 max-w-[1600px] mx-auto">
                 <SwapSupervisorQueue empresaId={empresaId} />
             </div>
+            {menuRapido && typeof document !== 'undefined' && createPortal((() => {
+                const idsCronograma = new Set(displayedEmployees.map((e: { id: string }) => e.id));
+                const personas = employees
+                    .filter((e: { id?: string; status?: string; modalidad?: string; bolsaCuil?: string }) => e.id && e.id !== menuRapido.empId && e.status !== 'INACTIVE' && !esLegajoEventual(e))
+                    .map((e: { id: string; name?: string }) => ({
+                        id: e.id,
+                        nombre: String(e.name || e.id),
+                        rol: rolDesdeTurno(turnoMenuDe(e.id, menuRapido.dateStr)),
+                        enCronograma: idsCronograma.has(e.id),
+                    }));
+                const listas = listasAsignarMenu(personas, menuRapido.busqueda);
+                const motivoDe = (id: string) => {
+                    const opt = listVacancyGapBandOptions(effectivePosStructure, menuRapido.positionName).find((o) => o.code === menuRapido.gapBand);
+                    const guard = evaluateCoverageDayGuards({
+                        dateStr: menuRapido.dateStr,
+                        proposedByEmp: { [id]: { code: menuRapido.gapBand, startTime: opt?.startTime, endTime: opt?.endTime, hours: opt?.hours || 8, addHours: opt?.hours || 8 } },
+                        shiftOf: (empId, fecha) => turnoMenuDe(empId, fecha),
+                        monthHoursOf: (empId) => empMonthlyHours[empId] || 0,
+                        nameOf: (empId) => String(employees.find((x: { id?: string; name?: string }) => x.id === empId)?.name || empId),
+                    });
+                    return guard.blocked[0] || '';
+                };
+                const aFila = (p: { id: string; nombre: string; rol: string }) => {
+                    const tipo = tipoDesdeRolDia(p.rol);
+                    const tag = tipo ? etiquetaTipoNomina(tipo).tag : '';
+                    const motivo = motivoDe(p.id);
+                    return { id: p.id, nombre: p.nombre, detalle: tag, tag, disabled: !!motivo, motivo };
+                };
+                const ctxSplit = {
+                    positionStructure: effectivePosStructure as import('@/lib/planificacion/vacancySplitBands').VacancyPositionSla[],
+                    gapPositionName: menuRapido.positionName,
+                    gapBand: menuRapido.gapBand,
+                    preferSamePosition: true as const,
+                };
+                const filasExt = menuRapido.paso === 'ext' || menuRapido.paso === 'adel'
+                    ? listExtensionCandidates(menuRapido.gapBand, menuRapido.dateStr, selectedObjective || '', employees, shiftsMap, pendingChanges, [menuRapido.empId].filter(Boolean), ctxSplit)
+                    : [];
+                const filasAdel = menuRapido.paso === 'adel'
+                    ? listEarlyStartCandidates(menuRapido.gapBand, menuRapido.dateStr, selectedObjective || '', employees, shiftsMap, pendingChanges, [menuRapido.empId, menuRapido.extId].filter(Boolean), ctxSplit)
+                    : [];
+                const filas = menuRapido.paso === 'asignar'
+                    ? listas.cronograma.map(aFila)
+                    : menuRapido.paso === 'ext'
+                        ? filasExt.map((r) => ({ id: r.id, nombre: r.name, detalle: `${r.code} · ${r.positionName || ''}`.trim(), tag: r.code }))
+                        : menuRapido.paso === 'adel'
+                            ? filasAdel.map((r) => ({ id: r.id, nombre: r.name, detalle: r.id === menuRapido.adelId ? 'Elegido para adelantar' : `${r.code} · ${r.positionName || ''}`.trim(), tag: r.code }))
+                            : [];
+                const fuera = menuRapido.paso === 'asignar' ? listas.fuera.map(aFila) : [];
+                const extNombre = employees.find((e: { id?: string; name?: string }) => e.id === menuRapido.extId)?.name || '';
+                return (
+                    <>
+                        <div className="fixed inset-0 z-[9999]" onMouseDown={cerrarMenuRapido} onContextMenu={(e) => { e.preventDefault(); cerrarMenuRapido(); }} />
+                        <MenuRapidoCobertura
+                            x={menuRapido.x}
+                            y={menuRapido.y}
+                            opciones={menuRapido.opciones}
+                            paso={menuRapido.paso}
+                            filas={filas}
+                            fuera={fuera}
+                            busqueda={menuRapido.busqueda}
+                            extNombre={extNombre}
+                            puedeAplicar={!!menuRapido.adelId}
+                            onBusqueda={(q) => setMenuRapido((m) => (m ? { ...m, busqueda: q } : m))}
+                            onAsignar={() => setMenuRapido((m) => (m ? { ...m, paso: 'asignar', busqueda: '' } : m))}
+                            onExtAdel={() => setMenuRapido((m) => (m ? { ...m, paso: 'ext', extId: '', adelId: '' } : m))}
+                            onAbrir={abrirCoberturaDesdeMenu}
+                            onElegir={(id) => {
+                                if (menuRapido.paso === 'asignar') pedirPinYAsignar(id);
+                                else if (menuRapido.paso === 'ext') setMenuRapido((m) => (m ? { ...m, extId: id, adelId: '', paso: 'adel' } : m));
+                                else setMenuRapido((m) => (m ? { ...m, adelId: id } : m));
+                            }}
+                            onVolver={() => setMenuRapido((m) => (m ? { ...m, paso: m.paso === 'adel' ? 'ext' : 'raiz', adelId: '' } : m))}
+                            onAplicar={escribirSplitMenu}
+                            onClose={cerrarMenuRapido}
+                        />
+                    </>
+                );
+            })(), document.body)}
             {coverageTooltip && coverageTooltipLayout && typeof document !== 'undefined' && createPortal(
                 <div
                     className="fixed z-[9999]"
@@ -15438,22 +15878,10 @@ function PlanificacionDesktop() {
                         return h;
                     };
                     // Clasificar disponibilidad en la fecha de la ausencia
-                    const NON_AVAILABLE = new Set(['F','FF','FP','FT','V','L','PG','A','E','AA','PAST','LOCKED']);
-                    type VacancyDayRole = 'RETEN' | 'ESC' | 'REF' | 'FREE' | 'FRANCO' | 'WORKING' | 'LICENCIA';
-                    const LICENSE_DAY = new Set(['V', 'L', 'PG', 'A', 'E', 'AA', 'ART']);
-                    const getEmpDayRole = (empId: string, dateStr: string): VacancyDayRole => {
+                    const getEmpDayRole = (empId: string, dateStr: string) => {
                         const key = `${empId}_${dateStr}`;
                         const s = pendingChanges[key] ? (pendingChanges[key].isDeleted ? null : pendingChanges[key]) : shiftsMap[key];
-                        if (!s || s.isDeleted) return 'FREE';
-                        const code = String(s.code || '').toUpperCase();
-                        if (s.isFrancoTrabajado === true || code === 'FT') return 'WORKING';
-                        if (code === 'RET') return 'RETEN';
-                        if (code === 'ESC') return 'ESC';
-                        if (code === 'REF') return 'REF';
-                        if (LICENSE_DAY.has(code)) return 'LICENCIA';
-                        if (code === 'F' || code === 'FF' || code === 'FP' || s.isFranco === true) return 'FRANCO';
-                        if (NON_AVAILABLE.has(code)) return 'FREE';
-                        return 'WORKING';
+                        return rolDesdeTurno(s);
                     };
                     const objLat = Number(selectedObjectiveData?.lat ?? 0);
                     const objLng = Number(selectedObjectiveData?.lng ?? 0);
