@@ -477,6 +477,7 @@ import {
     calcPlanningSlaReconciliationHours,
     planningShiftBillableBreakdown,
 } from '@/lib/planificacion/planningScheduledHours';
+import { aporteDelTurnoAlDia, sumarDiasCalendario } from '@/lib/planificacion/coberturaDiaHueco';
 import { computePlanningMonthHoursBreakdown } from '@/lib/planificacion/planningMonthHoursBreakdown';
 import { buildPlannerColumnHours } from '@/lib/planificacion/plannerColumnHours';
 import {
@@ -4433,31 +4434,46 @@ function PlanificacionDesktop() {
 
         let current = 0;
         const dominant = structure.reduce((prev: any, current: any) => (prev.qty > current.qty) ? prev : current, structure[0] || { qty: 1, positionName: 'General' });
+        const fechasHoras = [sumarDiasCalendario(dateStr, -1), dateStr, sumarDiasCalendario(dateStr, 1)];
 
         employeesList.forEach((emp: any) => {
-            const key = `${emp.id}_${dateStr}`;
+            for (const docDate of fechasHoras) {
+            const key = `${emp.id}_${docDate}`;
             const absence = absencesMap[key];
-            if (isEmployeeOnLeave({ shiftCode: changes[key]?.code || existing[key]?.code, absence })) return;
+            if (isEmployeeOnLeave({ shiftCode: changes[key]?.code || existing[key]?.code, absence })) continue;
             const shift = changes[key] ? (changes[key].isDeleted ? null : changes[key]) : existing[key];
-            if (!shift) return;
+            if (!shift) continue;
+            const aporte = aporteDelTurnoAlDia(shift, docDate, dateStr);
+            if (aporte === 'nada') continue;
             const pending = changes[key];
             const explicitObj = pending?.objectiveId ?? shift.objectiveId;
             const effectiveObjId = explicitObj
                 ? String(explicitObj)
                 : (resolveNativeObjectiveInGrupo(emp) || (emp.preferredObjectiveId === covObjId || slaIdToObjId[emp.preferredObjectiveId] === covObjId ? covObjId : null));
-            if (String(effectiveObjId || '') !== String(covObjId)) return;
+            if (String(effectiveObjId || '') !== String(covObjId)) continue;
             const code = String(shift.code || '').toUpperCase();
-            if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) return;
+            if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) continue;
             const homePos = shift.positionName || dominant?.positionName || 'General';
-            const attributed = calcPlanningBillableHoursAttributedToPosition(
-                { ...shift, positionName: homePos },
-                positionName,
-                slaCodeHoursHint,
-            );
-            if (attributed <= 0) return;
+            const coverPos = shift.coversPositionName || homePos;
+            if (aporte === 'solo-tramo') {
+                if (String(coverPos) !== String(positionName)) continue;
+                const tramo = planningShiftBillableBreakdown({ ...shift, positionName: homePos }, slaCodeHoursHint).extra;
+                if (tramo > 0) current += tramo;
+                continue;
+            }
+            const attributed = aporte === 'solo-base'
+                ? planningShiftBillableBreakdown({ ...shift, positionName: homePos }, slaCodeHoursHint).base
+                : calcPlanningBillableHoursAttributedToPosition(
+                    { ...shift, positionName: homePos },
+                    positionName,
+                    slaCodeHoursHint,
+                );
+            if (attributed <= 0) continue;
             const isHomePos = String(homePos) === String(positionName);
-            if (isHomePos && validWorkCodes.size > 0 && isPlanningWorkShiftCode(code) && !validWorkCodes.has(code)) return;
+            if (aporte === 'solo-base' && !isHomePos) continue;
+            if (isHomePos && validWorkCodes.size > 0 && isPlanningWorkShiftCode(code) && !validWorkCodes.has(code)) continue;
             current += attributed;
+            }
         });
         return { current, target, pax, isActiveDay: isDayActive && !isDayExcluded, isExcludedDay: isDayExcluded };
     };
@@ -7445,6 +7461,7 @@ function PlanificacionDesktop() {
                             if (change.coversEmployeeId) turnoPayload.coversEmployeeId = change.coversEmployeeId;
                             if (change.coversPositionName) turnoPayload.coversPositionName = change.coversPositionName;
                             if (change.coversBandCode) turnoPayload.coversBandCode = change.coversBandCode;
+                            if (change.coversDateStr) turnoPayload.coversDateStr = change.coversDateStr;
                             if (change.segmentFromTime) turnoPayload.segmentFromTime = change.segmentFromTime;
                             if (change.segmentToTime) turnoPayload.segmentToTime = change.segmentToTime;
                         }

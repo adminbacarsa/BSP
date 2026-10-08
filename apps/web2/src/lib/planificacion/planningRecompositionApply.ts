@@ -184,6 +184,7 @@ export function buildRecompositionPendingUpdates(
     coversEmployeeId: isOperationalGap ? undefined : pkg.target.employeeId,
     coversPositionName: pkg.gapPositionName,
     coversBandCode: String(pkg.target.code || '').toUpperCase() || undefined,
+    coversDateStr: pkg.dateStr,
     coverageMode: isEarlyDeparture ? 'EARLY_DEPARTURE' : 'SPLIT',
     coverageStatus: 'COVERED',
     ...extra,

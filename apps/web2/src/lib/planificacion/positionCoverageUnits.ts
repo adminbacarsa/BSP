@@ -6,6 +6,7 @@
 import { effectiveShiftsForPositionDay } from './autoScheduleEngineV2';
 import { resolveTitularVacancyWorkShift } from './vacancyCoverage';
 import { paxBoostDeltaForDate } from '@/lib/servicios/paxBoostRanges';
+import { diaAcreditacionCobertura, sumarDiasCalendario } from './coberturaDiaHueco';
 
 export const PLANNING_NON_BILLABLE_CODES = new Set([
     'F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET', 'REF', 'ESC', 'SUS', 'SGS', 'EV',
@@ -25,6 +26,12 @@ export type PlanningShiftSlice = {
     coversPositionName?: string;
     coversEmployeeId?: string;
     coversBandCode?: string;
+    /** Día del hueco que cierra este tramo (puede ser distinto del día del turno). */
+    coversDateStr?: string;
+    segmentFromTime?: string;
+    segmentToTime?: string;
+    startTime?: string;
+    endTime?: string;
     coverageStatus?: string;
     coveredBy?: string;
     isExtended?: boolean;
@@ -249,17 +256,21 @@ function collectLegacyExtAdelPairs(
     const adel: ShiftRow[] = [];
     const absentWithCover: ShiftRow[] = [];
 
+    const fechas = [sumarDiasCalendario(dateStr, -1), dateStr, sumarDiasCalendario(dateStr, 1)];
     for (const emp of employeesList) {
         if (packagedEmpIds.has(emp.id)) continue;
-        const shift = resolveShift(emp.id, dateStr);
+        for (const ds of fechas) {
+        const shift = resolveShift(emp.id, ds);
         if (!shift || shift.isDeleted) continue;
-        if (!shiftBelongsToObjective(shift, options.selectedObjective, options.isPendingChange?.(emp.id, dateStr))) continue;
+        if (diaAcreditacionCobertura(shift, ds) !== dateStr) continue;
+        if (!shiftBelongsToObjective(shift, options.selectedObjective, options.isPendingChange?.(emp.id, ds))) continue;
 
         const row: ShiftRow = { ...shift, employeeId: emp.id };
         const code = normBandCode(shift.code);
         if (shift.isExtended && !shift.isEarlyStart) ext.push(row);
         else if (shift.isEarlyStart && !shift.isExtended) adel.push(row);
         else if (ABSENCE_CODES.has(code) && String(shift.coveredBy || '').trim()) absentWithCover.push(row);
+        }
     }
 
     const pairs: Array<{ rows: ShiftRow[]; titularId?: string }> = [];
@@ -311,14 +322,18 @@ function collectDualExtensionOrphanGroups(
     skipEmpIds: Set<string>,
 ): ShiftRow[][] {
     const extRows: ShiftRow[] = [];
+    const fechas = [sumarDiasCalendario(dateStr, -1), dateStr, sumarDiasCalendario(dateStr, 1)];
     for (const emp of employeesList) {
         if (skipEmpIds.has(emp.id)) continue;
-        const shift = resolveShift(emp.id, dateStr);
+        for (const ds of fechas) {
+        const shift = resolveShift(emp.id, ds);
         if (!shift || shift.isDeleted) continue;
-        if (!shiftBelongsToObjective(shift, options.selectedObjective, options.isPendingChange?.(emp.id, dateStr))) continue;
+        if (diaAcreditacionCobertura(shift, ds) !== dateStr) continue;
+        if (!shiftBelongsToObjective(shift, options.selectedObjective, options.isPendingChange?.(emp.id, ds))) continue;
         if (!shift.isExtended || shift.isEarlyStart) continue;
         if (shift.coverageSegmentRole === 'EARLY_START') continue;
         extRows.push({ ...shift, employeeId: emp.id });
+        }
     }
 
     const byPos = new Map<string, ShiftRow[]>();
@@ -377,15 +392,18 @@ export function collectSplitBandCreditsForDay(
             : undefined,
     };
 
+    const fechas = [sumarDiasCalendario(dateStr, -1), dateStr, sumarDiasCalendario(dateStr, 1)];
     for (const emp of employeesList) {
-        const shift = resolveShift(emp.id, dateStr);
+      for (const ds of fechas) {
+        const shift = resolveShift(emp.id, ds);
         if (!shift || shift.isDeleted) continue;
         const isSplitSegment = !!shift.coveragePackageId
             || shift.isExtended
             || shift.isEarlyStart
             || !!shift.coversPositionName;
         if (!isSplitSegment) continue;
-        if (!shiftBelongsToObjective(shift, options.selectedObjective, options.isPendingChange?.(emp.id, dateStr))) continue;
+        if (diaAcreditacionCobertura(shift, ds) !== dateStr) continue;
+        if (!shiftBelongsToObjective(shift, options.selectedObjective, options.isPendingChange?.(emp.id, ds))) continue;
 
         const pkgId = shift.coveragePackageId;
         const key = pkgId
@@ -393,6 +411,7 @@ export function collectSplitBandCreditsForDay(
         const list = packages.get(key) || [];
         list.push({ ...shift, employeeId: emp.id });
         packages.set(key, list);
+      }
     }
 
     const credits: Record<string, Record<string, number>> = {};

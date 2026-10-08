@@ -90,6 +90,8 @@ export interface RecompositionPendingMeta {
   coversPositionName?: string;
   /** Banda SLA cubierta por el paquete split (ej. MM, M). */
   coversBandCode?: string;
+  /** Día del hueco que cierra el tramo (el del titular), no el día del turno extendido. */
+  coversDateStr?: string;
   coverageNote?: string;
   liberationReason?: string;
   redeployNote?: string;

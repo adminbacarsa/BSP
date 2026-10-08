@@ -111,6 +111,7 @@ export function applySingleShiftExtension(
     coverageStatus: coversFullBand ? 'COVERED' : (input.coversBandCode ? 'PARTIAL' : undefined),
     coversBandCode: input.coversBandCode || undefined,
     coversPositionName: input.coversPositionName || base.positionName,
+    coversDateStr: input.dateStr,
     extExtraHours: input.extraHours,
     coverageNote: coversFullBand
       ? `Ext +${input.extraHours}h · cierra banda ${input.coversBandCode} completa (${segFrom}–${segTo})`
@@ -358,6 +359,7 @@ export function aplicarTramoSolo(
         coversBandCode: input.gapBand,
         coversPositionName: input.gapPosition,
         coversEmployeeId: input.titularId || undefined,
+        coversDateStr: input.dateStr,
         extExtraHours: extraHours,
         coverageNote: `Adelanto solo ${input.gapStart}–${input.gapEnd} · ${nombre}`,
       },

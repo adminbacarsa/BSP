@@ -33,6 +33,9 @@ export function coalescePlannedTurnosForCell(
     merged.coveragePackageId = merged.coveragePackageId || t.coveragePackageId;
     merged.coverageSegmentRole = merged.coverageSegmentRole || t.coverageSegmentRole;
     merged.coversPositionName = merged.coversPositionName || t.coversPositionName;
+    merged.coversBandCode = merged.coversBandCode || t.coversBandCode;
+    merged.coversDateStr = merged.coversDateStr || t.coversDateStr;
+    merged.coversEmployeeId = merged.coversEmployeeId || t.coversEmployeeId;
     merged.segmentFromTime = merged.segmentFromTime || t.segmentFromTime;
     merged.segmentToTime = merged.segmentToTime || t.segmentToTime;
     merged.adjustedEndTime = merged.adjustedEndTime || t.adjustedEndTime;

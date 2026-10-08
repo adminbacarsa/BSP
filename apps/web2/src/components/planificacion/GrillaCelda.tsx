@@ -1,7 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Briefcase, Clock, MapPin, Siren, Stethoscope, X } from 'lucide-react';
 import { IndicadorConsultaCelda } from '@/components/planificacion/ConsultasEnCurso';
+import { ubicarTooltipCelda } from '@/lib/planificacion/coberturaDiaHueco';
 
 /** El tooltip de la celda sale solo si el mouse queda quieto este tiempo sobre la misma celda. */
 export const CELL_TOOLTIP_DELAY_MS = 2000;
@@ -219,11 +220,25 @@ export function TooltipCeldaGrilla({
         };
     }, [controlRef, demoraMs]);
 
+    const cajaRef = useRef<HTMLDivElement>(null);
+    const [caja, setCaja] = useState<{ left: number; top: number } | null>(null);
+    useLayoutEffect(() => {
+        const el = cajaRef.current;
+        if (!datos || !el || typeof window === 'undefined') {
+            setCaja(null);
+            return;
+        }
+        const r = el.getBoundingClientRect();
+        const next = ubicarTooltipCelda(datos.x, datos.y, r.width, r.height, window.innerWidth, window.innerHeight);
+        setCaja((prev) => (prev && prev.left === next.left && prev.top === next.top ? prev : next));
+    }, [datos]);
     if (!datos || typeof document === 'undefined') return null;
+    const estimado = ubicarTooltipCelda(datos.x, datos.y, 280, 110, window.innerWidth, window.innerHeight);
     return createPortal(
         <div
+            ref={cajaRef}
             className="fixed z-[9999] pointer-events-none"
-            style={{ left: datos.x + 10, top: datos.y - 64 }}
+            style={{ left: (caja || estimado).left, top: (caja || estimado).top }}
             data-tooltip-celda
         >
             <div className={`bg-slate-900 text-white text-[10px] font-black px-2.5 py-2 rounded-lg shadow-sm flex flex-col gap-1 max-w-[320px] ${datos.label?.includes('\n') ? 'whitespace-pre-line' : 'whitespace-nowrap'}`}>

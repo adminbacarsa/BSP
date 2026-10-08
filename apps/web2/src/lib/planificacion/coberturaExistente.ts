@@ -6,6 +6,7 @@ import {
   vacancyDayHasCoverage,
   type VacancyDayCoverage,
 } from '@/lib/planificacion/vacancyCoverage';
+import { diaAcreditacionCobertura, esTramoCobertura, sumarDiasCalendario } from '@/lib/planificacion/coberturaDiaHueco';
 import type { ConsultaResumenIn } from '@/lib/planificacion/coberturaEventualesUx';
 
 export type TurnoDiaIn = {
@@ -47,6 +48,9 @@ export type TurnoDiaIn = {
   codigoOriginal?: string;
   deploymentBand?: string;
   coversBandCode?: string;
+  coversDateStr?: string;
+  segmentFromTime?: string;
+  segmentToTime?: string;
 };
 
 export type CoberturaExistente =
@@ -295,6 +299,29 @@ export function recolectarTurnosDelDia(p: {
     const emp = empDe(key);
     const previos = (porEmpleado.get(emp) || []).filter((t) => esOpsCoverageDoc(t));
     porEmpleado.set(emp, [...previos, { ...raw, employeeId: raw.employeeId || emp }]);
+  }
+  for (const off of [-1, 1]) {
+    const otro = sumarDiasCalendario(p.date, off);
+    const sufOtro = `_${otro}`;
+    const empDeOtro = (key: string) => (key.endsWith(sufOtro) ? key.slice(0, -sufOtro.length) : '');
+    const sumar = (key: string, raw: TurnoDiaIn | null | undefined) => {
+      if (!raw || raw.isDeleted || !key.endsWith(sufOtro)) return;
+      if (!esTramoCobertura(raw)) return;
+      if (diaAcreditacionCobertura(raw, otro) !== p.date) return;
+      const emp = empDeOtro(key);
+      const list = porEmpleado.get(emp) || [];
+      list.push({ ...raw, employeeId: raw.employeeId || emp });
+      porEmpleado.set(emp, list);
+    };
+    for (const [key, arr] of Object.entries(p.cellTurnosMap || {})) {
+      if (!key.endsWith(sufOtro)) continue;
+      for (const t of arr || []) sumar(key, t);
+    }
+    for (const [key, raw] of Object.entries(p.shiftsMap || {})) {
+      if (p.pendingChanges && Object.prototype.hasOwnProperty.call(p.pendingChanges, key)) continue;
+      sumar(key, raw);
+    }
+    for (const [key, raw] of Object.entries(p.pendingChanges || {})) sumar(key, raw);
   }
   const titularKey = `${p.titularEmployeeId}${sufijo}`;
   const persisted = p.shiftsMap?.[titularKey] || null;

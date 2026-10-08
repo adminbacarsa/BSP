@@ -352,6 +352,8 @@ function stripCoverageMeta(shift: Record<string, any> | null | undefined): Recor
     adjustedEndTime: _m,
     segmentFromTime: _n,
     segmentToTime: _o,
+    coversBandCode: _p,
+    coversDateStr: _q,
     ...rest
   } = shift;
   return { ...rest, isExtended: false, isEarlyStart: false };
