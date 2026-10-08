@@ -1,5 +1,7 @@
 /**
  * Registra la ausencia RRHH de turnos que quedaron ABSENT sin doc en `ausencias`.
+ * Solo AA (o sin tipo) de un titular con persona. Una licencia queda en «revisar a mano»
+ * y no se escribe. Una vacante sin guardia se ignora.
  * Usa markShiftAbsent con FIX_SIN_REGISTRO: no cascada, no vacante, no push.
  *
  *   node scripts/fix-ausente-sin-registro.mjs --empresa pruebas_sa --desde 2026-10-01 --hasta 2026-10-31
@@ -45,7 +47,40 @@ function ymd(value) {
   return new Date(t - 3 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
-const planes = [];
+function esVacanteSinPersona(id, shift) {
+  const emp = String(shift.employeeId || '').trim();
+  const empUp = emp.toUpperCase();
+  const name = String(shift.employeeName || '').trim().toUpperCase();
+  const origin = String(shift.origin || '').toUpperCase();
+  if (!emp || empUp.startsWith('VACANTE') || empUp === 'SIN_COBERTURA' || empUp === 'SIN COBERTURA') return true;
+  if (name === 'SIN COBERTURA' || name.startsWith('VACANTE')) return true;
+  if (String(id).startsWith('autosinc_') || String(id).startsWith('autodev_')) return true;
+  // isUnassigned en un titular con persona (sin cobertura, después cubierto) sigue siendo AA.
+  if (shift.isVacancy === true) return true;
+  if (
+    origin === 'SLA_VIRTUAL'
+    || origin === 'SLA_UNPLANNED_GAP'
+    || origin === 'VACANTE_POR_AUSENCIA'
+    || origin.includes('HUECO')
+  ) return true;
+  return false;
+}
+
+/** Licencia ya clasificada (Fallecimiento Familiar, V, E, L…). AA y vacío se registran. */
+function esLicenciaARevisar(shift) {
+  const tipo = String(shift.absenceType || '').trim();
+  if (!tipo) return false;
+  return tipo.toUpperCase() !== 'AA';
+}
+
+function linea(doc) {
+  const s = doc.data();
+  return `  ${doc.id} ${s.employeeName || s.employeeId || '—'} ${ymd(s.startTime)} ${s.code || ''} absenceType=${s.absenceType || '—'}`;
+}
+
+const registran = [];
+const revisar = [];
+const ignoran = [];
 const vistos = new Set();
 for (const campo of [
   db.collection('turnos').where('isAbsent', '==', true),
@@ -62,20 +97,24 @@ for (const campo of [
     if (!dia || dia < desde || dia > hasta) continue;
     const aus = await db.collection('ausencias').where('shiftId', '==', doc.id).limit(1).get();
     if (!aus.empty) continue;
-    planes.push(doc);
+    if (esVacanteSinPersona(doc.id, shift)) ignoran.push(doc);
+    else if (esLicenciaARevisar(shift)) revisar.push(doc);
+    else registran.push(doc);
   }
 }
 
-console.log(`${apply ? 'APPLY' : 'DRY-RUN'} ${empresaId} ${desde}→${hasta}: ${planes.length} turnos ABSENT sin ausencias`);
-for (const doc of planes) {
-  const s = doc.data();
-  console.log(`  ${doc.id} ${s.employeeName || s.employeeId} ${ymd(s.startTime)} ${s.code || ''} absenceType=${s.absenceType || '—'}`);
-}
-if (!apply || planes.length === 0) process.exit(0);
+console.log(`${apply ? 'APPLY' : 'DRY-RUN'} ${empresaId} ${desde}→${hasta}`);
+console.log(`Se registran (AA): ${registran.length}`);
+for (const doc of registran) console.log(linea(doc));
+console.log(`Revisar a mano (tipo de licencia): ${revisar.length}`);
+for (const doc of revisar) console.log(linea(doc));
+console.log(`Se ignoran (vacante sin persona): ${ignoran.length}`);
+for (const doc of ignoran) console.log(linea(doc));
+if (!apply || registran.length === 0) process.exit(0);
 
 const { markShiftAbsent } = requireFn('./lib/attendance/markShiftAbsent.js');
 let escritos = 0;
-for (const doc of planes) {
+for (const doc of registran) {
   const r = await markShiftAbsent(db, doc.id, {
     reason: 'FIX_SIN_REGISTRO',
     by: 'FIX_SIN_REGISTRO',
