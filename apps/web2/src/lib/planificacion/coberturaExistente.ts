@@ -40,6 +40,11 @@ export type TurnoDiaIn = {
   originalCode?: string;
   originalPositionName?: string;
   positionName?: string;
+  hours?: number;
+  isAbsent?: boolean;
+  codigoOriginal?: string;
+  deploymentBand?: string;
+  coversBandCode?: string;
 };
 
 export type CoberturaExistente =
@@ -343,4 +348,209 @@ export function textoDecisionCobertura(decision: 'cerrar' | 'confirmar' | 'vacan
 /** Un hueco ya cubierto por Operaciones no se vuelve a ofrecer. El parcial sí: falta un tramo. */
 export function seOfreceParaCubrir(existente: CoberturaExistente): boolean {
   return !(existente.origen === 'operaciones' && existente.estado === 'CUBIERTO');
+}
+
+const NO_ES_TURNO_DE_TRABAJO = new Set(['V', 'L', 'PG', 'A', 'E', 'AA', 'ART', 'F', 'FF', 'FP', 'FT', 'SGS', 'SUS', 'LT', 'PAST', 'LOCKED']);
+
+function esTurnoDeTrabajo(code: unknown): boolean {
+  const c = String(code || '').trim().toUpperCase();
+  return !!c && c.length <= 8 && !NO_ES_TURNO_DE_TRABAJO.has(c);
+}
+
+function horasGuardadas(v: unknown): number | null {
+  const n = Number(v);
+  return n > 0 && n <= 16 ? Math.round(n * 100) / 100 : null;
+}
+
+/** Horario real del doc. `00:00–00:00` no cuenta: es el placeholder de una novedad. */
+function horarioDe(start: unknown, end: unknown): { label: string; hours: number } | null {
+  const hm = (v: unknown): string | null => {
+    if (typeof v === 'string' && /^\d{1,2}:\d{2}$/.test(v.trim())) {
+      const [h, m] = v.trim().split(':');
+      return `${h.padStart(2, '0')}:${m}`;
+    }
+    const ms = msDe(v);
+    return ms ? hmAr(ms) : null;
+  };
+  const a = hm(start);
+  const b = hm(end);
+  if (!a || !b || (a === '00:00' && b === '00:00')) return null;
+  const [ah, am] = a.split(':').map(Number);
+  const [bh, bm] = b.split(':').map(Number);
+  let mins = (bh * 60 + bm) - (ah * 60 + am);
+  if (mins <= 0) mins += 24 * 60;
+  if (mins > 16 * 60) return null;
+  return { label: `${a}–${b}`, hours: Math.round((mins / 60) * 100) / 100 };
+}
+
+function horasDelTurno(guardadas: unknown, horario: { hours: number } | null): number {
+  const stored = horasGuardadas(guardadas);
+  if (stored != null && horario && Math.abs(stored - horario.hours) < 0.2) return stored;
+  if (horario) return horario.hours;
+  return stored ?? 0;
+}
+
+export type TurnoQueTenia = {
+  code: string;
+  positionName: string;
+  scheduleLabel: string;
+  hours: number;
+};
+
+export type AusenciaDiaIn = {
+  shiftId?: string | null;
+  type?: string | null;
+  status?: string | null;
+  revisionEstado?: string | null;
+  absenceType?: string | null;
+  avisoPortal?: boolean;
+  source?: string | null;
+};
+
+export type ResumenAusenciaDia = {
+  turno: TurnoQueTenia | null;
+  cobertura: CoberturaExistente;
+  /** Línea de la tarjeta. Null si no hay cobertura. */
+  cubiertoPor: string | null;
+  esOperaciones: boolean;
+  nota: string;
+  tipoNovedad: string;
+  estadoNovedad: string;
+};
+
+export const TEXTO_LO_CUBRIO_OPERACIONES = 'Lo cubrió Operaciones. Para cambiarlo, hacelo desde Operaciones.';
+
+function turnoPorId(turnos: TurnoDiaIn[], id: string): TurnoDiaIn | null {
+  const sid = String(id || '').trim();
+  if (!sid) return null;
+  return turnos.find((t) => String(t.id || '') === sid && !esOpsCoverageDoc(t)) || null;
+}
+
+function titularDelDia(p: {
+  titularEmployeeId: string;
+  titular?: TurnoDiaIn | null;
+  turnosDelDia?: TurnoDiaIn[] | null;
+  ausencia?: AusenciaDiaIn | null;
+}): TurnoDiaIn | null {
+  if (p.titular && !esOpsCoverageDoc(p.titular)) return p.titular;
+  const turnos = p.turnosDelDia || [];
+  const porAusencia = turnoPorId(turnos, String(p.ausencia?.shiftId || ''));
+  if (porAusencia) return porAusencia;
+  const emp = String(p.titularEmployeeId || '').trim();
+  return turnos.find((t) => String(t.employeeId || '') === emp && !esOpsCoverageDoc(t)) || null;
+}
+
+function bandaDelOps(ops: TurnoDiaIn | null): string | null {
+  if (!ops) return null;
+  const code = String(ops.code || ops.coversBandCode || '').trim().toUpperCase();
+  const tipo = String(ops.codigoOriginal || ops.coverageType || '').trim().toUpperCase();
+  if (!esTurnoDeTrabajo(code)) return null;
+  if (tipo && code === tipo) return null;
+  return code;
+}
+
+function turnoQueTenia(titular: TurnoDiaIn | null, turnos: TurnoDiaIn[], titularEmp: string): TurnoQueTenia | null {
+  const titularId = String(titular?.id || '').trim();
+  const ops = turnos.find((t) => ligaOps(t, titularId, titularEmp) || (titular?.coverageDocId && String(t.id || '') === String(titular.coverageDocId) && esOpsCoverageDoc(t))) || null;
+  const code = (esTurnoDeTrabajo(titular?.originalCode) ? String(titular?.originalCode).toUpperCase() : '')
+    || (esTurnoDeTrabajo(titular?.code) ? String(titular?.code).toUpperCase() : '')
+    || (esTurnoDeTrabajo(titular?.deploymentBand) ? String(titular?.deploymentBand).toUpperCase() : '')
+    || bandaDelOps(ops)
+    || '';
+  const positionName = String(titular?.originalPositionName || titular?.positionName || ops?.positionName || ops?.originalPositionName || '').trim();
+  const horario = horarioDe(titular?.startTime, titular?.endTime) || horarioDe(ops?.startTime, ops?.endTime);
+  const hours = horasDelTurno(titular?.hours ?? ops?.hours, horario);
+  if (!code && !horario && !positionName) return null;
+  return {
+    code: code || '—',
+    positionName: positionName || 'General',
+    scheduleLabel: horario?.label || '—',
+    hours,
+  };
+}
+
+function apellidoDeTurno(turnos: TurnoDiaIn[], empId: string): string {
+  const t = turnos.find((x) => String(x.employeeId || '') === empId);
+  return apellidoCorto(String(t?.employeeName || empId)) || empId;
+}
+
+function codigoDeTurno(turnos: TurnoDiaIn[], empId: string): string {
+  const t = turnos.find((x) => String(x.employeeId || '') === empId && !esOpsCoverageDoc(x));
+  return String(t?.code || '').trim().toUpperCase();
+}
+
+function lineaCubierto(ex: CoberturaExistente, turnos: TurnoDiaIn[]): string | null {
+  if (ex.origen === 'operaciones') {
+    if (ex.estado === 'PARCIAL') {
+      const tipo = ex.codigo ? ` (${ex.codigo})` : '';
+      return `Parcial · ${ex.nombre}${tipo}${ex.tramoFaltante ? ` · falta ${ex.tramoFaltante}` : ''}`;
+    }
+    return [ex.nombre, ex.codigo, `desde Operaciones${ex.desdeHm ? ` ${ex.desdeHm}` : ''}`].filter(Boolean).join(' · ');
+  }
+  if (ex.origen === 'planificada') {
+    if (ex.cobertura.mode === 'split') {
+      return `${apellidoDeTurno(turnos, ex.cobertura.extEmpId)} (ext) · ${apellidoDeTurno(turnos, ex.cobertura.adelEmpId)} (adel)`;
+    }
+    const code = codigoDeTurno(turnos, ex.cobertura.employeeId);
+    return `${apellidoDeTurno(turnos, ex.cobertura.employeeId)}${code ? ` (${code})` : ''} · planificada`;
+  }
+  if (ex.origen === 'consulta') return ex.texto;
+  return null;
+}
+
+/** Estado real de la ausencia. El aviso del portal no se muestra como Autorizada. */
+export function estadoNovedadAusencia(ausencia: AusenciaDiaIn | null | undefined): { tipo: string; estado: string } {
+  if (!ausencia) return { tipo: '', estado: '' };
+  const tipoRaw = String(ausencia.type || '').trim();
+  const status = String(ausencia.status || '').trim();
+  const rev = String(ausencia.revisionEstado || '').toUpperCase();
+  const esAviso = ausencia.avisoPortal === true || tipoRaw === 'Ausencia con aviso' || status === 'Avisada';
+  if (esAviso) {
+    if (rev === 'JUSTIFICADA') {
+      return { tipo: tipoRaw && tipoRaw !== 'Ausencia con aviso' ? tipoRaw : 'Ausencia con aviso', estado: status === 'En verificación' ? 'En verificación' : (status && status !== 'Avisada' ? status : 'Justificada') };
+    }
+    if (rev === 'INJUSTIFICADA') return { tipo: 'Ausencia con aviso', estado: 'Injustificada' };
+    if (rev === 'POR_REVISAR' || status === 'Avisada' || status === 'Pendiente' || status === '') {
+      return { tipo: 'Ausencia con aviso', estado: 'Avisada · Por revisar' };
+    }
+    return { tipo: 'Ausencia con aviso', estado: status };
+  }
+  return { tipo: tipoRaw, estado: status };
+}
+
+/**
+ * Lo que muestran la tarjeta del clic izquierdo y el modal para un día de ausencia:
+ * el turno que tenía el titular y la cobertura que ya existe. Misma función en las dos.
+ */
+export function resumenAusenciaDia(p: {
+  titularEmployeeId: string;
+  titularName?: string | null;
+  date: string;
+  titular?: TurnoDiaIn | null;
+  turnosDelDia?: TurnoDiaIn[] | null;
+  ausencia?: AusenciaDiaIn | null;
+  consulta?: ConsultaResumenIn | null;
+}): ResumenAusenciaDia {
+  const emp = String(p.titularEmployeeId || '').trim();
+  const turnos = p.turnosDelDia || [];
+  const titular = titularDelDia(p);
+  const cobertura = coberturaExistenteDelDia({
+    titularEmployeeId: emp,
+    titularName: p.titularName,
+    date: p.date,
+    titular,
+    turnosDelDia: turnos,
+    consulta: p.consulta,
+  });
+  const novedad = estadoNovedadAusencia(p.ausencia);
+  const esOperaciones = cobertura.origen === 'operaciones' && cobertura.estado === 'CUBIERTO';
+  return {
+    turno: turnoQueTenia(titular, turnos, emp),
+    cobertura,
+    cubiertoPor: lineaCubierto(cobertura, turnos),
+    esOperaciones,
+    nota: esOperaciones ? TEXTO_LO_CUBRIO_OPERACIONES : '',
+    tipoNovedad: novedad.tipo,
+    estadoNovedad: novedad.estado,
+  };
 }

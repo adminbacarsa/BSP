@@ -358,6 +358,8 @@ test('la columna de días marca, selecciona, quita y aplica a los marcados; el p
   const pie = renderToStaticMarkup(<CoberturaPie accion={textoAccionPrincipal(true)} onAccion={() => {}} onCerrar={() => {}} />);
   assert.match(pie, /data-cobertura-cerrar[^>]*>Cerrar</);
   assert.match(pie, /data-cobertura-principal[^>]*>Confirmar cobertura</);
+  const pieCerrar = renderToStaticMarkup(<CoberturaPie accion="Cerrar" onAccion={() => {}} onCerrar={() => {}} />);
+  assert.equal(pieCerrar.match(/>Cerrar</g)?.length, 1);
   assert.doesNotMatch(pie, /Cancelar/);
   assert.doesNotMatch(pie, /Listo/);
   assert.doesNotMatch(pie, /Marcar vacante/);

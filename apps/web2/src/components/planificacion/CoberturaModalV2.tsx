@@ -445,14 +445,17 @@ export function CoberturaPie(props: { accion: string; accionDisabled?: boolean; 
     <div className="flex flex-col gap-2 border-t border-slate-200 bg-white px-5 py-3 sm:flex-row sm:items-center" data-cobertura-pie>
       <p className="min-w-0 flex-1 text-[10px] font-bold text-slate-500">{props.hint || TEXTO_CERRAR_GUARDA}</p>
       <div className="flex shrink-0 gap-2">
-        <button type="button" onClick={props.onCerrar} data-cobertura-cerrar className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-xs font-black text-slate-700 hover:bg-slate-50">
-          Cerrar
-        </button>
+        {props.accion !== 'Cerrar' && (
+          <button type="button" onClick={props.onCerrar} data-cobertura-cerrar className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-xs font-black text-slate-700 hover:bg-slate-50">
+            Cerrar
+          </button>
+        )}
         <button
           type="button"
           disabled={!!props.accionDisabled}
           onClick={props.onAccion}
           data-cobertura-principal
+          data-cobertura-cerrar={props.accion === 'Cerrar' ? '' : undefined}
           className="rounded-xl bg-indigo-600 px-5 py-2.5 text-xs font-black text-white shadow-lg hover:bg-indigo-700 disabled:cursor-not-allowed disabled:border disabled:border-slate-300 disabled:bg-white disabled:text-slate-500 disabled:shadow-none"
         >
           {props.accion}

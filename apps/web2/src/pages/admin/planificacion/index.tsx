@@ -338,6 +338,7 @@ import {
     decisionPrincipalCobertura,
     draftDeCobertura,
     recolectarTurnosDelDia,
+    resumenAusenciaDia,
     textoDecisionCobertura,
     type CoberturaExistente,
 } from '@/lib/planificacion/coberturaExistente';
@@ -14734,114 +14735,36 @@ function PlanificacionDesktop() {
                                 const objectiveId = (shift?.objectiveId || selectedObjective || '').toString();
                                 const serviceName = shift?.objectiveName || (objectiveId ? getObjectiveName(objectiveId) : '-');
                                 const coveredPosition = (shift?.positionName || activePosition || 'General').toString();
-                                const NON_ABSENCE_CODES = new Set(['M', 'T', 'N', 'D12', 'N12', 'PU', 'GU', 'EN', 'FT', 'RET', 'REF', 'ESC', 'C']);
-                                const resolveCoverageForAbsence = () => {
-                                    const empName = employees.find(e => e.id === selectedCell.empId)?.name || '';
-                                    const dateStr = selectedCell.dateStr;
-                                    const allSources = { ...shiftsMap, ...pendingChanges };
-                                    for (const [k, raw] of Object.entries(allSources)) {
-                                        if (!k.endsWith(`_${dateStr}`) || k.startsWith(`${selectedCell.empId}_`)) continue;
-                                        const s = raw as any;
-                                        if (s?.isDeleted) continue;
-                                        if (s?.comments?.includes(`Cubriendo a ${empName}`)) {
-                                            const covEmpId = k.replace(`_${dateStr}`, '');
-                                            const covEmp = employees.find((e: any) => e.id === covEmpId);
-                                            const covCode = String(s.code || '').toUpperCase();
-                                            return {
-                                                employeeName: covEmp?.name || '—',
-                                                code: covCode,
-                                                shift: s,
-                                                objectiveName: s.objectiveName || (s.objectiveId ? getObjectiveName(s.objectiveId) : serviceName),
-                                            };
-                                        }
+                                const packDia = recolectarTurnosDelDia({
+                                    date: selectedCell.dateStr,
+                                    titularEmployeeId: selectedCell.empId,
+                                    shiftsMap,
+                                    cellTurnosMap,
+                                    pendingChanges,
+                                });
+                                const resumenDia = (absence || isRRHHCode) ? resumenAusenciaDia({
+                                    titularEmployeeId: selectedCell.empId,
+                                    titularName: employeeName,
+                                    date: selectedCell.dateStr,
+                                    titular: packDia.titular || shift || null,
+                                    turnosDelDia: packDia.turnos,
+                                    ausencia: absence,
+                                    consulta: consultaDelDia(vacancyConsultas, selectedCell.dateStr),
+                                }) : null;
+                                const originalWorkShift = resumenDia?.turno
+                                    ? {
+                                        code: resumenDia.turno.code,
+                                        label: LEGEND_DESCRIPTIONS[resumenDia.turno.code] || resumenDia.turno.code,
+                                        schedule: resumenDia.turno.scheduleLabel,
+                                        hours: resumenDia.turno.hours,
+                                        service: serviceName,
+                                        position: resumenDia.turno.positionName,
                                     }
-                                    const coveredByRaw = shift?.coveredBy || pending?.coveredBy || shift?.coveredByEmployeeName || pending?.coveredByEmployeeName;
-                                    if (coveredByRaw) {
-                                        const nameOnly = String(coveredByRaw).replace(/\s*\([^)]*\)\s*$/, '').trim();
-                                        return { employeeName: nameOnly, code: '', shift: null, objectiveName: serviceName };
-                                    }
-                                    return null;
-                                };
-                                const coverageInfo = (absence || isRRHHCode) ? resolveCoverageForAbsence() : null;
-                                const ABSENCE_FRANCO_CODES = new Set(['F', 'FF', 'FP', 'V', 'L', 'PG', 'A', 'E', 'AA']);
-                                const isWorkCode = (c: string) => !!c && !ABSENCE_FRANCO_CODES.has(c.toUpperCase());
-                                const resolveOriginalWorkShift = () => {
-                                    // 1) Código preservado al aplicar cobertura (banda que se cubrió)
-                                    const pendingTitular = pending && !pending.isDeleted ? pending : null;
-                                    const storedOrig = String(
-                                      pendingTitular?.originalCode || shift?.originalCode || '',
-                                    ).toUpperCase();
-                                    if (storedOrig && isWorkCode(storedOrig)) {
-                                        const posName = pendingTitular?.originalPositionName || shift?.originalPositionName || coveredPosition;
-                                        const h = SHIFT_HOURS_LOOKUP[storedOrig] || 8;
-                                        return {
-                                            code: storedOrig,
-                                            label: LEGEND_DESCRIPTIONS[storedOrig] || storedOrig,
-                                            schedule: VACANCY_BAND_SCHEDULE[storedOrig]
-                                              || formatShiftScheduleLabel(
-                                                { code: storedOrig, positionName: posName },
-                                                storedOrig,
-                                              ),
-                                            hours: h,
-                                            service: serviceName,
-                                            position: posName,
-                                        };
-                                    }
-                                    if (coverageInfo?.shift && coverageInfo.code && NON_ABSENCE_CODES.has(coverageInfo.code)) {
-                                        const h = Number(coverageInfo.shift.hours) || SHIFT_HOURS_LOOKUP[coverageInfo.code] || 8;
-                                        return {
-                                            code: coverageInfo.code,
-                                            label: LEGEND_DESCRIPTIONS[coverageInfo.code] || coverageInfo.code,
-                                            schedule: formatShiftScheduleLabel(coverageInfo.shift, coverageInfo.code),
-                                            hours: h,
-                                            service: coverageInfo.objectiveName || serviceName,
-                                            position: coverageInfo.shift.positionName || coveredPosition,
-                                        };
-                                    }
-                                    if (pendingTitular?.coveredBy && code && NON_ABSENCE_CODES.has(code)) {
-                                        const h = Number(pendingTitular.hours) || SHIFT_HOURS_LOOKUP[code] || 8;
-                                        return {
-                                            code,
-                                            label: LEGEND_DESCRIPTIONS[code] || code,
-                                            schedule: formatShiftScheduleLabel(pendingTitular, code),
-                                            hours: h,
-                                            service: serviceName,
-                                            position: coveredPosition,
-                                        };
-                                    }
-                                    // Fallback: el turno planificado del empleado ese día (ya disponible en `shift`)
-                                    const shiftCode = String(shift?.code || '').toUpperCase();
-                                    if (shift && isWorkCode(shiftCode)) {
-                                        const h = Number(shift.hours) || SHIFT_HOURS_LOOKUP[shiftCode] || 8;
-                                        return {
-                                            code: shiftCode,
-                                            label: LEGEND_DESCRIPTIONS[shiftCode] || shiftCode,
-                                            schedule: formatShiftScheduleLabel(shift, shiftCode),
-                                            hours: h,
-                                            service: serviceName,
-                                            position: shift.positionName || coveredPosition,
-                                        };
-                                    }
-                                    return null;
-                                };
-                                const originalWorkShift = (absence || isRRHHCode) ? resolveOriginalWorkShift() : null;
-                                const absenceTypeLabel = absence?.type || shift?.name || LEGEND_DESCRIPTIONS[code] || code || '—';
-                                const ABSENCE_STATUS_ES: Record<string, string> = {
-                                    APPROVED: 'Aprobada', PENDING: 'Pendiente', REJECTED: 'Rechazada',
-                                    ACTIVE: 'Activa', CLOSED: 'Cerrada', REGISTERED: 'Registrada',
-                                    VERIFIED: 'Verificada', JUSTIFIED: 'Justificada',
-                                };
-                                // Ausencias injustificadas/sin aviso: el estado APPROVED significa "registrada por RRHH",
-                                // no que la ausencia fue aprobada — se muestra "Registrada" para no confundir.
-                                const UNEXCUSED_CODES = new Set(['AA']);
-                                const absenceRawStatus = absence?.status || (isRRHHCode ? 'APPROVED' : '');
-                                const isUnexcused = UNEXCUSED_CODES.has(code) || absence?.type?.toLowerCase().includes('injustificada');
-                                const absenceStatusLabel = (isUnexcused && absenceRawStatus?.toUpperCase() === 'APPROVED')
-                                    ? 'Registrada'
-                                    : (ABSENCE_STATUS_ES[absenceRawStatus?.toUpperCase?.()] || absenceRawStatus || '');
-                                const coveringEmployee = coverageInfo
-                                    ? (coverageInfo.code ? `${coverageInfo.employeeName} (${coverageInfo.code})` : coverageInfo.employeeName)
-                                    : (shift?.coveredBy || pending?.coveredBy || null);
+                                    : null;
+                                const absenceTypeLabel = resumenDia?.tipoNovedad || absence?.type || shift?.name || LEGEND_DESCRIPTIONS[code] || code || '—';
+                                const absenceStatusLabel = resumenDia ? resumenDia.estadoNovedad : String(absence?.status || '');
+                                const coveringEmployee = resumenDia?.cubiertoPor || shift?.coveredBy || pending?.coveredBy || null;
+                                const coberturaEsOperaciones = !!resumenDia?.esOperaciones;
                                 const hasSwap = !!(shift?.swapWith || shift?.swapDate);
                                 const isSwapPersisted = hasSwap && !pending && !!shift?.id;
                                 const showRrhhPanel = !!(absence || isRRHHCode);
@@ -14918,7 +14841,7 @@ function PlanificacionDesktop() {
                                                                             <span className="font-mono font-black text-sm text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100">{originalWorkShift.code}</span>
                                                                             <span className="text-sm font-bold text-slate-800">{originalWorkShift.label}</span>
                                                                             {originalWorkShift.hours > 0 && (
-                                                                                <span className="text-xs font-mono text-slate-500">{originalWorkShift.hours}h</span>
+                                                                                <span className="text-xs font-mono text-slate-500">{fmtHorasAr(originalWorkShift.hours)} h</span>
                                                                             )}
                                                                         </div>
                                                                         <p className="text-xs font-mono text-slate-600 mt-1.5">{originalWorkShift.schedule}</p>
@@ -14945,8 +14868,8 @@ function PlanificacionDesktop() {
                                                                 <p className="text-[10px] font-black uppercase text-slate-400 mb-1.5">3 · Tipo de novedad</p>
                                                                 <div className="flex items-center gap-2 flex-wrap">
                                                                     <span className="text-sm font-black text-slate-800">{absenceTypeLabel}</span>
-                                                                    {code && (
-                                                                        <span className="font-mono text-[10px] font-black px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200">{code}</span>
+                                                                    {String(absence?.absenceType || absence?.inferredCode || '').trim() && (
+                                                                        <span className="font-mono text-[10px] font-black px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200">{String(absence?.absenceType || absence?.inferredCode).toUpperCase()}</span>
                                                                     )}
                                                                 </div>
                                                                 {absence?.reason && (
@@ -14956,17 +14879,9 @@ function PlanificacionDesktop() {
 
                                                             <div>
                                                                 <p className="text-[10px] font-black uppercase text-slate-400 mb-1.5">4 · Cubierto por</p>
-                                                                {coverageInfo?.employeeName ? (
+                                                                {resumenDia?.cubiertoPor ? (
                                                                     <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-3">
-                                                                        <p className="text-sm font-black text-emerald-900">{coverageInfo.employeeName}</p>
-                                                                        {coverageInfo.code && (
-                                                                            <p className="text-xs text-emerald-700 mt-0.5">
-                                                                                Turno asignado: <span className="font-mono font-bold">{coverageInfo.code}</span>
-                                                                                {coverageInfo.shift && (
-                                                                                    <span className="text-emerald-600/80"> · {formatShiftScheduleLabel(coverageInfo.shift, coverageInfo.code)}</span>
-                                                                                )}
-                                                                            </p>
-                                                                        )}
+                                                                        <p className="text-sm font-black text-emerald-900">{resumenDia.cubiertoPor}</p>
                                                                     </div>
                                                                 ) : (
                                                                     <p className="text-sm text-amber-700 font-bold">Sin cobertura asignada</p>
@@ -14980,18 +14895,20 @@ function PlanificacionDesktop() {
                                                                     Quitar marca (borrador)
                                                                 </button>
                                                             </div>
+                                                        ) : coberturaEsOperaciones ? (
+                                                            <p className="px-4 pb-3 text-[10px] font-bold text-slate-500 text-center">
+                                                                {resumenDia?.nota}
+                                                            </p>
+                                                        ) : resumenDia?.cubiertoPor ? (
+                                                            <p className="px-4 pb-3 text-[10px] font-bold text-emerald-700 text-center">
+                                                                Licencia cubierta — en reportes/liquidación figura como novedad RRHH; las horas del puesto las computa quien cubre.
+                                                            </p>
                                                         ) : (
-                                                            coverageInfo?.employeeName ? (
-                                                                <p className="px-4 pb-3 text-[10px] font-bold text-emerald-700 text-center">
-                                                                    Licencia cubierta — en reportes/liquidación figura como novedad RRHH; las horas del puesto las computa {coverageInfo.employeeName}.
-                                                                </p>
-                                                            ) : (
-                                                                <p className="px-4 pb-3 text-[10px] font-bold text-amber-800/80 text-center">
-                                                                    Novedad RRHH — podés re-procesar cobertura abajo si el día no está consolidado.
-                                                                </p>
-                                                            )
+                                                            <p className="px-4 pb-3 text-[10px] font-bold text-amber-800/80 text-center">
+                                                                Novedad RRHH — podés re-procesar cobertura abajo si el día no está consolidado.
+                                                            </p>
                                                         )}
-                                                        {isRRHHCode && !isConsolidated && !pending && absence && (
+                                                        {isRRHHCode && !isConsolidated && !pending && absence && !coberturaEsOperaciones && (
                                                             <div className="px-4 pb-4">
                                                                 <button
                                                                     onClick={() => {
@@ -16871,6 +16788,30 @@ function PlanificacionDesktop() {
                     };
                     const diaSel = vacancyEditingDay || sortedActiveDates[0] || absenceDateRange[0] || null;
                     const titSel = diaSel ? resolveEffectiveTitularForDay(diaSel) : null;
+                    const resumenSel = (() => {
+                        if (!diaSel) return null;
+                        const pack = recolectarTurnosDelDia({
+                            date: diaSel,
+                            titularEmployeeId: String(vacancyData?.employeeId || ''),
+                            shiftsMap,
+                            cellTurnosMap,
+                            pendingChanges,
+                        });
+                        return resumenAusenciaDia({
+                            titularEmployeeId: String(vacancyData?.employeeId || ''),
+                            titularName: vacancyData?.employeeName,
+                            date: diaSel,
+                            titular: pack.titular,
+                            turnosDelDia: pack.turnos,
+                            ausencia: vacancyData,
+                            consulta: consultaDelDia(vacancyConsultas, diaSel),
+                        });
+                    })();
+                    const turnoFranja = vacancyGapBandOverride
+                        ? titSel
+                        : (resumenSel?.turno && resumenSel.turno.code !== '—'
+                            ? resumenSel.turno
+                            : titSel);
                     const opsSel = diaSel ? opsVista(diaSel) : null;
                     const consultaSel = diaSel && opsSel?.estado !== 'CUBIERTO' ? consultaViva(diaSel) : null;
                     const estadoSel = diaSel ? estadoDe(diaSel) : null;
@@ -16985,7 +16926,7 @@ function PlanificacionDesktop() {
                                 codigo={absType || '—'}
                                 rango={textoRangoDias(absenceDateRange)}
                                 diaLabel={diaSel ? formatShortDay(diaSel) : null}
-                                cubrir={textoCubrir(titSel)}
+                                cubrir={textoCubrir(turnoFranja)}
                                 bandas={bandas}
                                 bandaValue={vacancyGapBandOverride ?? bandaAuto}
                                 onBanda={(v) => setVacancyGapBandOverride(v && v !== bandaAuto ? v : null)}
