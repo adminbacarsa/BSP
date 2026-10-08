@@ -53,6 +53,7 @@ export function shiftCoverageExtensionExtraHours(
   if (fromRaw && toRaw && hasCoverageSegment) {
     const from = String(fromRaw).slice(0, 5);
     const to = String(toRaw).slice(0, 5);
+    if (from === to) return 0;
     const h = hoursBetweenClockTimes(from, to);
     if (h != null && h >= 0.25 && h <= 6) {
       const code = String(shift.code || '').toUpperCase();
@@ -310,7 +311,10 @@ export function shiftCoverageSegmentBillableHours(
     ?? (shift.isExtended ? (shift.adjustedEndTime || shift.extensionEndTime) : null);
 
   if (fromRaw && toRaw) {
-    const h = hoursBetweenClockTimes(String(fromRaw).slice(0, 5), String(toRaw).slice(0, 5));
+    const from = String(fromRaw).slice(0, 5);
+    const to = String(toRaw).slice(0, 5);
+    if (from === to) return 0;
+    const h = hoursBetweenClockTimes(from, to);
     if (h != null && h > 0) return Math.round(h * 100) / 100;
   }
 

@@ -270,6 +270,121 @@ export function applyShiftExtensionFromCell(
   return changes;
 }
 
+/**
+ * Extensión o adelanto que cubre todo el hueco cuando del otro lado no hay nadie.
+ * El escritor de la extensión es `applySingleShiftExtension` (el de la extensión simple).
+ */
+export function aplicarTramoSolo(
+  baseChanges: Record<string, any>,
+  ctx: {
+    shiftsMap: Record<string, any>;
+    positionStructure?: VacancyPositionSla[];
+    employeesById: Record<string, any>;
+    objectiveId: string;
+    clientId?: string;
+  },
+  input: {
+    lado: 'ext' | 'adel';
+    empId: string;
+    titularId?: string | null;
+    dateStr: string;
+    gapStart: string;
+    gapEnd: string;
+    gapBand: string;
+    gapPosition: string;
+    gapHours?: number | null;
+  },
+): Record<string, any> {
+  const key = `${input.empId}_${input.dateStr}`;
+  const pending = baseChanges[key];
+  const base = (pending && !pending.isDeleted ? pending : null) || ctx.shiftsMap[key] || null;
+  if (!base) throw new Error('El guardia no tiene turno ese día');
+  const desde = typeof base.startTime === 'string' ? base.startTime.slice(0, 5) : input.gapStart;
+  const hasta = typeof base.endTime === 'string' ? base.endTime.slice(0, 5) : input.gapEnd;
+  const spanMin = (a: string, b: string) => {
+    const aa = parseMin(a);
+    const bb = parseMin(b);
+    if (aa == null || bb == null) return 0;
+    return Math.max(0, bb >= aa ? bb - aa : bb + 24 * 60 - aa);
+  };
+  const extraMin = input.lado === 'ext' ? spanMin(hasta, input.gapEnd) : spanMin(input.gapStart, desde);
+  const extraHours = Math.round((extraMin / 60) * 100) / 100;
+  let changes = input.lado === 'ext'
+    ? applyShiftExtensionFromCell(baseChanges, {
+        objectiveId: ctx.objectiveId,
+        clientId: ctx.clientId,
+        dateStr: input.dateStr,
+        primaryEmpId: input.empId,
+        primaryExtraHours: extraHours,
+        gapBand: input.gapBand,
+        gapPosition: input.gapPosition,
+        positionStructure: ctx.positionStructure,
+        shiftsMap: ctx.shiftsMap,
+        employeesById: ctx.employeesById,
+      })
+    : baseChanges;
+
+  if (input.lado === 'ext') {
+    const cur = changes[key];
+    if (cur) {
+      changes = {
+        ...changes,
+        [key]: {
+          ...cur,
+          coversEmployeeId: input.titularId || cur.coversEmployeeId,
+          segmentToTime: input.gapEnd,
+          adjustedEndTime: input.gapEnd,
+          coverageMode: 'FULL_BAND',
+          coverageStatus: 'COVERED',
+        },
+      };
+    }
+  } else {
+    const nombre = String(ctx.employeesById[input.empId]?.name || input.empId).split(',')[0].trim().split(/\s+/)[0];
+    changes = {
+      ...baseChanges,
+      [key]: {
+        ...base,
+        isTemp: true,
+        isEarlyStart: true,
+        isExtended: false,
+        adjustedStartTime: input.gapStart,
+        segmentFromTime: input.gapStart,
+        segmentToTime: input.gapEnd,
+        coverageSegmentRole: 'EARLY_START',
+        coverageType: 'ABSENCE_COVERAGE',
+        coverageMode: 'FULL_BAND',
+        coverageStatus: 'COVERED',
+        coversBandCode: input.gapBand,
+        coversPositionName: input.gapPosition,
+        coversEmployeeId: input.titularId || undefined,
+        extExtraHours: extraHours,
+        coverageNote: `Adelanto solo ${input.gapStart}–${input.gapEnd} · ${nombre}`,
+      },
+    };
+  }
+
+  if (input.titularId && input.titularId !== input.empId) {
+    const tKey = `${input.titularId}_${input.dateStr}`;
+    const tPending = changes[tKey];
+    const tBase = (tPending && !tPending.isDeleted ? tPending : null) || ctx.shiftsMap[tKey] || {};
+    const quien = String(ctx.employeesById[input.empId]?.name || input.empId).split(',')[0].trim().split(/\s+/)[0];
+    const verbo = input.lado === 'ext' ? 'ext' : 'adel';
+    changes = {
+      ...changes,
+      [tKey]: {
+        ...tBase,
+        isTemp: true,
+        coveredBy: `${quien} ${verbo} ${input.gapStart}–${input.gapEnd}`,
+        coverageStatus: 'COVERED',
+        coverageType: input.lado === 'ext' ? 'EXTEND' : 'ADVANCE',
+        coverageSegmentRole: 'TARGET',
+      },
+    };
+  }
+  return changes;
+}
+
 export function isShiftEligibleForExtension(shift: Record<string, any> | null | undefined): boolean {
   if (!shift || shift.isDeleted) return false;
   const code = String(shift.code || '').toUpperCase();

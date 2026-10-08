@@ -14,10 +14,11 @@ import {
   applyFrancoTrabajadoGapCloseToChanges,
   applyOperationalGapCloseToChanges,
   applySingleWorkerFullGapCloseToChanges,
+  segmentosMitadHueco,
+  ventanaHuecoSla,
 } from '@/lib/planificacion/operationalGapCoverage';
 import {
   describeVacancySplitPlan,
-  resolveVacancySplitSegmentTimes,
   vacancySplitUsesManualExtraHours,
   type TitularVacancyWorkShift,
 } from '@/lib/planificacion/vacancyCoverage';
@@ -90,12 +91,28 @@ export default function PlanningSlaGapCloseModal({
     () => describeVacancySplitPlan(titular, positionStructure),
     [titular, positionStructure],
   );
+  const gapVentana = useMemo(
+    () => ventanaHuecoSla({
+      gapBand: data.gapBand,
+      gapPosition: data.positionName,
+      positionStructure,
+      gapFrom: titular.scheduleLabel.includes('–') || titular.scheduleLabel.includes('-')
+        ? titular.scheduleLabel.split(/[–-]/)[0]?.trim()
+        : undefined,
+      gapTo: titular.scheduleLabel.includes('–') || titular.scheduleLabel.includes('-')
+        ? titular.scheduleLabel.split(/[–-]/)[1]?.trim()
+        : undefined,
+    }),
+    [data.gapBand, data.positionName, positionStructure, titular.scheduleLabel],
+  );
   const listCtx = useMemo(() => ({
     positionStructure,
     preferSamePosition: false,
     gapPositionName: data.positionName,
     gapBand: data.gapBand,
-  }), [positionStructure, data.positionName, data.gapBand]);
+    gapStart: gapVentana.from,
+    gapEnd: gapVentana.to,
+  }), [positionStructure, data.positionName, data.gapBand, gapVentana]);
   const poolExt = useMemo(
     () => listExtensionCandidates(
       data.gapBand,
@@ -150,20 +167,15 @@ export default function PlanningSlaGapCloseModal({
   );
 
   const manual = vacancySplitUsesManualExtraHours({ extExtraHours: extExtraH, secondExtExtraHours: secondExtraH });
-  const extCand = poolExt.find((c) => c.id === extId);
   const extShiftDate = extApplyDate || data.dateStr;
-  const secondCand = poolSecond.find((c) => c.id === secondId);
-  const preview = extId && secondId
-    ? resolveVacancySplitSegmentTimes(
-      positionStructure,
-      data.gapBand,
-      data.positionName,
-      { positionName: extCand?.positionName, code: extCand?.code },
-      { positionName: secondCand?.positionName, code: secondCand?.code },
-      extExtraH,
-      secondExtraH,
-    )
-    : null;
+  const preview = (() => {
+    try {
+      const s = segmentosMitadHueco(data.dateStr, gapVentana.from, gapVentana.to);
+      return { gap: gapVentana, first: s.ext, second: s.adel, firstExtraHours: 0, secondExtraHours: 0 };
+    } catch {
+      return null;
+    }
+  })();
 
   const employeesById = useMemo(
     () => Object.fromEntries(employees.filter((e) => e.id).map((e) => [e.id!, e])),
@@ -232,6 +244,8 @@ export default function PlanningSlaGapCloseModal({
         dateStr: data.dateStr,
         gapPosition: data.positionName,
         gapBand: data.gapBand,
+        gapFrom: gapVentana.from,
+        gapTo: gapVentana.to,
         extEmpId: extId,
         secondEmpId: secondId,
         extHomePosition: extShift?.positionName,
@@ -420,8 +434,7 @@ export default function PlanningSlaGapCloseModal({
           <>
           <div>
             <div className="text-[10px] font-black uppercase text-slate-500 mb-1">
-              1.er tramo {preview ? `(${preview.first.from}–${preview.first.to})` : splitPlan ? `(${splitPlan.extSegment})` : ''}
-              {splitPlan?.extBand && <span className="font-mono text-slate-400"> · solo {splitPlan.extBand}</span>}
+              1.er tramo {preview ? `(${preview.first.from}–${preview.first.to})` : ''} · termina a la hora del inicio o hasta 30 min antes
             </div>
             <div className="space-y-1 max-h-32 overflow-y-auto rounded-xl border border-slate-100 p-1">
               {poolExt.length === 0 ? (
@@ -438,7 +451,7 @@ export default function PlanningSlaGapCloseModal({
                   }}
                   className={`w-full px-2.5 py-2 text-left text-xs font-bold rounded-lg border ${extId === c.id ? 'bg-red-100 border-red-500 text-red-900' : 'bg-white border-slate-200'}`}
                 >
-                  {c.name} · {c.code} · {c.positionName}
+                  {c.textoFila || `${c.name} · ${c.code} · ${c.positionName}`}
                 </button>
               ))}
             </div>
@@ -446,8 +459,7 @@ export default function PlanningSlaGapCloseModal({
 
           <div>
             <div className="text-[10px] font-black uppercase text-slate-500 mb-1">
-              2.º tramo {preview ? `(${preview.second.from}–${preview.second.to})` : splitPlan ? `(${splitPlan.adelSegment})` : ''}
-              {splitPlan?.adelBand && <span className="font-mono text-slate-400"> · solo {splitPlan.adelBand}</span>}
+              2.º tramo {preview ? `(${preview.second.from}–${preview.second.to})` : ''} · arranca a la hora del fin o hasta 30 min después
             </div>
             <div className="space-y-1 max-h-32 overflow-y-auto rounded-xl border border-slate-100 p-1">
               {poolSecond.length === 0 ? (
@@ -465,7 +477,7 @@ export default function PlanningSlaGapCloseModal({
                   }}
                   className={`w-full px-2.5 py-2 text-left text-xs font-bold rounded-lg border ${secondId === c.id ? 'bg-red-100 border-red-500 text-red-900' : 'bg-white border-slate-200'}`}
                 >
-                  {c.name} · {c.code} · {c.positionName}
+                  {c.textoFila || `${c.name} · ${c.code} · ${c.positionName}`}
                 </button>
               ))}
             </div>

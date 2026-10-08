@@ -144,9 +144,13 @@ describe('clic en la grilla', () => {
   it('Ext: tiene que tener la franja anterior al hueco', () => {
     const lista = ['galeano'];
     assert.deepEqual(validarClicElegir({ ...ok, paso: 'ext', candidatoId: 'galeano', rol: 'WORKING', candidatosBanda: lista }), { ok: true });
-    const r = validarClicElegir({ ...ok, paso: 'ext', candidatoId: 'barros', rol: 'WORKING', candidatosBanda: lista, bandaHueco: 'M' });
+    const r = validarClicElegir({
+      ...ok, paso: 'ext', candidatoId: 'barros', rol: 'WORKING', candidatosBanda: lista,
+      inicioHueco: '15:30', finTurno: '13:30', nombreCandidato: 'BARROS',
+    });
     assert.equal(r.ok, false);
-    assert.match((r as { motivo: string }).motivo, /franja anterior al hueco M/);
+    assert.match((r as { motivo: string }).motivo, /terminar entre las 15:00 y las 15:30/);
+    assert.match((r as { motivo: string }).motivo, /BARROS termina 13:30/);
   });
 
   it('Adel: la franja siguiente y no puede ser quien extiende', () => {
@@ -156,8 +160,12 @@ describe('clic en la grilla', () => {
       validarClicElegir({ ...ok, paso: 'adel', candidatoId: 'galeano', rol: 'WORKING', candidatosBanda: lista, extId: 'galeano' }),
       { ok: false, motivo: 'Ya extiende: el adelanto lo hace otra persona' },
     );
-    const r = validarClicElegir({ ...ok, paso: 'adel', candidatoId: 'sosa', rol: 'WORKING', candidatosBanda: lista, extId: 'galeano' });
-    assert.match((r as { motivo: string }).motivo, /franja siguiente/);
+    const r = validarClicElegir({
+      ...ok, paso: 'adel', candidatoId: 'sosa', rol: 'WORKING', candidatosBanda: lista, extId: 'galeano',
+      finHueco: '16:30', inicioTurno: '19:00', nombreCandidato: 'SOSA',
+    });
+    assert.match((r as { motivo: string }).motivo, /arrancar entre las 16:30 y las 17:00/);
+    assert.match((r as { motivo: string }).motivo, /SOSA arranca 19:00/);
   });
 });
 

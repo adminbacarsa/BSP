@@ -307,4 +307,8 @@ export type VacancySplitListContext = {
   preferSamePosition?: boolean;
   /** Si true, no rellenar con otras bandas (adelanto = solo turno siguiente). */
   strictNeighborBand?: boolean;
+  /** Inicio real del hueco (HH:mm). Manda sobre la sigla y sobre el SLA. */
+  gapStart?: string | null;
+  /** Fin real del hueco (HH:mm). */
+  gapEnd?: string | null;
 };
