@@ -10,7 +10,7 @@ import {
     ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Search, Plus,
     Users, Clock, X, UserPlus, ArrowRight, Eye, EyeOff, 
     CheckCircle, Trash2, ShieldAlert, User, Briefcase, Layers,
-    Bell, Calendar, CalendarX, Loader2, Stethoscope, MapPin, Lock, ShieldCheck, UserMinus,
+    Bell, Calendar, CalendarX, Loader2, MapPin, Lock, ShieldCheck, UserMinus,
     Save, Undo, History, MousePointer2, AlertTriangle, Grip, LayoutGrid, MonitorPlay,
     Printer, Download, Grid, RefreshCw, Edit3, Shield, ArrowRightCircle, Info, ArrowDownWideNarrow, ArrowDownAZ,
     BadgePercent, ArrowLeftRight, CalendarSearch, CheckSquare, XCircle, Search as SearchIcon, RefreshCcw, UserCheck, Split, Ban,
@@ -200,6 +200,16 @@ import {
   resolveCoverGuardDisplayName,
 } from '@/lib/cosp/coverageSemantics';
 import { PlanningCoverageLegend } from '@/components/planificacion/PlanningCoverageLegend';
+import { inicioRenderGrilla, registrarCommitGrilla } from '@/lib/planificacion/perfGrilla';
+import {
+    CeldaGrilla,
+    TooltipCeldaGrilla,
+    reusarVista,
+    useControlTooltipCelda,
+    type ControlCeldas,
+    type DatosTooltipCelda,
+    type VistaCelda,
+} from '@/components/planificacion/GrillaCelda';
 import {
     compareObjectiveMonthSchedules,
     formatCompareObjectiveMonthsReport,
@@ -248,6 +258,7 @@ import {
     resolveVacancySplitSegmentTimes,
     vacancySplitUsesManualExtraHours,
     VACANCY_BAND_SCHEDULE,
+    VACANCY_ABSENCE_TYPE_CODES,
     type VacancyDayCoverage,
 } from '@/lib/planificacion/vacancyCoverage';
 import {
@@ -259,6 +270,7 @@ import {
     mergeCoverages,
     type CoverageAuthRequest,
     nextMarkedDay,
+    propuestaGuardCobertura,
     templateDayForRemaining,
     type ProposedGuardShift,
 } from '@/lib/planificacion/vacancyCoverageWizard';
@@ -288,7 +300,7 @@ import {
     type DiaFila,
 } from '@/components/planificacion/CoberturaModalV2';
 import { BarraPreguntar } from '@/components/eventuales/EventualesCandidatosUx';
-import { ConsultasEnCursoPill, IndicadorConsultaCelda } from '@/components/planificacion/ConsultasEnCurso';
+import { ConsultasEnCursoPill } from '@/components/planificacion/ConsultasEnCurso';
 import { useConsultasDisponibilidadObjetivo, type ConsultaObjetivo } from '@/hooks/useConsultasDisponibilidadObjetivo';
 import {
     TEXTO_AVISO_ASIGNADO_AL_GUARDAR,
@@ -329,6 +341,44 @@ import {
     textoDecisionCobertura,
     type CoberturaExistente,
 } from '@/lib/planificacion/coberturaExistente';
+import MenuRapidoCobertura, { FranjaModoElegir } from '@/components/planificacion/MenuRapidoCobertura';
+import {
+    apellidoMarca,
+    bloqueAusencia,
+    buscarFueraDelCronograma,
+    celdaEsHuecoSla,
+    diasParaRepetir,
+    fechaCorta,
+    marcaCeldaMenuRapido,
+    opcionesMenuRapido,
+    pasoDeModo,
+    resumenRepetir,
+    rolDesdeTurno,
+    textoFranjaElegir,
+    textoMarcaMenuRapido,
+    textoRepetir,
+    validarClicElegir,
+    type AccionElegir,
+    type OpcionesMenuRapido,
+    type PasoElegir,
+    type ResultadoDia,
+} from '@/lib/planificacion/menuRapidoCobertura';
+
+type CtxMenuRapido = {
+    clase: 'ausente' | 'hueco';
+    empId: string;
+    empName: string;
+    dateStr: string;
+    positionName: string;
+    gapBand: string;
+    horario: string;
+    horas: number;
+    codigoAusencia: string;
+    absence: any;
+};
+type CovMenuRapido = { mode: 'substitute'; id: string } | { mode: 'split'; extId: string; adelId: string };
+import { applyOperationalGapCloseToChanges } from '@/lib/planificacion/operationalGapCoverage';
+import { format as formatFecha } from 'date-fns';
 import { alignVacancyGapBand } from '@/lib/planificacion/vacancySplitBands';
 import {
     listVacancyGapBandOptions,
@@ -1068,6 +1118,314 @@ const rfzDocToShiftView = (rfz: any) => ({
     employeeName: rfz.employeeName,
 });
 
+const CELDA_BORRADA = { borrada: true } as const;
+
+type EntradaCeldaGrilla = {
+    selectedObjective: any;
+    selectedGrupo: any;
+    grupoUnifiedMode: boolean;
+    pendingChanges: Record<string, any>;
+    shiftsMap: Record<string, any>;
+    rfzByEmpDate: Record<string, any>;
+    absencesMap: Record<string, any>;
+    planPublicado: boolean;
+    cellTurnosMap: Record<string, any[]>;
+    turaMap: Record<string, any>;
+    lctRestByCell: Record<string, string>;
+    excludedPositionsByDate: Record<string, string[]>;
+    vacancyConsultas: any;
+    isServiceLocked: boolean;
+    fechaBloqueada: (dateStr: string) => boolean;
+    nombreObjetivo: (objId: string) => string;
+};
+
+type CtxCeldaGrilla = {
+    emp: any;
+    dateStr: string;
+    dayIndex: number;
+    p: any;
+    s: any;
+    absence: any;
+    activeShift: any;
+    cellShift: any;
+    rfzOnCell: any;
+    evOverlay: any;
+    cellCode: string | null;
+    leaveCellCode: string;
+    isLeaveCell: boolean;
+    coveredByCell: any;
+    cellPosName: string | null;
+    cellPosExcluded: boolean;
+    isOtherObjectiveShift: boolean;
+    isOpsCoverageCell: boolean;
+    opsTooltipShift: any;
+    coverageSourceShift: any;
+    isCoverageSourceUsed: boolean;
+    planDualUsedAndCob: boolean;
+    isEarly: boolean;
+    isExtended: boolean;
+    covRole: any;
+    covNote: any;
+    isExclusionCol: boolean;
+    excludedOnDay: string[];
+    lctRest: string;
+    tieneTurno: boolean;
+};
+
+function esInvitadoEnGrilla(emp: any, selectedObjective: any, selectedGrupo: any, grupoUnifiedMode: boolean, slaIdToObjId: Record<string, string>): boolean {
+    return !!(selectedObjective && (
+        (selectedGrupo && grupoUnifiedMode)
+            ? !(selectedGrupo.objectiveIds.includes(emp.preferredObjectiveId) ||
+                (slaIdToObjId[emp.preferredObjectiveId] && selectedGrupo.objectiveIds.includes(slaIdToObjId[emp.preferredObjectiveId])))
+            : emp.preferredObjectiveId !== selectedObjective
+    ));
+}
+
+function calcularCeldaGrilla(e: EntradaCeldaGrilla, emp: any, isGuest: boolean, day: Date, dayIndex: number): { vista: VistaCelda; ctx: CtxCeldaGrilla } {
+    const selectedObjective = e.selectedObjective;
+    const selectedGrupo = e.selectedGrupo;
+    const grupoUnifiedMode = e.grupoUnifiedMode;
+    const cellDateStr = getDateKey(day);
+    const key = `${emp.id}_${cellDateStr}`;
+    const { s, p } = resolveCellShiftDisplay(
+        emp.id, cellDateStr, selectedObjective, selectedGrupo, grupoUnifiedMode, e.pendingChanges, e.shiftsMap,
+    );
+    const rfzOnCell = e.rfzByEmpDate[key];
+    const isLockedDate = e.fechaBloqueada(cellDateStr);
+    const isCellWeekend = [0, 6].includes(day.getDay());
+    let content: any = null; let style = "";
+    let isFT = s?.isFrancoTrabajado || p?.isFrancoTrabajado; let isFF = s?.isFrancoCompensatorio || p?.isFrancoCompensatorio;
+    const isExtended = s?.isExtended || p?.isExtended;
+    const isEarly = s?.isEarlyStart || p?.isEarlyStart || s?.isAdvanced || p?.isAdvanced;
+    const covRole = p?.coverageSegmentRole || s?.coverageSegmentRole;
+    const covNote = p?.coverageNote || s?.coverageNote;
+    const plannedNov = s?.plannedNovedad || p?.plannedNovedad;
+    let absence = e.absencesMap[key];
+    if (absence && ((absence.inferredCode as string) || inferAbsenceCode(absence)) === 'AA' && !e.planPublicado) absence = null as any;
+    const effectiveCode = p?.code || s?.code;
+    const coveredByCell = p?.coveredBy || s?.coveredBy || s?.coveredByEmployeeName || p?.coveredByEmployeeName;
+    const hasConflict = shouldShowLeaveConflictSiren({
+        shiftCode: effectiveCode,
+        absence,
+        coveredBy: coveredByCell,
+        hasNovedad: !!(s && s.hasNovedad),
+        shiftStatus: s?.status,
+    });
+    let statusIndicator: string | null = null;
+    if (s) {
+        const coveredAbs =
+            (s.status === 'ABSENT' || s.isAbsent) &&
+            isTitularCoverageAssigned(s);
+        if (coveredAbs) statusIndicator = 'bg-teal-500';
+        else if (s.status === 'PRESENT' || s.status === 'COMPLETED' || s.isPresent) statusIndicator = 'bg-emerald-500';
+        else if (s.status === 'ABSENT' || s.isAbsent) statusIndicator = 'bg-rose-500';
+    }
+    const isSwap = s?.swapWith || p?.swapWith;
+    const swapPending = !!(
+        isSwap &&
+        (
+            (s?.origin && s.origin !== 'PLANIFICADOR' && !s.swapAuthorized) ||
+            (p?.origin && p.origin !== 'PLANIFICADOR' && !p.swapAuthorized)
+        )
+    );
+    const swapStyle = swapPending ? SHIFT_STYLES['SWAP_PENDING'] : SHIFT_STYLES['SWAP'];
+    if (isLockedDate && !p) { style = SHIFT_STYLES['PAST']; if (s) content = s.code; }
+    else if (p) { if (p.isDeleted) { content = CELDA_BORRADA; style = "bg-rose-50 text-rose-300"; } else { if (isFT) { style = SHIFT_STYLES['FT']; content = "FT"; } else if (isFF) { style = SHIFT_STYLES['FF']; content = "FF"; } else { content = p.code; const baseStyle = SHIFT_STYLES[p.code]; style = baseStyle ? `${baseStyle} ring-2 ring-amber-400 ${isSwap ? swapStyle : ''}` : `bg-amber-100 text-amber-700 font-black ring-2 ring-amber-400 ${isSwap ? swapStyle : ''}`; if (content === 'REF' || content === 'ESC') content = cellLabelForDeployment(String(content), p.deploymentBand); } } }
+    else if (s) { if (!isLockedDate) { if (isFT) { style = SHIFT_STYLES['FT']; content = "FT"; } else if (isFF) { style = SHIFT_STYLES['FF']; content = "FF"; } else { style = `${getDefaultStyle(s.code)} ${isSwap ? swapStyle : ''}`; content = s.code; } } }
+    else if (rfzOnCell && !p) {
+        content = 'RFZ';
+        style = `${SHIFT_STYLES['RFZ']}${rfzOnCell.draft ? ' ring-2 ring-amber-400' : ''}`;
+    }
+    const _deployBand = (p && !p.isDeleted ? p.deploymentBand : s?.deploymentBand);
+    if (content === 'REF' || content === 'ESC') {
+        content = cellLabelForDeployment(String(content), _deployBand);
+    }
+    if (plannedNov === 'AVISO') { style += ' border-l-4 border-l-amber-500'; }
+    if (plannedNov === 'LICENCIA') { style += ' border-l-4 border-l-purple-500'; }
+    if (content === 'Ausencia con Aviso' || content === 'Injustificada') { content = 'AA'; style = SHIFT_STYLES['AA']; }
+    const _isRaCell = !!(
+        (p && !p.isDeleted && p.isRetiroAnticipado)
+        || (s && s.isRetiroAnticipado)
+    );
+    if (_isRaCell && content != null && typeof content === 'string' && !String(content).includes('/RA')) {
+        content = `${String(content).toUpperCase()}/RA`;
+        style += ' ring-1 ring-rose-400';
+    }
+    if (isGuest && (s || p)) { style += ' border-t-2 border-t-amber-400'; }
+    const opsShiftFromMulti = pickOpsCoverageShiftForPlanningCell(
+        e.cellTurnosMap[key],
+        selectedObjective,
+    );
+    const opsShiftForCell =
+        opsShiftFromMulti
+        || (s && selectedObjective && isOpsCoverageShiftForObjective(s, selectedObjective)
+            ? s
+            : null);
+    const activeShift = (p && !p.isDeleted) ? p : (s || (rfzOnCell ? rfzDocToShiftView(rfzOnCell) : null));
+    const isOpsCoverageCell = !!opsShiftForCell;
+    const opsTooltipShift = opsShiftForCell || activeShift;
+    const coverageSourceShift =
+        (p && !p.isDeleted) ? p : (s && !isOpsCoverageShiftForObjective(s, selectedObjective) ? s : null);
+    const isCoverageSourceUsed =
+        !!(coverageSourceShift?.coverageUsed === true && !absence);
+    const planDualUsedAndCob =
+        isCoverageSourceUsed && isOpsCoverageCell && !!opsShiftForCell;
+    if (isOpsCoverageCell && opsShiftForCell) {
+        const opsCodeRaw = String(opsShiftForCell.code || '').trim().toUpperCase();
+        const opsEtiqueta = etiquetaCeldaOpsCoverage(opsShiftForCell);
+        content = opsEtiqueta.content;
+        style = opsEtiqueta.esRefEsc
+            ? getDefaultStyle(opsCodeRaw || 'M')
+            : `${getDefaultStyle(opsCodeRaw || 'M')} ${OPS_COVERAGE_CELL_RING}`;
+        isFT = false;
+        isFF = false;
+    }
+    if (activeShift?.id && e.turaMap[activeShift.id]) { style = 'bg-red-500 text-white border-red-600 font-black'; }
+    const hasRfzOverlay = !!(rfzOnCell && (s || (p && !p.isDeleted)) && !absence);
+    const _rawOtherObj = isShiftAtOtherObjective(s, p, selectedObjective);
+    const _activeShiftObjId = ((p && !p.isDeleted) ? p : s)?.objectiveId;
+    const _cellIsRetAtOtherObj = _rawOtherObj && shiftPlanningCodeUpper(activeShift) === 'RET';
+    const isOtherObjectiveShift = !!(_rawOtherObj
+        && !_cellIsRetAtOtherObj
+        && !(selectedGrupo && grupoUnifiedMode && selectedGrupo.objectiveIds.includes(_activeShiftObjId)));
+    if (absence) { const absCode = absence.inferredCode || inferAbsenceCode(absence); const displayCode = absenceGridDisplayCode(absence); content = displayCode; style = SHIFT_STYLES[displayCode] || SHIFT_STYLES[absCode] || 'bg-rose-50 text-rose-700 font-bold border-rose-200'; }
+    if (isOtherObjectiveShift && content != null) {
+        style = OTHER_OBJECTIVE_CELL_STYLE;
+    }
+    if (_cellIsRetAtOtherObj && content != null) {
+        style = `${SHIFT_STYLES['RET']} ring-1 ring-amber-400/80`;
+    }
+    const evOverlay = absence ? null : eventoCellOverlay(e.cellTurnosMap[key], (p && !p.isDeleted) ? p : s);
+    if (evOverlay?.mode === 'EV') {
+        content = 'EV';
+        style = `${SHIFT_STYLES['EV']} ring-1 ring-yellow-600/70`;
+    } else if (evOverlay?.mode === 'FRANCO_USADO') {
+        const _fCode = String(evOverlay.franco?.code || evOverlay.franco?.type || 'F').toUpperCase();
+        content = FRANCO_CELL_CODES.has(String(content || '').toUpperCase()) ? content : _fCode;
+        style = `${SHIFT_STYLES[String(content)] || SHIFT_STYLES['F']} ring-1 ring-violet-500/90`;
+    }
+    const isCoverageSplitCell = !!(
+        !isFT
+        && !isFF
+        && !absence
+        && !isOtherObjectiveShift
+        && content != null
+        && !(activeShift?.id && e.turaMap[activeShift.id])
+        && (
+            isExtended
+            || isEarly
+            || covRole === 'EXTENSION'
+            || covRole === 'EARLY_START'
+        )
+    );
+    if (isCoverageSplitCell) {
+        style = `${SHIFT_STYLES['EXTENDED']} z-10`;
+    }
+    const sufijoUsado = (isCoverageSourceUsed && content != null && !planDualUsedAndCob) ? ' ring-1 ring-violet-500/90' : '';
+    const cellPosName = (p && !p.isDeleted ? p.positionName : s?.positionName) || rfzOnCell?.positionName || null;
+    const cellCode = (p && !p.isDeleted) ? (isFT ? 'FT' : isFF ? 'FF' : p.code) : s ? (isFT ? 'FT' : isFF ? 'FF' : s.code) : (rfzOnCell ? 'RFZ' : null);
+    const cellShift = (p && !p.isDeleted) ? p : s;
+    const lctRest = e.lctRestByCell[key] || '';
+    const excludedOnDay = e.excludedPositionsByDate[cellDateStr];
+    const isExclusionCol = !!excludedOnDay?.length;
+    const cellPosExcluded = !!(cellPosName && excludedOnDay?.includes(cellPosName));
+    const leaveCellCode = absence
+        ? String(absenceGridDisplayCode(absence) || content || '').toUpperCase()
+        : String(cellCode || '').toUpperCase();
+    const isLeaveCell = !!absence || LEAVE_CELL_CODES.has(leaveCellCode);
+    const consulta = consultaAbiertaEnFecha(e.vacancyConsultas, cellDateStr, emp.id, String(cellCode || leaveCellCode || ''));
+    const menuRol = p && !p.isDeleted ? p.menuRapidoRol : s?.menuRapidoRol;
+    const menuCubre = p && !p.isDeleted ? p.menuRapidoCubreA : s?.menuRapidoCubreA;
+    const cubierto = (((covRole === 'TARGET' || isLeaveCell) && coveredByCell) || (p?.menuRapidoTexto && !p?.menuRapidoRol) || (s?.menuRapidoTexto && !s?.menuRapidoRol));
+    let grupoColor: string | undefined;
+    let grupoNombre: string | undefined;
+    if (selectedGrupo && grupoUnifiedMode && content && !isOtherObjectiveShift && activeShift?.objectiveId && selectedGrupo.objectiveIds.includes(activeShift.objectiveId)) {
+        const _oi = selectedGrupo.objectiveIds.indexOf(activeShift.objectiveId!);
+        grupoColor = GRUPO_COLOR_HEX[_oi % GRUPO_COLOR_HEX.length];
+        grupoNombre = (selectedGrupo.objectiveNames[_oi] || '').trim().split(/\s+/).filter((w: string) => w.length > 1).pop()?.slice(0, 6).toUpperCase() || (selectedGrupo.objectiveNames[_oi] || '').slice(0, 5).toUpperCase();
+    }
+    const titulo = isOpsCoverageCell
+        ? undefined
+        : evOverlay
+            ? (evOverlay.mode === 'EV' ? evOverlay.tooltip : `${evOverlay.mode === 'FRANCO_USADO' ? 'Franco usado en evento' : 'También afectado al evento'}: ${evOverlay.tooltip}`)
+            : isExclusionCol && !s && !p
+                ? excludedPositionsTooltip(excludedOnDay, cellDateStr)
+                : isOtherObjectiveShift && activeShift?.objectiveId
+                    ? `Turno en ${e.nombreObjetivo(activeShift.objectiveId)}`
+                    : undefined;
+    const borrado = content === CELDA_BORRADA;
+    const vista: VistaCelda = {
+        key,
+        contenido: borrado ? null : content,
+        borrado,
+        estilo: style,
+        sufijoUsado,
+        ringExtra: lctRest ? 'ring-2 ring-amber-400' : cellPosExcluded ? 'ring-1 ring-rose-400/70' : '',
+        editable: !isLockedDate && !e.isServiceLocked && !isOpsCoverageCell,
+        fondo: isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : '',
+        evento: evOverlay ? evOverlay.mode : undefined,
+        titulo,
+        consulta: !!consulta,
+        consultaId: consulta ? (consulta as { id?: string }).id : undefined,
+        consultaTexto: consulta ? textoIndicadorConsulta(consulta) : undefined,
+        consultaTooltip: consulta ? textoTooltipConsulta(consulta) : undefined,
+        evBadge: !!(evOverlay && evOverlay.mode !== 'EV'),
+        evBadgeTitulo: evOverlay && evOverlay.mode !== 'EV' ? evOverlay.tooltip : undefined,
+        lct: lctRest || undefined,
+        puntoExclusion: !!(isExclusionCol && !content),
+        swap: isSwap ? (swapPending ? 'S!' : 'S') : '',
+        mas: !!(isExtended || isEarly || isCoverageSplitCell),
+        liberado: covRole === 'LIBERATED',
+        usado: isCoverageSourceUsed,
+        descansoReducido: !!cellShift?.descansoReducido,
+        topeExcedido: !!cellShift?.topeExcedido,
+        menuRol: menuRol || undefined,
+        menuMarca: menuRol ? marcaCeldaMenuRapido(menuRol, menuCubre) : undefined,
+        cubiertoTitulo: cubierto ? (p?.menuRapidoTexto || s?.menuRapidoTexto || (coveredByCell ? `Cubierto por ${coveredByCell}` : 'Cubierto')) : undefined,
+        estado: statusIndicator || undefined,
+        conflicto: !!hasConflict,
+        invitado: !!(isGuest && (s || p) && !absence && !isOtherObjectiveShift),
+        otroObjetivo: isOtherObjectiveShift,
+        grupoColor,
+        grupoNombre,
+        rfzOverlay: hasRfzOverlay,
+        rfzSinPublicar: !!(rfzOnCell && !s && !p && !absence && rfzOnCell.draft),
+    };
+    const ctx: CtxCeldaGrilla = {
+        emp,
+        dateStr: cellDateStr,
+        dayIndex,
+        p,
+        s,
+        absence,
+        activeShift,
+        cellShift,
+        rfzOnCell,
+        evOverlay,
+        cellCode,
+        leaveCellCode,
+        isLeaveCell,
+        coveredByCell,
+        cellPosName,
+        cellPosExcluded,
+        isOtherObjectiveShift,
+        isOpsCoverageCell,
+        opsTooltipShift,
+        coverageSourceShift,
+        isCoverageSourceUsed,
+        planDualUsedAndCob,
+        isEarly: !!isEarly,
+        isExtended: !!isExtended,
+        covRole,
+        covNote,
+        isExclusionCol,
+        excludedOnDay,
+        lctRest,
+        tieneTurno: !!((p && !p.isDeleted) || s || rfzOnCell),
+    };
+    return { vista, ctx };
+}
+
 function computeServiceRuleChanges(
     dateStr: string,
     rules: import('@/services/slaService').ServiceRule[],
@@ -1135,6 +1493,8 @@ function computeServiceRuleChanges(
 }
 
 function PlanificacionDesktop() {
+    const perfRenderInicio = inicioRenderGrilla();
+    useLayoutEffect(() => registrarCommitGrilla(perfRenderInicio, 'pagina'));
     const { empresaId, empresa, loadingEmpresa } = useEmpresa();
     const { rules: planningRules } = usePlanningRules(empresaId);
     const planningLimits = useMemo(
@@ -1196,23 +1556,6 @@ function PlanificacionDesktop() {
     const [toolbarMoreOpen, setToolbarMoreOpen] = useState(false);
     const [cronoFullscreen, setCronoFullscreen] = useState(false);
     const [statsBarCollapsed, setStatsBarCollapsed] = useState(false);
-    const [coverageLegendOpen, setCoverageLegendOpen] = useState(() => {
-        if (typeof window === 'undefined') return false;
-        try {
-            return sessionStorage.getItem('planif_coverage_legend_open') === '1';
-        } catch {
-            return false;
-        }
-    });
-    const toggleCoverageLegend = useCallback(() => {
-        setCoverageLegendOpen((prev) => {
-            const next = !prev;
-            try {
-                sessionStorage.setItem('planif_coverage_legend_open', next ? '1' : '0');
-            } catch { /* ignore */ }
-            return next;
-        });
-    }, []);
     const [statsHoursView, setStatsHoursView] = useState<'total' | 'detalle'>('total');
 
     const [isDataSyncing, setIsDataSyncing] = useState(false);
@@ -1244,7 +1587,6 @@ function PlanificacionDesktop() {
         try { return JSON.parse(localStorage.getItem('planif_emp_order') || '{}'); } catch { return {}; }
     });
     const [dragOverVisual, setDragOverVisual] = useState<number | null>(null);
-    const [shiftTooltip, setShiftTooltip] = useState<{ label: string | null; pos: string | null; range: string | null; x: number; y: number; restHours?: number | null; readOnlyOps?: boolean } | null>(null);
     const [opsCoverageDetailModal, setOpsCoverageDetailModal] = useState<{
         guardName: string;
         dateLabel: string;
@@ -1685,6 +2027,22 @@ function PlanificacionDesktop() {
 
     const [showVacancyModal, setShowVacancyModal] = useState(false);
     const [vacancyData, setVacancyData] = useState<any>(null);
+    const [menuRapido, setMenuRapido] = useState<{
+        x: number;
+        y: number;
+        ctx: CtxMenuRapido;
+        opciones: OpcionesMenuRapido;
+    } | null>(null);
+    const [modoElegir, setModoElegir] = useState<{
+        ctx: CtxMenuRapido;
+        accion: AccionElegir;
+        extId: string;
+        aviso: string | null;
+        fueraAbierto: boolean;
+        busqueda: string;
+        repetir: { dias: string[]; cov: CovMenuRapido; texto: string } | null;
+        resultado: string | null;
+    } | null>(null);
     const [selectedReplacement, setSelectedReplacement] = useState('');
     const [vacancyActiveDates, setVacancyActiveDates] = useState<Set<string>>(new Set());
     const [vacancyDayCoverages, setVacancyDayCoverages] = useState<Record<string, VacancyDayCoverage>>({});
@@ -2875,47 +3233,23 @@ function PlanificacionDesktop() {
         return result;
     }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, selectedObjective, selectedGrupo, grupoUnifiedMode]);
 
-    // Celdas con descanso insuficiente (<12h o <35h post-racha) respecto a turnos adyacentes.
-    const restViolationCells = useMemo(() => {
-        const violated = new Set<string>();
-        if (!displayedEmployees.length || !daysInMonth.length) return violated;
-        const NON_WORK = new Set(['F','FF','FP','FT','V','L','A','E','PG','AA','RET']);
-        const getShift = (empId: string, ds: string) => {
-            const k = `${empId}_${ds}`;
-            const p = pendingChanges[k];
-            if (p) return p.isDeleted ? null : p;
-            // Un EV del guardia ese día cuenta como turno aunque el doc principal sea un franco.
-            return pickShiftForRest(shiftsMap[k] || null, cellTurnosMap[k]);
-        };
-        const cfg = { minRestBetweenShiftsHours: 12, longRestAfterWorkedHours: 48, minLongRestHours: 35 };
-        for (const emp of displayedEmployees as any[]) {
-            for (const day of daysInMonth) {
-                const dateStr = getDateKey(day);
-                const sh = getShift(emp.id, dateStr);
-                if (!sh || sh.isDeleted) continue;
-                const code = String(sh.code || '').toUpperCase();
-                if (NON_WORK.has(code)) continue;
-                const violation = checkRestBetweenShiftsDetail({
-                    empId: emp.id, targetDateStr: dateStr,
-                    proposed: { code, startTime: sh.startTime || undefined, hours: Number(sh.hours) || undefined },
-                    getShift, cfg,
-                });
-                const band = classifyRestViolation(violation);
-                if (band === 'blocked' || (band === 'pin' && !sh.descansoReducido)) violated.add(`${emp.id}_${dateStr}`);
-            }
-        }
-        return violated;
-    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, cellTurnosMap]);
-
     // Art. 197 LCT: menos de 12 h entre el tope de cierre (inicio + 12:59) y el próximo turno, también de otro objetivo. Solo aviso.
+    // Cada legajo se calcula aparte: si sus turnos no cambiaron se reusa el resultado anterior.
+    const lctCacheRef = useRef<Map<string, { refs: unknown[]; gaps: Record<string, string> }>>(new Map());
     const lctRestByCell = useMemo(() => {
-        const list: LctShiftInput[] = [];
+        const porLegajo = new Map<string, { refs: unknown[]; list: LctShiftInput[] }>();
         const seen = new Set<string>();
         const push = (key: string, sh: any) => {
             if (!sh || sh.isDeleted) return;
             const dateStr = key.slice(-10);
             const employeeId = key.slice(0, Math.max(0, key.length - 11));
-            list.push({
+            let grupo = porLegajo.get(employeeId);
+            if (!grupo) {
+                grupo = { refs: [], list: [] };
+                porLegajo.set(employeeId, grupo);
+            }
+            grupo.refs.push(key, sh);
+            grupo.list.push({
                 employeeId,
                 employeeName: sh.employeeName || '',
                 dateStr,
@@ -2946,10 +3280,24 @@ function PlanificacionDesktop() {
             if (seen.has(key) || pending?.isDeleted) return;
             push(key, pending);
         });
+        const anterior = lctCacheRef.current;
+        const siguiente = new Map<string, { refs: unknown[]; gaps: Record<string, string> }>();
         const map: Record<string, string> = {};
-        findLctRestGaps(list).forEach((g) => {
-            g.cellKeys.forEach((c) => { map[c] = map[c] ? `${map[c]} | ${g.message}` : g.message; });
+        porLegajo.forEach((grupo, employeeId) => {
+            const prev = anterior.get(employeeId);
+            let gaps: Record<string, string>;
+            if (prev && prev.refs.length === grupo.refs.length && prev.refs.every((r, i) => r === grupo.refs[i])) {
+                gaps = prev.gaps;
+            } else {
+                gaps = {};
+                findLctRestGaps(grupo.list).forEach((g) => {
+                    g.cellKeys.forEach((c) => { gaps[c] = gaps[c] ? `${gaps[c]} | ${g.message}` : g.message; });
+                });
+            }
+            siguiente.set(employeeId, { refs: grupo.refs, gaps });
+            Object.assign(map, gaps);
         });
+        lctCacheRef.current = siguiente;
         return map;
     }, [cellTurnosMap, pendingChanges]);
 
@@ -6627,7 +6975,7 @@ function PlanificacionDesktop() {
             const pubMonth = currentDate.getMonth() + 1;
             const publishLookupKey = planificacionPublishLookupKey(selectedObjective, pubYear, pubMonth);
             const isPublished = isPlanificacionPublished(publishStatusMap[publishLookupKey]);
-            const logData: { empId: string; date: string; action: string; detail: string }[] = [];
+            const logData: { empId: string; date: string; action: string; detail: string; via?: string }[] = [];
             const employeesById: Record<string, any> = {};
             employees.forEach((e: any) => { employeesById[e.id] = e; });
             // snapshotData ya armado en doSave (grilla completa del mes)
@@ -6761,6 +7109,7 @@ function PlanificacionDesktop() {
                 actionDetail: string,
                 codigoAntes: string,
                 codigoDespues: string,
+                via?: string,
             ) => {
                 if (!correctionMode) return;
                 const [y, m, d] = dateStr.split('-').map(Number);
@@ -6769,7 +7118,7 @@ function PlanificacionDesktop() {
                     codigoAntes && codigoDespues && codigoAntes !== codigoDespues && codigoDespues !== '(eliminado)'
                         ? 'CORRECCION_CODIGO'
                         : 'CORRECCION_PLANIFICACION';
-                logData.push({ empId, date: dateStr, action: 'CORRECCION_SUPERADMIN' });
+                logData.push({ empId, date: dateStr, action: 'CORRECCION_SUPERADMIN', detail: actionDetail });
                 batch.set(doc(collection(db, 'audit_logs')), stampEmpresaId({
                     action: 'CORRECCION_SUPERADMIN',
                     module: 'PLANIFICADOR',
@@ -6780,6 +7129,7 @@ function PlanificacionDesktop() {
                     employeeId: empId,
                     employeeName: empName,
                     fecha: corrFechaTs,
+                    ...(via ? { via } : {}),
                 }, empresaId));
                 bumpBatchOp();
                 await flushBatchWhenFull();
@@ -6886,6 +7236,7 @@ function PlanificacionDesktop() {
                             actionDetail,
                             existing?.code || '',
                             '(eliminado)',
+                            change.menuRapidoVia,
                         );
                     } else {
                         if (
@@ -6974,6 +7325,8 @@ function PlanificacionDesktop() {
                             } : {}),
                             positionName: safePositionName,
                             coveredBy: change.coveredBy || null,
+                            ...(change.menuRapidoTexto ? { menuRapidoTexto: change.menuRapidoTexto, menuRapidoVia: change.menuRapidoVia || 'MENU_RAPIDO' } : {}),
+                            ...(change.menuRapidoRol ? { menuRapidoRol: change.menuRapidoRol, ...(change.menuRapidoCubreA ? { menuRapidoCubreA: change.menuRapidoCubreA } : {}) } : {}),
                             draft: correctionMode ? false : !isPublished,
                             actorName: realActorName,
                             ...deploymentFieldsForFirestore(change),
@@ -7068,9 +7421,10 @@ function PlanificacionDesktop() {
                                 actionDetail,
                                 existing?.code || '',
                                 codigoNuevo,
+                                change.menuRapidoVia,
                             );
                         } else {
-                            logData.push({ empId, date: dateStr, action: actionType, detail: actionDetail });
+                            logData.push({ empId, date: dateStr, action: actionType, detail: actionDetail, via: change.menuRapidoVia || undefined });
                         }
                     }
                     await flushBatchWhenFull();
@@ -7102,6 +7456,7 @@ function PlanificacionDesktop() {
                                 objectiveId: selectedObjective,
                                 objectiveName: getObjectiveName(selectedObjective),
                                 clientId: selectedClient || undefined,
+                                ...(entry.via ? { via: entry.via } : {}),
                             }, empresaId));
                             bumpBatchOp();
                         }
@@ -7722,7 +8077,542 @@ function PlanificacionDesktop() {
         }
         runApplyVacancy(francoConflicts.length > 0 || vacancyFrancoAuthApproved);
     };
-    
+
+    const turnoMenuDe = (empId: string, dateStr: string) => {
+        const key = `${empId}_${dateStr}`;
+        const pending = pendingChanges[key];
+        if (pending?.isDeleted) return null;
+        return pending || shiftsMap[key] || null;
+    };
+    useEffect(() => {
+        setModoElegir(null);
+        setMenuRapido(null);
+    }, [selectedObjective, currentDate]);
+    const nombreEmpleadoMenu = (id: string) => String(employees.find((e: { id?: string; name?: string }) => e.id === id)?.name || id);
+    const turnoGuardMenu = (empId: string, dia: string) => {
+        const s = turnoMenuDe(empId, dia);
+        if (!s) return null;
+        return {
+            code: s.code,
+            startTime: typeof s.startTime === 'string' ? s.startTime : undefined,
+            endTime: typeof s.endTime === 'string' ? s.endTime : undefined,
+            hours: s.hours,
+            isFranco: s.isFranco === true,
+        };
+    };
+    const puedeEditarDiaMenu = (dia: string) => {
+        if (!selectedObjective) return false;
+        const pubKey = planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1);
+        const publicado = isPlanificacionPublished(publishStatusMap[pubKey]);
+        return !isServiceLocked && !isPlanningDateLocked(dia) && (!publicado || (correctionMode && canCorrectPlanning));
+    };
+    const abrirMenuRapidoCelda = (
+        ev: React.MouseEvent,
+        celda: {
+            emp: { id: string; name?: string };
+            dateStr: string;
+            isLeave: boolean;
+            leaveCode?: string | null;
+            tieneTurno: boolean;
+            positionName: string | null;
+        },
+    ) => {
+        if (comparingSnapshot || !selectedObjective) return;
+        const posPreferida = celda.positionName || getEmpDefaultPos(celda.emp.id) || '';
+        const dayReport = buildDayCoverageReport(celda.dateStr);
+        const faltaPax = !!(posPreferida && dayReport?.positions?.some((p: { positionName?: string; missingUnits?: number }) => p.positionName === posPreferida && (p.missingUnits || 0) > 0));
+        const esHueco = celdaEsHuecoSla({ tieneTurno: celda.tieneTurno, tieneAusencia: celda.isLeave, faltaPaxEnPuesto: faltaPax });
+        const pack = recolectarTurnosDelDia({
+            date: celda.dateStr,
+            titularEmployeeId: celda.emp.id,
+            shiftsMap,
+            cellTurnosMap,
+            pendingChanges,
+        });
+        const existente = coberturaExistenteDelDia({
+            titularEmployeeId: celda.emp.id,
+            titularName: celda.emp.name,
+            date: celda.dateStr,
+            titular: pack.titular,
+            turnosDelDia: pack.turnos,
+            consulta: null,
+        });
+        const cubiertoPorOps = existente.origen === 'operaciones' && existente.estado === 'CUBIERTO';
+        const opciones = opcionesMenuRapido({
+            esAusente: celda.isLeave,
+            esHueco,
+            cubiertoPorOps,
+            puedeEditar: puedeEditarDiaMenu(celda.dateStr),
+        });
+        if (!opciones.visible) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        setModoElegir(null);
+        const work = resolveTitularVacancyWorkShift(celda.emp.id, celda.dateStr, shiftsMap, pendingChanges);
+        const gapRows = dayReport ? flattenDayGapsForUi(dayReport) : [];
+        const gapRow = gapRows.find((g) => g.positionName === posPreferida) || gapRows[0];
+        const gapBand = String(work?.code || inferGapBandForClose(gapRow || {}) || 'M').toUpperCase();
+        const positionName = work?.positionName || posPreferida || 'General';
+        const opt = listVacancyGapBandOptions(effectivePosStructure, positionName).find((o) => o.code === gapBand);
+        const horario = work?.scheduleLabel && work.scheduleLabel !== '—'
+            ? work.scheduleLabel
+            : (opt?.startTime && opt?.endTime ? `${opt.startTime}–${opt.endTime}` : '');
+        setMenuRapido({
+            x: ev.clientX,
+            y: ev.clientY,
+            opciones,
+            ctx: {
+                clase: celda.isLeave ? 'ausente' : 'hueco',
+                empId: celda.emp.id,
+                empName: celda.emp.name || 'Titular',
+                dateStr: celda.dateStr,
+                positionName,
+                gapBand,
+                horario,
+                horas: work?.hours || opt?.hours || 8,
+                codigoAusencia: String(celda.leaveCode || '').toUpperCase(),
+                absence: absencesMap[`${celda.emp.id}_${celda.dateStr}`] || null,
+            },
+        });
+    };
+    const cerrarMenuRapido = () => setMenuRapido(null);
+    const cancelarModoElegir = useCallback(() => setModoElegir(null), []);
+    const abrirCoberturaDesdeMenu = () => {
+        if (!menuRapido) return;
+        const ctx = menuRapido.ctx;
+        if (ctx.clase === 'hueco') {
+            setSlaGapCloseModal({ dateStr: ctx.dateStr, positionName: ctx.positionName, gapBand: ctx.gapBand });
+        } else {
+            const ausencia = ctx.absence;
+            setVacancyData(ausencia?.type
+                ? { ...ausencia, source: 'AUSENCIA', focusDate: ctx.dateStr, employeeId: ctx.empId, employeeName: ctx.empName }
+                : {
+                    employeeId: ctx.empId,
+                    employeeName: ctx.empName,
+                    startDate: ctx.dateStr,
+                    endDate: ctx.dateStr,
+                    type: 'L',
+                    source: 'AUSENCIA',
+                    focusDate: ctx.dateStr,
+                });
+            setShowVacancyModal(true);
+        }
+        cerrarMenuRapido();
+    };
+    const iniciarModoElegir = (accion: AccionElegir) => {
+        if (!menuRapido) return;
+        setSelection({ start: null, end: null });
+        setModoElegir({
+            ctx: menuRapido.ctx,
+            accion,
+            extId: '',
+            aviso: null,
+            fueraAbierto: false,
+            busqueda: '',
+            repetir: null,
+            resultado: null,
+        });
+        cerrarMenuRapido();
+    };
+    const ctxMenuDelDia = (ctx: CtxMenuRapido, dia: string): CtxMenuRapido => {
+        if (dia === ctx.dateStr || ctx.clase !== 'ausente') return { ...ctx, dateStr: dia };
+        const work = resolveTitularVacancyWorkShift(ctx.empId, dia, shiftsMap, pendingChanges);
+        const horario = work?.scheduleLabel && work.scheduleLabel !== '—' ? work.scheduleLabel : ctx.horario;
+        return {
+            ...ctx,
+            dateStr: dia,
+            gapBand: String(work?.code || ctx.gapBand).toUpperCase(),
+            positionName: work?.positionName || ctx.positionName,
+            horario,
+            horas: work?.hours || ctx.horas,
+            absence: absencesMap[`${ctx.empId}_${dia}`] || ctx.absence,
+        };
+    };
+    const evaluarClicMenu = (ctx: CtxMenuRapido, paso: PasoElegir, personaId: string, extId: string) => {
+        const dia = ctx.dateStr;
+        const shift = turnoMenuDe(personaId, dia);
+        const rol = rolDesdeTurno(shift);
+        const ini = typeof shift?.startTime === 'string' ? shift.startTime : '';
+        const fin = typeof shift?.endTime === 'string' ? shift.endTime : '';
+        const turnoTexto = shift?.code ? `${shift.code}${ini && fin ? ` ${ini}–${fin}` : ''}` : null;
+        const titularId = ctx.clase === 'ausente' ? ctx.empId : null;
+        const listCtx = {
+            positionStructure: effectivePosStructure as import('@/lib/planificacion/vacancySplitBands').VacancyPositionSla[],
+            gapPositionName: ctx.positionName,
+            gapBand: ctx.gapBand,
+            preferSamePosition: true as const,
+        };
+        const excl = titularId ? [titularId] : [];
+        const candidatosBanda = paso === 'ext'
+            ? listExtensionCandidates(ctx.gapBand, dia, selectedObjective || '', employees, shiftsMap, pendingChanges, excl, listCtx).map((r) => r.id)
+            : paso === 'adel'
+                ? listEarlyStartCandidates(ctx.gapBand, dia, selectedObjective || '', employees, shiftsMap, pendingChanges, [...excl, extId].filter(Boolean), listCtx).map((r) => r.id)
+                : [];
+        const coverage: VacancyDayCoverage = paso === 'asignar'
+            ? { mode: 'substitute', employeeId: personaId }
+            : { mode: 'split', extEmpId: paso === 'ext' ? personaId : extId, adelEmpId: paso === 'adel' ? personaId : '', gapBand: ctx.gapBand, gapPosition: ctx.positionName };
+        const propuesta = propuestaGuardCobertura({
+            coverage,
+            titular: { code: ctx.gapBand, scheduleLabel: ctx.horario, hours: ctx.horas },
+            shiftOf: (id) => turnoGuardMenu(id, dia),
+            positionStructure: effectivePosStructure as import('@/lib/planificacion/vacancySplitBands').VacancyPositionSla[],
+        });
+        delete propuesta[''];
+        const guard = evaluateCoverageDayGuards({
+            dateStr: dia,
+            proposedByEmp: propuesta,
+            shiftOf: turnoGuardMenu,
+            monthHoursOf: (id) => empMonthlyHours[id] || 0,
+            nameOf: nombreEmpleadoMenu,
+        });
+        const res = validarClicElegir({
+            paso,
+            candidatoId: personaId,
+            titularId,
+            puedeEditar: puedeEditarDiaMenu(dia),
+            rol,
+            codigoLicencia: rol === 'LICENCIA' ? String(shift?.code || '') : null,
+            turnoTexto,
+            candidatosBanda,
+            bandaHueco: ctx.gapBand,
+            extId,
+            bloqueos: guard.blocked,
+        });
+        return { res, guard };
+    };
+    const tramoExtMenu = (ctx: CtxMenuRapido, extId: string) => {
+        const extShift = turnoMenuDe(extId, ctx.dateStr);
+        const times = resolveVacancySplitSegmentTimes(
+            effectivePosStructure as import('@/lib/planificacion/vacancySplitBands').VacancyPositionSla[],
+            ctx.gapBand,
+            ctx.positionName,
+            { code: extShift?.code },
+            null,
+        );
+        return times.first.from && times.first.to ? `${times.first.from}–${times.first.to}` : '';
+    };
+    const tipoAusenciaMenu = (ctx: CtxMenuRapido) => {
+        const tipoDoc = ctx.absence?.type as string | undefined;
+        const codigo = ctx.codigoAusencia;
+        const tipoPorCodigo = Object.entries(VACANCY_ABSENCE_TYPE_CODES).find(([, c]) => c === codigo)?.[0];
+        if (tipoDoc && (!codigo || VACANCY_ABSENCE_TYPE_CODES[tipoDoc] === codigo)) return tipoDoc;
+        return tipoPorCodigo || tipoDoc || 'Injustificada';
+    };
+    const vacancyDeMenu = (ctx: CtxMenuRapido) => {
+        const type = tipoAusenciaMenu(ctx);
+        return ctx.absence
+            ? { ...ctx.absence, type, employeeId: ctx.empId, employeeName: ctx.empName, startDate: ctx.absence.startDate || ctx.dateStr }
+            : { employeeId: ctx.empId, employeeName: ctx.empName, startDate: ctx.dateStr, endDate: ctx.dateStr, type };
+    };
+    const sellarMenuRapido = (
+        changes: Record<string, any>,
+        claves: { key: string; rol?: 'CUBRE' | 'EXT' | 'ADEL' }[],
+        texto: string,
+        cubreA?: string,
+    ) => {
+        for (const { key, rol } of claves) {
+            if (!changes[key] || changes[key].isDeleted) continue;
+            changes[key] = {
+                ...changes[key],
+                menuRapidoTexto: texto,
+                menuRapidoVia: 'MENU_RAPIDO',
+                ...(rol ? { menuRapidoRol: rol } : {}),
+                ...(rol === 'CUBRE' && cubreA ? { menuRapidoCubreA: cubreA } : {}),
+            };
+        }
+        return changes;
+    };
+    const auditarMenuRapido = async (texto: string, employeeId: string) => {
+        try {
+            await addDoc(collection(db, 'audit_logs'), stampEmpresaId({
+                action: 'ASIGNACION_MASIVA',
+                module: 'PLANIFICADOR',
+                details: texto,
+                via: 'MENU_RAPIDO',
+                timestamp: serverTimestamp(),
+                actorName: activeActorName,
+                actorUid: getAuth().currentUser?.uid,
+                objectiveId: selectedObjective,
+                objectiveName: getObjectiveName(selectedObjective),
+                employeeId,
+            }, empresaId));
+        } catch (err) {
+            console.error(err);
+        }
+    };
+    const escribirCoberturaEnCambios = (base: Record<string, any>, ctx: CtxMenuRapido, cov: CovMenuRapido) => {
+        const employeesById: Record<string, any> = {};
+        employees.forEach((e: any) => { if (e.id) employeesById[e.id] = e; });
+        const comunes = {
+            vacancyData: vacancyDeMenu(ctx),
+            selectedObjective: selectedObjective || '',
+            activePosition: ctx.positionName,
+            shiftsMap,
+            getTypicalShift: () => null,
+            employeesById,
+            clientId: selectedClient || undefined,
+            defaultSplitForBand: (band: string, gapPosition?: string | null) => {
+                const times = defaultSplitForBandAtPosition(band, effectivePosStructure, gapPosition ?? null);
+                return { ext: times.ext, adel: times.adel };
+            },
+            positionStructure: effectivePosStructure,
+            authorizeFrancoTrabajado: false,
+            fallbackGapBand: ctx.gapBand,
+        };
+        const titularKey = `${ctx.empId}_${ctx.dateStr}`;
+        if (cov.mode === 'substitute') {
+            const nombre = nombreEmpleadoMenu(cov.id);
+            const tipo = tipoDesdeRolDia(rolDesdeTurno(turnoMenuDe(cov.id, ctx.dateStr))) || 'LIBRE';
+            const cubreA = ctx.clase === 'hueco' ? `${ctx.positionName} ${ctx.gapBand}` : ctx.empName;
+            const texto = textoMarcaMenuRapido({
+                modo: 'asignar',
+                cubreA,
+                tipo,
+                actor: activeActorName,
+                cuando: formatFecha(new Date(), 'dd/MM HH:mm'),
+            });
+            const key = `${cov.id}_${ctx.dateStr}`;
+            if (ctx.clase === 'ausente') {
+                const applied = applyVacancyCoverageToChanges(base, {
+                    ...comunes,
+                    days: [{
+                        dateStr: ctx.dateStr,
+                        coverage: { mode: 'substitute', employeeId: cov.id, employeeName: nombre, gapBand: ctx.gapBand, gapPosition: ctx.positionName },
+                    }],
+                });
+                return { changes: sellarMenuRapido(applied.changes, [{ key: titularKey }, { key, rol: 'CUBRE' }], texto, ctx.empName), texto };
+            }
+            const opt = listVacancyGapBandOptions(effectivePosStructure, ctx.positionName).find((o) => o.code === ctx.gapBand);
+            const changes = {
+                ...base,
+                [key]: {
+                    ...(base[key] && !base[key].isDeleted ? base[key] : {}),
+                    code: ctx.gapBand,
+                    name: ctx.gapBand,
+                    isTemp: true,
+                    objectiveId: selectedObjective,
+                    hours: opt?.hours || 8,
+                    startTime: opt?.startTime || '07:00',
+                    endTime: opt?.endTime || '15:00',
+                    positionName: ctx.positionName,
+                    comments: `Cubre hueco SLA ${ctx.positionName} ${ctx.gapBand}`,
+                },
+            };
+            return { changes: sellarMenuRapido(changes, [{ key, rol: 'CUBRE' }], texto, ctx.positionName), texto };
+        }
+        const texto = textoMarcaMenuRapido({ modo: 'split', ext: nombreEmpleadoMenu(cov.extId), adel: nombreEmpleadoMenu(cov.adelId) });
+        const extShift = turnoMenuDe(cov.extId, ctx.dateStr);
+        const adelShift = turnoMenuDe(cov.adelId, ctx.dateStr);
+        const claves = [
+            { key: `${cov.extId}_${ctx.dateStr}`, rol: 'EXT' as const },
+            { key: `${cov.adelId}_${ctx.dateStr}`, rol: 'ADEL' as const },
+        ];
+        if (ctx.clase === 'ausente') {
+            const applied = applyVacancyCoverageToChanges(base, {
+                ...comunes,
+                days: [{
+                    dateStr: ctx.dateStr,
+                    coverage: {
+                        mode: 'split',
+                        extEmpId: cov.extId,
+                        adelEmpId: cov.adelId,
+                        gapBand: ctx.gapBand,
+                        gapPosition: ctx.positionName,
+                        extHomePosition: extShift?.positionName,
+                        extBaseCode: extShift?.code,
+                        adelBaseCode: adelShift?.code,
+                    },
+                }],
+            });
+            return { changes: sellarMenuRapido(applied.changes, [{ key: titularKey }, ...claves], texto), texto };
+        }
+        const changes = applyOperationalGapCloseToChanges(base, {
+            objectiveId: selectedObjective || '',
+            clientId: selectedClient || undefined,
+            dateStr: ctx.dateStr,
+            gapPosition: ctx.positionName,
+            gapBand: ctx.gapBand,
+            extEmpId: cov.extId,
+            secondEmpId: cov.adelId,
+            extHomePosition: extShift?.positionName,
+            extBaseCode: extShift?.code,
+            secondBaseCode: adelShift?.code,
+            positionStructure: effectivePosStructure,
+        }, { shiftsMap, employeesById });
+        return { changes: sellarMenuRapido(changes, claves, texto), texto };
+    };
+    /** Valida cada día como el clic, pide un solo PIN si hace falta y escribe los que pasan. */
+    const aplicarCoberturaMenu = (
+        ctx: CtxMenuRapido,
+        dias: string[],
+        cov: CovMenuRapido,
+        onDone: (resultados: ResultadoDia[]) => void,
+    ) => {
+        if (!selectedObjective) return;
+        const resultados: ResultadoDia[] = [];
+        const okDias: CtxMenuRapido[] = [];
+        let auths: CoverageAuthRequest[] = [];
+        for (const dia of dias) {
+            const c = ctxMenuDelDia(ctx, dia);
+            let motivo: string | null = null;
+            let guard: { authorizations: CoverageAuthRequest[] } = { authorizations: [] };
+            if (cov.mode === 'substitute') {
+                const e = evaluarClicMenu(c, 'asignar', cov.id, '');
+                if (!e.res.ok) motivo = e.res.motivo;
+                guard = e.guard;
+            } else {
+                const ex = evaluarClicMenu(c, 'ext', cov.extId, '');
+                if (!ex.res.ok) motivo = `${apellidoMarca(nombreEmpleadoMenu(cov.extId))}: ${ex.res.motivo}`;
+                else {
+                    const ad = evaluarClicMenu(c, 'adel', cov.adelId, cov.extId);
+                    if (!ad.res.ok) motivo = `${apellidoMarca(nombreEmpleadoMenu(cov.adelId))}: ${ad.res.motivo}`;
+                    guard = ad.guard;
+                }
+            }
+            resultados.push({ dia, motivo });
+            if (!motivo) {
+                okDias.push(c);
+                auths = auths.concat(guard.authorizations);
+            }
+        }
+        if (!okDias.length) {
+            onDone(resultados);
+            return;
+        }
+        const escribir = (marks?: Record<string, ShiftAuthMark>) => {
+            let changes = pendingChanges;
+            const textos: string[] = [];
+            for (const c of okDias) {
+                const w = escribirCoberturaEnCambios(changes, c, cov);
+                changes = w.changes;
+                textos.push(w.texto);
+            }
+            if (marks && Object.keys(marks).length) changes = stampShiftAuthMarks(changes, marks);
+            setPendingChanges(changes);
+            okDias.forEach((c, i) => {
+                void auditarMenuRapido(`${textos[i]} · ${fechaCorta(c.dateStr)}`, cov.mode === 'substitute' ? cov.id : cov.extId);
+            });
+            if (dias.length === 1 && cov.mode === 'substitute') {
+                const c = okDias[0];
+                toast.success(`${textos[0]}. ${TEXTO_AVISO_ASIGNADO_AL_GUARDAR}: «${textoAvisoAsignadoDia(c.dateStr, c.gapBand, c.clase === 'ausente' && c.horario ? c.horario : null, c.positionName)}». Guardá el cronograma.`);
+            } else if (dias.length === 1) {
+                toast.success(`${textos[0]}. Guardá el cronograma.`);
+            }
+            onDone(resultados);
+        };
+        const clasificado = clasificarPedidosPin(auths, (empId, periodo) => {
+            const grant = topeGrants[empId];
+            return grant && grant.periodo === periodo ? grant : undefined;
+        });
+        for (const aviso of clasificado.avisos) toast.message(aviso, { duration: 6000 });
+        const granted: Record<string, ShiftAuthMark> = {};
+        for (const auth of auths) {
+            if (auth.kind !== 'TOPE') continue;
+            const periodo = periodoTopeDeFecha(auth.dateStr);
+            const grant = topeGrants[auth.employeeId];
+            if (!grant || topeRequierePin(grant, periodo)) continue;
+            granted[`${auth.employeeId}_${auth.dateStr}`] = { topeExcedido: true, horasMes: grant.horasAlAutorizar, autorizacionMotivo: grant.motivo };
+        }
+        const pedir = auths.filter((auth) => clasificado.pedir.some((p) => p.employeeId === auth.employeeId && p.dateStr === auth.dateStr && p.kind === auth.kind));
+        if (!pedir.length) {
+            escribir(granted);
+            return;
+        }
+        requestSupervisorLaborAuth(pedir, () => {
+            const motivo = authReasonRef.current;
+            const marks: Record<string, ShiftAuthMark> = { ...granted };
+            for (const auth of pedir) {
+                const key = `${auth.employeeId}_${auth.dateStr}`;
+                marks[key] = {
+                    ...(marks[key] || {}),
+                    autorizacionMotivo: motivo,
+                    ...(auth.kind === 'DESCANSO'
+                        ? { descansoReducido: true, descansoHoras: auth.restHours != null ? Math.round(auth.restHours * 10) / 10 : undefined }
+                        : {}),
+                    ...(auth.kind === 'TOPE' ? { topeExcedido: true, horasMes: auth.monthHours } : {}),
+                };
+            }
+            escribir(marks);
+        });
+    };
+    const diaCubiertoMenu = (ctx: CtxMenuRapido, dia: string) => {
+        if (isPlanningDateLocked(dia)) return true;
+        const pack = recolectarTurnosDelDia({ date: dia, titularEmployeeId: ctx.empId, shiftsMap, cellTurnosMap, pendingChanges });
+        const ex = coberturaExistenteDelDia({
+            titularEmployeeId: ctx.empId,
+            titularName: ctx.empName,
+            date: dia,
+            titular: pack.titular,
+            turnosDelDia: pack.turnos,
+            consulta: null,
+        });
+        return (ex.origen === 'operaciones' && ex.estado === 'CUBIERTO') || ex.origen === 'planificada' || !!turnoMenuDe(ctx.empId, dia)?.coveredBy;
+    };
+    const diasRepetiblesMenu = (ctx: CtxMenuRapido): string[] => {
+        if (ctx.clase !== 'ausente') return [];
+        const mes = ctx.dateStr.slice(0, 7);
+        const absId = ctx.absence?.id;
+        const misma = (d: string) => {
+            if (d.slice(0, 7) !== mes) return false;
+            const a = absencesMap[`${ctx.empId}_${d}`];
+            if (absId && a?.id === absId) return true;
+            if (!ctx.codigoAusencia) return false;
+            if (a && VACANCY_ABSENCE_TYPE_CODES[a.type] === ctx.codigoAusencia) return true;
+            return String(turnoMenuDe(ctx.empId, d)?.code || '').toUpperCase() === ctx.codigoAusencia;
+        };
+        return diasParaRepetir(bloqueAusencia(ctx.dateStr, misma), ctx.dateStr, (d) => diaCubiertoMenu(ctx, d));
+    };
+    const clicPersonaModoElegir = (personaId: string) => {
+        const m = modoElegir;
+        if (!m || m.repetir || m.resultado) return;
+        const paso = pasoDeModo(m.accion, m.extId);
+        const { res } = evaluarClicMenu(m.ctx, paso, personaId, m.extId);
+        if (!res.ok) {
+            setModoElegir((prev) => (prev ? { ...prev, aviso: `${apellidoMarca(nombreEmpleadoMenu(personaId))}: ${res.motivo}` } : prev));
+            return;
+        }
+        if (paso === 'ext') {
+            setModoElegir((prev) => (prev ? { ...prev, extId: personaId, aviso: null } : prev));
+            return;
+        }
+        const cov: CovMenuRapido = paso === 'asignar'
+            ? { mode: 'substitute', id: personaId }
+            : { mode: 'split', extId: m.extId, adelId: personaId };
+        const dias = diasRepetiblesMenu(m.ctx);
+        aplicarCoberturaMenu(m.ctx, [m.ctx.dateStr], cov, (resultados) => {
+            const r = resultados[0];
+            if (r?.motivo) {
+                setModoElegir((prev) => (prev ? { ...prev, aviso: r.motivo } : prev));
+                return;
+            }
+            if (!dias.length) {
+                setModoElegir(null);
+                return;
+            }
+            setModoElegir((prev) => (prev ? {
+                ...prev,
+                extId: cov.mode === 'split' ? cov.extId : prev.extId,
+                aviso: null,
+                fueraAbierto: false,
+                repetir: { dias, cov, texto: textoRepetir(dias, m.ctx.codigoAusencia) },
+            } : prev));
+        });
+    };
+    const repetirModoElegir = () => {
+        const m = modoElegir;
+        if (!m?.repetir) return;
+        const { dias, cov } = m.repetir;
+        aplicarCoberturaMenu(m.ctx, dias, cov, (resultados) => {
+            const r = resumenRepetir(resultados);
+            if (!r.salteados.length) {
+                toast.success(`${r.texto}. Guardá el cronograma.`);
+                setModoElegir(null);
+                return;
+            }
+            setModoElegir((prev) => (prev ? { ...prev, repetir: null, aviso: r.texto, resultado: r.texto } : prev));
+        });
+    };
+
     // Bulk: inyecta el puesto dueño del código SLA (no el default "Puesto 1") y respeta cupos de cobertura.
     const applyBulkChange = (shiftConfig: any, opts?: { onlyEmpId?: string }) => {
         if (!allowPlanningMultiSelect) {
@@ -10772,6 +11662,199 @@ function PlanificacionDesktop() {
         return displayedEmployees.filter((e: { id: string }) => ids.has(e.id));
     }, [comparingSnapshot, compareShowOnlyDiffs, planningCompareDiff, displayedEmployees]);
 
+    const planPublicadoGrilla = isPlanificacionPublished(publishStatusMap[planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1)]);
+    const fechaBloqueadaGrilla = useCallback(
+        (dateStr: string) => isPlanningDateLocked(dateStr) || isOutsideServiceRange(dateStr),
+        [isPlanningDateLocked, isOutsideServiceRange],
+    );
+    const nombreObjetivoRef = useRef(getObjectiveName);
+    nombreObjetivoRef.current = getObjectiveName;
+    const entradaCeldas: EntradaCeldaGrilla = {
+        selectedObjective,
+        selectedGrupo,
+        grupoUnifiedMode,
+        pendingChanges,
+        shiftsMap,
+        rfzByEmpDate,
+        absencesMap,
+        planPublicado: planPublicadoGrilla,
+        cellTurnosMap,
+        turaMap,
+        lctRestByCell,
+        excludedPositionsByDate,
+        vacancyConsultas,
+        isServiceLocked,
+        fechaBloqueada: fechaBloqueadaGrilla,
+        nombreObjetivo: (objId: string) => nombreObjetivoRef.current(objId),
+    };
+    const vistasPrevRef = useRef<Record<string, VistaCelda>>({});
+    const filasCeldas = comparingSnapshot ? compareGridEmployees : displayedEmployees;
+    const celdasGrilla = useMemo(() => {
+        const vistas: Record<string, VistaCelda> = {};
+        const ctx: Record<string, CtxCeldaGrilla> = {};
+        const prev = vistasPrevRef.current;
+        for (const emp of filasCeldas as any[]) {
+            const isGuest = esInvitadoEnGrilla(emp, selectedObjective, selectedGrupo, grupoUnifiedMode, slaIdToObjId);
+            daysInMonth.forEach((day, dayIndex) => {
+                const r = calcularCeldaGrilla(entradaCeldas, emp, isGuest, day, dayIndex);
+                vistas[r.vista.key] = reusarVista(prev[r.vista.key], r.vista);
+                ctx[r.vista.key] = r.ctx;
+            });
+        }
+        vistasPrevRef.current = vistas;
+        return { vistas, ctx };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [
+        filasCeldas, daysInMonth, selectedObjective, selectedGrupo, grupoUnifiedMode, slaIdToObjId,
+        pendingChanges, shiftsMap, rfzByEmpDate, absencesMap, planPublicadoGrilla, cellTurnosMap, turaMap,
+        lctRestByCell, excludedPositionsByDate, vacancyConsultas, isServiceLocked, fechaBloqueadaGrilla, clients,
+    ]);
+    const ctxCeldasExtraRef = useRef<Record<string, CtxCeldaGrilla>>({});
+    const celdaDeGrilla = (emp: any, isGuest: boolean, day: Date, dayIndex: number) => {
+        const key = `${emp.id}_${getDateKey(day)}`;
+        const vista = celdasGrilla.vistas[key];
+        if (vista) return vista;
+        const r = calcularCeldaGrilla(entradaCeldas, emp, !!isGuest, day, dayIndex);
+        ctxCeldasExtraRef.current[key] = r.ctx;
+        return r.vista;
+    };
+    const ctxDeCelda = (key: string): CtxCeldaGrilla | undefined => celdasGrilla.ctx[key] || ctxCeldasExtraRef.current[key];
+
+    const tooltipCeldaCtl = useControlTooltipCelda();
+
+    const construirTooltipCelda = (key: string): DatosTooltipCelda | null => {
+        const c = ctxDeCelda(key);
+        if (!c) return null;
+        const { emp, p, s, absence, activeShift, rfzOnCell, evOverlay, cellCode, leaveCellCode, coveredByCell, cellPosName } = c;
+        const _marca = (p && !p.isDeleted && p.menuRapidoTexto) || s?.menuRapidoTexto;
+        if (_marca) return { label: String(_marca), pos: null, range: null, restHours: null };
+        if (c.isLeaveCell) {
+            const absType = absence?.type || activeShift?.name || LEGEND_DESCRIPTIONS[leaveCellCode] || leaveCellCode;
+            const reason = absence?.reason || activeShift?.comments || p?.comments || '';
+            const covered = resolveTitularCoverageName(emp.id, emp.name || '', c.dateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell, cellTurnosMap);
+            return { label: buildLeaveCellTooltipLabel({ absenceType: absType, reason, coveredBy: covered }), pos: null, range: null, restHours: null };
+        }
+        if ((s || p || rfzOnCell || evOverlay) && !absence) {
+            const _cellShift = c.cellShift;
+            const _cellActualRange = (_cellShift?.startTime && _cellShift?.endTime)
+                ? `${formatTime(_cellShift.startTime)} - ${formatTime(_cellShift.endTime)}`
+                : null;
+            const _b2 = resolveCellSecondBlock(
+                key,
+                pendingChanges,
+                secondBlockMap,
+                cellPosName,
+                cellCode,
+                positionStructure,
+            );
+            const _b2Range = (_b2?.startTime && _b2?.endTime)
+                ? `${formatTime(_b2.startTime)} - ${formatTime(_b2.endTime)}`
+                : null;
+            const cellRange = cellCode
+                ? ((_cellActualRange && _b2Range)
+                    ? `${_cellActualRange} + ${_b2Range}`
+                    : (_cellActualRange || SHIFT_RANGES[cellCode] || null))
+                : null;
+            const { isEarly, isExtended, covRole, covNote, coverageSourceShift } = c;
+            const _covSegHint = isEarly || covRole === 'EARLY_START'
+                ? '\n⏩ Adelanto (cobertura)'
+                : (isExtended || covRole === 'EXTENSION')
+                    ? '\n⏱ Extensión (cobertura)'
+                    : '';
+            const _usedHint = c.isCoverageSourceUsed
+                ? (c.planDualUsedAndCob
+                    ? `\n🔗 ${String(coverageSourceShift?.code || 'Turno').toUpperCase()} usado en cobertura`
+                    + `\n🟠 COB: cubre a ${String(coverageSourceShift?.coverageUsedCoversEmployeeName || coverageSourceShift?.coversEmployeeName || 'titular').trim()}`
+                    + `${coverageSourceShift?.coverageUsedObjectiveName ? ` en ${coverageSourceShift.coverageUsedObjectiveName}` : ''}`
+                    : `\n🔗 Usado: cubrió a ${String(coverageSourceShift?.coverageUsedCoversEmployeeName || coverageSourceShift?.coversEmployeeName || 'titular').trim()}${coverageSourceShift?.coverageUsedObjectiveName ? ` en ${coverageSourceShift.coverageUsedObjectiveName}` : ''}`)
+                : '';
+            const _evHint = evOverlay
+                ? (evOverlay.mode === 'FRANCO_USADO'
+                    ? `\n🔗 Franco usado en evento: ${evOverlay.tooltip}`
+                    : evOverlay.mode === 'BADGE'
+                        ? `\n⚠ También afectado al evento: ${evOverlay.tooltip}`
+                        : '')
+                : '';
+            const _covHint = (covNote ? `\n📋 ${covNote}` : '') + _covSegHint + _usedHint + _evHint;
+            const _billBr = activeShift && shiftCountsForEmployeeCronoHours(activeShift)
+                ? planningShiftBillableBreakdown(activeShift, slaCodeHoursHint)
+                : null;
+            const _billHint = _billBr && _billBr.gross > 0
+                ? `\n📊 ${_billBr.base}h base${_billBr.extra > 0 ? ` + ${_billBr.extra}h cobertura = ${_billBr.gross}h` : ` (${_billBr.gross}h)`}`
+                : '';
+            const _authHint = `${_cellShift?.descansoReducido ? `\n⚠ Descanso reducido autorizado${_cellShift.descansoHoras != null ? ` (${_cellShift.descansoHoras} h)` : ''}` : ''}${_cellShift?.topeExcedido ? `\n⚠ Tope 200 h autorizado${_cellShift.horasMes != null ? ` (${_cellShift.horasMes} h)` : ''}` : ''}`;
+            const shiftLabel = evOverlay?.mode === 'EV'
+                ? evOverlay.tooltip
+                : (cellCode === 'EV' && (activeShift?.eventoNombre || activeShift?.servicioNombre))
+                    ? eventoTooltip(activeShift)
+                    : cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : (rfzOnCell ? 'Refuerzo cliente (RFZ)' : null);
+            const _isFrancoTip = cellCode ? ['F', 'FF', 'FP', 'FT'].includes(String(cellCode).toUpperCase()) : false;
+            const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, c.dayIndex) : null;
+            const _isRet = String(cellCode || '').toUpperCase() === 'RET';
+            const _exclHint = c.cellPosExcluded ? `\n⚠ Puesto excluido por SLA este día` : '';
+            const _otherObjHint = c.isOtherObjectiveShift && activeShift?.objectiveId ? `\n📍 Otro objetivo: ${getObjectiveName(activeShift.objectiveId)}` : '';
+            const _rfzHint = rfzOnCell ? `\n🔴 RFZ ${formatTime(rfzOnCell.startTime)}–${formatTime(rfzOnCell.endTime)}${rfzOnCell.positionName ? ` · ${rfzOnCell.positionName}` : ''}` : '';
+            const _linkedTura = activeShift?.id ? turaMap[activeShift.id] : null;
+            const _turaHint = _linkedTura ? `\n🟣 TURA ${isTuraContiguousToParent(activeShift, _linkedTura) ? 'seguido' : 'cortado'} ${formatShiftClockRange(_linkedTura)}${_linkedTura.positionName ? ` → ${_linkedTura.positionName}` : ''}` : '';
+            const _lctRest = c.lctRest;
+            const _tipLabel = c.isOpsCoverageCell
+                ? buildOpsCoverageCellTooltip(c.opsTooltipShift, opsCoverageTooltipCtxFor(c.opsTooltipShift, emp.name || ''))
+                : (shiftLabel
+                    ? `${shiftLabel}${_exclHint}${_otherObjHint}${_rfzHint}${_turaHint}${_covHint}${_billHint}${_authHint}${_lctRest ? `\n⚠ ${_lctRest}` : ''}`
+                    : (_exclHint || _otherObjHint || _rfzHint || _turaHint || _covHint || _billHint || _lctRest || null));
+            return {
+                label: _tipLabel,
+                readOnlyOps: c.isOpsCoverageCell,
+                pos: _isRet ? null : (cellPosName || rfzOnCell?.positionName || null),
+                range: _isRet ? null : (cellRange || (rfzOnCell ? `${formatTime(rfzOnCell.startTime)} - ${formatTime(rfzOnCell.endTime)}` : null)),
+                restHours: _restHrs,
+            };
+        }
+        if (c.isExclusionCol) {
+            return { label: excludedPositionsTooltip(c.excludedOnDay, c.dateStr), pos: null, range: null, restHours: null };
+        }
+        return null;
+    };
+
+    const ctlCeldas = useRef<ControlCeldas>(null as unknown as ControlCeldas);
+    ctlCeldas.current = {
+        contextMenu: (ev, key) => {
+            const c = ctxDeCelda(key);
+            if (!c) return;
+            tooltipCeldaCtl.current.ocultar();
+            abrirMenuRapidoCelda(ev, {
+                emp: c.emp,
+                dateStr: c.dateStr,
+                isLeave: c.isLeaveCell,
+                leaveCode: c.isLeaveCell ? c.leaveCellCode : null,
+                tieneTurno: c.tieneTurno,
+                positionName: c.cellPosName,
+            });
+        },
+        mouseDown: (ev, key, fila, col) => {
+            if (ev.button !== 0) return;
+            tooltipCeldaCtl.current.ocultar();
+            if (modoElegir) {
+                const c = ctxDeCelda(key);
+                ev.preventDefault();
+                ev.stopPropagation();
+                if (c) clicPersonaModoElegir(c.emp.id);
+                return;
+            }
+            handleMouseDown(fila, col);
+        },
+        mouseEnter: (ev, key, fila, col) => {
+            if (isDragging && allowPlanningMultiSelect) setSelection((pr) => ({ ...pr, end: { r: fila, c: col } }));
+            tooltipCeldaCtl.current.programar(() => construirTooltipCelda(key), ev.clientX, ev.clientY);
+        },
+        mouseMove: (ev) => tooltipCeldaCtl.current.mover(ev.clientX, ev.clientY),
+        mouseLeave: () => tooltipCeldaCtl.current.ocultar(),
+        abrirConsulta: (consultaId) => {
+            setConsultaFoco(consultaId);
+            setConsultaTick((n) => n + 1);
+        },
+    };
+
     const renderGrid = (
         isSnapshotView: boolean,
         snapshotData?: any,
@@ -10985,7 +12068,7 @@ function PlanificacionDesktop() {
                             {!isSnapshotView && (
                                 <tr
                                     id={`plan-emp-${emp.id}`}
-                                    className={`group ${isPoolRow ? 'bg-amber-50/70 dark:bg-amber-950/20' : ''} ${highlightEmpId === emp.id ? 'ring-2 ring-inset ring-indigo-400 bg-indigo-50 dark:bg-indigo-900/30' : ''} ${dragOverVisual === idx ? 'border-t-2 border-t-indigo-400' : ''} ${(empMonthlyHours[emp.id] || 0) >= planningLimits.monthly ? 'bg-red-50 hover:bg-red-100 dark:bg-red-950/30 dark:hover:bg-red-900/30' : 'hover:bg-slate-50 dark:hover:bg-slate-700/40'}`}
+                                    className={`group ${modoElegir ? 'cursor-pointer' : ''} ${isPoolRow ? 'bg-amber-50/70 dark:bg-amber-950/20' : ''} ${highlightEmpId === emp.id ? 'ring-2 ring-inset ring-indigo-400 bg-indigo-50 dark:bg-indigo-900/30' : ''} ${dragOverVisual === idx ? 'border-t-2 border-t-indigo-400' : ''} ${(empMonthlyHours[emp.id] || 0) >= planningLimits.monthly ? 'bg-red-50 hover:bg-red-100 dark:bg-red-950/30 dark:hover:bg-red-900/30' : 'hover:bg-slate-50 dark:hover:bg-slate-700/40'}`}
                                     onDragOver={(e) => handleRowDragOver(e, idx)}
                                     onDrop={(e) => handleRowDrop(e, idx)}
                                     onDragEnd={() => setDragOverVisual(null)}
@@ -10993,8 +12076,8 @@ function PlanificacionDesktop() {
                                     <td
                                         draggable
                                         onDragStart={(e) => handleRowDragStart(e, idx)}
-                                        onClick={() => !isSnapshotView && handleRowHeaderClick(idx)}
-                                        title="Clic para seleccionar fila completa"
+                                        onClick={() => { if (modoElegir) { clicPersonaModoElegir(emp.id); return; } if (!isSnapshotView) handleRowHeaderClick(idx); }}
+                                        title={modoElegir ? "Clic para elegir a esta persona" : "Clic para seleccionar fila completa"}
                                         style={{ width: nameColWidth, minWidth: nameColWidth }}
                                         className={`sticky left-0 z-20 p-2 border-r border-b shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)] h-8 cursor-grab active:cursor-grabbing dark:border-slate-700 ${(empMonthlyHours[emp.id] || 0) >= planningLimits.monthly ? 'bg-red-50 group-hover:bg-red-100 dark:bg-red-950/30 dark:group-hover:bg-red-900/30' : 'bg-white dark:bg-slate-800 group-hover:bg-slate-50 dark:group-hover:bg-slate-700/60'}`}
                                     >
@@ -11110,224 +12193,21 @@ function PlanificacionDesktop() {
                                         })()}
                                     </td>
                                     {daysInMonth.map((day, dayIndex) => {
+                                        const vistaCelda = celdaDeGrilla(emp, !!isGuest, day, dayIndex);
                                         const cellDateStr = getDateKey(day);
-                                        const key = `${emp.id}_${cellDateStr}`;
-                                        const { s, p } = resolveCellShiftDisplay(
-                                            emp.id, cellDateStr, selectedObjective, selectedGrupo, grupoUnifiedMode, pendingChanges, shiftsMap,
+                                        return (
+                                            <CeldaGrilla
+                                                key={vistaCelda.key}
+                                                vista={vistaCelda}
+                                                fila={idx}
+                                                col={dayIndex}
+                                                seleccionada={!!isCellSelected(idx, dayIndex)}
+                                                colElegir={!!modoElegir && cellDateStr === modoElegir.ctx.dateStr}
+                                                elegirActivo={!!modoElegir}
+                                                comparada={!!compareChangedKeys?.has(vistaCelda.key)}
+                                                ctl={ctlCeldas}
+                                            />
                                         );
-                                        const rfzOnCell = rfzByEmpDate[key];
-                                        const selected = !isSnapshotView && isCellSelected(idx, dayIndex);
-                                        const isLockedDate = !isSnapshotView && (isPlanningDateLocked(getDateKey(day)) || isOutsideServiceRange(getDateKey(day)));
-                                        const isCellWeekend = [0, 6].includes(day.getDay());
-                                        let content = null; let style = "";
-                                        let isFT = s?.isFrancoTrabajado || p?.isFrancoTrabajado; let isFF = s?.isFrancoCompensatorio || p?.isFrancoCompensatorio;
-                                        let isExtended = s?.isExtended || p?.isExtended;
-                                        let isEarly = s?.isEarlyStart || p?.isEarlyStart || s?.isAdvanced || p?.isAdvanced; 
-                                        const covRole = p?.coverageSegmentRole || s?.coverageSegmentRole;
-                                        const covNote = p?.coverageNote || s?.coverageNote;
-                                        let plannedNov = s?.plannedNovedad || p?.plannedNovedad; 
-                                        let absence = absencesMap[key];
-                                        if (absence && ((absence.inferredCode as string) || inferAbsenceCode(absence)) === 'AA' && !isPlanificacionPublished(publishStatusMap[planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1)])) absence = null as any;
-                                        const effectiveCode = p?.code || s?.code;
-                                        const coveredByCell = p?.coveredBy || s?.coveredBy || s?.coveredByEmployeeName || p?.coveredByEmployeeName;
-                                        let hasConflict = shouldShowLeaveConflictSiren({
-                                            shiftCode: effectiveCode,
-                                            absence,
-                                            coveredBy: coveredByCell,
-                                            hasNovedad: !!(s && s.hasNovedad),
-                                            shiftStatus: s?.status,
-                                        });
-                                        let statusIndicator = null;
-                                        const _planPublished = isPlanificacionPublished(publishStatusMap[planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1)]);
-                                        // Punto de estado: verde=presente, rojo=ausente sin cubrir, teal=ausente ya cubierto (NO confundir con presente).
-                                        if (s && !isSnapshotView) {
-                                            const coveredAbs =
-                                                (s.status === 'ABSENT' || s.isAbsent) &&
-                                                isTitularCoverageAssigned(s);
-                                            if (coveredAbs) statusIndicator = 'bg-teal-500';
-                                            else if (s.status === 'PRESENT' || s.status === 'COMPLETED' || s.isPresent) statusIndicator = 'bg-emerald-500';
-                                            else if (s.status === 'ABSENT' || s.isAbsent) statusIndicator = 'bg-rose-500';
-                                        }
-                                        let isSwap = s?.swapWith || p?.swapWith;
-                                        const swapPending = !!(
-                                            isSwap &&
-                                            (
-                                                (s?.origin && s.origin !== 'PLANIFICADOR' && !s.swapAuthorized) ||
-                                                (p?.origin && p.origin !== 'PLANIFICADOR' && !p.swapAuthorized)
-                                            )
-                                        );
-                                        const swapStyle = swapPending ? SHIFT_STYLES['SWAP_PENDING'] : SHIFT_STYLES['SWAP'];
-                                        if (isLockedDate && !p) { style = SHIFT_STYLES['PAST']; if (s) content = s.code; }
-                                        else if (p) { if(p.isDeleted) { content=<X size={12}/>; style="bg-rose-50 text-rose-300"; } else { if(isFT) { style=SHIFT_STYLES['FT']; content="FT"; } else if(isFF) { style=SHIFT_STYLES['FF']; content="FF"; } else { content=p.code; const baseStyle = SHIFT_STYLES[p.code]; style = baseStyle ? `${baseStyle} ring-2 ring-amber-400 ${isSwap ? swapStyle : ''}` : `bg-amber-100 text-amber-700 font-black ring-2 ring-amber-400 ${isSwap ? swapStyle : ''}`; if (content === 'REF' || content === 'ESC') content = cellLabelForDeployment(String(content), p.deploymentBand); } } }
-                                        else if (s) { if (!isLockedDate) { if(isFT) { style=SHIFT_STYLES['FT']; content="FT"; } else if(isFF) { style=SHIFT_STYLES['FF']; content="FF"; } else { style=`${getDefaultStyle(s.code)} ${isSwap ? swapStyle : ''}`; content=s.code; } } }
-                                        else if (rfzOnCell && !p) {
-                                            content = 'RFZ';
-                                            style = `${SHIFT_STYLES['RFZ']}${rfzOnCell.draft ? ' ring-2 ring-amber-400' : ''}`;
-                                        }
-                                        const _deployBand = (p && !p.isDeleted ? p.deploymentBand : s?.deploymentBand);
-                                        if (content === 'REF' || content === 'ESC') {
-                                            content = cellLabelForDeployment(String(content), _deployBand);
-                                        }
-                                        if (plannedNov === 'AVISO') { style += ' border-l-4 border-l-amber-500'; }
-                                        if (plannedNov === 'LICENCIA') { style += ' border-l-4 border-l-purple-500'; }
-                                        if (content === 'Ausencia con Aviso' || content === 'Injustificada') { content = 'AA'; style = SHIFT_STYLES['AA']; }
-                                        const _isRaCell = !!(
-                                            (p && !p.isDeleted && p.isRetiroAnticipado)
-                                            || (s && s.isRetiroAnticipado)
-                                        );
-                                        if (_isRaCell && content != null && typeof content === 'string' && !String(content).includes('/RA')) {
-                                            content = `${String(content).toUpperCase()}/RA`;
-                                            style += ' ring-1 ring-rose-400';
-                                        }
-                                        if (isGuest && (s || p)) { style += ' border-t-2 border-t-amber-400'; }
-                                        const opsShiftFromMulti = pickOpsCoverageShiftForPlanningCell(
-                                            cellTurnosMap[key],
-                                            selectedObjective,
-                                        );
-                                        const opsShiftForCell =
-                                            opsShiftFromMulti
-                                            || (s && selectedObjective && isOpsCoverageShiftForObjective(s, selectedObjective)
-                                                ? s
-                                                : null);
-                                        const activeShift = (p && !p.isDeleted) ? p : (s || (rfzOnCell ? rfzDocToShiftView(rfzOnCell) : null));
-                                        const isOpsCoverageCell = !!opsShiftForCell;
-                                        const opsTooltipShift = opsShiftForCell || activeShift;
-                                        const coverageSourceShift =
-                                            (p && !p.isDeleted) ? p : (s && !isOpsCoverageShiftForObjective(s, selectedObjective) ? s : null);
-                                        const isCoverageSourceUsed =
-                                            !!(coverageSourceShift?.coverageUsed === true && !absence);
-                                        const planDualUsedAndCob =
-                                            isCoverageSourceUsed && isOpsCoverageCell && !!opsShiftForCell;
-                                        if (isOpsCoverageCell && opsShiftForCell) {
-                                            const opsCodeRaw = String(opsShiftForCell.code || '').trim().toUpperCase();
-                                            const opsEtiqueta = etiquetaCeldaOpsCoverage(opsShiftForCell);
-                                            content = opsEtiqueta.content;
-                                            style = `${getDefaultStyle(opsCodeRaw || 'M')} ${OPS_COVERAGE_CELL_RING}`;
-                                            isFT = false;
-                                            isFF = false;
-                                        }
-                                        // TURA: turno agregado por cliente → fondo rojo en celda padre
-                                        if (activeShift?.id && turaMap[activeShift.id]) { style = 'bg-red-500 text-white border-red-600 font-black'; }
-                                        const hasRfzOverlay = !!(rfzOnCell && (s || (p && !p.isDeleted)) && !absence);
-                                        const _rawOtherObj = isShiftAtOtherObjective(s, p, selectedObjective);
-                                        const _activeShiftObjId = ((p && !p.isDeleted) ? p : s)?.objectiveId;
-                                        const _cellIsRetAtOtherObj = _rawOtherObj && shiftPlanningCodeUpper(activeShift) === 'RET';
-                                        const isOtherObjectiveShift = _rawOtherObj
-                                            && !_cellIsRetAtOtherObj
-                                            && !(selectedGrupo && grupoUnifiedMode && selectedGrupo.objectiveIds.includes(_activeShiftObjId));
-                                        if (absence) { const absCode = absence.inferredCode || inferAbsenceCode(absence); const displayCode = absenceGridDisplayCode(absence); content = displayCode; style = SHIFT_STYLES[displayCode] || SHIFT_STYLES[absCode] || 'bg-rose-50 text-rose-700 font-bold border-rose-200'; }
-                                        if (isOtherObjectiveShift && content != null) {
-                                            style = OTHER_OBJECTIVE_CELL_STYLE;
-                                        }
-                                        if (_cellIsRetAtOtherObj && content != null) {
-                                            style = `${SHIFT_STYLES['RET']} ring-1 ring-amber-400/80`;
-                                        }
-                                        // Evento (EV del servidor) en la fila del guardia: celda EV, franco usado o marca sobre otro turno.
-                                        const _evOverlay = (absence || isSnapshotView) ? null : eventoCellOverlay(cellTurnosMap[key], (p && !p.isDeleted) ? p : s);
-                                        if (_evOverlay?.mode === 'EV') {
-                                            content = 'EV';
-                                            style = `${SHIFT_STYLES['EV']} ring-1 ring-yellow-600/70`;
-                                        } else if (_evOverlay?.mode === 'FRANCO_USADO') {
-                                            const _fCode = String(_evOverlay.franco?.code || _evOverlay.franco?.type || 'F').toUpperCase();
-                                            content = FRANCO_CELL_CODES.has(String(content || '').toUpperCase()) ? content : _fCode;
-                                            style = `${SHIFT_STYLES[String(content)] || SHIFT_STYLES['F']} ring-1 ring-violet-500/90`;
-                                        }
-                                        const isCoverageSplitCell = !!(
-                                            !isFT
-                                            && !isFF
-                                            && !absence
-                                            && !isOtherObjectiveShift
-                                            && content != null
-                                            && !(activeShift?.id && turaMap[activeShift.id])
-                                            && (
-                                                isExtended
-                                                || isEarly
-                                                || covRole === 'EXTENSION'
-                                                || covRole === 'EARLY_START'
-                                            )
-                                        );
-                                        if (isCoverageSplitCell) {
-                                            style = `${SHIFT_STYLES['EXTENDED']} z-10`;
-                                        }
-                                        if (compareChangedKeys?.has(key)) {
-                                            style += isSnapshotView
-                                                ? ' ring-2 ring-amber-600 ring-offset-1 z-20'
-                                                : ' ring-2 ring-violet-600 ring-offset-1 z-20';
-                                        }
-                                        if (isCoverageSourceUsed && content != null && !planDualUsedAndCob) {
-                                            style += ' ring-1 ring-violet-500/90';
-                                        }
-                                        const cellPosName = (p && !p.isDeleted ? p.positionName : s?.positionName) || rfzOnCell?.positionName || null;
-                                        const cellCode = (p && !p.isDeleted) ? (isFT ? 'FT' : isFF ? 'FF' : p.code) : s ? (isFT ? 'FT' : isFF ? 'FF' : s.code) : (rfzOnCell ? 'RFZ' : null);
-                                        const _cellShift = (p && !p.isDeleted) ? p : s;
-                                        const _lctRest = lctRestByCell[key] || '';
-                                        const _cellActualRange = (_cellShift?.startTime && _cellShift?.endTime)
-                                            ? `${formatTime(_cellShift.startTime)} - ${formatTime(_cellShift.endTime)}`
-                                            : null;
-                                        const _b2 = resolveCellSecondBlock(
-                                            key,
-                                            pendingChanges,
-                                            secondBlockMap,
-                                            cellPosName,
-                                            cellCode,
-                                            positionStructure,
-                                        );
-                                        const _b2Range = (_b2?.startTime && _b2?.endTime)
-                                            ? `${formatTime(_b2.startTime)} - ${formatTime(_b2.endTime)}`
-                                            : null;
-                                        const cellRange = cellCode
-                                            ? ((_cellActualRange && _b2Range)
-                                                ? `${_cellActualRange} + ${_b2Range}`
-                                                : (_cellActualRange || SHIFT_RANGES[cellCode] || null))
-                                            : null;
-                                        const excludedOnDay = excludedPositionsByDate[cellDateStr];
-                                        const isExclusionCol = !!excludedOnDay?.length;
-                                        const cellPosExcluded = !!(cellPosName && excludedOnDay?.includes(cellPosName));
-                                        const leaveCellCode = absence
-                                            ? String(absenceGridDisplayCode(absence) || content || '').toUpperCase()
-                                            : String(cellCode || '').toUpperCase();
-                                        const isLeaveCell = !!absence || LEAVE_CELL_CODES.has(leaveCellCode);
-                                        const _covSegHint = isEarly || covRole === 'EARLY_START'
-                                            ? '\n⏩ Adelanto (cobertura)'
-                                            : (isExtended || covRole === 'EXTENSION')
-                                                ? '\n⏱ Extensión (cobertura)'
-                                                : '';
-                                        const _usedHint = isCoverageSourceUsed
-                                            ? (planDualUsedAndCob
-                                                ? `\n🔗 ${String(coverageSourceShift?.code || 'Turno').toUpperCase()} usado en cobertura`
-                                                + `\n🟠 COB: cubre a ${String(coverageSourceShift?.coverageUsedCoversEmployeeName || coverageSourceShift?.coversEmployeeName || 'titular').trim()}`
-                                                + `${coverageSourceShift?.coverageUsedObjectiveName ? ` en ${coverageSourceShift.coverageUsedObjectiveName}` : ''}`
-                                                : `\n🔗 Usado: cubrió a ${String(coverageSourceShift?.coverageUsedCoversEmployeeName || coverageSourceShift?.coversEmployeeName || 'titular').trim()}${coverageSourceShift?.coverageUsedObjectiveName ? ` en ${coverageSourceShift.coverageUsedObjectiveName}` : ''}`)
-                                            : '';
-                                        const _evHint = _evOverlay
-                                            ? (_evOverlay.mode === 'FRANCO_USADO'
-                                                ? `\n🔗 Franco usado en evento: ${_evOverlay.tooltip}`
-                                                : _evOverlay.mode === 'BADGE'
-                                                    ? `\n⚠ También afectado al evento: ${_evOverlay.tooltip}`
-                                                    : '')
-                                            : '';
-                                        const _covHint = (covNote ? `\n📋 ${covNote}` : '') + _covSegHint + _usedHint + _evHint;
-                                        const _billBr = activeShift && shiftCountsForEmployeeCronoHours(activeShift)
-                                            ? planningShiftBillableBreakdown(activeShift, slaCodeHoursHint)
-                                            : null;
-                                        const _billHint = _billBr && _billBr.gross > 0
-                                            ? `\n📊 ${_billBr.base}h base${_billBr.extra > 0 ? ` + ${_billBr.extra}h cobertura = ${_billBr.gross}h` : ` (${_billBr.gross}h)`}`
-                                            : '';
-                                        const _authHint = `${_cellShift?.descansoReducido ? `\n⚠ Descanso reducido autorizado${_cellShift.descansoHoras != null ? ` (${_cellShift.descansoHoras} h)` : ''}` : ''}${_cellShift?.topeExcedido ? `\n⚠ Tope 200 h autorizado${_cellShift.horasMes != null ? ` (${_cellShift.horasMes} h)` : ''}` : ''}`;
-                                        const _consultaCelda = consultaAbiertaEnFecha(vacancyConsultas, cellDateStr, emp.id, String(cellCode || leaveCellCode || ''));
-                                        return <td key={key} data-testid="grilla-celda" onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={(e) => { if (!isSnapshotView && isDragging && allowPlanningMultiSelect) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); if (isLeaveCell) { const absType = absence?.type || activeShift?.name || LEGEND_DESCRIPTIONS[leaveCellCode] || leaveCellCode; const reason = absence?.reason || activeShift?.comments || p?.comments || ''; const covered = resolveTitularCoverageName(emp.id, emp.name || '', cellDateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell, cellTurnosMap); setShiftTooltip({ label: buildLeaveCellTooltipLabel({ absenceType: absType, reason, coveredBy: covered }), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else if ((s || p || rfzOnCell || _evOverlay) && !absence) { const shiftLabel = _evOverlay?.mode === 'EV'
-                                                    ? _evOverlay.tooltip
-                                                    : (cellCode === 'EV' && (activeShift?.eventoNombre || activeShift?.servicioNombre))
-                                                    ? eventoTooltip(activeShift)
-                                                    : cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : (rfzOnCell ? 'Refuerzo cliente (RFZ)' : null); const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; const _exclHint = cellPosExcluded ? `\n⚠ Puesto excluido por SLA este día` : ''; const _otherObjHint = isOtherObjectiveShift && activeShift?.objectiveId ? `\n📍 Otro objetivo: ${getObjectiveName(activeShift.objectiveId)}` : ''; const _rfzHint = rfzOnCell ? `\n🔴 RFZ ${formatTime(rfzOnCell.startTime)}–${formatTime(rfzOnCell.endTime)}${rfzOnCell.positionName ? ` · ${rfzOnCell.positionName}` : ''}` : ''; const _linkedTura = activeShift?.id ? turaMap[activeShift.id] : null; const _turaHint = _linkedTura ? `\n🟣 TURA ${isTuraContiguousToParent(activeShift, _linkedTura) ? 'seguido' : 'cortado'} ${formatShiftClockRange(_linkedTura)}${_linkedTura.positionName ? ` → ${_linkedTura.positionName}` : ''}` : ''; const _tipLabel = isOpsCoverageCell ? buildOpsCoverageCellTooltip(opsTooltipShift, opsCoverageTooltipCtxFor(opsTooltipShift, emp.name || '')) : (shiftLabel ? `${shiftLabel}${_exclHint}${_otherObjHint}${_rfzHint}${_turaHint}${_covHint}${_billHint}${_authHint}${_lctRest ? `\n⚠ ${_lctRest}` : ''}` : (_exclHint || _otherObjHint || _rfzHint || _turaHint || _covHint || _billHint || _lctRest || null)); setShiftTooltip({ label: _tipLabel, readOnlyOps: isOpsCoverageCell, pos: _isRet ? null : (cellPosName || rfzOnCell?.positionName || null), range: _isRet ? null : (cellRange || (rfzOnCell ? `${formatTime(rfzOnCell.startTime)} - ${formatTime(rfzOnCell.endTime)}` : null)), x: e.clientX, y: e.clientY, restHours: _restHrs }); } else if (isExclusionCol) { setShiftTooltip({ label: excludedPositionsTooltip(excludedOnDay, cellDateStr), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked && !isOpsCoverageCell ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`} data-evento={_evOverlay ? _evOverlay.mode : undefined} title={isOpsCoverageCell ? undefined : _evOverlay ? (_evOverlay.mode === 'EV' ? _evOverlay.tooltip : `${_evOverlay.mode === 'FRANCO_USADO' ? 'Franco usado en evento' : 'También afectado al evento'}: ${_evOverlay.tooltip}`) : isExclusionCol && !s && !p ? excludedPositionsTooltip(excludedOnDay, cellDateStr) : isOtherObjectiveShift && activeShift?.objectiveId ? `Turno en ${getObjectiveName(activeShift.objectiveId)}` : undefined}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style} ${_lctRest ? 'ring-2 ring-amber-400' : cellPosExcluded ? 'ring-1 ring-rose-400/70' : ''}`}>{_consultaCelda ? <IndicadorConsultaCelda texto={textoIndicadorConsulta(_consultaCelda)} tooltip={textoTooltipConsulta(_consultaCelda)} onAbrir={() => { setConsultaFoco(_consultaCelda.id); setConsultaTick((n) => n + 1); }} /> : null}{_evOverlay && _evOverlay.mode !== 'EV' && (<div className="absolute -bottom-0.5 right-0 text-[6.5px] font-black bg-yellow-400 text-yellow-900 px-0.5 rounded z-10" title={_evOverlay.tooltip}>EV</div>)}{_lctRest ? (<span className="absolute top-0 left-0 w-1.5 h-1.5 rounded-full bg-amber-500 border border-white" title={_lctRest}/>) : null}{content}{isExclusionCol && !content && (<span className="absolute bottom-0 left-0 w-1.5 h-1.5 rounded-full bg-rose-400/80" title="Día con puesto(s) excluido(s)"/>)}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly || isCoverageSplitCell) && <div className="absolute -top-1 -right-1 text-[8px] bg-red-900 text-white px-1 rounded-full border border-white/40">+</div>}{covRole === 'LIBERATED' && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-emerald-600 text-white px-0.5 rounded">RET</div>}{isCoverageSourceUsed && <div className="absolute -top-1 -left-1 text-[7px] font-black bg-violet-600 text-white px-0.5 rounded z-10" title="Turno usado en cobertura operativa">U</div>}{_cellShift?.descansoReducido && <div className="absolute -top-1 left-0 text-[7px] font-black bg-amber-500 text-white px-0.5 rounded z-10" title="Descanso reducido autorizado">8–12</div>}{_cellShift?.topeExcedido && <div className="absolute -bottom-0.5 right-0 text-[7px] font-black bg-rose-600 text-white px-0.5 rounded z-10" title="Tope de 200 h autorizado">200</div>}{(covRole === 'TARGET' || isLeaveCell) && coveredByCell && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-orange-500 text-white px-0.5 rounded" title={coveredByCell ? `Cubierto por ${coveredByCell}` : 'Cubierto'}>✓</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && !isOtherObjectiveShift && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}{isOtherObjectiveShift && content && (<div className="absolute bottom-0 left-0"><MapPin size={7} className="text-slate-300 drop-shadow-sm"/></div>)}{selectedGrupo && grupoUnifiedMode && content && !isOtherObjectiveShift && activeShift?.objectiveId && selectedGrupo.objectiveIds.includes(activeShift.objectiveId) && (() => {
-                                                    const _oi = selectedGrupo.objectiveIds.indexOf(activeShift.objectiveId!);
-                                                    const _clr = GRUPO_COLOR_HEX[_oi % GRUPO_COLOR_HEX.length];
-                                                    const _nm = (selectedGrupo.objectiveNames[_oi] || '').trim().split(/\s+/).filter((w: string) => w.length > 1).pop()?.slice(0, 6).toUpperCase() || (selectedGrupo.objectiveNames[_oi] || '').slice(0, 5).toUpperCase();
-                                                    return (<>
-                                                        <div className="absolute top-0 left-0 bottom-0 w-0.5 opacity-80" style={{ backgroundColor: _clr }}/>
-                                                        <div className="absolute bottom-0 left-0.5 right-0 text-[5.5px] font-black text-white leading-tight text-center overflow-hidden" style={{ backgroundColor: _clr + 'cc' }}>{_nm}</div>
-                                                    </>);
-                                                })()}{hasRfzOverlay && (<div className="absolute top-0 right-0 text-[7px] font-black bg-red-600 text-white px-0.5 rounded-bl">RFZ</div>)}{rfzOnCell && !s && !p && !absence && rfzOnCell.draft && (<div className="absolute bottom-0 right-0 w-1.5 h-1.5 rounded-full bg-amber-400 border border-white" title="Sin publicar"/>)}</div></td>;
                                     })}
                                 </tr>
                             )}
@@ -11398,17 +12278,16 @@ function PlanificacionDesktop() {
                                     key={`eventos_${dayStr}`}
                                     className={`border-b border-r p-0.5 text-center ${isCellWeekend ? 'bg-rose-50/40 dark:bg-rose-950/20' : ''}`}
                                     onMouseEnter={(e) => {
-                                        if (!cell) { setShiftTooltip(null); return; }
-                                        setShiftTooltip({
+                                        if (!cell) { tooltipCeldaCtl.current.ocultar(); return; }
+                                        tooltipCeldaCtl.current.programar(() => ({
                                             label: tooltip,
                                             pos: 'Eventos',
                                             range: cell.entries.map((en) => `${en.nombre} ${en.hours}h`).join(' · '),
-                                            x: e.clientX,
-                                            y: e.clientY,
                                             restHours: null,
-                                        });
+                                        }), e.clientX, e.clientY);
                                     }}
-                                    onMouseLeave={() => setShiftTooltip(null)}
+                                    onMouseMove={(e) => tooltipCeldaCtl.current.mover(e.clientX, e.clientY)}
+                                    onMouseLeave={() => tooltipCeldaCtl.current.ocultar()}
                                 >
                                     {cell && (
                                         <div
@@ -11622,6 +12501,66 @@ function PlanificacionDesktop() {
             <div className="no-print px-2 max-w-[1600px] mx-auto">
                 <SwapSupervisorQueue empresaId={empresaId} />
             </div>
+            {menuRapido && typeof document !== 'undefined' && createPortal(
+                <>
+                    <div className="fixed inset-0 z-[9999]" onMouseDown={cerrarMenuRapido} onContextMenu={(e) => { e.preventDefault(); cerrarMenuRapido(); }} />
+                    <MenuRapidoCobertura
+                        x={menuRapido.x}
+                        y={menuRapido.y}
+                        opciones={menuRapido.opciones}
+                        onAsignar={() => iniciarModoElegir('asignar')}
+                        onExtAdel={() => iniciarModoElegir('split')}
+                        onAbrir={abrirCoberturaDesdeMenu}
+                        onClose={cerrarMenuRapido}
+                    />
+                </>,
+                document.body,
+            )}
+            {modoElegir && typeof document !== 'undefined' && createPortal((() => {
+                const idsCronograma = new Set(displayedEmployees.map((e: { id: string }) => e.id));
+                const fuera = modoElegir.accion === 'asignar' && modoElegir.fueraAbierto
+                    ? buscarFueraDelCronograma(
+                        employees
+                            .filter((e: { id?: string; status?: string; modalidad?: string; bolsaCuil?: string }) => e.id && e.id !== modoElegir.ctx.empId && e.status !== 'INACTIVE' && !esLegajoEventual(e))
+                            .map((e: { id: string; name?: string }) => ({
+                                id: e.id,
+                                nombre: String(e.name || e.id),
+                                rol: rolDesdeTurno(turnoMenuDe(e.id, modoElegir.ctx.dateStr)),
+                                enCronograma: idsCronograma.has(e.id),
+                            })),
+                        modoElegir.busqueda,
+                    )
+                    : [];
+                const texto = textoFranjaElegir({
+                    accion: modoElegir.accion,
+                    clase: modoElegir.ctx.clase,
+                    titular: modoElegir.ctx.empName,
+                    codigoAusencia: modoElegir.ctx.codigoAusencia,
+                    positionName: modoElegir.ctx.positionName,
+                    dateStr: modoElegir.ctx.dateStr,
+                    banda: modoElegir.ctx.gapBand,
+                    horario: modoElegir.ctx.horario,
+                    extNombre: modoElegir.extId ? nombreEmpleadoMenu(modoElegir.extId) : null,
+                    extTramo: modoElegir.extId ? tramoExtMenu(modoElegir.ctx, modoElegir.extId) : null,
+                });
+                return (
+                    <FranjaModoElegir
+                        texto={modoElegir.repetir || modoElegir.resultado ? `${texto.replace(/^Elegí quién cubre/, 'Cubre').replace(/ → ahora elegí quién adelanta$/, ` · adelanta ${apellidoMarca(modoElegir.repetir?.cov.mode === 'split' ? nombreEmpleadoMenu(modoElegir.repetir.cov.adelId) : '')}`)}` : texto}
+                        aviso={modoElegir.aviso}
+                        fueraVisible={modoElegir.accion === 'asignar'}
+                        fueraAbierto={modoElegir.fueraAbierto}
+                        busqueda={modoElegir.busqueda}
+                        fuera={fuera}
+                        repetir={modoElegir.repetir ? { texto: modoElegir.repetir.texto } : null}
+                        terminado={!!modoElegir.resultado}
+                        onBusqueda={(q) => setModoElegir((m) => (m ? { ...m, busqueda: q } : m))}
+                        onToggleFuera={() => setModoElegir((m) => (m ? { ...m, fueraAbierto: !m.fueraAbierto, busqueda: '' } : m))}
+                        onElegirFuera={clicPersonaModoElegir}
+                        onRepetir={repetirModoElegir}
+                        onCancelar={cancelarModoElegir}
+                    />
+                );
+            })(), document.body)}
             {coverageTooltip && coverageTooltipLayout && typeof document !== 'undefined' && createPortal(
                 <div
                     className="fixed z-[9999]"
@@ -11714,49 +12653,8 @@ function PlanificacionDesktop() {
                 />,
                 document.body,
             )}
-            {shiftTooltip && (
-                <div
-                    className="fixed z-[9999] pointer-events-none"
-                    style={{ left: shiftTooltip.x + 10, top: shiftTooltip.y - 64 }}
-                >
-                    <div className={`bg-slate-900 text-white text-[10px] font-black px-2.5 py-2 rounded-lg shadow-sm flex flex-col gap-1 max-w-[320px] ${shiftTooltip.label?.includes('\n') ? 'whitespace-pre-line' : 'whitespace-nowrap'}`}>
-                        {shiftTooltip.label && (
-                            <div className="flex items-start gap-1.5 text-white font-medium">
-                                {shiftTooltip.label.startsWith('Tipo:') ? (
-                                    <Stethoscope size={9} className="text-rose-300 shrink-0 mt-0.5" />
-                                ) : (
-                                    <Clock size={9} className="text-indigo-300 shrink-0 mt-0.5" />
-                                )}
-                                <span>{shiftTooltip.label}</span>
-                            </div>
-                        )}
-                        {shiftTooltip.pos && (
-                            <div className="flex items-center gap-1.5 text-slate-300 font-medium text-[9px]">
-                                <MapPin size={9} className="text-indigo-300 shrink-0" />
-                                {shiftTooltip.pos}
-                            </div>
-                        )}
-                        {shiftTooltip.range && (
-                            <div className="flex items-center gap-1.5 text-slate-300 font-medium text-[9px]">
-                                <span className="text-indigo-300">⏱</span>
-                                {shiftTooltip.range}
-                            </div>
-                        )}
-                        {shiftTooltip.restHours != null && (
-                            <div className="flex items-center gap-1.5 text-green-300 font-medium text-[9px]">
-                                <span className="text-green-400">⏸</span>
-                                Descanso total: <span className="font-black text-green-200">{shiftTooltip.restHours}h</span>
-                            </div>
-                        )}
-                        <div className="text-[8px] text-slate-500 font-medium pt-0.5 border-t border-slate-700">
-                            {shiftTooltip.readOnlyOps
-                                ? 'Solo lectura (Operaciones) — click en la celda para informe completo'
-                                : 'Click para ver detalle / Cambiar'}
-                        </div>
-                    </div>
-                    <div className="w-2 h-2 bg-slate-900 rotate-45 ml-2 -mt-1" />
-                </div>
-            )}
+            <TooltipCeldaGrilla controlRef={tooltipCeldaCtl} />
+
             {opsCoverageDetailModal && (
                 <div
                     className="fixed inset-0 z-[10000] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4"
@@ -12072,6 +12970,7 @@ function PlanificacionDesktop() {
                                     </button>
                                 )}
                                 {showLegend && renderLegend()}
+                                {!comparingSnapshot && <PlanningCoverageLegend />}
 
                                 {/* BELL — solo expandido */}
                                 {!toolbarCollapsed && (
@@ -12726,9 +13625,6 @@ function PlanificacionDesktop() {
                                 </div>
                             );
                         })()}
-                        {!comparingSnapshot && (
-                            <PlanningCoverageLegend open={coverageLegendOpen} onToggle={toggleCoverageLegend} />
-                        )}
                         {correctionMode && (
                             <>
                             <div className="mx-2 mb-1 flex items-center gap-2 bg-rose-600 text-white px-4 py-2 rounded-xl text-xs font-black no-print">
@@ -15436,22 +16332,10 @@ function PlanificacionDesktop() {
                         return h;
                     };
                     // Clasificar disponibilidad en la fecha de la ausencia
-                    const NON_AVAILABLE = new Set(['F','FF','FP','FT','V','L','PG','A','E','AA','PAST','LOCKED']);
-                    type VacancyDayRole = 'RETEN' | 'ESC' | 'REF' | 'FREE' | 'FRANCO' | 'WORKING' | 'LICENCIA';
-                    const LICENSE_DAY = new Set(['V', 'L', 'PG', 'A', 'E', 'AA', 'ART']);
-                    const getEmpDayRole = (empId: string, dateStr: string): VacancyDayRole => {
+                    const getEmpDayRole = (empId: string, dateStr: string) => {
                         const key = `${empId}_${dateStr}`;
                         const s = pendingChanges[key] ? (pendingChanges[key].isDeleted ? null : pendingChanges[key]) : shiftsMap[key];
-                        if (!s || s.isDeleted) return 'FREE';
-                        const code = String(s.code || '').toUpperCase();
-                        if (s.isFrancoTrabajado === true || code === 'FT') return 'WORKING';
-                        if (code === 'RET') return 'RETEN';
-                        if (code === 'ESC') return 'ESC';
-                        if (code === 'REF') return 'REF';
-                        if (LICENSE_DAY.has(code)) return 'LICENCIA';
-                        if (code === 'F' || code === 'FF' || code === 'FP' || s.isFranco === true) return 'FRANCO';
-                        if (NON_AVAILABLE.has(code)) return 'FREE';
-                        return 'WORKING';
+                        return rolDesdeTurno(s);
                     };
                     const objLat = Number(selectedObjectiveData?.lat ?? 0);
                     const objLng = Number(selectedObjectiveData?.lng ?? 0);
@@ -15616,14 +16500,6 @@ function PlanificacionDesktop() {
                             isFranco: src.isFranco === true,
                         };
                     };
-                    const segHours = (from?: string, to?: string) => {
-                        if (!from || !to) return 0;
-                        const [fh, fm] = from.split(':').map(Number);
-                        const [th, tm] = to.split(':').map(Number);
-                        let mins = (th * 60 + tm) - (fh * 60 + fm);
-                        if (mins <= 0) mins += 24 * 60;
-                        return Math.round((mins / 60) * 10) / 10;
-                    };
                     const materializeOnDay = (day: string, base: VacancyDayCoverage, useOverride: boolean): VacancyDayCoverage | null => {
                         if (base.mode === 'substitute') return base;
                         if (base.mode !== 'split') return null;
@@ -15649,45 +16525,12 @@ function PlanificacionDesktop() {
                             tit ? { band: tit.code, position: tit.positionName, extExtraHours: vacancySplitExtExtraHours, secondExtExtraHours: vacancySplitSecondExtraHours } : undefined,
                         );
                     };
-                    const proposedForCoverage = (dateStr: string, coverage: VacancyDayCoverage): Record<string, ProposedGuardShift> => {
-                        if (coverage.mode === 'substitute') {
-                            const tit = resolveEffectiveTitularForDay(dateStr);
-                            const sched = String(tit?.scheduleLabel || '');
-                            const m = sched.match(/(\d{1,2}:\d{2})\s*[–-]\s*(\d{1,2}:\d{2})/);
-                            const hours = tit?.hours || 8;
-                            return { [coverage.employeeId]: { code: tit?.code || 'M', startTime: m?.[1], endTime: m?.[2], hours, addHours: hours } };
-                        }
-                        if (coverage.mode !== 'split') return {};
-                        const extShift = shiftOfGuard(coverage.extEmpId, dateStr);
-                        const adelShift = shiftOfGuard(coverage.adelEmpId, dateStr);
-                        const times = resolveVacancySplitSegmentTimes(
-                            vacancyPosSla,
-                            coverage.gapBand,
-                            coverage.gapPosition,
-                            { code: extShift?.code },
-                            { code: adelShift?.code },
-                            coverage.extExtraHours,
-                            coverage.secondExtExtraHours,
-                        );
-                        const extAdd = coverage.extExtraHours ?? segHours(times.first.from, times.first.to);
-                        const adelAdd = coverage.secondExtExtraHours ?? segHours(times.second.from, times.second.to);
-                        return {
-                            [coverage.extEmpId]: {
-                                code: String(extShift?.code || coverage.gapBand || 'M'),
-                                startTime: extShift?.startTime || times.first.from,
-                                endTime: times.first.to,
-                                hours: extAdd,
-                                addHours: extAdd,
-                            },
-                            [coverage.adelEmpId]: {
-                                code: String(adelShift?.code || coverage.gapBand || 'T'),
-                                startTime: adelShift?.startTime || times.second.from,
-                                endTime: times.second.to,
-                                hours: adelAdd,
-                                addHours: adelAdd,
-                            },
-                        };
-                    };
+                    const proposedForCoverage = (dateStr: string, coverage: VacancyDayCoverage): Record<string, ProposedGuardShift> => propuestaGuardCobertura({
+                        coverage,
+                        titular: coverage.mode === 'substitute' ? resolveEffectiveTitularForDay(dateStr) : null,
+                        shiftOf: (empId) => shiftOfGuard(empId, dateStr),
+                        positionStructure: vacancyPosSla,
+                    });
                     const guardOnDay = (dateStr: string, coverage: VacancyDayCoverage) => {
                         if (!vacancyDayHasCoverage(coverage)) return { blocked: [] as string[], authorizations: [] as CoverageAuthRequest[] };
                         return evaluateCoverageDayGuards({
