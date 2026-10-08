@@ -199,6 +199,7 @@ export async function registrarPresencia(
     lateArrivalAt: shiftData.lateArrivalAt ?? null,
     presenciaSource: source,
     presenciaAt: now,
+    isAwaitingCoverageCheckIn: false,
   };
   if (operatorUid) incomingPatch.checkInOperator = operatorUid;
   if (source === 'VIGI' || source === 'DEMO') {
@@ -212,17 +213,19 @@ export async function registrarPresencia(
 
   await shiftRef.update(incomingPatch);
 
+  const titularLink = String(shiftData.absenceShiftId || shiftData.coverageForShiftId || '').trim();
+  const convId = String(shiftData.coverageConvocatoriaId || shiftData.assignedByConvocatoria || '').trim();
+  if (convocadoPunch || convId || titularLink) {
+    const { cerrarSeguimientoPorFichada } = await import('../attendance/convocadoFollowUp');
+    await cerrarSeguimientoPorFichada(db, {
+      convIds: convId ? [convId] : [],
+      titularShiftId: titularLink,
+      employeeId: String(empId || shiftData.employeeId || ''),
+      now: Timestamp.fromMillis(nowMs),
+    }).catch((e) => console.warn('[registrarPresencia] cierre seguimiento:', (e as Error).message));
+  }
+
   if (convocadoPunch) {
-    const convId = String(shiftData.coverageConvocatoriaId || shiftData.assignedByConvocatoria || '').trim();
-    if (convId) {
-      const { logConvocatoriaEvento } = await import('../coverage/convocatoriaEventos');
-      const { convocadoFollowUpClosePatch } = await import('../attendance/convocadoFollowUp');
-      const punchTs = Timestamp.fromMillis(nowMs);
-      await db.collection('convocatorias_cobertura').doc(convId)
-        .update({ ...convocadoFollowUpClosePatch('FICHO', punchTs), checkedInAt: punchTs })
-        .catch(() => undefined);
-      await logConvocatoriaEvento(db, convId, { type: 'FICHO', at: punchTs }).catch(() => undefined);
-    }
     if (covTypeUp === 'ADVANCE') {
       const titularId = String(shiftData.absenceShiftId || shiftData.coveredShiftId || '').trim();
       if (titularId) {

@@ -645,7 +645,9 @@ export async function applyCoverage(
           }),
       ...(existingCov ? {} : { createdAt: coverageServerTime() }),
       ...(existingCov?.acceptedAt ? {} : { acceptedAt: params.acceptedAt || coverageServerTime() }),
-      ...(params.convocatoriaId ? { assignedByConvocatoria: params.convocatoriaId } : {}),
+      ...(params.convocatoriaId
+        ? { assignedByConvocatoria: params.convocatoriaId, coverageConvocatoriaId: params.convocatoriaId }
+        : {}),
       ...(params.refEscAsignacionDirecta ? { refEscAsignacionDirecta: true } : {}),
       ...(params.retAsignacionDirecta ? { retAsignacionDirecta: true } : {}),
       ...(params.coberturaAnticipada ? { coberturaAnticipada: true, refEscAsignacionDirecta: true } : {}),

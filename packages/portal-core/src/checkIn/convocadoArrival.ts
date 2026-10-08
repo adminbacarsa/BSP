@@ -37,7 +37,76 @@ export type RecordatorioConvocadoLike = {
   originSource?: 'DEVICE' | 'DOMICILIO' | 'SIN_COORD' | string;
   acceptedAt?: unknown;
   respondedAt?: unknown;
+  /** El servidor cerró el seguimiento (fichó, hueco terminado o cancelada). */
+  followUpClosedAt?: unknown;
+  followUpClosedReason?: string;
+  /** Fin del hueco. */
+  gapEndAt?: unknown;
+  endTime?: unknown;
 };
+
+export type TurnoPresenciaLike = {
+  id?: string;
+  employeeId?: string;
+  absenceShiftId?: string;
+  coverageForShiftId?: string;
+  coveredShiftId?: string;
+  isPresent?: boolean;
+  status?: string;
+  isDeleted?: boolean;
+  checkInAt?: unknown;
+  checkInTime?: unknown;
+  realStartTime?: unknown;
+};
+
+function turnoFichado(shift: TurnoPresenciaLike): boolean {
+  if (shift.isDeleted === true) return false;
+  const st = String(shift.status || '').toUpperCase();
+  if (st === 'CANCELLED' || st === 'DELETED') return false;
+  return shift.isPresent === true
+    || st === 'PRESENT'
+    || timestampLikeToMillis(shift.checkInAt) > 0
+    || timestampLikeToMillis(shift.checkInTime) > 0
+    || timestampLikeToMillis(shift.realStartTime) > 0;
+}
+
+/** Mismo id que `buildOpsCoverageDocId` del servidor. */
+export function opsCoverageDocId(titularShiftId: string, employeeId: string): string {
+  return `ops_cov_${titularShiftId}_${employeeId}`.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
+}
+
+/** El hueco ya pasó: no queda tarjeta de «¿venís?». */
+export function huecoTerminado(
+  c: { gapEndAt?: unknown; endTime?: unknown } | null | undefined,
+  nowMs = Date.now(),
+): boolean {
+  if (!c) return false;
+  const end = timestampLikeToMillis(c.gapEndAt) || timestampLikeToMillis(c.endTime);
+  return end > 0 && end <= nowMs;
+}
+
+/**
+ * El guardia ya está en el puesto de ese hueco: fichó el ops_cov,
+ * el turno del hueco, o un turno suyo que lo cubre.
+ */
+export function guardiaPresenteEnHueco(
+  shifts: TurnoPresenciaLike[] | null | undefined,
+  huecoShiftId: string | null | undefined,
+  employeeId: string | null | undefined,
+): boolean {
+  const hueco = String(huecoShiftId || '').trim();
+  if (!hueco || !shifts?.length) return false;
+  const emp = String(employeeId || '').trim();
+  const covId = emp ? opsCoverageDocId(hueco, emp) : '';
+  return shifts.some((shift) => {
+    if (!turnoFichado(shift)) return false;
+    if (covId && shift.id === covId) return true;
+    if (shift.id === hueco && (!emp || !shift.employeeId || shift.employeeId === emp)) return true;
+    const link = String(shift.absenceShiftId || shift.coverageForShiftId || shift.coveredShiftId || '').trim();
+    if (link !== hueco) return false;
+    return !emp || !shift.employeeId || shift.employeeId === emp;
+  });
+}
 
 export function isConvocadoEta(value: number): value is ConvocadoEtaMinutes {
   return value === 10 || value === 15 || value === 30;
@@ -55,6 +124,8 @@ export function isRecordatorioPendiente(
   const type = String(c.type || '').trim().toUpperCase();
   if (type === 'LLEGADA_TARDE' || type === 'EXTEND') return false;
   if (String(c.status || '').trim().toUpperCase() !== 'ACCEPTED') return false;
+  if (timestampLikeToMillis(c.followUpClosedAt) > 0) return false;
+  if (huecoTerminado(c)) return false;
   const sentMs = timestampLikeToMillis(c.reminderSentAt);
   if (sentMs <= 0) return false;
   const gap = timestampLikeToMillis(c.gapStartAt) || timestampLikeToMillis((c as { startTime?: unknown }).startTime);

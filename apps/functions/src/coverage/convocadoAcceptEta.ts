@@ -167,6 +167,23 @@ export async function responderRecordatorioConvocadoShift(
   const conv = snap.data() as Record<string, unknown>;
   if (String(conv.status || '') !== 'ACCEPTED') return { success: false, reason: 'NOT_ACCEPTED' };
 
+  const covId = buildOpsCoverageDocId(String(conv.shiftId || ''), String(conv.candidateEmployeeId || ''));
+  const covSnap = covId ? await db.collection('turnos').doc(covId).get() : null;
+  const cov = covSnap?.exists ? covSnap.data() as Record<string, unknown> : null;
+  const presente = cov?.isPresent === true
+    || String(cov?.status || '').toUpperCase() === 'PRESENT'
+    || !!(cov?.checkInAt || cov?.realStartTime);
+  const cerrado = !!(conv.followUpClosedAt as { toMillis?: () => number } | undefined)?.toMillis?.()
+    || conv.followUpClosedAt instanceof Date;
+  const fin = (conv.gapEndAt as { toMillis?: () => number } | undefined)?.toMillis?.()
+    || (conv.endTime as { toMillis?: () => number } | undefined)?.toMillis?.()
+    || 0;
+  const termino = fin > 0 && fin <= Date.now();
+  if (presente || (cerrado && String(conv.followUpClosedReason || '') === 'FICHO')) {
+    return { success: false, reason: 'Ya fichaste' };
+  }
+  if (termino || cerrado) return { success: false, reason: 'La cobertura ya terminó' };
+
   const now = Timestamp.now();
   if (input.action === 'PROBLEM') {
     const note = String(input.note || '').trim();
@@ -201,10 +218,8 @@ export async function responderRecordatorioConvocadoShift(
     delayAlertPending: true,
     delayAlertedForArrivalAt: FieldValue.delete(),
   });
-  const covId = buildOpsCoverageDocId(String(conv.shiftId || ''), String(conv.candidateEmployeeId || ''));
-  const cov = await db.collection('turnos').doc(covId).get();
-  if (cov.exists) {
-    await cov.ref.update({
+  if (covSnap?.exists) {
+    await covSnap.ref.update({
       expectedArrivalAt: expected,
       convocadoReply: 'ON_WAY',
       convocadoDemorado: false,

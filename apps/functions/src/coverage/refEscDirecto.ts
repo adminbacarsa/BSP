@@ -305,6 +305,7 @@ export async function resolverCoberturaRefEscRet(
   const sourceId = String(data.candidateShiftId || '').trim();
   const resolvedBy = resolvedByDe(data.createdBy);
   const anticipada = escenario === 'ANTICIPADA';
+  const convRef = anticipada ? null : db.collection('convocatorias_cobertura').doc();
   const batch = db.batch();
   let covDocId = '';
   try {
@@ -330,6 +331,7 @@ export async function resolverCoberturaRefEscRet(
       coberturaUrgente: !anticipada,
       escenarioCobertura: escenario,
       retAsignacionDirecta: !anticipada && esRet(data.type),
+      ...(convRef ? { convocatoriaId: convRef.id } : {}),
     });
     await syncAusenciaCoberturaGestionada(db, {
       shiftId: data.shiftId,
@@ -407,7 +409,7 @@ export async function resolverCoberturaRefEscRet(
     coberturaUrgente: true,
     escenarioCobertura: 'URGENTE',
   }, { merge: true });
-  await db.collection('convocatorias_cobertura').doc().set({
+  await convRef.set({
     empresaId: data.empresaId,
     shiftId: data.shiftId,
     objectiveId: data.objectiveId,
