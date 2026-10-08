@@ -132,8 +132,9 @@ export function opsCoverageDocCountsBillableHours(
 }
 
 /**
- * REF/ESC usado como cobertura se muestra con el código del titular (M), no «COB M».
- * El turno origen queda dado de baja: una sola representación, sin duplicar horas.
+ * Toda cobertura de Operaciones se ve «COB {código del titular}» (pedido de Mauro 08/10: la grilla
+ * tiene que mostrar que vino del CC). REF/ESC/RET: el turno origen queda dado de baja, una sola
+ * representación sin duplicar horas; `esRefEsc` sigue informando de dónde salió.
  */
 export function etiquetaCeldaOpsCoverage(shift: { code?: unknown; coverageType?: unknown } | null | undefined): {
   content: string;
@@ -141,8 +142,8 @@ export function etiquetaCeldaOpsCoverage(shift: { code?: unknown; coverageType?:
 } {
   const code = String(shift?.code || '').trim().toUpperCase();
   const ct = String(shift?.coverageType || '').trim().toUpperCase();
-  if (ct === 'REF' || ct === 'ESC' || ct === 'RET') return { content: code || 'M', esRefEsc: true };
-  return { content: code ? `COB ${code}` : 'COB', esRefEsc: false };
+  const content = code ? `COB ${code}` : 'COB';
+  return { content, esRefEsc: ct === 'REF' || ct === 'ESC' || ct === 'RET' };
 }
 
 /** Turno OPERATIONS_COVERAGE del guardia en el objetivo del cronograma (puede ser 2º doc del día). */

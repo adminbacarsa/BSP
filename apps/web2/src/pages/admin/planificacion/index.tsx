@@ -11202,9 +11202,7 @@ function PlanificacionDesktop() {
                                             const opsCodeRaw = String(opsShiftForCell.code || '').trim().toUpperCase();
                                             const opsEtiqueta = etiquetaCeldaOpsCoverage(opsShiftForCell);
                                             content = opsEtiqueta.content;
-                                            style = opsEtiqueta.esRefEsc
-                                                ? getDefaultStyle(opsCodeRaw || 'M')
-                                                : `${getDefaultStyle(opsCodeRaw || 'M')} ${OPS_COVERAGE_CELL_RING}`;
+                                            style = `${getDefaultStyle(opsCodeRaw || 'M')} ${OPS_COVERAGE_CELL_RING}`;
                                             isFT = false;
                                             isFF = false;
                                         }
