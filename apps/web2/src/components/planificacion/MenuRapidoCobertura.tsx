@@ -90,6 +90,8 @@ type FranjaProps = {
   onElegirFuera: (id: string) => void;
   onRepetir: () => void;
   onCancelar: () => void;
+  onSaltear?: () => void;
+  onTerminar?: () => void;
 };
 
 /** Franja fija arriba de la grilla mientras se elige a la persona tocándola. */
@@ -108,6 +110,8 @@ export function FranjaModoElegir({
   onElegirFuera,
   onRepetir,
   onCancelar,
+  onSaltear,
+  onTerminar,
 }: FranjaProps) {
   useEscape(onCancelar);
   return (
@@ -137,6 +141,26 @@ export function FranjaModoElegir({
             data-franja-solo
           >
             {solo.texto}
+          </button>
+        )}
+        {onSaltear && !repetir && !terminado && (
+          <button
+            type="button"
+            onClick={onSaltear}
+            className="flex shrink-0 items-center gap-1 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-black text-slate-600 hover:bg-slate-50"
+            data-franja-saltear
+          >
+            Saltear este día
+          </button>
+        )}
+        {onTerminar && !repetir && !terminado && (
+          <button
+            type="button"
+            onClick={onTerminar}
+            className="flex shrink-0 items-center gap-1 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-black text-slate-600 hover:bg-slate-50"
+            data-franja-terminar
+          >
+            Terminar
           </button>
         )}
         {repetir && (

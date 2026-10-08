@@ -382,6 +382,17 @@ type CtxMenuRapido = {
 };
 type CovMenuRapido = { mode: 'substitute'; id: string } | { mode: 'split'; extId: string; adelId: string };
 import { applyOperationalGapCloseToChanges } from '@/lib/planificacion/operationalGapCoverage';
+import {
+    clasificarSeleccionLicencia,
+    diasQueQuedaron,
+    esCeldaLicencia,
+    iniciarRecorrido,
+    siguienteRecorrido,
+    textoCubrirDias,
+    textoFranjaRecorrido,
+    textoRepetirQuedaron,
+    type RecorridoDias,
+} from '@/lib/planificacion/seleccionLicencia';
 import { format as formatFecha } from 'date-fns';
 import { alignVacancyGapBand } from '@/lib/planificacion/vacancySplitBands';
 import {
@@ -1351,7 +1362,7 @@ function calcularCeldaGrilla(e: EntradaCeldaGrilla, emp: any, isGuest: boolean, 
     const leaveCellCode = absence
         ? String(absenceGridDisplayCode(absence) || content || '').toUpperCase()
         : String(cellCode || '').toUpperCase();
-    const isLeaveCell = !!absence || LEAVE_CELL_CODES.has(leaveCellCode);
+    const isLeaveCell = esCeldaLicencia({ code: leaveCellCode, tieneAusencia: !!absence });
     const consulta = consultaAbiertaEnFecha(e.vacancyConsultas, cellDateStr, emp.id, String(cellCode || leaveCellCode || ''));
     const menuRol = p && !p.isDeleted ? p.menuRapidoRol : s?.menuRapidoRol;
     const menuCubre = p && !p.isDeleted ? p.menuRapidoCubreA : s?.menuRapidoCubreA;
@@ -2051,6 +2062,7 @@ function PlanificacionDesktop() {
         y: number;
         ctx: CtxMenuRapido;
         opciones: OpcionesMenuRapido;
+        diasLicencia: string[];
     } | null>(null);
     const [modoElegir, setModoElegir] = useState<{
         ctx: CtxMenuRapido;
@@ -2061,6 +2073,7 @@ function PlanificacionDesktop() {
         busqueda: string;
         repetir: { dias: string[]; cov: CovMenuRapido; texto: string } | null;
         resultado: string | null;
+        recorrido: RecorridoDias | null;
     } | null>(null);
     const [selectedReplacement, setSelectedReplacement] = useState('');
     const [vacancyActiveDates, setVacancyActiveDates] = useState<Set<string>>(new Set());
@@ -2162,7 +2175,10 @@ function PlanificacionDesktop() {
         }
         const all = listDateRangeInclusive(vacancyData.startDate, vacancyData.endDate || vacancyData.startDate);
         const focus = vacancyData.focusDate as string | undefined;
-        const initialDates = focus && all.includes(focus) ? [focus] : all;
+        const pedidos = Array.isArray(vacancyData.activeDates)
+            ? (vacancyData.activeDates as string[]).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
+            : [];
+        const initialDates = pedidos.length ? pedidos : (focus && all.includes(focus) ? [focus] : all);
         setVacancyActiveDates(new Set(initialDates.length ? initialDates : all));
         const titularId = String(vacancyData.employeeId || '');
         setVacancyDayCoverages(coberturaInicialPlanificada(all, (d) => {
@@ -8175,6 +8191,56 @@ function PlanificacionDesktop() {
         const publicado = isPlanificacionPublished(publishStatusMap[pubKey]);
         return !isServiceLocked && !isPlanningDateLocked(dia) && (!publicado || (correctionMode && canCorrectPlanning));
     };
+    const celdasDeLaSeleccion = () => {
+        if (!selection.start || !selection.end) return [];
+        const minR = Math.min(selection.start.r, selection.end.r);
+        const maxR = Math.max(selection.start.r, selection.end.r);
+        const minC = Math.min(selection.start.c, selection.end.c);
+        const maxC = Math.max(selection.start.c, selection.end.c);
+        const out: { empId: string; dateStr: string; code?: string | null; tieneAusencia?: boolean }[] = [];
+        for (let r = minR; r <= maxR; r++) {
+            const emp = displayedEmployees[r];
+            if (!emp) continue;
+            for (let c = minC; c <= maxC; c++) {
+                const dateStr = getDateKey(daysInMonth[c]);
+                const key = `${emp.id}_${dateStr}`;
+                const pending = pendingChanges[key];
+                const shift = pending?.isDeleted ? null : (pending || shiftsMap[key]);
+                const ausencia = absencesMap[key];
+                out.push({
+                    empId: emp.id,
+                    dateStr,
+                    code: shift?.code || null,
+                    tieneAusencia: !!ausencia || esCeldaLicencia({ code: shift?.code }),
+                });
+            }
+        }
+        return out;
+    };
+    const ctxDeLicencia = (empId: string, empName: string, dateStr: string): CtxMenuRapido | null => {
+        const posPreferida = getEmpDefaultPos(empId) || '';
+        const work = bandaTitularDelDia(empId, dateStr, posPreferida);
+        if (!work?.code) return null;
+        const positionName = work.positionName || posPreferida || 'General';
+        const gapBand = String(work.code).toUpperCase();
+        const opt = listVacancyGapBandOptions(effectivePosStructure, positionName).find((o) => o.code === gapBand);
+        const horario = work.scheduleLabel && work.scheduleLabel !== '—'
+            ? work.scheduleLabel
+            : (opt?.startTime && opt?.endTime ? `${opt.startTime}–${opt.endTime}` : '');
+        const shift = turnoMenuDe(empId, dateStr);
+        return {
+            clase: 'ausente',
+            empId,
+            empName,
+            dateStr,
+            positionName,
+            gapBand,
+            horario,
+            horas: work.hours || opt?.hours || 8,
+            codigoAusencia: String(shift?.code || 'V').toUpperCase(),
+            absence: absencesMap[`${empId}_${dateStr}`] || null,
+        };
+    };
     const abrirMenuRapidoCelda = (
         ev: React.MouseEvent,
         celda: {
@@ -8217,6 +8283,13 @@ function PlanificacionDesktop() {
         ev.preventDefault();
         ev.stopPropagation();
         setModoElegir(null);
+        const propias = celda.isLeave
+            ? clasificarSeleccionLicencia(celdasDeLaSeleccion()).licencias.filter((c) => c.empId === celda.emp.id)
+            : [];
+        const diasLicencia = [...new Set(propias.map((c) => c.dateStr))].sort();
+        const menuOpciones = diasLicencia.length > 1 && diasLicencia.includes(celda.dateStr)
+            ? { ...opciones, titulo: textoCubrirDias(diasLicencia) }
+            : opciones;
         const work = celda.isLeave ? bandaTitularDelDia(celda.emp.id, celda.dateStr, posPreferida) : null;
         const huecosPuesto = !work && dayReport
             ? flattenDayGapsForUi(dayReport).filter((g) => !posPreferida || g.positionName === posPreferida)
@@ -8233,7 +8306,8 @@ function PlanificacionDesktop() {
         setMenuRapido({
             x: ev.clientX,
             y: ev.clientY,
-            opciones,
+            opciones: menuOpciones,
+            diasLicencia: diasLicencia.length > 1 && diasLicencia.includes(celda.dateStr) ? diasLicencia : [],
             ctx: {
                 clase: celda.isLeave ? 'ausente' : 'hueco',
                 empId: celda.emp.id,
@@ -8257,26 +8331,60 @@ function PlanificacionDesktop() {
             setSlaGapCloseModal({ dateStr: ctx.dateStr, positionName: ctx.positionName, gapBand: ctx.gapBand });
         } else {
             const ausencia = ctx.absence;
+            const dias = menuRapido.diasLicencia.length > 1 ? menuRapido.diasLicencia : [ctx.dateStr];
             setVacancyData(ausencia?.type
-                ? { ...ausencia, source: 'AUSENCIA', focusDate: ctx.dateStr, employeeId: ctx.empId, employeeName: ctx.empName }
+                ? { ...ausencia, source: 'AUSENCIA', focusDate: dias[0], employeeId: ctx.empId, employeeName: ctx.empName, startDate: dias[0], endDate: dias[dias.length - 1], activeDates: dias }
                 : {
                     employeeId: ctx.empId,
                     employeeName: ctx.empName,
-                    startDate: ctx.dateStr,
-                    endDate: ctx.dateStr,
+                    startDate: dias[0],
+                    endDate: dias[dias.length - 1],
                     type: 'L',
                     source: 'AUSENCIA',
-                    focusDate: ctx.dateStr,
+                    focusDate: dias[0],
+                    activeDates: dias,
                 });
             setShowVacancyModal(true);
         }
         cerrarMenuRapido();
     };
+    const abrirCoberturaDias = (empId: string, dias: string[]) => {
+        const sorted = [...dias].sort();
+        if (!sorted.length) return;
+        const emp = employees.find((e: { id?: string; name?: string }) => e.id === empId);
+        const ausencia = absencesMap[`${empId}_${sorted[0]}`];
+        setVacancyData(ausencia?.type
+            ? {
+                ...ausencia,
+                source: 'AUSENCIA',
+                employeeId: empId,
+                employeeName: emp?.name || ausencia.employeeName,
+                startDate: sorted[0],
+                endDate: sorted[sorted.length - 1],
+                focusDate: sorted[0],
+                activeDates: sorted,
+            }
+            : {
+                employeeId: empId,
+                employeeName: emp?.name || 'Titular',
+                startDate: sorted[0],
+                endDate: sorted[sorted.length - 1],
+                type: 'L',
+                source: 'AUSENCIA',
+                focusDate: sorted[0],
+                activeDates: sorted,
+            });
+        setShowVacancyModal(true);
+        setSelection({ start: null, end: null });
+    };
     const iniciarModoElegir = (accion: AccionElegir) => {
         if (!menuRapido) return;
         setSelection({ start: null, end: null });
+        const dias = menuRapido.diasLicencia;
+        const rec = iniciarRecorrido(dias);
+        const primero = rec ? ctxDeLicencia(menuRapido.ctx.empId, menuRapido.ctx.empName, rec.dias[0]) : null;
         setModoElegir({
-            ctx: menuRapido.ctx,
+            ctx: primero || menuRapido.ctx,
             accion,
             extId: '',
             aviso: null,
@@ -8284,6 +8392,7 @@ function PlanificacionDesktop() {
             busqueda: '',
             repetir: null,
             resultado: null,
+            recorrido: primero ? rec : null,
         });
         cerrarMenuRapido();
     };
@@ -8725,11 +8834,53 @@ function PlanificacionDesktop() {
             toast.success(lado === 'ext'
                 ? `${quien} extiende hasta las ${rango.to}. Guardá el cronograma.`
                 : `${quien} adelanta desde las ${rango.from}. Guardá el cronograma.`);
-            setModoElegir(null);
+            const covSolo: CovMenuRapido = { mode: 'split', extId: lado === 'ext' ? empId : '', adelId: lado === 'adel' ? empId : '' };
+            if (!seguirRecorrido(m.ctx, covSolo, true)) setModoElegir(null);
         } catch (err) {
             const msg = err instanceof Error ? err.message : 'No se pudo aplicar';
             setModoElegir((prev) => (prev ? { ...prev, aviso: msg } : prev));
         }
+    };
+    const seguirRecorrido = (ctx: CtxMenuRapido, cov: CovMenuRapido | null, hecho: boolean): boolean => {
+        const rec = modoElegir?.recorrido;
+        if (!rec) return false;
+        let cursor = siguienteRecorrido(rec, hecho);
+        while (cursor) {
+            const next = ctxDeLicencia(ctx.empId, ctx.empName, cursor.dias[cursor.indice]);
+            if (next) {
+                setModoElegir((prev) => (prev ? {
+                    ...prev, ctx: next, extId: '', aviso: null, fueraAbierto: false, repetir: null, recorrido: cursor,
+                } : prev));
+                return true;
+            }
+            cursor = siguienteRecorrido(cursor, false);
+        }
+        const hechos = hecho ? [...new Set([...rec.hechos, ctx.dateStr])] : rec.hechos;
+        const quedaron = diasQueQuedaron({ ...rec, hechos }, (d) => diaCubiertoMenu(ctx, d));
+        if (cov && quedaron.length) {
+            setModoElegir((prev) => (prev ? {
+                ...prev,
+                extId: cov.mode === 'split' ? cov.extId : prev.extId,
+                aviso: null,
+                recorrido: { ...rec, hechos },
+                repetir: { dias: quedaron, cov, texto: textoRepetirQuedaron(quedaron) },
+            } : prev));
+            return true;
+        }
+        setModoElegir(null);
+        return true;
+    };
+    const saltearDiaRecorrido = () => {
+        const m = modoElegir;
+        if (!m) return;
+        if (!seguirRecorrido(m.ctx, null, false)) setModoElegir(null);
+    };
+    const terminarRecorrido = () => {
+        const m = modoElegir;
+        if (!m?.recorrido) { setModoElegir(null); return; }
+        const quedaron = diasQueQuedaron(m.recorrido, (d) => diaCubiertoMenu(m.ctx, d));
+        if (!quedaron.length) { setModoElegir(null); return; }
+        setModoElegir((prev) => (prev ? { ...prev, aviso: textoRepetirQuedaron(quedaron), resultado: textoRepetirQuedaron(quedaron) } : prev));
     };
     const clicPersonaModoElegir = (personaId: string) => {
         const m = modoElegir;
@@ -8773,6 +8924,7 @@ function PlanificacionDesktop() {
                 setModoElegir((prev) => (prev ? { ...prev, aviso: r.motivo } : prev));
                 return;
             }
+            if (m.recorrido && seguirRecorrido(m.ctx, cov, true)) return;
             if (!dias.length) {
                 setModoElegir(null);
                 return;
@@ -8853,6 +9005,7 @@ function PlanificacionDesktop() {
         let skippedExcluded = 0;
         let skippedCoverage = 0;
         let skippedExt = 0;
+        let skippedLicencia = 0;
 
         const cyclesForBulk = autoSelectedCyclesRef.current?.length
             ? autoSelectedCyclesRef.current
@@ -9016,6 +9169,10 @@ function PlanificacionDesktop() {
                 const existing = shiftsMap[key];
                 const pendingCell = newChanges[key] ?? pendingChanges[key];
                 const effectiveExisting = pendingCell && !pendingCell.isDeleted ? pendingCell : existing;
+                if (esCeldaLicencia({ code: effectiveExisting?.code, tieneAusencia: !!absencesMap[key] })) {
+                    skippedLicencia++;
+                    continue;
+                }
                 if (isShiftConsolidated(effectiveExisting)) continue;
                 if (shiftConfig === null) {
                     newChanges[key] = { isDeleted: true };
@@ -9102,6 +9259,7 @@ function PlanificacionDesktop() {
         }
         if (blockedEmps.size > 0) toast.error(`🚫 Bloqueados (objetivo excluido): ${[...blockedEmps].join(', ')}`, { duration: 10000 });
         const bulkWarns: string[] = [];
+        if (skippedLicencia > 0) bulkWarns.push(`${skippedLicencia} con licencia: se cubre, no se le asigna turno`);
         if (skippedExt > 0) bulkWarns.push(`${skippedExt} omitida(s): elegí objetivo EXT`);
         if (skippedExcluded > 0) bulkWarns.push(`${skippedExcluded} omitida(s): puesto excluido SLA`);
         if (skippedCoverage > 0) bulkWarns.push(`${skippedCoverage} omitida(s): cobertura completa`);
@@ -12055,7 +12213,7 @@ function PlanificacionDesktop() {
         const compareMinimal = !!gridOpts?.minimalHeader;
         const compareCompact = !!gridOpts?.compactRows;
         return (
-        <table className="planning-grid-table border-separate border-spacing-0 w-full text-xs">
+        <table className="planning-grid-table border-separate border-spacing-0 w-full min-h-full text-xs">
             <thead className="sticky top-0 z-30 bg-slate-100 shadow-md">
                 {compareMinimal ? (
                 <tr className="h-7">
@@ -12738,7 +12896,14 @@ function PlanificacionDesktop() {
                 const solo = sinAdelantar && rangoFranja && modoElegir.extId
                     ? { texto: textoTramoSolo('ext', rangoFranja.to), onAplicar: () => aplicarSolaMenu('ext', modoElegir.extId) }
                     : null;
-                const textoBase = textoFranjaElegir({
+                const textoBase = modoElegir.recorrido && !modoElegir.extId
+                    ? textoFranjaRecorrido(
+                        modoElegir.recorrido,
+                        modoElegir.ctx.gapBand,
+                        modoElegir.ctx.horario,
+                        modoElegir.accion === 'asignar' ? 'elegí quién cubre' : 'elegí quién extiende',
+                    )
+                    : textoFranjaElegir({
                     accion: modoElegir.accion,
                     clase: modoElegir.ctx.clase,
                     titular: modoElegir.ctx.empName,
@@ -12750,11 +12915,15 @@ function PlanificacionDesktop() {
                     extNombre: modoElegir.extId ? nombreEmpleadoMenu(modoElegir.extId) : null,
                     extTramo: modoElegir.extId ? tramoExtMenu(modoElegir.ctx, modoElegir.extId) : null,
                 });
-                const texto = sinAdelantar && rangoFranja
+                const prefijoDia = modoElegir.recorrido && modoElegir.extId
+                    ? `Día ${modoElegir.recorrido.indice + 1} de ${modoElegir.recorrido.dias.length} · `
+                    : '';
+                const cuerpoFranja = sinAdelantar && rangoFranja
                     ? `Extiende ${apellidoMarca(nombreEmpleadoMenu(modoElegir.extId))}. ${textoTramoSolo('ext', rangoFranja.to)}`
                     : sinExtender && rangoFranja
                         ? `${textoTramoSolo('adel', rangoFranja.from)}. Elegí quién adelanta`
                         : textoBase;
+                const texto = `${prefijoDia}${cuerpoFranja}`;
                 return (
                     <FranjaModoElegir
                         texto={modoElegir.repetir || modoElegir.resultado ? `${texto.replace(/^Elegí quién cubre/, 'Cubre').replace(/ → ahora elegí quién adelanta$/, ` · adelanta ${apellidoMarca(modoElegir.repetir?.cov.mode === 'split' ? nombreEmpleadoMenu(modoElegir.repetir.cov.adelId) : '')}`)}` : texto}
@@ -12771,6 +12940,8 @@ function PlanificacionDesktop() {
                         onElegirFuera={clicPersonaModoElegir}
                         onRepetir={repetirModoElegir}
                         onCancelar={cancelarModoElegir}
+                        onSaltear={modoElegir.recorrido ? saltearDiaRecorrido : undefined}
+                        onTerminar={modoElegir.recorrido ? terminarRecorrido : undefined}
                     />
                 );
             })(), document.body)}
@@ -14039,7 +14210,7 @@ function PlanificacionDesktop() {
                                 </div>
                             </div>
                         ) : (
-                            <div className={`relative flex-1 min-h-0 overflow-auto custom-scrollbar rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/40 transition-opacity duration-150 ${(isFilterPending || (selectedObjective && !shiftsMapLoaded)) ? 'opacity-70' : ''} ${correctionMode ? 'pb-2' : ''}`}>
+                            <div data-plan-grilla className={`relative flex-1 min-h-0 h-full overflow-auto custom-scrollbar rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/40 transition-opacity duration-150 ${(isFilterPending || (selectedObjective && !shiftsMapLoaded)) ? 'opacity-70' : ''} ${correctionMode ? 'pb-2' : ''}`}>
                                 {renderGrid(false, undefined, undefined, undefined, correctionMode ? { highlightCoverageFooter: true } : undefined)}
                             </div>
                         )}
@@ -14338,9 +14509,35 @@ function PlanificacionDesktop() {
                                     </div>
                                 </div>
                             </>
-                        ) : (
+                        ) : (() => {
+                            const clas = clasificarSeleccionLicencia(celdasDeLaSeleccion());
+                            if (!clas.soloLicencias) return null;
+                            return (
+                                <div className="flex gap-2 items-center p-2 flex-wrap" data-barra-cubrir>
+                                    <span className="text-[11px] font-black px-2 text-white">{clas.textoCubrir || 'Cubrir licencia'}</span>
+                                    {clas.mismoTitular && clas.titularId ? (
+                                        <button
+                                            type="button"
+                                            data-barra-cubrir-modal
+                                            onClick={() => abrirCoberturaDias(clas.titularId as string, clas.dias)}
+                                            className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-white font-black text-xs"
+                                        >
+                                            Abrir cobertura
+                                        </button>
+                                    ) : (
+                                        <span className="text-[10px] font-bold text-amber-200">Son de distintas personas: cubrilas de a una.</span>
+                                    )}
+                                    <button type="button" onClick={() => setSelection({ start: null, end: null })} className="ml-1 p-2 hover:bg-slate-700 rounded-lg"><X size={16}/></button>
+                                </div>
+                            );
+                        })() || (
                             <div className="flex gap-1 items-center p-2 flex-wrap">
                                 <span className="text-[10px] font-bold px-2 text-slate-300 uppercase tracking-wider">Asignar:</span>
+                                {clasificarSeleccionLicencia(celdasDeLaSeleccion()).mezcla && (
+                                    <span className="text-[9px] font-bold text-amber-200 px-1" data-barra-salteo>
+                                        {clasificarSeleccionLicencia(celdasDeLaSeleccion()).motivoTurno}
+                                    </span>
+                                )}
                                 {selectedGrupo && grupoUnifiedMode && bulkBarScopeObjectiveId && (() => {
                                     const oi = selectedGrupo.objectiveIds.indexOf(bulkBarScopeObjectiveId);
                                     const clr = GRUPO_COLOR_HEX[oi % GRUPO_COLOR_HEX.length] || '#64748b';
