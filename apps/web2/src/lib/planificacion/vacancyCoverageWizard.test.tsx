@@ -10,6 +10,7 @@ import {
   evaluateCoverageDayGuards,
   fillEmptyDays,
   nextMarkedDay,
+  propuestaGuardCobertura,
   savedCoverage,
   templateDayForRemaining,
   unresolvedGuardMessages,
@@ -99,6 +100,34 @@ test('licencia, descanso y tope se evalúan con el guardia de ese día; el franc
   assert.equal(descanso8.authorizations.some((a) => a.kind === 'DESCANSO'), true);
   assert.match(unresolvedGuardMessages(descanso8, { descanso: false, tope: true }).join(' '), /8\.0h|8h/);
   assert.deepEqual(unresolvedGuardMessages(descanso8, { descanso: true, tope: true }), []);
+});
+
+test('Ext + Adel: la extensión sigue a su noche sin pedir descanso; el adelanto arranca en el corte', () => {
+  const day = '2026-10-15';
+  const turnos: Record<string, { code: string; startTime: string; endTime: string; hours: number }> = {
+    'galeano|2026-10-14': { code: 'N', startTime: '23:00', endTime: '07:00', hours: 8 },
+    'galeano|2026-10-15': { code: 'N', startTime: '23:00', endTime: '07:00', hours: 8 },
+    'barros|2026-10-14': { code: 'T', startTime: '15:00', endTime: '23:00', hours: 8 },
+    'barros|2026-10-15': { code: 'T', startTime: '15:00', endTime: '23:00', hours: 8 },
+  };
+  const propuesta = propuestaGuardCobertura({
+    coverage: { mode: 'split', gapBand: 'M', gapPosition: 'Puesto 1', extEmpId: 'galeano', adelEmpId: 'barros' } as VacancyDayCoverage,
+    titular: { code: 'M', scheduleLabel: '07:00–15:00', hours: 8 },
+    shiftOf: (id) => turnos[`${id}|${day}`] || null,
+    positionStructure: undefined,
+  });
+  assert.equal(propuesta.galeano.extiendeTurno, true);
+  assert.equal(propuesta.barros.startTime, '11:00');
+  assert.equal(propuesta.barros.endTime, '23:00');
+  const r = evaluateCoverageDayGuards({
+    dateStr: day,
+    proposedByEmp: propuesta,
+    shiftOf: (id, ds) => turnos[`${id}|${ds}`] || null,
+    monthHoursOf: () => 100,
+    nameOf: (id) => id,
+  });
+  assert.deepEqual(r.blocked, []);
+  assert.deepEqual(r.authorizations, []);
 });
 
 test('12 h pasa, 10 h pide PIN, 7 h bloquea y 204 h pide PIN', () => {

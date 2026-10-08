@@ -7,9 +7,11 @@ import { checkRestBetweenShiftsDetail } from '@/lib/planificacion/restBetweenShi
 import { classifyRestViolation, monthNeedsSupervisorPin } from '@/lib/planificacion/supervisorAuth';
 import { planningHourLimits } from '@/lib/planning/planning-rules.runtime';
 import {
+  resolveVacancySplitSegmentTimes,
   vacancyDayHasCoverage,
   type VacancyDayCoverage,
 } from '@/lib/planificacion/vacancyCoverage';
+import type { VacancyPositionSla } from '@/lib/planificacion/vacancySplitBands';
 
 const LICENSE = new Set(['V', 'L', 'E', 'A', 'AA', 'PG', 'ART']);
 const FRANCO = new Set(['F', 'FF', 'FP']);
@@ -177,7 +179,64 @@ export type ProposedGuardShift = {
   hours?: number;
   /** Horas que se suman al mes: el hueco si está libre, solo el extra si ya trabaja. */
   addHours: number;
+  /** Extensión pegada al turno que ya hace: no abre un descanso nuevo antes. */
+  extiendeTurno?: boolean;
 };
+
+export function horasEntre(from?: string, to?: string): number {
+  if (!from || !to) return 0;
+  const [fh, fm] = from.split(':').map(Number);
+  const [th, tm] = to.split(':').map(Number);
+  let mins = (th * 60 + tm) - (fh * 60 + fm);
+  if (mins <= 0) mins += 24 * 60;
+  return Math.round((mins / 60) * 10) / 10;
+}
+
+/** Turno que tomaría cada guardia ese día con esta cobertura (descanso y tope lo miran). */
+export function propuestaGuardCobertura(input: {
+  coverage: VacancyDayCoverage;
+  titular: { code?: string; scheduleLabel?: string; hours?: number } | null;
+  shiftOf: (empId: string) => GuardShift | null;
+  positionStructure: VacancyPositionSla[] | undefined;
+}): Record<string, ProposedGuardShift> {
+  const { coverage, titular } = input;
+  if (coverage.mode === 'substitute') {
+    const m = String(titular?.scheduleLabel || '').match(/(\d{1,2}:\d{2})\s*[–-]\s*(\d{1,2}:\d{2})/);
+    const hours = titular?.hours || 8;
+    return { [coverage.employeeId]: { code: titular?.code || 'M', startTime: m?.[1], endTime: m?.[2], hours, addHours: hours } };
+  }
+  if (coverage.mode !== 'split') return {};
+  const extShift = input.shiftOf(coverage.extEmpId);
+  const adelShift = input.shiftOf(coverage.adelEmpId);
+  const times = resolveVacancySplitSegmentTimes(
+    input.positionStructure,
+    coverage.gapBand,
+    coverage.gapPosition,
+    { code: extShift?.code },
+    { code: adelShift?.code },
+    coverage.extExtraHours,
+    coverage.secondExtExtraHours,
+  );
+  const extAdd = coverage.extExtraHours ?? horasEntre(times.first.from, times.first.to);
+  const adelAdd = coverage.secondExtExtraHours ?? horasEntre(times.second.from, times.second.to);
+  return {
+    [coverage.extEmpId]: {
+      code: String(extShift?.code || coverage.gapBand || 'M'),
+      startTime: extShift?.startTime || times.first.from,
+      endTime: times.first.to,
+      hours: extAdd,
+      addHours: extAdd,
+      extiendeTurno: true,
+    },
+    [coverage.adelEmpId]: {
+      code: String(adelShift?.code || coverage.gapBand || 'T'),
+      startTime: times.second.from,
+      endTime: adelShift?.endTime || times.second.to,
+      hours: adelAdd,
+      addHours: adelAdd,
+    },
+  };
+}
 
 export type CoverageGuardInput = {
   dateStr: string;
@@ -225,7 +284,7 @@ export function evaluateCoverageDayGuards(input: CoverageGuardInput): CoverageGu
       blocked.push(`${name} tiene licencia ${code} ese día.`);
       continue;
     }
-    if (!franco) {
+    if (!franco && !proposed.extiendeTurno) {
       const rest = checkRestBetweenShiftsDetail({
         empId,
         targetDateStr: input.dateStr,

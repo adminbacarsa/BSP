@@ -248,6 +248,7 @@ import {
     resolveVacancySplitSegmentTimes,
     vacancySplitUsesManualExtraHours,
     VACANCY_BAND_SCHEDULE,
+    VACANCY_ABSENCE_TYPE_CODES,
     type VacancyDayCoverage,
 } from '@/lib/planificacion/vacancyCoverage';
 import {
@@ -259,6 +260,7 @@ import {
     mergeCoverages,
     type CoverageAuthRequest,
     nextMarkedDay,
+    propuestaGuardCobertura,
     templateDayForRemaining,
     type ProposedGuardShift,
 } from '@/lib/planificacion/vacancyCoverageWizard';
@@ -329,15 +331,42 @@ import {
     textoDecisionCobertura,
     type CoberturaExistente,
 } from '@/lib/planificacion/coberturaExistente';
-import MenuRapidoCobertura from '@/components/planificacion/MenuRapidoCobertura';
+import MenuRapidoCobertura, { FranjaModoElegir } from '@/components/planificacion/MenuRapidoCobertura';
 import {
+    apellidoMarca,
+    bloqueAusencia,
+    buscarFueraDelCronograma,
     celdaEsHuecoSla,
-    listasAsignarMenu,
+    diasParaRepetir,
+    fechaCorta,
+    marcaCeldaMenuRapido,
     opcionesMenuRapido,
+    pasoDeModo,
+    resumenRepetir,
     rolDesdeTurno,
+    textoFranjaElegir,
     textoMarcaMenuRapido,
+    textoRepetir,
+    validarClicElegir,
+    type AccionElegir,
     type OpcionesMenuRapido,
+    type PasoElegir,
+    type ResultadoDia,
 } from '@/lib/planificacion/menuRapidoCobertura';
+
+type CtxMenuRapido = {
+    clase: 'ausente' | 'hueco';
+    empId: string;
+    empName: string;
+    dateStr: string;
+    positionName: string;
+    gapBand: string;
+    horario: string;
+    horas: number;
+    codigoAusencia: string;
+    absence: any;
+};
+type CovMenuRapido = { mode: 'substitute'; id: string } | { mode: 'split'; extId: string; adelId: string };
 import { applyOperationalGapCloseToChanges } from '@/lib/planificacion/operationalGapCoverage';
 import { format as formatFecha } from 'date-fns';
 import { alignVacancyGapBand } from '@/lib/planificacion/vacancySplitBands';
@@ -1699,17 +1728,18 @@ function PlanificacionDesktop() {
     const [menuRapido, setMenuRapido] = useState<{
         x: number;
         y: number;
-        empId: string;
-        empName: string;
-        dateStr: string;
-        positionName: string;
-        gapBand: string;
+        ctx: CtxMenuRapido;
         opciones: OpcionesMenuRapido;
-        paso: 'raiz' | 'asignar' | 'ext' | 'adel';
+    } | null>(null);
+    const [modoElegir, setModoElegir] = useState<{
+        ctx: CtxMenuRapido;
+        accion: AccionElegir;
         extId: string;
-        adelId: string;
+        aviso: string | null;
+        fueraAbierto: boolean;
         busqueda: string;
-        absence: any;
+        repetir: { dias: string[]; cov: CovMenuRapido; texto: string } | null;
+        resultado: string | null;
     } | null>(null);
     const [selectedReplacement, setSelectedReplacement] = useState('');
     const [vacancyActiveDates, setVacancyActiveDates] = useState<Set<string>>(new Set());
@@ -7004,6 +7034,7 @@ function PlanificacionDesktop() {
                             positionName: safePositionName,
                             coveredBy: change.coveredBy || null,
                             ...(change.menuRapidoTexto ? { menuRapidoTexto: change.menuRapidoTexto, menuRapidoVia: change.menuRapidoVia || 'MENU_RAPIDO' } : {}),
+                            ...(change.menuRapidoRol ? { menuRapidoRol: change.menuRapidoRol, ...(change.menuRapidoCubreA ? { menuRapidoCubreA: change.menuRapidoCubreA } : {}) } : {}),
                             draft: correctionMode ? false : !isPublished,
                             actorName: realActorName,
                             ...deploymentFieldsForFirestore(change),
@@ -7761,12 +7792,35 @@ function PlanificacionDesktop() {
         if (pending?.isDeleted) return null;
         return pending || shiftsMap[key] || null;
     };
+    useEffect(() => {
+        setModoElegir(null);
+        setMenuRapido(null);
+    }, [selectedObjective, currentDate]);
+    const nombreEmpleadoMenu = (id: string) => String(employees.find((e: { id?: string; name?: string }) => e.id === id)?.name || id);
+    const turnoGuardMenu = (empId: string, dia: string) => {
+        const s = turnoMenuDe(empId, dia);
+        if (!s) return null;
+        return {
+            code: s.code,
+            startTime: typeof s.startTime === 'string' ? s.startTime : undefined,
+            endTime: typeof s.endTime === 'string' ? s.endTime : undefined,
+            hours: s.hours,
+            isFranco: s.isFranco === true,
+        };
+    };
+    const puedeEditarDiaMenu = (dia: string) => {
+        if (!selectedObjective) return false;
+        const pubKey = planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1);
+        const publicado = isPlanificacionPublished(publishStatusMap[pubKey]);
+        return !isServiceLocked && !isPlanningDateLocked(dia) && (!publicado || (correctionMode && canCorrectPlanning));
+    };
     const abrirMenuRapidoCelda = (
         ev: React.MouseEvent,
         celda: {
             emp: { id: string; name?: string };
             dateStr: string;
             isLeave: boolean;
+            leaveCode?: string | null;
             tieneTurno: boolean;
             positionName: string | null;
         },
@@ -7792,65 +7846,187 @@ function PlanificacionDesktop() {
             consulta: null,
         });
         const cubiertoPorOps = existente.origen === 'operaciones' && existente.estado === 'CUBIERTO';
-        const pubKey = planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1);
-        const publicado = isPlanificacionPublished(publishStatusMap[pubKey]);
-        const puedeEditar = !isServiceLocked && !isPlanningDateLocked(celda.dateStr) && (!publicado || (correctionMode && canCorrectPlanning));
         const opciones = opcionesMenuRapido({
             esAusente: celda.isLeave,
             esHueco,
             cubiertoPorOps,
-            puedeEditar,
+            puedeEditar: puedeEditarDiaMenu(celda.dateStr),
         });
         if (!opciones.visible) return;
         ev.preventDefault();
         ev.stopPropagation();
+        setModoElegir(null);
         const work = resolveTitularVacancyWorkShift(celda.emp.id, celda.dateStr, shiftsMap, pendingChanges);
         const gapRows = dayReport ? flattenDayGapsForUi(dayReport) : [];
         const gapRow = gapRows.find((g) => g.positionName === posPreferida) || gapRows[0];
         const gapBand = String(work?.code || inferGapBandForClose(gapRow || {}) || 'M').toUpperCase();
         const positionName = work?.positionName || posPreferida || 'General';
+        const opt = listVacancyGapBandOptions(effectivePosStructure, positionName).find((o) => o.code === gapBand);
+        const horario = work?.scheduleLabel && work.scheduleLabel !== '—'
+            ? work.scheduleLabel
+            : (opt?.startTime && opt?.endTime ? `${opt.startTime}–${opt.endTime}` : '');
         setMenuRapido({
             x: ev.clientX,
             y: ev.clientY,
-            empId: celda.emp.id,
-            empName: celda.emp.name || 'Titular',
-            dateStr: celda.dateStr,
-            positionName,
-            gapBand,
             opciones,
-            paso: 'raiz',
-            extId: '',
-            adelId: '',
-            busqueda: '',
-            absence: absencesMap[`${celda.emp.id}_${celda.dateStr}`] || null,
+            ctx: {
+                clase: celda.isLeave ? 'ausente' : 'hueco',
+                empId: celda.emp.id,
+                empName: celda.emp.name || 'Titular',
+                dateStr: celda.dateStr,
+                positionName,
+                gapBand,
+                horario,
+                horas: work?.hours || opt?.hours || 8,
+                codigoAusencia: String(celda.leaveCode || '').toUpperCase(),
+                absence: absencesMap[`${celda.emp.id}_${celda.dateStr}`] || null,
+            },
         });
     };
     const cerrarMenuRapido = () => setMenuRapido(null);
+    const cancelarModoElegir = useCallback(() => setModoElegir(null), []);
     const abrirCoberturaDesdeMenu = () => {
         if (!menuRapido) return;
-        if (menuRapido.opciones.clase === 'hueco') {
-            setSlaGapCloseModal({ dateStr: menuRapido.dateStr, positionName: menuRapido.positionName, gapBand: menuRapido.gapBand });
+        const ctx = menuRapido.ctx;
+        if (ctx.clase === 'hueco') {
+            setSlaGapCloseModal({ dateStr: ctx.dateStr, positionName: ctx.positionName, gapBand: ctx.gapBand });
         } else {
-            const ausencia = menuRapido.absence;
+            const ausencia = ctx.absence;
             setVacancyData(ausencia?.type
-                ? { ...ausencia, source: 'AUSENCIA', focusDate: menuRapido.dateStr, employeeId: menuRapido.empId, employeeName: menuRapido.empName }
+                ? { ...ausencia, source: 'AUSENCIA', focusDate: ctx.dateStr, employeeId: ctx.empId, employeeName: ctx.empName }
                 : {
-                    employeeId: menuRapido.empId,
-                    employeeName: menuRapido.empName,
-                    startDate: menuRapido.dateStr,
-                    endDate: menuRapido.dateStr,
+                    employeeId: ctx.empId,
+                    employeeName: ctx.empName,
+                    startDate: ctx.dateStr,
+                    endDate: ctx.dateStr,
                     type: 'L',
                     source: 'AUSENCIA',
-                    focusDate: menuRapido.dateStr,
+                    focusDate: ctx.dateStr,
                 });
             setShowVacancyModal(true);
         }
         cerrarMenuRapido();
     };
-    const sellarMenuRapido = (changes: Record<string, any>, keys: string[], texto: string) => {
-        for (const key of keys) {
+    const iniciarModoElegir = (accion: AccionElegir) => {
+        if (!menuRapido) return;
+        setSelection({ start: null, end: null });
+        setModoElegir({
+            ctx: menuRapido.ctx,
+            accion,
+            extId: '',
+            aviso: null,
+            fueraAbierto: false,
+            busqueda: '',
+            repetir: null,
+            resultado: null,
+        });
+        cerrarMenuRapido();
+    };
+    const ctxMenuDelDia = (ctx: CtxMenuRapido, dia: string): CtxMenuRapido => {
+        if (dia === ctx.dateStr || ctx.clase !== 'ausente') return { ...ctx, dateStr: dia };
+        const work = resolveTitularVacancyWorkShift(ctx.empId, dia, shiftsMap, pendingChanges);
+        const horario = work?.scheduleLabel && work.scheduleLabel !== '—' ? work.scheduleLabel : ctx.horario;
+        return {
+            ...ctx,
+            dateStr: dia,
+            gapBand: String(work?.code || ctx.gapBand).toUpperCase(),
+            positionName: work?.positionName || ctx.positionName,
+            horario,
+            horas: work?.hours || ctx.horas,
+            absence: absencesMap[`${ctx.empId}_${dia}`] || ctx.absence,
+        };
+    };
+    const evaluarClicMenu = (ctx: CtxMenuRapido, paso: PasoElegir, personaId: string, extId: string) => {
+        const dia = ctx.dateStr;
+        const shift = turnoMenuDe(personaId, dia);
+        const rol = rolDesdeTurno(shift);
+        const ini = typeof shift?.startTime === 'string' ? shift.startTime : '';
+        const fin = typeof shift?.endTime === 'string' ? shift.endTime : '';
+        const turnoTexto = shift?.code ? `${shift.code}${ini && fin ? ` ${ini}–${fin}` : ''}` : null;
+        const titularId = ctx.clase === 'ausente' ? ctx.empId : null;
+        const listCtx = {
+            positionStructure: effectivePosStructure as import('@/lib/planificacion/vacancySplitBands').VacancyPositionSla[],
+            gapPositionName: ctx.positionName,
+            gapBand: ctx.gapBand,
+            preferSamePosition: true as const,
+        };
+        const excl = titularId ? [titularId] : [];
+        const candidatosBanda = paso === 'ext'
+            ? listExtensionCandidates(ctx.gapBand, dia, selectedObjective || '', employees, shiftsMap, pendingChanges, excl, listCtx).map((r) => r.id)
+            : paso === 'adel'
+                ? listEarlyStartCandidates(ctx.gapBand, dia, selectedObjective || '', employees, shiftsMap, pendingChanges, [...excl, extId].filter(Boolean), listCtx).map((r) => r.id)
+                : [];
+        const coverage: VacancyDayCoverage = paso === 'asignar'
+            ? { mode: 'substitute', employeeId: personaId }
+            : { mode: 'split', extEmpId: paso === 'ext' ? personaId : extId, adelEmpId: paso === 'adel' ? personaId : '', gapBand: ctx.gapBand, gapPosition: ctx.positionName };
+        const propuesta = propuestaGuardCobertura({
+            coverage,
+            titular: { code: ctx.gapBand, scheduleLabel: ctx.horario, hours: ctx.horas },
+            shiftOf: (id) => turnoGuardMenu(id, dia),
+            positionStructure: effectivePosStructure as import('@/lib/planificacion/vacancySplitBands').VacancyPositionSla[],
+        });
+        delete propuesta[''];
+        const guard = evaluateCoverageDayGuards({
+            dateStr: dia,
+            proposedByEmp: propuesta,
+            shiftOf: turnoGuardMenu,
+            monthHoursOf: (id) => empMonthlyHours[id] || 0,
+            nameOf: nombreEmpleadoMenu,
+        });
+        const res = validarClicElegir({
+            paso,
+            candidatoId: personaId,
+            titularId,
+            puedeEditar: puedeEditarDiaMenu(dia),
+            rol,
+            codigoLicencia: rol === 'LICENCIA' ? String(shift?.code || '') : null,
+            turnoTexto,
+            candidatosBanda,
+            bandaHueco: ctx.gapBand,
+            extId,
+            bloqueos: guard.blocked,
+        });
+        return { res, guard };
+    };
+    const tramoExtMenu = (ctx: CtxMenuRapido, extId: string) => {
+        const extShift = turnoMenuDe(extId, ctx.dateStr);
+        const times = resolveVacancySplitSegmentTimes(
+            effectivePosStructure as import('@/lib/planificacion/vacancySplitBands').VacancyPositionSla[],
+            ctx.gapBand,
+            ctx.positionName,
+            { code: extShift?.code },
+            null,
+        );
+        return times.first.from && times.first.to ? `${times.first.from}–${times.first.to}` : '';
+    };
+    const tipoAusenciaMenu = (ctx: CtxMenuRapido) => {
+        const tipoDoc = ctx.absence?.type as string | undefined;
+        const codigo = ctx.codigoAusencia;
+        const tipoPorCodigo = Object.entries(VACANCY_ABSENCE_TYPE_CODES).find(([, c]) => c === codigo)?.[0];
+        if (tipoDoc && (!codigo || VACANCY_ABSENCE_TYPE_CODES[tipoDoc] === codigo)) return tipoDoc;
+        return tipoPorCodigo || tipoDoc || 'Injustificada';
+    };
+    const vacancyDeMenu = (ctx: CtxMenuRapido) => {
+        const type = tipoAusenciaMenu(ctx);
+        return ctx.absence
+            ? { ...ctx.absence, type, employeeId: ctx.empId, employeeName: ctx.empName, startDate: ctx.absence.startDate || ctx.dateStr }
+            : { employeeId: ctx.empId, employeeName: ctx.empName, startDate: ctx.dateStr, endDate: ctx.dateStr, type };
+    };
+    const sellarMenuRapido = (
+        changes: Record<string, any>,
+        claves: { key: string; rol?: 'CUBRE' | 'EXT' | 'ADEL' }[],
+        texto: string,
+        cubreA?: string,
+    ) => {
+        for (const { key, rol } of claves) {
             if (!changes[key] || changes[key].isDeleted) continue;
-            changes[key] = { ...changes[key], menuRapidoTexto: texto, menuRapidoVia: 'MENU_RAPIDO' };
+            changes[key] = {
+                ...changes[key],
+                menuRapidoTexto: texto,
+                menuRapidoVia: 'MENU_RAPIDO',
+                ...(rol ? { menuRapidoRol: rol } : {}),
+                ...(rol === 'CUBRE' && cubreA ? { menuRapidoCubreA: cubreA } : {}),
+            };
         }
         return changes;
     };
@@ -7872,217 +8048,277 @@ function PlanificacionDesktop() {
             console.error(err);
         }
     };
-    const escribirAsignacionMenu = (personaId: string, marks?: Record<string, ShiftAuthMark>) => {
-        if (!menuRapido || !selectedObjective) return;
-        const persona = employees.find((e: { id?: string; name?: string }) => e.id === personaId);
-        const nombre = String(persona?.name || personaId);
-        const cuando = formatFecha(new Date(), 'dd/MM HH:mm');
-        const tipo = tipoDesdeRolDia(rolDesdeTurno(turnoMenuDe(personaId, menuRapido.dateStr))) || 'LIBRE';
-        const texto = textoMarcaMenuRapido({
-            modo: 'asignar',
-            cubreA: menuRapido.opciones.clase === 'hueco' ? `${menuRapido.positionName} ${menuRapido.gapBand}` : menuRapido.empName,
-            tipo,
-            actor: activeActorName,
-            cuando,
-        });
+    const escribirCoberturaEnCambios = (base: Record<string, any>, ctx: CtxMenuRapido, cov: CovMenuRapido) => {
         const employeesById: Record<string, any> = {};
         employees.forEach((e: any) => { if (e.id) employeesById[e.id] = e; });
-        let changes: Record<string, any>;
-        if (menuRapido.opciones.clase === 'ausente') {
-            const vacancy = menuRapido.absence?.type
-                ? { ...menuRapido.absence, employeeId: menuRapido.empId, employeeName: menuRapido.empName, startDate: menuRapido.absence.startDate || menuRapido.dateStr }
-                : { employeeId: menuRapido.empId, employeeName: menuRapido.empName, startDate: menuRapido.dateStr, endDate: menuRapido.dateStr, type: 'Injustificada' };
-            const applied = applyVacancyCoverageToChanges(pendingChanges, {
-                vacancyData: vacancy,
-                days: [{
-                    dateStr: menuRapido.dateStr,
-                    coverage: {
-                        mode: 'substitute',
-                        employeeId: personaId,
-                        employeeName: nombre,
-                        gapBand: menuRapido.gapBand,
-                        gapPosition: menuRapido.positionName,
-                    },
-                }],
-                selectedObjective,
-                activePosition: menuRapido.positionName,
-                shiftsMap,
-                getTypicalShift: () => null,
-                employeesById,
-                clientId: selectedClient || undefined,
-                defaultSplitForBand: (band, gapPosition) => {
-                    const times = defaultSplitForBandAtPosition(band, effectivePosStructure, gapPosition ?? null);
-                    return { ext: times.ext, adel: times.adel };
-                },
-                positionStructure: effectivePosStructure,
-                authorizeFrancoTrabajado: false,
-                fallbackGapBand: menuRapido.gapBand,
+        const comunes = {
+            vacancyData: vacancyDeMenu(ctx),
+            selectedObjective: selectedObjective || '',
+            activePosition: ctx.positionName,
+            shiftsMap,
+            getTypicalShift: () => null,
+            employeesById,
+            clientId: selectedClient || undefined,
+            defaultSplitForBand: (band: string, gapPosition?: string | null) => {
+                const times = defaultSplitForBandAtPosition(band, effectivePosStructure, gapPosition ?? null);
+                return { ext: times.ext, adel: times.adel };
+            },
+            positionStructure: effectivePosStructure,
+            authorizeFrancoTrabajado: false,
+            fallbackGapBand: ctx.gapBand,
+        };
+        const titularKey = `${ctx.empId}_${ctx.dateStr}`;
+        if (cov.mode === 'substitute') {
+            const nombre = nombreEmpleadoMenu(cov.id);
+            const tipo = tipoDesdeRolDia(rolDesdeTurno(turnoMenuDe(cov.id, ctx.dateStr))) || 'LIBRE';
+            const cubreA = ctx.clase === 'hueco' ? `${ctx.positionName} ${ctx.gapBand}` : ctx.empName;
+            const texto = textoMarcaMenuRapido({
+                modo: 'asignar',
+                cubreA,
+                tipo,
+                actor: activeActorName,
+                cuando: formatFecha(new Date(), 'dd/MM HH:mm'),
             });
-            changes = sellarMenuRapido(applied.changes, [
-                `${menuRapido.empId}_${menuRapido.dateStr}`,
-                `${personaId}_${menuRapido.dateStr}`,
-            ], texto);
-        } else {
-            const opt = listVacancyGapBandOptions(effectivePosStructure, menuRapido.positionName).find((o) => o.code === menuRapido.gapBand);
-            const key = `${personaId}_${menuRapido.dateStr}`;
-            changes = {
-                ...pendingChanges,
+            const key = `${cov.id}_${ctx.dateStr}`;
+            if (ctx.clase === 'ausente') {
+                const applied = applyVacancyCoverageToChanges(base, {
+                    ...comunes,
+                    days: [{
+                        dateStr: ctx.dateStr,
+                        coverage: { mode: 'substitute', employeeId: cov.id, employeeName: nombre, gapBand: ctx.gapBand, gapPosition: ctx.positionName },
+                    }],
+                });
+                return { changes: sellarMenuRapido(applied.changes, [{ key: titularKey }, { key, rol: 'CUBRE' }], texto, ctx.empName), texto };
+            }
+            const opt = listVacancyGapBandOptions(effectivePosStructure, ctx.positionName).find((o) => o.code === ctx.gapBand);
+            const changes = {
+                ...base,
                 [key]: {
-                    ...(pendingChanges[key] && !pendingChanges[key].isDeleted ? pendingChanges[key] : {}),
-                    code: menuRapido.gapBand,
-                    name: menuRapido.gapBand,
+                    ...(base[key] && !base[key].isDeleted ? base[key] : {}),
+                    code: ctx.gapBand,
+                    name: ctx.gapBand,
                     isTemp: true,
                     objectiveId: selectedObjective,
                     hours: opt?.hours || 8,
                     startTime: opt?.startTime || '07:00',
                     endTime: opt?.endTime || '15:00',
-                    positionName: menuRapido.positionName,
-                    comments: `Cubre hueco SLA ${menuRapido.positionName} ${menuRapido.gapBand}`,
-                    menuRapidoTexto: texto,
-                    menuRapidoVia: 'MENU_RAPIDO',
+                    positionName: ctx.positionName,
+                    comments: `Cubre hueco SLA ${ctx.positionName} ${ctx.gapBand}`,
                 },
             };
+            return { changes: sellarMenuRapido(changes, [{ key, rol: 'CUBRE' }], texto, ctx.positionName), texto };
         }
-        if (marks) changes = stampShiftAuthMarks(changes, marks);
-        setPendingChanges(changes);
-        const tit = resolveTitularVacancyWorkShift(menuRapido.empId, menuRapido.dateStr, shiftsMap, pendingChanges);
-        const horario = menuRapido.opciones.clase === 'ausente' ? tit?.scheduleLabel : null;
-        toast.success(`${texto}. ${TEXTO_AVISO_ASIGNADO_AL_GUARDAR}: «${textoAvisoAsignadoDia(menuRapido.dateStr, menuRapido.gapBand, horario && horario !== '—' ? horario : null, menuRapido.positionName)}». Guardá el cronograma.`);
-        void auditarMenuRapido(texto, personaId);
-        cerrarMenuRapido();
+        const texto = textoMarcaMenuRapido({ modo: 'split', ext: nombreEmpleadoMenu(cov.extId), adel: nombreEmpleadoMenu(cov.adelId) });
+        const extShift = turnoMenuDe(cov.extId, ctx.dateStr);
+        const adelShift = turnoMenuDe(cov.adelId, ctx.dateStr);
+        const claves = [
+            { key: `${cov.extId}_${ctx.dateStr}`, rol: 'EXT' as const },
+            { key: `${cov.adelId}_${ctx.dateStr}`, rol: 'ADEL' as const },
+        ];
+        if (ctx.clase === 'ausente') {
+            const applied = applyVacancyCoverageToChanges(base, {
+                ...comunes,
+                days: [{
+                    dateStr: ctx.dateStr,
+                    coverage: {
+                        mode: 'split',
+                        extEmpId: cov.extId,
+                        adelEmpId: cov.adelId,
+                        gapBand: ctx.gapBand,
+                        gapPosition: ctx.positionName,
+                        extHomePosition: extShift?.positionName,
+                        extBaseCode: extShift?.code,
+                        adelBaseCode: adelShift?.code,
+                    },
+                }],
+            });
+            return { changes: sellarMenuRapido(applied.changes, [{ key: titularKey }, ...claves], texto), texto };
+        }
+        const changes = applyOperationalGapCloseToChanges(base, {
+            objectiveId: selectedObjective || '',
+            clientId: selectedClient || undefined,
+            dateStr: ctx.dateStr,
+            gapPosition: ctx.positionName,
+            gapBand: ctx.gapBand,
+            extEmpId: cov.extId,
+            secondEmpId: cov.adelId,
+            extHomePosition: extShift?.positionName,
+            extBaseCode: extShift?.code,
+            secondBaseCode: adelShift?.code,
+            positionStructure: effectivePosStructure,
+        }, { shiftsMap, employeesById });
+        return { changes: sellarMenuRapido(changes, claves, texto), texto };
     };
-    const pedirPinYAsignar = (personaId: string) => {
-        if (!menuRapido) return;
-        const tit = resolveTitularVacancyWorkShift(menuRapido.empId, menuRapido.dateStr, shiftsMap, pendingChanges);
-        const horario = tit?.scheduleLabel && tit.scheduleLabel !== '—' ? tit.scheduleLabel : '';
-        const partes = horario.match(/(\d{1,2}:\d{2}).+(\d{1,2}:\d{2})/);
-        const opt = listVacancyGapBandOptions(effectivePosStructure, menuRapido.positionName).find((o) => o.code === menuRapido.gapBand);
-        const horas = tit?.hours || opt?.hours || 8;
-        const guard = evaluateCoverageDayGuards({
-            dateStr: menuRapido.dateStr,
-            proposedByEmp: {
-                [personaId]: {
-                    code: menuRapido.gapBand,
-                    startTime: partes?.[1] || opt?.startTime,
-                    endTime: partes?.[2] || opt?.endTime,
-                    hours: horas,
-                    addHours: horas,
-                },
-            },
-            shiftOf: (id, fecha) => turnoMenuDe(id, fecha),
-            monthHoursOf: (id) => empMonthlyHours[id] || 0,
-            nameOf: (id) => String(employees.find((e: { id?: string; name?: string }) => e.id === id)?.name || id),
-        });
-        if (guard.blocked.length) {
-            toast.error(guard.blocked.slice(0, 3).join(' · '), { duration: 9000 });
+    /** Valida cada día como el clic, pide un solo PIN si hace falta y escribe los que pasan. */
+    const aplicarCoberturaMenu = (
+        ctx: CtxMenuRapido,
+        dias: string[],
+        cov: CovMenuRapido,
+        onDone: (resultados: ResultadoDia[]) => void,
+    ) => {
+        if (!selectedObjective) return;
+        const resultados: ResultadoDia[] = [];
+        const okDias: CtxMenuRapido[] = [];
+        let auths: CoverageAuthRequest[] = [];
+        for (const dia of dias) {
+            const c = ctxMenuDelDia(ctx, dia);
+            let motivo: string | null = null;
+            let guard: { authorizations: CoverageAuthRequest[] } = { authorizations: [] };
+            if (cov.mode === 'substitute') {
+                const e = evaluarClicMenu(c, 'asignar', cov.id, '');
+                if (!e.res.ok) motivo = e.res.motivo;
+                guard = e.guard;
+            } else {
+                const ex = evaluarClicMenu(c, 'ext', cov.extId, '');
+                if (!ex.res.ok) motivo = `${apellidoMarca(nombreEmpleadoMenu(cov.extId))}: ${ex.res.motivo}`;
+                else {
+                    const ad = evaluarClicMenu(c, 'adel', cov.adelId, cov.extId);
+                    if (!ad.res.ok) motivo = `${apellidoMarca(nombreEmpleadoMenu(cov.adelId))}: ${ad.res.motivo}`;
+                    guard = ad.guard;
+                }
+            }
+            resultados.push({ dia, motivo });
+            if (!motivo) {
+                okDias.push(c);
+                auths = auths.concat(guard.authorizations);
+            }
+        }
+        if (!okDias.length) {
+            onDone(resultados);
             return;
         }
-        const clasificado = clasificarPedidosPin(guard.authorizations, (empId, periodo) => {
+        const escribir = (marks?: Record<string, ShiftAuthMark>) => {
+            let changes = pendingChanges;
+            const textos: string[] = [];
+            for (const c of okDias) {
+                const w = escribirCoberturaEnCambios(changes, c, cov);
+                changes = w.changes;
+                textos.push(w.texto);
+            }
+            if (marks && Object.keys(marks).length) changes = stampShiftAuthMarks(changes, marks);
+            setPendingChanges(changes);
+            okDias.forEach((c, i) => {
+                void auditarMenuRapido(`${textos[i]} · ${fechaCorta(c.dateStr)}`, cov.mode === 'substitute' ? cov.id : cov.extId);
+            });
+            if (dias.length === 1 && cov.mode === 'substitute') {
+                const c = okDias[0];
+                toast.success(`${textos[0]}. ${TEXTO_AVISO_ASIGNADO_AL_GUARDAR}: «${textoAvisoAsignadoDia(c.dateStr, c.gapBand, c.clase === 'ausente' && c.horario ? c.horario : null, c.positionName)}». Guardá el cronograma.`);
+            } else if (dias.length === 1) {
+                toast.success(`${textos[0]}. Guardá el cronograma.`);
+            }
+            onDone(resultados);
+        };
+        const clasificado = clasificarPedidosPin(auths, (empId, periodo) => {
             const grant = topeGrants[empId];
             return grant && grant.periodo === periodo ? grant : undefined;
         });
         for (const aviso of clasificado.avisos) toast.message(aviso, { duration: 6000 });
         const granted: Record<string, ShiftAuthMark> = {};
-        for (const auth of guard.authorizations) {
+        for (const auth of auths) {
             if (auth.kind !== 'TOPE') continue;
             const periodo = periodoTopeDeFecha(auth.dateStr);
             const grant = topeGrants[auth.employeeId];
             if (!grant || topeRequierePin(grant, periodo)) continue;
             granted[`${auth.employeeId}_${auth.dateStr}`] = { topeExcedido: true, horasMes: grant.horasAlAutorizar, autorizacionMotivo: grant.motivo };
         }
-        const pedir = guard.authorizations.filter((auth) => clasificado.pedir.some((p) => p.employeeId === auth.employeeId && p.dateStr === auth.dateStr && p.kind === auth.kind));
-        if (pedir.length) {
-            requestSupervisorLaborAuth(pedir, () => {
-                const motivo = authReasonRef.current;
-                const marks: Record<string, ShiftAuthMark> = { ...granted };
-                for (const auth of pedir) {
-                    const key = `${auth.employeeId}_${auth.dateStr}`;
-                    marks[key] = {
-                        ...(marks[key] || {}),
-                        autorizacionMotivo: motivo,
-                        ...(auth.kind === 'DESCANSO'
-                            ? { descansoReducido: true, descansoHoras: auth.restHours != null ? Math.round(auth.restHours * 10) / 10 : undefined }
-                            : {}),
-                        ...(auth.kind === 'TOPE' ? { topeExcedido: true, horasMes: auth.monthHours } : {}),
-                    };
-                }
-                escribirAsignacionMenu(personaId, marks);
-            });
+        const pedir = auths.filter((auth) => clasificado.pedir.some((p) => p.employeeId === auth.employeeId && p.dateStr === auth.dateStr && p.kind === auth.kind));
+        if (!pedir.length) {
+            escribir(granted);
             return;
         }
-        escribirAsignacionMenu(personaId, Object.keys(granted).length ? granted : undefined);
+        requestSupervisorLaborAuth(pedir, () => {
+            const motivo = authReasonRef.current;
+            const marks: Record<string, ShiftAuthMark> = { ...granted };
+            for (const auth of pedir) {
+                const key = `${auth.employeeId}_${auth.dateStr}`;
+                marks[key] = {
+                    ...(marks[key] || {}),
+                    autorizacionMotivo: motivo,
+                    ...(auth.kind === 'DESCANSO'
+                        ? { descansoReducido: true, descansoHoras: auth.restHours != null ? Math.round(auth.restHours * 10) / 10 : undefined }
+                        : {}),
+                    ...(auth.kind === 'TOPE' ? { topeExcedido: true, horasMes: auth.monthHours } : {}),
+                };
+            }
+            escribir(marks);
+        });
     };
-    const escribirSplitMenu = () => {
-        if (!menuRapido || !menuRapido.extId || !menuRapido.adelId || !selectedObjective) return;
-        const ext = employees.find((e: { id?: string; name?: string }) => e.id === menuRapido.extId);
-        const adel = employees.find((e: { id?: string; name?: string }) => e.id === menuRapido.adelId);
-        const texto = textoMarcaMenuRapido({ modo: 'split', ext: ext?.name, adel: adel?.name });
-        const employeesById: Record<string, any> = {};
-        employees.forEach((e: any) => { if (e.id) employeesById[e.id] = e; });
-        const extShift = turnoMenuDe(menuRapido.extId, menuRapido.dateStr);
-        const adelShift = turnoMenuDe(menuRapido.adelId, menuRapido.dateStr);
-        let changes: Record<string, any>;
-        if (menuRapido.opciones.clase === 'ausente') {
-            const vacancy = menuRapido.absence?.type
-                ? { ...menuRapido.absence, employeeId: menuRapido.empId, employeeName: menuRapido.empName, startDate: menuRapido.absence.startDate || menuRapido.dateStr }
-                : { employeeId: menuRapido.empId, employeeName: menuRapido.empName, startDate: menuRapido.dateStr, endDate: menuRapido.dateStr, type: 'Injustificada' };
-            const applied = applyVacancyCoverageToChanges(pendingChanges, {
-                vacancyData: vacancy,
-                days: [{
-                    dateStr: menuRapido.dateStr,
-                    coverage: {
-                        mode: 'split',
-                        extEmpId: menuRapido.extId,
-                        adelEmpId: menuRapido.adelId,
-                        gapBand: menuRapido.gapBand,
-                        gapPosition: menuRapido.positionName,
-                        extHomePosition: extShift?.positionName,
-                        extBaseCode: extShift?.code,
-                        adelBaseCode: adelShift?.code,
-                    },
-                }],
-                selectedObjective,
-                activePosition: menuRapido.positionName,
-                shiftsMap,
-                getTypicalShift: () => null,
-                employeesById,
-                clientId: selectedClient || undefined,
-                defaultSplitForBand: (band, gapPosition) => {
-                    const times = defaultSplitForBandAtPosition(band, effectivePosStructure, gapPosition ?? null);
-                    return { ext: times.ext, adel: times.adel };
-                },
-                positionStructure: effectivePosStructure,
-                authorizeFrancoTrabajado: false,
-                fallbackGapBand: menuRapido.gapBand,
-            });
-            changes = sellarMenuRapido(applied.changes, [
-                `${menuRapido.empId}_${menuRapido.dateStr}`,
-                `${menuRapido.extId}_${menuRapido.dateStr}`,
-                `${menuRapido.adelId}_${menuRapido.dateStr}`,
-            ], texto);
-        } else {
-            changes = applyOperationalGapCloseToChanges(pendingChanges, {
-                objectiveId: selectedObjective,
-                clientId: selectedClient || undefined,
-                dateStr: menuRapido.dateStr,
-                gapPosition: menuRapido.positionName,
-                gapBand: menuRapido.gapBand,
-                extEmpId: menuRapido.extId,
-                secondEmpId: menuRapido.adelId,
-                extHomePosition: extShift?.positionName,
-                extBaseCode: extShift?.code,
-                secondBaseCode: adelShift?.code,
-                positionStructure: effectivePosStructure,
-            }, { shiftsMap, employeesById });
-            changes = sellarMenuRapido(changes, [
-                `${menuRapido.extId}_${menuRapido.dateStr}`,
-                `${menuRapido.adelId}_${menuRapido.dateStr}`,
-            ], texto);
+    const diaCubiertoMenu = (ctx: CtxMenuRapido, dia: string) => {
+        if (isPlanningDateLocked(dia)) return true;
+        const pack = recolectarTurnosDelDia({ date: dia, titularEmployeeId: ctx.empId, shiftsMap, cellTurnosMap, pendingChanges });
+        const ex = coberturaExistenteDelDia({
+            titularEmployeeId: ctx.empId,
+            titularName: ctx.empName,
+            date: dia,
+            titular: pack.titular,
+            turnosDelDia: pack.turnos,
+            consulta: null,
+        });
+        return (ex.origen === 'operaciones' && ex.estado === 'CUBIERTO') || ex.origen === 'planificada' || !!turnoMenuDe(ctx.empId, dia)?.coveredBy;
+    };
+    const diasRepetiblesMenu = (ctx: CtxMenuRapido): string[] => {
+        if (ctx.clase !== 'ausente') return [];
+        const mes = ctx.dateStr.slice(0, 7);
+        const absId = ctx.absence?.id;
+        const misma = (d: string) => {
+            if (d.slice(0, 7) !== mes) return false;
+            const a = absencesMap[`${ctx.empId}_${d}`];
+            if (absId && a?.id === absId) return true;
+            if (!ctx.codigoAusencia) return false;
+            if (a && VACANCY_ABSENCE_TYPE_CODES[a.type] === ctx.codigoAusencia) return true;
+            return String(turnoMenuDe(ctx.empId, d)?.code || '').toUpperCase() === ctx.codigoAusencia;
+        };
+        return diasParaRepetir(bloqueAusencia(ctx.dateStr, misma), ctx.dateStr, (d) => diaCubiertoMenu(ctx, d));
+    };
+    const clicPersonaModoElegir = (personaId: string) => {
+        const m = modoElegir;
+        if (!m || m.repetir || m.resultado) return;
+        const paso = pasoDeModo(m.accion, m.extId);
+        const { res } = evaluarClicMenu(m.ctx, paso, personaId, m.extId);
+        if (!res.ok) {
+            setModoElegir((prev) => (prev ? { ...prev, aviso: `${apellidoMarca(nombreEmpleadoMenu(personaId))}: ${res.motivo}` } : prev));
+            return;
         }
-        setPendingChanges(changes);
-        toast.success(`${texto}. Guardá el cronograma.`);
-        void auditarMenuRapido(texto, menuRapido.extId);
-        cerrarMenuRapido();
+        if (paso === 'ext') {
+            setModoElegir((prev) => (prev ? { ...prev, extId: personaId, aviso: null } : prev));
+            return;
+        }
+        const cov: CovMenuRapido = paso === 'asignar'
+            ? { mode: 'substitute', id: personaId }
+            : { mode: 'split', extId: m.extId, adelId: personaId };
+        const dias = diasRepetiblesMenu(m.ctx);
+        aplicarCoberturaMenu(m.ctx, [m.ctx.dateStr], cov, (resultados) => {
+            const r = resultados[0];
+            if (r?.motivo) {
+                setModoElegir((prev) => (prev ? { ...prev, aviso: r.motivo } : prev));
+                return;
+            }
+            if (!dias.length) {
+                setModoElegir(null);
+                return;
+            }
+            setModoElegir((prev) => (prev ? {
+                ...prev,
+                extId: cov.mode === 'split' ? cov.extId : prev.extId,
+                aviso: null,
+                fueraAbierto: false,
+                repetir: { dias, cov, texto: textoRepetir(dias, m.ctx.codigoAusencia) },
+            } : prev));
+        });
+    };
+    const repetirModoElegir = () => {
+        const m = modoElegir;
+        if (!m?.repetir) return;
+        const { dias, cov } = m.repetir;
+        aplicarCoberturaMenu(m.ctx, dias, cov, (resultados) => {
+            const r = resumenRepetir(resultados);
+            if (!r.salteados.length) {
+                toast.success(`${r.texto}. Guardá el cronograma.`);
+                setModoElegir(null);
+                return;
+            }
+            setModoElegir((prev) => (prev ? { ...prev, repetir: null, aviso: r.texto, resultado: r.texto } : prev));
+        });
     };
 
     // Bulk: inyecta el puesto dueño del código SLA (no el default "Puesto 1") y respeta cupos de cobertura.
@@ -11347,7 +11583,7 @@ function PlanificacionDesktop() {
                             {!isSnapshotView && (
                                 <tr
                                     id={`plan-emp-${emp.id}`}
-                                    className={`group ${isPoolRow ? 'bg-amber-50/70 dark:bg-amber-950/20' : ''} ${highlightEmpId === emp.id ? 'ring-2 ring-inset ring-indigo-400 bg-indigo-50 dark:bg-indigo-900/30' : ''} ${dragOverVisual === idx ? 'border-t-2 border-t-indigo-400' : ''} ${(empMonthlyHours[emp.id] || 0) >= planningLimits.monthly ? 'bg-red-50 hover:bg-red-100 dark:bg-red-950/30 dark:hover:bg-red-900/30' : 'hover:bg-slate-50 dark:hover:bg-slate-700/40'}`}
+                                    className={`group ${modoElegir ? 'cursor-pointer' : ''} ${isPoolRow ? 'bg-amber-50/70 dark:bg-amber-950/20' : ''} ${highlightEmpId === emp.id ? 'ring-2 ring-inset ring-indigo-400 bg-indigo-50 dark:bg-indigo-900/30' : ''} ${dragOverVisual === idx ? 'border-t-2 border-t-indigo-400' : ''} ${(empMonthlyHours[emp.id] || 0) >= planningLimits.monthly ? 'bg-red-50 hover:bg-red-100 dark:bg-red-950/30 dark:hover:bg-red-900/30' : 'hover:bg-slate-50 dark:hover:bg-slate-700/40'}`}
                                     onDragOver={(e) => handleRowDragOver(e, idx)}
                                     onDrop={(e) => handleRowDrop(e, idx)}
                                     onDragEnd={() => setDragOverVisual(null)}
@@ -11355,8 +11591,8 @@ function PlanificacionDesktop() {
                                     <td
                                         draggable
                                         onDragStart={(e) => handleRowDragStart(e, idx)}
-                                        onClick={() => !isSnapshotView && handleRowHeaderClick(idx)}
-                                        title="Clic para seleccionar fila completa"
+                                        onClick={() => { if (modoElegir) { clicPersonaModoElegir(emp.id); return; } if (!isSnapshotView) handleRowHeaderClick(idx); }}
+                                        title={modoElegir ? "Clic para elegir a esta persona" : "Clic para seleccionar fila completa"}
                                         style={{ width: nameColWidth, minWidth: nameColWidth }}
                                         className={`sticky left-0 z-20 p-2 border-r border-b shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)] h-8 cursor-grab active:cursor-grabbing dark:border-slate-700 ${(empMonthlyHours[emp.id] || 0) >= planningLimits.monthly ? 'bg-red-50 group-hover:bg-red-100 dark:bg-red-950/30 dark:group-hover:bg-red-900/30' : 'bg-white dark:bg-slate-800 group-hover:bg-slate-50 dark:group-hover:bg-slate-700/60'}`}
                                     >
@@ -11679,11 +11915,11 @@ function PlanificacionDesktop() {
                                             : '';
                                         const _authHint = `${_cellShift?.descansoReducido ? `\n⚠ Descanso reducido autorizado${_cellShift.descansoHoras != null ? ` (${_cellShift.descansoHoras} h)` : ''}` : ''}${_cellShift?.topeExcedido ? `\n⚠ Tope 200 h autorizado${_cellShift.horasMes != null ? ` (${_cellShift.horasMes} h)` : ''}` : ''}`;
                                         const _consultaCelda = consultaAbiertaEnFecha(vacancyConsultas, cellDateStr, emp.id, String(cellCode || leaveCellCode || ''));
-                                        return <td key={key} data-testid="grilla-celda" onContextMenu={(ev) => abrirMenuRapidoCelda(ev, { emp, dateStr: cellDateStr, isLeave: isLeaveCell, tieneTurno: !!((p && !p.isDeleted) || s || rfzOnCell), positionName: cellPosName })} onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={(e) => { if (!isSnapshotView && isDragging && allowPlanningMultiSelect) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); const _marca = (p && !p.isDeleted && p.menuRapidoTexto) || s?.menuRapidoTexto; if (_marca) { setShiftTooltip({ label: String(_marca), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); return; } if (isLeaveCell) { const absType = absence?.type || activeShift?.name || LEGEND_DESCRIPTIONS[leaveCellCode] || leaveCellCode; const reason = absence?.reason || activeShift?.comments || p?.comments || ''; const covered = resolveTitularCoverageName(emp.id, emp.name || '', cellDateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell, cellTurnosMap); setShiftTooltip({ label: buildLeaveCellTooltipLabel({ absenceType: absType, reason, coveredBy: covered }), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else if ((s || p || rfzOnCell || _evOverlay) && !absence) { const shiftLabel = _evOverlay?.mode === 'EV'
+                                        return <td key={key} data-testid="grilla-celda" onContextMenu={(ev) => abrirMenuRapidoCelda(ev, { emp, dateStr: cellDateStr, isLeave: isLeaveCell, leaveCode: isLeaveCell ? leaveCellCode : null, tieneTurno: !!((p && !p.isDeleted) || s || rfzOnCell), positionName: cellPosName })} onMouseDown={(ev) => { if (ev.button !== 0) return; if (modoElegir) { ev.preventDefault(); ev.stopPropagation(); clicPersonaModoElegir(emp.id); return; } if (!isSnapshotView) handleMouseDown(idx, dayIndex); }} onMouseEnter={(e) => { if (!isSnapshotView && isDragging && allowPlanningMultiSelect) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); const _marca = (p && !p.isDeleted && p.menuRapidoTexto) || s?.menuRapidoTexto; if (_marca) { setShiftTooltip({ label: String(_marca), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); return; } if (isLeaveCell) { const absType = absence?.type || activeShift?.name || LEGEND_DESCRIPTIONS[leaveCellCode] || leaveCellCode; const reason = absence?.reason || activeShift?.comments || p?.comments || ''; const covered = resolveTitularCoverageName(emp.id, emp.name || '', cellDateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell, cellTurnosMap); setShiftTooltip({ label: buildLeaveCellTooltipLabel({ absenceType: absType, reason, coveredBy: covered }), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else if ((s || p || rfzOnCell || _evOverlay) && !absence) { const shiftLabel = _evOverlay?.mode === 'EV'
                                                     ? _evOverlay.tooltip
                                                     : (cellCode === 'EV' && (activeShift?.eventoNombre || activeShift?.servicioNombre))
                                                     ? eventoTooltip(activeShift)
-                                                    : cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : (rfzOnCell ? 'Refuerzo cliente (RFZ)' : null); const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; const _exclHint = cellPosExcluded ? `\n⚠ Puesto excluido por SLA este día` : ''; const _otherObjHint = isOtherObjectiveShift && activeShift?.objectiveId ? `\n📍 Otro objetivo: ${getObjectiveName(activeShift.objectiveId)}` : ''; const _rfzHint = rfzOnCell ? `\n🔴 RFZ ${formatTime(rfzOnCell.startTime)}–${formatTime(rfzOnCell.endTime)}${rfzOnCell.positionName ? ` · ${rfzOnCell.positionName}` : ''}` : ''; const _linkedTura = activeShift?.id ? turaMap[activeShift.id] : null; const _turaHint = _linkedTura ? `\n🟣 TURA ${isTuraContiguousToParent(activeShift, _linkedTura) ? 'seguido' : 'cortado'} ${formatShiftClockRange(_linkedTura)}${_linkedTura.positionName ? ` → ${_linkedTura.positionName}` : ''}` : ''; const _tipLabel = isOpsCoverageCell ? buildOpsCoverageCellTooltip(opsTooltipShift, opsCoverageTooltipCtxFor(opsTooltipShift, emp.name || '')) : (shiftLabel ? `${shiftLabel}${_exclHint}${_otherObjHint}${_rfzHint}${_turaHint}${_covHint}${_billHint}${_authHint}${_lctRest ? `\n⚠ ${_lctRest}` : ''}` : (_exclHint || _otherObjHint || _rfzHint || _turaHint || _covHint || _billHint || _lctRest || null)); setShiftTooltip({ label: _tipLabel, readOnlyOps: isOpsCoverageCell, pos: _isRet ? null : (cellPosName || rfzOnCell?.positionName || null), range: _isRet ? null : (cellRange || (rfzOnCell ? `${formatTime(rfzOnCell.startTime)} - ${formatTime(rfzOnCell.endTime)}` : null)), x: e.clientX, y: e.clientY, restHours: _restHrs }); } else if (isExclusionCol) { setShiftTooltip({ label: excludedPositionsTooltip(excludedOnDay, cellDateStr), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked && !isOpsCoverageCell ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`} data-evento={_evOverlay ? _evOverlay.mode : undefined} title={isOpsCoverageCell ? undefined : _evOverlay ? (_evOverlay.mode === 'EV' ? _evOverlay.tooltip : `${_evOverlay.mode === 'FRANCO_USADO' ? 'Franco usado en evento' : 'También afectado al evento'}: ${_evOverlay.tooltip}`) : isExclusionCol && !s && !p ? excludedPositionsTooltip(excludedOnDay, cellDateStr) : isOtherObjectiveShift && activeShift?.objectiveId ? `Turno en ${getObjectiveName(activeShift.objectiveId)}` : undefined}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style} ${_lctRest ? 'ring-2 ring-amber-400' : cellPosExcluded ? 'ring-1 ring-rose-400/70' : ''}`}>{_consultaCelda ? <IndicadorConsultaCelda texto={textoIndicadorConsulta(_consultaCelda)} tooltip={textoTooltipConsulta(_consultaCelda)} onAbrir={() => { setConsultaFoco(_consultaCelda.id); setConsultaTick((n) => n + 1); }} /> : null}{_evOverlay && _evOverlay.mode !== 'EV' && (<div className="absolute -bottom-0.5 right-0 text-[6.5px] font-black bg-yellow-400 text-yellow-900 px-0.5 rounded z-10" title={_evOverlay.tooltip}>EV</div>)}{_lctRest ? (<span className="absolute top-0 left-0 w-1.5 h-1.5 rounded-full bg-amber-500 border border-white" title={_lctRest}/>) : null}{content}{isExclusionCol && !content && (<span className="absolute bottom-0 left-0 w-1.5 h-1.5 rounded-full bg-rose-400/80" title="Día con puesto(s) excluido(s)"/>)}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly || isCoverageSplitCell) && <div className="absolute -top-1 -right-1 text-[8px] bg-red-900 text-white px-1 rounded-full border border-white/40">+</div>}{covRole === 'LIBERATED' && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-emerald-600 text-white px-0.5 rounded">RET</div>}{isCoverageSourceUsed && <div className="absolute -top-1 -left-1 text-[7px] font-black bg-violet-600 text-white px-0.5 rounded z-10" title="Turno usado en cobertura operativa">U</div>}{_cellShift?.descansoReducido && <div className="absolute -top-1 left-0 text-[7px] font-black bg-amber-500 text-white px-0.5 rounded z-10" title="Descanso reducido autorizado">8–12</div>}{_cellShift?.topeExcedido && <div className="absolute -bottom-0.5 right-0 text-[7px] font-black bg-rose-600 text-white px-0.5 rounded z-10" title="Tope de 200 h autorizado">200</div>}{(((covRole === 'TARGET' || isLeaveCell) && coveredByCell) || p?.menuRapidoTexto || s?.menuRapidoTexto) && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-orange-500 text-white px-0.5 rounded" title={p?.menuRapidoTexto || s?.menuRapidoTexto || (coveredByCell ? `Cubierto por ${coveredByCell}` : 'Cubierto')}>✓</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && !isOtherObjectiveShift && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}{isOtherObjectiveShift && content && (<div className="absolute bottom-0 left-0"><MapPin size={7} className="text-slate-300 drop-shadow-sm"/></div>)}{selectedGrupo && grupoUnifiedMode && content && !isOtherObjectiveShift && activeShift?.objectiveId && selectedGrupo.objectiveIds.includes(activeShift.objectiveId) && (() => {
+                                                    : cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : (rfzOnCell ? 'Refuerzo cliente (RFZ)' : null); const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; const _exclHint = cellPosExcluded ? `\n⚠ Puesto excluido por SLA este día` : ''; const _otherObjHint = isOtherObjectiveShift && activeShift?.objectiveId ? `\n📍 Otro objetivo: ${getObjectiveName(activeShift.objectiveId)}` : ''; const _rfzHint = rfzOnCell ? `\n🔴 RFZ ${formatTime(rfzOnCell.startTime)}–${formatTime(rfzOnCell.endTime)}${rfzOnCell.positionName ? ` · ${rfzOnCell.positionName}` : ''}` : ''; const _linkedTura = activeShift?.id ? turaMap[activeShift.id] : null; const _turaHint = _linkedTura ? `\n🟣 TURA ${isTuraContiguousToParent(activeShift, _linkedTura) ? 'seguido' : 'cortado'} ${formatShiftClockRange(_linkedTura)}${_linkedTura.positionName ? ` → ${_linkedTura.positionName}` : ''}` : ''; const _tipLabel = isOpsCoverageCell ? buildOpsCoverageCellTooltip(opsTooltipShift, opsCoverageTooltipCtxFor(opsTooltipShift, emp.name || '')) : (shiftLabel ? `${shiftLabel}${_exclHint}${_otherObjHint}${_rfzHint}${_turaHint}${_covHint}${_billHint}${_authHint}${_lctRest ? `\n⚠ ${_lctRest}` : ''}` : (_exclHint || _otherObjHint || _rfzHint || _turaHint || _covHint || _billHint || _lctRest || null)); setShiftTooltip({ label: _tipLabel, readOnlyOps: isOpsCoverageCell, pos: _isRet ? null : (cellPosName || rfzOnCell?.positionName || null), range: _isRet ? null : (cellRange || (rfzOnCell ? `${formatTime(rfzOnCell.startTime)} - ${formatTime(rfzOnCell.endTime)}` : null)), x: e.clientX, y: e.clientY, restHours: _restHrs }); } else if (isExclusionCol) { setShiftTooltip({ label: excludedPositionsTooltip(excludedOnDay, cellDateStr), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} data-modo-elegir-col={modoElegir && cellDateStr === modoElegir.ctx.dateStr ? '1' : undefined} className={`border-b border-r p-0.5 ${modoElegir || (!isSnapshotView && !isLockedDate && !isServiceLocked && !isOpsCoverageCell) ? 'cursor-pointer' : 'cursor-default'} text-center relative ${modoElegir && cellDateStr === modoElegir.ctx.dateStr ? 'bg-indigo-100 dark:bg-indigo-900/40' : selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`} data-evento={_evOverlay ? _evOverlay.mode : undefined} title={isOpsCoverageCell ? undefined : _evOverlay ? (_evOverlay.mode === 'EV' ? _evOverlay.tooltip : `${_evOverlay.mode === 'FRANCO_USADO' ? 'Franco usado en evento' : 'También afectado al evento'}: ${_evOverlay.tooltip}`) : isExclusionCol && !s && !p ? excludedPositionsTooltip(excludedOnDay, cellDateStr) : isOtherObjectiveShift && activeShift?.objectiveId ? `Turno en ${getObjectiveName(activeShift.objectiveId)}` : undefined}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style} ${_lctRest ? 'ring-2 ring-amber-400' : cellPosExcluded ? 'ring-1 ring-rose-400/70' : ''}`}>{_consultaCelda ? <IndicadorConsultaCelda texto={textoIndicadorConsulta(_consultaCelda)} tooltip={textoTooltipConsulta(_consultaCelda)} onAbrir={() => { setConsultaFoco(_consultaCelda.id); setConsultaTick((n) => n + 1); }} /> : null}{_evOverlay && _evOverlay.mode !== 'EV' && (<div className="absolute -bottom-0.5 right-0 text-[6.5px] font-black bg-yellow-400 text-yellow-900 px-0.5 rounded z-10" title={_evOverlay.tooltip}>EV</div>)}{_lctRest ? (<span className="absolute top-0 left-0 w-1.5 h-1.5 rounded-full bg-amber-500 border border-white" title={_lctRest}/>) : null}{content}{isExclusionCol && !content && (<span className="absolute bottom-0 left-0 w-1.5 h-1.5 rounded-full bg-rose-400/80" title="Día con puesto(s) excluido(s)"/>)}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly || isCoverageSplitCell) && <div className="absolute -top-1 -right-1 text-[8px] bg-red-900 text-white px-1 rounded-full border border-white/40">+</div>}{covRole === 'LIBERATED' && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-emerald-600 text-white px-0.5 rounded">RET</div>}{isCoverageSourceUsed && <div className="absolute -top-1 -left-1 text-[7px] font-black bg-violet-600 text-white px-0.5 rounded z-10" title="Turno usado en cobertura operativa">U</div>}{_cellShift?.descansoReducido && <div className="absolute -top-1 left-0 text-[7px] font-black bg-amber-500 text-white px-0.5 rounded z-10" title="Descanso reducido autorizado">8–12</div>}{_cellShift?.topeExcedido && <div className="absolute -bottom-0.5 right-0 text-[7px] font-black bg-rose-600 text-white px-0.5 rounded z-10" title="Tope de 200 h autorizado">200</div>}{(() => { const _mr = p && !p.isDeleted ? p.menuRapidoRol : s?.menuRapidoRol; if (!_mr) return null; const _cubre = p && !p.isDeleted ? p.menuRapidoCubreA : s?.menuRapidoCubreA; return <div className={`absolute -top-1 left-1/2 -translate-x-1/2 max-w-full truncate text-[6.5px] font-black text-white px-0.5 rounded z-10 ${_mr === 'CUBRE' ? 'bg-indigo-600' : 'bg-emerald-600'}`} data-marca-menu={_mr}>{marcaCeldaMenuRapido(_mr, _cubre)}</div>; })()}{(((covRole === 'TARGET' || isLeaveCell) && coveredByCell) || (p?.menuRapidoTexto && !p?.menuRapidoRol) || (s?.menuRapidoTexto && !s?.menuRapidoRol)) && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-orange-500 text-white px-0.5 rounded" title={p?.menuRapidoTexto || s?.menuRapidoTexto || (coveredByCell ? `Cubierto por ${coveredByCell}` : 'Cubierto')}>✓</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && !isOtherObjectiveShift && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}{isOtherObjectiveShift && content && (<div className="absolute bottom-0 left-0"><MapPin size={7} className="text-slate-300 drop-shadow-sm"/></div>)}{selectedGrupo && grupoUnifiedMode && content && !isOtherObjectiveShift && activeShift?.objectiveId && selectedGrupo.objectiveIds.includes(activeShift.objectiveId) && (() => {
                                                     const _oi = selectedGrupo.objectiveIds.indexOf(activeShift.objectiveId!);
                                                     const _clr = GRUPO_COLOR_HEX[_oi % GRUPO_COLOR_HEX.length];
                                                     const _nm = (selectedGrupo.objectiveNames[_oi] || '').trim().split(/\s+/).filter((w: string) => w.length > 1).pop()?.slice(0, 6).toUpperCase() || (selectedGrupo.objectiveNames[_oi] || '').slice(0, 5).toUpperCase();
@@ -11986,82 +12222,64 @@ function PlanificacionDesktop() {
             <div className="no-print px-2 max-w-[1600px] mx-auto">
                 <SwapSupervisorQueue empresaId={empresaId} />
             </div>
-            {menuRapido && typeof document !== 'undefined' && createPortal((() => {
+            {menuRapido && typeof document !== 'undefined' && createPortal(
+                <>
+                    <div className="fixed inset-0 z-[9999]" onMouseDown={cerrarMenuRapido} onContextMenu={(e) => { e.preventDefault(); cerrarMenuRapido(); }} />
+                    <MenuRapidoCobertura
+                        x={menuRapido.x}
+                        y={menuRapido.y}
+                        opciones={menuRapido.opciones}
+                        onAsignar={() => iniciarModoElegir('asignar')}
+                        onExtAdel={() => iniciarModoElegir('split')}
+                        onAbrir={abrirCoberturaDesdeMenu}
+                        onClose={cerrarMenuRapido}
+                    />
+                </>,
+                document.body,
+            )}
+            {modoElegir && typeof document !== 'undefined' && createPortal((() => {
                 const idsCronograma = new Set(displayedEmployees.map((e: { id: string }) => e.id));
-                const personas = employees
-                    .filter((e: { id?: string; status?: string; modalidad?: string; bolsaCuil?: string }) => e.id && e.id !== menuRapido.empId && e.status !== 'INACTIVE' && !esLegajoEventual(e))
-                    .map((e: { id: string; name?: string }) => ({
-                        id: e.id,
-                        nombre: String(e.name || e.id),
-                        rol: rolDesdeTurno(turnoMenuDe(e.id, menuRapido.dateStr)),
-                        enCronograma: idsCronograma.has(e.id),
-                    }));
-                const listas = listasAsignarMenu(personas, menuRapido.busqueda);
-                const motivoDe = (id: string) => {
-                    const opt = listVacancyGapBandOptions(effectivePosStructure, menuRapido.positionName).find((o) => o.code === menuRapido.gapBand);
-                    const guard = evaluateCoverageDayGuards({
-                        dateStr: menuRapido.dateStr,
-                        proposedByEmp: { [id]: { code: menuRapido.gapBand, startTime: opt?.startTime, endTime: opt?.endTime, hours: opt?.hours || 8, addHours: opt?.hours || 8 } },
-                        shiftOf: (empId, fecha) => turnoMenuDe(empId, fecha),
-                        monthHoursOf: (empId) => empMonthlyHours[empId] || 0,
-                        nameOf: (empId) => String(employees.find((x: { id?: string; name?: string }) => x.id === empId)?.name || empId),
-                    });
-                    return guard.blocked[0] || '';
-                };
-                const aFila = (p: { id: string; nombre: string; rol: string }) => {
-                    const tipo = tipoDesdeRolDia(p.rol);
-                    const tag = tipo ? etiquetaTipoNomina(tipo).tag : '';
-                    const motivo = motivoDe(p.id);
-                    return { id: p.id, nombre: p.nombre, detalle: tag, tag, disabled: !!motivo, motivo };
-                };
-                const ctxSplit = {
-                    positionStructure: effectivePosStructure as import('@/lib/planificacion/vacancySplitBands').VacancyPositionSla[],
-                    gapPositionName: menuRapido.positionName,
-                    gapBand: menuRapido.gapBand,
-                    preferSamePosition: true as const,
-                };
-                const filasExt = menuRapido.paso === 'ext' || menuRapido.paso === 'adel'
-                    ? listExtensionCandidates(menuRapido.gapBand, menuRapido.dateStr, selectedObjective || '', employees, shiftsMap, pendingChanges, [menuRapido.empId].filter(Boolean), ctxSplit)
+                const fuera = modoElegir.accion === 'asignar' && modoElegir.fueraAbierto
+                    ? buscarFueraDelCronograma(
+                        employees
+                            .filter((e: { id?: string; status?: string; modalidad?: string; bolsaCuil?: string }) => e.id && e.id !== modoElegir.ctx.empId && e.status !== 'INACTIVE' && !esLegajoEventual(e))
+                            .map((e: { id: string; name?: string }) => ({
+                                id: e.id,
+                                nombre: String(e.name || e.id),
+                                rol: rolDesdeTurno(turnoMenuDe(e.id, modoElegir.ctx.dateStr)),
+                                enCronograma: idsCronograma.has(e.id),
+                            })),
+                        modoElegir.busqueda,
+                    )
                     : [];
-                const filasAdel = menuRapido.paso === 'adel'
-                    ? listEarlyStartCandidates(menuRapido.gapBand, menuRapido.dateStr, selectedObjective || '', employees, shiftsMap, pendingChanges, [menuRapido.empId, menuRapido.extId].filter(Boolean), ctxSplit)
-                    : [];
-                const filas = menuRapido.paso === 'asignar'
-                    ? listas.cronograma.map(aFila)
-                    : menuRapido.paso === 'ext'
-                        ? filasExt.map((r) => ({ id: r.id, nombre: r.name, detalle: `${r.code} · ${r.positionName || ''}`.trim(), tag: r.code }))
-                        : menuRapido.paso === 'adel'
-                            ? filasAdel.map((r) => ({ id: r.id, nombre: r.name, detalle: r.id === menuRapido.adelId ? 'Elegido para adelantar' : `${r.code} · ${r.positionName || ''}`.trim(), tag: r.code }))
-                            : [];
-                const fuera = menuRapido.paso === 'asignar' ? listas.fuera.map(aFila) : [];
-                const extNombre = employees.find((e: { id?: string; name?: string }) => e.id === menuRapido.extId)?.name || '';
+                const texto = textoFranjaElegir({
+                    accion: modoElegir.accion,
+                    clase: modoElegir.ctx.clase,
+                    titular: modoElegir.ctx.empName,
+                    codigoAusencia: modoElegir.ctx.codigoAusencia,
+                    positionName: modoElegir.ctx.positionName,
+                    dateStr: modoElegir.ctx.dateStr,
+                    banda: modoElegir.ctx.gapBand,
+                    horario: modoElegir.ctx.horario,
+                    extNombre: modoElegir.extId ? nombreEmpleadoMenu(modoElegir.extId) : null,
+                    extTramo: modoElegir.extId ? tramoExtMenu(modoElegir.ctx, modoElegir.extId) : null,
+                });
                 return (
-                    <>
-                        <div className="fixed inset-0 z-[9999]" onMouseDown={cerrarMenuRapido} onContextMenu={(e) => { e.preventDefault(); cerrarMenuRapido(); }} />
-                        <MenuRapidoCobertura
-                            x={menuRapido.x}
-                            y={menuRapido.y}
-                            opciones={menuRapido.opciones}
-                            paso={menuRapido.paso}
-                            filas={filas}
-                            fuera={fuera}
-                            busqueda={menuRapido.busqueda}
-                            extNombre={extNombre}
-                            puedeAplicar={!!menuRapido.adelId}
-                            onBusqueda={(q) => setMenuRapido((m) => (m ? { ...m, busqueda: q } : m))}
-                            onAsignar={() => setMenuRapido((m) => (m ? { ...m, paso: 'asignar', busqueda: '' } : m))}
-                            onExtAdel={() => setMenuRapido((m) => (m ? { ...m, paso: 'ext', extId: '', adelId: '' } : m))}
-                            onAbrir={abrirCoberturaDesdeMenu}
-                            onElegir={(id) => {
-                                if (menuRapido.paso === 'asignar') pedirPinYAsignar(id);
-                                else if (menuRapido.paso === 'ext') setMenuRapido((m) => (m ? { ...m, extId: id, adelId: '', paso: 'adel' } : m));
-                                else setMenuRapido((m) => (m ? { ...m, adelId: id } : m));
-                            }}
-                            onVolver={() => setMenuRapido((m) => (m ? { ...m, paso: m.paso === 'adel' ? 'ext' : 'raiz', adelId: '' } : m))}
-                            onAplicar={escribirSplitMenu}
-                            onClose={cerrarMenuRapido}
-                        />
-                    </>
+                    <FranjaModoElegir
+                        texto={modoElegir.repetir || modoElegir.resultado ? `${texto.replace(/^Elegí quién cubre/, 'Cubre').replace(/ → ahora elegí quién adelanta$/, ` · adelanta ${apellidoMarca(modoElegir.repetir?.cov.mode === 'split' ? nombreEmpleadoMenu(modoElegir.repetir.cov.adelId) : '')}`)}` : texto}
+                        aviso={modoElegir.aviso}
+                        fueraVisible={modoElegir.accion === 'asignar'}
+                        fueraAbierto={modoElegir.fueraAbierto}
+                        busqueda={modoElegir.busqueda}
+                        fuera={fuera}
+                        repetir={modoElegir.repetir ? { texto: modoElegir.repetir.texto } : null}
+                        terminado={!!modoElegir.resultado}
+                        onBusqueda={(q) => setModoElegir((m) => (m ? { ...m, busqueda: q } : m))}
+                        onToggleFuera={() => setModoElegir((m) => (m ? { ...m, fueraAbierto: !m.fueraAbierto, busqueda: '' } : m))}
+                        onElegirFuera={clicPersonaModoElegir}
+                        onRepetir={repetirModoElegir}
+                        onCancelar={cancelarModoElegir}
+                    />
                 );
             })(), document.body)}
             {coverageTooltip && coverageTooltipLayout && typeof document !== 'undefined' && createPortal(
@@ -16046,14 +16264,6 @@ function PlanificacionDesktop() {
                             isFranco: src.isFranco === true,
                         };
                     };
-                    const segHours = (from?: string, to?: string) => {
-                        if (!from || !to) return 0;
-                        const [fh, fm] = from.split(':').map(Number);
-                        const [th, tm] = to.split(':').map(Number);
-                        let mins = (th * 60 + tm) - (fh * 60 + fm);
-                        if (mins <= 0) mins += 24 * 60;
-                        return Math.round((mins / 60) * 10) / 10;
-                    };
                     const materializeOnDay = (day: string, base: VacancyDayCoverage, useOverride: boolean): VacancyDayCoverage | null => {
                         if (base.mode === 'substitute') return base;
                         if (base.mode !== 'split') return null;
@@ -16079,45 +16289,12 @@ function PlanificacionDesktop() {
                             tit ? { band: tit.code, position: tit.positionName, extExtraHours: vacancySplitExtExtraHours, secondExtExtraHours: vacancySplitSecondExtraHours } : undefined,
                         );
                     };
-                    const proposedForCoverage = (dateStr: string, coverage: VacancyDayCoverage): Record<string, ProposedGuardShift> => {
-                        if (coverage.mode === 'substitute') {
-                            const tit = resolveEffectiveTitularForDay(dateStr);
-                            const sched = String(tit?.scheduleLabel || '');
-                            const m = sched.match(/(\d{1,2}:\d{2})\s*[–-]\s*(\d{1,2}:\d{2})/);
-                            const hours = tit?.hours || 8;
-                            return { [coverage.employeeId]: { code: tit?.code || 'M', startTime: m?.[1], endTime: m?.[2], hours, addHours: hours } };
-                        }
-                        if (coverage.mode !== 'split') return {};
-                        const extShift = shiftOfGuard(coverage.extEmpId, dateStr);
-                        const adelShift = shiftOfGuard(coverage.adelEmpId, dateStr);
-                        const times = resolveVacancySplitSegmentTimes(
-                            vacancyPosSla,
-                            coverage.gapBand,
-                            coverage.gapPosition,
-                            { code: extShift?.code },
-                            { code: adelShift?.code },
-                            coverage.extExtraHours,
-                            coverage.secondExtExtraHours,
-                        );
-                        const extAdd = coverage.extExtraHours ?? segHours(times.first.from, times.first.to);
-                        const adelAdd = coverage.secondExtExtraHours ?? segHours(times.second.from, times.second.to);
-                        return {
-                            [coverage.extEmpId]: {
-                                code: String(extShift?.code || coverage.gapBand || 'M'),
-                                startTime: extShift?.startTime || times.first.from,
-                                endTime: times.first.to,
-                                hours: extAdd,
-                                addHours: extAdd,
-                            },
-                            [coverage.adelEmpId]: {
-                                code: String(adelShift?.code || coverage.gapBand || 'T'),
-                                startTime: adelShift?.startTime || times.second.from,
-                                endTime: times.second.to,
-                                hours: adelAdd,
-                                addHours: adelAdd,
-                            },
-                        };
-                    };
+                    const proposedForCoverage = (dateStr: string, coverage: VacancyDayCoverage): Record<string, ProposedGuardShift> => propuestaGuardCobertura({
+                        coverage,
+                        titular: coverage.mode === 'substitute' ? resolveEffectiveTitularForDay(dateStr) : null,
+                        shiftOf: (empId) => shiftOfGuard(empId, dateStr),
+                        positionStructure: vacancyPosSla,
+                    });
                     const guardOnDay = (dateStr: string, coverage: VacancyDayCoverage) => {
                         if (!vacancyDayHasCoverage(coverage)) return { blocked: [] as string[], authorizations: [] as CoverageAuthRequest[] };
                         return evaluateCoverageDayGuards({
