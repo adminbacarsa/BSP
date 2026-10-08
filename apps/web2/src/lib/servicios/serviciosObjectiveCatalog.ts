@@ -246,12 +246,15 @@ export function buildServiciosObjectiveCatalog(
     clientId?: string;
     search?: string;
     slasByClient?: Map<string, SlaPlanningRow[]>;
-    /** Sin mapa vacío: hasSlaInMonth exige cronograma publicado (coherente con Operaciones). */
+    /**
+     * Cronogramas publicados. «En operación» exige cronograma publicado siempre (como Operaciones y
+     * los KPI de arriba): un mapa vacío significa «ninguno publicado», no «no mirar».
+     */
     publishStatusMap?: Record<string, boolean>;
   },
 ): ServiciosCatalogRow[] {
   const publishStatusMap = opts?.publishStatusMap ?? {};
-  const requirePublished = Object.keys(publishStatusMap).length > 0;
+
   const clientsForPlanning = clients.map((c) => ({
     id: c.id,
     name: c.name,
@@ -288,8 +291,7 @@ export function buildServiciosObjectiveCatalog(
 
       const { vigente } = pickSlaForPlanningMonth(matchingRows, kpiYear, kpiMonth);
       const hasPublishedPlan =
-        !requirePublished
-        || (!!obj.id && isObjectivePlanificacionPublished(publishStatusMap, obj.id, kpiYear, kpiMonth + 1));
+        !!obj.id && isObjectivePlanificacionPublished(publishStatusMap, obj.id, kpiYear, kpiMonth + 1);
       const presence = objectiveMonthSlaPresence({
         slas: matchingRows as unknown as Parameters<typeof objectiveMonthSlaPresence>[0]['slas'],
         year: kpiYear,
