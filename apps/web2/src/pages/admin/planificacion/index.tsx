@@ -7616,7 +7616,11 @@ function PlanificacionDesktop() {
             } catch(e) {
                 console.error(e);
                 restorePendingOnFailure();
-                planToastSaveError();
+                const _err = e as { code?: string; message?: string };
+                const _det = String(_err?.code || _err?.message || '').slice(0, 160);
+                planToastSaveError(_det
+                    ? `Error al guardar — cambios restaurados en pendientes. Detalle: ${_det}`
+                    : undefined);
             } finally {
                 setBackgroundSaveCount((c) => Math.max(0, c - 1));
             }
