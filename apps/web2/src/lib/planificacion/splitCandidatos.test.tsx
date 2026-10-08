@@ -193,3 +193,15 @@ test('H. de Niños 09/10: el hueco Rondin M lo extiende la N del 08 y lo adelant
   );
   assert.throws(() => segmentosMitadHueco(dia, '15:00', '15:00'), /0 h/);
 });
+
+test('borradores: la N del día anterior en borrador puede extender una M (cronograma sin publicar)', () => {
+  const sm: Record<string, any> = {
+    ['kasi_2026-10-10']: { employeeId: 'kasi', objectiveId: OBJ, code: 'N', positionName: 'Puesto 2', startTime: '23:00', endTime: '07:00', draft: true },
+    ['mart_2026-10-11']: { employeeId: 'mart', objectiveId: OBJ, code: 'V', positionName: 'Puesto 2', draft: true },
+    ['herr_2026-10-11']: { employeeId: 'herr', objectiveId: OBJ, code: 'T', positionName: 'Puesto 2', startTime: '15:00', endTime: '23:00', draft: true },
+  };
+  const emps = [{ id: 'kasi', name: 'KASIANCHUK' }, { id: 'mart', name: 'MARTINEZ' }, { id: 'herr', name: 'HERRERA' }];
+  const ctx2 = { gapPositionName: 'Puesto 2', gapStart: '07:00', gapEnd: '15:00', preferSamePosition: true };
+  assert.deepEqual(listExtensionCandidates('M', '2026-10-11', OBJ, emps, sm, {}, ['mart'], ctx2).map((r) => r.id), ['kasi']);
+  assert.deepEqual(listEarlyStartCandidates('M', '2026-10-11', OBJ, emps, sm, {}, ['mart'], ctx2).map((r) => r.id), ['herr']);
+});
