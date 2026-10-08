@@ -11,6 +11,16 @@ import {
   planHoursOf,
   type HoursLedgerPlanMode,
 } from '@/lib/hoursLedger/hoursLedgerRead';
+import {
+  agrupaPorCliente,
+  guardarOrdenCronograma,
+  leerOrdenCronograma,
+  ordenarFilasCronograma,
+  ordenarGruposPorCliente,
+  siguienteOrden,
+  type ColumnaOrdenCronograma,
+  type OrdenCronograma,
+} from '@/lib/planificacion/cronogramaOrden';
 
 function formatActivityDate(d: Date | null): string {
   if (!d) return '—';
@@ -45,6 +55,45 @@ type Props = {
   onNavigateToObjective: (clientId: string, objectiveId: string, year: number, month: number) => void;
 };
 
+function ThOrden({
+  col,
+  label,
+  orden,
+  onOrden,
+  align,
+  className,
+  title,
+}: {
+  col: ColumnaOrdenCronograma;
+  label: string;
+  orden: OrdenCronograma | null;
+  onOrden: (col: ColumnaOrdenCronograma) => void;
+  align: 'left' | 'right' | 'center';
+  className: string;
+  title?: string;
+}) {
+  const activa = orden?.columna === col;
+  return (
+    <th
+      aria-sort={activa ? (orden.direccion === 'asc' ? 'ascending' : 'descending') : 'none'}
+      className={className}
+      title={title}
+    >
+      <button
+        type="button"
+        data-ordenar={col}
+        onClick={() => onOrden(col)}
+        className={`w-full bg-transparent font-black uppercase tracking-wider text-[9px] rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 ${
+          align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : 'text-left'
+        }`}
+      >
+        {label}
+        {activa ? (orden.direccion === 'asc' ? ' ▲' : ' ▼') : ''}
+      </button>
+    </th>
+  );
+}
+
 function groupByClient(rows: CronogramaOverviewRow[]) {
   const groups: { clientId: string; clientName: string; rows: CronogramaOverviewRow[] }[] = [];
   const indexByClient = new Map<string, number>();
@@ -78,6 +127,7 @@ export default function PlanningCronogramasOverviewModal({
   const [filterOpenVacancies, setFilterOpenVacancies] = useState(false);
   const [search, setSearch] = useState('');
   const [planMode, setPlanMode] = useState<HoursLedgerPlanMode>('published');
+  const [orden, setOrden] = useState<OrdenCronograma | null>(() => leerOrdenCronograma());
 
   const monthLabel = useMemo(
     () => new Date(year, month - 1, 1).toLocaleDateString('es-AR', { month: 'long', year: 'numeric' }),
@@ -147,12 +197,134 @@ export default function PlanningCronogramasOverviewModal({
     [rows, planMode],
   );
 
-  const grouped = useMemo(() => groupByClient(filtered), [filtered]);
+  const horasDe = useCallback(
+    (r: CronogramaOverviewRow) => planHoursOf(planMode, { planPublished: r.plannedHours, planDraft: r.planDraftHours }),
+    [planMode],
+  );
+
+  const elegirOrden = (col: ColumnaOrdenCronograma) => {
+    setOrden((prev) => {
+      const next = siguienteOrden(prev, col);
+      guardarOrdenCronograma(next);
+      return next;
+    });
+  };
+
+  const vista = useMemo(() => {
+    if (agrupaPorCliente(orden)) {
+      const groups = groupByClient(filtered);
+      return {
+        plana: false as const,
+        groups: orden?.columna === 'cliente' ? ordenarGruposPorCliente(groups, orden.direccion) : groups,
+      };
+    }
+    return { plana: true as const, filas: ordenarFilasCronograma(filtered, orden!, horasDe) };
+  }, [filtered, orden, horasDe]);
 
   const shiftMonth = (delta: number) => {
     const d = new Date(year, month - 1 + delta, 1);
     onMonthChange(d.getFullYear(), d.getMonth() + 1);
   };
+
+  const celdasObjetivo = (r: CronogramaOverviewRow) => (
+    <>
+      <td className="px-4 py-2.5 border-r border-slate-100 font-bold text-slate-800">
+        <span className="line-clamp-2" title={r.objectiveName}>{r.objectiveName}</span>
+      </td>
+      <td className="px-4 py-2.5 border-r border-slate-100">
+        <span
+          className={`inline-flex items-center gap-1.5 text-[9px] font-black px-2.5 py-1 rounded-lg border whitespace-nowrap ${ESTADO_STYLE[r.estado]} ${r.estado === 'PUBLICADO_CON_CAMBIOS' ? 'animate-pulse' : ''}`}
+        >
+          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${ESTADO_DOT[r.estado]}`} />
+          {CRONOGRAMA_ESTADO_LABEL[r.estado]}
+        </span>
+      </td>
+      <td className="px-4 py-2.5 border-r border-slate-100 text-right font-black tabular-nums text-indigo-700">
+        {horasDe(r) > 0 ? (
+          <span>{horasDe(r).toLocaleString('es-AR')} hs</span>
+        ) : (
+          <span className="text-slate-300">—</span>
+        )}
+      </td>
+      <td className="px-4 py-2.5 border-r border-slate-100 text-right font-mono text-[10px]">
+        {r.totalShifts === 0 ? (
+          <span className="text-slate-300">—</span>
+        ) : (
+          <div className="flex flex-col items-end gap-0.5">
+            {r.publishedShifts > 0 && (
+              <span className="text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100">
+                {r.publishedShifts} pub
+              </span>
+            )}
+            {r.draftShifts > 0 && (
+              <span className="text-amber-700 font-bold bg-amber-50 px-1.5 py-0.5 rounded border border-amber-100">
+                {r.draftShifts} borr
+              </span>
+            )}
+          </div>
+        )}
+      </td>
+      <td className="px-3 py-2.5 border-r border-slate-100 text-center">
+        {r.openVacancies > 0 ? (
+          <span className="inline-flex items-center gap-1 text-[10px] font-black text-orange-700 bg-orange-50 border border-orange-200 px-2 py-0.5 rounded-lg">
+            <AlertTriangle size={9} />
+            {r.openVacancies}
+          </span>
+        ) : (
+          <span className="text-slate-200 text-[10px]">—</span>
+        )}
+      </td>
+      <td className="px-4 py-2.5 border-r border-slate-100 text-slate-600 text-[10px] font-medium">
+        {r.publishedBy ? (
+          <span className="line-clamp-2" title={r.publishedBy}>{r.publishedBy}</span>
+        ) : r.publishedAt ? (
+          <span className="text-slate-500 font-mono text-[9px]">{formatActivityDate(r.publishedAt)}</span>
+        ) : (
+          <span className="text-slate-300">—</span>
+        )}
+      </td>
+      <td className="px-4 py-2.5 border-r border-slate-100 text-slate-700 text-[10px] font-mono">
+        {r.lastModifiedAt ? (
+          <span title={r.lastModifiedAt.toISOString()}>{formatActivityDate(r.lastModifiedAt)}</span>
+        ) : (
+          <span className="text-slate-300 font-sans">—</span>
+        )}
+      </td>
+      <td className="px-4 py-2.5 border-r border-slate-100 text-slate-600 text-[10px] font-medium">
+        {r.lastModifiedBy ? (
+          <span className="line-clamp-2" title={r.lastModifiedBy}>{r.lastModifiedBy}</span>
+        ) : (
+          <span className="text-slate-300">—</span>
+        )}
+      </td>
+      <td className="px-2 py-2.5 border-r border-slate-100 text-center">
+        {r.shortRestGaps > 0 ? (
+          <span
+            className="inline-flex items-center gap-1 text-[10px] font-black text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-lg"
+            title={r.shortRestDetail || 'Descanso menor a 12 h (art. 197 LCT)'}
+          >
+            <AlertTriangle size={9} />
+            {r.shortRestGaps}
+          </span>
+        ) : (
+          <span className="text-slate-200 text-[10px]">—</span>
+        )}
+      </td>
+      <td className="px-2 py-2.5 text-center">
+        <button
+          type="button"
+          title="Abrir en planificador"
+          onClick={() => {
+            onNavigateToObjective(r.clientId, r.objectiveId, r.year, r.month);
+            onClose();
+          }}
+          className="p-1.5 rounded-lg text-indigo-600 hover:bg-indigo-100 border border-transparent hover:border-indigo-200 transition-colors"
+        >
+          <ExternalLink size={14} />
+        </button>
+      </td>
+    </>
+  );
 
   if (!isOpen) return null;
 
@@ -288,50 +460,40 @@ export default function PlanningCronogramasOverviewModal({
             </div>
           ) : (
             <div className="flex-1 min-h-0 overflow-y-auto overflow-x-auto rounded-2xl border border-slate-200 shadow-sm bg-white overscroll-contain">
-              <table className="w-full text-[11px] border-collapse min-w-[900px]">
+              <table className="w-full text-[11px] border-collapse min-w-[900px]" data-orden={orden ? `${orden.columna}:${orden.direccion}` : 'agrupado'}>
                 <thead className="sticky top-0 z-20">
                   <tr className="bg-slate-100 border-b-2 border-slate-200 shadow-sm">
-                    <th className="text-left text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[16%] bg-slate-100">
-                      Cliente
-                    </th>
-                    <th className="text-left text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[18%] bg-slate-100">
-                      Objetivo
-                    </th>
-                    <th className="text-left text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[16%] bg-slate-100">
-                      Estado
-                    </th>
-                    <th className="text-right text-[9px] font-black uppercase tracking-wider text-indigo-600 px-4 py-3 border-r border-slate-200 w-[9%] bg-indigo-50/50">
-                      Hs plan
-                    </th>
-                    <th className="text-right text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[9%] bg-slate-100">
-                      Turnos
-                    </th>
-                    <th className="text-center text-[9px] font-black uppercase tracking-wider text-orange-600 px-3 py-3 border-r border-slate-200 w-[8%] bg-orange-50/60">
-                      Cob. abiertas
-                    </th>
-                    <th className="text-left text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[12%] bg-slate-100">
-                      Publicado
-                    </th>
-                    <th className="text-left text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[12%] bg-slate-100">
-                      Últ. modificación
-                    </th>
-                    <th className="text-left text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[12%] bg-slate-100">
-                      Modificado por
-                    </th>
-                    <th className="text-center text-[9px] font-black uppercase tracking-wider text-amber-700 px-2 py-3 border-r border-slate-200 w-[8%] bg-amber-50/70" title="Art. 197 LCT: menos de 12 h entre el fin del turno (planificado, o el real si ya cerró) y el siguiente, también en otro objetivo. No bloquea.">
-                      Desc. &lt;12h
-                    </th>
+                    <ThOrden col="cliente" label="Cliente" orden={orden} onOrden={elegirOrden} align="left" className="text-left text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[16%] bg-slate-100" />
+                    <ThOrden col="objetivo" label="Objetivo" orden={orden} onOrden={elegirOrden} align="left" className="text-left text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[18%] bg-slate-100" />
+                    <ThOrden col="estado" label="Estado" orden={orden} onOrden={elegirOrden} align="left" className="text-left text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[16%] bg-slate-100" />
+                    <ThOrden col="hs" label="Hs plan" orden={orden} onOrden={elegirOrden} align="right" className="text-right text-[9px] font-black uppercase tracking-wider text-indigo-600 px-4 py-3 border-r border-slate-200 w-[9%] bg-indigo-50/50" />
+                    <ThOrden col="turnos" label="Turnos" orden={orden} onOrden={elegirOrden} align="right" className="text-right text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[9%] bg-slate-100" />
+                    <ThOrden col="coberturas" label="Cob. abiertas" orden={orden} onOrden={elegirOrden} align="center" className="text-center text-[9px] font-black uppercase tracking-wider text-orange-600 px-3 py-3 border-r border-slate-200 w-[8%] bg-orange-50/60" />
+                    <ThOrden col="publicado" label="Publicado" orden={orden} onOrden={elegirOrden} align="left" className="text-left text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[12%] bg-slate-100" />
+                    <ThOrden col="modificacion" label="Últ. modificación" orden={orden} onOrden={elegirOrden} align="left" className="text-left text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[12%] bg-slate-100" />
+                    <ThOrden col="modificadoPor" label="Modificado por" orden={orden} onOrden={elegirOrden} align="left" className="text-left text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[12%] bg-slate-100" />
+                    <ThOrden col="descanso" label="Desc. <12h" orden={orden} onOrden={elegirOrden} align="center" className="text-center text-[9px] font-black uppercase tracking-wider text-amber-700 px-2 py-3 border-r border-slate-200 w-[8%] bg-amber-50/70" title="Art. 197 LCT: menos de 12 h entre el fin del turno (planificado, o el real si ya cerró) y el siguiente, también en otro objetivo. No bloquea." />
                     <th className="text-center text-[9px] font-black uppercase tracking-wider text-slate-500 px-2 py-3 w-[4%] bg-slate-100">
                       Ir
                     </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {grouped.map((group, gi) => (
+                  {vista.plana ? vista.filas.map((r, ri) => (
+                    <tr
+                      key={r.lookupKey}
+                      className={`border-b border-slate-100 hover:bg-indigo-50/40 transition-colors ${ri % 2 === 1 ? 'bg-slate-50/40' : 'bg-white'}`}
+                    >
+                      <td className="px-4 py-2.5 border-r border-slate-100 font-black text-slate-700 text-[10px] leading-snug">
+                        <span className="line-clamp-2" title={r.clientName}>{r.clientName}</span>
+                      </td>
+                      {celdasObjetivo(r)}
+                    </tr>
+                  )) : vista.groups.map((group, gi) => (
                     group.rows.map((r, ri) => {
                       const isFirstInGroup = ri === 0;
                       const isLastInGroup = ri === group.rows.length - 1;
-                      const isLastGroup = gi === grouped.length - 1;
+                      const isLastGroup = gi === vista.groups.length - 1;
                       const rowBorder = isLastInGroup && !isLastGroup
                         ? 'border-b-2 border-slate-300'
                         : 'border-b border-slate-100';
@@ -354,109 +516,7 @@ export default function PlanningCronogramasOverviewModal({
                               </span>
                             </td>
                           ) : null}
-                          <td className="px-4 py-2.5 border-r border-slate-100 font-bold text-slate-800">
-                            <span className="line-clamp-2" title={r.objectiveName}>
-                              {r.objectiveName}
-                            </span>
-                          </td>
-                          <td className="px-4 py-2.5 border-r border-slate-100">
-                            <span
-                              className={`inline-flex items-center gap-1.5 text-[9px] font-black px-2.5 py-1 rounded-lg border whitespace-nowrap ${
-                                ESTADO_STYLE[r.estado]
-                              } ${r.estado === 'PUBLICADO_CON_CAMBIOS' ? 'animate-pulse' : ''}`}
-                            >
-                              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${ESTADO_DOT[r.estado]}`} />
-                              {CRONOGRAMA_ESTADO_LABEL[r.estado]}
-                            </span>
-                          </td>
-                          <td className="px-4 py-2.5 border-r border-slate-100 text-right font-black tabular-nums text-indigo-700">
-                            {r.plannedHours > 0 ? (
-                              <span>{planHoursOf(planMode, { planPublished: r.plannedHours, planDraft: r.planDraftHours }).toLocaleString('es-AR')} hs</span>
-                            ) : (
-                              <span className="text-slate-300">—</span>
-                            )}
-                          </td>
-                          <td className="px-4 py-2.5 border-r border-slate-100 text-right font-mono text-[10px]">
-                            {r.totalShifts === 0 ? (
-                              <span className="text-slate-300">—</span>
-                            ) : (
-                              <div className="flex flex-col items-end gap-0.5">
-                                {r.publishedShifts > 0 && (
-                                  <span className="text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100">
-                                    {r.publishedShifts} pub
-                                  </span>
-                                )}
-                                {r.draftShifts > 0 && (
-                                  <span className="text-amber-700 font-bold bg-amber-50 px-1.5 py-0.5 rounded border border-amber-100">
-                                    {r.draftShifts} borr
-                                  </span>
-                                )}
-                              </div>
-                            )}
-                          </td>
-                          <td className="px-3 py-2.5 border-r border-slate-100 text-center">
-                            {r.openVacancies > 0 ? (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-black text-orange-700 bg-orange-50 border border-orange-200 px-2 py-0.5 rounded-lg">
-                                <AlertTriangle size={9} />
-                                {r.openVacancies}
-                              </span>
-                            ) : (
-                              <span className="text-slate-200 text-[10px]">—</span>
-                            )}
-                          </td>
-                          <td className="px-4 py-2.5 border-r border-slate-100 text-slate-600 text-[10px] font-medium">
-                            {r.publishedBy ? (
-                              <span className="line-clamp-2" title={r.publishedBy}>{r.publishedBy}</span>
-                            ) : r.publishedAt ? (
-                              <span className="text-slate-500 font-mono text-[9px]">
-                                {formatActivityDate(r.publishedAt)}
-                              </span>
-                            ) : (
-                              <span className="text-slate-300">—</span>
-                            )}
-                          </td>
-                          <td className="px-4 py-2.5 border-r border-slate-100 text-slate-700 text-[10px] font-mono">
-                            {r.lastModifiedAt ? (
-                              <span title={r.lastModifiedAt.toISOString()}>
-                                {formatActivityDate(r.lastModifiedAt)}
-                              </span>
-                            ) : (
-                              <span className="text-slate-300 font-sans">—</span>
-                            )}
-                          </td>
-                          <td className="px-4 py-2.5 border-r border-slate-100 text-slate-600 text-[10px] font-medium">
-                            {r.lastModifiedBy ? (
-                              <span className="line-clamp-2" title={r.lastModifiedBy}>{r.lastModifiedBy}</span>
-                            ) : (
-                              <span className="text-slate-300">—</span>
-                            )}
-                          </td>
-                          <td className="px-2 py-2.5 border-r border-slate-100 text-center">
-                            {r.shortRestGaps > 0 ? (
-                              <span
-                                className="inline-flex items-center gap-1 text-[10px] font-black text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-lg"
-                                title={r.shortRestDetail || 'Descanso menor a 12 h (art. 197 LCT)'}
-                              >
-                                <AlertTriangle size={9} />
-                                {r.shortRestGaps}
-                              </span>
-                            ) : (
-                              <span className="text-slate-200 text-[10px]">—</span>
-                            )}
-                          </td>
-                          <td className="px-2 py-2.5 text-center">
-                            <button
-                              type="button"
-                              title="Abrir en planificador"
-                              onClick={() => {
-                                onNavigateToObjective(r.clientId, r.objectiveId, r.year, r.month);
-                                onClose();
-                              }}
-                              className="p-1.5 rounded-lg text-indigo-600 hover:bg-indigo-100 border border-transparent hover:border-indigo-200 transition-colors"
-                            >
-                              <ExternalLink size={14} />
-                            </button>
-                          </td>
+                          {celdasObjetivo(r)}
                         </tr>
                       );
                     })
