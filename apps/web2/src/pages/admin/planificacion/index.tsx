@@ -8435,12 +8435,15 @@ function PlanificacionDesktop() {
             });
             return { changes: sellarMenuRapido(applied.changes, [{ key: titularKey }, ...claves], texto), texto };
         }
+        const rangoHuecoMenu = rangoHorario(ctx.horario);
         const changes = applyOperationalGapCloseToChanges(base, {
             objectiveId: selectedObjective || '',
             clientId: selectedClient || undefined,
             dateStr: ctx.dateStr,
             gapPosition: ctx.positionName,
             gapBand: ctx.gapBand,
+            gapFrom: rangoHuecoMenu?.from,
+            gapTo: rangoHuecoMenu?.to,
             extEmpId: cov.extId,
             secondEmpId: cov.adelId,
             extHomePosition: extShift?.positionName,

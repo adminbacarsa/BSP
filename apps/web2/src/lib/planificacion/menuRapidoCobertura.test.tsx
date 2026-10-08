@@ -149,7 +149,7 @@ describe('clic en la grilla', () => {
       inicioHueco: '15:30', finTurno: '13:30', nombreCandidato: 'BARROS',
     });
     assert.equal(r.ok, false);
-    assert.match((r as { motivo: string }).motivo, /terminar cerca de las 15:30/);
+    assert.match((r as { motivo: string }).motivo, /terminar entre las 15:00 y las 15:30/);
     assert.match((r as { motivo: string }).motivo, /BARROS termina 13:30/);
   });
 
@@ -164,7 +164,7 @@ describe('clic en la grilla', () => {
       ...ok, paso: 'adel', candidatoId: 'sosa', rol: 'WORKING', candidatosBanda: lista, extId: 'galeano',
       finHueco: '16:30', inicioTurno: '19:00', nombreCandidato: 'SOSA',
     });
-    assert.match((r as { motivo: string }).motivo, /arrancar cerca de las 16:30/);
+    assert.match((r as { motivo: string }).motivo, /arrancar entre las 16:30 y las 17:00/);
     assert.match((r as { motivo: string }).motivo, /SOSA arranca 19:00/);
   });
 });

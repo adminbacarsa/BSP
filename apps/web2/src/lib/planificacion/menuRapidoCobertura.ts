@@ -211,6 +211,13 @@ export type ClicElegir = {
   bloqueos?: readonly string[];
 };
 
+function hmMasMin(hm: string, delta: number): string {
+  const m = String(hm).match(/(\d{1,2}):(\d{2})/);
+  if (!m) return hm;
+  const total = ((Number(m[1]) * 60 + Number(m[2]) + delta) % (24 * 60) + 24 * 60) % (24 * 60);
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+}
+
 export type ResultadoClic = { ok: boolean; motivo?: string };
 
 /** Lo que valida cada clic en modo elegir. Mismas reglas que el modal, sin listas. */
@@ -238,13 +245,17 @@ export function validarClicElegir(c: ClicElegir): ResultadoClic {
     if (!lista.includes(c.candidatoId)) {
       const quien = c.nombreCandidato ? `${c.nombreCandidato} ` : '';
       if (c.paso === 'ext') {
-        const hora = c.inicioHueco || 'la hora de inicio';
+        const hora = c.inicioHueco || '';
+        const desde = hora ? hmMasMin(hora, -30) : '';
         const detalle = c.finTurno ? `. ${quien}termina ${c.finTurno}` : '';
-        return { ok: false, motivo: `Para extender, su turno tiene que terminar cerca de las ${hora} (±30 min)${detalle}` };
+        const ventana = hora && desde ? `entre las ${desde} y las ${hora}` : 'a la hora de inicio o hasta 30 min antes';
+        return { ok: false, motivo: `Para extender, su turno tiene que terminar ${ventana}${detalle}` };
       }
-      const hora = c.finHueco || 'la hora de fin';
+      const hora = c.finHueco || '';
+      const hasta = hora ? hmMasMin(hora, 30) : '';
       const detalle = c.inicioTurno ? `. ${quien}arranca ${c.inicioTurno}` : '';
-      return { ok: false, motivo: `Para adelantar, su turno tiene que arrancar cerca de las ${hora} (±30 min)${detalle}` };
+      const ventana = hora && hasta ? `entre las ${hora} y las ${hasta}` : 'a la hora de fin o hasta 30 min después';
+      return { ok: false, motivo: `Para adelantar, su turno tiene que arrancar ${ventana}${detalle}` };
     }
   }
   if (c.bloqueos && c.bloqueos.length) return { ok: false, motivo: c.bloqueos[0] };

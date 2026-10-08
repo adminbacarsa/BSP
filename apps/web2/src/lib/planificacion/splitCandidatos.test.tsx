@@ -2,6 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { listEarlyStartCandidates, listExtensionCandidates } from './planningRecompositionApply';
 import { textoTramoSolo, validarClicElegir } from './menuRapidoCobertura';
+import { applyOperationalGapCloseToChanges, segmentosMitadHueco } from './operationalGapCoverage';
+import { calcPlanningBillableHoursAttributedToPosition } from './planningScheduledHours';
 
 const OBJ = 'obj1';
 const DIA = '2026-10-01';
@@ -65,7 +67,7 @@ test('Peaje 09/10: extender T2 15:30 es por horario, no por la sigla M2', () => 
   const { employees, shiftsMap } = armar(filas, dia);
   const ctx = { gapPositionName: 'Puesto 2', gapStart: '15:30', gapEnd: '16:30' };
   const ext = listExtensionCandidates('T2', dia, 'peaje', employees, shiftsMap, {}, ['gonzalez'], ctx);
-  assert.deepEqual(ext.map((r) => r.id), ['garcia', 'bosio', 'ferrero', 'fantini', 'farias']);
+  assert.deepEqual(ext.map((r) => r.id), ['garcia', 'bosio', 'ferrero', 'fantini']);
   assert.equal(ext.find((r) => r.id === 'ferrero')?.textoFila, 'FERRERO · M 11:30–15:15 · termina 15 min antes');
   assert.equal(ext.find((r) => r.id === 'garcia')?.textoFila, 'GARCIA · M2 11:45–15:30 · termina a la hora');
   assert.equal(ext.find((r) => r.id === 'fantini')?.textoFila, 'FANTINI · M2 11:00–15:00 · termina 30 min antes');
@@ -79,13 +81,16 @@ test('Peaje 09/10: extender T2 15:30 es por horario, no por la sigla M2', () => 
     inicioHueco: '15:30', finTurno: '13:30', nombreCandidato: 'LEJOS',
   });
   assert.equal(lejos.ok, false);
+  assert.match(lejos.motivo || '', /entre las 15:00 y las 15:30/);
   assert.match(lejos.motivo || '', /LEJOS termina 13:30/);
+  const farias = validarClicElegir({
+    puedeEditar: true, paso: 'ext', candidatoId: 'farias', rol: 'WORKING', candidatosBanda: ids,
+    inicioHueco: '15:30', finTurno: '16:00', nombreCandidato: 'FARIAS',
+  });
+  assert.equal(farias.ok, false);
+  assert.match(farias.motivo || '', /FARIAS termina 16:00/);
   const adel = listEarlyStartCandidates('T2', dia, 'peaje', employees, shiftsMap, {}, ['gonzalez'], ctx);
-  assert.deepEqual(adel.map((r) => r.id), ['venencia']);
-  assert.match(adel[0].textoFila || '', /arranca 30 min antes/);
-  const sinVenencia = employees.filter((e) => e.id !== 'venencia');
-  const adelVacio = listEarlyStartCandidates('T2', dia, 'peaje', sinVenencia, shiftsMap, {}, ['gonzalez'], ctx);
-  assert.deepEqual(adelVacio, []);
+  assert.deepEqual(adel.map((r) => r.id), []);
   assert.equal(textoTramoSolo('ext', '16:30'), 'Nadie arranca a las 16:30 · Aplicar solo la extensión hasta 16:30');
 });
 
@@ -120,4 +125,71 @@ test('la N del día anterior que termina a las 07:00 puede extender la M', () =>
   });
   assert.deepEqual(rows.map((r) => r.id), ['noche']);
   assert.equal(rows[0].extensionApplyDate, prev);
+});
+
+test('H. de Niños 09/10: el hueco Rondin M lo extiende la N del 08 y lo adelanta el T de las 15:00', () => {
+  const dia = '2026-10-09';
+  const prev = '2026-10-08';
+  const employees = [
+    { id: 'gaitan', name: 'GAITAN' },
+    { id: 'canet', name: 'CANET ENRIQUE' },
+    { id: 'obregon', name: 'OBREGON LORENA' },
+  ];
+  const shiftsMap: Record<string, any> = {
+    [`gaitan_${prev}`]: { employeeId: 'gaitan', objectiveId: 'ninos', code: 'N', positionName: 'Rondin', startTime: '23:00', endTime: '07:00', hours: 8 },
+    [`canet_${dia}`]: { employeeId: 'canet', objectiveId: 'ninos', code: 'T', positionName: 'Playa', startTime: '15:00', endTime: '23:00', hours: 8 },
+    [`obregon_${dia}`]: { employeeId: 'obregon', objectiveId: 'ninos', code: 'N', positionName: 'Rondin', startTime: '23:00', endTime: '07:00', hours: 8 },
+  };
+  const ctx = { gapPositionName: 'Rondin', gapStart: '07:00', gapEnd: '15:00' };
+  const ext = listExtensionCandidates('M', dia, 'ninos', employees, shiftsMap, {}, [], ctx);
+  const adel = listEarlyStartCandidates('M', dia, 'ninos', employees, shiftsMap, {}, [], ctx);
+  assert.deepEqual(ext.map((r) => r.id), ['gaitan']);
+  assert.equal(ext[0].extensionApplyDate, prev);
+  assert.deepEqual(adel.map((r) => r.id), ['canet']);
+  assert.equal(adel.some((r) => r.id === 'obregon'), false);
+  assert.equal(ext.some((r) => r.id === 'obregon'), false);
+
+  const changes = applyOperationalGapCloseToChanges({}, {
+    objectiveId: 'ninos',
+    dateStr: dia,
+    gapPosition: 'Rondin',
+    gapBand: 'M',
+    gapFrom: '07:00',
+    gapTo: '15:00',
+    extEmpId: 'canet',
+    secondEmpId: 'gaitan',
+  }, { shiftsMap, employeesById: Object.fromEntries(employees.map((e) => [e.id, e])) });
+
+  const noche = changes[`gaitan_${prev}`];
+  const tarde = changes[`canet_${dia}`];
+  assert.equal(noche.coverageSegmentRole, 'EXTENSION');
+  assert.equal(noche.isExtended, true);
+  assert.equal(noche.segmentFromTime, '07:00');
+  assert.equal(noche.segmentToTime, '11:00');
+  assert.notEqual(noche.segmentFromTime, noche.segmentToTime);
+  assert.equal(noche.extExtraHours, 4);
+  assert.equal(tarde.coverageSegmentRole, 'EARLY_START');
+  assert.equal(tarde.isEarlyStart, true);
+  assert.equal(tarde.isExtended, false);
+  assert.equal(tarde.segmentFromTime, '11:00');
+  assert.equal(tarde.segmentToTime, '15:00');
+  assert.notEqual(tarde.segmentFromTime, tarde.segmentToTime);
+  assert.equal(tarde.coversPositionName, 'Rondin');
+  assert.equal(calcPlanningBillableHoursAttributedToPosition(tarde, 'Playa'), 8);
+  assert.equal(calcPlanningBillableHoursAttributedToPosition(tarde, 'Rondin'), 4);
+
+  assert.throws(
+    () => applyOperationalGapCloseToChanges({}, {
+      objectiveId: 'ninos',
+      dateStr: dia,
+      gapPosition: 'Rondin',
+      gapBand: 'M',
+      gapFrom: '07:00',
+      gapTo: '15:00',
+      extEmpId: 'canet',
+      secondEmpId: 'obregon',
+    }, { shiftsMap, employeesById: Object.fromEntries(employees.map((e) => [e.id, e])) }),
+    /adelanto|23:00/,
+  );
+  assert.throws(() => segmentosMitadHueco(dia, '15:00', '15:00'), /0 h/);
 });

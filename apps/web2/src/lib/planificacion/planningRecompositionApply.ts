@@ -312,7 +312,7 @@ export function buildRecompositionPendingUpdates(
   if (adelOnFranco && !ctx.authorizeFrancoTrabajado) {
     throw new Error(`FRANCO_COVERAGE:${adelName} tiene franco planificado (${adelBase.code}) el ${pkg.dateStr} — requiere PIN de supervisor (FT / costo extra).`);
   }
-  const tailExtension = !isEarlyDeparture && vacancySecondSegmentIsTailExtension(String(pkg.target.code || ''));
+  const tailExtension = !isOperationalGap && !isEarlyDeparture && vacancySecondSegmentIsTailExtension(String(pkg.target.code || ''));
   const adelExtraHoursField = pkg.earlyStart.extraHours != null && pkg.earlyStart.extraHours > 0
     ? { extExtraHours: pkg.earlyStart.extraHours }
     : {};
@@ -762,10 +762,22 @@ function listarContiguos(
       if (!horario) continue;
       const punta = (lado === 'ext' ? horario.endMin : horario.startMin) + offset * 24 * 60;
       const delta = punta - borde;
-      if (Math.abs(delta) > CONTIGUO_MIN) continue;
+      // De un solo lado: extender termina antes o a la hora; adelantar arranca a la hora o hasta 30 min después.
+      // Si termina después de que empieza el hueco, está en otro lado durante el hueco.
+      if (lado === 'ext' ? (delta > 0 || delta < -CONTIGUO_MIN) : (delta < 0 || delta > CONTIGUO_MIN)) continue;
+      const positionNamePre = String(shift?.positionName || 'General');
+      if (
+        offset === 0
+        && listCtx?.gapPositionName
+        && positionNamePre === listCtx.gapPositionName
+        && horario.startMin >= hueco.start
+        && horario.startMin < hueco.end
+      ) {
+        continue;
+      }
       const name = empDisplayName(emp, emp.id);
       const code = String(shift?.code || '').toUpperCase();
-      const positionName = String(shift?.positionName || 'General');
+      const positionName = positionNamePre;
       const row: SegmentCandidateRow & { abs: number; mismo: boolean } = {
         id: emp.id,
         name: offset < 0 ? `${name} · ${code} ${dia.slice(8)}/${dia.slice(5, 7)}→` : name,
@@ -791,7 +803,44 @@ function listarContiguos(
     .map(({ abs: _a, mismo: _m, ...row }) => row);
 }
 
-/** Extensión: quien termina a ±30 min del inicio del hueco. El código no importa. Incluye la N del día anterior. */
+/**
+ * Ext si termina entre (inicio − 30 min) e inicio. Adel si arranca entre el fin y el fin + 30 min.
+ * offsetDays = −1 para la N del día anterior (su fin cae en el día del hueco).
+ */
+export function clasificarTurnoContraHueco(
+  shift: Record<string, any> | null | undefined,
+  gapStart: string,
+  gapEnd: string,
+  positionStructure?: VacancyPositionSla[],
+  opts?: { offsetDays?: number; gapPositionName?: string | null },
+): 'ext' | 'adel' | null {
+  if (!esTurnoDePuestoParaExtender(shift)) return null;
+  const horario = horarioDelTurno(shift, positionStructure);
+  const hueco = ventanaDelHueco('X', { gapStart, gapEnd });
+  if (!horario || !hueco) return null;
+  const offset = opts?.offsetDays || 0;
+  const pos = String(shift?.positionName || '');
+  if (
+    offset === 0
+    && opts?.gapPositionName
+    && pos === opts.gapPositionName
+    && horario.startMin >= hueco.start
+    && horario.startMin < hueco.end
+  ) {
+    return null;
+  }
+  const fin = horario.endMin + offset * 24 * 60;
+  const ini = horario.startMin + offset * 24 * 60;
+  const dExt = fin - hueco.start;
+  const dAdel = ini - hueco.end;
+  const esExt = dExt <= 0 && dExt >= -CONTIGUO_MIN;
+  const esAdel = offset === 0 && dAdel >= 0 && dAdel <= CONTIGUO_MIN;
+  if (esExt && !esAdel) return 'ext';
+  if (esAdel && !esExt) return 'adel';
+  return null;
+}
+
+/** Extensión: quien termina entre 30 min antes y el inicio del hueco. Incluye la N del día anterior. */
 export function listExtensionCandidates(
   targetBand: string,
   dateStr: string,
