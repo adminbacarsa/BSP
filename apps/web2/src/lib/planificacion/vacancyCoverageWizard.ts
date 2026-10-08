@@ -181,6 +181,8 @@ export type ProposedGuardShift = {
   addHours: number;
   /** Extensión pegada al turno que ya hace: no abre un descanso nuevo antes. */
   extiendeTurno?: boolean;
+  /** Día de la celda si no es el del hueco (adelanto de la M del día siguiente). */
+  applyDateStr?: string;
 };
 
 export function horasEntre(from?: string, to?: string): number {
@@ -277,7 +279,8 @@ export function evaluateCoverageDayGuards(input: CoverageGuardInput): CoverageGu
   const cfg = { minRestBetweenShiftsHours: 12, longRestAfterWorkedHours: 48, minLongRestHours: 35 };
   for (const [empId, proposed] of Object.entries(input.proposedByEmp)) {
     const name = input.nameOf(empId) || empId;
-    const today = input.shiftOf(empId, input.dateStr);
+    const fecha = proposed.applyDateStr || input.dateStr;
+    const today = input.shiftOf(empId, fecha);
     const code = String(today?.code || '').toUpperCase();
     const franco = !!today?.isFranco || FRANCO.has(code);
     if (LICENSE.has(code)) {
@@ -287,7 +290,7 @@ export function evaluateCoverageDayGuards(input: CoverageGuardInput): CoverageGu
     if (!franco && !proposed.extiendeTurno) {
       const rest = checkRestBetweenShiftsDetail({
         empId,
-        targetDateStr: input.dateStr,
+        targetDateStr: fecha,
         proposed: {
           code: proposed.code,
           startTime: proposed.startTime,
@@ -295,7 +298,7 @@ export function evaluateCoverageDayGuards(input: CoverageGuardInput): CoverageGu
           hours: proposed.hours,
         },
         getShift: (eid, ds) => {
-          if (eid === empId && ds === input.dateStr) {
+          if (eid === empId && ds === fecha) {
             return { code: proposed.code, startTime: proposed.startTime, endTime: proposed.endTime, hours: proposed.hours };
           }
           return input.shiftOf(eid, ds);
@@ -309,7 +312,7 @@ export function evaluateCoverageDayGuards(input: CoverageGuardInput): CoverageGu
           kind: 'DESCANSO',
           employeeId: empId,
           name,
-          dateStr: input.dateStr,
+          dateStr: fecha,
           restHours: rest.gapHours,
           cap,
           shiftCode: proposed.code,

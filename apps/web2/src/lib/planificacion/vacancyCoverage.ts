@@ -16,6 +16,7 @@ import {
   collectSplitFrancoConflicts,
   isPlannedFrancoShift,
   resolveEmployeeShift,
+  resolverDiaTramo,
   type FrancoCoverageConflict,
 } from './planningRecompositionApply';
 import type { RecompositionPackage, RecompositionTarget } from './planningRecomposition.types';
@@ -305,6 +306,10 @@ export type VacancyDayCoverageInput =
       adelBaseCode?: string;
       extExtraHours?: number | null;
       secondExtExtraHours?: number | null;
+      /** Celda de la extensión (N del día anterior). */
+      extApplyDateStr?: string;
+      /** Celda del adelanto (M del día siguiente en un hueco N). */
+      adelApplyDateStr?: string;
     };
 
 export function listDateRangeInclusive(startYmd: unknown, endYmd?: unknown): string[] {
@@ -562,6 +567,9 @@ function buildVacancySplitPackage(
       homePositionName: coverage.extHomePosition,
       baseCode: coverage.extBaseCode,
       extraHours: splitTimes.extExtraHours,
+      applyDateStr: coverage.extApplyDateStr && coverage.extApplyDateStr !== dateStr
+        ? coverage.extApplyDateStr
+        : undefined,
     },
     earlyStart: {
       employeeId: coverage.adelEmpId,
@@ -571,6 +579,9 @@ function buildVacancySplitPackage(
       toTime: splitTimes.adel.to,
       baseCode: coverage.adelBaseCode,
       extraHours: splitTimes.adelExtraHours,
+      applyDateStr: coverage.adelApplyDateStr && coverage.adelApplyDateStr !== dateStr
+        ? coverage.adelApplyDateStr
+        : undefined,
     },
   };
 }
@@ -583,7 +594,7 @@ function deriveFallbackWorkShift(
   input: ProcessVacancyInput,
   overrideBand?: string | null,
   overridePosition?: string | null,
-): { code: string; hours: number; startTime: string; positionName: string; objectiveId?: string } | null {
+): { code: string; hours: number; startTime: string; endTime?: string; positionName: string; objectiveId?: string } | null {
   const code = String(overrideBand || input.fallbackGapBand || '').toUpperCase();
   if (!code) return null;
   const activePos = String(overridePosition || input.activePosition || '').trim();
@@ -595,6 +606,7 @@ function deriveFallbackWorkShift(
     code,
     hours: Number(shift?.hours) || (code === 'D12' || code === 'N12' ? 12 : 8),
     startTime: shift?.startTime || '00:00',
+    endTime: shift?.endTime || undefined,
     positionName: String(pos?.positionName || activePos || 'General'),
     objectiveId: input.selectedObjective,
   };
@@ -603,11 +615,12 @@ function deriveFallbackWorkShift(
 function mapRawToWorkShift(
   raw: Record<string, any>,
   selectedObjective?: string,
-): { code: string; hours: number; startTime: string; positionName: string; objectiveId?: string } {
+): { code: string; hours: number; startTime: string; endTime?: string; positionName: string; objectiveId?: string } {
   return {
     code: String(raw.code || '').toUpperCase(),
     hours: Number(raw.hours) || 8,
     startTime: raw.startTime || '00:00',
+    endTime: typeof raw.endTime === 'string' ? raw.endTime : undefined,
     positionName: String(raw.positionName || 'General'),
     objectiveId: raw.objectiveId || selectedObjective,
   };
@@ -620,7 +633,7 @@ function resolveSubstituteInheritedWorkShift(
   input: ProcessVacancyInput,
   coverage: Extract<VacancyDayCoverageInput, { mode: 'substitute' }>,
   workShift: Record<string, any> | null,
-): { code: string; hours: number; startTime: string; positionName: string; objectiveId?: string } | null {
+): { code: string; hours: number; startTime: string; endTime?: string; positionName: string; objectiveId?: string } | null {
   const preferredBand = String(coverage.gapBand || '').toUpperCase() || null;
   const preferredPos = coverage.gapPosition || null;
 
@@ -756,6 +769,7 @@ export function applyVacancyCoverageToChanges(
         objectiveId: effectiveWorkShift.objectiveId || input.selectedObjective,
         hours: effectiveWorkShift.hours || 8,
         startTime: effectiveWorkShift.startTime || '00:00',
+        endTime: effectiveWorkShift.endTime,
         positionName: effectiveWorkShift.positionName || input.activePosition || 'General',
         isFrancoTrabajado: suplOnFranco || undefined,
         isFranco: suplOnFranco ? false : undefined,
@@ -780,19 +794,62 @@ export function applyVacancyCoverageToChanges(
         label: `${titularName} · ${gapPositionName} · ${gapBand}`,
         kind: 'absence',
       };
-      const extShift = resolveEmployeeShift(coverage.extEmpId, dateStr, input.shiftsMap, newChanges);
-      const adelShift = resolveEmployeeShift(coverage.adelEmpId, dateStr, input.shiftsMap, newChanges);
+      const ventana = defaultSplitTimesForVacancyGap(input.positionStructure, gapPositionName, gapBand);
+      const hmPlano = (v: unknown) => {
+        if (typeof v !== 'string') return '';
+        const m = v.match(/(\d{1,2}):(\d{2})/);
+        return m ? `${m[1].padStart(2, '0')}:${m[2]}` : '';
+      };
+      const crudoFrom = hmPlano(effectiveWorkShift.startTime);
+      const crudoTo = hmPlano(effectiveWorkShift.endTime);
+      const placeholder = !crudoFrom || !crudoTo || (crudoFrom === '00:00' && (crudoTo === '23:59' || crudoTo === '00:00'));
+      const gapFrom = placeholder ? ventana.gap.from : crudoFrom;
+      const gapTo = placeholder ? ventana.gap.to : crudoTo;
+      const extHallado = resolverDiaTramo({
+        lado: 'ext',
+        empId: coverage.extEmpId,
+        dateStr,
+        gapFrom,
+        gapTo,
+        gapPosition: gapPositionName,
+        shiftsMap: input.shiftsMap,
+        pendingChanges: newChanges,
+        positionStructure: input.positionStructure,
+        preferDate: coverage.extApplyDateStr,
+      });
+      const adelHallado = resolverDiaTramo({
+        lado: 'adel',
+        empId: coverage.adelEmpId,
+        dateStr,
+        gapFrom,
+        gapTo,
+        gapPosition: gapPositionName,
+        shiftsMap: input.shiftsMap,
+        pendingChanges: newChanges,
+        positionStructure: input.positionStructure,
+        preferDate: coverage.adelApplyDateStr,
+      });
+      const extShift = extHallado.shift;
+      const adelShift = adelHallado.shift;
+      const coverageFechada = {
+        ...coverage,
+        extHomePosition: extShift?.positionName || coverage.extHomePosition,
+        extBaseCode: extShift?.code || coverage.extBaseCode,
+        adelBaseCode: adelShift?.code || coverage.adelBaseCode,
+        extApplyDateStr: extHallado.dateStr,
+        adelApplyDateStr: adelHallado.dateStr,
+      };
       const dualPlan = resolveVacancySplitSegmentTimes(
         input.positionStructure,
         gapBand,
         gapPositionName,
         {
-          positionName: extShift?.positionName || coverage.extHomePosition,
-          code: extShift?.code || coverage.extBaseCode,
+          positionName: extShift?.positionName || coverageFechada.extHomePosition,
+          code: extShift?.code || coverageFechada.extBaseCode,
         },
         {
           positionName: adelShift?.positionName,
-          code: adelShift?.code || coverage.adelBaseCode,
+          code: adelShift?.code || coverageFechada.adelBaseCode,
         },
         coverage.extExtraHours,
         coverage.secondExtExtraHours,
@@ -803,7 +860,7 @@ export function applyVacancyCoverageToChanges(
         extExtraHours: dualPlan.firstExtraHours,
         adelExtraHours: dualPlan.secondExtraHours,
       };
-      const pkg = buildVacancySplitPackage(input, dateStr, coverage, target, splitTimes);
+      const pkg = buildVacancySplitPackage(input, dateStr, coverageFechada, target, splitTimes);
       try {
         const updates = buildRecompositionPendingUpdates(pkg, {
           shiftsMap: input.shiftsMap,

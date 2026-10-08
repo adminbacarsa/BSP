@@ -203,9 +203,9 @@ export function defaultSplitTimesCct(band: string): VacancySplitTimes {
   }
   if (b === 'N') {
     return {
-      gap: { from: '19:00', to: '07:00' },
-      ext: { from: '19:00', to: '23:00' },
-      adel: { from: '23:00', to: '07:00' },
+      gap: { from: '23:00', to: '07:00' },
+      ext: { from: '23:00', to: '03:00' },
+      adel: { from: '03:00', to: '07:00' },
     };
   }
   if (b === 'M') {
@@ -229,12 +229,11 @@ export function defaultSplitTimesForVacancyGap(
   targetBand: string,
 ): VacancySplitTimes {
   const target = normCode(targetBand);
-  if (CCT_BANDS.has(target)) return defaultSplitTimesCct(target);
-
   const resolvedPos = findPositionForBand(positionStructure, target, positionName);
   const ordered = orderedBandsForVacancyGap(positionStructure, resolvedPos);
   const shift = ordered.find((s) => normCode(s.code) === target);
-  if (!shift) return defaultSplitTimesCct(target);
+  const tieneHorario = !!(shift?.startTime || shift?.endTime || (shift?.blocks && shift.blocks.length > 0));
+  if (!shift || !tieneHorario) return defaultSplitTimesCct(target);
 
   const win = shiftTimeWindowFromSla(shift);
   const gap = { from: win.from, to: win.to };

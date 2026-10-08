@@ -32,7 +32,7 @@ function faltantes(counts: Record<string, number>): string[] {
   return (gap?.missingBandsPrimary || []).map((b) => b.code);
 }
 
-test('V sobre N conserva la banda y el horario', () => {
+test('una sola banda sin cerrar manda, aunque el original diga otra', () => {
   const previo = { code: 'N', positionName: PUESTO, startTime: '23:00', endTime: '07:00', hours: 8 };
   const campos = camposBandaConservada(previo);
   assert.deepEqual(campos, {
@@ -42,18 +42,42 @@ test('V sobre N conserva la banda y el horario', () => {
     originalEndTime: '07:00',
   });
   const pending = { [`${EMP}_2026-10-11`]: { code: 'V', name: 'Vacaciones', startTime: '00:00', endTime: '23:59', ...campos } };
+  const sola = resolverBandaACubrir({
+    titularId: EMP,
+    dateStr: '2026-10-11',
+    pendingChanges: pending,
+    positionName: PUESTO,
+    positionStructure: estructura,
+    bandasFaltantes: ['N'],
+  });
+  assert.equal(sola?.code, 'N');
+  assert.equal(sola?.scheduleLabel, '23:00–07:00');
+  const distinta = resolverBandaACubrir({
+    titularId: EMP,
+    dateStr: '2026-10-11',
+    pendingChanges: { [`${EMP}_2026-10-11`]: { code: 'V', originalCode: 'M', originalStartTime: '07:00', originalEndTime: '15:00', positionName: PUESTO } },
+    positionName: PUESTO,
+    positionStructure: estructura,
+    bandasFaltantes: ['N'],
+  });
+  assert.equal(distinta?.code, 'N');
+  assert.equal(distinta?.source, 'sla_faltante');
+  assert.notEqual(distinta?.code, 'M');
+});
+
+test('si faltan varias, gana originalCode y no la primera de la lista', () => {
+  const pending = { [`${EMP}_2026-10-11`]: { code: 'V', originalCode: 'N', originalPositionName: PUESTO, originalStartTime: '23:00', originalEndTime: '07:00' } };
   const banda = resolverBandaACubrir({
     titularId: EMP,
     dateStr: '2026-10-11',
     pendingChanges: pending,
     positionName: PUESTO,
     positionStructure: estructura,
-    bandasFaltantes: ['M'],
+    bandasFaltantes: ['M', 'T', 'N'],
   });
   assert.equal(banda?.code, 'N');
   assert.equal(banda?.source, 'dia');
   assert.equal(banda?.scheduleLabel, '23:00–07:00');
-  assert.equal(banda?.positionName, PUESTO);
 });
 
 test('licencia sin originalCode usa la banda que el SLA dejó sin cubrir, nunca M', () => {

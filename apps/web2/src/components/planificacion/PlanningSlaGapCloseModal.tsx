@@ -76,6 +76,7 @@ export default function PlanningSlaGapCloseModal({
   const [extId, setExtId] = useState('');
   const [extApplyDate, setExtApplyDate] = useState('');
   const [secondId, setSecondId] = useState('');
+  const [adelApplyDate, setAdelApplyDate] = useState('');
   const [soloId, setSoloId] = useState('');
   const [soloApplyDate, setSoloApplyDate] = useState('');
   const [ftId, setFtId] = useState('');
@@ -168,6 +169,7 @@ export default function PlanningSlaGapCloseModal({
 
   const manual = vacancySplitUsesManualExtraHours({ extExtraHours: extExtraH, secondExtExtraHours: secondExtraH });
   const extShiftDate = extApplyDate || data.dateStr;
+  const adelShiftDate = adelApplyDate || data.dateStr;
   const preview = (() => {
     try {
       const s = segmentosMitadHueco(data.dateStr, gapVentana.from, gapVentana.to);
@@ -229,7 +231,7 @@ export default function PlanningSlaGapCloseModal({
         return;
       }
       const extShift = resolveEmployeeShift(extId, extShiftDate, shiftsMap, pendingChanges);
-      const secondShift = resolveEmployeeShift(secondId, data.dateStr, shiftsMap, pendingChanges);
+      const secondShift = resolveEmployeeShift(secondId, adelShiftDate, shiftsMap, pendingChanges);
       if (!extShift || extShift.isDeleted) {
         toast.error('El guardia del 1.er tramo no tiene turno laboral ese día.');
         return;
@@ -256,6 +258,7 @@ export default function PlanningSlaGapCloseModal({
         positionStructure,
         authorizeFrancoTrabajado: authorizeFranco,
         extApplyDateStr: extShiftDate !== data.dateStr ? extShiftDate : undefined,
+        adelApplyDateStr: adelShiftDate !== data.dateStr ? adelShiftDate : undefined,
       }, {
         shiftsMap,
         employeesById,
@@ -362,6 +365,7 @@ export default function PlanningSlaGapCloseModal({
                     setExtId('');
                     setSecondId('');
                     setExtApplyDate('');
+                    setAdelApplyDate('');
                   }}
                   className={`w-full px-2.5 py-2 text-left text-xs font-bold rounded-lg border ${ftId === c.id ? 'bg-violet-600 text-white border-violet-700' : 'bg-white border-slate-200 text-slate-800'}`}
                 >
@@ -379,6 +383,7 @@ export default function PlanningSlaGapCloseModal({
                 setExtId('');
                 setSecondId('');
                 setExtApplyDate('');
+                setAdelApplyDate('');
               }}
               className={`flex-1 py-2 rounded-xl text-[10px] font-black border ${coverMode === 'solo' ? 'bg-rose-600 text-white border-rose-600' : 'bg-white border-slate-200 text-slate-600'}`}
             >
@@ -416,7 +421,7 @@ export default function PlanningSlaGapCloseModal({
                   onClick={() => {
                     setFtId('');
                     setSoloId(c.id);
-                    setSoloApplyDate(c.extensionApplyDate || data.dateStr);
+                    setSoloApplyDate(c.earlyStartApplyDate || c.extensionApplyDate || data.dateStr);
                   }}
                   className={`w-full px-2.5 py-2 text-left text-xs font-bold rounded-lg border ${soloId === c.id ? 'bg-red-100 border-red-500 text-red-900' : 'bg-white border-slate-200'}`}
                 >
@@ -468,12 +473,13 @@ export default function PlanningSlaGapCloseModal({
                 </p>
               ) : poolSecond.map((c) => (
                 <button
-                  key={c.id}
+                  key={`${c.id}_${c.earlyStartApplyDate || data.dateStr}`}
                   type="button"
                   onClick={() => {
                     setFtId('');
                     setSoloId('');
                     setSecondId(c.id);
+                    setAdelApplyDate(c.earlyStartApplyDate || data.dateStr);
                   }}
                   className={`w-full px-2.5 py-2 text-left text-xs font-bold rounded-lg border ${secondId === c.id ? 'bg-red-100 border-red-500 text-red-900' : 'bg-white border-slate-200'}`}
                 >

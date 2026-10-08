@@ -28,9 +28,17 @@ function shiftKey(empId: string, dateStr: string) {
 }
 
 export function previousCalendarDayStr(dateStr: string): string {
+  return shiftCalendarDayStr(dateStr, -1);
+}
+
+export function nextCalendarDayStr(dateStr: string): string {
+  return shiftCalendarDayStr(dateStr, 1);
+}
+
+function shiftCalendarDayStr(dateStr: string, delta: number): string {
   const [y, m, d] = dateStr.split('-').map(Number);
   const t = new Date(y, m - 1, d);
-  t.setDate(t.getDate() - 1);
+  t.setDate(t.getDate() + delta);
   return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
 }
 
@@ -41,6 +49,8 @@ export type SegmentCandidateRow = {
   positionName: string;
   /** Si la extensión se aplica en otra celda (ej. N del día anterior). */
   extensionApplyDate?: string;
+  /** Si el adelanto se aplica en otra celda (ej. M del día siguiente, hueco N). */
+  earlyStartApplyDate?: string;
   /** «11:30–15:15». */
   scheduleLabel?: string;
   /** Fin (ext) o inicio (adel) menos el borde del hueco, en minutos. Negativo = antes. */
@@ -303,14 +313,15 @@ export function buildRecompositionPendingUpdates(
   }
 
   // ── Adelanto (G2) ──
-  const adelKey = shiftKey(pkg.earlyStart.employeeId, pkg.dateStr);
-  const adelBase = getShift(pkg.earlyStart.employeeId, pkg.dateStr);
+  const adelDateStr = pkg.earlyStart.applyDateStr || pkg.dateStr;
+  const adelKey = shiftKey(pkg.earlyStart.employeeId, adelDateStr);
+  const adelBase = getShift(pkg.earlyStart.employeeId, adelDateStr);
   if (!adelBase || adelBase.isDeleted) {
-    throw new Error('El guardia de adelanto no tiene turno ese día');
+    throw new Error(`El guardia de adelanto no tiene turno el ${adelDateStr.split('-').reverse().slice(0, 2).join('/')}`);
   }
   const adelOnFranco = isPlannedFrancoShift(adelBase);
   if (adelOnFranco && !ctx.authorizeFrancoTrabajado) {
-    throw new Error(`FRANCO_COVERAGE:${adelName} tiene franco planificado (${adelBase.code}) el ${pkg.dateStr} — requiere PIN de supervisor (FT / costo extra).`);
+    throw new Error(`FRANCO_COVERAGE:${adelName} tiene franco planificado (${adelBase.code}) el ${adelDateStr} — requiere PIN de supervisor (FT / costo extra).`);
   }
   const tailExtension = !isOperationalGap && !isEarlyDeparture && vacancySecondSegmentIsTailExtension(String(pkg.target.code || ''));
   const adelExtraHoursField = pkg.earlyStart.extraHours != null && pkg.earlyStart.extraHours > 0
@@ -749,10 +760,12 @@ function listarContiguos(
   if (!hueco) return [];
   const exclude = new Set(excludeIds);
   const borde = lado === 'ext' ? hueco.start : hueco.end;
-  const dias = lado === 'ext' ? [dateStr, previousCalendarDayStr(dateStr)] : [dateStr];
+  const prev = previousCalendarDayStr(dateStr);
+  const next = nextCalendarDayStr(dateStr);
+  const dias = lado === 'ext' ? [dateStr, prev] : [dateStr, next];
   const porPersona = new Map<string, SegmentCandidateRow & { abs: number; mismo: boolean }>();
   for (const dia of dias) {
-    const offset = dia === dateStr ? 0 : -1;
+    const offset = dia === dateStr ? 0 : dia === prev ? -1 : 1;
     for (const emp of employees) {
       if (!emp.id || exclude.has(emp.id)) continue;
       const shift = resolveEmployeeShift(emp.id, dia, shiftsMap, pendingChanges);
@@ -781,7 +794,11 @@ function listarContiguos(
       const positionName = positionNamePre;
       const row: SegmentCandidateRow & { abs: number; mismo: boolean } = {
         id: emp.id,
-        name: offset < 0 ? `${name} · ${code} ${dia.slice(8)}/${dia.slice(5, 7)}→` : name,
+        name: offset < 0
+          ? `${name} · ${code} ${dia.slice(8)}/${dia.slice(5, 7)}→`
+          : offset > 0
+            ? `${name} · ${code} ←${dia.slice(8)}/${dia.slice(5, 7)}`
+            : name,
         code,
         positionName,
         scheduleLabel: `${horario.from}–${horario.to}`,
@@ -790,6 +807,7 @@ function listarContiguos(
         abs: Math.abs(delta),
         mismo: !!listCtx?.gapPositionName && positionName === listCtx.gapPositionName,
         ...(offset < 0 ? { extensionApplyDate: dia } : {}),
+        ...(offset > 0 ? { earlyStartApplyDate: dia } : {}),
       };
       const prev = porPersona.get(emp.id);
       if (!prev || row.abs < prev.abs) porPersona.set(emp.id, row);
@@ -807,6 +825,7 @@ function listarContiguos(
 /**
  * Ext si termina entre (inicio − 30 min) e inicio. Adel si arranca entre el fin y el fin + 30 min.
  * offsetDays = −1 para la N del día anterior (su fin cae en el día del hueco).
+ * offsetDays = +1 para la M del día siguiente (su inicio es el fin del hueco N).
  */
 export function clasificarTurnoContraHueco(
   shift: Record<string, any> | null | undefined,
@@ -835,10 +854,42 @@ export function clasificarTurnoContraHueco(
   const dExt = fin - hueco.start;
   const dAdel = ini - hueco.end;
   const esExt = dExt <= 0 && dExt >= -CONTIGUO_MIN;
-  const esAdel = offset === 0 && dAdel >= 0 && dAdel <= CONTIGUO_MIN;
+  const esAdel = (offset === 0 || offset === 1) && dAdel >= 0 && dAdel <= CONTIGUO_MIN;
   if (esExt && !esAdel) return 'ext';
   if (esAdel && !esExt) return 'adel';
   return null;
+}
+
+/** Día de la celda donde vive el turno que extiende o adelanta. La extensión puede ser el día anterior; el adelanto, el siguiente. */
+export function resolverDiaTramo(opts: {
+  lado: 'ext' | 'adel';
+  empId: string;
+  dateStr: string;
+  gapFrom: string;
+  gapTo: string;
+  gapPosition?: string | null;
+  shiftsMap: Record<string, any>;
+  pendingChanges?: Record<string, any>;
+  positionStructure?: VacancyPositionSla[];
+  preferDate?: string | null;
+}): { dateStr: string; shift: Record<string, any> | null } {
+  const prev = previousCalendarDayStr(opts.dateStr);
+  const next = nextCalendarDayStr(opts.dateStr);
+  const natural = opts.lado === 'ext' ? [opts.dateStr, prev] : [opts.dateStr, next];
+  const dias = [...new Set([...(opts.preferDate ? [opts.preferDate] : []), ...natural])];
+  const pending = opts.pendingChanges || {};
+  for (const dia of dias) {
+    const shift = resolveEmployeeShift(opts.empId, dia, opts.shiftsMap, pending);
+    if (!shift) continue;
+    const offset = dia === opts.dateStr ? 0 : dia === prev ? -1 : dia === next ? 1 : 0;
+    const lado = clasificarTurnoContraHueco(shift, opts.gapFrom, opts.gapTo, opts.positionStructure, {
+      offsetDays: offset,
+      gapPositionName: opts.gapPosition,
+    });
+    if (lado === opts.lado) return { dateStr: dia, shift };
+  }
+  const fallback = opts.preferDate || opts.dateStr;
+  return { dateStr: fallback, shift: resolveEmployeeShift(opts.empId, fallback, opts.shiftsMap, pending) };
 }
 
 /** Extensión: quien termina entre 30 min antes y el inicio del hueco. Incluye la N del día anterior. */
@@ -855,7 +906,7 @@ export function listExtensionCandidates(
   return listarContiguos('ext', targetBand, dateStr, objectiveId, employees, shiftsMap, pendingChanges, excludeIds, listCtx);
 }
 
-/** Adelanto: quien arranca a ±30 min del fin del hueco. El código no importa. No toma el día siguiente. */
+/** Adelanto: quien arranca entre el fin del hueco y 30 min después. Si el hueco termina al día siguiente, mira esa M. */
 export function listEarlyStartCandidates(
   targetBand: string,
   dateStr: string,

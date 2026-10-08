@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import { listEarlyStartCandidates, listExtensionCandidates } from './planningRecompositionApply';
 import { textoTramoSolo, validarClicElegir } from './menuRapidoCobertura';
 import { applyOperationalGapCloseToChanges, segmentosMitadHueco } from './operationalGapCoverage';
+import { applyVacancyCoverageToChanges } from './vacancyCoverage';
+import { defaultSplitTimesCct } from './vacancySplitBands';
+import { evaluateCoverageDayGuards } from './vacancyCoverageWizard';
 import { calcPlanningBillableHoursAttributedToPosition } from './planningScheduledHours';
 
 const OBJ = 'obj1';
@@ -204,4 +207,116 @@ test('borradores: la N del día anterior en borrador puede extender una M (crono
   const ctx2 = { gapPositionName: 'Puesto 2', gapStart: '07:00', gapEnd: '15:00', preferSamePosition: true };
   assert.deepEqual(listExtensionCandidates('M', '2026-10-11', OBJ, emps, sm, {}, ['mart'], ctx2).map((r) => r.id), ['kasi']);
   assert.deepEqual(listEarlyStartCandidates('M', '2026-10-11', OBJ, emps, sm, {}, ['mart'], ctx2).map((r) => r.id), ['herr']);
+});
+
+test('hueco M: la extensión se escribe en la N del día anterior, no en el franco del día del hueco', () => {
+  const dia = '2026-10-11';
+  const prev = '2026-10-10';
+  const puesto = [{ positionName: 'Puesto 2', shifts: [
+    { code: 'M', hours: 8, startTime: '07:00', endTime: '15:00' },
+    { code: 'T', hours: 8, startTime: '15:00', endTime: '23:00' },
+    { code: 'N', hours: 8, startTime: '23:00', endTime: '07:00' },
+  ] }];
+  const shifts: Record<string, any> = {
+    [`bordino_${prev}`]: { employeeId: 'bordino', objectiveId: 'obrador', code: 'N', positionName: 'Puesto 2', startTime: '23:00', endTime: '07:00' },
+    [`bordino_${dia}`]: { employeeId: 'bordino', objectiveId: 'obrador', code: 'F', positionName: 'Puesto 2', isFranco: true },
+    [`barrios_${dia}`]: { employeeId: 'barrios', objectiveId: 'obrador', code: 'T', positionName: 'Puesto 2', startTime: '15:00', endTime: '23:00' },
+    [`mart_${dia}`]: { employeeId: 'mart', objectiveId: 'obrador', code: 'V', positionName: 'Puesto 2', originalCode: 'M' },
+  };
+  const emps = [{ id: 'bordino', name: 'BORDINO' }, { id: 'barrios', name: 'BARRIOS' }, { id: 'mart', name: 'MARTINEZ' }];
+  const ctx = { gapPositionName: 'Puesto 2', gapStart: '07:00', gapEnd: '15:00' };
+  const ext = listExtensionCandidates('M', dia, 'obrador', emps, shifts, {}, ['mart'], ctx);
+  assert.equal(ext[0]?.id, 'bordino');
+  assert.equal(ext[0]?.extensionApplyDate, prev);
+  const out = applyVacancyCoverageToChanges({}, {
+    vacancyData: { employeeId: 'mart', employeeName: 'MARTINEZ', type: 'Vacaciones', startDate: dia },
+    days: [{ dateStr: dia, coverage: { mode: 'split', extEmpId: 'bordino', adelEmpId: 'barrios', gapBand: 'M', gapPosition: 'Puesto 2' } }],
+    selectedObjective: 'obrador',
+    activePosition: 'Puesto 2',
+    shiftsMap: shifts,
+    getTypicalShift: () => null,
+    employeesById: Object.fromEntries(emps.map((e) => [e.id, e])),
+    defaultSplitForBand: () => ({ ext: { from: '07:00', to: '11:00' }, adel: { from: '11:00', to: '15:00' } }),
+    positionStructure: puesto,
+    fallbackGapBand: 'M',
+  });
+  const noche = out.changes[`bordino_${prev}`];
+  const franco = out.changes[`bordino_${dia}`];
+  const tarde = out.changes[`barrios_${dia}`];
+  assert.equal(noche?.isExtended, true);
+  assert.equal(noche?.coverageSegmentRole, 'EXTENSION');
+  assert.equal(noche?.segmentFromTime, '07:00');
+  assert.equal(noche?.segmentToTime, '11:00');
+  assert.equal(noche?.coversPositionName, 'Puesto 2');
+  assert.equal(franco?.isExtended, undefined);
+  assert.equal(tarde?.isEarlyStart, true);
+  assert.equal(tarde?.adjustedStartTime, '11:00');
+  assert.equal(out.changes[`mart_${dia}`]?.coverageStatus, 'COVERED');
+});
+
+test('hueco N: adelanta la M del día siguiente y la escribe ahí', () => {
+  const dia = '2026-10-12';
+  const next = '2026-10-13';
+  const emps = [{ id: 'herrera', name: 'HERRERA' }, { id: 'morales', name: 'MORALES' }];
+  const shifts: Record<string, any> = {
+    [`herrera_${dia}`]: { employeeId: 'herrera', objectiveId: 'obrador', code: 'T', positionName: 'Puesto 2', startTime: '15:00', endTime: '23:00' },
+    [`morales_${next}`]: { employeeId: 'morales', objectiveId: 'obrador', code: 'M', positionName: 'Puesto 2', startTime: '07:00', endTime: '15:00' },
+  };
+  const ctx = { gapPositionName: 'Puesto 2', gapStart: '23:00', gapEnd: '07:00' };
+  const ext = listExtensionCandidates('N', dia, 'obrador', emps, shifts, {}, [], ctx);
+  const adel = listEarlyStartCandidates('N', dia, 'obrador', emps, shifts, {}, [], ctx);
+  assert.deepEqual(ext.map((r) => r.id), ['herrera']);
+  assert.equal(ext[0].extensionApplyDate, undefined);
+  assert.deepEqual(adel.map((r) => r.id), ['morales']);
+  assert.equal(adel[0].earlyStartApplyDate, next);
+  const changes = applyOperationalGapCloseToChanges({}, {
+    objectiveId: 'obrador',
+    dateStr: dia,
+    gapPosition: 'Puesto 2',
+    gapBand: 'N',
+    gapFrom: '23:00',
+    gapTo: '07:00',
+    extEmpId: 'herrera',
+    secondEmpId: 'morales',
+  }, { shiftsMap: shifts, employeesById: Object.fromEntries(emps.map((e) => [e.id, e])) });
+  assert.equal(changes[`herrera_${dia}`].isExtended, true);
+  assert.equal(changes[`herrera_${dia}`].segmentToTime, '03:00');
+  assert.equal(changes[`morales_${next}`].isEarlyStart, true);
+  assert.equal(changes[`morales_${next}`].coverageSegmentRole, 'EARLY_START');
+  assert.equal(changes[`morales_${next}`].adjustedStartTime, '03:00');
+  assert.equal(changes[`morales_${dia}`], undefined);
+});
+
+test('hueco N parte en 23:00–03:00 y 03:00–07:00', () => {
+  const t = defaultSplitTimesCct('N');
+  assert.equal(t.ext.from, '23:00');
+  assert.equal(t.ext.to, '03:00');
+  assert.equal(t.adel.from, '03:00');
+  assert.equal(t.adel.to, '07:00');
+});
+
+test('adelanto del día siguiente no se mide como un turno nuevo del día del hueco', () => {
+  const dia = '2026-10-12';
+  const next = '2026-10-13';
+  const shifts: Record<string, any> = {
+    [`herrante_${dia}`]: { code: 'M', startTime: '07:00', endTime: '15:00' },
+    [`herrante_${next}`]: { code: 'M', startTime: '07:00', endTime: '15:00' },
+  };
+  const shiftOf = (id: string, d: string) => shifts[`${id}_${d}`] || null;
+  const mal = evaluateCoverageDayGuards({
+    dateStr: dia,
+    proposedByEmp: { herrante: { code: 'M', startTime: '23:00', endTime: '07:00', addHours: 4 } },
+    shiftOf,
+    monthHoursOf: () => 100,
+    nameOf: () => 'HERRANTE',
+  });
+  assert.ok(mal.blocked.some((m) => /descanso/i.test(m)));
+  const bien = evaluateCoverageDayGuards({
+    dateStr: dia,
+    proposedByEmp: { herrante: { code: 'M', startTime: '03:00', endTime: '15:00', addHours: 4, applyDateStr: next } },
+    shiftOf,
+    monthHoursOf: () => 100,
+    nameOf: () => 'HERRANTE',
+  });
+  assert.deepEqual(bien.blocked, []);
 });

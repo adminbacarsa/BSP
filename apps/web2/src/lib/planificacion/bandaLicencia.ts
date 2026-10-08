@@ -302,8 +302,6 @@ export function resolverBandaACubrir(input: {
   const structure = input.positionStructure;
   const doc = docDelDia(input.titularId, input.dateStr, shiftsMap, pending);
   const delDia = bandaDelDoc(doc, pos, structure, 'dia', 'Turno planificado ese día (antes de la licencia)');
-  if (delDia) return delDia;
-
   const hermano = (input.turnosDelDia || []).find((t) => {
     if (!t || t.isDeleted || t.isSecondBlock) return false;
     if (String(t.origin || '') === 'OPERATIONS_COVERAGE') return false;
@@ -312,22 +310,26 @@ export function resolverBandaACubrir(input: {
     return esBandaTrabajo(t.code);
   });
   const delHermano = bandaDelDoc(hermano, pos, structure, 'dia', 'Turno de trabajo que quedó junto a la licencia');
-  if (delHermano) return delHermano;
+  const guardada = delDia || delHermano;
 
   const faltantes = [...new Set((input.bandasFaltantes || []).map(up).filter((c) => esBandaTrabajo(c)))];
   if (faltantes.length === 1) {
-    return armar(faltantes[0], pos || 'General', null, structure, 'sla_faltante', 'Banda del puesto que quedó sin cubrir');
+    const code = faltantes[0];
+    if (guardada && up(guardada.code) === code) return guardada;
+    return armar(code, pos || guardada?.positionName || 'General', null, structure, 'sla_faltante', 'Banda del puesto que quedó sin cubrir');
   }
 
   if (faltantes.length > 1) {
+    if (guardada && faltantes.includes(up(guardada.code))) return guardada;
     const conocidos = conocidosDelTitular(input.titularId, input.dateStr, shiftsMap, pending, input.turnosDelDia || undefined);
     const ciclo = proyectarCiclo(conocidos, input.dateStr);
     if (ciclo && esBandaTrabajo(ciclo) && faltantes.includes(ciclo)) {
       return armar(ciclo, pos || 'General', null, structure, 'ciclo', 'Ciclo del titular');
     }
+    return null;
   }
 
-  return null;
+  return guardada;
 }
 
 export function textoTurnoQueTenia(

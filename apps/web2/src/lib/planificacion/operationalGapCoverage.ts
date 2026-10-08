@@ -9,6 +9,7 @@ import {
   clasificarTurnoContraHueco,
   hoursBetweenTimes,
   isPlannedFrancoShift,
+  nextCalendarDayStr,
   previousCalendarDayStr,
   resolveEmployeeShift,
 } from './planningRecompositionApply';
@@ -33,6 +34,8 @@ export type OperationalGapCloseInput = {
   authorizeFrancoTrabajado?: boolean;
   /** Día de la celda del guardia de extensión (default: dateStr del hueco). */
   extApplyDateStr?: string;
+  /** Día de la celda del adelanto (default: dateStr del hueco; hueco N = día siguiente). */
+  adelApplyDateStr?: string;
   /** Horario real del hueco. Si falta, se toma del SLA del puesto y si no, del CCT. */
   gapFrom?: string;
   gapTo?: string;
@@ -86,6 +89,9 @@ export function buildOperationalGapRecompositionPackage(
       toTime: splitTimes.adel.to,
       baseCode: input.secondBaseCode,
       extraHours: splitTimes.adelExtraHours,
+      applyDateStr: input.adelApplyDateStr && input.adelApplyDateStr !== input.dateStr
+        ? input.adelApplyDateStr
+        : undefined,
     },
   };
 }
@@ -166,19 +172,25 @@ function ladoDePersona(
   pending: Record<string, any>,
   positionStructure: VacancyPositionSla[] | undefined,
 ): LadoEncontrado | null {
-  const dias = [dateStr, previousCalendarDayStr(dateStr)];
+  const prev = previousCalendarDayStr(dateStr);
+  const next = nextCalendarDayStr(dateStr);
+  const dias = [
+    { dia: dateStr, offset: 0 },
+    { dia: prev, offset: -1 },
+    { dia: next, offset: 1 },
+  ];
   let ext: LadoEncontrado | null = null;
   let adel: LadoEncontrado | null = null;
-  dias.forEach((dia, i) => {
+  for (const { dia, offset } of dias) {
     const shift = resolveEmployeeShift(empId, dia, shiftsMap, pending);
-    if (!shift) return;
+    if (!shift) continue;
     const lado = clasificarTurnoContraHueco(shift, gap.from, gap.to, positionStructure, {
-      offsetDays: i === 0 ? 0 : -1,
+      offsetDays: offset,
       gapPositionName: gapPosition,
     });
     if (lado === 'ext' && !ext) ext = { empId, lado, dateStr: dia, shift };
-    if (lado === 'adel' && i === 0 && !adel) adel = { empId, lado, dateStr: dia, shift };
-  });
+    if (lado === 'adel' && !adel) adel = { empId, lado, dateStr: dia, shift };
+  }
   if (ext && !adel) return ext;
   if (adel && !ext) return adel;
   return null;
@@ -215,7 +227,8 @@ export function applyOperationalGapCloseToChanges(
     const nb = apellidoDe(ctx.employeesById, input.secondEmpId);
     const sa = resolveEmployeeShift(input.extEmpId, input.extApplyDateStr || input.dateStr, ctx.shiftsMap, baseChanges)
       || resolveEmployeeShift(input.extEmpId, previousCalendarDayStr(input.dateStr), ctx.shiftsMap, baseChanges);
-    const sb = resolveEmployeeShift(input.secondEmpId, input.dateStr, ctx.shiftsMap, baseChanges)
+    const sb = resolveEmployeeShift(input.secondEmpId, input.adelApplyDateStr || input.dateStr, ctx.shiftsMap, baseChanges)
+      || resolveEmployeeShift(input.secondEmpId, nextCalendarDayStr(input.dateStr), ctx.shiftsMap, baseChanges)
       || resolveEmployeeShift(input.secondEmpId, previousCalendarDayStr(input.dateStr), ctx.shiftsMap, baseChanges);
     const partes = [motivoNoContiguo(na, sa, gap)];
     if (input.secondEmpId !== input.extEmpId) partes.push(motivoNoContiguo(nb, sb, gap));
@@ -239,6 +252,7 @@ export function applyOperationalGapCloseToChanges(
     extBaseCode: String(extP.shift.code || ''),
     secondBaseCode: String(adelP.shift.code || ''),
     extApplyDateStr: extP.dateStr !== input.dateStr ? extP.dateStr : undefined,
+    adelApplyDateStr: adelP.dateStr !== input.dateStr ? adelP.dateStr : undefined,
     extExtraHours: extH,
     secondExtExtraHours: adelH,
   }, splitTimes);
@@ -294,8 +308,13 @@ export function applySingleWorkerFullGapCloseToChanges(
   const from = gap.from;
   const to = gap.to;
   const hoursLabel = Number.isInteger(hours) ? String(hours) : hours.toFixed(1);
+  const offsetDays = applyDate === input.dateStr
+    ? 0
+    : applyDate === nextCalendarDayStr(input.dateStr)
+      ? 1
+      : -1;
   const lado = clasificarTurnoContraHueco(base, from, to, input.positionStructure, {
-    offsetDays: applyDate === input.dateStr ? 0 : -1,
+    offsetDays,
     gapPositionName: input.gapPosition,
   });
   if (lado !== 'ext' && lado !== 'adel') {

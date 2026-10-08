@@ -8140,13 +8140,31 @@ function PlanificacionDesktop() {
         setMenuRapido(null);
     }, [selectedObjective, currentDate]);
     const nombreEmpleadoMenu = (id: string) => String(employees.find((e: { id?: string; name?: string }) => e.id === id)?.name || id);
+    const hmMenu = (v: unknown): string | undefined => {
+        if (typeof v === 'string') {
+            const corto = v.match(/^(\d{1,2}):(\d{2})$/);
+            if (corto) return `${corto[1].padStart(2, '0')}:${corto[2]}`;
+            const d = new Date(v);
+            if (!Number.isNaN(d.getTime())) {
+                return new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'America/Argentina/Buenos_Aires' }).format(d);
+            }
+            return undefined;
+        }
+        if (v && typeof v === 'object' && typeof (v as { toDate?: () => Date }).toDate === 'function') {
+            return hmMenu((v as { toDate: () => Date }).toDate().toISOString());
+        }
+        if (v && typeof v === 'object' && typeof (v as { seconds?: number }).seconds === 'number') {
+            return hmMenu(new Date((v as { seconds: number }).seconds * 1000).toISOString());
+        }
+        return undefined;
+    };
     const turnoGuardMenu = (empId: string, dia: string) => {
         const s = turnoMenuDe(empId, dia);
         if (!s) return null;
         return {
             code: s.code,
-            startTime: typeof s.startTime === 'string' ? s.startTime : undefined,
-            endTime: typeof s.endTime === 'string' ? s.endTime : undefined,
+            startTime: hmMenu(s.startTime),
+            endTime: hmMenu(s.endTime),
             hours: s.hours,
             isFranco: s.isFranco === true,
         };
@@ -8301,11 +8319,13 @@ function PlanificacionDesktop() {
             preferSamePosition: true as const,
         };
         const excl = titularId ? [titularId] : [];
-        const candidatosBanda = paso === 'ext'
-            ? listExtensionCandidates(ctx.gapBand, dia, selectedObjective || '', employees, shiftsMap, pendingChanges, excl, listCtx).map((r) => r.id)
-            : paso === 'adel'
-                ? listEarlyStartCandidates(ctx.gapBand, dia, selectedObjective || '', employees, shiftsMap, pendingChanges, [...excl, extId].filter(Boolean), listCtx).map((r) => r.id)
-                : [];
+        const filasExt = paso === 'ext'
+            ? listExtensionCandidates(ctx.gapBand, dia, selectedObjective || '', employees, shiftsMap, pendingChanges, excl, listCtx)
+            : [];
+        const filasAdel = paso === 'adel'
+            ? listEarlyStartCandidates(ctx.gapBand, dia, selectedObjective || '', employees, shiftsMap, pendingChanges, [...excl, extId].filter(Boolean), listCtx)
+            : [];
+        const candidatosBanda = (paso === 'ext' ? filasExt : filasAdel).map((r) => r.id);
         const coverage: VacancyDayCoverage = paso === 'asignar'
             ? { mode: 'substitute', employeeId: personaId }
             : { mode: 'split', extEmpId: paso === 'ext' ? personaId : extId, adelEmpId: paso === 'adel' ? personaId : '', gapBand: ctx.gapBand, gapPosition: ctx.positionName };
@@ -8316,6 +8336,31 @@ function PlanificacionDesktop() {
             positionStructure: effectivePosStructure as import('@/lib/planificacion/vacancySplitBands').VacancyPositionSla[],
         });
         delete propuesta[''];
+        if (paso === 'adel' && propuesta[personaId]) {
+            const fecha = filasAdel.find((r) => r.id === personaId)?.earlyStartApplyDate;
+            if (fecha && fecha !== dia) {
+                const propio = turnoGuardMenu(personaId, fecha);
+                propuesta[personaId] = {
+                    ...propuesta[personaId],
+                    code: String(propio?.code || propuesta[personaId].code),
+                    endTime: propio?.endTime || propuesta[personaId].endTime,
+                    applyDateStr: fecha,
+                };
+            }
+        }
+        if (paso === 'ext' && propuesta[personaId]) {
+            const fecha = filasExt.find((r) => r.id === personaId)?.extensionApplyDate;
+            if (fecha && fecha !== dia) {
+                const propio = turnoGuardMenu(personaId, fecha);
+                propuesta[personaId] = {
+                    ...propuesta[personaId],
+                    code: String(propio?.code || propuesta[personaId].code),
+                    startTime: propio?.startTime || propuesta[personaId].startTime,
+                    extiendeTurno: true,
+                    applyDateStr: fecha,
+                };
+            }
+        }
         const guard = evaluateCoverageDayGuards({
             dateStr: dia,
             proposedByEmp: propuesta,
@@ -8465,11 +8510,26 @@ function PlanificacionDesktop() {
             return { changes: sellarMenuRapido(changes, [{ key, rol: 'CUBRE' }], texto, ctx.positionName), texto };
         }
         const texto = textoMarcaMenuRapido({ modo: 'split', ext: nombreEmpleadoMenu(cov.extId), adel: nombreEmpleadoMenu(cov.adelId) });
-        const extShift = turnoMenuDe(cov.extId, ctx.dateStr);
-        const adelShift = turnoMenuDe(cov.adelId, ctx.dateStr);
+        const rangoHuecoMenu = rangoHorario(ctx.horario);
+        const listCtxMenu = {
+            positionStructure: effectivePosStructure as import('@/lib/planificacion/vacancySplitBands').VacancyPositionSla[],
+            gapPositionName: ctx.positionName,
+            gapBand: ctx.gapBand,
+            gapStart: rangoHuecoMenu?.from,
+            gapEnd: rangoHuecoMenu?.to,
+        };
+        const exclMenu = ctx.clase === 'ausente' ? [ctx.empId] : [];
+        const extRow = listExtensionCandidates(ctx.gapBand, ctx.dateStr, selectedObjective || '', employees, shiftsMap, base, exclMenu, listCtxMenu)
+            .find((r) => r.id === cov.extId);
+        const adelRow = listEarlyStartCandidates(ctx.gapBand, ctx.dateStr, selectedObjective || '', employees, shiftsMap, base, [...exclMenu, cov.extId], listCtxMenu)
+            .find((r) => r.id === cov.adelId);
+        const extDate = extRow?.extensionApplyDate || ctx.dateStr;
+        const adelDate = adelRow?.earlyStartApplyDate || ctx.dateStr;
+        const extShift = turnoMenuDe(cov.extId, extDate);
+        const adelShift = turnoMenuDe(cov.adelId, adelDate);
         const claves = [
-            { key: `${cov.extId}_${ctx.dateStr}`, rol: 'EXT' as const },
-            { key: `${cov.adelId}_${ctx.dateStr}`, rol: 'ADEL' as const },
+            { key: `${cov.extId}_${extDate}`, rol: 'EXT' as const },
+            { key: `${cov.adelId}_${adelDate}`, rol: 'ADEL' as const },
         ];
         if (ctx.clase === 'ausente') {
             const applied = applyVacancyCoverageToChanges(base, {
@@ -8485,12 +8545,13 @@ function PlanificacionDesktop() {
                         extHomePosition: extShift?.positionName,
                         extBaseCode: extShift?.code,
                         adelBaseCode: adelShift?.code,
+                        extApplyDateStr: extDate,
+                        adelApplyDateStr: adelDate,
                     },
                 }],
             });
             return { changes: sellarMenuRapido(applied.changes, [{ key: titularKey }, ...claves], texto), texto };
         }
-        const rangoHuecoMenu = rangoHorario(ctx.horario);
         const changes = applyOperationalGapCloseToChanges(base, {
             objectiveId: selectedObjective || '',
             clientId: selectedClient || undefined,
@@ -8505,6 +8566,8 @@ function PlanificacionDesktop() {
             extBaseCode: extShift?.code,
             secondBaseCode: adelShift?.code,
             positionStructure: effectivePosStructure,
+            extApplyDateStr: extDate !== ctx.dateStr ? extDate : undefined,
+            adelApplyDateStr: adelDate !== ctx.dateStr ? adelDate : undefined,
         }, { shiftsMap, employeesById });
         return { changes: sellarMenuRapido(changes, claves, texto), texto };
     };
