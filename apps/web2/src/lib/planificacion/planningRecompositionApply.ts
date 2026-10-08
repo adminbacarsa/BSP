@@ -704,7 +704,8 @@ function ventanaDelHueco(
 
 /** Turno de puesto: no licencia, no franco, no RET/ESC/REF, no ops_cov, no ya extendido. */
 function esTurnoDePuestoParaExtender(shift: Record<string, any> | null | undefined): boolean {
-  if (!shift || shift.isDeleted || shift.draft === true || shift.isVirtual === true) return false;
+  // En Planificación el cronograma entero es borrador hasta publicar: un turno en borrador es plan, sí cuenta.
+  if (!shift || shift.isDeleted || shift.isVirtual === true) return false;
   if (shift.isAbsent === true) return false;
   if (shift.isExtended || shift.isEarlyStart) return false;
   if (String(shift.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE') return false;
@@ -712,7 +713,7 @@ function esTurnoDePuestoParaExtender(shift: Record<string, any> | null | undefin
   const code = String(shift.code || '').toUpperCase();
   const orig = String(shift.codigoOriginal || '').toUpperCase();
   if (EXTRA_NO_PUESTO.has(code) || EXTRA_NO_PUESTO.has(orig)) return false;
-  return isReliefEligibleShift(shift);
+  return isReliefEligibleShift({ ...shift, draft: false });
 }
 
 export function textoFilaHorario(p: {
