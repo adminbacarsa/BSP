@@ -3,6 +3,7 @@
  *   PLANIF_EMU_PORTS=8080:8291,9099:9291 node scripts/capturar-continuar-ret.mjs
  */
 import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { abrirPlanificacion, sleep } from './planif-cdp-lib.mjs';
 
 const m = JSON.parse(readFileSync(new URL('./continuar-mes/.manifest.json', import.meta.url), 'utf8'));
@@ -54,6 +55,22 @@ try {
   })()`);
   console.log('GRILLA', grilla);
   await shot('ret-fila');
+  const py = spawnSync('python', ['-c', `
+from PIL import Image
+from pathlib import Path
+d = Path(r"${process.cwd()}").joinpath("docs", "capturas-cobertura")
+modal = Image.open(d / "continuar-mes-ret-modal.png").convert("RGB")
+fila = Image.open(d / "continuar-mes-ret-fila.png").convert("RGB")
+w = max(modal.width, fila.width)
+gap = 12
+out = Image.new("RGB", (w, modal.height + gap + fila.height), (15, 23, 42))
+out.paste(modal, (0, 0))
+out.paste(fila, (0, modal.height + gap))
+out.save(d / "continuar-mes-ret.png")
+print("stitched", out.size)
+`], { encoding: 'utf8' });
+  if (py.status !== 0) throw new Error(py.stderr || py.stdout || 'no se pudo unir la captura');
+  console.log(py.stdout.trim());
 } finally {
   await cerrar();
 }
