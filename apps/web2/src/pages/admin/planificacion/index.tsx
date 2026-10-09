@@ -16,7 +16,7 @@ import {
     BadgePercent, ArrowLeftRight, CalendarSearch, CheckSquare, XCircle, Search as SearchIcon, RefreshCcw, UserCheck, Split, Ban,
     FastForward, Rewind, AlertOctagon, Siren, FileText, Fingerprint, CalendarCheck, HelpCircle, MousePointerClick, Check, Database, Activity,
     PowerOff, LockKeyhole, Ghost, Maximize2, Maximize, Minimize2, Copy, ClipboardPaste, Scissors, Wand2, BarChart3, BarChart2, PanelLeft, LayoutList,
-    ChevronsUp, ChevronsDown, MoreHorizontal, FlaskConical, Shuffle, Timer, Repeat
+    ChevronsUp, ChevronsDown, MoreHorizontal, FlaskConical, Shuffle, Timer, Repeat, UnfoldHorizontal
 } from 'lucide-react';
 
 import { PlanificacionMovil } from '@/components/movil/PlanificacionMovil';
@@ -202,6 +202,11 @@ import {
 import { PlanningCoverageLegend } from '@/components/planificacion/PlanningCoverageLegend';
 import { inicioRenderGrilla, registrarCommitGrilla } from '@/lib/planificacion/perfGrilla';
 import { etiquetaFilaGrupo, puestoDeTurno, type EtiquetaFilaGrupo } from '@/lib/planificacion/etiquetaFilaGrupo';
+import {
+    ANCHO_ANCHA, ANCHO_COMPACTA, abreviarNombreGuardia, anchoAutoDotacion, anchoCajaNombre, anchoContenidoFila, clampAnchoDotacion,
+    anchosEnVista, guardarAnchoDotacion, leerAnchoDotacion,
+    type ModoAnchoDotacion, type PresentacionDotacion, type VistaAnchoDotacion,
+} from '@/lib/planificacion/anchoDotacion';
 import { pasoScrollArrastre } from '@/lib/planificacion/scrollArrastreFila';
 import {
     celdaOtroObjetivoBloqueada,
@@ -2205,8 +2210,56 @@ function PlanificacionDesktop() {
     const [slaDebug, setSlaDebug] = useState<{ id: string; data: any } | null>(null);
     const [slaDebugLoading, setSlaDebugLoading] = useState(false);
     const [hoursMode, setHoursMode] = useState<'mes' | 'cct'>('mes');
-    const [nameColWidth, setNameColWidth] = useState(150);
-    const nameColResizing = React.useRef<{ startX: number; startW: number } | null>(null);
+    const [anchoDotacion, setAnchoDotacion] = useState(ANCHO_ANCHA);
+    const [modoAnchoDotacion, setModoAnchoDotacion] = useState<ModoAnchoDotacion>('ancha');
+    const [presentacionDotacion, setPresentacionDotacion] = useState<PresentacionDotacion>('completa');
+    const [menuAnchoDotacion, setMenuAnchoDotacion] = useState(false);
+    const [menuAnchoPos, setMenuAnchoPos] = useState<{ top: number; left: number } | null>(null);
+    const anchoDotacionRef = useRef(ANCHO_ANCHA);
+    const presentacionDotacionRef = useRef<PresentacionDotacion>('completa');
+    const vistaAnchoRef = useRef<VistaAnchoDotacion>('objetivo');
+    const nameColResizing = useRef<{ startX: number; startW: number } | null>(null);
+    const vistaAnchoDotacion: VistaAnchoDotacion = grupoUnifiedMode && selectedGrupo ? 'agrupada' : 'objetivo';
+
+    useEffect(() => {
+        vistaAnchoRef.current = vistaAnchoDotacion;
+        const pref = leerAnchoDotacion(typeof window === 'undefined' ? null : window.localStorage, vistaAnchoDotacion);
+        anchoDotacionRef.current = pref.ancho;
+        presentacionDotacionRef.current = pref.presentacion;
+        setAnchoDotacion(pref.ancho);
+        setModoAnchoDotacion(pref.modo);
+        setPresentacionDotacion(pref.presentacion);
+    }, [vistaAnchoDotacion]);
+
+    const pintarAnchoDotacion = (px: number) => {
+        document.querySelectorAll<HTMLElement>('.planning-grid-table').forEach((tabla) => {
+            tabla.style.setProperty('--plan-dotacion-ancho', `${px}px`);
+        });
+    };
+
+    const aplicarAnchoDotacion = (anchoIn: number, modo: ModoAnchoDotacion, presentacion: PresentacionDotacion) => {
+        const ancho = clampAnchoDotacion(anchoIn);
+        anchoDotacionRef.current = ancho;
+        presentacionDotacionRef.current = presentacion;
+        setAnchoDotacion(ancho);
+        setModoAnchoDotacion(modo);
+        setPresentacionDotacion(presentacion);
+        pintarAnchoDotacion(ancho);
+        guardarAnchoDotacion(typeof window === 'undefined' ? null : window.localStorage, vistaAnchoRef.current, { modo, ancho, presentacion });
+    };
+
+    const medirAnchoAuto = () => {
+        const grilla = document.querySelector('[data-plan-grilla]') as HTMLElement | null;
+        if (!grilla) return ANCHO_ANCHA;
+        const box = grilla.getBoundingClientRect();
+        const filas: { top: number; bottom: number; ancho: number }[] = [];
+        grilla.querySelectorAll<HTMLElement>('[data-ancho-contenido]').forEach((el) => {
+            const r = el.getBoundingClientRect();
+            const n = Number(el.dataset.anchoContenido);
+            if (Number.isFinite(n)) filas.push({ top: r.top, bottom: r.bottom, ancho: n });
+        });
+        return anchoAutoDotacion(anchosEnVista(filas, box.top, box.bottom));
+    };
 
     const [showVacancyModal, setShowVacancyModal] = useState(false);
     const [vacancyData, setVacancyData] = useState<any>(null);
@@ -13004,15 +13057,21 @@ function PlanificacionDesktop() {
         const compareMinimal = !!gridOpts?.minimalHeader;
         const compareCompact = !!gridOpts?.compactRows;
         return (
-        <table className="planning-grid-table border-separate border-spacing-0 w-full text-xs">
+        <table
+            className="planning-grid-table border-separate border-spacing-0 w-full text-xs"
+            data-ancho-dotacion-modo={modoAnchoDotacion}
+            style={{ '--plan-dotacion-ancho': `${anchoDotacion}px` } as React.CSSProperties}
+        >
             <thead className="sticky top-0 z-30 bg-slate-100 shadow-md">
                 {compareMinimal ? (
                 <tr className="h-7">
-                    <th className="planning-sticky-corner bg-slate-100 p-1.5 text-left border-b border-r relative select-none z-20" style={{ width: nameColWidth, minWidth: nameColWidth }}>
+                    <th className="planning-dotacion planning-sticky-corner bg-slate-100 text-left border-b border-r relative select-none z-20">
+                        <div className="planning-dotacion-caja px-1.5 py-1">
                         <span className="text-[9px] font-black uppercase text-slate-500 flex items-center gap-1">
                             {isSnapshotView ? <History size={10} className="text-amber-600"/> : <Activity size={10} className="text-indigo-600"/>}
                             {isSnapshotView ? 'Histórico' : 'Actual'}
                         </span>
+                        </div>
                     </th>
                     {daysInMonth.map((d) => {
                         const dateStr = getDateKey(d);
@@ -13029,8 +13088,56 @@ function PlanificacionDesktop() {
                 ) : (
                 <>
                 <tr className="h-6">
-                    <th rowSpan={2} className="planning-sticky-corner bg-slate-100 p-2 text-left border-b border-r relative select-none z-20" style={{ width: nameColWidth, minWidth: nameColWidth }}>
-                        <span className="text-[10px] font-black uppercase"><Users size={12}/> Dotación</span>
+                    <th rowSpan={2} className="planning-dotacion planning-sticky-corner bg-slate-100 text-left border-b border-r relative select-none z-20">
+                        <div className="planning-dotacion-caja relative h-full p-2">
+                        <span className="text-[10px] font-black uppercase inline-flex items-center gap-1">
+                            <Users size={12}/> Dotación
+                            {!isSnapshotView && (
+                                <button
+                                    type="button"
+                                    data-ancho-dotacion="menu"
+                                    title="Ancho de la columna"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                        setMenuAnchoPos({ top: r.bottom + 4, left: r.left });
+                                        setMenuAnchoDotacion((v) => !v);
+                                    }}
+                                    className="inline-flex h-4 w-4 items-center justify-center rounded border border-slate-300 bg-white text-slate-500 hover:bg-slate-50"
+                                >
+                                    <UnfoldHorizontal size={11} />
+                                </button>
+                            )}
+                        </span>
+                        {menuAnchoDotacion && menuAnchoPos && !isSnapshotView && createPortal(
+                            <>
+                                <div className="fixed inset-0 z-[80]" onClick={() => setMenuAnchoDotacion(false)} />
+                                <div className="fixed z-[81] w-36 rounded-xl border border-slate-200 bg-white py-1 shadow-lg" style={{ top: menuAnchoPos.top, left: menuAnchoPos.left }}>
+                                    {([
+                                        ['compacta', 'Compacta'],
+                                        ['auto', 'Auto'],
+                                        ['ancha', 'Ancha'],
+                                    ] as const).map(([id, label]) => (
+                                        <button
+                                            key={id}
+                                            type="button"
+                                            data-ancho-modo={id}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                setMenuAnchoDotacion(false);
+                                                if (id === 'auto') aplicarAnchoDotacion(medirAnchoAuto(), 'auto', 'completa');
+                                                else if (id === 'compacta') aplicarAnchoDotacion(ANCHO_COMPACTA, 'compacta', 'compacta');
+                                                else aplicarAnchoDotacion(ANCHO_ANCHA, 'ancha', 'completa');
+                                            }}
+                                            className={`block w-full px-3 py-1.5 text-left text-[11px] font-bold hover:bg-slate-50 ${modoAnchoDotacion === id ? 'text-indigo-700' : 'text-slate-700'}`}
+                                        >
+                                            {label}
+                                        </button>
+                                    ))}
+                                </div>
+                            </>,
+                            document.body,
+                        )}
                         {selectedObjective && !isSnapshotView && (
                             <span className="block text-[8px] font-bold text-slate-400 mt-0.5" title="Total guardias en dotación activa para este objetivo (sin REF/ESC de reserva)">
                                 {planningDotacionEmployees.length} c/ turno
@@ -13111,24 +13218,35 @@ function PlanificacionDesktop() {
                             </span>
                         )}
                         <div
-                            className="absolute right-0 top-0 h-full w-2 cursor-col-resize hover:bg-indigo-400/60 transition-colors"
-                            title="Arrastrar para cambiar el ancho"
+                            data-ancho-dotacion="borde"
+                            className="absolute right-0 top-0 z-10 h-full w-2 cursor-col-resize hover:bg-indigo-400/60"
+                            title="Arrastrar para cambiar el ancho. Doble clic: auto"
                             onMouseDown={(e) => {
                                 e.preventDefault();
-                                nameColResizing.current = { startX: e.clientX, startW: nameColWidth };
+                                e.stopPropagation();
+                                nameColResizing.current = { startX: e.clientX, startW: anchoDotacionRef.current };
                                 const onMove = (ev: MouseEvent) => {
                                     if (!nameColResizing.current) return;
-                                    setNameColWidth(Math.max(120, Math.min(400, nameColResizing.current.startW + ev.clientX - nameColResizing.current.startX)));
+                                    const next = clampAnchoDotacion(nameColResizing.current.startW + ev.clientX - nameColResizing.current.startX);
+                                    anchoDotacionRef.current = next;
+                                    pintarAnchoDotacion(next);
                                 };
                                 const onUp = () => {
                                     nameColResizing.current = null;
                                     document.removeEventListener('mousemove', onMove);
                                     document.removeEventListener('mouseup', onUp);
+                                    aplicarAnchoDotacion(anchoDotacionRef.current, 'manual', presentacionDotacionRef.current);
                                 };
                                 document.addEventListener('mousemove', onMove);
                                 document.addEventListener('mouseup', onUp);
                             }}
+                            onDoubleClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                aplicarAnchoDotacion(medirAnchoAuto(), 'auto', 'completa');
+                            }}
                         />
+                        </div>
                     </th>
                     {daysInMonth.map((d) => {
                         const dateStr = getDateKey(d);
@@ -13216,9 +13334,9 @@ function PlanificacionDesktop() {
                                         onDragStart={(e) => handleRowDragStart(e, idx)}
                                         onClick={() => { if (modoElegir) { clicPersonaModoElegir(emp.id); return; } if (!isSnapshotView) handleRowHeaderClick(idx); }}
                                         title={modoElegir ? "Clic para elegir a esta persona" : "Clic para seleccionar fila completa"}
-                                        style={{ width: nameColWidth, minWidth: nameColWidth }}
-                                        className={`sticky left-0 z-20 p-2 border-r border-b shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)] h-8 cursor-grab active:cursor-grabbing dark:border-slate-700 ${(empMonthlyHours[emp.id] || 0) >= planningLimits.monthly ? 'bg-red-50 group-hover:bg-red-100 dark:bg-red-950/30 dark:group-hover:bg-red-900/30' : 'bg-white dark:bg-slate-800 group-hover:bg-slate-50 dark:group-hover:bg-slate-700/60'}`}
+                                        className={`planning-dotacion sticky left-0 z-20 border-r border-b shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)] h-8 cursor-grab active:cursor-grabbing dark:border-slate-700 ${(empMonthlyHours[emp.id] || 0) >= planningLimits.monthly ? 'bg-red-50 group-hover:bg-red-100 dark:bg-red-950/30 dark:group-hover:bg-red-900/30' : 'bg-white dark:bg-slate-800 group-hover:bg-slate-50 dark:group-hover:bg-slate-700/60'}`}
                                     >
+                                    <div className="planning-dotacion-caja px-2 py-1">
                                         {(() => {
                                             if (compareCompact) {
                                                 return (
@@ -13246,18 +13364,49 @@ function PlanificacionDesktop() {
                                                 : 'text-slate-400 dark:text-slate-500';
                                             const grantTope = topeGrants[emp.id];
                                             const topeAviso = grantTope && !topeRequierePin(grantTope, periodoPlan) ? textoAvisoTope(grantTope) : '';
+                                            const compacta = presentacionDotacion === 'compacta';
+                                            const etGrupo = selectedGrupo && grupoUnifiedMode ? etiquetasGrupo.get(emp.id) : undefined;
+                                            const cajaNombre = anchoCajaNombre(anchoDotacion, {
+                                                compacta,
+                                                conPuesto: !!etGrupo,
+                                                conHoras: !compacta,
+                                                conKm: !compacta && (distKm !== null || !!emp.address),
+                                                conExt: !compacta && (!!isGuest || !!isVolante),
+                                                conPuntaje: true,
+                                                conTope: !compacta && !!topeAviso,
+                                            });
+                                            const nombreVisible = abreviarNombreGuardia(String(emp.name || ''), cajaNombre);
+                                            const tituloNombre = [
+                                                emp.name,
+                                                etGrupo?.tooltip,
+                                                `${formatLegajoHours(displayHours)} h`,
+                                                distKm !== null ? (distKm < 1 ? `${Math.round(distKm * 1000)} m` : `${distKm.toFixed(1)} km`) : null,
+                                                isGuest ? `EXT · ${homeObjectiveName}` : null,
+                                                isVolante ? `Volante · ${homeObjectiveName}` : null,
+                                                topeAviso || null,
+                                            ].filter(Boolean).join(' · ');
                                             return (
-                                                <div className="flex items-center justify-between w-full">
+                                                <div
+                                                    className="relative flex items-center justify-between w-full"
+                                                    data-ancho-contenido={anchoContenidoFila(String(emp.name || ''), {
+                                                        conPuesto: !!etGrupo,
+                                                        conHoras: true,
+                                                        conKm: distKm !== null,
+                                                        conExt: !!(isGuest || isVolante),
+                                                        conPuntaje: true,
+                                                        conTope: !!topeAviso,
+                                                    })}
+                                                >
                                                     <div className="flex items-center gap-1 min-w-0 overflow-hidden">
                                                         <Grip size={8} className="shrink-0 text-slate-200 group-hover:text-slate-400 transition-colors mr-0.5" />
-                                                        <span className={`text-[9px] font-bold truncate text-slate-700 dark:text-slate-200 ${selectedGrupo && grupoUnifiedMode ? 'min-w-0 flex-1' : ''}`} title={emp.name}>{emp.name}</span>
+                                                        <span className={`text-[9px] font-bold whitespace-nowrap text-slate-700 dark:text-slate-200 ${nombreVisible === emp.name ? 'min-w-0 flex-1 truncate' : 'shrink-0'}`} title={tituloNombre}>{nombreVisible}</span>
                                                         <PuntajeChip sujetoId={String(emp.bolsaCuil || emp.id || '')} />
-                                                        {isVolante && (<div className="shrink-0 px-1.5 py-0.5 rounded bg-violet-500 text-white text-[8px] font-black uppercase flex items-center gap-1 cursor-help shadow-sm" title={`Volante — base: ${homeObjectiveName}`}><Shuffle size={8} /> VOL</div>)}
-                                        {isGuest && !isVolante && (esLegajoEventual(emp)
+                                                        {!compacta && isVolante && (<div className="shrink-0 px-1.5 py-0.5 rounded bg-violet-500 text-white text-[8px] font-black uppercase flex items-center gap-1 cursor-help shadow-sm" title={`Volante — base: ${homeObjectiveName}`}><Shuffle size={8} /> VOL</div>)}
+                                        {!compacta && isGuest && !isVolante && (esLegajoEventual(emp)
                                             ? (<div className="shrink-0 px-1.5 py-0.5 rounded bg-violet-600 text-white text-[8px] font-black uppercase flex items-center gap-1 cursor-help shadow-sm" title={`Eventual de la bolsa · CUIL ${emp.bolsaCuil || '—'}`}><Briefcase size={8} /> EVENTUAL</div>)
                                             : (<div className="shrink-0 px-1.5 py-0.5 rounded bg-amber-500 text-white text-[8px] font-black uppercase flex items-center gap-1 cursor-help shadow-sm" title={`Base: ${homeObjectiveName}`}><Briefcase size={8} /> {emp._kind || 'EXT'}</div>))}
                                                         {/* Horas mensuales planificadas (facturables) + días RET sobrantes */}
-                                                        <span
+                                                        {!compacta && <span
                                                             title={hoursMode === 'cct'
                                                                 ? `${formatLegajoHours(cctHours)}h en el ciclo CCT actual (26 mes anterior → 25 de este mes). Tope 200h.\n${formatLegajoHours(monthHours)}h en el mes calendario.${retDays > 0 ? `\n${retDays} días RET (0 h planificadas; sobrante disponible en otro objetivo).` : ''}${topeAviso ? `\n${topeAviso}` : ''}`
                                                                 : `${formatLegajoHours(monthHours)}h de plan publicado de este legajo (jornada del puesto, incluye FT). Los turnos sin código no tienen fila.\n${formatLegajoHours(cctHours)}h en el ciclo CCT actual (tope 200h).${retDays > 0 ? `\n${retDays} días RET (0 h planificadas; sobrante disponible en otro objetivo).` : ''}${topeAviso ? `\n${topeAviso}` : ''}`}
@@ -13266,8 +13415,8 @@ function PlanificacionDesktop() {
                                                             {formatLegajoHours(displayHours)}h
                                                             {retDays > 0 && displayHours === 0 && <span className="ml-0.5 text-[7px] text-amber-700 font-bold" title={`${retDays} días RET (0 h planificadas)`}>+{retDays}RET</span>}
                                                             {hoursMode === 'cct' && <span className="ml-0.5 text-[7px] text-indigo-500 font-black">CCT</span>}
-                                                        </span>
-                                                        {topeAviso ? (
+                                                        </span>}
+                                                        {!compacta && topeAviso ? (
                                                             <button
                                                                 type="button"
                                                                 title={`${topeAviso}. Revocar`}
@@ -13278,7 +13427,7 @@ function PlanificacionDesktop() {
                                                             </button>
                                                         ) : null}
                                                         {/* Distancia al objetivo — solo si hay coordenadas */}
-                                                        {distKm !== null ? (
+                                                        {compacta ? null : distKm !== null ? (
                                                             <span title="Distancia al objetivo" className={`shrink-0 flex items-center gap-0.5 text-[8px] ${distKm >= 9 ? 'text-orange-500' : distKm >= 3 ? 'text-amber-400' : 'text-slate-400 dark:text-slate-400'}`}>
                                                                 <MapPin size={7}/>{distKm < 1 ? `${Math.round(distKm * 1000)}m` : `${distKm.toFixed(1)}km`}
                                                             </span>
@@ -13287,9 +13436,20 @@ function PlanificacionDesktop() {
                                                                 <MapPin size={7}/>?
                                                             </span>
                                                         ) : null}
+                                                        {compacta && etGrupo && (
+                                                            <span
+                                                                className="inline-flex shrink-0 items-center gap-0.5 rounded bg-indigo-600 px-1 py-0.5 text-[8px] font-black text-white"
+                                                                data-fila-puesto={etGrupo.puesto}
+                                                                data-fila-objetivo={etGrupo.objetivoSigla || etGrupo.objetivoVisible}
+                                                                title={tituloNombre}
+                                                            >
+                                                                <span className="max-w-[52px] truncate">{etGrupo.puesto}</span>
+                                                                <span>{etGrupo.objetivoSigla}</span>
+                                                            </span>
+                                                        )}
                                                     </div>
-                                                    <div className="flex gap-1 ml-1 shrink-0 items-center">
-                                                        {selectedGrupo && grupoUnifiedMode && (() => {
+                                                    <div className={compacta ? 'absolute right-0 top-0 hidden items-center gap-1 group-hover:flex' : 'ml-1 flex shrink-0 items-center gap-1'}>
+                                                        {!compacta && selectedGrupo && grupoUnifiedMode && (() => {
                                                             const et = etiquetasGrupo.get(emp.id);
                                                             if (!et) return null;
                                                             const oi = selectedGrupo.objectiveIds.indexOf(et.objetivoId);
@@ -13331,6 +13491,7 @@ function PlanificacionDesktop() {
                                                 </div>
                                             );
                                         })()}
+                                    </div>
                                     </td>
                                     {daysInMonth.map((day, dayIndex) => {
                                         const vistaCelda = celdaDeGrilla(emp, !!isGuest, day, dayIndex);
@@ -13355,8 +13516,10 @@ function PlanificacionDesktop() {
                             {/* FILA SNAPSHOT (HISTÓRICA) - Solo se muestra si hay snapshotData y estamos en modo snapshot */}
                             {isSnapshotView && snapshotData && (
                                 <tr className="hover:bg-slate-50 dark:hover:bg-slate-700/40">
-                                    <td className="sticky left-0 z-20 bg-white dark:bg-slate-800 p-2 border-r border-b shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)] h-8" style={{ width: nameColWidth, minWidth: nameColWidth }}>
-                                        <span className="inline-flex min-w-0 items-center gap-1"><span className="truncate text-[9px] font-bold text-slate-700 dark:text-slate-200" title={emp.name}>{emp.name}</span><PuntajeChip sujetoId={String(emp.bolsaCuil || emp.id || '')} /></span>
+                                    <td className="planning-dotacion sticky left-0 z-20 bg-white dark:bg-slate-800 border-r border-b shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)] h-8">
+                                        <div className="planning-dotacion-caja px-2 py-1">
+                                        <span className="inline-flex min-w-0 items-center gap-1"><span className="truncate text-[9px] font-bold text-slate-700 dark:text-slate-200" title={emp.name}>{abreviarNombreGuardia(String(emp.name || ''), anchoCajaNombre(anchoDotacion, { conPuntaje: true }))}</span><PuntajeChip sujetoId={String(emp.bolsaCuil || emp.id || '')} /></span>
+                                        </div>
                                     </td>
                                     {daysInMonth.map((day) => {
                                         const key = `${emp.id}_${getDateKey(day)}`;
@@ -13393,10 +13556,9 @@ function PlanificacionDesktop() {
                 {!isSnapshotView && Object.keys(planningEventosCellsByDay).length > 0 && (
                     <tr className="hover:bg-violet-50/40 dark:hover:bg-violet-950/20">
                         <td
-                            className="sticky left-0 z-20 p-2 border-r border-b shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)] h-8 bg-violet-50 border-violet-200 dark:bg-violet-950/30 dark:border-violet-800"
-                            style={{ width: nameColWidth, minWidth: nameColWidth }}
+                            className="planning-dotacion sticky left-0 z-20 border-r border-b shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)] h-8 bg-violet-50 border-violet-200 dark:bg-violet-950/30 dark:border-violet-800"
                         >
-                            <div className="flex flex-col min-w-0">
+                            <div className="planning-dotacion-caja flex flex-col min-w-0 px-2 py-1">
                                 <span className="text-[9px] font-black uppercase tracking-wide leading-tight text-violet-800 dark:text-violet-200">
                                     Eventos
                                 </span>
@@ -13460,9 +13622,8 @@ function PlanificacionDesktop() {
                     const pendiente = asignado && rfz.draft === true;
                     return (
                         <tr key={`rfz_${rfz.id}`} className={asignado ? 'hover:bg-emerald-50/30' : 'hover:bg-red-50/30'}>
-                            <td className={`sticky left-0 z-20 p-2 border-r border-b shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)] h-8 ${asignado ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}
-                                style={{ width: nameColWidth, minWidth: nameColWidth }}>
-                                <div className="flex flex-col min-w-0">
+                            <td className={`planning-dotacion sticky left-0 z-20 border-r border-b shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)] h-8 ${asignado ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
+                                <div className="planning-dotacion-caja flex min-w-0 flex-col px-2 py-1">
                                     <span className={`text-[9px] font-black uppercase tracking-wide leading-tight ${asignado ? 'text-emerald-700' : 'text-red-700'}`}>
                                         {asignado ? (guardiaNombre as string) : 'VACANTE RFZ'}{rfzFechaCorta ? ` · ${rfzFechaCorta}` : ''}
                                     </span>
@@ -13501,8 +13662,8 @@ function PlanificacionDesktop() {
             {!gridOpts?.hideFooter && (
             <tfoot className={`sticky bottom-0 z-10 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] border-t-2 ${gridOpts?.highlightCoverageFooter ? 'bg-rose-50 border-rose-400 ring-2 ring-rose-300 ring-inset' : 'bg-slate-50 border-slate-300'}`}>
                 <tr>
-                    <td className={`sticky left-0 z-20 p-2 border-r border-b font-black text-[10px] uppercase shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)] h-8 ${gridOpts?.highlightCoverageFooter ? 'bg-rose-50 text-rose-800' : 'bg-slate-50 text-slate-500'}`} style={{ width: nameColWidth, minWidth: nameColWidth }}>
-                        <div className="flex items-center justify-between gap-2 w-full">
+                    <td className={`planning-dotacion sticky left-0 z-20 border-r border-b font-black text-[10px] uppercase shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)] h-8 ${gridOpts?.highlightCoverageFooter ? 'bg-rose-50 text-rose-800' : 'bg-slate-50 text-slate-500'}`}>
+                        <div className="planning-dotacion-caja flex w-full items-center justify-between gap-2 px-2 py-1">
                             <button
                                 type="button"
                                 onClick={() => setHoursMode((m) => (m === 'mes' ? 'cct' : 'mes'))}
@@ -13659,7 +13820,7 @@ function PlanificacionDesktop() {
                     {planningBusyLabel}
                 </div>
             )}
-            <style>{`.pattern-grid { background-image: linear-gradient(45deg, #e5e7eb 25%, transparent 25%, transparent 75%, #e5e7eb 75%, #e5e7eb), linear-gradient(45deg, #e5e7eb 25%, transparent 25%, transparent 75%, #e5e7eb 75%, #e5e7eb); background-size: 10px 10px; background-position: 0 0, 5px 5px; } .sla-excluded-day-col { background-image: repeating-linear-gradient(-45deg, transparent, transparent 4px, rgba(251, 113, 133, 0.07) 4px, rgba(251, 113, 133, 0.07) 8px); } .planning-grid-table { border-collapse: separate; border-spacing: 0; } .planning-grid-table thead th { box-shadow: 0 1px 0 rgba(148,163,184,0.35); } .planning-grid-table .planning-sticky-corner { position: sticky; left: 0; top: 0; z-index: 50; } @media print { @page { size: A4 landscape; margin: 5mm; } body { -webkit-print-color-adjust: exact; print-color-adjust: exact; background-color: white !important; } #printable-section { position: absolute; left: 0; top: 0; width: 100%; min-width: 100%; transform: none; background: white; } .no-print { display: none !important; } .custom-scrollbar { overflow: visible !important; height: auto !important; } }`}</style>
+            <style>{`.pattern-grid { background-image: linear-gradient(45deg, #e5e7eb 25%, transparent 25%, transparent 75%, #e5e7eb 75%, #e5e7eb), linear-gradient(45deg, #e5e7eb 25%, transparent 25%, transparent 75%, #e5e7eb 75%, #e5e7eb); background-size: 10px 10px; background-position: 0 0, 5px 5px; } .sla-excluded-day-col { background-image: repeating-linear-gradient(-45deg, transparent, transparent 4px, rgba(251, 113, 133, 0.07) 4px, rgba(251, 113, 133, 0.07) 8px); } .planning-grid-table { border-collapse: separate; border-spacing: 0; } .planning-grid-table thead th { box-shadow: 0 1px 0 rgba(148,163,184,0.35); } .planning-grid-table .planning-sticky-corner { position: sticky; left: 0; top: 0; z-index: 50; } .planning-dotacion { width: 0 !important; min-width: 0 !important; max-width: var(--plan-dotacion-ancho) !important; padding-left: 0 !important; padding-right: 0 !important; overflow: hidden; } .planning-dotacion-caja { width: var(--plan-dotacion-ancho); max-width: var(--plan-dotacion-ancho); box-sizing: border-box; overflow: hidden; } @media print { @page { size: A4 landscape; margin: 5mm; } body { -webkit-print-color-adjust: exact; print-color-adjust: exact; background-color: white !important; } #printable-section { position: absolute; left: 0; top: 0; width: 100%; min-width: 100%; transform: none; background: white; } .no-print { display: none !important; } .custom-scrollbar { overflow: visible !important; height: auto !important; } }`}</style>
             <div className="no-print px-2 max-w-[1600px] mx-auto">
                 <SwapSupervisorQueue empresaId={empresaId} />
             </div>

@@ -33,7 +33,7 @@ const gente = [
   { id: 'gp_prov', name: 'CARDOZO, ANA', puesto: 'Proveedores', obj: ninos },
   { id: 'gp_rondin', name: 'DIAZ, PEDRO', puesto: 'Rondin', obj: ninos },
   { id: 'gp_guardia', name: 'ESCOBAR, JUANA', puesto: 'Guardia', obj: casa },
-  { id: 'gp_mixto', name: 'FERNANDEZ, ROSA', puesto: 'Internado', obj: ninos, tambien: { puesto: 'Playa', obj: casa, dias: [3, 10, 17, 24] } },
+  { id: 'gp_mixto', name: 'NAVARRO ASTRADA, ROXANA GABRIELA', puesto: 'Internado', obj: ninos, tambien: { puesto: 'Playa', obj: casa, dias: [3, 10, 17, 24] } },
 ];
 
 function sla(id, objectiveId, objectiveName, positions) {
