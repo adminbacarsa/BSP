@@ -889,8 +889,7 @@ export function resolverDiaTramo(opts: {
     });
     if (lado === opts.lado) return { dateStr: dia, shift };
   }
-  const fallback = opts.preferDate || opts.dateStr;
-  return { dateStr: fallback, shift: resolveEmployeeShift(opts.empId, fallback, opts.shiftsMap, pending) };
+  return { dateStr: '', shift: null };
 }
 
 /** Extensión: quien termina entre 30 min antes y el inicio del hueco. Incluye la N del día anterior. */

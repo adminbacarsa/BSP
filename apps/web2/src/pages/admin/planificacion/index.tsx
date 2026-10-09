@@ -251,6 +251,7 @@ import { isEmployeeOnLeave, shouldShowLeaveConflictSiren } from '@/lib/planifica
 import {
     listDateRangeInclusive,
     applyVacancyCoverageToChanges,
+    motivoSinPata,
     collectVacancyFrancoConflicts,
     VACANCY_NON_WORK_CODES,
     resolveVacancyDayCoverage,
@@ -8286,11 +8287,14 @@ function PlanificacionDesktop() {
                 const totalCovered = covered + splitCovered;
                 const resueltos = days.filter((d) => diaLoResuelveConsulta(vacancyConsultas, d.dateStr)).length;
                 const resuelveMsg = resueltos > 0 ? ' Esos días los resuelve la consulta.' : '';
+                const omitidosMsg = applied.omitidos.length
+                    ? ` No se aplicó: ${applied.omitidos.map((o) => `${o.dateStr.slice(8, 10)}/${o.dateStr.slice(5, 7)} (${o.motivo})`).join(' · ')}.`
+                    : '';
                 if (totalCovered > 0) {
                     const splitMsg = splitCovered > 0 ? ` (${covered} suplente, ${splitCovered} ext+adel)` : '';
-                    toast.success(`${absCode} en ${count} día(s) — ${totalCovered} con cobertura${splitMsg}.${clearedMsg}${resuelveMsg} Guardá los cambios.`);
+                    toast.success(`${absCode} en ${count} día(s) — ${totalCovered} con cobertura${splitMsg}.${clearedMsg}${resuelveMsg}${omitidosMsg} Guardá los cambios.`);
                 } else {
-                    toast.success(`${absCode} en ${count} día(s) — sin cobertura asignada.${clearedMsg}${resuelveMsg} Guardá los cambios.`);
+                    toast.success(`${absCode} en ${count} día(s) — sin cobertura asignada.${clearedMsg}${resuelveMsg}${omitidosMsg} Guardá los cambios.`);
                 }
             } catch (e: any) {
                 const msg = String(e?.message || '');
@@ -8668,6 +8672,24 @@ function PlanificacionDesktop() {
             extId,
             bloqueos: guard.blocked,
         });
+        if (!res.ok && (paso === 'ext' || paso === 'adel') && String(res.motivo || '').startsWith('Para ')) {
+            const employeesById: Record<string, any> = {};
+            employees.forEach((e: any) => { if (e.id) employeesById[e.id] = e; });
+            return {
+                res: {
+                    ...res,
+                    motivo: motivoSinPata({
+                        lado: paso,
+                        empId: personaId,
+                        dateStr: dia,
+                        shiftsMap,
+                        pendingChanges,
+                        employeesById,
+                    }),
+                },
+                guard,
+            };
+        }
         return { res, guard };
     };
     const tramoExtMenu = (ctx: CtxMenuRapido, extId: string) => {
@@ -8771,7 +8793,7 @@ function PlanificacionDesktop() {
                         coverage: { mode: 'substitute', employeeId: cov.id, employeeName: nombre, gapBand: ctx.gapBand, gapPosition: ctx.positionName },
                     }],
                 });
-                return { changes: sellarMenuRapido(applied.changes, [{ key: titularKey }, { key, rol: 'CUBRE' }], texto, ctx.empName), texto };
+                return { changes: sellarMenuRapido(applied.changes, [{ key: titularKey }, { key, rol: 'CUBRE' }], texto, ctx.empName), texto, motivo: null as string | null };
             }
             const opt = listVacancyGapBandOptions(effectivePosStructure, ctx.positionName).find((o) => o.code === ctx.gapBand);
             const changes = {
@@ -8789,7 +8811,7 @@ function PlanificacionDesktop() {
                     comments: `Cubre hueco SLA ${ctx.positionName} ${ctx.gapBand}`,
                 },
             };
-            return { changes: sellarMenuRapido(changes, [{ key, rol: 'CUBRE' }], texto, ctx.positionName), texto };
+            return { changes: sellarMenuRapido(changes, [{ key, rol: 'CUBRE' }], texto, ctx.positionName), texto, motivo: null as string | null };
         }
         const texto = textoMarcaMenuRapido({ modo: 'split', ext: nombreEmpleadoMenu(cov.extId), adel: nombreEmpleadoMenu(cov.adelId) });
         const rangoHuecoMenu = rangoHorario(ctx.horario);
@@ -8832,7 +8854,9 @@ function PlanificacionDesktop() {
                     },
                 }],
             });
-            return { changes: sellarMenuRapido(applied.changes, [{ key: titularKey }, ...claves], texto), texto };
+            const omitido = applied.omitidos.find((o) => o.dateStr === ctx.dateStr);
+            if (omitido) return { changes: base, texto, motivo: omitido.motivo };
+            return { changes: sellarMenuRapido(applied.changes, [{ key: titularKey }, ...claves], texto), texto, motivo: null };
         }
         const changes = applyOperationalGapCloseToChanges(base, {
             objectiveId: selectedObjective || '',
@@ -8851,7 +8875,7 @@ function PlanificacionDesktop() {
             extApplyDateStr: extDate !== ctx.dateStr ? extDate : undefined,
             adelApplyDateStr: adelDate !== ctx.dateStr ? adelDate : undefined,
         }, { shiftsMap, employeesById });
-        return { changes: sellarMenuRapido(changes, claves, texto), texto };
+        return { changes: sellarMenuRapido(changes, claves, texto), texto, motivo: null as string | null };
     };
     /** Valida cada día como el clic, pide un solo PIN si hace falta y escribe los que pasan. */
     const aplicarCoberturaMenu = (
@@ -8896,8 +8920,13 @@ function PlanificacionDesktop() {
             const textos: string[] = [];
             for (const c of okDias) {
                 const w = escribirCoberturaEnCambios(changes, c, cov);
-                changes = w.changes;
-                textos.push(w.texto);
+                if (w.motivo) {
+                    const i = resultados.findIndex((r) => r.dia === c.dateStr);
+                    if (i >= 0) resultados[i] = { dia: c.dateStr, motivo: w.motivo };
+                } else {
+                    changes = w.changes;
+                    textos.push(w.texto);
+                }
             }
             if (marks && Object.keys(marks).length) changes = stampShiftAuthMarks(changes, marks);
             setPendingChanges(changes);

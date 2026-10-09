@@ -4,6 +4,7 @@ import { listEarlyStartCandidates, listExtensionCandidates } from './planningRec
 import { textoTramoSolo, validarClicElegir } from './menuRapidoCobertura';
 import { applyOperationalGapCloseToChanges, segmentosMitadHueco } from './operationalGapCoverage';
 import { applyVacancyCoverageToChanges } from './vacancyCoverage';
+import { aplicarTramoSolo } from './shiftExtensionApply';
 import { defaultSplitTimesCct } from './vacancySplitBands';
 import { evaluateCoverageDayGuards } from './vacancyCoverageWizard';
 import { calcPlanningBillableHoursAttributedToPosition } from './planningScheduledHours';
@@ -319,4 +320,127 @@ test('adelanto del día siguiente no se mide como un turno nuevo del día del hu
     nameOf: () => 'HERRANTE',
   });
   assert.deepEqual(bien.blocked, []);
+});
+
+test('repetir Ext/Adel de una N escribe cada día en su T y en la M del día siguiente', () => {
+  const puesto = [{ positionName: 'Puesto 1', shifts: [
+    { code: 'M', hours: 8, startTime: '07:00', endTime: '15:00' },
+    { code: 'T', hours: 8, startTime: '15:00', endTime: '23:00' },
+    { code: 'N', hours: 8, startTime: '23:00', endTime: '07:00' },
+  ] }];
+  const emps = [
+    { id: 'baig', name: 'BAIGORRIA, EMMANUEL' },
+    { id: 'barrios', name: 'BARRIOS CARRANZA, ERICK' },
+    { id: 'bordino', name: 'BORDINO, JUAN' },
+  ];
+  const employeesById = Object.fromEntries(emps.map((e) => [e.id, e]));
+  const turno = (id: string, code: string, start: string, end: string) => ({
+    employeeId: id,
+    objectiveId: 'obrador',
+    code,
+    positionName: code === 'F' || code === 'V' ? 'General' : 'Puesto 1',
+    startTime: start,
+    endTime: end,
+    ...(code === 'F' ? { isFranco: true } : {}),
+    ...(code === 'V' ? { originalCode: 'N', originalPositionName: 'Puesto 1' } : {}),
+  });
+  const shifts: Record<string, any> = {
+    'baig_2026-10-10': turno('baig', 'V', '00:00', '23:59'),
+    'baig_2026-10-11': turno('baig', 'V', '00:00', '23:59'),
+    'baig_2026-10-12': turno('baig', 'V', '00:00', '23:59'),
+    'barrios_2026-10-10': turno('barrios', 'T', '15:00', '23:00'),
+    'barrios_2026-10-11': turno('barrios', 'T', '15:00', '23:00'),
+    'barrios_2026-10-12': turno('barrios', 'F', '00:00', '23:59'),
+    'bordino_2026-10-11': turno('bordino', 'M', '07:00', '15:00'),
+    'bordino_2026-10-12': turno('bordino', 'M', '07:00', '15:00'),
+    'bordino_2026-10-13': turno('bordino', 'M', '07:00', '15:00'),
+  };
+  const inputDe = (dateStr: string) => ({
+    vacancyData: { employeeId: 'baig', employeeName: 'BAIGORRIA, EMMANUEL', type: 'Vacaciones', startDate: '2026-10-10' },
+    days: [{
+      dateStr,
+      coverage: {
+        mode: 'split' as const,
+        extEmpId: 'barrios',
+        adelEmpId: 'bordino',
+        gapBand: 'N',
+        gapPosition: 'Puesto 1',
+      },
+    }],
+    selectedObjective: 'obrador',
+    activePosition: 'Puesto 1',
+    shiftsMap: shifts,
+    getTypicalShift: () => null,
+    employeesById,
+    defaultSplitForBand: () => ({ ext: { from: '23:00', to: '03:00' }, adel: { from: '03:00', to: '07:00' } }),
+    positionStructure: puesto,
+    fallbackGapBand: 'N',
+  });
+  const dia10 = applyVacancyCoverageToChanges({}, inputDe('2026-10-10'));
+  assert.equal(dia10.omitidos.length, 0);
+  assert.equal(dia10.changes['barrios_2026-10-10'].isExtended, true);
+  assert.equal(dia10.changes['barrios_2026-10-10'].coversDateStr, '2026-10-10');
+  assert.equal(dia10.changes['bordino_2026-10-11'].isEarlyStart, true);
+  assert.equal(dia10.changes['bordino_2026-10-11'].coversDateStr, '2026-10-10');
+  assert.equal(dia10.changes['baig_2026-10-10'].coverageSegmentRole, 'TARGET');
+
+  const dia11 = applyVacancyCoverageToChanges(dia10.changes, inputDe('2026-10-11'));
+  assert.equal(dia11.omitidos.length, 0);
+  assert.equal(dia11.changes['barrios_2026-10-10'].coversDateStr, '2026-10-10');
+  assert.equal(dia11.changes['bordino_2026-10-11'].isEarlyStart, true);
+  assert.equal(dia11.changes['bordino_2026-10-11'].coversDateStr, '2026-10-10');
+  assert.equal(dia11.changes['barrios_2026-10-11'].isExtended, true);
+  assert.equal(dia11.changes['barrios_2026-10-11'].coverageSegmentRole, 'EXTENSION');
+  assert.equal(dia11.changes['barrios_2026-10-11'].coversDateStr, '2026-10-11');
+  assert.equal(dia11.changes['bordino_2026-10-12'].isEarlyStart, true);
+  assert.equal(dia11.changes['bordino_2026-10-12'].coversDateStr, '2026-10-11');
+  assert.equal(dia11.changes['baig_2026-10-11'].coverageSegmentRole, 'TARGET');
+  assert.match(String(dia11.changes['baig_2026-10-11'].coverageNote), /Cubierto split/);
+
+  const dia12 = applyVacancyCoverageToChanges(dia11.changes, inputDe('2026-10-12'));
+  assert.equal(dia12.omitidos.length, 1);
+  assert.match(dia12.omitidos[0].motivo, /franco/i);
+  assert.equal(dia12.changes['baig_2026-10-12'].coverageSegmentRole, undefined);
+  assert.equal(dia12.changes['baig_2026-10-12'].coverageStatus, undefined);
+  assert.equal(dia12.changes['barrios_2026-10-11'].isExtended, true);
+  assert.equal(dia12.changes['barrios_2026-10-11'].coversDateStr, '2026-10-11');
+  assert.equal(dia12.changes['bordino_2026-10-12'].isEarlyStart, true);
+  assert.equal(dia12.changes['bordino_2026-10-12'].coversDateStr, '2026-10-11');
+  assert.notEqual(dia12.changes['barrios_2026-10-12']?.isExtended, true);
+});
+
+test('adelanto solo de una N se escribe en la M del día siguiente y sin esa M no marca la licencia', () => {
+  const puesto = [{ positionName: 'Puesto 1', shifts: [
+    { code: 'M', hours: 8, startTime: '07:00', endTime: '15:00' },
+    { code: 'N', hours: 8, startTime: '23:00', endTime: '07:00' },
+  ] }];
+  const shifts: Record<string, any> = {
+    'baig_2026-10-11': { employeeId: 'baig', code: 'V', originalCode: 'N', positionName: 'Puesto 1' },
+    'bordino_2026-10-12': { employeeId: 'bordino', objectiveId: 'obrador', code: 'M', positionName: 'Puesto 1', startTime: '07:00', endTime: '15:00' },
+  };
+  const ctx = {
+    shiftsMap: shifts,
+    positionStructure: puesto,
+    employeesById: { baig: { name: 'BAIGORRIA' }, bordino: { name: 'BORDINO' } },
+    objectiveId: 'obrador',
+  };
+  const input = {
+    lado: 'adel' as const,
+    empId: 'bordino',
+    titularId: 'baig',
+    dateStr: '2026-10-11',
+    gapStart: '23:00',
+    gapEnd: '07:00',
+    gapBand: 'N',
+    gapPosition: 'Puesto 1',
+  };
+  const out = aplicarTramoSolo({}, ctx, input);
+  assert.equal(out['bordino_2026-10-12'].isEarlyStart, true);
+  assert.equal(out['bordino_2026-10-12'].coversDateStr, '2026-10-11');
+  assert.equal(out['baig_2026-10-11'].coverageSegmentRole, 'TARGET');
+  assert.equal(out['bordino_2026-10-11'], undefined);
+  assert.throws(
+    () => aplicarTramoSolo({}, { ...ctx, shiftsMap: { 'baig_2026-10-11': shifts['baig_2026-10-11'] } }, input),
+    /adelantar/,
+  );
 });

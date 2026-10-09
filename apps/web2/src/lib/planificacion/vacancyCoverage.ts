@@ -15,6 +15,8 @@ import {
   buildRecompositionPendingUpdates,
   collectSplitFrancoConflicts,
   isPlannedFrancoShift,
+  nextCalendarDayStr,
+  previousCalendarDayStr,
   resolveEmployeeShift,
   resolverDiaTramo,
   type FrancoCoverageConflict,
@@ -440,8 +442,15 @@ export function clearPreviousVacancyCoverage(
   const empIds = new Set<string>();
   Object.keys(opts.shiftsMap).forEach((k) => empIds.add(k.split('_')[0]));
   Object.keys(changes).forEach((k) => empIds.add(k.split('_')[0]));
+  const fechasALimpiar = new Set(opts.dateStrs);
+  const mirar = new Set<string>();
+  for (const dia of opts.dateStrs) {
+    mirar.add(dia);
+    mirar.add(previousCalendarDayStr(dia));
+    mirar.add(nextCalendarDayStr(dia));
+  }
 
-  for (const dateStr of opts.dateStrs) {
+  for (const dateStr of mirar) {
     for (const empId of empIds) {
       if (empId === opts.titularEmployeeId) continue;
       const key = `${empId}_${dateStr}`;
@@ -453,6 +462,9 @@ export function clearPreviousVacancyCoverage(
       const coversTitular = active.coversEmployeeId === opts.titularEmployeeId;
       const isSubstitute = String(active.comments ?? '').includes(needle);
       if (!coversTitular && !isSubstitute) continue;
+      const explicito = String(active.coversDateStr || '').slice(0, 10);
+      const diaAcreditado = /^\d{4}-\d{2}-\d{2}$/.test(explicito) ? explicito : dateStr;
+      if (!fechasALimpiar.has(diaAcreditado)) continue;
 
       if (persisted?.id) {
         if (isSubstitute && !coversTitular) {
@@ -652,10 +664,64 @@ function resolveSubstituteInheritedWorkShift(
   return deriveFallbackWorkShift(input, preferredBand, preferredPos);
 }
 
+const LICENCIA_SIN_TRAMO = new Set(['V', 'L', 'E', 'A', 'AA', 'PG', 'ART', 'SGS', 'SUS', 'LT']);
+
+function apellidoTramo(employeesById: Record<string, any>, id: string): string {
+  const name = String(employeesById[id]?.name || id);
+  return name.split(',')[0].trim().split(/\s+/)[0] || name;
+}
+
+/** Por qué no se puede extender o adelantar ese hueco. No marca la licencia. */
+export function motivoSinPata(opts: {
+  lado: 'ext' | 'adel';
+  empId: string;
+  dateStr: string;
+  shiftsMap: Record<string, any>;
+  pendingChanges: Record<string, any>;
+  employeesById: Record<string, any>;
+}): string {
+  const quien = apellidoTramo(opts.employeesById, opts.empId);
+  const verbo = opts.lado === 'ext' ? 'extender' : 'adelantar';
+  const dias = opts.lado === 'ext'
+    ? [opts.dateStr, previousCalendarDayStr(opts.dateStr)]
+    : [opts.dateStr, nextCalendarDayStr(opts.dateStr)];
+  for (const dia of dias) {
+    const s = resolveEmployeeShift(opts.empId, dia, opts.shiftsMap, opts.pendingChanges);
+    if (!s) continue;
+    const code = String(s.code || '').toUpperCase();
+    if (isPlannedFrancoShift(s)) return `${quien} está de franco`;
+    if (LICENCIA_SIN_TRAMO.has(code) || s.isAbsent === true) return `${quien} está de licencia${code ? ` (${code})` : ''}`;
+    if (s.isExtended || s.isEarlyStart) return `${quien} ya cubre otro tramo`;
+    const ini = typeof s.startTime === 'string' ? s.startTime.slice(0, 5) : '';
+    const fin = typeof s.endTime === 'string' ? s.endTime.slice(0, 5) : '';
+    const horario = ini && fin ? ` ${ini}–${fin}` : '';
+    if (code) return `${quien} no tiene el horario para ${verbo} (tiene ${code}${horario})`;
+  }
+  return `${quien} no tiene el turno para ${verbo}`;
+}
+
+function patasSplitEscritas(
+  updates: Record<string, any>,
+  pkg: { dateStr: string; extension?: { employeeId: string; applyDateStr?: string } | null; earlyStart: { employeeId: string; applyDateStr?: string } },
+): boolean {
+  const acredita = (s: any) => String(s?.coversDateStr || '') === pkg.dateStr;
+  const extDate = pkg.extension?.applyDateStr || pkg.dateStr;
+  const adelDate = pkg.earlyStart.applyDateStr || pkg.dateStr;
+  const ext = pkg.extension ? updates[`${pkg.extension.employeeId}_${extDate}`] : null;
+  const adel = updates[`${pkg.earlyStart.employeeId}_${adelDate}`];
+  const extOk = !pkg.extension || (!!ext && (ext.isExtended === true || ext.coverageSegmentRole === 'EXTENSION') && acredita(ext));
+  const adelOk = !!adel
+    && (adel.isEarlyStart === true || adel.isExtended === true || adel.coverageSegmentRole === 'EARLY_START' || adel.coverageSegmentRole === 'EXTENSION')
+    && acredita(adel);
+  return extOk && adelOk;
+}
+
+export type DiaCoberturaOmitido = { dateStr: string; motivo: string };
+
 export function applyVacancyCoverageToChanges(
   baseChanges: Record<string, any>,
   input: ProcessVacancyInput,
-): { changes: Record<string, any>; count: number; covered: number; splitCovered: number; cleared: number } {
+): { changes: Record<string, any>; count: number; covered: number; splitCovered: number; cleared: number; omitidos: DiaCoberturaOmitido[] } {
   const newChanges = { ...baseChanges };
   const absCode = VACANCY_ABSENCE_TYPE_CODES[input.vacancyData.type] || 'AA';
   const absHours = ['E', 'L', 'PG', 'A'].includes(absCode) ? 8 : 0;
@@ -673,6 +739,7 @@ export function applyVacancyCoverageToChanges(
   let count = 0;
   let covered = 0;
   let splitCovered = 0;
+  const omitidos: DiaCoberturaOmitido[] = [];
 
   for (const day of input.days) {
     const { dateStr, coverage } = day;
@@ -741,12 +808,12 @@ export function applyVacancyCoverageToChanges(
       hours: absHours,
       startTime: '00:00',
       comments: `${input.vacancyData.type} — gestionado desde planificador`,
-      coveredBy: coveredByLabel || undefined,
-      ...(coveredByLabel
+      coveredBy: coverage.mode === 'split' ? undefined : (coveredByLabel || undefined),
+      ...(coveredByLabel && coverage.mode !== 'split'
         ? {
             coverageSegmentRole: 'TARGET' as const,
             coverageStatus: 'COVERED',
-            coverageType: coverage.mode === 'substitute' ? 'substitute' : coverage.mode === 'split' ? 'split' : undefined,
+            coverageType: coverage.mode === 'substitute' ? 'substitute' : undefined,
           }
         : {}),
       ...camposBandaConservada({
@@ -831,6 +898,13 @@ export function applyVacancyCoverageToChanges(
         positionStructure: input.positionStructure,
         preferDate: coverage.adelApplyDateStr,
       });
+      if (!extHallado.shift || !adelHallado.shift) {
+        const partes = [
+          !extHallado.shift ? motivoSinPata({ lado: 'ext', empId: coverage.extEmpId, dateStr, shiftsMap: input.shiftsMap, pendingChanges: newChanges, employeesById: input.employeesById }) : '',
+          !adelHallado.shift ? motivoSinPata({ lado: 'adel', empId: coverage.adelEmpId, dateStr, shiftsMap: input.shiftsMap, pendingChanges: newChanges, employeesById: input.employeesById }) : '',
+        ].filter(Boolean);
+        omitidos.push({ dateStr, motivo: partes.join(' · ') || 'no se escribieron las dos patas' });
+      } else {
       const extShift = extHallado.shift;
       const adelShift = adelHallado.shift;
       const coverageFechada = {
@@ -872,14 +946,21 @@ export function applyVacancyCoverageToChanges(
           clientId: input.clientId,
           authorizeFrancoTrabajado: input.authorizeFrancoTrabajado,
         });
-        Object.assign(newChanges, updates);
-        splitCovered++;
-      } catch {
-        // Si falla split (ej. ext/adel sin turno), titular queda en V sin cobertura split
+        if (!patasSplitEscritas(updates, pkg)) {
+          omitidos.push({ dateStr, motivo: 'no se escribieron las dos patas' });
+        } else {
+          Object.assign(newChanges, updates);
+          splitCovered++;
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : '';
+        const franco = msg.startsWith('FRANCO_COVERAGE:') ? msg.slice('FRANCO_COVERAGE:'.length).split(' tiene franco')[0] : '';
+        omitidos.push({ dateStr, motivo: franco ? `${franco} está de franco` : (msg || 'no se escribieron las dos patas') });
+      }
       }
     }
     count++;
   }
 
-  return { changes: newChanges, count, covered, splitCovered, cleared };
+  return { changes: newChanges, count, covered, splitCovered, cleared, omitidos };
 }

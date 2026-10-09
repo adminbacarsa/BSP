@@ -2,7 +2,7 @@
  * Extensión de jornada de un guardia (desde celda), con o sin cierre SLA dual.
  */
 
-import { resolveEmployeeShift } from './planningRecompositionApply';
+import { resolveEmployeeShift, resolverDiaTramo } from './planningRecompositionApply';
 import { applyOperationalGapCloseToChanges, type OperationalGapCloseInput } from './operationalGapCoverage';
 import { shiftTimeWindowFromSla, type VacancyPositionSla } from './vacancySplitBands';
 import { normalizePlanningPositionName } from './positionCoverageUnits';
@@ -296,10 +296,23 @@ export function aplicarTramoSolo(
     gapHours?: number | null;
   },
 ): Record<string, any> {
-  const key = `${input.empId}_${input.dateStr}`;
+  const hallado = resolverDiaTramo({
+    lado: input.lado,
+    empId: input.empId,
+    dateStr: input.dateStr,
+    gapFrom: input.gapStart,
+    gapTo: input.gapEnd,
+    gapPosition: input.gapPosition,
+    shiftsMap: ctx.shiftsMap,
+    pendingChanges: baseChanges,
+    positionStructure: ctx.positionStructure,
+  });
+  if (!hallado.shift || !hallado.dateStr) {
+    throw new Error(input.lado === 'ext' ? 'No tiene el turno para extender ese día' : 'No tiene el turno para adelantar ese día');
+  }
+  const key = `${input.empId}_${hallado.dateStr}`;
   const pending = baseChanges[key];
-  const base = (pending && !pending.isDeleted ? pending : null) || ctx.shiftsMap[key] || null;
-  if (!base) throw new Error('El guardia no tiene turno ese día');
+  const base = (pending && !pending.isDeleted ? pending : null) || hallado.shift;
   const desde = typeof base.startTime === 'string' ? base.startTime.slice(0, 5) : input.gapStart;
   const hasta = typeof base.endTime === 'string' ? base.endTime.slice(0, 5) : input.gapEnd;
   const spanMin = (a: string, b: string) => {
@@ -314,7 +327,7 @@ export function aplicarTramoSolo(
     ? applyShiftExtensionFromCell(baseChanges, {
         objectiveId: ctx.objectiveId,
         clientId: ctx.clientId,
-        dateStr: input.dateStr,
+        dateStr: hallado.dateStr,
         primaryEmpId: input.empId,
         primaryExtraHours: extraHours,
         gapBand: input.gapBand,
@@ -333,6 +346,7 @@ export function aplicarTramoSolo(
         [key]: {
           ...cur,
           coversEmployeeId: input.titularId || cur.coversEmployeeId,
+          coversDateStr: input.dateStr,
           segmentToTime: input.gapEnd,
           adjustedEndTime: input.gapEnd,
           coverageMode: 'FULL_BAND',
@@ -365,6 +379,12 @@ export function aplicarTramoSolo(
       },
     };
   }
+
+  const leg = changes[key];
+  const legOk = input.lado === 'ext'
+    ? leg?.isExtended === true || leg?.coverageSegmentRole === 'EXTENSION'
+    : leg?.isEarlyStart === true || leg?.coverageSegmentRole === 'EARLY_START';
+  if (!legOk) throw new Error(input.lado === 'ext' ? 'No se escribió la extensión' : 'No se escribió el adelanto');
 
   if (input.titularId && input.titularId !== input.empId) {
     const tKey = `${input.titularId}_${input.dateStr}`;
