@@ -33,6 +33,8 @@ export type VistaCelda = {
     usado: boolean;
     descansoReducido: boolean;
     topeExcedido: boolean;
+    /** Borde rojo desde el día en que el mes pasa 200 h. No tapa el código. */
+    marcaTope: boolean;
     menuRol?: string;
     menuMarca?: string;
     cubiertoTitulo?: string;
@@ -90,11 +92,12 @@ function CeldaGrillaBase({ vista: v, fila, col, seleccionada, colElegir, elegirA
             onMouseMove={(ev) => ctl.current.mouseMove(ev)}
             onMouseLeave={() => ctl.current.mouseLeave()}
             data-modo-elegir-col={colElegir ? '1' : undefined}
+            data-marca-tope={v.marcaTope ? '1' : undefined}
             className={`border-b border-r p-0.5 ${elegirActivo || v.editable ? 'cursor-pointer' : 'cursor-default'} text-center relative ${colElegir ? 'bg-indigo-100 dark:bg-indigo-900/40' : seleccionada ? 'bg-indigo-200 dark:bg-indigo-800/50' : v.fondo}`}
             data-evento={v.evento}
             title={v.titulo}
         >
-            <div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${v.estilo}${comparada ? ' ring-2 ring-violet-600 ring-offset-1 z-20' : ''}${v.sufijoUsado} ${v.ringExtra}`}>
+            <div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${v.estilo}${comparada ? ' ring-2 ring-violet-600 ring-offset-1 z-20' : ''}${v.sufijoUsado} ${v.ringExtra}${v.marcaTope ? ' border-b-2 border-rose-600' : ''}`}>
                 {v.consulta ? (
                     <IndicadorConsultaCelda
                         texto={v.consultaTexto || ''}
@@ -115,7 +118,6 @@ function CeldaGrillaBase({ vista: v, fila, col, seleccionada, colElegir, elegirA
                 {v.liberado && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-emerald-600 text-white px-0.5 rounded">RET</div>}
                 {v.usado && <div className="absolute -top-1 -left-1 text-[7px] font-black bg-violet-600 text-white px-0.5 rounded z-10" title="Turno usado en cobertura operativa">U</div>}
                 {v.descansoReducido && <div className="absolute -top-1 left-0 text-[7px] font-black bg-amber-500 text-white px-0.5 rounded z-10" title="Descanso reducido autorizado">8–12</div>}
-                {v.topeExcedido && <div className="absolute -bottom-0.5 right-0 text-[7px] font-black bg-rose-600 text-white px-0.5 rounded z-10" title="Tope de 200 h autorizado">200</div>}
                 {v.menuRol ? (
                     <div className={`absolute -top-1 left-1/2 -translate-x-1/2 max-w-full truncate text-[6.5px] font-black text-white px-0.5 rounded z-10 ${v.menuRol === 'CUBRE' ? 'bg-indigo-600' : 'bg-emerald-600'}`} data-marca-menu={v.menuRol}>{v.menuMarca}</div>
                 ) : null}

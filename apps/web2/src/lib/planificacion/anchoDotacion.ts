@@ -97,7 +97,7 @@ const RESERVA = {
   ext: 52,
   horas: 36,
   km: 40,
-  tope: 36,
+  tope: 48,
   puestoLinea: 72,
   puestoLado: 96,
 };
@@ -107,9 +107,9 @@ function reserva(flags: FlagsAnchoFila): number {
   return RESERVA.padding + RESERVA.grip
     + (flags.conPuntaje ? RESERVA.puntaje : 0)
     + (!compacta && flags.conExt ? RESERVA.ext : 0)
-    + (!compacta && flags.conHoras ? RESERVA.horas : 0)
+    + ((!compacta || flags.conTope) && flags.conHoras ? RESERVA.horas : 0)
     + (!compacta && flags.conKm ? RESERVA.km : 0)
-    + (!compacta && flags.conTope ? RESERVA.tope : 0)
+    + (flags.conTope ? RESERVA.tope : 0)
     + (flags.conPuesto ? (compacta ? RESERVA.puestoLinea : RESERVA.puestoLado) : 0);
 }
 

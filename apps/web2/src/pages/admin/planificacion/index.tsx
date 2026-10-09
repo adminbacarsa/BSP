@@ -536,7 +536,8 @@ import { aporteDelTurnoAlDia, sumarDiasCalendario } from '@/lib/planificacion/co
 import { sumarAportePorDiaYPuesto } from '@/lib/planificacion/aporteCoberturaMes';
 import { AVISO_MES_CERRADO, mesCerrado } from '@/lib/planificacion/mesCerradoPlanif';
 import { computePlanningMonthHoursBreakdown } from '@/lib/planificacion/planningMonthHoursBreakdown';
-import { buildPlannerColumnHours } from '@/lib/planificacion/plannerColumnHours';
+import { buildPlannerColumnHours, collectPlannerColumnShifts } from '@/lib/planificacion/plannerColumnHours';
+import { cruceTopeDeTurnos, textoTooltipCeldaTope, textoTooltipFilaTope, type CruceTope } from '@/lib/planificacion/topeGrilla';
 import {
     billableHoursForPlanningCell,
     resolveTurnosForPlanningCellKey,
@@ -1206,6 +1207,8 @@ type EntradaCeldaGrilla = {
     cellTurnosMap: Record<string, any[]>;
     turaMap: Record<string, any>;
     lctRestByCell: Record<string, string>;
+    /** Primer día en que el legajo pasa las 200 h del mes. */
+    cruceTopePorEmp: Record<string, CruceTope>;
     excludedPositionsByDate: Record<string, string[]>;
     vacancyConsultas: any;
     isServiceLocked: boolean;
@@ -1469,6 +1472,7 @@ function calcularCeldaGrilla(e: EntradaCeldaGrilla, emp: any, isGuest: boolean, 
         usado: isCoverageSourceUsed,
         descansoReducido: !!cellShift?.descansoReducido,
         topeExcedido: !!cellShift?.topeExcedido,
+        marcaTope: !!(e.cruceTopePorEmp[emp.id] && cellDateStr >= e.cruceTopePorEmp[emp.id].dateStr),
         menuRol: menuRol || undefined,
         menuMarca: menuRol ? marcaCeldaMenuRapido(menuRol, menuCubre) : undefined,
         cubiertoTitulo: cubierto ? (p?.menuRapidoTexto || s?.menuRapidoTexto || (coveredByCell ? `Cubierto por ${coveredByCell}` : 'Cubierto')) : undefined,
@@ -3311,6 +3315,25 @@ function PlanificacionDesktop() {
     }, [cellTurnosMap, shiftsMap, pendingChanges, displayedEmployees, selectedObjective, selectedGrupo, grupoUnifiedMode]);
 
     const empMonthlyHours = plannerColumn.byEmployee;
+    const cruceTopePorEmp = useMemo(() => {
+        const groupMode = !!(selectedGrupo && grupoUnifiedMode && selectedGrupo.objectiveIds?.length);
+        const objectiveIds = groupMode
+            ? selectedGrupo.objectiveIds.map((id: string) => String(id))
+            : (selectedObjective ? [String(selectedObjective)] : []);
+        const { visible } = collectPlannerColumnShifts({
+            cellTurnosMap,
+            shiftsMap,
+            pendingChanges,
+            objectiveIds,
+            groupMode,
+            employeeIds: displayedEmployees.map((emp: any) => String(emp.id)),
+        });
+        return cruceTopeDeTurnos(visible, (t) => {
+            if (typeof t?.dateStr === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(t.dateStr)) return t.dateStr;
+            const raw = t?.startTime?.toDate ? t.startTime.toDate() : t?.startTime;
+            return raw ? getDateKey(raw) : '';
+        }, planningLimits.monthly);
+    }, [cellTurnosMap, shiftsMap, pendingChanges, displayedEmployees, selectedObjective, selectedGrupo, grupoUnifiedMode, planningLimits.monthly]);
     const publishedPlanMesh = plannerColumn.published;
     const plannerWorkingHours = plannerColumn.working.hours;
 
@@ -12871,6 +12894,7 @@ function PlanificacionDesktop() {
         cellTurnosMap,
         turaMap,
         lctRestByCell,
+        cruceTopePorEmp,
         excludedPositionsByDate,
         vacancyConsultas,
         isServiceLocked,
@@ -12897,7 +12921,7 @@ function PlanificacionDesktop() {
     }, [
         filasCeldas, daysInMonth, selectedObjective, selectedGrupo, grupoUnifiedMode, slaIdToObjId,
         pendingChanges, shiftsMap, rfzByEmpDate, absencesMap, planPublicadoGrilla, cellTurnosMap, turaMap,
-        lctRestByCell, excludedPositionsByDate, vacancyConsultas, isServiceLocked, fechaBloqueadaGrilla, clients,
+        lctRestByCell, cruceTopePorEmp, excludedPositionsByDate, vacancyConsultas, isServiceLocked, fechaBloqueadaGrilla, clients,
     ]);
     const ctxCeldasExtraRef = useRef<Record<string, CtxCeldaGrilla>>({});
     const celdaDeGrilla = (emp: any, isGuest: boolean, day: Date, dayIndex: number) => {
@@ -12916,13 +12940,19 @@ function PlanificacionDesktop() {
         const c = ctxDeCelda(key);
         if (!c) return null;
         const { emp, p, s, absence, activeShift, rfzOnCell, evOverlay, cellCode, leaveCellCode, coveredByCell, cellPosName } = c;
+        const cruceTope = cruceTopePorEmp[String(emp.id)];
+        const avisoTope = cruceTope && c.dateStr >= cruceTope.dateStr ? textoTooltipCeldaTope(cruceTope.total) : '';
+        const sumarTope = (label: string | null | undefined): string | null => {
+            if (!avisoTope) return label || null;
+            return label ? `${label}\n${avisoTope}` : avisoTope;
+        };
         const _marca = (p && !p.isDeleted && p.menuRapidoTexto) || s?.menuRapidoTexto;
-        if (_marca) return { label: String(_marca), pos: null, range: null, restHours: null };
+        if (_marca) return { label: sumarTope(String(_marca)), pos: null, range: null, restHours: null };
         if (c.isLeaveCell) {
             const absType = absence?.type || activeShift?.name || LEGEND_DESCRIPTIONS[leaveCellCode] || leaveCellCode;
             const reason = absence?.reason || activeShift?.comments || p?.comments || '';
             const covered = resolveTitularCoverageName(emp.id, emp.name || '', c.dateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell, cellTurnosMap);
-            return { label: buildLeaveCellTooltipLabel({ absenceType: absType, reason, coveredBy: covered }), pos: null, range: null, restHours: null };
+            return { label: sumarTope(buildLeaveCellTooltipLabel({ absenceType: absType, reason, coveredBy: covered })), pos: null, range: null, restHours: null };
         }
         if ((s || p || rfzOnCell || evOverlay) && !absence) {
             const _cellShift = c.cellShift;
@@ -12976,12 +13006,12 @@ function PlanificacionDesktop() {
                 if (_cellShift?.topeExcedido) alertas.push(`Tope 200 h autorizado${_cellShift.horasMes != null ? ` (${_cellShift.horasMes} h)` : ''}`);
                 if (c.lctRest) alertas.push(c.lctRest);
                 return {
-                    label: textoTooltipEventoCelda({
+                    label: sumarTope(textoTooltipEventoCelda({
                         ev: evDoc,
                         mode: evOverlay?.mode || 'EV',
                         lugar,
                         alertas,
-                    }),
+                    })),
                     pos: null,
                     range: null,
                     restHours: null,
@@ -13003,7 +13033,7 @@ function PlanificacionDesktop() {
                     ? `${shiftLabel}${_exclHint}${_otherObjHint}${_rfzHint}${_turaHint}${_covHint}${_billHint}${_authHint}${_lctRest ? `\n⚠ ${_lctRest}` : ''}`
                     : (_exclHint || _otherObjHint || _rfzHint || _turaHint || _covHint || _billHint || _lctRest || null));
             return {
-                label: _tipLabel,
+                label: sumarTope(_tipLabel),
                 readOnlyOps: c.isOpsCoverageCell,
                 pos: _isRet ? null : (cellPosName || rfzOnCell?.positionName || null),
                 range: _isRet ? null : (cellRange || (rfzOnCell ? `${formatTime(rfzOnCell.startTime)} - ${formatTime(rfzOnCell.endTime)}` : null)),
@@ -13011,9 +13041,10 @@ function PlanificacionDesktop() {
             };
         }
         if (c.isExclusionCol) {
-            return { label: excludedPositionsTooltip(c.excludedOnDay, c.dateStr), pos: null, range: null, restHours: null };
+            return { label: sumarTope(excludedPositionsTooltip(c.excludedOnDay, c.dateStr)), pos: null, range: null, restHours: null };
         }
-        return null;
+        const soloTope = sumarTope(null);
+        return soloTope ? { label: soloTope, pos: null, range: null, restHours: null } : null;
     };
 
     const ctlCeldas = useRef<ControlCeldas>(null as unknown as ControlCeldas);
@@ -13385,16 +13416,18 @@ function PlanificacionDesktop() {
                                                 : 'text-slate-400 dark:text-slate-500';
                                             const grantTope = topeGrants[emp.id];
                                             const topeAviso = grantTope && !topeRequierePin(grantTope, periodoPlan) ? textoAvisoTope(grantTope) : '';
+                                            const cruceTope = cruceTopePorEmp[emp.id];
+                                            const pasaTope = !!cruceTope;
                                             const compacta = presentacionDotacion === 'compacta';
                                             const etGrupo = selectedGrupo && grupoUnifiedMode ? etiquetasGrupo.get(emp.id) : undefined;
                                             const cajaNombre = anchoCajaNombre(anchoDotacion, {
                                                 compacta,
                                                 conPuesto: !!etGrupo,
-                                                conHoras: !compacta,
+                                                conHoras: !compacta || pasaTope,
                                                 conKm: !compacta && (distKm !== null || !!emp.address),
                                                 conExt: !compacta && (!!isGuest || !!isVolante),
                                                 conPuntaje: true,
-                                                conTope: !compacta && !!topeAviso,
+                                                conTope: pasaTope || (!compacta && !!topeAviso),
                                             });
                                             const nombreVisible = abreviarNombreGuardia(String(emp.name || ''), cajaNombre);
                                             const tituloNombre = [
@@ -13415,7 +13448,7 @@ function PlanificacionDesktop() {
                                                         conKm: distKm !== null,
                                                         conExt: !!(isGuest || isVolante),
                                                         conPuntaje: true,
-                                                        conTope: !!topeAviso,
+                                                        conTope: pasaTope || !!topeAviso,
                                                     })}
                                                 >
                                                     <div className="flex items-center gap-1 min-w-0 overflow-hidden">
@@ -13427,16 +13460,23 @@ function PlanificacionDesktop() {
                                             ? (<div className="shrink-0 px-1.5 py-0.5 rounded bg-violet-600 text-white text-[8px] font-black uppercase flex items-center gap-1 cursor-help shadow-sm" title={`Eventual de la bolsa · CUIL ${emp.bolsaCuil || '—'}`}><Briefcase size={8} /> EVENTUAL</div>)
                                             : (<div className="shrink-0 px-1.5 py-0.5 rounded bg-amber-500 text-white text-[8px] font-black uppercase flex items-center gap-1 cursor-help shadow-sm" title={`Base: ${homeObjectiveName}`}><Briefcase size={8} /> {emp._kind || 'EXT'}</div>))}
                                                         {/* Horas mensuales planificadas (facturables) + días RET sobrantes */}
-                                                        {!compacta && <span
+                                                        {(!compacta || pasaTope) && <span
                                                             title={hoursMode === 'cct'
                                                                 ? `${formatLegajoHours(cctHours)}h en el ciclo CCT actual (26 mes anterior → 25 de este mes). Tope 200h.\n${formatLegajoHours(monthHours)}h en el mes calendario.${retDays > 0 ? `\n${retDays} días RET (0 h planificadas; sobrante disponible en otro objetivo).` : ''}${topeAviso ? `\n${topeAviso}` : ''}`
                                                                 : `${formatLegajoHours(monthHours)}h de plan publicado de este legajo (jornada del puesto, incluye FT). Los turnos sin código no tienen fila.\n${formatLegajoHours(cctHours)}h en el ciclo CCT actual (tope 200h).${retDays > 0 ? `\n${retDays} días RET (0 h planificadas; sobrante disponible en otro objetivo).` : ''}${topeAviso ? `\n${topeAviso}` : ''}`}
-                                                            className={`shrink-0 text-[8px] ${hoursColor}`}
+                                                            className={`shrink-0 text-[8px] ${pasaTope ? 'text-red-600 font-black' : hoursColor}`}
                                                         >
-                                                            {formatLegajoHours(displayHours)}h
+                                                            {formatLegajoHours(pasaTope ? monthHours : displayHours)}h
                                                             {retDays > 0 && displayHours === 0 && <span className="ml-0.5 text-[7px] text-amber-700 font-bold" title={`${retDays} días RET (0 h planificadas)`}>+{retDays}RET</span>}
-                                                            {hoursMode === 'cct' && <span className="ml-0.5 text-[7px] text-indigo-500 font-black">CCT</span>}
+                                                            {hoursMode === 'cct' && !pasaTope && <span className="ml-0.5 text-[7px] text-indigo-500 font-black">CCT</span>}
                                                         </span>}
+                                                        {pasaTope && cruceTope ? (
+                                                            <span
+                                                                data-tope-chip={emp.id}
+                                                                title={textoTooltipFilaTope(cruceTope, grantTope && !topeRequierePin(grantTope, periodoPlan) ? grantTope.autorizadoPor : '')}
+                                                                className="shrink-0 rounded bg-rose-600 px-1 py-px text-[7px] font-black leading-none text-white"
+                                                            >+200 h</span>
+                                                        ) : null}
                                                         {!compacta && topeAviso ? (
                                                             <button
                                                                 type="button"
