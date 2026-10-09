@@ -204,6 +204,15 @@ import { inicioRenderGrilla, registrarCommitGrilla } from '@/lib/planificacion/p
 import { etiquetaFilaGrupo, puestoDeTurno, type EtiquetaFilaGrupo } from '@/lib/planificacion/etiquetaFilaGrupo';
 import { pasoScrollArrastre } from '@/lib/planificacion/scrollArrastreFila';
 import {
+    celdaOtroObjetivoBloqueada,
+    decisionGuardadoTurnoAjeno,
+    esTurnoAjenoAlCrono,
+    idsObjetivosDelCrono,
+    saltearEscrituraTurnoAjeno,
+    sanearPendientesTurnoAjeno,
+    textoAvisoTurnoAjeno,
+} from '@/lib/planificacion/turnoOtroObjetivo';
+import {
     CeldaGrilla,
     TooltipCeldaGrilla,
     reusarVista,
@@ -900,13 +909,14 @@ function resolveCellShiftDisplay(
         const objId = active.objectiveId != null && active.objectiveId !== ''
             ? String(active.objectiveId)
             : null;
+        const enGrupo = !!(objId && selectedGrupo.objectiveIds.includes(objId));
+        if (objId && !enGrupo) {
+            return { s: active, p: null };
+        }
         if (rawP && !rawP.isDeleted) {
-            if (objId && !selectedGrupo.objectiveIds.includes(objId)) {
-                return { s: null, p: null };
-            }
             return { s: rawS ?? null, p: rawP };
         }
-        if (objId && selectedGrupo.objectiveIds.includes(objId)) {
+        if (enGrupo) {
             if (!isOperationalOriginShift(active) || isOpsCoverageShiftForObjective(active, objId)) {
                 return { s: rawS, p: null };
             }
@@ -1201,6 +1211,7 @@ type CtxCeldaGrilla = {
     cellPosName: string | null;
     cellPosExcluded: boolean;
     isOtherObjectiveShift: boolean;
+    soloLecturaAjena: boolean;
     isOpsCoverageCell: boolean;
     opsTooltipShift: any;
     coverageSourceShift: any;
@@ -1344,9 +1355,11 @@ function calcularCeldaGrilla(e: EntradaCeldaGrilla, emp: any, isGuest: boolean, 
     const _rawOtherObj = isShiftAtOtherObjective(s, p, selectedObjective);
     const _activeShiftObjId = ((p && !p.isDeleted) ? p : s)?.objectiveId;
     const _cellIsRetAtOtherObj = _rawOtherObj && shiftPlanningCodeUpper(activeShift) === 'RET';
+    const _ajenoAlGrupo = !(selectedGrupo && grupoUnifiedMode && _activeShiftObjId && selectedGrupo.objectiveIds.includes(_activeShiftObjId));
     const isOtherObjectiveShift = !!(_rawOtherObj
         && !_cellIsRetAtOtherObj
-        && !(selectedGrupo && grupoUnifiedMode && selectedGrupo.objectiveIds.includes(_activeShiftObjId)));
+        && _ajenoAlGrupo);
+    const soloLecturaAjena = !!(_rawOtherObj && _ajenoAlGrupo);
     if (absence) { const absCode = absence.inferredCode || inferAbsenceCode(absence); const displayCode = absenceGridDisplayCode(absence); content = displayCode; style = SHIFT_STYLES[displayCode] || SHIFT_STYLES[absCode] || 'bg-rose-50 text-rose-700 font-bold border-rose-200'; }
     if (isOtherObjectiveShift && content != null) {
         style = OTHER_OBJECTIVE_CELL_STYLE;
@@ -1420,7 +1433,7 @@ function calcularCeldaGrilla(e: EntradaCeldaGrilla, emp: any, isGuest: boolean, 
         estilo: style,
         sufijoUsado,
         ringExtra: lctRest ? 'ring-2 ring-amber-400' : cellPosExcluded ? 'ring-1 ring-rose-400/70' : '',
-        editable: !isLockedDate && !e.isServiceLocked && !isOpsCoverageCell,
+        editable: !isLockedDate && !e.isServiceLocked && !isOpsCoverageCell && !soloLecturaAjena,
         fondo: isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : '',
         evento: evOverlay ? evOverlay.mode : undefined,
         titulo,
@@ -1468,6 +1481,7 @@ function calcularCeldaGrilla(e: EntradaCeldaGrilla, emp: any, isGuest: boolean, 
         cellPosName,
         cellPosExcluded,
         isOtherObjectiveShift,
+        soloLecturaAjena,
         isOpsCoverageCell,
         opsTooltipShift,
         coverageSourceShift,
@@ -1873,7 +1887,7 @@ function PlanificacionDesktop() {
     const [pendingAssignment, setPendingAssignment] = useState<any>(null); 
     const [authWarningMessage, setAuthWarningMessage] = useState('');
 
-    const [pendingChanges, setPendingChanges] = useState<Record<string, any>>({});
+    const [pendingChanges, setPendingChangesState] = useState<Record<string, any>>({});
     const [pendingNovedades, setPendingNovedades] = useState<Record<string, any>>({});
     const [selection, setSelection] = useState<{start: Coords | null, end: Coords | null}>({ start: null, end: null });
     const [isDragging, setIsDragging] = useState(false);
@@ -1919,6 +1933,61 @@ function PlanificacionDesktop() {
     const undoStackRef = useRef<Record<string, any>[]>([]);
     const pendingChangesRef = useRef(pendingChanges);
     pendingChangesRef.current = pendingChanges;
+    const guardCronoRef = useRef({
+        shiftsMap,
+        cellTurnosMap,
+        selectedObjective,
+        selectedGrupo,
+        grupoUnifiedMode,
+        employees,
+        clients,
+    });
+    guardCronoRef.current = {
+        shiftsMap,
+        cellTurnosMap,
+        selectedObjective,
+        selectedGrupo,
+        grupoUnifiedMode,
+        employees,
+        clients,
+    };
+    const setPendingChanges = useCallback((
+        action: Record<string, any> | ((prev: Record<string, any>) => Record<string, any>),
+    ) => {
+        const prev = pendingChangesRef.current;
+        const next = typeof action === 'function' ? action(prev) : action;
+        const g = guardCronoRef.current;
+        const permitidos = idsObjetivosDelCrono(
+            g.selectedObjective,
+            g.selectedGrupo?.objectiveIds,
+            !!(g.selectedGrupo && g.grupoUnifiedMode),
+        );
+        const docsPorClave: Record<string, any[]> = {};
+        const claves = new Set([...Object.keys(prev || {}), ...Object.keys(next || {})]);
+        for (const key of claves) {
+            const primary = key.endsWith('_B2') ? key.slice(0, -3) : key;
+            if (docsPorClave[primary]) continue;
+            const lista = g.cellTurnosMap[primary];
+            docsPorClave[primary] = lista?.length ? lista : (g.shiftsMap[primary] ? [g.shiftsMap[primary]] : []);
+        }
+        const { changes, rechazadas } = sanearPendientesTurnoAjeno({ prev, next, docsPorClave, permitidos });
+        if (rechazadas.length) {
+            const textos = [...new Set(rechazadas.map((r) => {
+                const empId = r.key.split('_')[0];
+                const emp = g.employees.find((e: any) => e.id === empId);
+                const nombre = emp?.name || emp?.nombre || 'El guardia';
+                let objetivo = r.objectiveId || 'otro objetivo';
+                for (const client of g.clients) {
+                    const found = client.objetivos?.find((o: any) => (o.id || o.name) === r.objectiveId);
+                    if (found?.name) { objetivo = found.name; break; }
+                }
+                return textoAvisoTurnoAjeno(nombre, objetivo);
+            }))];
+            queueMicrotask(() => toast.message(textos.length === 1 ? textos[0] : `${textos[0]} · y ${textos.length - 1} más`));
+        }
+        pendingChangesRef.current = changes;
+        setPendingChangesState(changes);
+    }, []);
 
     /** Guarda snapshot antes de mutar pendingChanges (máx. 40 pasos). */
     const consultasCursoRef = useRef<ConsultaObjetivo[]>([]);
@@ -7269,9 +7338,13 @@ function PlanificacionDesktop() {
 
             const jobShiftsMap: Record<string, any> = {};
             const jobAllShiftIds: Record<string, string[]> = {};
+            const jobCellTurnos: Record<string, any[]> = {};
             for (const key of jobKeys) {
+                const primary = key.endsWith('_B2') ? key.slice(0, -3) : key;
                 if (shiftsMap[key]) jobShiftsMap[key] = shiftsMap[key];
+                if (shiftsMap[primary]) jobShiftsMap[primary] = shiftsMap[primary];
                 if (allShiftIds[key]?.length) jobAllShiftIds[key] = [...allShiftIds[key]];
+                if (cellTurnosMap[primary]?.length) jobCellTurnos[primary] = cellTurnosMap[primary];
             }
             // Snapshot completo del mes (para historial): estado post-guardado = grilla + pendientes.
             // No usar solo pending: eso deja el Histórico vacío y parece «Solo cambios» permanente.
@@ -7514,20 +7587,46 @@ function PlanificacionDesktop() {
             };
 
             try {
+                const avisosTurnoAjeno: string[] = [];
                 for (const [key, change] of Object.entries(jobPending)) {
                     // key puede ser "empId_YYYY-MM-DD" o "empId_YYYY-MM-DD_B2" para bloques secundarios
                     const parts = key.split('_');
                     const empId = parts[0];
                     const dateStr = parts[1]; // YYYY-MM-DD
-                    const existing = jobShiftsMap[key];
+                    let existing = jobShiftsMap[key];
+                    const empObj = employeesById[empId];
+                    const empName = empObj ? empObj.name : 'Desconocido';
+                    const primaryKey = key.endsWith('_B2') ? key.slice(0, -3) : key;
+                    const docsGuard = (jobCellTurnos[primaryKey]?.length
+                        ? jobCellTurnos[primaryKey]
+                        : (jobShiftsMap[primaryKey] ? [jobShiftsMap[primaryKey]] : (existing ? [existing] : [])));
+                    const permitidosGuard = idsObjetivosDelCrono(
+                        selectedObjective,
+                        selectedGrupo?.objectiveIds,
+                        !!(selectedGrupo && grupoUnifiedMode),
+                    );
+                    const decisionAjeno = decisionGuardadoTurnoAjeno({
+                        cambio: {
+                            isDeleted: change?.isDeleted === true,
+                            isSecondBlock: change?.isSecondBlock === true || key.endsWith('_B2'),
+                        },
+                        docs: docsGuard,
+                        permitidos: permitidosGuard,
+                    });
+                    if (!decisionAjeno.escribir) {
+                        const ajeno = docsGuard.find((d: any) => esTurnoAjenoAlCrono(d?.objectiveId, permitidosGuard) && !d?.isSecondBlock);
+                        avisosTurnoAjeno.push(textoAvisoTurnoAjeno(empName, getObjectiveName(ajeno?.objectiveId)));
+                        continue;
+                    }
+                    if (existing && esTurnoAjenoAlCrono(existing.objectiveId, permitidosGuard)) {
+                        existing = docsGuard.find((d: any) => d?.id && decisionAjeno.borrarIds.includes(String(d.id))) || null;
+                    }
                     const existingCodeUpper = String(existing?.code || existing?.type || '').toUpperCase();
                     const nextCodeUpper = String(change?.code || change?.type || '').toUpperCase();
                     const existingEventoId = String(existing?.eventoId || '');
                     const existingServicioId = String(existing?.servicioId || '');
                     const nextEventoId = String(change?.eventoId || '');
                     const nextServicioId = String(change?.servicioId || '');
-                    const empObj = employeesById[empId];
-                    const empName = empObj ? empObj.name : 'Desconocido';
                     let actionType = 'ASIGNACION_MASIVA';
                     let actionDetail = change.coveredBy
                         ? `Cobertura ${change.code} — ${empName} cubierto por ${change.coveredBy} el ${dateStr}`
@@ -7537,9 +7636,8 @@ function PlanificacionDesktop() {
                                 ? `${change.name || change.code} — ${empName} el ${dateStr}`
                                 : `Asignó ${change.code} a ${empName} el ${dateStr}`;
 
-                    const allExistingIds = jobAllShiftIds[key] ?? (existing?.id ? [existing.id] : []);
-                    const deleteAllExisting = () => {
-                        for (const docId of allExistingIds) {
+                    const deletePropios = () => {
+                        for (const docId of decisionAjeno.borrarIds) {
                             batch.delete(doc(db, 'turnos', docId));
                             bumpBatchOp();
                         }
@@ -7551,7 +7649,7 @@ function PlanificacionDesktop() {
                         if (existingCodeUpper === 'EV' && existingEventoId && existingServicioId) {
                             await rollbackEventoSolicitud(existingEventoId, existingServicioId, empId);
                         }
-                        deleteAllExisting();
+                        deletePropios();
 
                         // Crear vacante en Firestore cuando una corrección quita un guardia de un turno publicado
                         if (correctionMode) {
@@ -7612,7 +7710,7 @@ function PlanificacionDesktop() {
                         ) {
                             await rollbackEventoSolicitud(existingEventoId, existingServicioId, empId);
                         }
-                        deleteAllExisting();
+                        deletePropios();
                         await flushBatchWhenFull();
 
                         if (existing) {
@@ -7791,6 +7889,10 @@ function PlanificacionDesktop() {
                         }
                     }
                     await flushBatchWhenFull();
+                }
+                if (avisosTurnoAjeno.length) {
+                    const unicos = [...new Set(avisosTurnoAjeno)];
+                    toast.message(unicos.length === 1 ? unicos[0] : `${unicos[0]} · y ${unicos.length - 1} más`);
                 }
 
                 if (isPublished && !correctionMode && logData.length > 0) {
@@ -9341,6 +9443,13 @@ function PlanificacionDesktop() {
         let skippedCoverage = 0;
         let skippedExt = 0;
         let skippedLicencia = 0;
+        let skippedAjeno = 0;
+        const avisosAjenoBulk: string[] = [];
+        const permitidosBulk = idsObjetivosDelCrono(
+            selectedObjective,
+            selectedGrupo?.objectiveIds,
+            !!(selectedGrupo && grupoUnifiedMode),
+        );
 
         const cyclesForBulk = autoSelectedCyclesRef.current?.length
             ? autoSelectedCyclesRef.current
@@ -9470,6 +9579,8 @@ function PlanificacionDesktop() {
                 const day = daysInMonth[c];
                 const key = `${emp.id}_${getDateKey(day)}`;
                 const existing = shiftsMap[key];
+                const docsFranco = (cellTurnosMap[key]?.length ? cellTurnosMap[key] : (existing ? [existing] : [])) as any[];
+                if (docsFranco.some((d) => celdaOtroObjetivoBloqueada(d, permitidosBulk))) continue;
                 if (existing && (existing.code === 'F' || existing.isFranco) && shiftConfig && shiftConfig.code !== 'F') {
                     francosReplaced++;
                 }
@@ -9502,6 +9613,13 @@ function PlanificacionDesktop() {
                 const dateStr = getDateKey(day);
                 const key = `${emp.id}_${dateStr}`;
                 const existing = shiftsMap[key];
+                const docsBulk = (cellTurnosMap[key]?.length ? cellTurnosMap[key] : (existing ? [existing] : [])) as any[];
+                const ajenoBulk = docsBulk.find((d) => celdaOtroObjetivoBloqueada(d, permitidosBulk));
+                if (ajenoBulk) {
+                    skippedAjeno++;
+                    avisosAjenoBulk.push(textoAvisoTurnoAjeno(emp.name, getObjectiveName(ajenoBulk.objectiveId)));
+                    continue;
+                }
                 const pendingCell = newChanges[key] ?? pendingChanges[key];
                 const effectiveExisting = pendingCell && !pendingCell.isDeleted ? pendingCell : existing;
                 if (esCeldaLicencia({ code: effectiveExisting?.code, tieneAusencia: !!absencesMap[key] })) {
@@ -9594,6 +9712,10 @@ function PlanificacionDesktop() {
         }
         if (blockedEmps.size > 0) toast.error(`🚫 Bloqueados (objetivo excluido): ${[...blockedEmps].join(', ')}`, { duration: 10000 });
         const bulkWarns: string[] = [];
+        if (avisosAjenoBulk.length) {
+            const unicos = [...new Set(avisosAjenoBulk)];
+            bulkWarns.push(unicos.length === 1 ? unicos[0] : `${unicos[0]} · y ${unicos.length - 1} más`);
+        }
         if (skippedLicencia > 0) bulkWarns.push(`${skippedLicencia} con licencia: se cubre, no se le asigna turno`);
         if (skippedExt > 0) bulkWarns.push(`${skippedExt} omitida(s): elegí objetivo EXT`);
         if (skippedExcluded > 0) bulkWarns.push(`${skippedExcluded} omitida(s): puesto excluido SLA`);
@@ -9779,6 +9901,17 @@ function PlanificacionDesktop() {
                 const dateStr = getDateKey(daysInMonth[c]);
                 const key = `${emp.id}_${dateStr}`;
                 const existing = shiftsMap[key];
+                const permitidosFill = idsObjetivosDelCrono(
+                    selectedObjective,
+                    selectedGrupo?.objectiveIds,
+                    !!(selectedGrupo && grupoUnifiedMode),
+                );
+                const docsFill = (cellTurnosMap[key]?.length ? cellTurnosMap[key] : (existing ? [existing] : [])) as any[];
+                const ajenoFill = docsFill.find((d) => celdaOtroObjetivoBloqueada(d, permitidosFill));
+                if (ajenoFill) {
+                    toast.message(textoAvisoTurnoAjeno(emp.name, getObjectiveName(ajenoFill.objectiveId)));
+                    continue;
+                }
                 if (isShiftConsolidated(existing)) continue;
                 if (isPosExcludedOnDate(pos, dateStr)) { skippedExcluded++; continue; }
                 const hours = Number(sh.hours) || SHIFT_HOURS_LOOKUP[String(sh.code || '').toUpperCase()] || 8;
@@ -10180,30 +10313,16 @@ function PlanificacionDesktop() {
             setFrancoMode('NONE');
             return;
         }
-        const newAssignCode = String(shiftConfig.code || '').toUpperCase();
-        if (
-            existing &&
-            existing.objectiveId != null &&
-            existing.objectiveId !== '' &&
-            String(existing.objectiveId) !== String(selectedObjective) &&
-            !existing.isFranco &&
-            !isFT
-        ) {
-            const existingObjCode = shiftPlanningCodeUpper(existing);
-            if (existingObjCode === 'RET') {
-                applyToPending({ ...shiftConfig, positionName, objectiveId: selectedObjective });
-                return;
-            }
-            if (newAssignCode === 'RET') {
-                toast.error(
-                    `Ese día tiene turno en ${getObjectiveName(existing.objectiveId)}. No podés asignar RET en este objetivo sin mover el turno laboral.`,
-                    { duration: 9000 },
-                );
-                return;
-            }
-            const objName = getObjectiveName(existing.objectiveId);
-            if (!confirm(`⚠️ ALERTA DE TRANSFERENCIA\n\nEl empleado ya tiene turno en "${objName}".\n\n¿Desea moverlo a este objetivo?`)) return;
-            applyToPending({ ...shiftConfig, oldObjectiveId: existing.objectiveId, positionName });
+        const permitidosAsignar = idsObjetivosDelCrono(
+            selectedObjective,
+            selectedGrupo?.objectiveIds,
+            !!(selectedGrupo && grupoUnifiedMode),
+        );
+        const docsAsignar = (cellTurnosMap[key]?.length ? cellTurnosMap[key] : (shiftsMap[key] ? [shiftsMap[key]] : [])) as any[];
+        const ajenoAsignar = docsAsignar.find((d) => celdaOtroObjetivoBloqueada(d, permitidosAsignar));
+        if (ajenoAsignar) {
+            const empNombre = employees.find((e: any) => e.id === selectedCell.empId)?.name || 'El guardia';
+            toast.message(textoAvisoTurnoAjeno(empNombre, getObjectiveName(ajenoAsignar.objectiveId)));
             return;
         }
         if (!correctionMode && existing && (existing.code === 'F' || existing.isFranco) && shiftConfig.code !== 'F' && !isFT) { if(!confirm(`⚠️ ATENCIÓN: ESTÁ ELIMINANDO UN FRANCO\n\n¿Seguro que desea eliminar el Franco?`)) return; }
@@ -10464,6 +10583,17 @@ function PlanificacionDesktop() {
             if (isPlanningDateLocked(dateStr)) return;
             if (shift && isOutsideServiceRange(dateStr)) return;
             const key = `${emp.id}_${dateStr}`;
+            const permitidosPegar = idsObjetivosDelCrono(
+                selectedObjective,
+                selectedGrupo?.objectiveIds,
+                !!(selectedGrupo && grupoUnifiedMode),
+            );
+            const docsPegar = (cellTurnosMap[key]?.length ? cellTurnosMap[key] : (shiftsMap[key] ? [shiftsMap[key]] : [])) as any[];
+            const ajenoPegar = docsPegar.find((d) => saltearEscrituraTurnoAjeno(d, permitidosPegar));
+            if (ajenoPegar) {
+                toast.message(textoAvisoTurnoAjeno(emp.name, getObjectiveName(ajenoPegar.objectiveId)));
+                return;
+            }
             if (!shift) {
                 if (newChanges[key] || shiftsMap[key]) newChanges[key] = { isDeleted: true };
             } else {
@@ -10485,7 +10615,7 @@ function PlanificacionDesktop() {
                 : `${pasted} turno(s) pegado(s) — portapapeles listo para repetir`,
         );
         if (clipboardIsCut) setClipboardIsCut(false);
-    }, [allowPlanningMultiSelect, clipboard, clipboardIsCut, commitPendingChanges, displayedEmployees, daysInMonth, shiftsMap, selectedObjective, isPlanningDateLocked, isOutsideServiceRange, selectedGrupo, grupoUnifiedMode, resolveObjectiveForEmp, msgBloqueoEdicion]);
+    }, [allowPlanningMultiSelect, clipboard, clipboardIsCut, commitPendingChanges, displayedEmployees, daysInMonth, shiftsMap, cellTurnosMap, selectedObjective, isPlanningDateLocked, isOutsideServiceRange, selectedGrupo, grupoUnifiedMode, resolveObjectiveForEmp, getObjectiveName, msgBloqueoEdicion]);
 
     const cutSelection = useCallback(() => {
         if (!allowPlanningMultiSelect) {
@@ -10505,6 +10635,17 @@ function PlanificacionDesktop() {
                 const dateStr = getDateKey(daysInMonth[c]);
                 if (isPlanningDateLocked(dateStr)) continue;
                 const key = `${emp.id}_${dateStr}`;
+                const permitidosCorte = idsObjetivosDelCrono(
+                    selectedObjective,
+                    selectedGrupo?.objectiveIds,
+                    !!(selectedGrupo && grupoUnifiedMode),
+                );
+                const docsCorte = (cellTurnosMap[key]?.length ? cellTurnosMap[key] : (shiftsMap[key] ? [shiftsMap[key]] : [])) as any[];
+                const ajenoCorte = docsCorte.find((d) => saltearEscrituraTurnoAjeno(d, permitidosCorte));
+                if (ajenoCorte) {
+                    toast.message(textoAvisoTurnoAjeno(emp.name, getObjectiveName(ajenoCorte.objectiveId)));
+                    continue;
+                }
                 const existing = prev[key] ? (prev[key].isDeleted ? null : prev[key]) : (shiftsMap[key] || null);
                 if (isShiftConsolidated(existing)) continue;
                 if (existing || prev[key] || shiftsMap[key]) {
@@ -10515,7 +10656,7 @@ function PlanificacionDesktop() {
         }
         commitPendingChanges(newChanges);
         toast.success(`${cut} celda(s) cortada(s) — Ctrl+V para pegar`);
-    }, [allowPlanningMultiSelect, isServiceLocked, activeServiceStatus.msg, copySelectionToClipboard, commitPendingChanges, displayedEmployees, daysInMonth, shiftsMap, isPlanningDateLocked]);
+    }, [allowPlanningMultiSelect, isServiceLocked, activeServiceStatus.msg, copySelectionToClipboard, commitPendingChanges, displayedEmployees, daysInMonth, shiftsMap, cellTurnosMap, selectedObjective, selectedGrupo, grupoUnifiedMode, getObjectiveName, isPlanningDateLocked]);
 
     // Atajos: Ctrl+C copiar, Ctrl+X cortar, Ctrl+V pegar, Ctrl+Z deshacer
     useEffect(() => {
@@ -10604,13 +10745,16 @@ function PlanificacionDesktop() {
                     });
                     return;
                 }
-                if (
-                    effectiveShift &&
-                    selectedObjective &&
-                    !(selectedGrupo && grupoUnifiedMode) &&
-                    isCrossObjectivePlanningReadOnly(effectiveShift, selectedObjective)
-                ) {
-                    toast.message(`Turno en ${getObjectiveName(effObjId)} — solo lectura en este cronograma.`);
+                const permitidosClic = idsObjetivosDelCrono(
+                    selectedObjective,
+                    selectedGrupo?.objectiveIds,
+                    !!(selectedGrupo && grupoUnifiedMode),
+                );
+                const docsClic = (cellTurnosMap[key]?.length ? cellTurnosMap[key] : (shiftsMap[key] ? [shiftsMap[key]] : [])) as any[];
+                const ajenoClic = docsClic.find((d) => celdaOtroObjetivoBloqueada(d, permitidosClic))
+                    || (celdaOtroObjetivoBloqueada(effectiveShift, permitidosClic) ? effectiveShift : null);
+                if (ajenoClic) {
+                    toast.message(textoAvisoTurnoAjeno(emp.name, getObjectiveName(ajenoClic.objectiveId || effObjId)));
                     return;
                 }
                 const empPreferred = empDefaultPos[`${emp.id}___${selectedObjective}`];
@@ -12618,6 +12762,13 @@ function PlanificacionDesktop() {
             const c = ctxDeCelda(key);
             if (!c) return;
             tooltipCeldaCtl.current.ocultar();
+            if (c.soloLecturaAjena) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                const objId = c.activeShift?.objectiveId || c.s?.objectiveId;
+                toast.message(textoAvisoTurnoAjeno(c.emp?.name, getObjectiveName(objId)));
+                return;
+            }
             abrirMenuRapidoCelda(ev, {
                 emp: c.emp,
                 dateStr: c.dateStr,
@@ -12634,6 +12785,11 @@ function PlanificacionDesktop() {
                 const c = ctxDeCelda(key);
                 ev.preventDefault();
                 ev.stopPropagation();
+                if (c?.soloLecturaAjena) {
+                    const objId = c.activeShift?.objectiveId || c.s?.objectiveId;
+                    toast.message(textoAvisoTurnoAjeno(c.emp?.name, getObjectiveName(objId)));
+                    return;
+                }
                 if (c) clicPersonaModoElegir(c.emp.id);
                 return;
             }
