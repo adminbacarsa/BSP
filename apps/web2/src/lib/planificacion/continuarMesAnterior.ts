@@ -221,6 +221,8 @@ function etiquetaCiclo(fases: Array<DiaCiclo | null>): string {
  * En un bloque de trabajo (entre francos) de 4 días o más, si una banda tiene 2/3 o más,
  * los días sueltos de otra banda son cambios a mano (un cambio de turno puntual): se toma la del bloque.
  * Solo se corrige una fase cuando lo que se vio ahí lo admite (una sola muestra o alguna de esa banda).
+ * Un día distinto en el borde (el primero o el último) se absorbe si el bloque queda del mismo largo
+ * que los otros bloques de trabajo y del otro lado hay un franco o un bloque que ya tiene ese largo.
  */
 function uniformarBloques(resultado: Array<DiaCiclo | null>, fases: Map<number, Obs[]>): void {
   const p = resultado.length;
@@ -256,8 +258,82 @@ function uniformarBloques(resultado: Array<DiaCiclo | null>, fases: Map<number, 
         if (admite) resultado[ph] = { code: modelo.code, positionName: d.positionName || modelo.positionName };
       }
     }
-    // Días sin dato dentro del bloque (licencia sin banda conservada): la banda del bloque.
+    // Días sin dato dentro del bloque (licencia sin banda conservada, RET): la banda del bloque.
     for (const ph of bloque) if (!resultado[ph]) resultado[ph] = { ...modelo };
+  }
+  absorberBordes(resultado);
+}
+
+/** Rachas circulares del mismo código. Un hueco (sin dato) corta la racha. */
+function rachas(resultado: Array<DiaCiclo | null>): Array<{ code: string; idxs: number[] }> {
+  const p = resultado.length;
+  const codeAt = (i: number) => resultado[mod(i, p)]?.code || '';
+  if (!p || (codeAt(0) && Array.from({ length: p }, (_, i) => codeAt(i) === codeAt(0)).every(Boolean))) {
+    return codeAt(0) ? [{ code: codeAt(0), idxs: Array.from({ length: p }, (_, i) => i) }] : [];
+  }
+  let start = 0;
+  for (let i = 0; i < p; i += 1) {
+    if (codeAt(i) !== codeAt(i - 1)) { start = i; break; }
+  }
+  const runs: Array<{ code: string; idxs: number[] }> = [];
+  let k = start;
+  let seen = 0;
+  while (seen < p) {
+    const c = codeAt(k);
+    const idxs: number[] = [];
+    while (idxs.length < p - seen && codeAt(k) === c) {
+      idxs.push(mod(k, p));
+      k += 1;
+    }
+    runs.push({ code: c, idxs });
+    seen += idxs.length;
+  }
+  return runs;
+}
+
+/**
+ * Día distinto pegado al borde de un bloque de trabajo. Si al sumarlo el bloque queda del largo
+ * de los otros (el que más se repite, y en empate el más largo) y del otro lado hay franco o un
+ * bloque que ya tiene ese largo, el día es de ese bloque. No toca un D12/N12 de la misma banda:
+ * eso ya lo resolvió el paso anterior.
+ */
+function absorberBordes(resultado: Array<DiaCiclo | null>): void {
+  const p = resultado.length;
+  if (p < 8) return;
+  for (let pass = 0; pass < 4; pass += 1) {
+    const runs = rachas(resultado);
+    const largos = runs.filter((r) => r.code && r.code !== 'F' && r.idxs.length >= 4).map((r) => r.idxs.length);
+    if (!largos.length) return;
+    const freq = new Map<number, number>();
+    for (const len of largos) freq.set(len, (freq.get(len) || 0) + 1);
+    let canon = 0;
+    let bestN = -1;
+    for (const [len, n] of freq) {
+      if (n > bestN || (n === bestN && len > canon)) { bestN = n; canon = len; }
+    }
+    let changed = false;
+    for (let ri = 0; ri < runs.length; ri += 1) {
+      const stray = runs[ri];
+      if (stray.idxs.length !== 1 || !stray.code || stray.code === 'F') continue;
+      const prev = runs[mod(ri - 1, runs.length)];
+      const next = runs[mod(ri + 1, runs.length)];
+      const candidatos = [prev, next].filter((r) =>
+        r.code && r.code !== 'F' && familia(r.code) !== familia(stray.code) && r.idxs.length + 1 === canon);
+      for (const dest of candidatos) {
+        const otro = dest === prev ? next : prev;
+        const otroOk = otro.code === 'F' || (!!otro.code && otro.code !== 'F' && otro.idxs.length === canon);
+        if (!otroOk) continue;
+        const ph = stray.idxs[0];
+        const modelo = resultado[dest.idxs[0]];
+        const d = resultado[ph];
+        if (!modelo) continue;
+        resultado[ph] = { code: modelo.code, positionName: d?.positionName || modelo.positionName };
+        changed = true;
+        break;
+      }
+      if (changed) break;
+    }
+    if (!changed) return;
   }
 }
 
@@ -617,6 +693,96 @@ export function sobrantesPorDia(estructura: PuestoSla[], celdas: CeldaDia[]): Al
     if (n > cupo) out.push({ dateStr, positionName, code, asignados: n, cupo });
   }
   return out.sort((a, b) => a.dateStr.localeCompare(b.dateStr) || a.positionName.localeCompare(b.positionName));
+}
+
+const PALABRA_CANTIDAD = ['', 'una', 'dos', 'tres', 'cuatro', 'cinco', 'seis', 'siete', 'ocho', 'nueve', 'diez'];
+
+function palabraCantidad(n: number): string {
+  return PALABRA_CANTIDAD[n] || String(n);
+}
+
+function apellidoDe(nombre: string): string {
+  return String(nombre || '').split(',')[0].trim();
+}
+
+function juntarNombres(nombres: string[]): string {
+  const xs = [...new Set(nombres.map(apellidoDe).filter(Boolean))];
+  if (xs.length <= 1) return xs[0] || '';
+  if (xs.length === 2) return `${xs[0]} y ${xs[1]}`;
+  return `${xs.slice(0, -1).join(', ')} y ${xs[xs.length - 1]}`;
+}
+
+function ddmm(dateStr: string): string {
+  return `${dateStr.slice(8)}/${dateStr.slice(5, 7)}`;
+}
+
+export type AvisosCobertura = { lineas: string[]; accion: string; resto: number };
+
+/**
+ * Un aviso por día y puesto. Si en la misma banda sobra gente y en otra no hay nadie, es una sola frase.
+ * `puestosCortos` son los días-puesto que la fila Cobertura deja abiertos.
+ */
+export function avisosCoberturaPuesto(
+  estructura: PuestoSla[],
+  celdas: Array<CeldaDia & { nombre?: string }>,
+  puestosCortos: Array<{ dateStr: string; positionName: string }>,
+): AvisosCobertura {
+  const corto = new Set(puestosCortos.map((p) => `${p.dateStr}|${p.positionName}`));
+  const porBanda = new Map<string, { nombres: string[]; n: number }>();
+  const diasPos = new Set<string>(corto);
+  for (const c of celdas) {
+    const code = up(c.code);
+    if (!esCodigoPuesto(code)) continue;
+    const k = `${c.dateStr}|${c.positionName}|${code}`;
+    const g = porBanda.get(k) || { nombres: [], n: 0 };
+    g.n += 1;
+    if (c.nombre) g.nombres.push(String(c.nombre));
+    porBanda.set(k, g);
+    diasPos.add(`${c.dateStr}|${c.positionName}`);
+  }
+  type Fila = { texto: string; accion: string; mixta: boolean };
+  const filas: Fila[] = [];
+  for (const dp of [...diasPos].sort()) {
+    const dateStr = dp.slice(0, 10);
+    const positionName = dp.slice(11);
+    const pos = estructura.find((p) => p.positionName === positionName);
+    if (!pos) continue;
+    const codes = [...new Set((pos.shifts || []).map((s) => up(s.code)).filter(Boolean))]
+      .filter((code) => turnoHabilitadoPorEstructura([pos], positionName, code, dateStr));
+    const sobras: Array<{ code: string; n: number; nombres: string[] }> = [];
+    const faltas: string[] = [];
+    for (const code of codes) {
+      const g = porBanda.get(`${dateStr}|${positionName}|${code}`) || { nombres: [], n: 0 };
+      const cupo = cupoDe(pos, code);
+      if (g.n > cupo) sobras.push({ code, n: g.n, nombres: g.nombres });
+      else if (corto.has(dp) && g.n < cupo) faltas.push(code);
+    }
+    if (!sobras.length && !faltas.length) continue;
+    const partes: string[] = [];
+    for (const s of sobras) {
+      const quien = juntarNombres(s.nombres);
+      partes.push(quien ? `${palabraCantidad(s.n)} en ${s.code} (${quien})` : `${palabraCantidad(s.n)} en ${s.code}`);
+    }
+    if (sobras.length && faltas.length) {
+      const ceros = faltas.filter((code) => (porBanda.get(`${dateStr}|${positionName}|${code}`)?.n || 0) === 0);
+      const parciales = faltas.filter((code) => !ceros.includes(code));
+      if (ceros.length === 1) partes.push(`nadie en ${ceros[0]}`);
+      else if (ceros.length > 1) partes.push(`nadie en ${ceros.join(' ni en ')}`);
+      if (parciales.length) partes.push(`falta ${parciales.join(' y ')}`);
+    } else if (faltas.length) {
+      partes.push(`falta ${faltas.join(' y ')}`);
+    }
+    const texto = `${ddmm(dateStr)} · ${positionName}: ${partes.join(' y ')}`;
+    const mixta = sobras.length > 0 && faltas.length > 0;
+    const accion = mixta
+      ? `Cambiá a mano una de las ${palabraCantidad(sobras[0].n)} ${sobras[0].code} por ${faltas[0]} después de aplicar`
+      : faltas.length
+        ? `Asigná ${faltas.join(' y ')} a mano después de aplicar`
+        : `Dejá el cupo de ${sobras[0].code} a mano después de aplicar`;
+    filas.push({ texto, accion, mixta });
+  }
+  const accion = (filas.find((f) => f.mixta) || filas[0])?.accion || '';
+  return { lineas: filas.slice(0, 5).map((f) => f.texto), accion, resto: Math.max(0, filas.length - 5) };
 }
 
 /** Días ordenados y compactados: «1, 2, 5–9, 14». */

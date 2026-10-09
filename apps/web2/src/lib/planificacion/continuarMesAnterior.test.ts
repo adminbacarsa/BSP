@@ -5,7 +5,9 @@ import {
   alertasTope,
   cambioPendienteDe,
   codigoDeCiclo,
+  avisosCoberturaPuesto,
   detectarCiclo,
+  diaDelCiclo,
   diaIndex,
   observacionesDelGuardia,
   proponerContinuacion,
@@ -235,6 +237,63 @@ test('alertas: descanso < 12 h en el cambio de mes, más de 200 h y cupo sobrado
   ]);
   assert.deepEqual(sob, [{ dateStr: '2026-10-01', positionName: P1, code: 'M', asignados: 2, cupo: 1 }]);
   assert.equal(textoDias(['2026-10-01', '2026-10-02', '2026-10-03', '2026-10-07', '2026-10-09', '2026-10-10']), '1–3, 7, 9, 10');
+});
+
+test('QUEVEDO: la M suelta al inicio del bloque de T entra en el T×6', () => {
+  // M×6 · F×2 · T×6 · F×2 · N×6 · F×2, alineado para que el 10/10 sea el primer M.
+  const patron = [...Array(6).fill('M'), 'F', 'F', ...Array(6).fill('T'), 'F', 'F', ...Array(6).fill('N'), 'F', 'F'];
+  const oct10 = diaIndex('2026-10-10');
+  const mEnElBorde = new Set(['2026-08-31', '2026-09-24', '2026-10-18']);
+  const previos = armar(patron, ymdDeIndex(oct10 - 24 * 3), '2026-10-31', 0).map((t) => {
+    if (t.dateStr === '2026-10-15') return { ...t, code: 'RET', isReten: true };
+    if (mEnElBorde.has(t.dateStr)) return { ...t, code: 'M' };
+    if (t.dateStr === '2026-10-22') return { ...t, code: 'D12' };
+    if (t.dateStr === '2026-10-29') return { ...t, code: 'N12' };
+    return t;
+  });
+  const ciclo = detectarCiclo(observacionesDelGuardia(previos, OBJ))!;
+  assert.equal(ciclo.etiqueta, 'M×6 · F×2 · T×6 · F×2 · N×6 · F×2');
+  assert.equal(diaDelCiclo(ciclo, '2026-10-15')?.code, 'M');
+  assert.equal(diaDelCiclo(ciclo, '2026-10-18')?.code, 'T');
+  assert.equal(diaDelCiclo(ciclo, '2026-11-11')?.code, 'T');
+  const [res] = proponerContinuacion(input([{ id: '1V9qOhsyY8EZVPzavxnb', nombre: 'QUEVEDO, GASTON', previos }], diasDelMes(2026, 11)));
+  assert.equal(codigos(res)['2026-11-11'], 'T');
+});
+
+test('aviso de cobertura: el mismo día y puesto junta la banda que sobra con la que falta', () => {
+  const est: PuestoSla[] = [{
+    positionName: P1,
+    qty: 1,
+    shifts: [
+      { code: 'M', quantity: 1 },
+      { code: 'T', quantity: 1 },
+      { code: 'N', quantity: 1 },
+    ],
+  }];
+  const celdas = [
+    { dateStr: '2026-11-11', positionName: P1, code: 'M', nombre: 'QUEVEDO, GASTON' },
+    { dateStr: '2026-11-11', positionName: P1, code: 'M', nombre: 'TORRES, JUAN' },
+    { dateStr: '2026-11-11', positionName: P1, code: 'N', nombre: 'OTRO, ANA' },
+    { dateStr: '2026-11-12', positionName: P1, code: 'M', nombre: 'SOLO, UNO' },
+    { dateStr: '2026-11-12', positionName: P1, code: 'N', nombre: 'DOS, UNO' },
+    { dateStr: '2026-11-13', positionName: P1, code: 'M', nombre: 'A, A' },
+    { dateStr: '2026-11-13', positionName: P1, code: 'M', nombre: 'B, B' },
+    { dateStr: '2026-11-13', positionName: P1, code: 'T', nombre: 'C, C' },
+    { dateStr: '2026-11-13', positionName: P1, code: 'N', nombre: 'D, D' },
+  ];
+  const avisos = avisosCoberturaPuesto(est, celdas, [
+    { dateStr: '2026-11-11', positionName: P1 },
+    { dateStr: '2026-11-12', positionName: P1 },
+  ]);
+  assert.equal(avisos.lineas[0], '11/11 · Puesto 1: dos en M (QUEVEDO y TORRES) y nadie en T');
+  assert.equal(avisos.lineas[1], '12/11 · Puesto 1: falta T');
+  assert.equal(avisos.lineas[2], '13/11 · Puesto 1: dos en M (A y B)');
+  assert.equal(avisos.accion, 'Cambiá a mano una de las dos M por T después de aplicar');
+  const muchos = Array.from({ length: 7 }, (_, i) => ({ dateStr: `2026-11-${String(i + 1).padStart(2, '0')}`, positionName: P1 }));
+  const lista = avisosCoberturaPuesto(est, [], muchos);
+  assert.equal(lista.lineas.length, 5);
+  assert.equal(lista.resto, 2);
+  assert.match(lista.lineas[0], /^01\/11 · Puesto 1: falta/);
 });
 
 test('días de 12 h dentro de un bloque de M no rompen el ciclo (D12 ≈ M)', () => {

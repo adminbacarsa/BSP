@@ -5,6 +5,7 @@ import {
   type AlertaCupo,
   type AlertaDescanso,
   type AlertaHoras,
+  type AvisosCobertura,
   type ResultadoGuardia,
 } from '@/lib/planificacion/continuarMesAnterior';
 
@@ -16,6 +17,7 @@ export type ContinuarMesVista = {
   resultados: ResultadoGuardia[];
   cortos: DiaCorto[];
   sobrados: AlertaCupo[];
+  avisos: AvisosCobertura;
   descanso: AlertaDescanso[];
   tope: AlertaHoras[];
 };
@@ -88,9 +90,8 @@ export function ContinuarMesModal({ vista, onAplicar, onCancelar }: Props) {
     const dias = vista.resultados.map((r) => r.ciclo?.ultimoDia).filter((d): d is string => !!d).sort();
     return dias.length ? dias[dias.length - 1] : null;
   }, [vista.resultados]);
-  const cortosTxt = textoDias(vista.cortos.map((d) => d.dateStr));
-  const faltan = vista.cortos.reduce((a, d) => a + (d.requeridos - d.cerrados), 0);
-  const sobradosDias = textoDias(vista.sobrados.map((s) => s.dateStr));
+  const avisos = vista.avisos || { lineas: [], accion: '', resto: 0 };
+  const hayFalta = avisos.lineas.some((l) => l.includes('falta') || l.includes('nadie'));
 
   const toggle = (id: string) => setElegidos((prev) => {
     const next = new Set(prev);
@@ -118,22 +119,16 @@ export function ContinuarMesModal({ vista, onAplicar, onCancelar }: Props) {
 
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-2 items-start" data-continuar-alertas>
-            {vista.cortos.length > 0 ? (
-              <Seccion icon={<ShieldAlert size={12} />} titulo="SLA corto" tono="rojo">
-                <div>Faltan {faltan} puesto(s) por cerrar los días {cortosTxt}.</div>
-                <div className="text-[10px] opacity-80">Misma cuenta que la fila Cobertura: después de aplicar, cerralos a mano o con «Puestos sin cerrar».</div>
+            {avisos.lineas.length > 0 ? (
+              <Seccion icon={<ShieldAlert size={12} />} titulo="Cobertura del puesto" tono={hayFalta ? 'rojo' : 'ambar'}>
+                <div data-continuar-avisos>
+                  {avisos.lineas.map((linea, i) => <div key={i}>{linea}</div>)}
+                  {avisos.resto > 0 && <div>y {avisos.resto} más</div>}
+                  {avisos.accion && <div className="text-[10px] opacity-80 mt-1">{avisos.accion}</div>}
+                </div>
               </Seccion>
             ) : (
-              <Seccion icon={<ShieldAlert size={12} />} titulo="SLA" tono="gris"><div>Todos los días quedan con el servicio cubierto.</div></Seccion>
-            )}
-            {vista.sobrados.length > 0 && (
-              <Seccion icon={<AlertTriangle size={12} />} titulo="SLA sobrado" tono="ambar">
-                <div>Más gente que el cupo los días {sobradosDias}.</div>
-                {vista.sobrados.slice(0, 4).map((s, i) => (
-                  <div key={i} className="text-[10px]">{s.dateStr.slice(8)}/{s.dateStr.slice(5, 7)} · {s.positionName} · {s.code}: {s.asignados} de {s.cupo}</div>
-                ))}
-                {vista.sobrados.length > 4 && <div className="text-[10px]">y {vista.sobrados.length - 4} más</div>}
-              </Seccion>
+              <Seccion icon={<ShieldAlert size={12} />} titulo="Cobertura" tono="gris"><div>Todos los días quedan con el servicio cubierto.</div></Seccion>
             )}
             {vista.descanso.length > 0 && (
               <Seccion icon={<Moon size={12} />} titulo="Descanso < 12 h en el cambio de mes" tono="rojo">

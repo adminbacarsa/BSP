@@ -477,6 +477,7 @@ import {
     alertasTope,
     cambioPendienteDe,
     ORIGEN_CONTINUAR_MES,
+    avisosCoberturaPuesto,
     proponerContinuacion,
     sobrantesPorDia,
     turnoHabilitadoPorEstructura,
@@ -11139,7 +11140,8 @@ function PlanificacionDesktop() {
             const merged = { ...pendingChanges, ...cambios };
             const cyclesForCoverage = autoSelectedCyclesRef.current?.length ? autoSelectedCyclesRef.current : autoCycles;
             const cortos: DiaCorto[] = [];
-            const celdas: { dateStr: string; positionName: string; code: string }[] = [];
+            const puestosCortos: { dateStr: string; positionName: string }[] = [];
+            const celdas: { dateStr: string; positionName: string; code: string; nombre?: string }[] = [];
             const diasConPropuesta = new Set(Object.keys(cambios).map((k) => k.slice(-10)));
             for (const dateStr of dias) {
                 if (isOutsideServiceRange(dateStr)) continue;
@@ -11150,6 +11152,9 @@ function PlanificacionDesktop() {
                     const units = countPositionClosedUnits(dateStr, pos, dayLetter, guardiasBase, merged, shiftsMap, cyclesForCoverage);
                     requeridos += units.required;
                     cerrados += units.closed;
+                    if (units.required > 0 && units.closed < units.required) {
+                        puestosCortos.push({ dateStr, positionName: pos.positionName });
+                    }
                 });
                 if (requeridos > 0 && cerrados < requeridos) cortos.push({ dateStr, cerrados, requeridos });
                 if (!diasConPropuesta.has(dateStr)) continue;
@@ -11157,7 +11162,7 @@ function PlanificacionDesktop() {
                     const key = `${e.id}_${dateStr}`;
                     const sh = merged[key] ? (merged[key].isDeleted ? null : merged[key]) : shiftsMap[key];
                     if (!sh || (sh.objectiveId && String(sh.objectiveId) !== String(selectedObjective))) continue;
-                    celdas.push({ dateStr, positionName: sh.positionName || '', code: String(sh.code || '') });
+                    celdas.push({ dateStr, positionName: sh.positionName || '', code: String(sh.code || ''), nombre: e.name || e.id });
                 }
             }
             const sobrados = sobrantesPorDia((positionStructure || []) as PuestoSlaContinuar[], celdas);
@@ -11181,6 +11186,7 @@ function PlanificacionDesktop() {
                 resultados,
                 cortos,
                 sobrados,
+                avisos: avisosCoberturaPuesto((positionStructure || []) as PuestoSlaContinuar[], celdas, puestosCortos),
                 descanso: alertasDescansoCambioMes(ultimosPrevios, resultados, dias[0]),
                 tope: alertasTope(resultados, horasYaCargadas),
             });
