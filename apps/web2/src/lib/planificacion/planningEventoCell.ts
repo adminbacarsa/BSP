@@ -3,7 +3,7 @@
  *
  * El turno EV lo escribe el servidor (`escribirTurnoEvento`, `origin: 'EVENTO'`, `objectiveId` del
  * evento). Acá no se crea ni se modifica: se muestra en la fila del guardia en su objetivo de base
- * como celda «EV» (tooltip «{evento} · {servicio} · HH:MM–HH:MM»), se marca el franco que lo originó
+ * como celda «EV» (tooltip de 2 s «Evento: {evento} · {servicio} · HH:MM–HH:MM», después el lugar y las alertas; sin title nativo), se marca el franco que lo originó
  * como usado y se bloquea volver a asignarlo encima (solape, descanso 12 h, mismo evento).
  */
 import { isEventShift, type EventoCcShift } from '@/lib/operaciones/eventoCc';
@@ -120,6 +120,37 @@ export function eventoServicioDe(ev: TurnoEventoLike | null | undefined): string
 export function eventoTooltip(ev: TurnoEventoLike | null | undefined): string {
   if (!ev) return '';
   return [eventoNombreDe(ev), eventoServicioDe(ev), eventoHorario(ev)].filter(Boolean).join(' · ');
+}
+
+/** Lugar escrito en el turno. Si no hay, la grilla completa con el nombre del objetivo. */
+export function lugarEventoTurno(ev: TurnoEventoLike | null | undefined): string {
+  return str(ev?.eventoLugar) || str(ev?.eventoObjectiveName) || str(ev?.objectiveName);
+}
+
+/**
+ * Texto del tooltip de 2 s. Una sola pieza: primera línea el evento, el servicio y el horario;
+ * después el lugar y las alertas. La marca sobre otro turno y el franco usado usan la misma primera línea.
+ */
+export function textoTooltipEventoCelda(input: {
+  ev: TurnoEventoLike | null | undefined;
+  mode?: EventoCellOverlayMode;
+  lugar?: string | null;
+  alertas?: readonly string[];
+}): string {
+  const nombre = eventoNombreDe(input.ev);
+  const servicio = eventoServicioDe(input.ev);
+  const horario = eventoHorario(input.ev);
+  const primera = ['Evento:', [nombre, servicio, horario].filter(Boolean).join(' · ')].filter(Boolean).join(' ');
+  const lineas = [primera];
+  if (input.mode === 'FRANCO_USADO') lineas.push('Franco usado en evento');
+  else if (input.mode === 'BADGE') lineas.push('También afectado al evento');
+  const lugar = str(input.lugar);
+  if (lugar && lugar !== nombre && lugar !== servicio) lineas.push(lugar);
+  for (const alerta of input.alertas || []) {
+    const t = str(alerta);
+    if (t) lineas.push(t);
+  }
+  return lineas.join('\n');
 }
 
 /**

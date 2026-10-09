@@ -162,7 +162,7 @@ import {
 } from '@/lib/planificacion/planToast';
 import { checkRestBetweenShifts, checkRestBetweenShiftsDetail, getAgreementRestConfig } from '@/lib/planificacion/restBetweenShifts';
 import { findLctRestGaps, type LctShiftInput } from '@/lib/planificacion/lctRestGap';
-import { eventoAssignBlock, eventoCellOverlay, eventoTooltip, isEventoTurno, pickShiftForRest } from '@/lib/planificacion/planningEventoCell';
+import { eventoAssignBlock, eventoCellOverlay, isEventoTurno, lugarEventoTurno, pickShiftForRest, textoTooltipEventoCelda } from '@/lib/planificacion/planningEventoCell';
 import { applyServiceExcludedDays } from '@/lib/planificacion/absenceFrancoUtils';
 import { generateScheduleV4, effectiveShiftsForPositionDay, positionIsActiveOn } from '@/lib/planificacion/autoScheduleEngineV4';
 import { runPlanningGeneration, resolvePlanningGenerationRoute } from '@/lib/planificacion/planningGenerationRouter';
@@ -1416,11 +1416,9 @@ function calcularCeldaGrilla(e: EntradaCeldaGrilla, emp: any, isGuest: boolean, 
         grupoColor = GRUPO_COLOR_HEX[_oi % GRUPO_COLOR_HEX.length];
         grupoNombre = (selectedGrupo.objectiveNames[_oi] || '').trim().split(/\s+/).filter((w: string) => w.length > 1).pop()?.slice(0, 6).toUpperCase() || (selectedGrupo.objectiveNames[_oi] || '').slice(0, 5).toUpperCase();
     }
-    const titulo = isOpsCoverageCell
+    const titulo = isOpsCoverageCell || evOverlay
         ? undefined
-        : evOverlay
-            ? (evOverlay.mode === 'EV' ? evOverlay.tooltip : `${evOverlay.mode === 'FRANCO_USADO' ? 'Franco usado en evento' : 'También afectado al evento'}: ${evOverlay.tooltip}`)
-            : isExclusionCol && !s && !p
+        : isExclusionCol && !s && !p
                 ? excludedPositionsTooltip(excludedOnDay, cellDateStr)
                 : isOtherObjectiveShift && activeShift?.objectiveId
                     ? `Turno en ${e.nombreObjetivo(activeShift.objectiveId)}`
@@ -1442,7 +1440,7 @@ function calcularCeldaGrilla(e: EntradaCeldaGrilla, emp: any, isGuest: boolean, 
         consultaTexto: consulta ? textoIndicadorConsulta(consulta) : undefined,
         consultaTooltip: consulta ? textoTooltipConsulta(consulta) : undefined,
         evBadge: !!(evOverlay && evOverlay.mode !== 'EV'),
-        evBadgeTitulo: evOverlay && evOverlay.mode !== 'EV' ? evOverlay.tooltip : undefined,
+        evBadgeTitulo: undefined,
         lct: lctRest || undefined,
         puntoExclusion: !!(isExclusionCol && !content),
         swap: isSwap ? (swapPending ? 'S!' : 'S') : '',
@@ -12708,14 +12706,7 @@ function PlanificacionDesktop() {
                     + `${coverageSourceShift?.coverageUsedObjectiveName ? ` en ${coverageSourceShift.coverageUsedObjectiveName}` : ''}`
                     : `\n🔗 Usado: cubrió a ${String(coverageSourceShift?.coverageUsedCoversEmployeeName || coverageSourceShift?.coversEmployeeName || 'titular').trim()}${coverageSourceShift?.coverageUsedObjectiveName ? ` en ${coverageSourceShift.coverageUsedObjectiveName}` : ''}`)
                 : '';
-            const _evHint = evOverlay
-                ? (evOverlay.mode === 'FRANCO_USADO'
-                    ? `\n🔗 Franco usado en evento: ${evOverlay.tooltip}`
-                    : evOverlay.mode === 'BADGE'
-                        ? `\n⚠ También afectado al evento: ${evOverlay.tooltip}`
-                        : '')
-                : '';
-            const _covHint = (covNote ? `\n📋 ${covNote}` : '') + _covSegHint + _usedHint + _evHint;
+            const _covHint = (covNote ? `\n📋 ${covNote}` : '') + _covSegHint + _usedHint;
             const _billBr = activeShift && shiftCountsForEmployeeCronoHours(activeShift)
                 ? planningShiftBillableBreakdown(activeShift, slaCodeHoursHint)
                 : null;
@@ -12723,11 +12714,28 @@ function PlanificacionDesktop() {
                 ? `\n📊 ${_billBr.base}h base${_billBr.extra > 0 ? ` + ${_billBr.extra}h cobertura = ${_billBr.gross}h` : ` (${_billBr.gross}h)`}`
                 : '';
             const _authHint = `${_cellShift?.descansoReducido ? `\n⚠ Descanso reducido autorizado${_cellShift.descansoHoras != null ? ` (${_cellShift.descansoHoras} h)` : ''}` : ''}${_cellShift?.topeExcedido ? `\n⚠ Tope 200 h autorizado${_cellShift.horasMes != null ? ` (${_cellShift.horasMes} h)` : ''}` : ''}`;
-            const shiftLabel = evOverlay?.mode === 'EV'
-                ? evOverlay.tooltip
-                : (cellCode === 'EV' && (activeShift?.eventoNombre || activeShift?.servicioNombre))
-                    ? eventoTooltip(activeShift)
-                    : cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : (rfzOnCell ? 'Refuerzo cliente (RFZ)' : null);
+            const evDoc = evOverlay?.ev || ((cellCode === 'EV' || isEventoTurno(activeShift)) ? activeShift : null);
+            if (evDoc && !c.isOpsCoverageCell) {
+                const crudo = lugarEventoTurno(evDoc) || (evDoc.objectiveId ? getObjectiveName(String(evDoc.objectiveId)) : '');
+                const lugar = !crudo || crudo === 'Desconocido' || crudo === String(evDoc.objectiveId || '') ? '' : crudo;
+                const alertas: string[] = [];
+                if (c.cellPosExcluded) alertas.push('Puesto excluido por SLA este día');
+                if (_cellShift?.descansoReducido) alertas.push(`Descanso reducido autorizado${_cellShift.descansoHoras != null ? ` (${_cellShift.descansoHoras} h)` : ''}`);
+                if (_cellShift?.topeExcedido) alertas.push(`Tope 200 h autorizado${_cellShift.horasMes != null ? ` (${_cellShift.horasMes} h)` : ''}`);
+                if (c.lctRest) alertas.push(c.lctRest);
+                return {
+                    label: textoTooltipEventoCelda({
+                        ev: evDoc,
+                        mode: evOverlay?.mode || 'EV',
+                        lugar,
+                        alertas,
+                    }),
+                    pos: null,
+                    range: null,
+                    restHours: null,
+                };
+            }
+            const shiftLabel = cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : (rfzOnCell ? 'Refuerzo cliente (RFZ)' : null);
             const _isFrancoTip = cellCode ? ['F', 'FF', 'FP', 'FT'].includes(String(cellCode).toUpperCase()) : false;
             const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, c.dayIndex) : null;
             const _isRet = String(cellCode || '').toUpperCase() === 'RET';

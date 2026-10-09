@@ -5,6 +5,7 @@ import {
   eventoCellOverlay,
   eventoTooltip,
   pickEventoTurno,
+  textoTooltipEventoCelda,
   pickShiftForRest,
 } from '@/lib/planificacion/planningEventoCell';
 
@@ -27,6 +28,34 @@ const ev = {
 };
 const franco = { id: 'f1', code: 'F', isFranco: true, objectiveId: 'obj-peaje', employeeId: 'baez', coverageUsed: true };
 const manana = { id: 'm1', code: 'M', objectiveId: 'obj-peaje', employeeId: 'baez', startTime: ts('2026-10-03T10:00:00.000Z'), endTime: ts('2026-10-03T18:00:00.000Z') };
+
+test('tooltip de la celda: una línea «Evento: {evento} · {servicio} · horario», después lugar y alertas', () => {
+  assert.equal(
+    textoTooltipEventoCelda({ ev }),
+    'Evento: Recital Plaza · Acceso general · 20:00–02:00',
+  );
+  assert.equal(
+    textoTooltipEventoCelda({
+      ev,
+      lugar: 'Hospital de Niños',
+      alertas: ['Art. 197 LCT: M 15:00 → EV 08:00 = 11 h (mín. 12 h)'],
+    }),
+    'Evento: Recital Plaza · Acceso general · 20:00–02:00\nHospital de Niños\nArt. 197 LCT: M 15:00 → EV 08:00 = 11 h (mín. 12 h)',
+  );
+  assert.equal(
+    textoTooltipEventoCelda({ ev, mode: 'FRANCO_USADO', lugar: 'Acceso general' }),
+    'Evento: Recital Plaza · Acceso general · 20:00–02:00\nFranco usado en evento',
+    'el lugar que repite el servicio no se duplica',
+  );
+  assert.equal(
+    textoTooltipEventoCelda({ ev, mode: 'BADGE', lugar: 'Peaje Norte' }),
+    'Evento: Recital Plaza · Acceso general · 20:00–02:00\nTambién afectado al evento\nPeaje Norte',
+  );
+  assert.equal(
+    textoTooltipEventoCelda({ ev: { ...ev, eventoNombre: '', servicioNombre: '', positionName: 'Puerta 3' } }),
+    'Evento: Evento · Puerta 3 · 20:00–02:00',
+  );
+});
 
 test('tooltip «{evento} · {servicio} · HH:MM–HH:MM» en hora Argentina', () => {
   assert.equal(eventoTooltip(ev), 'Recital Plaza · Acceso general · 20:00–02:00');
