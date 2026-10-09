@@ -276,7 +276,13 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
             const cortar = () => { e.preventDefault(); e.stopImmediatePropagation(); };
 
             if (mod && key === 's') { cortar(); if (t != null) confirmar('Enter', false); p.onGuardar(); return; }
-            if (!cur) return;
+            if (!cur) {
+                if (p.dims.filas > 0 && p.dims.cols > 0 && (e.key.startsWith('Arrow') || e.key === 'Home' || e.key === 'Enter' || e.key === 'Tab')) {
+                    cortar();
+                    mover({ r: 0, c: 0 }, false);
+                }
+                return;
+            }
 
             if (enEditor || t != null) {
                 if (e.key === 'Escape') { cortar(); setTexto(null); setElegida(-1); enfocarContenedor(); return; }
@@ -294,6 +300,11 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
                     cortar();
                     confirmar(e.key, e.shiftKey);
                     return;
+                }
+                if (!enEditor && !mod && !e.altKey) {
+                    // El input recibe el foco en el próximo frame: lo tipeado antes no se pierde.
+                    if (TECLA_CODIGO.test(e.key)) { cortar(); setTexto((v) => `${v || ''}${e.key.toUpperCase()}`); setElegida(-1); return; }
+                    if (e.key === 'Backspace') { cortar(); setTexto((v) => (v || '').slice(0, -1)); setElegida(-1); return; }
                 }
                 return;
             }

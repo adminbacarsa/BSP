@@ -992,14 +992,21 @@ function resolveCellShiftDisplay(
     return { s: null, p: null };
 }
 
+const fmtDateKeyAr = new Intl.DateTimeFormat('es-AR', { timeZone: 'America/Argentina/Cordoba', year: 'numeric', month: '2-digit', day: '2-digit' });
+const dateKeyCache = new Map<number, string>();
 const getDateKey = (dateInput: any) => {
     const d = dateInput.toDate ? dateInput.toDate() : new Date(dateInput);
-    const options: Intl.DateTimeFormatOptions = { timeZone: 'America/Argentina/Cordoba', year: 'numeric', month: '2-digit', day: '2-digit' };
-    const parts = new Intl.DateTimeFormat('es-AR', options).formatToParts(d);
+    const ms = d.getTime();
+    const hit = dateKeyCache.get(ms);
+    if (hit !== undefined) return hit;
+    const parts = fmtDateKeyAr.formatToParts(d);
     const day = parts.find(p => p.type === 'day')?.value;
     const month = parts.find(p => p.type === 'month')?.value;
     const year = parts.find(p => p.type === 'year')?.value;
-    return `${year}-${month}-${day}`;
+    const key = `${year}-${month}-${day}`;
+    if (dateKeyCache.size > 50000) dateKeyCache.clear();
+    dateKeyCache.set(ms, key);
+    return key;
 };
 
 const isDateLocked = (dateStr: string) => {
@@ -13473,10 +13480,11 @@ function PlanificacionDesktop() {
             if (next) {
                 setSelection({ start: null, end: null });
                 setIsDragging(false);
-                toast.message('Modo rápido: hacé clic en una celda y escribí el código. «?» muestra los atajos.');
+                toast.message('Modo rápido: flechas o clic para elegir la celda y escribí el código. «?» muestra los atajos.');
             }
             return next;
         });
+        requestAnimationFrame(() => grillaScrollRef.current?.focus({ preventScroll: true }));
     };
 
     const [copiarDeCargando, setCopiarDeCargando] = useState(false);
@@ -15686,7 +15694,7 @@ function PlanificacionDesktop() {
                                     {Object.keys(pendingChanges).length > 0 && (
                                         <div className="flex items-center gap-1.5 bg-amber-50 p-1.5 rounded-xl border border-amber-200 shadow-sm shrink-0">
                                             <span className="text-[10px] font-bold text-amber-700 uppercase tracking-wide hidden lg:inline whitespace-nowrap">{activeActorName}</span>
-                                            <span className="text-xs font-black text-amber-700 px-1 whitespace-nowrap">{Object.values(pendingChanges).filter((v: any) => !v?._isAutoRotation && !v?._isAutoCondition).length || Object.keys(pendingChanges).length} camb.</span>
+                                            <span className="text-xs font-black text-amber-700 px-1 whitespace-nowrap" data-cambios-pendientes>{Object.values(pendingChanges).filter((v: any) => !v?._isAutoRotation && !v?._isAutoCondition).length || Object.keys(pendingChanges).length} camb.</span>
                                             <button type="button" onClick={() => undoLastPending()} title="Deshacer último cambio (Ctrl+Z)" className="p-1.5 hover:bg-amber-100 rounded-lg text-amber-600"><Undo size={16}/></button>
                                             <button type="button" onClick={() => { if (confirm('¿Descartar todos los cambios pendientes?')) { setPendingChanges({}); clearUndoStack(); } }} title="Descartar todos los cambios" className="p-1.5 hover:bg-rose-100 rounded-lg text-rose-500"><X size={16}/></button>
                                             <button onClick={() => handleSaveAll()} title="Guardar cambios pendientes (Ctrl+S)" className="bg-amber-500 hover:bg-amber-600 text-white p-2 rounded-lg text-xs font-black flex items-center shadow">
