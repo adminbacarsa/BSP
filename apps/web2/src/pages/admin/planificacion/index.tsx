@@ -12424,7 +12424,7 @@ function PlanificacionDesktop() {
         const compareMinimal = !!gridOpts?.minimalHeader;
         const compareCompact = !!gridOpts?.compactRows;
         return (
-        <table className="planning-grid-table border-separate border-spacing-0 w-full min-h-full text-xs">
+        <table className="planning-grid-table border-separate border-spacing-0 w-full text-xs">
             <thead className="sticky top-0 z-30 bg-slate-100 shadow-md">
                 {compareMinimal ? (
                 <tr className="h-7">
