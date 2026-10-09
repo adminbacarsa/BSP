@@ -26,19 +26,19 @@ function accion(p: Partial<AccionArmado> = {}): AccionArmado {
 }
 
 describe('cronómetro del armado', () => {
-  it('una pausa de más de 5 min no suma; una de 4 min sí, y 5 min justos también', () => {
+  it('una pausa de más de 2 min no suma; una de 1 min sí, y 2 min justos también', () => {
     const inicio = acumularArmado(null, [t0], accion({ cambios: 3 }));
     assert.equal(inicio.minutosActivos, 0);
     assert.equal(inicio.iniciadoAt, new Date(t0).toISOString());
 
-    const corto = acumularArmado(inicio, [t0 + 4 * min], accion());
-    assert.equal(corto.minutosActivos, 4);
+    const corto = acumularArmado(inicio, [t0 + 1 * min], accion());
+    assert.equal(corto.minutosActivos, 1);
 
-    const justo = acumularArmado(corto, [t0 + 4 * min + PAUSA_ARMADO_MS], accion());
-    assert.equal(justo.minutosActivos, 9);
+    const justo = acumularArmado(corto, [t0 + 1 * min + PAUSA_ARMADO_MS], accion());
+    assert.equal(justo.minutosActivos, 3);
 
-    const largo = acumularArmado(justo, [t0 + 4 * min + PAUSA_ARMADO_MS + PAUSA_ARMADO_MS + 1], accion());
-    assert.equal(largo.minutosActivos, 9);
+    const largo = acumularArmado(justo, [t0 + 1 * min + PAUSA_ARMADO_MS + PAUSA_ARMADO_MS + 1], accion());
+    assert.equal(largo.minutosActivos, 3);
   });
 
   it('acumula sesiones y usuarios sin pisar el inicio ni el origen', () => {
@@ -49,12 +49,12 @@ describe('cronómetro del armado', () => {
 
     const segunda = acumularArmado(
       primera,
-      [t0 + 3 * 60 * min, t0 + 3 * 60 * min + 3 * min],
+      [t0 + 3 * 60 * min, t0 + 3 * 60 * min + 2 * min],
       accion({ uid: 'u2', nombre: 'Beto', origen: 'MANUAL', cambios: 2 }),
     );
     assert.equal(segunda.iniciadoAt, primera.iniciadoAt);
     assert.equal(segunda.origen, 'COPIA_MES_ANTERIOR');
-    assert.equal(segunda.minutosActivos, 5);
+    assert.equal(segunda.minutosActivos, 4);
     assert.equal(segunda.cambios, 10);
     assert.deepEqual(segunda.usuarios.map((u) => u.uid), ['u1', 'u2']);
 
