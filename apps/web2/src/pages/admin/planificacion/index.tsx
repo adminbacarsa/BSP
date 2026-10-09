@@ -201,6 +201,7 @@ import {
 } from '@/lib/cosp/coverageSemantics';
 import { PlanningCoverageLegend } from '@/components/planificacion/PlanningCoverageLegend';
 import { inicioRenderGrilla, registrarCommitGrilla } from '@/lib/planificacion/perfGrilla';
+import { etiquetaFilaGrupo, puestoDeTurno, type EtiquetaFilaGrupo } from '@/lib/planificacion/etiquetaFilaGrupo';
 import {
     CeldaGrilla,
     TooltipCeldaGrilla,
@@ -2696,6 +2697,41 @@ function PlanificacionDesktop() {
         const ids = new Set(sorted.map((e: any) => e.id));
         return [...sorted, ...dotacionPoolCandidates.filter((e: any) => !ids.has(e.id))];
     }, [dotacionBaseEmployees, bandFilter, employeeMonthStats, sortBy, sortDir, selectedObjective, customOrderMap, empDefaultPos, clients, forceShowAll, dotacionPoolCandidates]);
+
+    const etiquetasGrupo = useMemo(() => {
+        const map = new Map<string, EtiquetaFilaGrupo>();
+        if (!selectedGrupo || !grupoUnifiedMode) return map;
+        const objetivos = selectedGrupo.objectiveIds.map((id: string, i: number) => ({
+            id,
+            nombre: selectedGrupo.objectiveNames[i] || id,
+        }));
+        const ids = new Set<string>(selectedGrupo.objectiveIds);
+        for (const emp of displayedEmployees) {
+            const fuentes: { puesto: string; objetivoId: string }[] = [];
+            for (const day of daysInMonth) {
+                const dateStr = getDateKey(day);
+                const key = `${emp.id}_${dateStr}`;
+                const pending = pendingChanges[key];
+                const turno = pending ? (pending.isDeleted ? null : pending) : shiftsMap[key];
+                if (!turno || turno.isDeleted) continue;
+                const objetivoId = String(turno.objectiveId || '');
+                if (!ids.has(objetivoId)) continue;
+                const puesto = puestoDeTurno(turno);
+                if (!puesto) continue;
+                fuentes.push({ puesto, objetivoId });
+            }
+            if (!fuentes.length) {
+                const nativo = ids.has(emp.preferredObjectiveId)
+                    ? emp.preferredObjectiveId
+                    : selectedGrupo.objectiveIds.find((id: string) => empDefaultPos[`${emp.id}___${id}`]);
+                const puesto = nativo ? String(empDefaultPos[`${emp.id}___${nativo}`] || '').trim() : '';
+                if (puesto && nativo) fuentes.push({ puesto, objetivoId: nativo });
+            }
+            const et = etiquetaFilaGrupo(fuentes, objetivos);
+            if (et) map.set(emp.id, et);
+        }
+        return map;
+    }, [selectedGrupo, grupoUnifiedMode, displayedEmployees, daysInMonth, pendingChanges, shiftsMap, empDefaultPos]);
 
     /** Guardias activos en dotación (excluye REF/ESC asignados como rol — no entran al auto ni al conteo). */
     const planningDotacionEmployees = useMemo(
@@ -12670,22 +12706,12 @@ function PlanificacionDesktop() {
                                                 <div className="flex items-center justify-between w-full">
                                                     <div className="flex items-center gap-1 min-w-0 overflow-hidden">
                                                         <Grip size={8} className="shrink-0 text-slate-200 group-hover:text-slate-400 transition-colors mr-0.5" />
-                                                        <span className="text-[9px] font-bold truncate text-slate-700 dark:text-slate-200" title={emp.name}>{emp.name}</span>
+                                                        <span className={`text-[9px] font-bold truncate text-slate-700 dark:text-slate-200 ${selectedGrupo && grupoUnifiedMode ? 'min-w-0 flex-1' : ''}`} title={emp.name}>{emp.name}</span>
                                                         <PuntajeChip sujetoId={String(emp.bolsaCuil || emp.id || '')} />
                                                         {isVolante && (<div className="shrink-0 px-1.5 py-0.5 rounded bg-violet-500 text-white text-[8px] font-black uppercase flex items-center gap-1 cursor-help shadow-sm" title={`Volante — base: ${homeObjectiveName}`}><Shuffle size={8} /> VOL</div>)}
                                         {isGuest && !isVolante && (esLegajoEventual(emp)
                                             ? (<div className="shrink-0 px-1.5 py-0.5 rounded bg-violet-600 text-white text-[8px] font-black uppercase flex items-center gap-1 cursor-help shadow-sm" title={`Eventual de la bolsa · CUIL ${emp.bolsaCuil || '—'}`}><Briefcase size={8} /> EVENTUAL</div>)
                                             : (<div className="shrink-0 px-1.5 py-0.5 rounded bg-amber-500 text-white text-[8px] font-black uppercase flex items-center gap-1 cursor-help shadow-sm" title={`Base: ${homeObjectiveName}`}><Briefcase size={8} /> {emp._kind || 'EXT'}</div>))}
-                                                        {selectedGrupo && grupoUnifiedMode && (() => {
-                                                            const _native = selectedGrupo.objectiveIds.includes(emp.preferredObjectiveId)
-                                                                ? emp.preferredObjectiveId
-                                                                : (slaIdToObjId[emp.preferredObjectiveId] && selectedGrupo.objectiveIds.includes(slaIdToObjId[emp.preferredObjectiveId]) ? slaIdToObjId[emp.preferredObjectiveId] : null);
-                                                            if (!_native) return null;
-                                                            const _oi = selectedGrupo.objectiveIds.indexOf(_native);
-                                                            const _clr = GRUPO_COLOR_HEX[_oi % GRUPO_COLOR_HEX.length];
-                                                            const _nm = (selectedGrupo.objectiveNames[_oi] || '').trim().split(/\s+/).filter((w: string) => w.length > 1).pop()?.slice(0, 6).toUpperCase() || '';
-                                                            return <div className="shrink-0 px-1 py-0.5 rounded text-[7px] font-black text-white leading-tight cursor-help" style={{ backgroundColor: _clr }} title={selectedGrupo.objectiveNames[_oi]}>{_nm}</div>;
-                                                        })()}
                                                         {/* Horas mensuales planificadas (facturables) + días RET sobrantes */}
                                                         <span
                                                             title={hoursMode === 'cct'
@@ -12719,7 +12745,19 @@ function PlanificacionDesktop() {
                                                         ) : null}
                                                     </div>
                                                     <div className="flex gap-1 ml-1 shrink-0 items-center">
-                                                        {positionStructure.length > 1 && !isServiceLocked && (
+                                                        {selectedGrupo && grupoUnifiedMode && (() => {
+                                                            const et = etiquetasGrupo.get(emp.id);
+                                                            if (!et) return null;
+                                                            const oi = selectedGrupo.objectiveIds.indexOf(et.objetivoId);
+                                                            const clr = GRUPO_COLOR_HEX[(oi < 0 ? 0 : oi) % GRUPO_COLOR_HEX.length];
+                                                            return (
+                                                                <div className="flex flex-col items-end leading-none max-w-[88px]" data-fila-puesto={et.puesto} data-fila-objetivo={et.objetivoVisible} title={et.tooltip}>
+                                                                    <span className="max-w-full truncate rounded bg-indigo-600 px-1.5 py-0.5 text-[8px] font-black text-white">{et.puesto}</span>
+                                                                    <span className="mt-px max-w-full truncate text-[7px] font-black" style={{ color: clr }}>{et.objetivoVisible}</span>
+                                                                </div>
+                                                            );
+                                                        })()}
+                                                        {positionStructure.length > 1 && !isServiceLocked && !(selectedGrupo && grupoUnifiedMode) && (
                                                             <button
                                                                 draggable={false}
                                                                 data-emp-pos-btn={emp.id}
