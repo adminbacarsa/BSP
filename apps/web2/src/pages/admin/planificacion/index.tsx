@@ -202,6 +202,7 @@ import {
 import { PlanningCoverageLegend } from '@/components/planificacion/PlanningCoverageLegend';
 import { inicioRenderGrilla, registrarCommitGrilla } from '@/lib/planificacion/perfGrilla';
 import { etiquetaFilaGrupo, puestoDeTurno, type EtiquetaFilaGrupo } from '@/lib/planificacion/etiquetaFilaGrupo';
+import { pasoScrollArrastre } from '@/lib/planificacion/scrollArrastreFila';
 import {
     CeldaGrilla,
     TooltipCeldaGrilla,
@@ -1638,6 +1639,31 @@ function PlanificacionDesktop() {
         try { return JSON.parse(localStorage.getItem('planif_emp_order') || '{}'); } catch { return {}; }
     });
     const [dragOverVisual, setDragOverVisual] = useState<number | null>(null);
+    const arrastreFilaRef = useRef<{ activo: boolean; clientY: number; raf: number; grilla: HTMLElement | null }>({
+        activo: false, clientY: 0, raf: 0, grilla: null,
+    });
+    useEffect(() => {
+        const estado = () => arrastreFilaRef.current;
+        const onOver = (e: DragEvent) => {
+            const s = estado();
+            if (!s.activo) return;
+            s.clientY = e.clientY;
+        };
+        const onEnd = () => {
+            const s = estado();
+            s.activo = false;
+            s.grilla = null;
+            if (s.raf) cancelAnimationFrame(s.raf);
+            s.raf = 0;
+        };
+        window.addEventListener('dragover', onOver);
+        window.addEventListener('dragend', onEnd);
+        return () => {
+            window.removeEventListener('dragover', onOver);
+            window.removeEventListener('dragend', onEnd);
+            onEnd();
+        };
+    }, []);
     const [opsCoverageDetailModal, setOpsCoverageDetailModal] = useState<{
         guardName: string;
         dateLabel: string;
@@ -6385,19 +6411,76 @@ function PlanificacionDesktop() {
         setShowCompareSummaryModal(false);
     };
 
+    const cortarArrastreFila = () => {
+        const s = arrastreFilaRef.current;
+        s.activo = false;
+        s.grilla = null;
+        if (s.raf) cancelAnimationFrame(s.raf);
+        s.raf = 0;
+    };
+    const frameArrastreFila = () => {
+        const s = arrastreFilaRef.current;
+        if (!s.activo) { s.raf = 0; return; }
+        const grilla = s.grilla;
+        if (grilla && grilla.isConnected) {
+            const rect = grilla.getBoundingClientRect();
+            const puede = grilla.scrollHeight > grilla.clientHeight + 1;
+            const paso = pasoScrollArrastre({
+                clientY: s.clientY,
+                top: rect.top,
+                bottom: rect.bottom,
+                grillaPuedeScroll: puede,
+            });
+            if (paso.grilla) grilla.scrollTop += paso.grilla;
+            else if (paso.pagina) {
+                let pagina: HTMLElement | null = grilla.parentElement;
+                while (pagina) {
+                    const oy = getComputedStyle(pagina).overflowY;
+                    if (oy === 'auto' || oy === 'scroll') break;
+                    pagina = pagina.parentElement;
+                }
+                const destino = pagina
+                    || (document.scrollingElement instanceof HTMLElement ? document.scrollingElement : null);
+                if (destino) destino.scrollTop += paso.pagina;
+            }
+        }
+        s.raf = requestAnimationFrame(frameArrastreFila);
+    };
     const handleRowDragStart = (e: React.DragEvent, idx: number) => {
         e.dataTransfer.effectAllowed = 'move';
         e.dataTransfer.setData('text/plain', String(idx));
+        const s = arrastreFilaRef.current;
+        s.activo = true;
+        s.clientY = e.clientY;
+        const origen = e.currentTarget instanceof Element ? e.currentTarget : null;
+        const marcada = origen?.closest('[data-plan-grilla]');
+        s.grilla = marcada instanceof HTMLElement
+            ? marcada
+            : (document.querySelector('[data-plan-grilla]') as HTMLElement | null);
+        if (!s.grilla && origen) {
+            let n: HTMLElement | null = origen.parentElement;
+            while (n) {
+                const oy = getComputedStyle(n).overflowY;
+                if ((oy === 'auto' || oy === 'scroll') && n.scrollHeight > n.clientHeight + 1) {
+                    s.grilla = n;
+                    break;
+                }
+                n = n.parentElement;
+            }
+        }
+        if (!s.raf) s.raf = requestAnimationFrame(frameArrastreFila);
     };
     const handleRowDragOver = (e: React.DragEvent, idx: number) => {
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
+        arrastreFilaRef.current.clientY = e.clientY;
         setDragOverVisual(idx);
     };
     const handleRowDrop = (e: React.DragEvent, toIdx: number) => {
         e.preventDefault();
         const fromIdx = parseInt(e.dataTransfer.getData('text/plain'));
         setDragOverVisual(null);
+        cortarArrastreFila();
         if (isNaN(fromIdx) || fromIdx === toIdx) return;
         const ids = displayedEmployees.map((emp: any) => emp.id);
         const [removed] = ids.splice(fromIdx, 1);
@@ -12665,7 +12748,7 @@ function PlanificacionDesktop() {
                                     className={`group ${modoElegir ? 'cursor-pointer' : ''} ${isPoolRow ? 'bg-amber-50/70 dark:bg-amber-950/20' : ''} ${highlightEmpId === emp.id ? 'ring-2 ring-inset ring-indigo-400 bg-indigo-50 dark:bg-indigo-900/30' : ''} ${dragOverVisual === idx ? 'border-t-2 border-t-indigo-400' : ''} ${(empMonthlyHours[emp.id] || 0) >= planningLimits.monthly ? 'bg-red-50 hover:bg-red-100 dark:bg-red-950/30 dark:hover:bg-red-900/30' : 'hover:bg-slate-50 dark:hover:bg-slate-700/40'}`}
                                     onDragOver={(e) => handleRowDragOver(e, idx)}
                                     onDrop={(e) => handleRowDrop(e, idx)}
-                                    onDragEnd={() => setDragOverVisual(null)}
+                                    onDragEnd={() => { setDragOverVisual(null); cortarArrastreFila(); }}
                                 >
                                     <td
                                         draggable
@@ -14492,7 +14575,15 @@ function PlanificacionDesktop() {
                                 </div>
                             </div>
                         ) : (
-                            <div data-plan-grilla className={`relative flex-1 min-h-0 h-full overflow-auto custom-scrollbar rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/40 transition-opacity duration-150 ${(isFilterPending || (selectedObjective && !shiftsMapLoaded)) ? 'opacity-70' : ''} ${correctionMode ? 'pb-2' : ''}`}>
+                            <div
+                                data-plan-grilla
+                                onDragOver={(e) => {
+                                    if (!arrastreFilaRef.current.activo) return;
+                                    e.preventDefault();
+                                    arrastreFilaRef.current.clientY = e.clientY;
+                                }}
+                                className={`relative flex-1 min-h-0 h-full overflow-auto custom-scrollbar rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/40 transition-opacity duration-150 ${(isFilterPending || (selectedObjective && !shiftsMapLoaded)) ? 'opacity-70' : ''} ${correctionMode ? 'pb-2' : ''}`}
+                            >
                                 {renderGrid(false, undefined, undefined, undefined, correctionMode ? { highlightCoverageFooter: true } : undefined)}
                             </div>
                         )}
