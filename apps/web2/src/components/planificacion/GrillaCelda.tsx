@@ -86,6 +86,7 @@ function CeldaGrillaBase({ vista: v, fila, col, seleccionada, colElegir, elegirA
     return (
         <td
             data-testid="grilla-celda"
+            data-rc={`${fila}:${col}`}
             onContextMenu={(ev) => ctl.current.contextMenu(ev, v.key)}
             onMouseDown={(ev) => ctl.current.mouseDown(ev, v.key, fila, col)}
             onMouseEnter={(ev) => ctl.current.mouseEnter(ev, v.key, fila, col)}
