@@ -312,4 +312,6 @@ export type VacancySplitListContext = {
   gapEnd?: string | null;
   /** En la vista agrupada: un guardia de cualquiera de estos objetivos puede extender. */
   objectiveIdsPermitidos?: readonly string[] | null;
+  /** Nombre corto del objetivo, para la fila («Niños»). */
+  etiquetaObjetivo?: (objectiveId: string) => string;
 };

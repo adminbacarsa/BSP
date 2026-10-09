@@ -57,6 +57,12 @@ export type SegmentCandidateRow = {
   deltaMin?: number;
   /** «FERRERO · M 11:30–15:15 · termina 15 min antes». */
   textoFila?: string;
+  /** Objetivo del turno, en la vista agrupada. */
+  objectiveId?: string;
+  /** «Niños», si el grupo tiene más de un objetivo. */
+  objetivoEtiqueta?: string;
+  /** «GALEANO · M · Niños». */
+  etiquetaLista?: string;
 };
 
 function empDisplayName(emp: { name?: string; apellido?: string; nombre?: string; firstName?: string; lastName?: string } | undefined, id: string) {
@@ -800,6 +806,13 @@ function listarContiguos(
       const name = empDisplayName(emp, emp.id);
       const code = String(shift?.code || '').toUpperCase();
       const positionName = positionNamePre;
+      const objectiveIdRow = shiftObj != null && String(shiftObj) !== '' ? String(shiftObj) : '';
+      const etiqueta = objectiveIdRow && listCtx?.etiquetaObjetivo
+        ? String(listCtx.etiquetaObjetivo(objectiveIdRow) || '').trim()
+        : '';
+      const mostrarObjetivo = !!etiqueta && (listCtx?.objectiveIdsPermitidos?.length || 0) > 1;
+      const apellido = String(name).split(',')[0].trim().split(/\s+/)[0] || name;
+      const textoBase = textoFilaHorario({ name, code, from: horario.from, to: horario.to, deltaMin: delta, lado });
       const row: SegmentCandidateRow & { abs: number; mismo: boolean } = {
         id: emp.id,
         name: offset < 0
@@ -811,7 +824,10 @@ function listarContiguos(
         positionName,
         scheduleLabel: `${horario.from}–${horario.to}`,
         deltaMin: delta,
-        textoFila: textoFilaHorario({ name, code, from: horario.from, to: horario.to, deltaMin: delta, lado }),
+        textoFila: mostrarObjetivo ? `${textoBase} · ${etiqueta}` : textoBase,
+        objectiveId: objectiveIdRow || undefined,
+        objetivoEtiqueta: mostrarObjetivo ? etiqueta : undefined,
+        etiquetaLista: mostrarObjetivo ? `${apellido} · ${code} · ${etiqueta}` : undefined,
         abs: Math.abs(delta),
         mismo: !!listCtx?.gapPositionName && positionName === listCtx.gapPositionName,
         ...(offset < 0 ? { extensionApplyDate: dia } : {}),

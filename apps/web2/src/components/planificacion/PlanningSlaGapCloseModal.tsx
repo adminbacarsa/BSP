@@ -43,6 +43,7 @@ type Props = {
   positionStructure: VacancyPositionSla[];
   bandasGrupo?: BandaAbiertaGrupo[];
   objetivosDelGrupo?: readonly string[];
+  etiquetaObjetivo?: (objectiveId: string) => string;
   onElegirBanda?: (banda: BandaAbiertaGrupo) => void;
   onApply: (changes: Record<string, any>) => void;
   onClose: () => void;
@@ -75,6 +76,7 @@ export default function PlanningSlaGapCloseModal({
   positionStructure,
   bandasGrupo,
   objetivosDelGrupo,
+  etiquetaObjetivo,
   onElegirBanda,
   onApply,
   onClose,
@@ -122,7 +124,8 @@ export default function PlanningSlaGapCloseModal({
     gapStart: gapVentana.from,
     gapEnd: gapVentana.to,
     objectiveIdsPermitidos: objetivosDelGrupo,
-  }), [positionStructure, data.positionName, data.gapBand, gapVentana, objetivosDelGrupo]);
+    etiquetaObjetivo,
+  }), [positionStructure, data.positionName, data.gapBand, gapVentana, objetivosDelGrupo, etiquetaObjetivo]);
   const poolExt = useMemo(
     () => listExtensionCandidates(
       data.gapBand,
@@ -452,7 +455,7 @@ export default function PlanningSlaGapCloseModal({
                   }}
                   className={`w-full px-2.5 py-2 text-left text-xs font-bold rounded-lg border ${soloId === c.id ? 'bg-red-100 border-red-500 text-red-900' : 'bg-white border-slate-200'}`}
                 >
-                  {c.name} · {c.code} · {c.positionName}
+                  {c.etiquetaLista || `${c.name} · ${c.code} · ${c.positionName}`}
                   <span className="block text-[9px] font-bold text-slate-500">
                     {c.soloRole === 'ext' ? 'Extiende' : 'Adelanta'} {titular.scheduleLabel !== '—' ? titular.scheduleLabel : `${titular.hours} h`}
                   </span>
@@ -483,7 +486,7 @@ export default function PlanningSlaGapCloseModal({
                   }}
                   className={`w-full px-2.5 py-2 text-left text-xs font-bold rounded-lg border ${extId === c.id ? 'bg-red-100 border-red-500 text-red-900' : 'bg-white border-slate-200'}`}
                 >
-                  {c.textoFila || `${c.name} · ${c.code} · ${c.positionName}`}
+                  {c.etiquetaLista || c.textoFila || `${c.name} · ${c.code} · ${c.positionName}`}
                 </button>
               ))}
             </div>
@@ -502,6 +505,8 @@ export default function PlanningSlaGapCloseModal({
                 <button
                   key={`${c.id}_${c.earlyStartApplyDate || data.dateStr}`}
                   type="button"
+                  data-segundo-guardia={c.id}
+                  data-objetivo={c.objetivoEtiqueta || ''}
                   onClick={() => {
                     setFtId('');
                     setSoloId('');
@@ -510,7 +515,7 @@ export default function PlanningSlaGapCloseModal({
                   }}
                   className={`w-full px-2.5 py-2 text-left text-xs font-bold rounded-lg border ${secondId === c.id ? 'bg-red-100 border-red-500 text-red-900' : 'bg-white border-slate-200'}`}
                 >
-                  {c.textoFila || `${c.name} · ${c.code} · ${c.positionName}`}
+                  {c.etiquetaLista || c.textoFila || `${c.name} · ${c.code} · ${c.positionName}`}
                 </button>
               ))}
             </div>

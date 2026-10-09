@@ -3,7 +3,7 @@ import { X, Clock, Timer } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   collectSplitFrancoConflicts,
-  listVacancySplitWorkersForDay,
+  listEarlyStartCandidates,
   resolveEmployeeShift,
   type FrancoCoverageConflict,
 } from '@/lib/planificacion/planningRecompositionApply';
@@ -15,9 +15,7 @@ import {
 } from '@/lib/planificacion/shiftExtensionApply';
 import { listVacancyGapBandOptions } from '@/lib/planificacion/vacancyGapBands';
 import { claveBandaAbierta, type BandaAbiertaGrupo } from '@/lib/planificacion/grupoCerrarBanda';
-import { describeVacancySplitPlan } from '@/lib/planificacion/vacancyCoverage';
 import type { VacancyPositionSla } from '@/lib/planificacion/vacancySplitBands';
-import type { TitularVacancyWorkShift } from '@/lib/planificacion/vacancyCoverage';
 
 export type ShiftExtendModalData = {
   empId: string;
@@ -41,6 +39,7 @@ type Props = {
   positionStructure: VacancyPositionSla[];
   bandasGrupo?: BandaAbiertaGrupo[];
   objetivosDelGrupo?: readonly string[];
+  etiquetaObjetivo?: (objectiveId: string) => string;
   onElegirBanda?: (banda: BandaAbiertaGrupo) => void;
   onApply: (changes: Record<string, any>) => void;
   onClose: () => void;
@@ -60,6 +59,7 @@ export default function PlanningShiftExtendModal({
   positionStructure,
   bandasGrupo,
   objetivosDelGrupo,
+  etiquetaObjetivo,
   onElegirBanda,
   onApply,
   onClose,
@@ -92,29 +92,21 @@ export default function PlanningShiftExtendModal({
   const primaryEnd = endTimeAfterExtraHours(slaEnd, primaryExtraH);
   const soloCoversFullBand = !secondId && primaryExtraH + 0.05 >= gapBandHours;
 
-  const titularStub: TitularVacancyWorkShift | null = uiBand
-    ? {
-      code: uiBand,
-      bandLabel: uiBand,
-      positionName: gapPositionName,
-      scheduleLabel: selectedGapOpt?.scheduleLabel || '—',
-      hours: gapBandHours,
-      source: 'user_selected',
-      sourceLabel: 'Banda SLA',
-    }
-    : null;
-  const splitPlan = titularStub ? describeVacancySplitPlan(titularStub, positionStructure) : null;
-
+  const bandaElegida = bandasGrupo?.find((b) => b.objectiveId === objectiveId && b.positionName === gapPositionName && b.band === uiBand);
   const listCtx = {
     positionStructure,
     preferSamePosition: true,
     gapPositionName,
     gapBand: uiBand,
+    gapStart: selectedGapOpt?.startTime || bandaElegida?.startTime,
+    gapEnd: selectedGapOpt?.endTime || bandaElegida?.endTime,
     objectiveIdsPermitidos: objetivosDelGrupo,
+    etiquetaObjetivo,
   };
   const poolSecond = useMemo(
     () => (uiBand
-      ? listVacancySplitWorkersForDay(
+      ? listEarlyStartCandidates(
+        uiBand,
         data.dateStr,
         objectiveId,
         employees,
@@ -122,10 +114,13 @@ export default function PlanningShiftExtendModal({
         pendingChanges,
         [data.empId],
         listCtx,
-        splitPlan ? [splitPlan.adelBand] : [],
-      ).filter((c) => !q || c.name.toLowerCase().includes(q))
+      ).filter((c) => {
+        if (!q) return true;
+        const t = `${c.name} ${c.textoFila || ''} ${c.etiquetaLista || ''} ${c.code}`.toLowerCase();
+        return t.includes(q);
+      })
       : []),
-    [data.dateStr, data.empId, uiBand, employees, listCtx, pendingChanges, q, splitPlan, objectiveId, shiftsMap],
+    [data.dateStr, data.empId, uiBand, employees, listCtx, pendingChanges, q, objectiveId, shiftsMap],
   );
 
   const employeesById = useMemo(
@@ -310,7 +305,7 @@ export default function PlanningShiftExtendModal({
               value={q}
               onChange={(e) => setQ(e.target.value)}
             />
-            <div className="space-y-1 max-h-28 overflow-y-auto rounded-lg border border-slate-100 p-1 bg-white">
+            <div className="space-y-1 max-h-28 overflow-y-auto rounded-lg border border-slate-100 p-1 bg-white" data-lista-segundo>
               <button
                 type="button"
                 onClick={() => setSecondId('')}
@@ -322,10 +317,12 @@ export default function PlanningShiftExtendModal({
                 <button
                   key={c.id}
                   type="button"
+                  data-segundo-guardia={c.id}
+                  data-objetivo={c.objetivoEtiqueta || ''}
                   onClick={() => setSecondId(c.id)}
                   className={`w-full px-2 py-1.5 text-left text-xs font-bold rounded border ${secondId === c.id ? 'bg-red-100 border-red-400' : 'border-transparent hover:bg-slate-50'}`}
                 >
-                  {c.name} · {c.code}
+                  {c.etiquetaLista || c.textoFila || `${c.name} · ${c.code}`}
                 </button>
               ))}
             </div>

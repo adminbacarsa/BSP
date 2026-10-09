@@ -201,7 +201,7 @@ import {
 } from '@/lib/cosp/coverageSemantics';
 import { PlanningCoverageLegend } from '@/components/planificacion/PlanningCoverageLegend';
 import { inicioRenderGrilla, registrarCommitGrilla } from '@/lib/planificacion/perfGrilla';
-import { etiquetaFilaGrupo, puestoDeTurno, type EtiquetaFilaGrupo } from '@/lib/planificacion/etiquetaFilaGrupo';
+import { etiquetaFilaGrupo, partesObjetivo, puestoDeTurno, type EtiquetaFilaGrupo } from '@/lib/planificacion/etiquetaFilaGrupo';
 import {
     ANCHO_ANCHA, ANCHO_COMPACTA, abreviarNombreGuardia, anchoAutoDotacion, anchoCajaNombre, anchoContenidoFila, clampAnchoDotacion,
     anchosEnVista, guardarAnchoDotacion, leerAnchoDotacion,
@@ -2259,6 +2259,17 @@ function PlanificacionDesktop() {
             if (Number.isFinite(n)) filas.push({ top: r.top, bottom: r.bottom, ancho: n });
         });
         return anchoAutoDotacion(anchosEnVista(filas, box.top, box.bottom));
+    };
+
+    const ctxObjetivosGrupo = () => {
+        if (!selectedGrupo || !grupoUnifiedMode) return {} as { objectiveIdsPermitidos?: string[]; etiquetaObjetivo?: (id: string) => string };
+        return {
+            objectiveIdsPermitidos: selectedGrupo.objectiveIds as string[],
+            etiquetaObjetivo: (id: string) => {
+                const i = selectedGrupo.objectiveIds.indexOf(id);
+                return partesObjetivo(String(selectedGrupo.objectiveNames[i] || '')).corto;
+            },
+        };
     };
 
     const [showVacancyModal, setShowVacancyModal] = useState(false);
@@ -9025,7 +9036,7 @@ function PlanificacionDesktop() {
             gapStart: rangoHueco?.from,
             gapEnd: rangoHueco?.to,
             preferSamePosition: true as const,
-            objectiveIdsPermitidos: selectedGrupo && grupoUnifiedMode ? selectedGrupo.objectiveIds : undefined,
+            ...ctxObjetivosGrupo(),
         };
         const excl = titularId ? [titularId] : [];
         const filasExt = paso === 'ext'
@@ -9244,6 +9255,7 @@ function PlanificacionDesktop() {
             gapBand: ctx.gapBand,
             gapStart: rangoHuecoMenu?.from,
             gapEnd: rangoHuecoMenu?.to,
+            ...ctxObjetivosGrupo(),
         };
         const exclMenu = ctx.clase === 'ausente' ? [ctx.empId] : [];
         const extRow = listExtensionCandidates(ctx.gapBand, ctx.dateStr, selectedObjective || '', employees, shiftsMap, base, exclMenu, listCtxMenu)
@@ -9518,6 +9530,7 @@ function PlanificacionDesktop() {
             gapBand: m.ctx.gapBand,
             gapStart: rango?.from,
             gapEnd: rango?.to,
+            ...ctxObjetivosGrupo(),
         };
         const excl = m.ctx.clase === 'ausente' ? [m.ctx.empId] : [];
         const hayExt = m.accion === 'split'
@@ -13861,7 +13874,7 @@ function PlanificacionDesktop() {
                     gapBand: modoElegir.ctx.gapBand,
                     gapStart: rangoFranja?.from,
                     gapEnd: rangoFranja?.to,
-                    objectiveIdsPermitidos: selectedGrupo && grupoUnifiedMode ? selectedGrupo.objectiveIds : undefined,
+                    ...ctxObjetivosGrupo(),
                 };
                 const exclFranja = modoElegir.ctx.clase === 'ausente' ? [modoElegir.ctx.empId] : [];
                 const sinExtender = modoElegir.accion === 'split' && !modoElegir.extId && rangoFranja
@@ -14050,6 +14063,7 @@ function PlanificacionDesktop() {
                         : effectivePosStructure) as import('@/lib/planificacion/vacancySplitBands').VacancyPositionSla[]}
                     bandasGrupo={selectedGrupo && grupoUnifiedMode ? bandasAbiertasGrupoEn(shiftExtendModal.dateStr, getDayLetter(shiftExtendModal.dateStr)) : undefined}
                     objetivosDelGrupo={selectedGrupo && grupoUnifiedMode ? selectedGrupo.objectiveIds : undefined}
+                    etiquetaObjetivo={ctxObjetivosGrupo().etiquetaObjetivo}
                     onElegirBanda={(banda) => setShiftExtendModal((m) => m ? ({
                         ...m,
                         objectiveId: banda.objectiveId,
@@ -14081,6 +14095,7 @@ function PlanificacionDesktop() {
                         : effectivePosStructure) as import('@/lib/planificacion/vacancySplitBands').VacancyPositionSla[]}
                     bandasGrupo={selectedGrupo && grupoUnifiedMode ? bandasAbiertasGrupoEn(slaGapCloseModal.dateStr, getDayLetter(slaGapCloseModal.dateStr)) : undefined}
                     objetivosDelGrupo={selectedGrupo && grupoUnifiedMode ? selectedGrupo.objectiveIds : undefined}
+                    etiquetaObjetivo={ctxObjetivosGrupo().etiquetaObjetivo}
                     onElegirBanda={(banda) => setSlaGapCloseModal((m) => m ? ({
                         ...m,
                         objectiveId: banda.objectiveId,
@@ -17194,6 +17209,7 @@ function PlanificacionDesktop() {
                                                                 objectiveId: elegida?.objectiveId,
                                                             });
                                                         }}
+                                                        data-extender-jornada
                                                         className="w-full py-2.5 rounded-xl text-xs font-black border-2 border-red-200 bg-red-50 text-red-800 hover:bg-red-100 flex items-center justify-center gap-2"
                                                     >
                                                         <Timer size={14} /> Extender jornada (+horas)
@@ -17767,6 +17783,7 @@ function PlanificacionDesktop() {
                     const vacancySplitListCtx = {
                         positionStructure: effectivePosStructure as import('@/lib/planificacion/vacancySplitBands').VacancyPositionSla[],
                         preferSamePosition: true,
+                        ...ctxObjetivosGrupo(),
                     };
                     const splitTitularShift = (() => {
                         if (splitReferenceDate) {
@@ -17834,7 +17851,7 @@ function PlanificacionDesktop() {
                             [vacancyData?.employeeId].filter(Boolean) as string[],
                             splitListCtxWithGap,
                         )
-                            .filter((c) => !q || c.name.toLowerCase().includes(q) || (c.textoFila || '').toLowerCase().includes(q))
+                            .filter((c) => !q || `${c.name} ${c.textoFila || ''} ${c.etiquetaLista || ''}`.toLowerCase().includes(q))
                         : [];
                     const splitWorkerPoolAdel = splitWorkBand && splitReferenceDate
                         ? listEarlyStartCandidates(
@@ -17847,7 +17864,7 @@ function PlanificacionDesktop() {
                             [vacancyData?.employeeId, vacancySplitExtId].filter(Boolean) as string[],
                             splitListCtxWithGap,
                         )
-                            .filter((c) => !q || c.name.toLowerCase().includes(q) || (c.textoFila || '').toLowerCase().includes(q))
+                            .filter((c) => !q || `${c.name} ${c.textoFila || ''} ${c.etiquetaLista || ''}`.toLowerCase().includes(q))
                         : [];
                     const splitManualExtraHours = vacancySplitUsesManualExtraHours({
                         extExtraHours: vacancySplitExtExtraHours,
@@ -18404,9 +18421,10 @@ function PlanificacionDesktop() {
                                         type="button"
                                         onClick={() => onPick(c.id)}
                                         data-split-candidato={c.id}
+                                        data-objetivo={c.objetivoEtiqueta || ''}
                                         className={`w-full rounded-lg border px-2.5 py-2 text-left text-xs font-bold transition-colors ${value === c.id ? 'border-violet-500 bg-violet-50 text-violet-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}
                                     >
-                                        {c.textoFila || `${c.name} · ${c.code} · ${c.positionName}`}
+                                        {c.etiquetaLista || c.textoFila || `${c.name} · ${c.code} · ${c.positionName}`}
                                     </button>
                                 ))}
                             </div>
