@@ -251,6 +251,13 @@ import {
     type BandaAbiertaGrupo,
 } from '@/lib/planificacion/grupoCerrarBanda';
 import {
+    agruparAmbiguos,
+    aplicarObjetivosDePuesto,
+    esPuestoReal,
+    resolverObjetivoDelPuesto,
+    type CandidatoObjetivo,
+} from '@/lib/planificacion/puestoObjetivoGrupo';
+import {
     analyzeDayCoverageGaps,
     analyzeObjectiveCoverageGaps,
     flattenDayGapsForUi,
@@ -1789,6 +1796,19 @@ function PlanificacionDesktop() {
     const dotacionMigratedRef = useRef(false);
     const objectiveSortAppliedRef = useRef<string | null>(null);
     const [empPosPicker, setEmpPosPicker] = useState<{ empId: string; x: number; y: number; maxHeight: number; floating?: boolean } | null>(null);
+    const [elegirPuestoObjetivo, setElegirPuestoObjetivo] = useState<{
+        filas: {
+            clave: string;
+            empId: string;
+            empName: string;
+            puesto: string;
+            fechas: string[];
+            candidatos: CandidatoObjetivo[];
+            elegido: string;
+        }[];
+        asignar: { config: any; positionName: string } | null;
+    } | null>(null);
+    const eleccionesPuestoRef = useRef<Record<string, string> | null>(null);
     const [deployBandPicker, setDeployBandPicker] = useState<'SURPLUS' | 'TRAINING' | null>(null);
     /** Picker REF/ESC desde selección masiva (bandas = turnos reales del puesto). */
     const [bulkDeployPicker, setBulkDeployPicker] = useState<{
@@ -5334,6 +5354,51 @@ function PlanificacionDesktop() {
         return selectedObjective;
     }, [selectedObjective, selectedGrupo, grupoUnifiedMode, employees, slaIdToObjId]);
 
+    const objetivosPuestosGrupo = useMemo(() => {
+        if (!selectedGrupo || !grupoUnifiedMode) return [];
+        return selectedGrupo.objectiveIds.map((id: string, i: number) => ({
+            id,
+            name: selectedGrupo.objectiveNames[i] || id,
+            puestos: (grupoSlaMap[id] || [])
+                .map((p: any) => String(p.positionName || ''))
+                .filter((n: string) => esPuestoReal(n)),
+        }));
+    }, [selectedGrupo, grupoUnifiedMode, grupoSlaMap]);
+
+    const preferidoObjetivoGrupo = useCallback((empId: string): string => {
+        if (!selectedGrupo) return '';
+        const emp = employees.find((e: any) => e.id === empId);
+        const pref = String(emp?.preferredObjectiveId || '');
+        if (selectedGrupo.objectiveIds.includes(pref)) return pref;
+        const mapped = slaIdToObjId[pref];
+        if (mapped && selectedGrupo.objectiveIds.includes(mapped)) return mapped;
+        return '';
+    }, [selectedGrupo, employees, slaIdToObjId]);
+
+    const objetivosDelMesGrupo = useCallback((empId: string): string[] => {
+        if (!selectedGrupo) return [];
+        const ids = new Set<string>();
+        const re = new RegExp(`^${empId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}_\\d{4}-\\d{2}-\\d{2}`);
+        for (const [key, shift] of Object.entries(shiftsMap)) {
+            if (!re.test(key) || !shift || (shift as any).isDeleted) continue;
+            const oid = String((shift as any).objectiveId || '');
+            if (selectedGrupo.objectiveIds.includes(oid)) ids.add(oid);
+        }
+        return [...ids];
+    }, [selectedGrupo, shiftsMap]);
+
+    const objetivoDePuestoGrupo = useCallback((empId: string, positionName: string, elegidoId?: string | null) => {
+        if (!selectedGrupo || !grupoUnifiedMode) return null;
+        return resolverObjetivoDelPuesto({
+            positionName,
+            objetivos: objetivosPuestosGrupo,
+            preferidoId: preferidoObjetivoGrupo(empId),
+            objetivosDelMes: objetivosDelMesGrupo(empId),
+            elegidoId,
+            respaldoId: resolveObjectiveForEmp(empId),
+        });
+    }, [selectedGrupo, grupoUnifiedMode, objetivosPuestosGrupo, preferidoObjetivoGrupo, objetivosDelMesGrupo, resolveObjectiveForEmp]);
+
     const handleDeleteGrupo = async (grupo: GrupoObjetivos) => {
         if (!confirm(`¿Eliminar el grupo "${grupo.nombre}"?`)) return;
         try {
@@ -7312,7 +7377,48 @@ function PlanificacionDesktop() {
             toast.message('Los días con consulta abierta no se guardan en el cronograma: los resuelve quien acepte.');
             setPendingChanges(saneado.changes);
         }
-        const pendingParaGuardar = saneado.changes;
+        let pendingParaGuardar = saneado.changes;
+        if (selectedGrupo && grupoUnifiedMode) {
+            if (Object.keys(grupoSlaMap).length === 0) {
+                toast.error('Todavía no cargaron los servicios del grupo. Esperá un segundo y volvé a guardar.');
+                return;
+            }
+            const aplicado = aplicarObjetivosDePuesto(pendingParaGuardar, {
+                objetivos: objetivosPuestosGrupo,
+                preferidoDe: preferidoObjetivoGrupo,
+                objetivosDelMesDe: objetivosDelMesGrupo,
+                respaldoDe: resolveObjectiveForEmp,
+                elecciones: eleccionesPuestoRef.current,
+            });
+            eleccionesPuestoRef.current = null;
+            if (aplicado.fuera.length) {
+                const puestos = [...new Set(aplicado.fuera.map((f) => f.puesto))].join(', ');
+                toast.error(`No se guardó: ${puestos} no está en el SLA de ningún objetivo del grupo.`);
+                return;
+            }
+            if (aplicado.ambiguos.length) {
+                const nombres = new Map(displayedEmployees.map((e: any) => [e.id, e.name || e.id]));
+                setElegirPuestoObjetivo({
+                    asignar: null,
+                    filas: agruparAmbiguos(aplicado.ambiguos).map((fila) => ({
+                        ...fila,
+                        empName: String(nombres.get(fila.empId) || fila.empId),
+                        elegido: '',
+                    })),
+                });
+                return;
+            }
+            const movidos = new Set<string>();
+            for (const [key, change] of Object.entries(aplicado.changes) as [string, any][]) {
+                const antes = pendingParaGuardar[key]?.objectiveId;
+                if (change?.objectiveId && antes !== change.objectiveId && esPuestoReal(change.positionName)) {
+                    const nombre = objetivosPuestosGrupo.find((o) => o.id === change.objectiveId)?.name || change.objectiveId;
+                    movidos.add(`${change.positionName} → ${nombre}`);
+                }
+            }
+            if (movidos.size) toast.message(`El puesto se guarda en el objetivo que lo tiene: ${[...movidos].join(' · ')}`);
+            pendingParaGuardar = aplicado.changes;
+        }
         const count = Object.keys(pendingParaGuardar).length;
         if (count === 0) return;
         const _userCount = Object.values(pendingParaGuardar).filter((v: any) => !v?._isAutoRotation).length;
@@ -10055,6 +10161,34 @@ function PlanificacionDesktop() {
             if (warnings.length > 0) planToastWarnMany(warnings, 8000);
             if (blocked) return;
         }
+        const puestoAsignado = config.positionName || activePosition || 'General';
+        let objectiveIdAsignado = config.objectiveId || (selectedGrupo && grupoUnifiedMode && cellPlanningObjectiveId) || resolveObjectiveForEmp(selectedCell.empId);
+        if (selectedGrupo && grupoUnifiedMode) {
+            const decision = objetivoDePuestoGrupo(selectedCell.empId, puestoAsignado, config.puestoObjetivoElegido || null);
+            if (decision && !decision.ok && decision.motivo === 'fuera') {
+                toast.error(`El puesto ${decision.puesto} no está en el SLA de ningún objetivo del grupo.`);
+                return;
+            }
+            if (decision && !decision.ok && decision.motivo === 'ambiguo') {
+                const emp = displayedEmployees.find((e: any) => e.id === selectedCell.empId);
+                setElegirPuestoObjetivo({
+                    asignar: { config, positionName: puestoAsignado },
+                    filas: [{
+                        clave: `${selectedCell.empId}|${puestoAsignado}`,
+                        empId: selectedCell.empId,
+                        empName: emp?.name || selectedCell.empId,
+                        puesto: puestoAsignado,
+                        fechas: [selectedCell.dateStr],
+                        candidatos: decision.candidatos,
+                        elegido: '',
+                    }],
+                });
+                return;
+            }
+            if (decision && decision.ok && decision.motivo !== 'sin-puesto' && decision.objectiveId) {
+                objectiveIdAsignado = decision.objectiveId;
+            }
+        }
         const newChanges = { ...pendingChanges };
         newChanges[key] = {
             ...config,
@@ -10064,8 +10198,8 @@ function PlanificacionDesktop() {
             isFranco: config.code === 'F' || config.code === 'FF' || config.isFranco,
             swapWith: config.swapWith || null,
             swapDate: config.swapDate || null,
-            positionName: config.positionName || activePosition || 'General',
-            objectiveId: config.objectiveId || (selectedGrupo && grupoUnifiedMode && cellPlanningObjectiveId) || resolveObjectiveForEmp(selectedCell.empId),
+            positionName: puestoAsignado,
+            objectiveId: objectiveIdAsignado,
         };
         // Aplicar condiciones EXCLUDE/ASSIGN en tiempo real tras cambio manual
         if (activeSlaServiceRules?.length) {
@@ -10626,13 +10760,26 @@ function PlanificacionDesktop() {
             if (!shift) {
                 if (newChanges[key] || shiftsMap[key]) newChanges[key] = { isDeleted: true };
             } else {
+                let objectiveIdPegado = (selectedGrupo && grupoUnifiedMode)
+                    ? resolveObjectiveForEmp(emp.id)
+                    : (shift.objectiveId || selectedObjective);
+                if (selectedGrupo && grupoUnifiedMode) {
+                    const decision = objetivoDePuestoGrupo(emp.id, shift.positionName || 'General', shift.puestoObjetivoElegido || null);
+                    if (decision && !decision.ok && decision.motivo === 'fuera') {
+                        toast.error(`El puesto ${decision.puesto} no está en el SLA de ningún objetivo del grupo.`);
+                        return;
+                    }
+                    if (decision && decision.ok && decision.motivo !== 'sin-puesto' && decision.objectiveId) {
+                        objectiveIdPegado = decision.objectiveId;
+                    } else if (decision && !decision.ok) {
+                        objectiveIdPegado = undefined;
+                    }
+                }
                 newChanges[key] = {
                     ...shift,
                     isTemp: true,
                     employeeId: emp.id,
-                    objectiveId: (selectedGrupo && grupoUnifiedMode)
-                        ? resolveObjectiveForEmp(emp.id)
-                        : (shift.objectiveId || selectedObjective),
+                    objectiveId: objectiveIdPegado,
                 };
                 pasted++;
             }
@@ -10644,7 +10791,7 @@ function PlanificacionDesktop() {
                 : `${pasted} turno(s) pegado(s) — portapapeles listo para repetir`,
         );
         if (clipboardIsCut) setClipboardIsCut(false);
-    }, [allowPlanningMultiSelect, clipboard, clipboardIsCut, commitPendingChanges, displayedEmployees, daysInMonth, shiftsMap, cellTurnosMap, selectedObjective, isPlanningDateLocked, isOutsideServiceRange, selectedGrupo, grupoUnifiedMode, resolveObjectiveForEmp, getObjectiveName, msgBloqueoEdicion]);
+    }, [allowPlanningMultiSelect, clipboard, clipboardIsCut, commitPendingChanges, displayedEmployees, daysInMonth, shiftsMap, cellTurnosMap, selectedObjective, isPlanningDateLocked, isOutsideServiceRange, selectedGrupo, grupoUnifiedMode, resolveObjectiveForEmp, objetivoDePuestoGrupo, getObjectiveName, msgBloqueoEdicion]);
 
     const cutSelection = useCallback(() => {
         if (!allowPlanningMultiSelect) {
@@ -13614,6 +13761,70 @@ function PlanificacionDesktop() {
                     />
                 );
             })(), document.body)}
+            {elegirPuestoObjetivo && (
+                <div className="fixed inset-0 z-[10060] flex items-center justify-center bg-slate-900/45 p-4" onClick={() => setElegirPuestoObjetivo(null)}>
+                    <div className="bg-white rounded-3xl shadow-lg w-full max-w-lg border border-slate-200 p-5" onClick={(e) => e.stopPropagation()}>
+                        <h3 className="font-black text-lg text-slate-900">Elegí el objetivo</h3>
+                        <p className="text-[12px] font-medium text-slate-600 mt-1">El puesto está en más de un objetivo del grupo. No se guarda hasta que elijas.</p>
+                        <div className="mt-4 space-y-3 max-h-[50vh] overflow-y-auto">
+                            {elegirPuestoObjetivo.filas.map((fila) => (
+                                <label key={fila.clave} className="block rounded-2xl border border-slate-200 p-3">
+                                    <span className="text-[11px] font-black text-slate-800">{fila.empName} · {fila.puesto}</span>
+                                    {fila.fechas.length > 0 && (
+                                        <span className="block text-[10px] font-bold text-slate-500 mt-0.5">{fila.fechas.join(' · ')}</span>
+                                    )}
+                                    <select
+                                        className="mt-2 w-full rounded-xl border border-slate-200 px-2 py-2 text-xs font-bold"
+                                        data-elegir-objetivo-puesto
+                                        value={fila.elegido}
+                                        onChange={(e) => {
+                                            const value = e.target.value;
+                                            setElegirPuestoObjetivo((prev) => prev ? {
+                                                ...prev,
+                                                filas: prev.filas.map((f) => f.clave === fila.clave ? { ...f, elegido: value } : f),
+                                            } : prev);
+                                        }}
+                                    >
+                                        <option value="">Elegí…</option>
+                                        {fila.candidatos.map((c) => (
+                                            <option key={c.id} value={c.id}>{c.name}</option>
+                                        ))}
+                                    </select>
+                                </label>
+                            ))}
+                        </div>
+                        <div className="mt-4 flex justify-end gap-2">
+                            <button type="button" onClick={() => setElegirPuestoObjetivo(null)} className="px-4 py-2 rounded-xl border border-slate-200 text-xs font-black text-slate-600">Cancelar</button>
+                            <button
+                                type="button"
+                                disabled={elegirPuestoObjetivo.filas.some((f) => !f.elegido)}
+                                onClick={() => {
+                                    const actual = elegirPuestoObjetivo;
+                                    if (!actual || actual.filas.some((f) => !f.elegido)) return;
+                                    const mapa: Record<string, string> = {};
+                                    for (const fila of actual.filas) mapa[fila.clave] = fila.elegido;
+                                    setElegirPuestoObjetivo(null);
+                                    if (actual.asignar) {
+                                        const fila = actual.filas[0];
+                                        applyToPending({
+                                            ...actual.asignar.config,
+                                            positionName: actual.asignar.positionName,
+                                            objectiveId: fila.elegido,
+                                            puestoObjetivoElegido: fila.elegido,
+                                        });
+                                        return;
+                                    }
+                                    eleccionesPuestoRef.current = mapa;
+                                    void handleSaveAll();
+                                }}
+                                className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-black disabled:bg-white disabled:text-slate-400 disabled:border disabled:border-slate-200"
+                            >
+                                Usar estos objetivos
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
             {coverageTooltip && coverageTooltipLayout && typeof document !== 'undefined' && createPortal(
                 <div
                     className="fixed z-[9999]"
