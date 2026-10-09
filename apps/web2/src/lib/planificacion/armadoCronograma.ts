@@ -2,7 +2,7 @@
 
 export const PAUSA_ARMADO_MS = 5 * 60 * 1000;
 
-export type OrigenArmado = 'MANUAL' | 'COPIA_MES_ANTERIOR' | 'ROTACION_SLA';
+export type OrigenArmado = 'MANUAL' | 'COPIA_MES_ANTERIOR' | 'CONTINUAR_MES_ANTERIOR' | 'ROTACION_SLA';
 
 export interface UsuarioArmado {
   uid: string;
@@ -189,7 +189,9 @@ export function detalleArmado(armado: ArmadoCronograma | null | undefined): stri
   const quienes = armado.usuarios.map((u) => u.nombre || u.uid).filter(Boolean).join(', ') || '—';
   const origen = armado.origen === 'COPIA_MES_ANTERIOR'
     ? 'Copiar mes anterior'
-    : armado.origen === 'ROTACION_SLA'
+    : armado.origen === 'CONTINUAR_MES_ANTERIOR'
+      ? 'Continuar mes anterior'
+      : armado.origen === 'ROTACION_SLA'
       ? 'Rotación del SLA'
       : 'Manual';
   const corr = armado.correccionesPostPublicacion;
@@ -215,7 +217,7 @@ function isoDe(value: unknown): string | null {
   return null;
 }
 
-const ORIGENES = new Set<OrigenArmado>(['MANUAL', 'COPIA_MES_ANTERIOR', 'ROTACION_SLA']);
+const ORIGENES = new Set<OrigenArmado>(['MANUAL', 'COPIA_MES_ANTERIOR', 'CONTINUAR_MES_ANTERIOR', 'ROTACION_SLA']);
 
 export function parseArmado(raw: unknown): ArmadoCronograma | null {
   if (!raw || typeof raw !== 'object') return null;
