@@ -15,7 +15,7 @@ import {
     Printer, Download, Grid, RefreshCw, Edit3, Shield, ArrowRightCircle, Info, ArrowDownWideNarrow, ArrowDownAZ,
     BadgePercent, ArrowLeftRight, CalendarSearch, CheckSquare, XCircle, Search as SearchIcon, RefreshCcw, UserCheck, Split, Ban,
     FastForward, Rewind, AlertOctagon, Siren, FileText, Fingerprint, CalendarCheck, HelpCircle, MousePointerClick, Check, Database, Activity,
-    PowerOff, LockKeyhole, Ghost, Maximize2, Maximize, Minimize2, Copy, ClipboardPaste, Scissors, Wand2, BarChart3, BarChart2, PanelLeft, LayoutList,
+    PowerOff, LockKeyhole, Ghost, Maximize2, Maximize, Minimize2, Copy, ClipboardPaste, Keyboard, Scissors, Wand2, BarChart3, BarChart2, PanelLeft, LayoutList,
     ChevronsUp, ChevronsDown, MoreHorizontal, FlaskConical, Shuffle, Timer, Repeat, UnfoldHorizontal
 } from 'lucide-react';
 
@@ -227,6 +227,27 @@ import {
     type DatosTooltipCelda,
     type VistaCelda,
 } from '@/components/planificacion/GrillaCelda';
+import { ModoRapidoCapa, type CapaModoRapidoApi, type MarcaAviso } from '@/components/planificacion/ModoRapidoCapa';
+import { ModoRapidoAyuda, ModoRapidoAvisosPanel, CopiarDeModal, type CopiarDeEleccion } from '@/components/planificacion/ModoRapidoPiezas';
+import {
+    type AvisoRapido,
+    type CeldaRC,
+    type RangoRC,
+    type TurnoSla,
+    CODIGOS_LICENCIA_RAPIDA,
+    HORARIO_ESTANDAR,
+    autorizacionesAlGuardar,
+    avisosModoRapido,
+    horarioDeCodigo,
+    matrizATsv,
+    normalizarCodigo,
+    opcionesDeCodigo,
+    parsearTsv,
+    planPegado,
+    planRelleno,
+    planSerie,
+    tipoDeCodigo,
+} from '@/lib/planificacion/modoRapido';
 import {
     compareObjectiveMonthSchedules,
     formatCompareObjectiveMonthsReport,
@@ -971,14 +992,21 @@ function resolveCellShiftDisplay(
     return { s: null, p: null };
 }
 
+const fmtDateKeyAr = new Intl.DateTimeFormat('es-AR', { timeZone: 'America/Argentina/Cordoba', year: 'numeric', month: '2-digit', day: '2-digit' });
+const dateKeyCache = new Map<number, string>();
 const getDateKey = (dateInput: any) => {
     const d = dateInput.toDate ? dateInput.toDate() : new Date(dateInput);
-    const options: Intl.DateTimeFormatOptions = { timeZone: 'America/Argentina/Cordoba', year: 'numeric', month: '2-digit', day: '2-digit' };
-    const parts = new Intl.DateTimeFormat('es-AR', options).formatToParts(d);
+    const ms = d.getTime();
+    const hit = dateKeyCache.get(ms);
+    if (hit !== undefined) return hit;
+    const parts = fmtDateKeyAr.formatToParts(d);
     const day = parts.find(p => p.type === 'day')?.value;
     const month = parts.find(p => p.type === 'month')?.value;
     const year = parts.find(p => p.type === 'year')?.value;
-    return `${year}-${month}-${day}`;
+    const key = `${year}-${month}-${day}`;
+    if (dateKeyCache.size > 50000) dateKeyCache.clear();
+    dateKeyCache.set(ms, key);
+    return key;
 };
 
 const isDateLocked = (dateStr: string) => {
@@ -1167,6 +1195,20 @@ const isPosExcludedOnDate = (pos: any, dateStr: string): boolean =>
     isPlanningPositionExcludedOnDate(pos, dateStr);
 
 interface Coords { r: number; c: number; }
+
+/** Lo que se copia de una celda en modo rápido: código y horario. */
+type FuenteRapida = { code: string; startTime?: string; endTime?: string; hours?: number; name?: string; positionName?: string };
+
+const hhmmRapido = (v: any): string | null => {
+    if (!v) return null;
+    if (typeof v === 'string') {
+        const m = v.trim().match(/^(\d{1,2}):(\d{2})/);
+        return m ? `${m[1].padStart(2, '0')}:${m[2]}` : null;
+    }
+    const d = v.toDate ? v.toDate() : v instanceof Date ? v : null;
+    if (!d || isNaN(d.getTime())) return null;
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+};
 
 const isShiftConsolidated = (shift: any) => {
     if (!shift) return false;
@@ -1966,6 +2008,22 @@ function PlanificacionDesktop() {
     const [clipboardDim, setClipboardDim] = useState<{rows: number; cols: number} | null>(null);
     const [clipboardIsCut, setClipboardIsCut] = useState(false);
     const undoStackRef = useRef<Record<string, any>[]>([]);
+    const redoStackRef = useRef<Record<string, any>[]>([]);
+    const [modoRapido, setModoRapido] = useState(false);
+    const modoRapidoRef = useRef(false);
+    const capaRapidaRef = useRef<CapaModoRapidoApi | null>(null);
+    const grillaScrollRef = useRef<HTMLDivElement | null>(null);
+    const [ayudaRapidaOpen, setAyudaRapidaOpen] = useState(false);
+    const [copiarDeOpen, setCopiarDeOpen] = useState(false);
+    const [copiarDeTick, setCopiarDeTick] = useState(0);
+    const pendienteCopiarDeRef = useRef<{ porEmpDia: Map<string, FuenteRapida>; empIds: string[]; soloVacias: boolean; nombre: string } | null>(null);
+    const copiarDeIntentosRef = useRef(0);
+    const avisosRapidoRef = useRef<AvisoRapido[]>([]);
+    const modoRapidoStorageKey = `cosp-planif-modo-rapido:${authUser?.uid || 'anon'}`;
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        setModoRapido(localStorage.getItem(modoRapidoStorageKey) === '1');
+    }, [modoRapidoStorageKey]);
     const pendingChangesRef = useRef(pendingChanges);
     pendingChangesRef.current = pendingChanges;
     const guardCronoRef = useRef({
@@ -2050,23 +2108,35 @@ function PlanificacionDesktop() {
             }
         }
         undoStackRef.current = [...undoStackRef.current.slice(-39), { ...prev }];
+        redoStackRef.current = [];
         setPendingChanges(resolved);
     }, [cancelarConsultaPlan]);
 
-    const undoLastPending = useCallback(() => {
+    const undoLastPending = useCallback((silencioso?: boolean) => {
         const stack = undoStackRef.current;
         if (stack.length === 0) {
-            toast.info('Nada para deshacer');
+            if (!silencioso) toast.info('Nada para deshacer');
             return;
         }
         const prev = stack[stack.length - 1];
         undoStackRef.current = stack.slice(0, -1);
+        redoStackRef.current = [...redoStackRef.current.slice(-39), { ...pendingChangesRef.current }];
         setPendingChanges(prev);
-        toast.success('Deshecho (Ctrl+Z)');
+        if (!silencioso) toast.success('Deshecho (Ctrl+Z)');
+    }, []);
+
+    const redoLastPending = useCallback(() => {
+        const stack = redoStackRef.current;
+        if (stack.length === 0) return;
+        const next = stack[stack.length - 1];
+        redoStackRef.current = stack.slice(0, -1);
+        undoStackRef.current = [...undoStackRef.current.slice(-39), { ...pendingChangesRef.current }];
+        setPendingChanges(next);
     }, []);
 
     const clearUndoStack = useCallback(() => {
         undoStackRef.current = [];
+        redoStackRef.current = [];
     }, []);
 
     const [prevMonthLoading, setPrevMonthLoading] = useState(false);
@@ -4679,7 +4749,7 @@ function PlanificacionDesktop() {
     const bloqueoMesCerrado = vistaMesCerrado && !(isSuperAdmin && correctionMode);
     const msgBloqueoEdicion: string | null = isServiceLocked
         ? (activeServiceStatus.msg || 'Bloqueado')
-        : sinServicioEnMes
+        : sinServicioEnMes && !modoRapido
             ? 'No hay servicio en este mes'
             : bloqueoMesCerrado
                 ? AVISO_MES_CERRADO
@@ -7462,9 +7532,9 @@ function PlanificacionDesktop() {
         });
     };
 
-    const handleSaveAll = async () => {
+    const handleSaveAll = async (opts?: { override?: Record<string, any>; autorizadoRapido?: boolean }) => {
         if (msgBloqueoEdicion) { toast.error(msgBloqueoEdicion); return; }
-        const saneado = quitarBorradorQuePisaConsulta(pendingChanges, vacancyConsultas);
+        const saneado = quitarBorradorQuePisaConsulta(opts?.override ?? pendingChanges, vacancyConsultas);
         if (saneado.quitadas.length) {
             toast.message('Los días con consulta abierta no se guardan en el cronograma: los resuelve quien acepte.');
             setPendingChanges(saneado.changes);
@@ -7518,7 +7588,48 @@ function PlanificacionDesktop() {
         const _confirmMsg = _userCount > 0
             ? `¿Confirmar y guardar ${_userCount} cambio${_userCount !== 1 ? 's' : ''}${_rotCount > 0 ? ` (+ ${_rotCount} turno${_rotCount !== 1 ? 's' : ''} de ciclo)` : ''}?`
             : `¿Guardar ${_rotCount} turno${_rotCount !== 1 ? 's' : ''} de ciclo?`;
-        if (!confirm(_confirmMsg)) return;
+        if (!opts?.autorizadoRapido && !confirm(_confirmMsg)) return;
+
+        if (modoRapidoRef.current && !opts?.autorizadoRapido) {
+            const { bloquean, piden } = autorizacionesAlGuardar(avisosRapidoRef.current);
+            if (bloquean.length) {
+                const lista = bloquean.slice(0, 3).map((a) => a.texto).join(' · ');
+                toast.error(`No se guarda: descanso menor a 8 h. ${lista}${bloquean.length > 3 ? ` · y ${bloquean.length - 3} más` : ''}`, { duration: 9000 });
+                return;
+            }
+            if (piden.length) {
+                const items: CoverageAuthRequest[] = piden.map((a) => ({
+                    kind: a.tipo === 'TOPE' ? 'TOPE' : 'DESCANSO',
+                    employeeId: a.empId,
+                    name: a.nombre,
+                    dateStr: a.dateStr,
+                    restHours: a.restHours,
+                    monthHours: a.monthHours,
+                    cap: a.tipo === 'TOPE' ? (a.cap || planningLimits.monthly) : 12,
+                    shiftCode: a.code,
+                    message: a.texto,
+                }));
+                requestSupervisorLaborAuth(items, () => {
+                    const motivo = authReasonRef.current;
+                    const marcado = { ...pendingParaGuardar };
+                    for (const a of piden) {
+                        if (a.tipo === 'DESCANSO') {
+                            const key = `${a.empId}_${a.dateStr}`;
+                            if (marcado[key] && !marcado[key].isDeleted) {
+                                marcado[key] = { ...marcado[key], descansoReducido: true, descansoHoras: a.restHours ?? null, autorizacionMotivo: motivo };
+                            }
+                        } else {
+                            for (const key of Object.keys(marcado)) {
+                                if (!key.startsWith(`${a.empId}_`) || marcado[key]?.isDeleted) continue;
+                                marcado[key] = { ...marcado[key], topeExcedido: true, horasMes: a.monthHours ?? null, autorizacionMotivo: motivo };
+                            }
+                        }
+                    }
+                    void handleSaveAll({ override: marcado, autorizadoRapido: true });
+                });
+                return;
+            }
+        }
 
         // Verificar si algún empleado superaría las 200h (saltar los ya autorizados este mes)
         const overCap: { empId: string; name: string; hours: number }[] = [];
@@ -7576,7 +7687,15 @@ function PlanificacionDesktop() {
                 pendingChanges: jobPending,
                 objectiveId: selectedObjective,
             });
-            const jobNovedades = { ...pendingNovedades };
+            const jobNovedades = Object.fromEntries(
+                Object.entries(pendingNovedades)
+                    .filter(([k, n]: [string, any]) => !n?._modoRapido || jobPending[k]?.isNovedad === true)
+                    .map(([k, n]: [string, any]) => {
+                        if (!n?._modoRapido) return [k, n];
+                        const { _modoRapido, ...resto } = n;
+                        return [k, resto];
+                    }),
+            );
             const jobPackages = [...pendingRecompositionPackages];
             const jobCount = jobKeys.length;
 
@@ -8296,7 +8415,7 @@ function PlanificacionDesktop() {
             })();
         };
 
-        if (overCap.length > 0) {
+        if (overCap.length > 0 && !opts?.autorizadoRapido) {
             setAuthModal({
                 pendingFn: doSave,
                 employees: overCap,
@@ -8347,6 +8466,7 @@ function PlanificacionDesktop() {
         const publishLookupKey = planificacionPublishLookupKey(selectedObjective, year, month);
         const isAlreadyPublished = isPlanificacionPublished(publishStatusMap[publishLookupKey]);
         const warnings: string[] = [];
+        if (sinServicioEnMes) warnings.push('Sin servicio cargado para este mes: se publica sin validar cobertura.');
         if (isSuperAdmin && slaHoursMismatch) {
             const delta = slaRounded - plannedRounded;
             warnings.push(
@@ -10974,6 +11094,7 @@ function PlanificacionDesktop() {
     }, [allowPlanningMultiSelect, selection, clipboard, copySelectionToClipboard, cutSelection, pasteClipboardAt, undoLastPending]);
 
     const handleMouseUp = () => {
+        if (modoRapidoRef.current) return;
         setIsDragging(false);
         clearTimeout(longPressTimer.current);
         if (columnSelectMode) return; // keep selection visible for copy action
@@ -13051,6 +13172,403 @@ function PlanificacionDesktop() {
         return soloTope ? { label: soloTope, pos: null, range: null, restHours: null } : null;
     };
 
+    // ── MODO RÁPIDO (grilla como planilla) ────────────────────────────────────
+    modoRapidoRef.current = modoRapido && !comparingSnapshot && !!selectedObjective;
+    const dimsRapido = useMemo(() => ({ filas: displayedEmployees.length, cols: daysInMonth.length }), [displayedEmployees.length, daysInMonth.length]);
+    const diasRapido = useMemo(() => daysInMonth.map((d) => getDateKey(d)), [daysInMonth]);
+    const portapapelesRapidoRef = useRef<{ tsv: string; celdas: Array<Array<FuenteRapida | null>> } | null>(null);
+
+    const slaTodosRapido = useMemo<TurnoSla[]>(() => {
+        const out: TurnoSla[] = [];
+        for (const p of (effectivePosStructure || []) as any[]) {
+            for (const s of (p.shifts || []) as any[]) {
+                out.push({ code: s.code, name: s.name, hours: s.hours, startTime: s.startTime, endTime: s.endTime, positionName: p.positionName });
+            }
+        }
+        return out;
+    }, [effectivePosStructure]);
+
+    const ultimoUsadoRapido = useMemo(() => {
+        const out: Record<string, { startTime: string; endTime: string; hours?: number; name?: string }> = {};
+        if (!modoRapido) return out;
+        for (const s of Object.values(shiftsMap) as any[]) {
+            if (!s || s.isDeleted) continue;
+            if (selectedObjective && s.objectiveId && s.objectiveId !== selectedObjective) continue;
+            const code = normalizarCodigo(s.code);
+            if (!code || out[code] || tipoDeCodigo(code) !== 'TRABAJO') continue;
+            const st = hhmmRapido(s.startTime);
+            const et = hhmmRapido(s.endTime);
+            if (!st || !et) continue;
+            out[code] = { startTime: st, endTime: et, hours: Number(s.hours) || undefined, name: s.name || s.type };
+        }
+        return out;
+    }, [modoRapido, shiftsMap, selectedObjective]);
+
+    const codigoCtxRapido = (c?: CtxCeldaGrilla): string => {
+        if (!c) return '';
+        if (c.p) return c.p.isDeleted ? '' : normalizarCodigo(c.p.code);
+        if (c.isLeaveCell) return normalizarCodigo(c.leaveCellCode);
+        return normalizarCodigo(c.cellCode || c.s?.code || '');
+    };
+    const ctxRapido = (r: number, c: number) => {
+        const emp = displayedEmployees[r];
+        const ds = diasRapido[c];
+        if (!emp || !ds) return { emp: null as any, ds: '', key: '', ctx: undefined as CtxCeldaGrilla | undefined };
+        const key = `${emp.id}_${ds}`;
+        return { emp, ds, key, ctx: ctxDeCelda(key) };
+    };
+    const fuenteRapida = (r: number, c: number): FuenteRapida | null => {
+        const { ctx } = ctxRapido(r, c);
+        const code = codigoCtxRapido(ctx);
+        if (!code) return null;
+        const base = ctx?.p && !ctx.p.isDeleted ? ctx.p : ctx?.s;
+        return {
+            code,
+            startTime: hhmmRapido(base?.startTime) || undefined,
+            endTime: hhmmRapido(base?.endTime) || undefined,
+            hours: Number(base?.hours) || undefined,
+            name: base?.name || base?.type,
+            positionName: base?.positionName,
+        };
+    };
+    const puestoFilaRapido = (empId: string, c?: CtxCeldaGrilla): string => {
+        const real = (n?: string | null) => (n && n !== 'General' && n !== 'Retén' ? n : null);
+        return real(c?.p?.positionName) || real(c?.s?.positionName) || real(getEmpDefaultPos(empId))
+            || real(dominantPosition?.positionName) || 'General';
+    };
+    const opcionesRapido = (r: number, c: number) => {
+        const { emp, ctx } = ctxRapido(r, c);
+        const pos = emp ? puestoFilaRapido(emp.id, ctx) : 'General';
+        const objId = emp ? resolveObjectiveForEmp(emp.id) : selectedObjective;
+        return opcionesDeCodigo(getShiftsForPosition(pos, objId) as TurnoSla[], slaTodosRapido, ultimoUsadoRapido);
+    };
+
+    const bloqueoGlobalRapido = (): string | null => {
+        if (!selectedObjective) return 'Elegí un objetivo.';
+        if (comparingSnapshot) return 'Salí de la comparación para editar.';
+        if (msgBloqueoEdicion) return msgBloqueoEdicion;
+        if (!allowPlanningMultiSelect) return 'Cronograma publicado: activá modo Corregir para editar.';
+        return null;
+    };
+    const bloqueoCeldaRapido = (emp: any, ds: string, c: CtxCeldaGrilla | undefined, code: string | null): string | null => {
+        if (c?.soloLecturaAjena) return textoAvisoTurnoAjeno(emp?.name, getObjectiveName(c.activeShift?.objectiveId || c.s?.objectiveId));
+        if (c?.isOpsCoverageCell) return 'Turno de Operaciones: no se edita desde la grilla.';
+        if (c?.s && isShiftConsolidated(c.s)) return 'Turno ya fichado: no se modifica.';
+        if (!sinServicioEnMes && isOutsideServiceRange(ds)) return outsideServiceMsg;
+        const tipo = code ? tipoDeCodigo(code) : null;
+        if (isPlanningDateLocked(ds) && !(tipo === 'RET' || tipo === 'FRANCO' || code === 'ESC')) return 'Día cerrado: solo RET, ESC o franco.';
+        return null;
+    };
+
+    const cambioRapido = (
+        emp: any,
+        ds: string,
+        code: string,
+        c: CtxCeldaGrilla | undefined,
+        fuente?: FuenteRapida | null,
+    ): { change: Record<string, any>; novedad?: Record<string, any> } | { error: string } => {
+        const tipo = tipoDeCodigo(code);
+        const objectiveId = resolveObjectiveForEmp(emp.id);
+        const pos = puestoFilaRapido(emp.id, c);
+        const base = {
+            isTemp: true,
+            _isAutoRotation: undefined,
+            _isAutoCondition: undefined,
+            isFrancoTrabajado: false,
+            isFrancoCompensatorio: false,
+            isExtended: false,
+            isEarlyStart: false,
+            swapWith: null,
+            swapDate: null,
+            objectiveId,
+        };
+        if (tipo === 'FRANCO') {
+            const nombres: Record<string, string> = { F: 'Franco', FF: 'Franco feriado', FP: 'Franco permuta' };
+            return { change: { ...base, code, name: nombres[code], hours: 0, startTime: '00:00', ...(code === 'FP' ? { endTime: '23:59' } : {}), isFranco: true, positionName: pos } };
+        }
+        if (tipo === 'LICENCIA') {
+            const name = CODIGOS_LICENCIA_RAPIDA[code];
+            return {
+                change: { code, name, isTemp: true, isNovedad: true, hours: 0, startTime: '00:00', ...camposBandaConservada(c?.s || null) },
+                novedad: { employeeId: emp.id, employeeName: emp.name || '', startDate: ds, endDate: ds, type: name, reason: 'Cargado en modo rápido', status: 'APPROVED', _modoRapido: true },
+            };
+        }
+        if (tipo === 'RET') {
+            return { change: { ...base, code: 'RET', name: 'Retén', hours: 0, startTime: '00:00', positionName: 'Retén', isFranco: false } };
+        }
+        if (tipo === 'DESPLIEGUE') {
+            const posReal = pos !== 'General' ? pos : (effectivePosStructure?.[0]?.positionName || 'General');
+            const bandas = getDeploymentBandsForPosition(posReal, effectivePosStructure, ds);
+            const banda = bandas[0] || { code: 'M', ...HORARIO_ESTANDAR.M };
+            const config = buildDeploymentShiftConfig(code === 'ESC' ? 'TRAINING' : 'SURPLUS', banda.code, posReal, banda);
+            return { change: { ...base, ...config, positionName: posReal, isFranco: false } };
+        }
+        const h = fuente && fuente.code === code && fuente.startTime && fuente.endTime
+            ? { code, name: fuente.name || code, startTime: fuente.startTime, endTime: fuente.endTime, hours: fuente.hours || 0, positionName: fuente.positionName }
+            : horarioDeCodigo(code, {
+                slaPuesto: getShiftsForPosition(pos, objectiveId) as TurnoSla[],
+                slaTodos: slaTodosRapido,
+                ultimoUsado: ultimoUsadoRapido,
+            });
+        if (!h) return { error: `Código ${code}: no está en el servicio ni en el catálogo.` };
+        const posSla = h.positionName && (effectivePosStructure || []).some((p: any) => p.positionName === h.positionName) ? h.positionName : null;
+        return {
+            change: {
+                ...base,
+                code,
+                name: h.name || code,
+                hours: Number(h.hours) || 8,
+                startTime: h.startTime,
+                endTime: h.endTime,
+                positionName: posSla && pos === 'General' ? posSla : (posSla && !getShiftsForPosition(pos, objectiveId).some((s: any) => normalizarCodigo(s.code) === code) ? posSla : pos),
+                isFranco: false,
+            },
+        };
+    };
+
+    type ItemRapido = { r: number; c: number; code?: string; borrar?: boolean; fuente?: FuenteRapida | null };
+    const escribirRapido = (items: ItemRapido[]) => {
+        const global = bloqueoGlobalRapido();
+        if (global) { toast.message(global); return; }
+        const next = { ...pendingChangesRef.current };
+        const novedades: Record<string, any> = {};
+        const motivos = new Map<string, number>();
+        const anotar = (m: string) => motivos.set(m, (motivos.get(m) || 0) + 1);
+        let hechos = 0;
+        for (const it of items) {
+            const { emp, ds, key, ctx } = ctxRapido(it.r, it.c);
+            if (!emp) continue;
+            if (it.borrar || !it.code) {
+                const bl = bloqueoCeldaRapido(emp, ds, ctx, null);
+                if (bl) { anotar(bl); continue; }
+                const guardado = !!(shiftsMap[key] && !shiftsMap[key].isDeleted);
+                if (next[key] && !guardado) { delete next[key]; hechos++; }
+                else if (guardado && !next[key]?.isDeleted) { next[key] = { isDeleted: true }; hechos++; }
+                continue;
+            }
+            const code = normalizarCodigo(it.code);
+            const bl = bloqueoCeldaRapido(emp, ds, ctx, code);
+            if (bl) { anotar(bl); continue; }
+            const res = cambioRapido(emp, ds, code, ctx, it.fuente);
+            if ('error' in res) { anotar(res.error); continue; }
+            next[key] = res.change;
+            if (res.novedad) novedades[key] = res.novedad;
+            hechos++;
+        }
+        if (hechos) {
+            commitPendingChanges(next);
+            if (Object.keys(novedades).length) setPendingNovedades((prev) => ({ ...prev, ...novedades }));
+        }
+        if (motivos.size) {
+            const lista = [...motivos.entries()];
+            const total = lista.reduce((a, [, n]) => a + n, 0);
+            toast.message(total === 1 ? lista[0][0] : `${total} celda(s) sin cambiar: ${lista[0][0]}${lista.length > 1 ? ` · y ${lista.length - 1} motivo(s) más` : ''}`);
+        }
+    };
+
+    const copiarRapido = (rg: RangoRC, cortar: boolean): string => {
+        const celdas: Array<Array<FuenteRapida | null>> = [];
+        for (let r = rg.minR; r <= rg.maxR; r++) {
+            const fila: Array<FuenteRapida | null> = [];
+            for (let c = rg.minC; c <= rg.maxC; c++) fila.push(fuenteRapida(r, c));
+            celdas.push(fila);
+        }
+        const tsv = matrizATsv(celdas.map((f) => f.map((x) => x?.code || '')));
+        portapapelesRapidoRef.current = { tsv, celdas };
+        if (cortar) {
+            const items: ItemRapido[] = [];
+            for (let r = rg.minR; r <= rg.maxR; r++) for (let c = rg.minC; c <= rg.maxC; c++) items.push({ r, c, borrar: true });
+            escribirRapido(items);
+        }
+        toast.message(`${cortar ? 'Cortado' : 'Copiado'} ${celdas.length}×${celdas[0]?.length || 0} · se mantiene al cambiar de objetivo o mes`);
+        return tsv;
+    };
+    const pegarRapido = (inicio: CeldaRC, rg: RangoRC, texto: string) => {
+        const interno = portapapelesRapidoRef.current;
+        const limpio = (t: string) => t.replace(/\r/g, '').trim();
+        const usarInterno = !!interno && (!limpio(texto) || limpio(texto) === limpio(interno.tsv));
+        const matriz = usarInterno ? interno!.celdas.map((f) => f.map((x) => x?.code || '')) : parsearTsv(texto);
+        if (!matriz.length) return;
+        const plan = planPegado(matriz, inicio, dimsRapido, rg);
+        escribirRapido(plan.map((p) => ({
+            r: p.r,
+            c: p.c,
+            code: p.valor,
+            borrar: !p.valor,
+            fuente: usarInterno ? interno!.celdas[p.fila]?.[p.col] : null,
+        })));
+    };
+    const rellenarRapido = (rg: RangoRC, dir: 'abajo' | 'derecha') => {
+        const pares = planRelleno(rg, dir);
+        escribirRapido(pares.map((p) => {
+            const f = fuenteRapida(p.desde.r, p.desde.c);
+            return { r: p.hacia.r, c: p.hacia.c, code: f?.code, borrar: !f, fuente: f };
+        }));
+    };
+    const serieRapido = (origen: RangoRC, destino: CeldaRC) => {
+        const plan = planSerie(origen, destino, (r, c) => codigoCtxRapido(ctxRapido(r, c).ctx));
+        if (!plan) return;
+        escribirRapido(plan.pares.map((p) => {
+            const f = fuenteRapida(p.desde.r, p.desde.c);
+            return { r: p.hacia.r, c: p.hacia.c, code: f?.code, borrar: !f, fuente: f };
+        }));
+    };
+
+    const avisosRapido = useMemo<AvisoRapido[]>(() => {
+        if (!modoRapido || !selectedObjective || comparingSnapshot) return [];
+        const claves = new Set(Object.keys(pendingChanges).filter((k) => !k.endsWith('_B2') && !pendingChanges[k]?._isAutoRotation && !pendingChanges[k]?._isAutoCondition));
+        if (!claves.size) return [];
+        const permitidos = idsObjetivosDelCrono(selectedObjective, selectedGrupo?.objectiveIds, !!(selectedGrupo && grupoUnifiedMode));
+        return avisosModoRapido({
+            filas: displayedEmployees.map((e: any) => ({ id: e.id, nombre: String(e.name || e.id) })),
+            dias: diasRapido,
+            claves,
+            turnoDe: (empId, ds) => {
+                const key = `${empId}_${ds}`;
+                const p = pendingChanges[key];
+                const t = p ? (p.isDeleted ? null : p) : shiftsMap[key];
+                if (!t || t.isDeleted) return null;
+                const code = normalizarCodigo(t.code);
+                const tipo = tipoDeCodigo(code);
+                return {
+                    code,
+                    startTime: hhmmRapido(t.startTime) || undefined,
+                    endTime: hhmmRapido(t.endTime) || undefined,
+                    hours: Number(t.hours) || undefined,
+                    trabajo: (tipo === 'TRABAJO' || tipo === 'DESPLIEGUE') && !t.isFranco && !t.isNovedad,
+                };
+            },
+            licenciaDe: (empId, ds) => {
+                const a = absencesMap[`${empId}_${ds}`];
+                return a ? String(a.type || a.absenceType || 'licencia') : null;
+            },
+            ajenoDe: (empId, ds) => {
+                const ajeno = (cellTurnosMap[`${empId}_${ds}`] || []).find((d: any) => d && !d.isDeleted && esTurnoAjenoAlCrono(d.objectiveId, permitidos));
+                return ajeno ? getObjectiveName(ajeno.objectiveId) : null;
+            },
+            horasMes: (empId) => Number(empMonthlyHours[empId]) || 0,
+            tope: planningLimits.monthly,
+            topeAutorizado: (empId) => authorizedOver200Ids.has(empId) || !topeRequierePin(topeGrants[empId], periodoPlan),
+        });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [modoRapido, selectedObjective, comparingSnapshot, pendingChanges, shiftsMap, absencesMap, cellTurnosMap, displayedEmployees, diasRapido, empMonthlyHours, planningLimits.monthly, authorizedOver200Ids, topeGrants, periodoPlan, selectedGrupo, grupoUnifiedMode]);
+    avisosRapidoRef.current = avisosRapido;
+
+    const marcasRapido = useMemo<MarcaAviso[]>(() => {
+        if (!avisosRapido.length) return [];
+        const filaDe = new Map(displayedEmployees.map((e: any, i: number) => [e.id, i]));
+        const colDe = new Map(diasRapido.map((d, i) => [d, i]));
+        const out: MarcaAviso[] = [];
+        for (const a of avisosRapido) {
+            const r = filaDe.get(a.empId);
+            const c = colDe.get(a.dateStr);
+            if (r == null || c == null) continue;
+            out.push({ r, c, tipo: a.tipo, texto: a.texto });
+        }
+        return out;
+    }, [avisosRapido, displayedEmployees, diasRapido]);
+
+    const irAvisoRapido = (a: AvisoRapido) => {
+        const r = displayedEmployees.findIndex((e: any) => e.id === a.empId);
+        const c = diasRapido.indexOf(a.dateStr);
+        if (r >= 0 && c >= 0) capaRapidaRef.current?.irA(r, c);
+    };
+
+    const toggleModoRapido = () => {
+        setModoRapido((v) => {
+            const next = !v;
+            if (typeof window !== 'undefined') localStorage.setItem(modoRapidoStorageKey, next ? '1' : '0');
+            if (next) {
+                setSelection({ start: null, end: null });
+                setIsDragging(false);
+                toast.message('Modo rápido: flechas o clic para elegir la celda y escribí el código. «?» muestra los atajos.');
+            }
+            return next;
+        });
+        requestAnimationFrame(() => grillaScrollRef.current?.focus({ preventScroll: true }));
+    };
+
+    const [copiarDeCargando, setCopiarDeCargando] = useState(false);
+    const copiarDeObjetivo = async (e: CopiarDeEleccion) => {
+        const global = bloqueoGlobalRapido();
+        if (global) { toast.message(global); return; }
+        setCopiarDeCargando(true);
+        try {
+            const desde = new Date(e.year, e.month - 1, 1);
+            const hasta = new Date(e.year, e.month, 0, 23, 59, 59);
+            const snap = await getDocs(query(
+                collection(db, 'turnos'),
+                where('objectiveId', '==', e.objectiveId),
+                where('startTime', '>=', Timestamp.fromDate(desde)),
+                where('startTime', '<=', Timestamp.fromDate(hasta)),
+            ));
+            const porEmpDia = new Map<string, FuenteRapida>();
+            const empIds = new Set<string>();
+            for (const d of snap.docs) {
+                const t = d.data() as any;
+                if (t.isDeleted) continue;
+                if (empresaId && t.empresaId && t.empresaId !== empresaId) continue;
+                if (t.origin === 'OPERATIONS_COVERAGE' || t.origin === 'SLA_VIRTUAL' || t.origin === 'RETEN' || t.resolvedBy === 'OPERACIONES') continue;
+                const empId = String(t.employeeId || '');
+                if (!empId || empId.toUpperCase().startsWith('VACANTE')) continue;
+                const start = t.startTime?.toDate ? t.startTime.toDate() : null;
+                if (!start) continue;
+                const code = normalizarCodigo(t.code || '');
+                if (!code) continue;
+                porEmpDia.set(`${empId}_${start.getDate()}`, {
+                    code,
+                    startTime: hhmmRapido(t.startTime) || undefined,
+                    endTime: hhmmRapido(t.endTime) || undefined,
+                    hours: Number(t.hours) || undefined,
+                    name: t.type || t.name,
+                    positionName: t.positionName,
+                });
+                empIds.add(empId);
+            }
+            if (!porEmpDia.size) { toast.message(`${e.objectiveName}: no hay turnos en ${String(e.month).padStart(2, '0')}/${e.year}.`); return; }
+            const enGrilla = new Set(displayedEmployees.map((x: any) => x.id));
+            const conocidos = new Set(employees.map((x: any) => x.id));
+            const agregar = [...empIds].filter((id) => !enGrilla.has(id) && conocidos.has(id));
+            const desconocidos = [...empIds].filter((id) => !conocidos.has(id)).length;
+            if (agregar.length) setPinnedExternalEmpIds((prev) => new Set([...prev, ...agregar]));
+            pendienteCopiarDeRef.current = { porEmpDia, empIds: [...empIds].filter((id) => conocidos.has(id)), soloVacias: e.soloVacias, nombre: e.objectiveName };
+            setCopiarDeTick((n) => n + 1);
+            setCopiarDeOpen(false);
+            if (desconocidos) toast.message(`${desconocidos} guardia(s) del origen no están en esta empresa y no se copiaron.`);
+        } catch (err) {
+            console.error(err);
+            toast.error('No se pudo leer el cronograma de origen.');
+        } finally {
+            setCopiarDeCargando(false);
+        }
+    };
+    useEffect(() => {
+        const pend = pendienteCopiarDeRef.current;
+        if (!pend) return;
+        const filaDe = new Map(displayedEmployees.map((x: any, i: number) => [x.id, i]));
+        if (pend.empIds.some((id) => !filaDe.has(id)) && copiarDeIntentosRef.current < 3) {
+            copiarDeIntentosRef.current += 1;
+            return;
+        }
+        pendienteCopiarDeRef.current = null;
+        copiarDeIntentosRef.current = 0;
+        const items: ItemRapido[] = [];
+        for (const empId of pend.empIds) {
+            const r = filaDe.get(empId);
+            if (r == null) continue;
+            diasRapido.forEach((ds, c) => {
+                const f = pend.porEmpDia.get(`${empId}_${Number(ds.slice(8, 10))}`);
+                if (!f) return;
+                if (pend.soloVacias && codigoCtxRapido(ctxRapido(r, c).ctx)) return;
+                items.push({ r, c, code: f.code, fuente: f });
+            });
+        }
+        if (!items.length) { toast.message('No había celdas para completar.'); return; }
+        escribirRapido(items);
+        toast.success(`Copiado de ${pend.nombre}: ${items.length} celda(s) como borrador. Revisá y guardá el cronograma.`);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [copiarDeTick, displayedEmployees]);
+
     const ctlCeldas = useRef<ControlCeldas>(null as unknown as ControlCeldas);
     ctlCeldas.current = {
         contextMenu: (ev, key) => {
@@ -13088,9 +13606,18 @@ function PlanificacionDesktop() {
                 if (c) clicPersonaModoElegir(c.emp.id);
                 return;
             }
+            if (modoRapidoRef.current && capaRapidaRef.current) {
+                ev.preventDefault();
+                capaRapidaRef.current.click(fila, col, ev.shiftKey);
+                return;
+            }
             handleMouseDown(fila, col);
         },
         mouseEnter: (ev, key, fila, col) => {
+            if (modoRapidoRef.current && capaRapidaRef.current?.arrastrando()) {
+                capaRapidaRef.current.extender(fila, col);
+                return;
+            }
             if (isDragging && allowPlanningMultiSelect) setSelection((pr) => ({ ...pr, end: { r: fila, c: col } }));
             tooltipCeldaCtl.current.programar(() => construirTooltipCelda(key), ev.clientX, ev.clientY);
         },
@@ -13749,7 +14276,11 @@ function PlanificacionDesktop() {
                             </span>
                         </div>
                     </td>
-                    {daysInMonth.map(day => {
+                    {sinServicioEnMes ? (
+                        <td colSpan={daysInMonth.length} className="border-b px-3 text-left text-[10px] font-black uppercase text-slate-400" data-cobertura-sin-servicio>
+                            Sin servicio: no se valida cobertura
+                        </td>
+                    ) : (daysInMonth.map(day => {
                         const dateStr = getDateKey(day);
                         const dayLetter = getDayLetter(dateStr);
 
@@ -13831,7 +14362,7 @@ function PlanificacionDesktop() {
                                 {requiredPax > 0 ? `${closedPax}/${requiredPax}` : '-'}
                             </td>
                         );
-                    })}
+                    }))}
                 </tr>
             </tfoot>
             )}
@@ -15060,6 +15591,44 @@ function PlanificacionDesktop() {
                                 {/* ASIGNAR — siempre visible */}
                                 <button onClick={() => { setAddSearchTerm(''); setShowAddModal(true); }} disabled={!selectedObjective || isServiceLocked} title="Asignar guardia al cronograma" aria-label="Asignar guardia" className="bg-slate-900 text-white p-2 rounded-xl flex items-center hover:bg-slate-800 disabled:opacity-50 shrink-0"><UserPlus size={16}/></button>
 
+                                {/* MODO RÁPIDO — la grilla como planilla */}
+                                {selectedObjective && (
+                                    <div className="relative flex shrink-0 items-center gap-1">
+                                        <button
+                                            type="button"
+                                            onClick={toggleModoRapido}
+                                            data-modo-rapido-toggle={modoRapido ? '1' : '0'}
+                                            title={modoRapido ? 'Salir del modo rápido' : 'Modo rápido: cargar la grilla con el teclado, como una planilla'}
+                                            className={`flex items-center gap-1.5 rounded-xl border px-2.5 py-2 text-[10px] font-black uppercase transition-colors ${modoRapido ? 'border-indigo-700 bg-indigo-600 text-white shadow-sm' : 'border-slate-200 bg-white text-slate-600 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700'}`}
+                                        >
+                                            <Keyboard size={14}/> Modo rápido
+                                        </button>
+                                        {modoRapido && (
+                                            <>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setCopiarDeOpen(true)}
+                                                    data-copiar-de-abrir
+                                                    title="Copiar el cronograma de otro objetivo o mes como borrador"
+                                                    className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-2 py-2 text-[10px] font-black uppercase text-slate-600 hover:bg-slate-50"
+                                                >
+                                                    <Copy size={13}/> Copiar de…
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => { e.stopPropagation(); setAyudaRapidaOpen((v) => !v); }}
+                                                    data-modo-rapido-ayuda-abrir
+                                                    title="Atajos del modo rápido"
+                                                    className="flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200 bg-white text-xs font-black text-slate-600 hover:bg-slate-50"
+                                                >
+                                                    ?
+                                                </button>
+                                                {ayudaRapidaOpen && <ModoRapidoAyuda onCerrar={() => setAyudaRapidaOpen(false)} />}
+                                            </>
+                                        )}
+                                    </div>
+                                )}
+
                                 {/* PANTALLA COMPLETA — siempre visible */}
                                 <button
                                     onClick={() => setCronoFullscreen(v => !v)}
@@ -15087,7 +15656,14 @@ function PlanificacionDesktop() {
                             {sinServicioEnMes && (
                                 <div className="bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl flex items-center gap-3 no-print" data-sin-servicio>
                                     <Database size={16} className="text-slate-500 shrink-0"/>
-                                    <p className="text-[10px] font-black text-slate-600 uppercase truncate">{activeServiceStatus.msg}</p>
+                                    <p className="text-[10px] font-black text-slate-600 uppercase truncate">
+                                        {modoRapido ? 'Sin servicio: no se valida cobertura. Códigos del catálogo y horarios estándar.' : activeServiceStatus.msg}
+                                    </p>
+                                    {!modoRapido && (
+                                        <button type="button" onClick={toggleModoRapido} className="ml-auto shrink-0 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[10px] font-black text-indigo-700 hover:bg-slate-50">
+                                            Planificar igual (modo rápido)
+                                        </button>
+                                    )}
                                 </div>
                             )}
                             {bloqueoMesCerrado && (
@@ -15119,10 +15695,10 @@ function PlanificacionDesktop() {
                                     {Object.keys(pendingChanges).length > 0 && (
                                         <div className="flex items-center gap-1.5 bg-amber-50 p-1.5 rounded-xl border border-amber-200 shadow-sm shrink-0">
                                             <span className="text-[10px] font-bold text-amber-700 uppercase tracking-wide hidden lg:inline whitespace-nowrap">{activeActorName}</span>
-                                            <span className="text-xs font-black text-amber-700 px-1 whitespace-nowrap">{Object.values(pendingChanges).filter((v: any) => !v?._isAutoRotation && !v?._isAutoCondition).length || Object.keys(pendingChanges).length} camb.</span>
-                                            <button type="button" onClick={undoLastPending} title="Deshacer último cambio (Ctrl+Z)" className="p-1.5 hover:bg-amber-100 rounded-lg text-amber-600"><Undo size={16}/></button>
+                                            <span className="text-xs font-black text-amber-700 px-1 whitespace-nowrap" data-cambios-pendientes>{Object.values(pendingChanges).filter((v: any) => !v?._isAutoRotation && !v?._isAutoCondition).length || Object.keys(pendingChanges).length} camb.</span>
+                                            <button type="button" onClick={() => undoLastPending()} title="Deshacer último cambio (Ctrl+Z)" className="p-1.5 hover:bg-amber-100 rounded-lg text-amber-600"><Undo size={16}/></button>
                                             <button type="button" onClick={() => { if (confirm('¿Descartar todos los cambios pendientes?')) { setPendingChanges({}); clearUndoStack(); } }} title="Descartar todos los cambios" className="p-1.5 hover:bg-rose-100 rounded-lg text-rose-500"><X size={16}/></button>
-                                            <button onClick={handleSaveAll} title="Guardar cambios pendientes" className="bg-amber-500 hover:bg-amber-600 text-white p-2 rounded-lg text-xs font-black flex items-center shadow">
+                                            <button onClick={() => handleSaveAll()} title="Guardar cambios pendientes (Ctrl+S)" className="bg-amber-500 hover:bg-amber-600 text-white p-2 rounded-lg text-xs font-black flex items-center shadow">
                                                 <Save size={14}/>
                                             </button>
                                         </div>
@@ -15365,16 +15941,42 @@ function PlanificacionDesktop() {
                                 </div>
                             </div>
                         ) : (
+                            <div className="relative flex-1 min-h-0 h-full flex flex-col">
                             <div
                                 data-plan-grilla
+                                ref={grillaScrollRef}
+                                tabIndex={modoRapido ? -1 : undefined}
                                 onDragOver={(e) => {
                                     if (!arrastreFilaRef.current.activo) return;
                                     e.preventDefault();
                                     arrastreFilaRef.current.clientY = e.clientY;
                                 }}
-                                className={`relative flex-1 min-h-0 h-full overflow-auto custom-scrollbar rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/40 transition-opacity duration-150 ${(isFilterPending || (selectedObjective && !shiftsMapLoaded)) ? 'opacity-70' : ''} ${correctionMode ? 'pb-2' : ''}`}
+                                className={`relative flex-1 min-h-0 h-full overflow-auto custom-scrollbar rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/40 transition-opacity duration-150 outline-none ${(isFilterPending || (selectedObjective && !shiftsMapLoaded)) ? 'opacity-70' : ''} ${correctionMode ? 'pb-2' : ''} ${modoRapido ? 'ring-1 ring-indigo-200' : ''}`}
                             >
                                 {renderGrid(false, undefined, undefined, undefined, correctionMode ? { highlightCoverageFooter: true } : undefined)}
+                                <ModoRapidoCapa
+                                    ref={capaRapidaRef}
+                                    activo={modoRapido && !!selectedObjective && !comparingSnapshot}
+                                    contenedorRef={grillaScrollRef}
+                                    dims={dimsRapido}
+                                    version={`${displayedEmployees.length}|${daysInMonth.length}|${Object.keys(pendingChanges).length}|${anchoDotacion}|${shiftsMapLoaded ? 1 : 0}`}
+                                    opciones={opcionesRapido}
+                                    valorDe={(r, c) => codigoCtxRapido(ctxRapido(r, c).ctx)}
+                                    marcas={marcasRapido}
+                                    onEscribir={(celdas, code) => escribirRapido(celdas.map((x) => ({ ...x, code })))}
+                                    onBorrar={(celdas) => escribirRapido(celdas.map((x) => ({ ...x, borrar: true })))}
+                                    onCopiar={copiarRapido}
+                                    onPegar={pegarRapido}
+                                    onRelleno={rellenarRapido}
+                                    onSerie={serieRapido}
+                                    onDeshacer={() => undoLastPending(true)}
+                                    onRehacer={redoLastPending}
+                                    onGuardar={() => { void handleSaveAll(); }}
+                                />
+                            </div>
+                            {modoRapido && !comparingSnapshot && (
+                                <ModoRapidoAvisosPanel avisos={avisosRapido} sinServicio={sinServicioEnMes} onIr={irAvisoRapido} />
+                            )}
                             </div>
                         )}
                         </>
@@ -15387,7 +15989,7 @@ function PlanificacionDesktop() {
                         {AVISO_MES_CERRADO}
                     </div>
                 )}
-                {!bloqueoMesCerrado && !sinServicioEnMes && !comparingSnapshot && !isServiceLocked && allowPlanningMultiSelect && (
+                {!modoRapido && !bloqueoMesCerrado && !sinServicioEnMes && !comparingSnapshot && !isServiceLocked && allowPlanningMultiSelect && (
                     (clipboard !== null) ||
                     (selection.start !== null && (selection.start.r !== selection.end?.r || selection.start.c !== selection.end?.c))
                 ) && (
@@ -15485,7 +16087,7 @@ function PlanificacionDesktop() {
                                         <div className="h-5 w-px bg-slate-600 mx-0.5" />
                                         <button onClick={handleCopySelection} title="Copiar" className="p-1.5 bg-indigo-700 hover:bg-indigo-600 rounded-lg text-indigo-200"><Copy size={13}/></button>
                                         <button onClick={cutSelection} disabled={isServiceLocked} className="p-1.5 bg-violet-700 hover:bg-violet-600 rounded-lg text-violet-100"><Scissors size={13}/></button>
-                                        <button onClick={undoLastPending} className="p-1.5 hover:bg-slate-700 rounded-lg text-slate-300"><Undo size={13}/></button>
+                                        <button onClick={() => undoLastPending()} className="p-1.5 hover:bg-slate-700 rounded-lg text-slate-300"><Undo size={13}/></button>
                                         <button onClick={() => setShowRRHHModal(true)} disabled={isServiceLocked} className="p-1.5 bg-amber-600 rounded-lg text-white"><FileText size={12}/></button>
                                         <button onClick={() => applyBulkChange(null)} disabled={isServiceLocked} className="p-1.5 hover:bg-rose-600 rounded-lg text-rose-300"><Trash2 size={14}/></button>
                                         <button onClick={() => setSelection({start:null, end:null})} className="p-1.5 hover:bg-slate-700 rounded-lg"><X size={14}/></button>
@@ -15822,7 +16424,7 @@ function PlanificacionDesktop() {
                                 <button onClick={cutSelection} disabled={isServiceLocked} title="Cortar (Ctrl+X)" className="p-2 bg-violet-700 hover:bg-violet-600 disabled:opacity-40 rounded-lg text-violet-100 hover:text-white transition-colors flex items-center gap-1">
                                     <Scissors size={14}/><span className="text-[9px] font-bold">Cortar</span>
                                 </button>
-                                <button onClick={undoLastPending} title="Deshacer (Ctrl+Z)" className="p-2 hover:bg-slate-700 rounded-lg text-slate-300 hover:text-white transition-colors flex items-center gap-1">
+                                <button onClick={() => undoLastPending()} title="Deshacer (Ctrl+Z)" className="p-2 hover:bg-slate-700 rounded-lg text-slate-300 hover:text-white transition-colors flex items-center gap-1">
                                     <Undo size={14}/><span className="text-[9px] font-bold">Z</span>
                                 </button>
                                 <span className="text-[8px] text-slate-500 px-1 hidden lg:inline">Ctrl+C/X/V/Z</span>
@@ -17327,6 +17929,13 @@ function PlanificacionDesktop() {
                                         ))}
                                     </div>
                                 )}
+                                {!publishConfirmModal.superAdminOverride && publishConfirmModal.warnings.length > 0 && (
+                                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 space-y-1" data-publicar-sin-servicio>
+                                        {publishConfirmModal.warnings.map((w, i) => (
+                                            <p key={i} className="text-[11px] font-medium text-slate-700">{w}</p>
+                                        ))}
+                                    </div>
+                                )}
                                 {(Object.keys(pendingChanges).length > 0 || backgroundSaveCount > 0) && (
                                     <div className="rounded-xl border-2 border-rose-300 bg-rose-50 px-3 py-2.5">
                                         <p className="text-[11px] font-bold text-rose-800 flex items-center gap-1.5">
@@ -17414,6 +18023,18 @@ function PlanificacionDesktop() {
                             </div>
                         </div>
                     </div>,
+                    document.body,
+                )}
+                {copiarDeOpen && selectedObjective && createPortal(
+                    <CopiarDeModal
+                        clientes={clients as any[]}
+                        objetivoActual={selectedObjective}
+                        year={currentDate.getFullYear()}
+                        month={currentDate.getMonth() + 1}
+                        cargando={copiarDeCargando}
+                        onCancelar={() => setCopiarDeOpen(false)}
+                        onConfirmar={(e) => { void copiarDeObjetivo(e); }}
+                    />,
                     document.body,
                 )}
                 {deployBandPicker && createPortal(
