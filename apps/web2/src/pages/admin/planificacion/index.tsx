@@ -13861,7 +13861,7 @@ function PlanificacionDesktop() {
                     ) : (
                         <>
                             <div className="flex items-center gap-2 min-w-0 overflow-x-auto overflow-y-visible custom-scrollbar no-print">
-                            <div className="flex items-center gap-1.5 min-w-0 max-w-[min(100%,380px)] shrink overflow-x-auto overflow-y-visible">
+                            <div className={`flex items-center gap-1.5 min-w-0 ${selectedGrupo ? 'max-w-[min(100%,620px)]' : 'max-w-[min(100%,380px)]'} shrink overflow-x-auto overflow-y-visible`}>
                             <div className="flex items-center gap-1.5 no-print min-w-0">
                                 {selectedGrupo ? (
                                     /* MODO GRUPO: etiqueta del grupo + tabs por objetivo */
@@ -13869,10 +13869,10 @@ function PlanificacionDesktop() {
                                         {/* Botón grupo: activo (violeta sólido) en modo unificado, outline en modo individual */}
                                         <button
                                             onClick={() => { setGrupoUnifiedMode(true); setSelectedObjective(selectedGrupo.objectiveIds[0]); }}
-                                            className={`flex items-center gap-1.5 h-9 px-3 rounded-lg text-xs font-black uppercase tracking-wide whitespace-nowrap transition-colors ${grupoUnifiedMode ? 'bg-violet-700 text-white' : 'bg-white text-violet-700 border border-violet-400 hover:bg-violet-50'}`}
+                                            className={`flex items-center gap-1.5 h-9 px-3 rounded-lg text-xs font-black uppercase tracking-wide whitespace-nowrap shrink-0 max-w-[15rem] transition-colors ${grupoUnifiedMode ? 'bg-violet-700 text-white' : 'bg-white text-violet-700 border border-violet-400 hover:bg-violet-50'}`}
                                             title="Ver todos los objetivos juntos"
                                         >
-                                            <Layers size={11}/>{selectedGrupo.nombre}
+                                            <Layers size={11} className="shrink-0"/><span className="truncate">{selectedGrupo.nombre}</span>
                                         </button>
                                         <ChevronRight size={12} className="text-slate-400"/>
                                         {/* Chips por objetivo: clickeables para foco individual */}
@@ -13880,10 +13880,10 @@ function PlanificacionDesktop() {
                                             <button
                                                 key={objId}
                                                 onClick={() => { setGrupoUnifiedMode(false); setSelectedObjective(objId); }}
-                                                className={`flex items-center h-9 px-3 rounded-lg text-xs font-black whitespace-nowrap transition-colors ${!grupoUnifiedMode && selectedObjective === objId ? 'bg-indigo-600 text-white' : 'bg-violet-100 text-violet-700 border border-violet-200 hover:bg-indigo-100 hover:text-indigo-700'}`}
-                                                title={`Ver solo ${selectedGrupo.objectiveNames[i]}`}
+                                                className={`flex items-center h-9 px-3 rounded-lg text-xs font-black whitespace-nowrap min-w-0 max-w-[11rem] transition-colors ${!grupoUnifiedMode && selectedObjective === objId ? 'bg-indigo-600 text-white' : 'bg-violet-100 text-violet-700 border border-violet-200 hover:bg-indigo-100 hover:text-indigo-700'}`}
+                                                title={`Ver solo ${selectedGrupo.objectiveNames[i] || objId}`}
                                             >
-                                                {selectedGrupo.objectiveNames[i] || objId}
+                                                <span className="truncate">{selectedGrupo.objectiveNames[i] || objId}</span>
                                             </button>
                                         ))}
                                         <button onClick={() => handleGrupoChange(null)} className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition-colors" title="Salir del grupo"><X size={13}/></button>
