@@ -1,6 +1,6 @@
-/** Cronómetro del armado de un objetivo-mes. Pausa mayor a 5 min no suma al tiempo activo. */
+/** Cronómetro del armado de un objetivo-mes. Pausa mayor a 2 min no suma al tiempo activo. */
 
-export const PAUSA_ARMADO_MS = 5 * 60 * 1000;
+export const PAUSA_ARMADO_MS = 2 * 60 * 1000;
 
 export type OrigenArmado = 'MANUAL' | 'COPIA_MES_ANTERIOR' | 'CONTINUAR_MES_ANTERIOR' | 'ROTACION_SLA';
 
@@ -70,7 +70,7 @@ function mergeUsuarios(lista: UsuarioArmado[], uid: string, nombre: string): Usu
 
 /**
  * Suma las acciones de una guardada al armado previo.
- * No pisa `iniciadoAt`, `origen` ni `completadoAt`. Una pausa de más de 5 min no entra en el activo.
+ * No pisa `iniciadoAt`, `origen` ni `completadoAt`. Una pausa de más de 2 min no entra en el activo.
  * Con el SLA ya completo, solo puede subir `correccionesPostPublicacion`.
  */
 export function acumularArmado(
