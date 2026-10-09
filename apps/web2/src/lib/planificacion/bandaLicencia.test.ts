@@ -187,3 +187,19 @@ test('la grilla muestra la licencia y se queda con el turno de trabajo de al lad
   });
   assert.equal(resumen.textoTurno, 'N · Puesto 2 · 23:00–07:00');
 });
+
+test('varias bandas faltantes: toma la banda de los otros días de la misma licencia (BAIGORRIA 10–11 N → 12 N)', () => {
+  const sm: Record<string, any> = {
+    ['baig_2026-10-07']: { employeeId: 'baig', code: 'M', positionName: 'Puesto 1', startTime: '07:00', endTime: '15:00' },
+    ['baig_2026-10-08']: { employeeId: 'baig', code: 'F' },
+    ['baig_2026-10-09']: { employeeId: 'baig', code: 'F' },
+    ['baig_2026-10-10']: { employeeId: 'baig', code: 'V', originalCode: 'N', originalPositionName: 'Puesto 1', originalStartTime: '23:00', originalEndTime: '07:00' },
+    ['baig_2026-10-11']: { employeeId: 'baig', code: 'V', originalCode: 'N', originalPositionName: 'Puesto 1', originalStartTime: '23:00', originalEndTime: '07:00' },
+    ['baig_2026-10-12']: { employeeId: 'baig', code: 'V' },
+    ['baig_2026-10-13']: { employeeId: 'baig', code: 'V' },
+  };
+  for (const dia of ['2026-10-12', '2026-10-13']) {
+    const r = resolverBandaACubrir({ titularId: 'baig', dateStr: dia, shiftsMap: sm, positionName: 'Puesto 1', bandasFaltantes: ['T', 'N'] });
+    assert.equal(r?.code, 'N', dia);
+  }
+});

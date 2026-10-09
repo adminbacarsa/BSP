@@ -326,6 +326,17 @@ export function resolverBandaACubrir(input: {
     if (ciclo && esBandaTrabajo(ciclo) && faltantes.includes(ciclo)) {
       return armar(ciclo, pos || 'General', null, structure, 'ciclo', 'Ciclo del titular');
     }
+    // Mismo bloque de licencia: la banda que conservaron los días vecinos (10 y 11 en N → el 12 es N).
+    for (let paso = 1; paso <= 7; paso++) {
+      for (const delta of [-paso, paso]) {
+        const vecino = docDelDia(input.titularId, sumarDias(input.dateStr, delta), shiftsMap, pending);
+        if (!vecino || !esLicencia(vecino.code)) continue;
+        const banda = bandaDelDoc(vecino, pos, structure, 'ciclo', 'Misma banda que los otros días de la licencia');
+        if (banda && faltantes.includes(up(banda.code))) {
+          return armar(up(banda.code), pos || banda.positionName || 'General', null, structure, 'ciclo', 'Misma banda que los otros días de la licencia');
+        }
+      }
+    }
     return null;
   }
 
