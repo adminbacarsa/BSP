@@ -30,11 +30,18 @@ function empFromCellKey(key: string): string {
   return key.slice(0, m.index);
 }
 
-/** El pending de la grilla a veces trae solo el código: el legajo está en la clave de la celda. */
+/** El pending de la grilla a veces trae solo el código y un horario HH:MM: el legajo y el día están en la clave. */
 function withCellEmployee(shift: any, key: string): any {
   const emp = String(shift?.employeeId || '').trim() || empFromCellKey(key);
-  if (!emp || emp === String(shift?.employeeId || '')) return shift;
-  return { ...shift, employeeId: emp };
+  const fecha = key.match(CELL_DATE)?.[1] || '';
+  const tieneFecha = typeof shift?.dateStr === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(shift.dateStr);
+  const mismoEmp = !!emp && emp === String(shift?.employeeId || '');
+  if (mismoEmp && (tieneFecha || !fecha)) return shift;
+  return {
+    ...shift,
+    ...(!mismoEmp && emp ? { employeeId: emp } : {}),
+    ...(!tieneFecha && fecha ? { dateStr: fecha } : {}),
+  };
 }
 
 function inScope(shift: any, objectiveIds: string[], groupMode: boolean): boolean {

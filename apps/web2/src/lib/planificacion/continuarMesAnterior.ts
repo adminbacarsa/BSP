@@ -12,9 +12,9 @@ import { findLctRestGaps, type LctShiftInput } from './lctRestGap';
 export const ORIGEN_CONTINUAR_MES = 'CONTINUAR_MES_ANTERIOR' as const;
 export const TOPE_HORAS_MES = 200;
 
-/** Lo que no es parte del ciclo del guardia (puntual, cobertura o pasivo). */
+/** Lo que no es parte del ciclo del guardia (puntual o cobertura). El RET planificado se evalúa aparte. */
 const NO_CICLO = new Set([
-  'RET', 'REF', 'ESC', 'FT', 'RFZ', 'TURA', 'EV', 'AVISO', 'AUS', 'VAC', 'SUP', 'COB', 'EXT', 'ADV', 'ADEL',
+  'REF', 'ESC', 'FT', 'RFZ', 'TURA', 'EV', 'AVISO', 'AUS', 'VAC', 'SUP', 'COB', 'EXT', 'ADV', 'ADEL',
 ]);
 const FRANCOS = new Set(['F', 'FF', 'FP']);
 const ORIGENES_PUNTUALES = new Set(['OPERATIONS_COVERAGE', 'SLA_VIRTUAL', 'RETEN', 'EVENTO']);
@@ -40,11 +40,22 @@ export type TurnoPrevio = {
   isReten?: unknown;
   coverageHoursOnSource?: unknown;
   coverageForShiftId?: unknown;
+  /** El turno de origen quedó anulado porque se usó para cubrir. No es el ciclo. */
+  coverageUsed?: unknown;
   eventoId?: unknown;
   startTime?: unknown;
+  endTime?: unknown;
+  hours?: unknown;
 };
 
-export type DiaCiclo = { code: string; positionName: string };
+export type DiaCiclo = {
+  code: string;
+  positionName: string;
+  /** Horario del RET que se repite, cuando el SLA del mes nuevo no trae ese turno. */
+  startTime?: string;
+  endTime?: string;
+  hours?: number;
+};
 
 export type CicloDetectado = {
   periodo: number;
@@ -157,12 +168,15 @@ function esCodigoPuesto(code: string): boolean {
 /**
  * Código de ciclo de un turno del mes anterior, o null si no sirve para leer el ciclo.
  * Licencia: la banda que conservó (`originalCode`). Francos F/FF/FP → F.
+ * RET planificado entra (el suelto se descarta al puntuar la fase). No entra el que vino de
+ * una cobertura ni el anulado con `coverageUsed`.
  */
 export function codigoDeCiclo(t: TurnoPrevio, objectiveId?: string): string | null {
   if (!t || t.isDeleted === true || t.isSecondBlock === true) return null;
   if (objectiveId && t.objectiveId && String(t.objectiveId) !== String(objectiveId)) return null;
   if (ORIGENES_PUNTUALES.has(up(t.origin))) return null;
   if (t.isVirtual === true || t.coverageHoursOnSource === true || t.eventoId || t.coverageForShiftId) return null;
+  if (t.coverageUsed === true) return null;
   if (t.isExtended === true || t.isEarlyStart === true || t.isFrancoTrabajado === true) return null;
   const code = up(t.code);
   if (LICENCIA_CODES.has(code) || code === 'AVISO') {
@@ -171,15 +185,16 @@ export function codigoDeCiclo(t: TurnoPrevio, objectiveId?: string): string | nu
     return esCodigoPuesto(orig) ? orig : null;
   }
   if (FRANCOS.has(code)) return 'F';
+  if (code === 'RET') return 'RET';
   if (t.isReten === true) return null;
   return esCodigoPuesto(code) ? code : null;
 }
 
-type Obs = { idx: number; code: string; fam: string; pos: string };
+type Obs = { idx: number; code: string; fam: string; pos: string; start?: unknown; end?: unknown };
 
 /** Un dato por día: el turno de puesto manda sobre el franco y sobre la banda conservada de una licencia. */
 export function observacionesDelGuardia(previos: TurnoPrevio[], objectiveId?: string): Obs[] {
-  const porDia = new Map<string, { code: string; pos: string; prio: number }>();
+  const porDia = new Map<string, { code: string; pos: string; prio: number; start?: unknown; end?: unknown }>();
   for (const t of previos || []) {
     const code = codigoDeCiclo(t, objectiveId);
     if (!code || !/^\d{4}-\d{2}-\d{2}$/.test(String(t.dateStr || ''))) continue;
@@ -187,11 +202,17 @@ export function observacionesDelGuardia(previos: TurnoPrevio[], objectiveId?: st
     const prio = licencia ? 1 : code === 'F' ? 2 : 3;
     const pos = String((licencia ? t.originalPositionName : null) || t.positionName || '').trim();
     const prev = porDia.get(t.dateStr);
-    if (!prev || prio > prev.prio) porDia.set(t.dateStr, { code, pos, prio });
+    if (!prev || prio > prev.prio) porDia.set(t.dateStr, { code, pos, prio, start: t.startTime, end: t.endTime });
   }
   return [...porDia.entries()]
-    .map(([dia, v]) => ({ idx: diaIndex(dia), code: v.code, fam: familia(v.code), pos: v.pos }))
+    .map(([dia, v]) => ({ idx: diaIndex(dia), code: v.code, fam: familia(v.code), pos: v.pos, start: v.start, end: v.end }))
     .sort((a, b) => a.idx - b.idx);
+}
+
+/** El RET de guardia no tiene ventana (00:00–00:00). Si la tenía, se conserva. */
+function horarioRet(o: Obs): { startTime: string; endTime: string; hours: number } {
+  const w = ventanaTrabajo(o.start, o.end);
+  return w ? { startTime: w.start, endTime: w.end, hours: w.hours } : { startTime: '00:00', endTime: '00:00', hours: 0 };
 }
 
 function mod(a: number, p: number): number {
@@ -250,6 +271,8 @@ function uniformarBloques(resultado: Array<DiaCiclo | null>, fases: Map<number, 
     for (const ph of conocidos) {
       const d = resultado[ph]!;
       if (d.code === modelo.code) continue;
+      // Un RET que ya ganó la fase es el ciclo (jueves fijo), no un cambio a mano del bloque de al lado.
+      if (d.code === 'RET') continue;
       const vistos = fases.get(ph) || [];
       // Un D12 dentro de un bloque de M es una extensión puntual: se sigue con M.
       const extension = familia(d.code) === famBloque && d.code !== famBloque && modelo.code === famBloque;
@@ -371,14 +394,30 @@ function evaluarPeriodo(obs: Obs[], last: number, p: number): CicloDetectado | n
   if (checks < Math.max(3, Math.ceil(p / 4))) return null;
   // La última vuelta del ciclo pesa doble para elegir qué toca en cada fase.
   const peso = (o: Obs) => (o.idx > last - p ? 2 : 1);
+  const retPorSemana = new Map<number, number>();
+  for (const o of sel) {
+    if (o.code !== 'RET') continue;
+    const wd = mod(o.idx, 7);
+    retPorSemana.set(wd, (retPorSemana.get(wd) || 0) + 1);
+  }
   let acuerdo = 0;
   let total = 0;
   const resultado: Array<DiaCiclo | null> = Array.from({ length: p }, () => null);
   for (const [ph, list] of fases) {
+    const nRet = list.filter((o) => o.code === 'RET').length;
+    let votan = list;
+    if (nRet > 0 && nRet < 2) {
+      const nSemana = p % 7 === 0 ? (retPorSemana.get(mod(list[0].idx, 7)) || 0) : 0;
+      const nOtros = list.length - nRet;
+      // Un jueves con un solo RET sigue siendo RET si los otros jueves lo son y nadie de esa fase lo supera.
+      if (nSemana >= 2 && nOtros <= nRet) votan = list.filter((o) => o.code === 'RET');
+      else votan = list.filter((o) => o.code !== 'RET');
+    }
+    if (!votan.length) continue;
     const porFam = new Map<string, number>();
     const cuentaFam = new Map<string, number>();
     const reciente = new Map<string, number>();
-    for (const o of list) {
+    for (const o of votan) {
       cuentaFam.set(o.fam, (cuentaFam.get(o.fam) || 0) + 1);
       porFam.set(o.fam, (porFam.get(o.fam) || 0) + peso(o));
       reciente.set(o.fam, Math.max(reciente.get(o.fam) ?? -Infinity, o.idx));
@@ -392,11 +431,12 @@ function evaluarPeriodo(obs: Obs[], last: number, p: number): CicloDetectado | n
       }
     }
     // La consistencia se mide sin pesos: el peso solo decide quién gana la fase.
-    if (list.length >= 2) {
+    // El RET suelto que se sacó de la votación no baja el acuerdo.
+    if (votan.length >= 2) {
       acuerdo += cuentaFam.get(famGanadora) || 0;
-      total += list.length;
+      total += votan.length;
     }
-    const deFam = list.filter((o) => o.fam === famGanadora);
+    const deFam = votan.filter((o) => o.fam === famGanadora);
     const ultimoDeFam = deFam[deFam.length - 1];
     const porCode = new Map<string, number>();
     for (const o of deFam) porCode.set(o.code, (porCode.get(o.code) || 0) + peso(o));
@@ -408,7 +448,8 @@ function evaluarPeriodo(obs: Obs[], last: number, p: number): CicloDetectado | n
       if (w + base > wc) { code = c; wc = w + base; }
     }
     const conPos = [...deFam].reverse().find((o) => o.code === code && o.pos);
-    resultado[ph] = { code, positionName: code === 'F' ? 'General' : (conPos?.pos || ultimoDeFam.pos || '') };
+    const base = { code, positionName: code === 'F' ? 'General' : (conPos?.pos || ultimoDeFam.pos || '') };
+    resultado[ph] = code === 'RET' ? { ...base, ...horarioRet(conPos || ultimoDeFam) } : base;
   }
   if (total === 0) return null;
   const consistencia = acuerdo / total;
@@ -457,6 +498,36 @@ function letraDia(dateStr: string): string {
 
 function turnoDelPuesto(pos: PuestoSla | undefined, code: string) {
   return (pos?.shifts || []).find((s) => up(s.code) === code) || null;
+}
+
+/** 'HH:MM' de un string o de un Timestamp/Date, en hora Argentina. */
+function hhmmAR(v: unknown): string {
+  if (typeof v === 'string') {
+    const m = v.match(/(\d{2}):(\d{2})/);
+    return m ? `${m[1]}:${m[2]}` : '';
+  }
+  const d = v && typeof (v as { toDate?: () => Date }).toDate === 'function'
+    ? (v as { toDate: () => Date }).toDate()
+    : v instanceof Date ? v : null;
+  if (!d || Number.isNaN(d.getTime())) return '';
+  const x = new Date(d.getTime() - 3 * 3600000);
+  return `${pad(x.getUTCHours())}:${pad(x.getUTCMinutes())}`;
+}
+
+/** Horario del RET planificado más reciente. Si el SLA no tiene RET, la propuesta usa este. */
+function retQueTenia(previos: TurnoPrevio[], objectiveId?: string): { positionName: string; start: string; end: string; hours: number } | null {
+  const rets = (previos || [])
+    .filter((t) => codigoDeCiclo(t, objectiveId) === 'RET')
+    .sort((a, b) => String(a.dateStr).localeCompare(String(b.dateStr)));
+  const t = rets[rets.length - 1];
+  if (!t) return null;
+  const hours = Number(t.hours);
+  return {
+    positionName: String(t.positionName || 'Retén').trim() || 'Retén',
+    start: hhmmAR(t.startTime) || '00:00',
+    end: hhmmAR(t.endTime) || '00:00',
+    hours: hours > 0 ? hours : 0,
+  };
 }
 
 export function turnoHabilitadoPorEstructura(estructura: PuestoSla[], positionName: string, code: string, dateStr: string): boolean {
@@ -559,6 +630,25 @@ export function proponerGuardia(input: ContinuarInput, g: ContinuarInput['guardi
       });
       continue;
     }
+    if (dia.code === 'RET') {
+      const sla = resolverPuesto(input.estructura, dia.positionName, 'RET');
+      if (!('motivo' in sla) && habilitado(sla.pos.positionName, 'RET', dateStr)) {
+        const celda = celdaDeTrabajo(g.id, dateStr, sla.pos, 'RET');
+        if (sla.reasignadoDe) celda.puestoReasignadoDe = sla.reasignadoDe;
+        res.propuestas.push(celda);
+        res.horasPropuestas += celda.hours;
+        continue;
+      }
+      const hist = retQueTenia(g.previos, input.objectiveId);
+      if (hist) {
+        res.propuestas.push({
+          employeeId: g.id, dateStr, code: 'RET', name: 'Retén', positionName: hist.positionName,
+          startTime: hist.start, endTime: hist.end, hours: hist.hours, isFranco: false,
+        });
+        res.horasPropuestas += hist.hours;
+        continue;
+      }
+    }
     const r = resolverPuesto(input.estructura, dia.positionName, dia.code);
     if ('motivo' in r) {
       const k = `${dia.positionName}|${dia.code}`;
@@ -598,7 +688,7 @@ export function cambioPendienteDe(c: CeldaPropuesta, objectiveId: string): Recor
   if (c.isFranco) {
     return {
       code: 'F', name: 'Franco', hours: 0, startTime: '00:00', isFranco: true,
-      positionName: 'General', objectiveId, isTemp: true,
+      positionName: 'General', objectiveId, isTemp: true, dateStr: c.dateStr,
     };
   }
   return {
@@ -611,6 +701,7 @@ export function cambioPendienteDe(c: CeldaPropuesta, objectiveId: string): Recor
     objectiveId,
     isFranco: false,
     isTemp: true,
+    dateStr: c.dateStr,
   };
 }
 

@@ -156,19 +156,28 @@ test('no pisa licencias ni celdas con algo en el mes nuevo', () => {
   assert.equal(res.propuestas.length, 31 - 7);
 });
 
-test('ignora coberturas, REF/ESC/RET, extensiones y turnos de otro objetivo', () => {
+test('ignora coberturas, REF/ESC, un RET suelto, extensiones y turnos de otro objetivo', () => {
   assert.equal(codigoDeCiclo({ dateStr: '2026-09-01', code: 'M', origin: 'OPERATIONS_COVERAGE' }, OBJ), null);
   assert.equal(codigoDeCiclo({ dateStr: '2026-09-01', code: 'REF' }, OBJ), null);
-  assert.equal(codigoDeCiclo({ dateStr: '2026-09-01', code: 'RET' }, OBJ), null);
+  assert.equal(codigoDeCiclo({ dateStr: '2026-09-01', code: 'RET' }, OBJ), 'RET');
+  assert.equal(codigoDeCiclo({ dateStr: '2026-09-01', code: 'RET', origin: 'OPERATIONS_COVERAGE' }, OBJ), null);
+  assert.equal(codigoDeCiclo({ dateStr: '2026-09-01', code: 'RET', coverageForShiftId: 'titular' }, OBJ), null);
+  assert.equal(codigoDeCiclo({ dateStr: '2026-09-01', code: 'RET', coverageUsed: true }, OBJ), null);
   assert.equal(codigoDeCiclo({ dateStr: '2026-09-01', code: 'M', isExtended: true }, OBJ), null);
   assert.equal(codigoDeCiclo({ dateStr: '2026-09-01', code: 'M', objectiveId: 'otro' }, OBJ), null);
   assert.equal(codigoDeCiclo({ dateStr: '2026-09-01', code: 'FF' }, OBJ), 'F');
   assert.equal(codigoDeCiclo({ dateStr: '2026-09-01', code: 'M2' }, OBJ), 'M2');
   assert.equal(codigoDeCiclo({ dateStr: '2026-09-01', code: 'E', originalCode: 'N' }, OBJ), 'N');
-  // Un REF puntual en un día de franco no rompe el ciclo.
+  // Un REF puntual en un día de franco no rompe el ciclo. Un RET un solo jueves tampoco.
   const patron = ['M', 'M', 'M', 'M', 'M', 'M', 'F', 'F'];
-  const previos = [...armar(patron, '2026-08-01', '2026-09-30', 0), { dateStr: '2026-09-07', code: 'REF', positionName: P1, objectiveId: OBJ }];
-  assert.equal(detectarCiclo(observacionesDelGuardia(previos, OBJ))?.periodo, 8);
+  const previos = [
+    ...armar(patron, '2026-08-01', '2026-09-30', 0),
+    { dateStr: '2026-09-07', code: 'REF', positionName: P1, objectiveId: OBJ },
+    { dateStr: '2026-09-10', code: 'RET', positionName: 'Retén', objectiveId: OBJ },
+  ];
+  const ciclo = detectarCiclo(observacionesDelGuardia(previos, OBJ))!;
+  assert.equal(ciclo.periodo, 8);
+  assert.notEqual(diaDelCiclo(ciclo, '2026-09-10')?.code, 'RET');
 });
 
 test('ciclo que no se repite: queda sin proponer, para hacer a mano', () => {
@@ -258,6 +267,76 @@ test('QUEVEDO: la M suelta al inicio del bloque de T entra en el T×6', () => {
   assert.equal(diaDelCiclo(ciclo, '2026-11-11')?.code, 'T');
   const [res] = proponerContinuacion(input([{ id: '1V9qOhsyY8EZVPzavxnb', nombre: 'QUEVEDO, GASTON', previos }], diasDelMes(2026, 11)));
   assert.equal(codigos(res)['2026-11-11'], 'T');
+});
+
+test('CACERES: RET fijo los jueves, RF vie-dom, lunes F/CO por medio, y el RET suelto queda afuera', () => {
+  // Octubre real de Tadicor. El 20 (martes RET) y el 22 (jueves F) son cambios a mano.
+  const seq: Array<[string, string, string]> = [
+    ['2026-10-01', 'RET', 'Retén'],
+    ['2026-10-02', 'RF', 'REFUERZO'], ['2026-10-03', 'RF', 'REFUERZO'], ['2026-10-04', 'RF', 'REFUERZO'],
+    ['2026-10-05', 'F', 'General'], ['2026-10-06', 'F', 'General'], ['2026-10-07', 'F', 'General'],
+    ['2026-10-08', 'RET', 'Retén'],
+    ['2026-10-09', 'RF', 'REFUERZO'], ['2026-10-10', 'RF', 'REFUERZO'], ['2026-10-11', 'RF', 'REFUERZO'],
+    ['2026-10-12', 'CO', 'CORTINA'],
+    ['2026-10-13', 'F', 'General'], ['2026-10-14', 'F', 'General'],
+    ['2026-10-15', 'RET', 'Retén'],
+    ['2026-10-16', 'RF', 'REFUERZO'], ['2026-10-17', 'RF', 'REFUERZO'], ['2026-10-18', 'RF', 'REFUERZO'],
+    ['2026-10-19', 'F', 'General'],
+    ['2026-10-20', 'RET', 'Retén'],
+    ['2026-10-21', 'F', 'General'],
+    ['2026-10-22', 'F', 'General'],
+    ['2026-10-23', 'RF', 'REFUERZO'], ['2026-10-24', 'RF', 'REFUERZO'], ['2026-10-25', 'RF', 'REFUERZO'],
+    ['2026-10-26', 'CO', 'CORTINA'],
+    ['2026-10-27', 'F', 'General'], ['2026-10-28', 'F', 'General'],
+    ['2026-10-29', 'RET', 'Retén'],
+    ['2026-10-30', 'RF', 'REFUERZO'], ['2026-10-31', 'RF', 'REFUERZO'],
+  ];
+  const horario = (code: string) => code === 'CO'
+    ? { startTime: '07:00', endTime: '15:00', hours: 8 }
+    : code === 'RF'
+      ? { startTime: '12:00', endTime: '22:00', hours: 10 }
+      : { startTime: '00:00', endTime: code === 'F' ? '23:59' : '00:00', hours: 0 };
+  const previos: TurnoPrevio[] = seq.map(([dateStr, code, positionName]) => ({
+    dateStr, code, positionName, objectiveId: OBJ, ...horario(code),
+  }));
+  const est: PuestoSla[] = [
+    { positionName: 'REFUERZO', qty: 1, shifts: [{ code: 'RF', startTime: '12:00', endTime: '22:00', hours: 10 }] },
+    { positionName: 'CORTINA', qty: 1, shifts: [{ code: 'CO', startTime: '07:00', endTime: '15:00', hours: 8 }] },
+  ];
+  const ciclo = detectarCiclo(observacionesDelGuardia(previos, OBJ))!;
+  assert.equal(ciclo.periodo, 14);
+  assert.equal(diaDelCiclo(ciclo, '2026-10-20')?.code, 'F');
+  assert.equal(diaDelCiclo(ciclo, '2026-10-22')?.code, 'RET');
+  const [res] = proponerContinuacion(input(
+    [{ id: 'di53KCLWRsq9q225SXml', nombre: 'CACERES, WALTER ALEJANDRO', previos }],
+    diasDelMes(2026, 11),
+    { estructura: est },
+  ));
+  const c = codigos(res);
+  for (const d of ['05', '12', '19', '26']) assert.equal(c[`2026-11-${d}`], 'RET', d);
+  assert.equal(c['2026-11-02'], 'F');
+  assert.equal(c['2026-11-09'], 'CO');
+  assert.equal(c['2026-11-16'], 'F');
+  assert.equal(c['2026-11-23'], 'CO');
+  assert.equal(c['2026-11-03'], 'F');
+  assert.equal(res.propuestas.length, 30, 'noviembre sin celdas vacías');
+  const ret = res.propuestas.find((p) => p.dateStr === '2026-11-05')!;
+  assert.equal(ret.positionName, 'Retén');
+  assert.equal(ret.startTime, '00:00');
+  assert.equal(ret.endTime, '00:00');
+  assert.equal(ret.hours, 0);
+  assert.equal(res.propuestas.find((p) => p.code === 'RF')!.startTime, '12:00');
+  assert.equal(res.propuestas.find((p) => p.code === 'CO')!.startTime, '07:00');
+  const conSla: PuestoSla[] = [...est, { positionName: 'Retén', qty: 1, shifts: [{ code: 'RET', startTime: '08:00', endTime: '16:00', hours: 8 }] }];
+  const [resSla] = proponerContinuacion(input(
+    [{ id: 'di53KCLWRsq9q225SXml', nombre: 'CACERES, WALTER ALEJANDRO', previos }],
+    diasDelMes(2026, 11),
+    { estructura: conSla },
+  ));
+  const retSla = resSla.propuestas.find((p) => p.dateStr === '2026-11-05')!;
+  assert.equal(retSla.startTime, '08:00');
+  assert.equal(retSla.endTime, '16:00');
+  assert.equal(retSla.positionName, 'Retén');
 });
 
 test('aviso de cobertura: el mismo día y puesto junta la banda que sobra con la que falta', () => {

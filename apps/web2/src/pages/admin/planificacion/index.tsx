@@ -3331,7 +3331,9 @@ function PlanificacionDesktop() {
         return cruceTopeDeTurnos(visible, (t) => {
             if (typeof t?.dateStr === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(t.dateStr)) return t.dateStr;
             const raw = t?.startTime?.toDate ? t.startTime.toDate() : t?.startTime;
-            return raw ? getDateKey(raw) : '';
+            if (!raw) return '';
+            if (typeof raw === 'string' && /^\d{1,2}:\d{2}/.test(raw.trim())) return '';
+            try { return getDateKey(raw); } catch { return ''; }
         }, planningLimits.monthly);
     }, [cellTurnosMap, shiftsMap, pendingChanges, displayedEmployees, selectedObjective, selectedGrupo, grupoUnifiedMode, planningLimits.monthly]);
     const publishedPlanMesh = plannerColumn.published;
@@ -7947,7 +7949,8 @@ function PlanificacionDesktop() {
                         else if (typeof change.endTime === 'string' && /^\d{1,2}:\d{2}(:\d{2})?$/.test(change.endTime)) {
                             const [eh, em] = change.endTime.split(':').map(Number);
                             end.setHours(eh, em, 0);
-                            if (end <= start) end.setTime(end.getTime() + 24 * 3600000);
+                            const retenSinHoras = String(change.code || '').toUpperCase() === 'RET' && !(Number(change.hours) > 0);
+                            if (end <= start && !retenSinHoras) end.setTime(end.getTime() + 24 * 3600000);
                         } else {
                             const slaSh = slaShiftByPosCode.get(`${safePositionName}__${String(change.code || '').toUpperCase()}`);
                             const slaEnd = typeof slaSh?.endTime === 'string' ? slaSh.endTime : null;
