@@ -13705,7 +13705,7 @@ function PlanificacionDesktop() {
                                         {/* Botón grupo: activo (violeta sólido) en modo unificado, outline en modo individual */}
                                         <button
                                             onClick={() => { setGrupoUnifiedMode(true); setSelectedObjective(selectedGrupo.objectiveIds[0]); }}
-                                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-black uppercase tracking-wide transition-colors ${grupoUnifiedMode ? 'bg-violet-700 text-white' : 'bg-white text-violet-700 border border-violet-400 hover:bg-violet-50'}`}
+                                            className={`flex items-center gap-1.5 h-9 px-3 rounded-lg text-xs font-black uppercase tracking-wide whitespace-nowrap transition-colors ${grupoUnifiedMode ? 'bg-violet-700 text-white' : 'bg-white text-violet-700 border border-violet-400 hover:bg-violet-50'}`}
                                             title="Ver todos los objetivos juntos"
                                         >
                                             <Layers size={11}/>{selectedGrupo.nombre}
@@ -13716,7 +13716,7 @@ function PlanificacionDesktop() {
                                             <button
                                                 key={objId}
                                                 onClick={() => { setGrupoUnifiedMode(false); setSelectedObjective(objId); }}
-                                                className={`px-2 py-1 rounded-md text-[10px] font-bold transition-colors ${!grupoUnifiedMode && selectedObjective === objId ? 'bg-indigo-600 text-white' : 'bg-violet-100 text-violet-700 border border-violet-200 hover:bg-indigo-100 hover:text-indigo-700'}`}
+                                                className={`flex items-center h-9 px-3 rounded-lg text-xs font-black whitespace-nowrap transition-colors ${!grupoUnifiedMode && selectedObjective === objId ? 'bg-indigo-600 text-white' : 'bg-violet-100 text-violet-700 border border-violet-200 hover:bg-indigo-100 hover:text-indigo-700'}`}
                                                 title={`Ver solo ${selectedGrupo.objectiveNames[i]}`}
                                             >
                                                 {selectedGrupo.objectiveNames[i] || objId}
