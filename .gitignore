@@ -119,3 +119,6 @@ apps/web2/out/
 # Residuos locales Expo (comandos mal pegados)
 apps/mobile-guardia/cd
 apps/mobile-guardia/npx
+
+# Continuar mes anterior: manifiestos locales de la copia al emulador
+scripts/continuar-mes/.*.json
