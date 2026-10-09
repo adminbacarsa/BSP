@@ -74,7 +74,7 @@ export function ContinuarMesModal({ vista, onAplicar, onCancelar }: Props) {
   const conCiclo = useMemo(() => vista.resultados.filter((r) => r.ciclo && r.propuestas.length > 0), [vista.resultados]);
   const sinCiclo = useMemo(() => vista.resultados.filter((r) => !r.ciclo), [vista.resultados]);
   const sinNada = useMemo(() => vista.resultados.filter((r) => r.ciclo && r.propuestas.length === 0), [vista.resultados]);
-  const [elegidos, setElegidos] = useState<Set<string>>(() => new Set(conCiclo.map((r) => r.employeeId)));
+  const [elegidos, setElegidos] = useState<Set<string>>(() => new Set(conCiclo.filter((r) => !r.estimado).map((r) => r.employeeId)));
 
   const totales = useMemo(() => {
     let turnos = 0; let francos = 0;
@@ -178,14 +178,18 @@ export function ContinuarMesModal({ vista, onAplicar, onCancelar }: Props) {
                   o.sinDato ? `${o.sinDato} sin dato` : '',
                 ].filter(Boolean).join(' · ');
                 return (
-                  <tr key={r.employeeId} className="border-b border-slate-100 align-top" data-continuar-guardia={r.employeeId}>
+                  <tr key={r.employeeId} className={`border-b border-slate-100 align-top ${r.estimado ? 'bg-amber-50/70' : ''}`} data-continuar-guardia={r.employeeId} data-continuar-estimado={r.estimado ? r.origenCiclo : undefined}>
                     <td className="py-1.5 pr-2">
                       <input type="checkbox" checked={elegidos.has(r.employeeId)} onChange={() => toggle(r.employeeId)} aria-label={`Incluir a ${r.nombre}`} />
                     </td>
                     <td className="py-1.5 pr-2 font-bold text-slate-800">{r.nombre}</td>
                     <td className="py-1.5 pr-2 font-mono text-slate-700">
                       {r.ciclo!.etiqueta}
-                      <span className="ml-1 text-[10px] text-slate-400 font-sans">({r.ciclo!.periodo} días)</span>
+                      {r.estimado ? (
+                        <div className="text-[10px] font-sans font-bold text-amber-800" data-continuar-nota={r.notaEstimado}>{r.notaEstimado}</div>
+                      ) : (
+                        <span className="ml-1 text-[10px] text-slate-400 font-sans">({r.ciclo!.periodo} días)</span>
+                      )}
                     </td>
                     <td className="py-1.5 pr-2 font-bold text-teal-700">{r.continuaEn}</td>
                     <td className="py-1.5 pr-2 text-right tabular-nums">{turnos} turnos · {francos} F</td>

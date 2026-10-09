@@ -173,10 +173,20 @@ for (const r of resultados) {
 
 const tot = filas.reduce((a, f) => ({ c: a.c + f.comparadas, i: a.i + f.iguales, f: a.f + f.igualesFam, s: a.s + f.sinPropuesta }), { c: 0, i: 0, f: 0, s: 0 });
 const pct = (a: number, b: number) => (b ? `${Math.round((a / b) * 1000) / 10}%` : '—');
+const suma = (pred: (r: typeof resultados[number]) => boolean) => resultados.filter(pred).reduce((a, r) => {
+  const f = filas.find((x) => x.id === r.employeeId);
+  return { c: a.c + (f?.comparadas || 0), i: a.i + (f?.iguales || 0), s: a.s + (f?.sinPropuesta || 0), n: a.n + 1 };
+}, { c: 0, i: 0, s: 0, n: 0 });
+const fijo = suma((r) => r.origenCiclo === 'fijo');
+const estimado = suma((r) => r.estimado);
 console.log(`Objetivo ${OBJ} · ${MES} · SLA ${vigente.id} (${estructura.map((p) => `${p.positionName}×${p.qty}`).join(', ')})`);
-console.log(`Guardias ${filas.length} · con ciclo ${resultados.filter((r) => r.ciclo).length} · celdas comparadas ${tot.c} · iguales ${tot.i} (${pct(tot.i, tot.c)}) · iguales contando D12≈M/N12≈N ${pct(tot.f, tot.c)} · sin propuesta ${tot.s} · aciertos sobre lo propuesto ${pct(tot.i, tot.c - tot.s)}`);
+console.log(`Guardias ${filas.length} · con ciclo ${resultados.filter((r) => r.ciclo).length} · estimados ${resultados.filter((r) => r.estimado).length} · celdas comparadas ${tot.c} · iguales ${tot.i} (${pct(tot.i, tot.c)}) · iguales contando D12≈M/N12≈N ${pct(tot.f, tot.c)} · sin propuesta ${tot.s} · aciertos sobre lo propuesto ${pct(tot.i, tot.c - tot.s)}`);
+console.log(`Período fijo: ${fijo.n} guardias · ${fijo.i}/${fijo.c} (${pct(fijo.i, fijo.c)}) · sobre lo propuesto ${pct(fijo.i, fijo.c - fijo.s)}`);
+console.log(`Estimado: ${estimado.n} guardias · ${estimado.i}/${estimado.c} (${pct(estimado.i, estimado.c)}) · sobre lo propuesto ${pct(estimado.i, estimado.c - estimado.s)}`);
 for (const f of filas.sort((a, b) => b.comparadas - a.comparadas)) {
-  console.log(`\n${f.nombre.slice(0, 30).padEnd(30)} ${pct(f.iguales, f.comparadas).padStart(6)} (${f.iguales}/${f.comparadas}) · ciclo ${f.ciclo} · continúa en ${f.continua || '—'}`);
+  const origen = resultados.find((r) => r.employeeId === f.id);
+  const marca = origen?.estimado ? ` · ${origen.notaEstimado}` : '';
+  console.log(`\n${f.nombre.slice(0, 30).padEnd(30)} ${pct(f.iguales, f.comparadas).padStart(6)} (${f.iguales}/${f.comparadas}) · ciclo ${f.ciclo}${marca} · continúa en ${f.continua || '—'}`);
   if (f.motivo) console.log(`   ${f.motivo}`);
   console.log(`   ${f.muestra}`);
 }

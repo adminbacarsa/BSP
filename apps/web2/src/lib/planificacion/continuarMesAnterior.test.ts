@@ -180,13 +180,24 @@ test('ignora coberturas, REF/ESC, un RET suelto, extensiones y turnos de otro ob
   assert.notEqual(diaDelCiclo(ciclo, '2026-09-10')?.code, 'RET');
 });
 
-test('ciclo que no se repite: queda sin proponer, para hacer a mano', () => {
-  const codes = ['M', 'T', 'N', 'F', 'M', 'M', 'N', 'F', 'T', 'F', 'F', 'N', 'M', 'T', 'F', 'N', 'N', 'M', 'F', 'T', 'M', 'F', 'N', 'T', 'T', 'F', 'M', 'N'];
+test('sin francos no hay ciclo, ni por período ni por bloques', () => {
+  const codes = ['M', 'T', 'N', 'M', 'T', 'N', 'M', 'T', 'N', 'M', 'T', 'N'];
   const previos = codes.map((code, i) => ({ dateStr: ymdDeIndex(diaIndex('2026-09-03') + i), code, positionName: P1, objectiveId: OBJ }));
   const [res] = proponerContinuacion(input([{ id: 'x', nombre: 'X', previos }], diasDelMes(2026, 10)));
   assert.equal(res.ciclo, null);
   assert.equal(res.propuestas.length, 0);
   assert.match(res.motivoSinCiclo || '', /no se repite/);
+});
+
+test('un esquema irregular con bloques de largo parecido se estima y queda destildado', () => {
+  const codes = ['M', 'T', 'N', 'F', 'M', 'M', 'N', 'F', 'T', 'F', 'F', 'N', 'M', 'T', 'F', 'N', 'N', 'M', 'F', 'T', 'M', 'F', 'N', 'T', 'T', 'F', 'M', 'N'];
+  const previos = codes.map((code, i) => ({ dateStr: ymdDeIndex(diaIndex('2026-09-03') + i), code, positionName: P1, objectiveId: OBJ }));
+  const [res] = proponerContinuacion(input([{ id: 'x', nombre: 'X', previos }], diasDelMes(2026, 10)));
+  assert.equal(detectarCiclo(observacionesDelGuardia(previos, OBJ)), null);
+  assert.equal(res.origenCiclo, 'bloques');
+  assert.equal(res.estimado, true);
+  assert.equal(res.notaEstimado, 'ciclo estimado (por bloques)');
+  assert.equal(codigos(res)['2026-10-01'], 'M');
 });
 
 test('el puesto del mes anterior ya no existe: si un solo puesto tiene el turno se propone ahí y se marca para revisar', () => {
@@ -381,4 +392,112 @@ test('días de 12 h dentro de un bloque de M no rompen el ciclo (D12 ≈ M)', ()
   const ciclo = detectarCiclo(observacionesDelGuardia(previos, OBJ))!;
   assert.equal(ciclo.periodo, 24);
   assert.ok(ciclo.fases.every((f) => f && ['M', 'N', 'T', 'F'].includes(f.code)));
+});
+
+function desdeMarcas(texto: string): TurnoPrevio[] {
+  return texto.trim().split(/\s+/).map((p) => {
+    const [dateStr, code] = p.split(':');
+    return { dateStr, code, positionName: code === 'F' ? 'General' : 'Puesto 1', objectiveId: OBJ };
+  });
+}
+
+function estructuraDe(previos: TurnoPrevio[]): PuestoSla[] {
+  const codes = [...new Set(previos.map((t) => String(t.code)).filter((c) => c !== 'F'))];
+  return [{
+    positionName: 'Puesto 1',
+    qty: 1,
+    shifts: codes.map((code) => ({ code, hours: 8, startTime: '07:00', endTime: '15:00' })),
+  }];
+}
+
+test('un ciclo claro de todo el historial no se marca como estimado', () => {
+  const previos = armar(ROTA_6_2, '2026-08-01', '2026-09-30', 0);
+  const [res] = proponerContinuacion(input([{ id: 'g', nombre: 'G', previos }], diasDelMes(2026, 10)));
+  assert.equal(res.origenCiclo, 'fijo');
+  assert.equal(res.estimado, false);
+  assert.equal(res.notaEstimado, null);
+});
+
+test('vuelve de vacaciones con otra fase: el ciclo se lee desde la vuelta y queda destildado', () => {
+  const diciembre = Array.from({ length: 31 }, (_, i) => ({
+    dateStr: ymdDeIndex(diaIndex('2025-12-01') + i),
+    code: i % 3 === 0 ? 'F' : 'T',
+    positionName: i % 3 === 0 ? 'General' : P1,
+    objectiveId: OBJ,
+  }));
+  const eneroRuido = ['M', 'T', 'M', 'T', 'F', 'F', 'M', 'T', 'M', 'T', 'F', 'F'].map((code, i) => ({
+    dateStr: ymdDeIndex(diaIndex('2026-01-01') + i), code, positionName: code === 'F' ? 'General' : P1, objectiveId: OBJ,
+  }));
+  const limpio = armar(['N', 'N', 'N', 'N', 'N', 'N', 'F', 'F'], '2026-01-17', '2026-01-31');
+  const previos = [...diciembre, ...eneroRuido, ...limpio];
+  assert.equal(detectarCiclo(observacionesDelGuardia(previos, OBJ)), null);
+  const [res] = proponerContinuacion(input([{ id: 'g', nombre: 'G', previos }], diasDelMes(2026, 2)));
+  assert.equal(res.origenCiclo, 'corte');
+  assert.equal(res.estimado, true);
+  assert.equal(res.notaEstimado, 'desde la vuelta del 17/01');
+  assert.equal(codigos(res)['2026-02-01'], 'F');
+  assert.equal(codigos(res)['2026-02-02'], 'N');
+  assert.equal(codigos(res)['2026-02-08'], 'F');
+  assert.equal(codigos(res)['2026-02-10'], 'N');
+});
+
+test('sin período fijo, el largo del bloque y del franco proyectan el mes y queda destildado', () => {
+  const bandas = ['M', 'T', 'N', 'Q', 'B', 'C', 'D', 'Z'];
+  const previos: TurnoPrevio[] = [];
+  let day = diaIndex('2025-12-01');
+  for (const b of bandas) {
+    for (let i = 0; i < 5; i += 1) {
+      previos.push({ dateStr: ymdDeIndex(day), code: b, positionName: P1, objectiveId: OBJ });
+      day += 1;
+    }
+    for (let i = 0; i < 2; i += 1) {
+      previos.push({ dateStr: ymdDeIndex(day), code: 'F', positionName: 'General', objectiveId: OBJ });
+      day += 1;
+    }
+  }
+  assert.equal(detectarCiclo(observacionesDelGuardia(previos, OBJ)), null);
+  const est = estructuraDe(previos);
+  const [res] = proponerContinuacion(input([{ id: 'g', nombre: 'G', previos }], diasDelMes(2026, 2), { estructura: est }));
+  assert.equal(res.origenCiclo, 'bloques');
+  assert.equal(res.estimado, true);
+  assert.equal(res.notaEstimado, 'ciclo estimado (por bloques)');
+  assert.match(res.ciclo!.etiqueta, /×5/);
+  assert.match(res.ciclo!.etiqueta, /F×2/);
+  const c = codigos(res);
+  assert.equal(c['2026-02-01'], 'F');
+  assert.equal(c['2026-02-02'], 'Z');
+  assert.equal(c['2026-02-06'], 'Z');
+  assert.equal(c['2026-02-07'], 'F');
+  assert.equal(c['2026-02-08'], 'F');
+});
+
+const REAL_CORTE = `2025-12-01:F 2025-12-02:F 2025-12-03:M 2025-12-04:F 2025-12-05:M 2025-12-06:TG 2025-12-07:TG 2025-12-08:TG 2025-12-09:F 2025-12-10:F 2025-12-11:N 2025-12-12:N 2025-12-13:N 2025-12-14:N 2025-12-15:F 2025-12-16:F 2025-12-17:N 2025-12-18:N 2025-12-19:N 2025-12-20:N 2025-12-21:F 2025-12-22:F 2025-12-23:MD 2025-12-24:MD 2025-12-25:F 2025-12-26:MD 2025-12-27:F 2025-12-28:MD 2025-12-29:MD 2025-12-30:MD 2025-12-31:F 2026-01-01:F 2026-01-02:MD 2026-01-03:MD 2026-01-04:MD 2026-01-05:MD 2026-01-06:F 2026-01-07:T 2026-01-08:N 2026-01-09:N 2026-01-10:T 2026-01-11:T 2026-01-12:F 2026-01-13:F 2026-01-14:MD 2026-01-15:MD 2026-01-16:MD 2026-01-17:MD 2026-01-18:F 2026-01-19:F 2026-02-03:N 2026-02-04:T 2026-02-05:F 2026-02-06:F 2026-02-07:MD 2026-02-08:MD 2026-02-09:M 2026-02-10:M 2026-02-11:F 2026-02-12:F 2026-02-13:N 2026-02-14:N 2026-02-15:N 2026-02-16:MD 2026-02-17:F 2026-02-18:T 2026-02-19:T 2026-02-20:N 2026-02-21:N 2026-02-22:N 2026-02-23:F 2026-02-24:F 2026-02-25:MD 2026-02-26:MD 2026-02-27:MD 2026-02-28:MD`;
+const REAL_CORTE_MARZO = 'F F N N N N F T T N N N F F MD MD MD MD F F N N N N F T T N N N F'.split(' ');
+
+const REAL_VENTANA = `2025-12-01:M 2025-12-02:F 2025-12-03:F 2025-12-04:PB2 2025-12-05:PB2 2025-12-06:PB2 2025-12-07:PB2 2025-12-08:F 2025-12-09:PB2 2025-12-10:PP 2025-12-11:PP 2025-12-12:PB2 2025-12-13:PB2 2025-12-14:F 2025-12-15:F 2025-12-16:M 2025-12-17:M 2025-12-18:PB1 2025-12-19:PB1 2025-12-20:F 2025-12-21:F 2025-12-22:N 2025-12-23:N 2025-12-24:F 2025-12-25:T 2025-12-26:F 2025-12-27:F 2025-12-28:PB1 2025-12-29:PB1 2025-12-30:PB1 2025-12-31:F 2026-01-01:T 2026-01-02:PB1 2026-01-03:PB1 2026-01-04:PB1 2026-01-05:PB1 2026-01-06:F 2026-01-07:F 2026-01-08:M 2026-01-09:M 2026-01-10:MM 2026-01-11:MM 2026-01-12:F 2026-01-13:F 2026-01-14:GX 2026-01-15:GX 2026-01-16:PP 2026-01-17:PP 2026-01-18:F 2026-01-19:F 2026-01-20:N 2026-01-21:N 2026-01-22:NN 2026-01-23:NN 2026-01-24:F 2026-01-25:PB1 2026-01-26:M 2026-01-27:M 2026-01-28:MM 2026-01-29:MM 2026-01-30:F 2026-01-31:F`;
+const REAL_VENTANA_FEBRERO = 'GX GX PP PP F F N N NN NN F PB1 M M MM MM F F GX GX PP PP F F N N NN NN'.split(' ');
+
+const REAL_BLOQUES = `2025-12-01:MM 2025-12-02:MM 2025-12-03:MM 2025-12-04:F 2025-12-05:F 2025-12-06:GX 2025-12-07:GX 2025-12-08:PP 2025-12-09:PP 2025-12-10:F 2025-12-11:F 2025-12-12:PB1 2025-12-13:PB1 2025-12-14:PB1 2025-12-15:PB1 2025-12-16:F 2025-12-18:N 2025-12-19:N 2025-12-20:NN 2025-12-21:NN 2025-12-22:T 2025-12-23:F 2025-12-24:F 2025-12-25:F 2025-12-26:GX 2025-12-27:GX 2025-12-28:PC 2025-12-29:NN 2025-12-30:PP 2025-12-31:F 2026-01-01:M 2026-01-02:F 2026-01-03:F 2026-01-18:M 2026-01-19:M 2026-01-20:F 2026-01-21:F 2026-01-22:N 2026-01-23:N 2026-01-24:NN 2026-01-25:NN 2026-01-26:F 2026-01-27:F 2026-01-28:GX 2026-01-29:GX 2026-01-30:PP 2026-01-31:PP`;
+const REAL_BLOQUES_FEBRERO = 'F F PB1 PB1 PB1 PB1 F F N N N N F F GX GX GX GX F F PB1 PB1 PB1 PB1 F F N N'.split(' ');
+
+test('secuencias reales anonimizadas: vuelta, últimas 4 semanas y bloques', () => {
+  const casos = [
+    { texto: REAL_CORTE, mes: 3, anio: 2026, origen: 'corte', nota: 'desde la vuelta del 03/02', dias: REAL_CORTE_MARZO },
+    { texto: REAL_VENTANA, mes: 2, anio: 2026, origen: 'corte', nota: 'últimas 4 semanas', dias: REAL_VENTANA_FEBRERO },
+    { texto: REAL_BLOQUES, mes: 2, anio: 2026, origen: 'bloques', nota: 'ciclo estimado (por bloques)', dias: REAL_BLOQUES_FEBRERO },
+  ] as const;
+  for (const caso of casos) {
+    const previos = desdeMarcas(caso.texto);
+    const est = estructuraDe(previos);
+    const [res] = proponerContinuacion(input(
+      [{ id: 'g', nombre: 'G', previos }],
+      diasDelMes(caso.anio, caso.mes),
+      { estructura: est },
+    ));
+    assert.equal(res.origenCiclo, caso.origen, caso.nota);
+    assert.equal(res.estimado, true);
+    assert.equal(res.notaEstimado, caso.nota);
+    const got = diasDelMes(caso.anio, caso.mes).slice(0, caso.dias.length).map((d) => codigos(res)[d]);
+    assert.deepEqual(got, [...caso.dias], caso.nota);
+  }
 });

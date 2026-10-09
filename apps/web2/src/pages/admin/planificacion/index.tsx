@@ -11161,6 +11161,7 @@ function PlanificacionDesktop() {
             });
             const cambios: Record<string, any> = {};
             for (const r of resultados) {
+                if (r.estimado) continue;
                 for (const c of r.propuestas) cambios[`${c.employeeId}_${c.dateStr}`] = cambioPendienteDe(c, selectedObjective);
             }
             const merged = { ...pendingChanges, ...cambios };

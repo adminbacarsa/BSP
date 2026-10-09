@@ -108,10 +108,18 @@ export type RevisarPuesto = {
   propuestoEn?: string;
 };
 
+/** `fijo` = el período de todo el historial. `corte` y `bloques` son estimados: el modal los deja destildados. */
+export type OrigenCiclo = 'fijo' | 'corte' | 'bloques';
+
 export type ResultadoGuardia = {
   employeeId: string;
   nombre: string;
   ciclo: CicloDetectado | null;
+  origenCiclo: OrigenCiclo | null;
+  /** true: la casilla del modal arranca destildada. */
+  estimado: boolean;
+  /** «desde la vuelta del dd/mm» o «ciclo estimado (por bloques)». */
+  notaEstimado: string | null;
   /** «continúa en T (2.º de 6)». */
   continuaEn: string;
   motivoSinCiclo: string | null;
@@ -469,7 +477,248 @@ function evaluarPeriodo(obs: Obs[], last: number, p: number): CicloDetectado | n
 }
 
 export function diaDelCiclo(ciclo: CicloDetectado, dateStr: string): DiaCiclo | null {
+  if (!ciclo.periodo || !ciclo.fases.length) return null;
   return ciclo.fases[mod(diaIndex(dateStr), ciclo.periodo)] || null;
+}
+
+/** Hueco de 4+ días entre dos datos de ciclo (licencia, vacaciones, pase de objetivo). */
+const HUECO_CORTE = 4;
+const VENTANAS_RECIENTES = [42, 28] as const;
+
+function obsDesdeUltimoCorte(obs: Obs[]): { sub: Obs[]; vuelta: string } | null {
+  let cut = 0;
+  for (let i = 1; i < obs.length; i += 1) {
+    if (obs[i].idx - obs[i - 1].idx >= HUECO_CORTE) cut = i;
+  }
+  if (cut === 0) return null;
+  const sub = obs.slice(cut);
+  if (sub.length >= obs.length) return null;
+  return { sub, vuelta: ymdDeIndex(obs[cut].idx) };
+}
+
+function obsVentana(obs: Obs[], dias: number): Obs[] {
+  const last = obs[obs.length - 1].idx;
+  return obs.filter((o) => o.idx > last - dias);
+}
+
+function notaVentana(dias: number): string {
+  return dias === 42 ? 'últimas 6 semanas' : 'últimas 4 semanas';
+}
+
+type RunCiclo = { kind: 'F' | 'W'; start: number; end: number; codes: string[]; len: number; band: string };
+
+function masVisto(cuenta: Map<string, number>, orden: string[]): string {
+  let best = orden[0] || '';
+  let n = -1;
+  for (const k of orden) {
+    const v = cuenta.get(k) || 0;
+    if (v > n) { n = v; best = k; }
+  }
+  return best;
+}
+
+function modoLargo(xs: number[]): number {
+  const cuenta = new Map<number, number>();
+  for (const x of xs) cuenta.set(x, (cuenta.get(x) || 0) + 1);
+  let top = 0;
+  for (const n of cuenta.values()) if (n > top) top = n;
+  let best = -1;
+  for (const [k, n] of cuenta) if (n === top && k > best) best = k;
+  return best;
+}
+
+function rachasDeCiclo(obs: Obs[]): RunCiclo[] {
+  const runs: RunCiclo[] = [];
+  for (const o of obs) {
+    const kind: 'F' | 'W' = o.code === 'F' ? 'F' : 'W';
+    const prev = runs[runs.length - 1];
+    if (prev && prev.kind === kind && o.idx === prev.end + 1) {
+      prev.end = o.idx;
+      prev.codes.push(o.code);
+    } else {
+      runs.push({ kind, start: o.idx, end: o.idx, codes: [o.code], len: 1, band: '' });
+    }
+  }
+  for (const r of runs) {
+    r.len = r.end - r.start + 1;
+    const cuenta = new Map<string, number>();
+    const orden: string[] = [];
+    for (const c of r.codes) {
+      const b = familia(c);
+      if (!cuenta.has(b)) orden.push(b);
+      cuenta.set(b, (cuenta.get(b) || 0) + 1);
+    }
+    r.band = masVisto(cuenta, orden);
+  }
+  return runs;
+}
+
+function puestoDelCodigo(obs: Obs[], code: string): { pos: string; start?: unknown; end?: unknown } {
+  for (let i = obs.length - 1; i >= 0; i -= 1) {
+    if (obs[i].code === code && obs[i].pos) return { pos: obs[i].pos, start: obs[i].start, end: obs[i].end };
+  }
+  const fam = familia(code);
+  for (let i = obs.length - 1; i >= 0; i -= 1) {
+    if (obs[i].fam === fam && obs[i].pos) return { pos: obs[i].pos, start: obs[i].start, end: obs[i].end };
+  }
+  return { pos: '' };
+}
+
+type ProyeccionBloques = {
+  ciclo: CicloDetectado;
+  porDia: Map<string, DiaCiclo>;
+  continuaEn: string;
+};
+
+/**
+ * Cuando ningún período fijo explica el historial: largo típico del bloque de trabajo,
+ * largo del franco y el orden de bandas. Tolera bloques cortados en los bordes.
+ */
+function detectarCicloPorBloques(obs: Obs[], desdeIdx: number, hastaIdx: number): ProyeccionBloques | null {
+  if (obs.length < 10 || hastaIdx < desdeIdx) return null;
+  const runs = rachasDeCiclo(obs);
+  const comp = runs.filter((r, i) => i > 0 && i < runs.length - 1
+    && runs[i - 1].end + 1 === r.start && r.end + 1 === runs[i + 1].start);
+  const trabajos = comp.filter((r) => r.kind === 'W').slice(-6).map((r) => r.len);
+  const francos = comp.filter((r) => r.kind === 'F').slice(-6).map((r) => r.len);
+  if (trabajos.length < 2 || francos.length < 2) return null;
+  const largoTrabajo = modoLargo(trabajos);
+  const largoFranco = modoLargo(francos);
+  const conf = (xs: number[], modo: number) => xs.filter((x) => x === modo).length / xs.length;
+  const confianza = Math.min(conf(trabajos, largoTrabajo), conf(francos, largoFranco));
+  if (confianza < 0.6 || largoTrabajo > 9 || largoFranco > 4 || largoTrabajo < 1) return null;
+  const deTrabajo = runs.filter((r) => r.kind === 'W' && r.len >= 2);
+  const bandas = deTrabajo.map((r) => r.band);
+  const sigue = new Map<string, Map<string, number>>();
+  const sigueOrden = new Map<string, string[]>();
+  for (let i = 0; i < bandas.length - 1; i += 1) {
+    const a = bandas[i];
+    const b = bandas[i + 1];
+    if (!sigue.has(a)) { sigue.set(a, new Map()); sigueOrden.set(a, []); }
+    const m = sigue.get(a)!;
+    const orden = sigueOrden.get(a)!;
+    if (!m.has(b)) orden.push(b);
+    m.set(b, (m.get(b) || 0) + 1);
+  }
+  const siguiente = (band: string) => {
+    const m = sigue.get(band);
+    const orden = sigueOrden.get(band) || [];
+    return m && orden.length ? masVisto(m, orden) : band;
+  };
+  const cuentaCode = new Map<string, Map<string, number>>();
+  const ordenCode = new Map<string, string[]>();
+  for (const o of obs) {
+    if (o.code === 'F') continue;
+    const b = familia(o.code);
+    if (!cuentaCode.has(b)) { cuentaCode.set(b, new Map()); ordenCode.set(b, []); }
+    const m = cuentaCode.get(b)!;
+    const orden = ordenCode.get(b)!;
+    if (!m.has(o.code)) orden.push(o.code);
+    m.set(o.code, (m.get(o.code) || 0) + 1);
+  }
+  const codigoDe = (band: string) => {
+    const m = cuentaCode.get(band);
+    const orden = ordenCode.get(band) || [];
+    return m && orden.length ? masVisto(m, orden) : band;
+  };
+  const ultimo = runs[runs.length - 1];
+  let kind = ultimo.kind;
+  let llevo = ultimo.len;
+  let banda = ultimo.band;
+  if (kind === 'F' && deTrabajo.length) banda = deTrabajo[deTrabajo.length - 1].band;
+  const partes: string[] = [];
+  const vistas = new Set<string>();
+  let rotulo = kind === 'W' ? banda : siguiente(banda);
+  for (let i = 0; i < 6 && !vistas.has(rotulo); i += 1) {
+    vistas.add(rotulo);
+    const code = codigoDe(rotulo);
+    partes.push(largoTrabajo > 1 ? `${code}×${largoTrabajo}` : code);
+    partes.push(largoFranco > 1 ? `F×${largoFranco}` : 'F');
+    rotulo = siguiente(rotulo);
+  }
+  const porDia = new Map<string, DiaCiclo>();
+  let continuaEn = 'sin dato el primer día';
+  let day = ultimo.end + 1;
+  let guard = 0;
+  while (day <= hastaIdx && guard < 400) {
+    guard += 1;
+    if (kind === 'W') {
+      if (llevo >= largoTrabajo) { kind = 'F'; llevo = 0; continue; }
+    } else if (llevo >= largoFranco) {
+      kind = 'W';
+      llevo = 0;
+      banda = siguiente(banda);
+      continue;
+    }
+    const code = kind === 'F' ? 'F' : codigoDe(banda);
+    const de = kind === 'F' ? largoFranco : largoTrabajo;
+    if (day >= desdeIdx) {
+      const puesto = code === 'F' ? { pos: 'General' } : puestoDelCodigo(obs, code);
+      const base: DiaCiclo = { code, positionName: code === 'F' ? 'General' : (puesto.pos || '') };
+      const dia: DiaCiclo = code === 'RET'
+        ? { ...base, ...horarioRet({ idx: day, code, fam: 'RET', pos: base.positionName, start: puesto.start, end: puesto.end }) }
+        : base;
+      porDia.set(ymdDeIndex(day), dia);
+      if (day === desdeIdx) continuaEn = de > 1 ? `${code} (${ordinal(llevo + 1)} de ${de})` : code;
+    }
+    llevo += 1;
+    day += 1;
+  }
+  if (!porDia.size) return null;
+  return {
+    porDia,
+    continuaEn,
+    ciclo: {
+      periodo: largoTrabajo + largoFranco,
+      fases: [],
+      consistencia: Math.round(confianza * 100) / 100,
+      muestras: obs.length,
+      ultimoDia: ymdDeIndex(obs[obs.length - 1].idx),
+      etiqueta: partes.join(' · '),
+    },
+  };
+}
+
+type CicloElegido = {
+  ciclo: CicloDetectado;
+  origen: OrigenCiclo;
+  estimado: boolean;
+  nota: string | null;
+  continuaEn: string | null;
+  diaDe: (dateStr: string) => DiaCiclo | null;
+};
+
+/** Período de todo el historial. Si no aparece, el tramo desde el último corte o las últimas semanas, y si tampoco, los bloques. */
+function elegirCiclo(obs: Obs[], desdeIdx: number, hastaIdx: number): CicloElegido | null {
+  const fijo = detectarCiclo(obs);
+  if (fijo) {
+    return { ciclo: fijo, origen: 'fijo', estimado: false, nota: null, continuaEn: null, diaDe: (d) => diaDelCiclo(fijo, d) };
+  }
+  const intentos: Array<{ sub: Obs[]; nota: string }> = [];
+  const corte = obsDesdeUltimoCorte(obs);
+  if (corte) {
+    const [dd, mm] = [corte.vuelta.slice(8), corte.vuelta.slice(5, 7)];
+    intentos.push({ sub: corte.sub, nota: `desde la vuelta del ${dd}/${mm}` });
+  }
+  for (const w of VENTANAS_RECIENTES) {
+    const sub = obsVentana(obs, w);
+    if (sub.length >= 6 && sub.length < obs.length) intentos.push({ sub, nota: notaVentana(w) });
+  }
+  for (const it of intentos) {
+    const c = detectarCiclo(it.sub);
+    if (!c) continue;
+    return { ciclo: c, origen: 'corte', estimado: true, nota: it.nota, continuaEn: null, diaDe: (d) => diaDelCiclo(c, d) };
+  }
+  const bloques = detectarCicloPorBloques(obs, desdeIdx, hastaIdx);
+  if (!bloques) return null;
+  return {
+    ciclo: bloques.ciclo,
+    origen: 'bloques',
+    estimado: true,
+    nota: 'ciclo estimado (por bloques)',
+    continuaEn: bloques.continuaEn,
+    diaDe: (d) => bloques.porDia.get(d) || null,
+  };
 }
 
 function ordinal(n: number): string {
@@ -592,6 +841,9 @@ export function proponerGuardia(input: ContinuarInput, g: ContinuarInput['guardi
     employeeId: g.id,
     nombre: g.nombre,
     ciclo: null,
+    origenCiclo: null,
+    estimado: false,
+    notaEstimado: null,
     continuaEn: '',
     motivoSinCiclo: null,
     propuestas: [],
@@ -604,15 +856,21 @@ export function proponerGuardia(input: ContinuarInput, g: ContinuarInput['guardi
     res.motivoSinCiclo = 'No trabajó en este objetivo en las últimas semanas';
     return res;
   }
-  const ciclo = detectarCiclo(obs);
-  if (!ciclo) {
+  const desdeIdx = input.dias.length ? diaIndex(input.dias[0]) : obs[obs.length - 1].idx + 1;
+  const hastaIdx = input.dias.length ? diaIndex(input.dias[input.dias.length - 1]) : desdeIdx;
+  const elegido = elegirCiclo(obs, desdeIdx, hastaIdx);
+  if (!elegido) {
     res.motivoSinCiclo = obs.length < 6
       ? `Pocos días para leer el ciclo (${obs.length})`
       : 'El ciclo no se repite (cambios a mano o esquema irregular)';
     return res;
   }
+  const ciclo = elegido.ciclo;
   res.ciclo = ciclo;
-  res.continuaEn = input.dias.length ? textoContinuaEn(ciclo, input.dias[0]) : '';
+  res.origenCiclo = elegido.origen;
+  res.estimado = elegido.estimado;
+  res.notaEstimado = elegido.nota;
+  res.continuaEn = elegido.continuaEn ?? (input.dias.length ? textoContinuaEn(ciclo, input.dias[0]) : '');
   const habilitado = input.turnoHabilitado
     || ((pos: string, code: string, ds: string) => turnoHabilitadoPorEstructura(input.estructura, pos, code, ds));
   const revisar = new Map<string, RevisarPuesto>();
@@ -621,7 +879,7 @@ export function proponerGuardia(input: ContinuarInput, g: ContinuarInput['guardi
     const estado = input.estadoCelda(g.id, dateStr);
     if (estado === 'licencia') { res.omitidas.licencia += 1; continue; }
     if (estado === 'ocupada') { res.omitidas.ocupada += 1; continue; }
-    const dia = diaDelCiclo(ciclo, dateStr);
+    const dia = elegido.diaDe(dateStr);
     if (!dia) { res.omitidas.sinDato += 1; continue; }
     if (dia.code === 'F') {
       res.propuestas.push({
