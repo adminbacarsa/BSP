@@ -185,6 +185,7 @@ export function buildRecompositionPendingUpdates(
     coversPositionName: pkg.gapPositionName,
     coversBandCode: String(pkg.target.code || '').toUpperCase() || undefined,
     coversDateStr: pkg.dateStr,
+    coversObjectiveId: objectiveId,
     coverageMode: isEarlyDeparture ? 'EARLY_DEPARTURE' : 'SPLIT',
     coverageStatus: 'COVERED',
     ...extra,
@@ -772,7 +773,13 @@ function listarContiguos(
       const shift = resolveEmployeeShift(emp.id, dia, shiftsMap, pendingChanges);
       if (!esTurnoDePuestoParaExtender(shift)) continue;
       const shiftObj = shift?.objectiveId;
-      if (shiftObj != null && shiftObj !== '' && String(shiftObj) !== String(objectiveId)) continue;
+      const permitidos = listCtx?.objectiveIdsPermitidos;
+      if (shiftObj != null && shiftObj !== '') {
+        const ok = permitidos?.length
+          ? permitidos.some((id) => String(id) === String(shiftObj))
+          : String(shiftObj) === String(objectiveId);
+        if (!ok) continue;
+      }
       const horario = horarioDelTurno(shift, listCtx?.positionStructure);
       if (!horario) continue;
       const punta = (lado === 'ext' ? horario.endMin : horario.startMin) + offset * 24 * 60;

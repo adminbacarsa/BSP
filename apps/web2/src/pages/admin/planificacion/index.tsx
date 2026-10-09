@@ -246,6 +246,11 @@ import {
     lookupSplitCreditsForPosition,
 } from '@/lib/planificacion/positionCoverageUnits';
 import {
+    acreditaCoberturaAlObjetivo,
+    bandasAbiertasDelGrupo,
+    type BandaAbiertaGrupo,
+} from '@/lib/planificacion/grupoCerrarBanda';
+import {
     analyzeDayCoverageGaps,
     analyzeObjectiveCoverageGaps,
     flattenDayGapsForUi,
@@ -1697,7 +1702,7 @@ function PlanificacionDesktop() {
     const [secondBlockMap, setSecondBlockMap] = useState<Record<string, { startTime: any; endTime: any }>>({});
     const [coverageTooltip, setCoverageTooltip] = useState<{
         dateStr: string;
-        gaps: { positionName: string; code: string; gapBand?: string; missing: number; detail?: string }[];
+        gaps: { positionName: string; code: string; gapBand?: string; missing: number; detail?: string; objectiveId?: string; etiqueta?: string }[];
         x: number;
         y: number;
     } | null>(null);
@@ -4864,9 +4869,9 @@ function PlanificacionDesktop() {
         dateStr: string,
         dayLetter: string,
         cycles?: string[],
-    ): { required: number; closed: number } => {
+    ): { required: number; closed: number; codeCountsCerrados: Record<string, Record<string, number>> } => {
         const structure = grupoSlaMap[objId] || [];
-        if (!structure.length) return { required: 0, closed: 0 };
+        if (!structure.length) return { required: 0, closed: 0, codeCountsCerrados: {} };
         const dominant = structure.reduce(
             (prev: any, cur: any) => ((prev?.qty ?? 0) > (cur?.qty ?? 0) ? prev : cur),
             structure[0] || { qty: 1, positionName: 'General' },
@@ -4905,9 +4910,7 @@ function PlanificacionDesktop() {
                 if (pending?.isDeleted) return null;
                 const raw = pending || shiftsMap[key] || null;
                 if (!raw) return null;
-                const effectiveObjId = resolveEffectiveShiftObjectiveId(emp, raw, key);
-                if (String(effectiveObjId || '') !== String(objId)) return null;
-                // Forzar objectiveId del objetivo para que shiftBelongsToObjective no confunda con slaId / pending huérfano.
+                if (!acreditaCoberturaAlObjetivo({ ...raw, objectiveId: resolveEffectiveShiftObjectiveId(emp, raw, key) || raw.objectiveId }, objId)) return null;
                 return { ...raw, objectiveId: objId };
             },
             {
@@ -4921,6 +4924,7 @@ function PlanificacionDesktop() {
 
         let required = 0;
         let closed = 0;
+        const codeCountsCerrados: Record<string, Record<string, number>> = {};
         for (const pos of structure) {
             if (!isPosActiveOnDay(pos, dayLetter, dateStr)) continue;
             if (isPosExcludedOnDate(pos, dateStr)) continue;
@@ -4930,12 +4934,28 @@ function PlanificacionDesktop() {
             for (const [bandCode, n] of Object.entries(posCredits)) {
                 codeCounts[bandCode] = (codeCounts[bandCode] || 0) + n;
             }
+            codeCountsCerrados[posName] = codeCounts;
             const units = countPositionClosedUnitsFromShifts(pos, dayLetter, codeCounts, cycles, true, dateStr);
             required += units.required;
             closed += units.closed;
         }
-        return { required, closed };
+        return { required, closed, codeCountsCerrados };
     }, [grupoSlaMap, dotacionBaseEmployees, pendingChanges, shiftsMap, absencesMap, resolveEffectiveShiftObjectiveId]);
+
+    const bandasAbiertasGrupoEn = useCallback((dateStr: string, dayLetter: string): BandaAbiertaGrupo[] => {
+        if (!selectedGrupo || !grupoUnifiedMode) return [];
+        const objetivos = selectedGrupo.objectiveIds.map((id: string, i: number) => {
+            const structure = (grupoSlaMap[id] || []).filter((pos: any) => isPosActiveOnDay(pos, dayLetter, dateStr) && !isPosExcludedOnDate(pos, dateStr));
+            const conteo = sumGrupoObjectiveCoverageForDay(id, dateStr, dayLetter, undefined);
+            return {
+                id,
+                name: selectedGrupo.objectiveNames[i] || id,
+                positions: structure,
+                codeCountsByPosition: conteo.codeCountsCerrados || {},
+            };
+        });
+        return bandasAbiertasDelGrupo({ objetivos, dateStr, dayLetter });
+    }, [selectedGrupo, grupoUnifiedMode, grupoSlaMap, sumGrupoObjectiveCoverageForDay]);
 
     // Diagnóstico de cobertura agregado para la vista de grupo unificado
     const grupoGapReport = useMemo(() => {
@@ -7818,6 +7838,7 @@ function PlanificacionDesktop() {
                             if (change.coversPositionName) turnoPayload.coversPositionName = change.coversPositionName;
                             if (change.coversBandCode) turnoPayload.coversBandCode = change.coversBandCode;
                             if (change.coversDateStr) turnoPayload.coversDateStr = change.coversDateStr;
+                            if (change.coversObjectiveId) turnoPayload.coversObjectiveId = change.coversObjectiveId;
                             if (change.segmentFromTime) turnoPayload.segmentFromTime = change.segmentFromTime;
                             if (change.segmentToTime) turnoPayload.segmentToTime = change.segmentToTime;
                         }
@@ -8738,7 +8759,16 @@ function PlanificacionDesktop() {
         if (!menuRapido) return;
         const ctx = menuRapido.ctx;
         if (ctx.clase === 'hueco') {
-            setSlaGapCloseModal({ dateStr: ctx.dateStr, positionName: ctx.positionName, gapBand: ctx.gapBand });
+            const abiertas = selectedGrupo && grupoUnifiedMode
+                ? bandasAbiertasGrupoEn(ctx.dateStr, getDayLetter(ctx.dateStr))
+                : [];
+            const elegida = abiertas.find((b) => b.positionName === ctx.positionName && b.band === ctx.gapBand) || abiertas[0];
+            setSlaGapCloseModal({
+                dateStr: ctx.dateStr,
+                positionName: elegida?.positionName || ctx.positionName,
+                gapBand: elegida?.band || ctx.gapBand,
+                objectiveId: elegida?.objectiveId,
+            });
         } else {
             const ausencia = ctx.absence;
             const dias = menuRapido.diasLicencia.length > 1 ? menuRapido.diasLicencia : [ctx.dateStr];
@@ -8836,6 +8866,7 @@ function PlanificacionDesktop() {
             gapStart: rangoHueco?.from,
             gapEnd: rangoHueco?.to,
             preferSamePosition: true as const,
+            objectiveIdsPermitidos: selectedGrupo && grupoUnifiedMode ? selectedGrupo.objectiveIds : undefined,
         };
         const excl = titularId ? [titularId] : [];
         const filasExt = paso === 'ext'
@@ -13376,33 +13407,51 @@ function PlanificacionDesktop() {
                         }
 
                         const isCovered = requiredPax > 0 && closedPax >= requiredPax;
+                        const bandasGrupo = selectedGrupo && grupoUnifiedMode && !isCovered && requiredPax > 0
+                            ? bandasAbiertasGrupoEn(dateStr, dayLetter)
+                            : [];
                         const cls = bloqueoMesCerrado
                             ? 'bg-slate-100 text-slate-400'
                             : (requiredPax === 0 ? 'bg-slate-50 text-slate-400' : (isCovered ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-600 cursor-pointer'));
                         return (
                             <td
                                 key={dateStr}
+                                data-cobertura-dia={dateStr}
                                 className={`text-center border-r border-b text-[10px] font-black ${cls}`}
                                 colSpan={1}
                                 title={bloqueoMesCerrado
                                     ? AVISO_MES_CERRADO
+                                    : bandasGrupo.length > 0
+                                    ? bandasGrupo.map((b) => b.etiqueta).join('\n')
                                     : (requiredPax > 0
                                     ? `${closedPax} de ${requiredPax} puestos cerrados (1 pax = esquema SLA completo del día)`
                                     : undefined)}
                                 onClick={(e) => {
                                     if (bloqueoMesCerrado || isCovered || requiredPax === 0) return;
-                                    const codeCounts = buildDayCodeCountsByPosition(dateStr);
-                                    const dayReport = analyzeDayCoverageGaps(
-                                        positionStructure || [],
-                                        dateStr,
-                                        dayLetter,
-                                        codeCounts,
-                                        cyclesForCoverage,
-                                        isPosActiveOnDay,
-                                    );
-                                    const gaps = dayReport.positions.length > 0
-                                        ? flattenDayGapsForUi(dayReport)
-                                        : (autoV2GenStats?.uncoveredSlotsByDay?.[dateStr] || []);
+                                    const gaps = bandasGrupo.length > 0
+                                        ? bandasGrupo.map((b) => ({
+                                            positionName: b.positionName,
+                                            code: b.band,
+                                            gapBand: b.band,
+                                            missing: b.missing,
+                                            detail: b.etiqueta,
+                                            objectiveId: b.objectiveId,
+                                            etiqueta: b.etiqueta,
+                                        }))
+                                        : (() => {
+                                            const codeCounts = buildDayCodeCountsByPosition(dateStr);
+                                            const dayReport = analyzeDayCoverageGaps(
+                                                positionStructure || [],
+                                                dateStr,
+                                                dayLetter,
+                                                codeCounts,
+                                                cyclesForCoverage,
+                                                isPosActiveOnDay,
+                                            );
+                                            return dayReport.positions.length > 0
+                                                ? flattenDayGapsForUi(dayReport)
+                                                : (autoV2GenStats?.uncoveredSlotsByDay?.[dateStr] || []);
+                                        })();
                                     if (gaps.length > 0) setCoverageTooltip(prev => prev?.dateStr === dateStr ? null : { dateStr, gaps, x: e.clientX, y: e.clientY });
                                 }}
                             >
@@ -13443,7 +13492,7 @@ function PlanificacionDesktop() {
 
     const openSlaGapCloseFromPie = useCallback((
         dateStr: string,
-        gap: { positionName: string; code: string; gapBand?: string; missing: number; detail?: string },
+        gap: { positionName: string; code: string; gapBand?: string; missing: number; detail?: string; objectiveId?: string },
     ) => {
         const gapBand = inferGapBandForClose(gap);
         if (!gapBand) {
@@ -13451,7 +13500,7 @@ function PlanificacionDesktop() {
             return;
         }
         setCoverageTooltip(null);
-        setSlaGapCloseModal({ dateStr, positionName: gap.positionName, gapBand });
+        setSlaGapCloseModal({ dateStr, positionName: gap.positionName, gapBand, objectiveId: gap.objectiveId });
     }, []);
 
     return (
@@ -13504,6 +13553,7 @@ function PlanificacionDesktop() {
                     gapBand: modoElegir.ctx.gapBand,
                     gapStart: rangoFranja?.from,
                     gapEnd: rangoFranja?.to,
+                    objectiveIdsPermitidos: selectedGrupo && grupoUnifiedMode ? selectedGrupo.objectiveIds : undefined,
                 };
                 const exclFranja = modoElegir.ctx.clase === 'ausente' ? [modoElegir.ctx.empId] : [];
                 const sinExtender = modoElegir.accion === 'split' && !modoElegir.extId && rangoFranja
@@ -13571,15 +13621,15 @@ function PlanificacionDesktop() {
                     onClick={(e) => e.stopPropagation()}
                     onMouseDown={(e) => e.stopPropagation()}
                 >
-                    <div className="bg-slate-900 text-white text-[10px] font-black px-3 py-2 rounded-lg shadow-sm flex flex-col gap-1.5 min-w-[240px] max-w-[320px]">
+                    <div className="bg-slate-900 text-white text-[10px] font-black px-3 py-2 rounded-lg shadow-sm flex flex-col gap-1.5 min-w-[240px] max-w-[420px]" data-puestos-sin-cerrar>
                         <div className="text-rose-300 text-[9px] uppercase tracking-wide mb-0.5">Puestos sin cerrar · {coverageTooltip.dateStr.slice(8)}</div>
                         {coverageTooltip.gaps.map((g, i) => (
-                            <div key={i} className="flex flex-col gap-1 border-b border-slate-700/50 pb-1.5 last:border-0">
+                            <div key={i} className="flex flex-col gap-1 border-b border-slate-700/50 pb-1.5 last:border-0" data-banda-abierta={g.etiqueta || g.positionName}>
                                 <div className="flex items-center justify-between gap-2">
-                                    <span className="text-slate-200">{g.positionName}</span>
-                                    <span className="text-rose-400 font-black shrink-0">{g.missing} pax</span>
+                                    <span className="text-slate-200 leading-snug">{g.etiqueta || g.positionName}</span>
+                                    {!g.etiqueta && <span className="text-rose-400 font-black shrink-0">{g.missing} pax</span>}
                                 </div>
-                                {'detail' in g && g.detail && (
+                                {'detail' in g && g.detail && g.detail !== g.etiqueta && (
                                     <span className="text-[9px] text-slate-400 font-medium leading-snug">{g.detail}</span>
                                 )}
                                 {(() => {
@@ -13618,12 +13668,22 @@ function PlanificacionDesktop() {
             {shiftExtendModal && planningObjectiveIdForModals && typeof document !== 'undefined' && createPortal(
                 <PlanningShiftExtendModal
                     data={shiftExtendModal}
-                    objectiveId={planningObjectiveIdForModals}
+                    objectiveId={shiftExtendModal.objectiveId || planningObjectiveIdForModals}
                     clientId={selectedClient || undefined}
                     employees={displayedEmployees}
                     shiftsMap={shiftsMap}
                     pendingChanges={pendingChanges}
-                    positionStructure={effectivePosStructure as import('@/lib/planificacion/vacancySplitBands').VacancyPositionSla[]}
+                    positionStructure={((selectedGrupo && grupoUnifiedMode && grupoSlaMap[shiftExtendModal.objectiveId || '']?.length)
+                        ? grupoSlaMap[shiftExtendModal.objectiveId || '']
+                        : effectivePosStructure) as import('@/lib/planificacion/vacancySplitBands').VacancyPositionSla[]}
+                    bandasGrupo={selectedGrupo && grupoUnifiedMode ? bandasAbiertasGrupoEn(shiftExtendModal.dateStr, getDayLetter(shiftExtendModal.dateStr)) : undefined}
+                    objetivosDelGrupo={selectedGrupo && grupoUnifiedMode ? selectedGrupo.objectiveIds : undefined}
+                    onElegirBanda={(banda) => setShiftExtendModal((m) => m ? ({
+                        ...m,
+                        objectiveId: banda.objectiveId,
+                        gapPositionName: banda.positionName,
+                        suggestedGapBand: banda.band,
+                    }) : m)}
                     onApply={(changes) => {
                         setPendingChanges(changes);
                         setSelectedCell(null);
@@ -13639,12 +13699,22 @@ function PlanificacionDesktop() {
             {slaGapCloseModal && planningObjectiveIdForModals && typeof document !== 'undefined' && createPortal(
                 <PlanningSlaGapCloseModal
                     data={slaGapCloseModal}
-                    objectiveId={planningObjectiveIdForModals}
+                    objectiveId={slaGapCloseModal.objectiveId || planningObjectiveIdForModals}
                     clientId={selectedClient || undefined}
                     employees={displayedEmployees}
                     shiftsMap={shiftsMap}
                     pendingChanges={pendingChanges}
-                    positionStructure={effectivePosStructure as import('@/lib/planificacion/vacancySplitBands').VacancyPositionSla[]}
+                    positionStructure={((selectedGrupo && grupoUnifiedMode && grupoSlaMap[slaGapCloseModal.objectiveId || '']?.length)
+                        ? grupoSlaMap[slaGapCloseModal.objectiveId || '']
+                        : effectivePosStructure) as import('@/lib/planificacion/vacancySplitBands').VacancyPositionSla[]}
+                    bandasGrupo={selectedGrupo && grupoUnifiedMode ? bandasAbiertasGrupoEn(slaGapCloseModal.dateStr, getDayLetter(slaGapCloseModal.dateStr)) : undefined}
+                    objetivosDelGrupo={selectedGrupo && grupoUnifiedMode ? selectedGrupo.objectiveIds : undefined}
+                    onElegirBanda={(banda) => setSlaGapCloseModal((m) => m ? ({
+                        ...m,
+                        objectiveId: banda.objectiveId,
+                        positionName: banda.positionName,
+                        gapBand: banda.band,
+                    }) : m)}
                     onApply={(changes) => {
                         setPendingChanges(changes);
                         toast.success('Hueco SLA cerrado en borrador — guardá el cronograma.');
@@ -16738,12 +16808,18 @@ function PlanificacionDesktop() {
                                                             const dateStr = selectedCell.dateStr;
                                                             const homePos = String(extShift?.positionName || activePosition || 'General');
                                                             const gapPos = resolveSuggestedGapPositionForDay(dateStr, homePos);
+                                                            const sugerida = resolveSuggestedGapBandForPosition(dateStr, gapPos);
+                                                            const abiertas = selectedGrupo && grupoUnifiedMode
+                                                                ? bandasAbiertasGrupoEn(dateStr, getDayLetter(dateStr))
+                                                                : [];
+                                                            const elegida = abiertas.find((b) => b.positionName === gapPos && b.band === sugerida) || abiertas[0];
                                                             setShiftExtendModal({
                                                                 empId: selectedCell.empId,
                                                                 empName: employeeName,
                                                                 dateStr,
-                                                                gapPositionName: gapPos,
-                                                                suggestedGapBand: resolveSuggestedGapBandForPosition(dateStr, gapPos),
+                                                                gapPositionName: elegida?.positionName || gapPos,
+                                                                suggestedGapBand: elegida?.band || sugerida,
+                                                                objectiveId: elegida?.objectiveId,
                                                             });
                                                         }}
                                                         className="w-full py-2.5 rounded-xl text-xs font-black border-2 border-red-200 bg-red-50 text-red-800 hover:bg-red-100 flex items-center justify-center gap-2"

@@ -92,6 +92,8 @@ export interface RecompositionPendingMeta {
   coversBandCode?: string;
   /** Día del hueco que cierra el tramo (el del titular), no el día del turno extendido. */
   coversDateStr?: string;
+  /** Objetivo del hueco. El turno del guardia sigue en el suyo. */
+  coversObjectiveId?: string;
   coverageNote?: string;
   liberationReason?: string;
   redeployNote?: string;

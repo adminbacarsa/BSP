@@ -14,6 +14,7 @@ import {
   slaEndForShift,
 } from '@/lib/planificacion/shiftExtensionApply';
 import { listVacancyGapBandOptions } from '@/lib/planificacion/vacancyGapBands';
+import { claveBandaAbierta, type BandaAbiertaGrupo } from '@/lib/planificacion/grupoCerrarBanda';
 import { describeVacancySplitPlan } from '@/lib/planificacion/vacancyCoverage';
 import type { VacancyPositionSla } from '@/lib/planificacion/vacancySplitBands';
 import type { TitularVacancyWorkShift } from '@/lib/planificacion/vacancyCoverage';
@@ -26,6 +27,8 @@ export type ShiftExtendModalData = {
   suggestedGapBand?: string;
   /** Puesto donde falta cerrar la banda (ej. 136), no el puesto “casa” del guardia */
   gapPositionName?: string;
+  /** Objetivo del hueco en la vista agrupada. */
+  objectiveId?: string;
 };
 
 type Props = {
@@ -36,6 +39,9 @@ type Props = {
   shiftsMap: Record<string, any>;
   pendingChanges: Record<string, any>;
   positionStructure: VacancyPositionSla[];
+  bandasGrupo?: BandaAbiertaGrupo[];
+  objetivosDelGrupo?: readonly string[];
+  onElegirBanda?: (banda: BandaAbiertaGrupo) => void;
   onApply: (changes: Record<string, any>) => void;
   onClose: () => void;
   onRequestSupervisorAuth?: (
@@ -52,6 +58,9 @@ export default function PlanningShiftExtendModal({
   shiftsMap,
   pendingChanges,
   positionStructure,
+  bandasGrupo,
+  objetivosDelGrupo,
+  onElegirBanda,
   onApply,
   onClose,
   onRequestSupervisorAuth,
@@ -101,6 +110,7 @@ export default function PlanningShiftExtendModal({
     preferSamePosition: true,
     gapPositionName,
     gapBand: uiBand,
+    objectiveIdsPermitidos: objetivosDelGrupo,
   };
   const poolSecond = useMemo(
     () => (uiBand
@@ -260,7 +270,24 @@ export default function PlanningShiftExtendModal({
               Sin 2.º guardia: extendé al menos las <span className="font-black">{gapBandHours}h</span> de la banda para cerrar el hueco.
               Con 2.º guardia repartís el tramo (ext + adel).
             </p>
-            {gapOptions.length > 0 && (
+            {bandasGrupo && bandasGrupo.length > 0 ? (
+              <select
+                className="w-full rounded-xl border border-slate-200 px-2 py-2 text-xs font-bold"
+                data-selector-banda-grupo
+                value={claveBandaAbierta({ objectiveId, positionName: gapPositionName, band: uiBand })}
+                onChange={(e) => {
+                  const elegida = bandasGrupo.find((b) => claveBandaAbierta(b) === e.target.value);
+                  if (!elegida) return;
+                  setGapBand(elegida.band);
+                  setGapHoursSynced(false);
+                  onElegirBanda?.(elegida);
+                }}
+              >
+                {bandasGrupo.map((b) => (
+                  <option key={claveBandaAbierta(b)} value={claveBandaAbierta(b)}>{b.etiqueta}</option>
+                ))}
+              </select>
+            ) : gapOptions.length > 0 && (
               <select
                 className="w-full rounded-xl border border-slate-200 px-2 py-2 text-xs font-bold"
                 value={uiBand}

@@ -310,4 +310,6 @@ export type VacancySplitListContext = {
   gapStart?: string | null;
   /** Fin real del hueco (HH:mm). */
   gapEnd?: string | null;
+  /** En la vista agrupada: un guardia de cualquiera de estos objetivos puede extender. */
+  objectiveIdsPermitidos?: readonly string[] | null;
 };

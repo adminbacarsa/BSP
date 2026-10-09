@@ -28,6 +28,8 @@ export type PlanningShiftSlice = {
     coversBandCode?: string;
     /** Día del hueco que cierra este tramo (puede ser distinto del día del turno). */
     coversDateStr?: string;
+    /** Objetivo al que se acredita el cierre. Si falta, vale `objectiveId` del turno. */
+    coversObjectiveId?: string;
     segmentFromTime?: string;
     segmentToTime?: string;
     startTime?: string;

@@ -23,12 +23,14 @@ import {
   type TitularVacancyWorkShift,
 } from '@/lib/planificacion/vacancyCoverage';
 import { listVacancyGapBandOptions } from '@/lib/planificacion/vacancyGapBands';
+import { claveBandaAbierta, type BandaAbiertaGrupo } from '@/lib/planificacion/grupoCerrarBanda';
 import type { VacancyPositionSla } from '@/lib/planificacion/vacancySplitBands';
 
 export type SlaGapCloseModalData = {
   dateStr: string;
   positionName: string;
   gapBand: string;
+  objectiveId?: string;
 };
 
 type Props = {
@@ -39,6 +41,9 @@ type Props = {
   shiftsMap: Record<string, any>;
   pendingChanges: Record<string, any>;
   positionStructure: VacancyPositionSla[];
+  bandasGrupo?: BandaAbiertaGrupo[];
+  objetivosDelGrupo?: readonly string[];
+  onElegirBanda?: (banda: BandaAbiertaGrupo) => void;
   onApply: (changes: Record<string, any>) => void;
   onClose: () => void;
   onRequestSupervisorAuth?: (
@@ -68,6 +73,9 @@ export default function PlanningSlaGapCloseModal({
   shiftsMap,
   pendingChanges,
   positionStructure,
+  bandasGrupo,
+  objetivosDelGrupo,
+  onElegirBanda,
   onApply,
   onClose,
   onRequestSupervisorAuth,
@@ -113,7 +121,8 @@ export default function PlanningSlaGapCloseModal({
     gapBand: data.gapBand,
     gapStart: gapVentana.from,
     gapEnd: gapVentana.to,
-  }), [positionStructure, data.positionName, data.gapBand, gapVentana]);
+    objectiveIdsPermitidos: objetivosDelGrupo,
+  }), [positionStructure, data.positionName, data.gapBand, gapVentana, objetivosDelGrupo]);
   const poolExt = useMemo(
     () => listExtensionCandidates(
       data.gapBand,
@@ -336,6 +345,24 @@ export default function PlanningSlaGapCloseModal({
         </div>
 
         <div className="p-4 overflow-y-auto custom-scrollbar space-y-3 flex-1">
+          {bandasGrupo && bandasGrupo.length > 0 && (
+            <label className="block">
+              <span className="text-[10px] font-black uppercase text-slate-600">Objetivo y banda abierta</span>
+              <select
+                className="mt-1 w-full rounded-xl border border-slate-200 px-2 py-2 text-xs font-bold"
+                data-selector-banda-grupo
+                value={claveBandaAbierta({ objectiveId: data.objectiveId || objectiveId, positionName: data.positionName, band: data.gapBand })}
+                onChange={(e) => {
+                  const elegida = bandasGrupo.find((b) => claveBandaAbierta(b) === e.target.value);
+                  if (elegida) onElegirBanda?.(elegida);
+                }}
+              >
+                {bandasGrupo.map((b) => (
+                  <option key={claveBandaAbierta(b)} value={claveBandaAbierta(b)}>{b.etiqueta}</option>
+                ))}
+              </select>
+            </label>
+          )}
           <input
             className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-bold bg-slate-50"
             placeholder="Filtrar guardias..."
