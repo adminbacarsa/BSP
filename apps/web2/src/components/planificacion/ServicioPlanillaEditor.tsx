@@ -3,6 +3,7 @@ import { Plus, Trash2 } from 'lucide-react';
 import type { EquivalenciaCodigo } from '@/lib/planificacion/equivalenciaCodigo';
 import type { CuadroPlanilla } from '@/lib/planificacion/importarExcel';
 import {
+  alinearPuestos,
   compararConVigente,
   etiquetaDias,
   lineasConfirmacion,
@@ -28,15 +29,19 @@ type Props = {
 };
 
 export function ServicioPlanillaEditor({ cuadro, year, month, mesLabel, vigente, servicioId, puedeCrear, puedeActualizar, hayOtroServicio, onGuardar }: Props) {
-  const propuesta = useMemo(() => proponerServicioDesdePlanilla(cuadro, year, month), [cuadro, year, month]);
+  const propuesta = useMemo(() => {
+    const p = proponerServicioDesdePlanilla(cuadro, year, month);
+    return { ...p, franjas: alinearPuestos(p.franjas, vigente) };
+  }, [cuadro, year, month, vigente]);
   const [franjas, setFranjas] = useState<FranjaServicioPlanilla[]>(propuesta.franjas);
   const [equivalencias, setEquivalencias] = useState<EquivalenciaCodigo[]>(propuesta.equivalencias);
-  const [baseId, setBaseId] = useState(cuadro.indice);
+  const baseKey = `${cuadro.indice}|${servicioId}`;
+  const [baseId, setBaseId] = useState(baseKey);
   const [confirmando, setConfirmando] = useState<'crear' | 'actualizar' | null>(null);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState('');
-  if (baseId !== cuadro.indice) {
-    setBaseId(cuadro.indice);
+  if (baseId !== baseKey) {
+    setBaseId(baseKey);
     setFranjas(propuesta.franjas);
     setEquivalencias(propuesta.equivalencias);
     setConfirmando(null);
@@ -73,7 +78,7 @@ export function ServicioPlanillaEditor({ cuadro, year, month, mesLabel, vigente,
 
   return (
     <div className="space-y-3" data-servicio-planilla>
-      <div className="grid gap-3 lg:grid-cols-2">
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <div className="overflow-auto rounded-2xl border border-slate-200 shadow-sm" data-servicio-propuesta>
           <table className="w-full text-left text-[12px]">
             <thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-400">
@@ -95,14 +100,16 @@ export function ServicioPlanillaEditor({ cuadro, year, month, mesLabel, vigente,
                   <td><input value={f.startTime} onChange={(e) => patch(f.id, { startTime: e.target.value })} className="w-16 rounded-lg border border-slate-200 px-1 py-0.5" /></td>
                   <td><input value={f.endTime} onChange={(e) => patch(f.id, { endTime: e.target.value })} className="w-16 rounded-lg border border-slate-200 px-1 py-0.5" /></td>
                   <td><input type="number" min={1} value={f.cantidad} onChange={(e) => patch(f.id, { cantidad: Math.max(1, Number(e.target.value) || 1) })} className="w-12 rounded-lg border border-slate-200 px-1 py-0.5" /></td>
-                  <td className="whitespace-nowrap">
-                    {DIAS.map((d) => {
-                      const on = !f.dias.length || f.dias.includes(d);
-                      return (
-                        <button key={d} type="button" onClick={() => toggleDia(f.id, d)} className={`mr-0.5 h-6 w-6 rounded-md text-[10px] font-black ${on ? 'bg-slate-900 text-white' : 'border border-slate-200 text-slate-400'}`}>{d}</button>
-                      );
-                    })}
-                    <span className="ml-1 text-[10px] text-slate-400">{etiquetaDias(f.dias)}</span>
+                  <td className="whitespace-nowrap py-1" data-servicio-dias>
+                    <div className="flex gap-px">
+                      {DIAS.map((d) => {
+                        const on = !f.dias.length || f.dias.includes(d);
+                        return (
+                          <button key={d} type="button" onClick={() => toggleDia(f.id, d)} className={`h-5 w-5 rounded text-[9px] font-black ${on ? 'bg-slate-900 text-white' : 'border border-slate-200 text-slate-400'}`}>{d}</button>
+                        );
+                      })}
+                    </div>
+                    <span className="text-[9px] text-slate-400">{etiquetaDias(f.dias)}</span>
                   </td>
                   <td>
                     <button type="button" aria-label="Quitar franja" onClick={() => setFranjas((prev) => prev.filter((x) => x.id !== f.id))} className="rounded-lg p-1 text-slate-400 hover:bg-slate-50 hover:text-rose-600"><Trash2 size={13} /></button>

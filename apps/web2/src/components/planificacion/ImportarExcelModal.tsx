@@ -351,7 +351,7 @@ export function ImportarExcelModal({ ctx, onCargar, onAplicar, onCancelar, puede
 
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/40 p-4" data-importar-excel-modal>
-      <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl bg-white shadow-lg" onClick={(e) => e.stopPropagation()}>
+      <div className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl bg-white shadow-lg" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-3 border-b border-slate-100 px-5 py-4">
           <FileSpreadsheet className="text-indigo-600" size={18} />
           <div className="min-w-0">

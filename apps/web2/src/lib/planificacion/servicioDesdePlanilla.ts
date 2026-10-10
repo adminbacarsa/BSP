@@ -233,12 +233,79 @@ function minDe(hm: string): number {
   return (h || 0) * 60 + (m || 0);
 }
 
+function numeroPuesto(nombre: string): string {
+  const n = normPlanilla(nombre);
+  const m = n.match(/^(?:P|PTO|PUESTO|PSTO)\.?\s*(\d+)$/) || n.match(/\b(\d+)\s*$/);
+  return m ? String(Number(m[1])) : '';
+}
+
+function esPuestoGenerico(nombre: string): boolean {
+  return /^(P|PTO|PUESTO|PSTO)\.?$/.test(normPlanilla(nombre));
+}
+
+/**
+ * Puesto de la planilla → puesto del servicio. Por nombre normalizado, por número
+ * («P1», «PUESTO 1»), «Puesto» sin número = el único puesto, y por franjas parecidas.
+ */
+export function emparejarPuestos(
+  propuesta: Array<{ puesto: string; code: string }>,
+  vigente: Array<{ puesto: string; code: string }>,
+): Map<string, string> {
+  const out = new Map<string, string>();
+  const nombresP = [...new Set(propuesta.map((f) => f.puesto))];
+  const nombresV = [...new Set(vigente.map((f) => f.puesto))];
+  const libres = new Set(nombresV);
+  const tomar = (p: string, v: string) => { out.set(normPlanilla(p), v); libres.delete(v); };
+  for (const p of nombresP) {
+    const v = nombresV.find((x) => libres.has(x) && normPlanilla(x) === normPlanilla(p));
+    if (v) tomar(p, v);
+  }
+  for (const p of nombresP) {
+    if (out.has(normPlanilla(p))) continue;
+    const n = numeroPuesto(p);
+    if (!n) continue;
+    const vs = nombresV.filter((x) => libres.has(x) && numeroPuesto(x) === n);
+    if (vs.length === 1) tomar(p, vs[0]);
+  }
+  const sinPar = nombresP.filter((p) => !out.has(normPlanilla(p)));
+  if (sinPar.length === 1 && libres.size === 1 && (esPuestoGenerico(sinPar[0]) || nombresP.length === 1)) {
+    tomar(sinPar[0], [...libres][0]);
+  }
+  const codigos = (lista: Array<{ puesto: string; code: string }>, nombre: string) =>
+    new Set(lista.filter((f) => f.puesto === nombre).map((f) => claveCodigo(f.code)));
+  for (const p of nombresP) {
+    if (out.has(normPlanilla(p))) continue;
+    const cp = codigos(propuesta, p);
+    let best: { v: string; j: number } | null = null;
+    for (const v of libres) {
+      const cv = codigos(vigente, v);
+      const inter = [...cp].filter((c) => cv.has(c)).length;
+      const j = inter / Math.max(1, new Set([...cp, ...cv]).size);
+      if (j >= 0.6 && (!best || j > best.j)) best = { v, j };
+    }
+    if (best) tomar(p, best.v);
+  }
+  return out;
+}
+
+/** Renombra los puestos de la propuesta con el puesto compatible del servicio del mes. */
+export function alinearPuestos(franjas: FranjaServicioPlanilla[], vigente: FranjaVigente[]): FranjaServicioPlanilla[] {
+  if (!vigente.length) return franjas;
+  const par = emparejarPuestos(franjas, vigente);
+  return franjas.map((f) => {
+    const v = par.get(normPlanilla(f.puesto));
+    return v && v !== f.puesto ? { ...f, puesto: v } : f;
+  });
+}
+
 export function compararConVigente(propuesta: FranjaServicioPlanilla[], vigente: FranjaVigente[]): DiffFranja[] {
   const usados = new Set<number>();
   const out: DiffFranja[] = [];
+  const par = emparejarPuestos(propuesta, vigente);
+  const mismoPuesto = (p: string, v: string) => normPlanilla(par.get(normPlanilla(p)) || p) === normPlanilla(v);
   const candidatos = (f: FranjaServicioPlanilla) => vigente
     .map((v, i) => ({ v, i }))
-    .filter((x) => !usados.has(x.i) && normPlanilla(x.v.puesto) === normPlanilla(f.puesto) && claveCodigo(x.v.code) === claveCodigo(f.code))
+    .filter((x) => !usados.has(x.i) && mismoPuesto(f.puesto, x.v.puesto) && claveCodigo(x.v.code) === claveCodigo(f.code))
     .map((x) => {
       const dStart = Math.abs(minDe(x.v.startTime) - minDe(f.startTime));
       const diasP = new Set(normDias(f.dias) === 'TODOS' ? ORDEN_DIAS : f.dias);

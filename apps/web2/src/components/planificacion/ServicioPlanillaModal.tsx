@@ -67,7 +67,7 @@ export function ServicioPlanillaModal(props: Props) {
 
   return (
     <div className="fixed inset-0 z-[80] flex items-start justify-center overflow-y-auto bg-slate-900/40 p-4" data-servicio-planilla-modal>
-      <div className="my-6 w-full max-w-5xl rounded-3xl border border-slate-200 bg-white shadow-lg">
+      <div className="my-6 w-full max-w-6xl rounded-3xl border border-slate-200 bg-white shadow-lg">
         <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-3">
           <FileSpreadsheet size={16} className="text-indigo-600" />
           <div>

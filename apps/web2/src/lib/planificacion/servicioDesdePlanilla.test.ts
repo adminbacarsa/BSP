@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { detectarCuadros, type CeldaPlano } from './importarExcel';
+import { detectarCuadros, normPlanilla, type CeldaPlano } from './importarExcel';
 import { prepararPegadoExcel } from './modoRapido';
 import { claveEquivalencia, type EquivalenciaCodigo } from './equivalenciaCodigo';
 import {
   avisosFueraDeServicio,
   compararConVigente,
+  emparejarPuestos,
   etiquetaDias,
   letraDia,
   lineasConfirmacion,
@@ -124,6 +125,22 @@ describe('servicio desde la planilla', () => {
     const lineas = lineasConfirmacion(distinto, 'actualizar', 'octubre 2026');
     assert.match(lineas[0], /aplicar estos cambios/);
     assert.match(lineas.join('\n'), /horario/);
+  });
+
+  it('empareja «Puesto» con «PUESTO 1» y «P2» con «Puesto 2»: sale «distinto horario», no falta + sobra', () => {
+    const vig = [
+      { puesto: 'PUESTO 1', code: 'M', startTime: '07:00', endTime: '15:00', cantidad: 1, dias: [] as string[] },
+      { puesto: 'Puesto 2', code: 'T', startTime: '15:00', endTime: '23:00', cantidad: 1, dias: [] as string[] },
+    ];
+    const par = emparejarPuestos([{ puesto: 'Puesto', code: 'M' }, { puesto: 'P2', code: 'T' }], vig);
+    assert.equal(par.get(normPlanilla('Puesto')), 'PUESTO 1');
+    assert.equal(par.get(normPlanilla('P2')), 'Puesto 2');
+    const diff = compararConVigente([
+      { id: 'f1', puesto: 'Puesto', code: 'M', startTime: '06:00', endTime: '14:00', cantidad: 1, dias: [] },
+    ], vig.slice(0, 1));
+    assert.equal(diff.length, 1);
+    assert.equal(diff[0].estado, 'distinto');
+    assert.match(diff[0].detalle, /horario/);
   });
 
   it('con equivalencias el pegado usa el código del servicio y lista el que no está', () => {
