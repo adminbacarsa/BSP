@@ -518,10 +518,13 @@ import {
     cambioPendienteDe,
     ORIGEN_CONTINUAR_MES,
     avisosCoberturaPuesto,
+    cupoDelServicio,
     proponerContinuacion,
+    punteroParaGuardar,
     sobrantesPorDia,
     turnoHabilitadoPorEstructura,
     type EstadoCelda as EstadoCeldaContinuar,
+    type SugerenciaNivelacion,
     type PuestoSla as PuestoSlaContinuar,
     type TurnoPrevio as TurnoPrevioContinuar,
 } from '@/lib/planificacion/continuarMesAnterior';
@@ -1708,6 +1711,8 @@ function PlanificacionDesktop() {
     const [marcasVersion, setMarcasVersion] = useState(0);
     const marcasAccionRef = useRef<number[]>([]);
     const origenArranqueRef = useRef<OrigenArmado | null>(null);
+    /** Puntero de nivelación de «Continuar»: se guarda en planificacion_estados con el cronograma. */
+    const continuarPunteroRef = useRef<string[] | null>(null);
     const guardandoArmadoRef = useRef(false);
     const pendingSigRef = useRef('');
     const [sortBy, setSortBy] = useState<'name' | 'activity' | 'client' | 'band' | 'position'>('activity');
@@ -6016,6 +6021,7 @@ function PlanificacionDesktop() {
         origenArranqueRef.current = null;
         guardandoArmadoRef.current = false;
         pendingSigRef.current = '';
+        continuarPunteroRef.current = null;
     }, [selectedObjective, currentDate.getFullYear(), currentDate.getMonth()]);
 
     // Auto-aplicar rotación cuando el mes está vacío y hay rotación configurada en el SLA
@@ -8373,6 +8379,15 @@ function PlanificacionDesktop() {
                         setArmadoGuardado(armado);
                         if (armado.iniciadoAt) origenArranqueRef.current = armado.origen;
                     }).catch((err) => console.warn('[plan] armado', err));
+                    const puntero = continuarPunteroRef.current;
+                    if (puntero) {
+                        continuarPunteroRef.current = null;
+                        void setDoc(
+                            doc(db, 'planificacion_estados', buildPlanificacionEstadoDocId(empresaId, selectedObjective, touchYear, touchMonth)),
+                            { continuarPuntero: puntero, continuarPunteroAt: new Date().toISOString(), empresaId, objectiveId: selectedObjective, year: touchYear, month: touchMonth },
+                            { merge: true },
+                        ).catch((err) => console.warn('[plan] continuarPuntero', err));
+                    }
                 }
 
                 if (isPublished) {
@@ -11314,15 +11329,24 @@ function PlanificacionDesktop() {
             const guardiasBase = dotacionBaseEmployees;
             const ids = new Set(guardiasBase.map((e: any) => e.id));
             const previosPorEmp = new Map<string, TurnoPrevioContinuar[]>();
+            const salientesPorEmp = new Map<string, { nombre: string; previos: TurnoPrevioContinuar[] }>();
             const ultimosPrevios: LctShiftInput[] = [];
             const ultimoDiaPrevio = getDateKey(new Date(y, m, 0));
             const penultimoDiaPrevio = getDateKey(new Date(y, m, -1));
             for (const d of snap.docs) {
                 const t = { id: d.id, ...(d.data() as any) };
-                if (!ids.has(t.employeeId) || t.isDeleted) continue;
+                if (!t.employeeId || t.isDeleted) continue;
                 const start = t.startTime?.toDate ? t.startTime.toDate() : null;
                 if (!start) continue;
                 const dateStr = getDateKey(start);
+                if (!ids.has(t.employeeId)) {
+                    const nombre = String(t.employeeName || '');
+                    if (!nombre || /^VACANTE|SIN COBERTURA/i.test(nombre)) continue;
+                    const s = salientesPorEmp.get(t.employeeId) || { nombre, previos: [] };
+                    s.previos.push({ ...t, dateStr });
+                    salientesPorEmp.set(t.employeeId, s);
+                    continue;
+                }
                 const list = previosPorEmp.get(t.employeeId) || [];
                 list.push({ ...t, dateStr });
                 previosPorEmp.set(t.employeeId, list);
@@ -11348,14 +11372,28 @@ function PlanificacionDesktop() {
                 if (isPlanningShiftExcludedOnDate(posCfg, dateStr, code)) return false;
                 return turnoHabilitadoPorEstructura([posCfg], positionName, code, dateStr);
             };
+            const cargado = (empId: string, dateStr: string): string | null => {
+                const key = `${empId}_${dateStr}`;
+                const pend = pendingChanges[key];
+                const sh = pend ? (pend.isDeleted ? null : pend) : shiftsMap[key];
+                if (!sh || absencesMap[key] || (sh.objectiveId && String(sh.objectiveId) !== String(selectedObjective))) return null;
+                const code = String(sh.code || '').toUpperCase();
+                return code && !esCeldaLicencia({ code, tieneAusencia: false }) ? code : null;
+            };
+            const estadoPrevio = await fetchPlanificacionEstadoDoc(empresaId, selectedObjective, m === 0 ? y - 1 : y, m === 0 ? 12 : m).catch(() => null);
+            const punteroGuardado = estadoPrevio?.data?.continuarPuntero;
             const resultados = proponerContinuacion({
                 objectiveId: selectedObjective,
                 dias,
                 guardias: guardiasBase.map((e: any) => ({ id: e.id, nombre: e.name || e.id, previos: previosPorEmp.get(e.id) || [] })),
+                salientes: [...salientesPorEmp].map(([id, s]) => ({ id, nombre: s.nombre, previos: s.previos })),
                 estructura: (positionStructure || []) as PuestoSlaContinuar[],
                 estadoCelda,
                 diaBloqueado: (ds) => isPlanningDateLocked(ds) || isOutsideServiceRange(ds),
                 turnoHabilitado,
+                cupoDia: (ds) => (isOutsideServiceRange(ds) ? null : cupoDelServicio((positionStructure || []) as PuestoSlaContinuar[], ds, turnoHabilitado)),
+                punteroPrevio: Array.isArray(punteroGuardado) ? punteroGuardado.map(String) : null,
+                cargado,
             });
             const cambios: Record<string, any> = {};
             for (const r of resultados) {
@@ -11407,7 +11445,11 @@ function PlanificacionDesktop() {
             };
             setContinuarVista({
                 mesLabel: currentDate.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' }),
-                mesAnteriorLabel: new Date(y, m - 1, 1).toLocaleDateString('es-AR', { month: 'long' }),
+                mesAnteriorLabel: (() => {
+                    const ult = resultados.map((r) => r.ciclo?.ultimoDia || '').filter(Boolean).sort().pop();
+                    const [uy, um] = ult ? ult.split('-').map(Number) : [y, m];
+                    return new Date(uy, um - 1, 1).toLocaleDateString('es-AR', { month: 'long' });
+                })(),
                 resultados,
                 cortos,
                 sobrados,
@@ -11423,27 +11465,37 @@ function PlanificacionDesktop() {
         }
     };
 
-    const aplicarContinuarMesAnterior = (employeeIds: string[]) => {
+    const aplicarContinuarMesAnterior = (employeeIds: string[], sugerencias: SugerenciaNivelacion[]) => {
         if (!continuarVista || !selectedObjective) return;
         const elegidos = new Set(employeeIds);
         const next = { ...pendingChangesRef.current };
         let turnos = 0;
         let francos = 0;
+        const escritas = new Set<string>();
         for (const r of continuarVista.resultados) {
             if (!elegidos.has(r.employeeId)) continue;
             for (const c of r.propuestas) {
                 const key = `${c.employeeId}_${c.dateStr}`;
                 if (next[key] && !next[key].isDeleted) continue;
                 next[key] = cambioPendienteDe(c, selectedObjective);
+                escritas.add(key);
                 if (c.isFranco) francos += 1; else turnos += 1;
             }
         }
+        const aceptadas = sugerencias.filter((s) => elegidos.has(s.celda.employeeId) && escritas.has(`${s.celda.employeeId}_${s.dateStr}`));
+        for (const s of aceptadas) next[`${s.celda.employeeId}_${s.dateStr}`] = cambioPendienteDe(s.celda, selectedObjective);
         if (turnos + francos > 0 && !origenArranqueRef.current && !armadoGuardado?.iniciadoAt) {
             origenArranqueRef.current = ORIGEN_CONTINUAR_MES;
         }
+        continuarPunteroRef.current = punteroParaGuardar(
+            continuarVista.resultados.filter((r) => elegidos.has(r.employeeId)),
+            aceptadas,
+            daysInMonth.map((d) => getDateKey(d)),
+        );
         commitPendingChanges(next);
         setContinuarVista(null);
-        toast.success(`Continuado desde el mes anterior: ${turnos} turnos y ${francos} francos en borrador. Revisalos y guardá el cronograma.`);
+        const niv = aceptadas.length ? ` y ${aceptadas.length} cambio(s) de nivelación` : '';
+        toast.success(`Continuado desde el mes anterior: ${turnos} turnos y ${francos} francos${niv} en borrador. Revisalos y guardá el cronograma.`);
     };
 
     const armarCatalogoPlanilla = async () => {

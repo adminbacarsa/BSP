@@ -13,8 +13,10 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import {
   codigoDeCiclo,
+  cupoDelServicio,
   diaDelCiclo,
   diaIndex,
+  observacionesDelGuardia,
   proponerContinuacion,
   sobrantesPorDia,
   alertasDescansoCambioMes,
@@ -25,6 +27,7 @@ import {
 } from '../../apps/web2/src/lib/planificacion/continuarMesAnterior';
 import { LICENCIA_CODES } from '../../apps/web2/src/lib/planificacion/bandaLicencia';
 import { buildPlanningPositionStructure } from '../../apps/web2/src/lib/slaPlanningMatch';
+import { toYyyyMmDd } from '../../apps/web2/src/lib/firestoreDates';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const requireFn = createRequire(path.join(__dirname, '../../apps/functions/package.json'));
@@ -35,6 +38,7 @@ const arg = (k: string, d = '') => { const i = args.indexOf(k); return i >= 0 ? 
 const OBJ = arg('--obj');
 const MES = arg('--mes', '2026-10');
 const JSON_OUT = arg('--json');
+const SOLO_RESUMEN = args.includes('--resumen');
 if (!OBJ) { console.error('Falta --obj'); process.exit(1); }
 
 admin.initializeApp({ credential: admin.credential.applicationDefault(), projectId: 'comtroldata' });
@@ -92,19 +96,33 @@ for (let i = 0; i < ids.length; i += 10) {
 
 // SLA del mes nuevo.
 const slas = (await db.collection('servicios_sla').where('objectiveId', '==', OBJ).get()).docs.map((d: any) => ({ id: d.id, ...d.data() }));
-const vigente = slas.find((s: any) => String(s.startDate || '').slice(0, 10) <= primerDia && String(s.endDate || '9999').slice(0, 10) >= primerDia && s.status !== 'INACTIVE')
-  || slas.find((s: any) => String(s.startDate || '').slice(0, 7) === MES);
+const delMesSla = slas.find((s: any) => toYyyyMmDd(s.startDate) <= primerDia && (toYyyyMmDd(s.endDate) || '9999') >= primerDia && s.status !== 'INACTIVE')
+  || slas.find((s: any) => toYyyyMmDd(s.startDate).slice(0, 7) === MES);
+// Sin servicio en el mes, para medir se usa el último anterior (la grilla diría «No hay servicio en este mes»).
+const respaldo = delMesSla ? null : slas
+  .filter((s: any) => toYyyyMmDd(s.startDate) < primerDia && s.status !== 'INACTIVE')
+  .sort((a: any, b: any) => toYyyyMmDd(b.startDate).localeCompare(toYyyyMmDd(a.startDate)))[0];
+const vigente = delMesSla || respaldo;
 if (!vigente) { console.error(`Sin servicio para ${MES}`); process.exit(1); }
+if (respaldo) console.log(`Sin servicio en ${MES}: se mide con el servicio ${respaldo.id} (${toYyyyMmDd(respaldo.startDate)})`);
 const { structure } = buildPlanningPositionStructure(vigente as any, { monthHasSla: true, hasExactMatch: true });
 const estructura = structure as unknown as PuestoSla[];
 
-const resultados = proponerContinuacion({
+// Dotación = quien tiene algo en el mes armado; salientes = trabajaron el mes anterior y no siguen.
+const enMes = new Set(delMes.map((t) => t.employeeId));
+const previosDe = (id: string) => previos.filter((t) => t.employeeId === id);
+const altas = new Set(ids.filter((id) => enMes.has(id) && observacionesDelGuardia(previosDe(id), OBJ).length === 0));
+const base = {
   objectiveId: OBJ,
   dias,
-  guardias: ids.map((id) => ({ id, nombre: nombres.get(id) || id, previos: previos.filter((t) => t.employeeId === id) })),
+  guardias: ids.filter((id) => enMes.has(id)).map((id) => ({ id, nombre: nombres.get(id) || id, previos: previosDe(id) })),
+  salientes: ids.filter((id) => !enMes.has(id)).map((id) => ({ id, nombre: nombres.get(id) || id, previos: previosDe(id) })),
   estructura,
-  estadoCelda: (e, d) => (licencia.has(`${e}_${d}`) ? 'licencia' : null),
-});
+  estadoCelda: (e: string, d: string) => (licencia.has(`${e}_${d}`) ? 'licencia' as const : null),
+  cupoDia: (d: string) => cupoDelServicio(estructura, d),
+};
+const anteriores = proponerContinuacion({ ...base, regla: 'anterior' });
+const resultados = proponerContinuacion(base);
 
 // Lo armado a mano, normalizado igual que el ciclo (puntuales y licencias afuera).
 const aMano = new Map<string, { code: string; pos: string }>();
@@ -115,6 +133,48 @@ for (const t of delMes) {
   const prev = aMano.get(k);
   if (!prev || (prev.code === 'F' && code !== 'F')) aMano.set(k, { code, pos: String(t.positionName || '') });
 }
+
+// Métrica: celdas de turno y franco del mes armado (sin licencias, eventos ni coberturas), sin altas ni bajas.
+const predDe = (rs: typeof resultados, niv: boolean) => new Map(rs.map((r) => {
+  const m = new Map(r.propuestas.map((c) => [c.dateStr, c.isFranco ? 'F' : c.code]));
+  if (niv) for (const s of r.sugerencias) m.set(s.dateStr, s.a);
+  return [r.employeeId, m];
+}));
+const pAnt = predDe(anteriores, false);
+const pC2 = predDe(resultados, false);
+const pNiv = predDe(resultados, true);
+let nCel = 0; let okAnt = 0; let okC2 = 0; let okNiv = 0;
+const porGuardia: string[] = [];
+for (const id of enMes) {
+  if (altas.has(id)) continue;
+  let n = 0; let a = 0; let c = 0;
+  let mano = ''; let ant = ''; let nue = '';
+  for (const d of dias) {
+    const h = aMano.get(`${id}_${d}`);
+    const lic = licencia.has(`${id}_${d}`);
+    mano += lic ? 'L' : (h?.code || '.').slice(0, 1);
+    ant += (pAnt.get(id)?.get(d) || '.').slice(0, 1);
+    nue += (pC2.get(id)?.get(d) || '.').slice(0, 1);
+    if (!h || lic) continue;
+    nCel += 1; n += 1;
+    if (pAnt.get(id)?.get(d) === h.code) { okAnt += 1; a += 1; }
+    if (pC2.get(id)?.get(d) === h.code) { okC2 += 1; c += 1; }
+    if (pNiv.get(id)?.get(d) === h.code) okNiv += 1;
+  }
+  const r = resultados.find((x) => x.employeeId === id);
+  const obs = new Map(observacionesDelGuardia(previosDe(id), OBJ).map((o) => [o.idx, o.code]));
+  const hist = Array.from({ length: 62 }, (_, k) => (obs.get(diaIndex(primerDia) - 62 + k) || '.').slice(0, 1)).join('');
+  if (a !== c) porGuardia.push(`  ${id.slice(0, 8)} ant ${a}/${n} c2 ${c}/${n} · ${r?.plantilla?.via || r?.origenCiclo || '—'} ${r?.continuaEn || ''}\n    hist ${hist}\n    mano ${mano}\n    ant  ${ant}\n    c2   ${nue}`);
+}
+const p1 = (a: number) => (nCel ? `${((100 * a) / nCel).toFixed(1)}%` : '—');
+const vias = resultados.reduce<Record<string, number>>((a, r) => {
+  const k = r.plantilla?.via || `anterior:${r.origenCiclo || 'sin ciclo'}`;
+  a[k] = (a[k] || 0) + 1;
+  return a;
+}, {});
+console.log(`RESUMEN ${OBJ} ${MES} · celdas ${nCel} · anterior ${p1(okAnt)} · c2 ${p1(okC2)} · c2+niv ${p1(okNiv)} · sugerencias ${resultados.reduce((a, r) => a + r.sugerencias.length, 0)} · altas ${altas.size} · bajas ${base.salientes.length} · ${JSON.stringify(vias)}`);
+if (args.includes('--difs')) console.log(porGuardia.join('\n'));
+if (SOLO_RESUMEN) process.exit(0);
 
 const fam = (c: string) => (c === 'D12' ? 'M' : c === 'N12' ? 'N' : c);
 type Fila = {

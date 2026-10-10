@@ -7,7 +7,21 @@
  * bloqueados, estructura del SLA del mes nuevo) y aplica el resultado como borrador.
  */
 import { LICENCIA_CODES, ventanaTrabajo } from './bandaLicencia';
+import { getEffectiveShiftQuantityOnDate } from '../slaPlanningMatch';
+import {
+  bandaDe,
+  continuarC2,
+  nivelarContraCupo,
+  punteroAlCierre,
+  rasgosDeHistoria,
+  type CupoDia,
+  type NivelacionC2,
+  type PlanC2,
+  type ViaC2,
+} from './continuarC2';
 import { findLctRestGaps, type LctShiftInput } from './lctRestGap';
+
+export type { CupoDia } from './continuarC2';
 
 export const ORIGEN_CONTINUAR_MES = 'CONTINUAR_MES_ANTERIOR' as const;
 export const TOPE_HORAS_MES = 200;
@@ -108,8 +122,27 @@ export type RevisarPuesto = {
   propuestoEn?: string;
 };
 
-/** `fijo` = el período de todo el historial. `corte` y `bloques` son estimados: el modal los deja destildados. */
-export type OrigenCiclo = 'fijo' | 'corte' | 'bloques';
+/**
+ * `plantilla` = ciclo del objetivo (c2) en la fase del guardia. `fijo` = el período de todo su historial.
+ * `corte` y `bloques` son estimados: el modal los deja destildados.
+ */
+export type OrigenCiclo = 'plantilla' | 'fijo' | 'corte' | 'bloques';
+
+export type PlantillaGuardia = {
+  periodo: number | null;
+  grupo: string | null;
+  via: ViaC2;
+  copiaDe: string | null;
+};
+
+/** Cambio de banda para nivelar el cupo del día. Se aplica solo si queda tildado. */
+export type SugerenciaNivelacion = {
+  dateStr: string;
+  de: string;
+  a: string;
+  texto: string;
+  celda: CeldaPropuesta;
+};
 
 export type ResultadoGuardia = {
   employeeId: string;
@@ -127,6 +160,8 @@ export type ResultadoGuardia = {
   omitidas: { licencia: number; ocupada: number; bloqueada: number; sinDato: number; excluida: number };
   revisar: RevisarPuesto[];
   horasPropuestas: number;
+  plantilla: PlantillaGuardia | null;
+  sugerencias: SugerenciaNivelacion[];
 };
 
 export type EstadoCelda = 'licencia' | 'ocupada' | null;
@@ -143,6 +178,16 @@ export type ContinuarInput = {
   diaBloqueado?: (dateStr: string) => boolean;
   /** El SLA habilita ese turno ese día (días de la semana, exclusiones). Default: por la estructura. */
   turnoHabilitado?: (positionName: string, code: string, dateStr: string) => boolean;
+  /** Cupo M/T/N del servicio ese día. Sin función (o servicio sin `exigeCobertura`) no se sugiere nivelación. */
+  cupoDia?: ((dateStr: string) => CupoDia | null) | null;
+  /** Quienes cerraron el mes anterior con un cambio en su último bloque. null = se deriva. */
+  punteroPrevio?: string[] | null;
+  /** Código de trabajo ya cargado en el mes nuevo: cuenta para el cupo y no se mueve. */
+  cargado?: ((employeeId: string, dateStr: string) => string | null) | null;
+  /** Trabajaron el mes anterior y ya no están en la dotación: un alta puede heredar su fila. */
+  salientes?: Array<{ id: string; nombre: string; previos: TurnoPrevio[] }>;
+  /** `anterior` = solo el ciclo de cada guardia (para comparar). Default `c2`. */
+  regla?: 'c2' | 'anterior';
 };
 
 function up(v: unknown): string {
@@ -779,6 +824,36 @@ function retQueTenia(previos: TurnoPrevio[], objectiveId?: string): { positionNa
   };
 }
 
+/**
+ * Cupo M/T/N del servicio ese día (cantidad efectiva del SLA, días y exclusiones). Si el puesto tiene franjas de 8 h,
+ * cuentan esas (D12/N12 son la alternativa de 12 h); si solo tiene 12 h, D12 cuenta M + ½ T y N12 N + ½ T.
+ * Los puestos con `exigeCobertura === false` no cuentan. null = el servicio no pide nada ese día.
+ */
+export function cupoDelServicio(
+  estructura: PuestoSla[],
+  dateStr: string,
+  habilitado?: (positionName: string, code: string, dateStr: string) => boolean,
+): CupoDia | null {
+  const c: CupoDia = { M: 0, T: 0, N: 0 };
+  let algo = false;
+  for (const pos of estructura) {
+    if ((pos as { exigeCobertura?: boolean }).exigeCobertura === false) continue;
+    const de8 = (pos.shifts || []).some((s) => /^[MTN]\d*$/.test(up(s.code)));
+    for (const s of pos.shifts || []) {
+      const code = up(s.code);
+      const banda = bandaDe(code);
+      if (!banda || (de8 && (code === 'D12' || code === 'N12'))) continue;
+      const ok = habilitado ? habilitado(pos.positionName, code, dateStr) : turnoHabilitadoPorEstructura(estructura, pos.positionName, code, dateStr);
+      if (!ok) continue;
+      const q = getEffectiveShiftQuantityOnDate(pos, dateStr, code, pos.qty);
+      if (!q) continue;
+      algo = true;
+      if (code === 'D12') { c.M += q; c.T += q / 2; } else if (code === 'N12') { c.N += q; c.T += q / 2; } else c[banda] += q;
+    }
+  }
+  return algo ? c : null;
+}
+
 export function turnoHabilitadoPorEstructura(estructura: PuestoSla[], positionName: string, code: string, dateStr: string): boolean {
   const pos = estructura.find((p) => p.positionName === positionName);
   if (!pos) return false;
@@ -836,7 +911,11 @@ function celdaDeTrabajo(employeeId: string, dateStr: string, pos: PuestoSla, cod
   };
 }
 
-export function proponerGuardia(input: ContinuarInput, g: ContinuarInput['guardias'][number]): ResultadoGuardia {
+export function proponerGuardia(
+  input: ContinuarInput,
+  g: ContinuarInput['guardias'][number],
+  forzado?: CicloElegido | null,
+): ResultadoGuardia {
   const res: ResultadoGuardia = {
     employeeId: g.id,
     nombre: g.nombre,
@@ -850,15 +929,17 @@ export function proponerGuardia(input: ContinuarInput, g: ContinuarInput['guardi
     omitidas: { licencia: 0, ocupada: 0, bloqueada: 0, sinDato: 0, excluida: 0 },
     revisar: [],
     horasPropuestas: 0,
+    plantilla: null,
+    sugerencias: [],
   };
   const obs = observacionesDelGuardia(g.previos, input.objectiveId);
-  if (obs.length === 0) {
+  if (obs.length === 0 && !forzado) {
     res.motivoSinCiclo = 'No trabajó en este objetivo en las últimas semanas';
     return res;
   }
-  const desdeIdx = input.dias.length ? diaIndex(input.dias[0]) : obs[obs.length - 1].idx + 1;
+  const desdeIdx = input.dias.length ? diaIndex(input.dias[0]) : (obs[obs.length - 1]?.idx ?? 0) + 1;
   const hastaIdx = input.dias.length ? diaIndex(input.dias[input.dias.length - 1]) : desdeIdx;
-  const elegido = elegirCiclo(obs, desdeIdx, hastaIdx);
+  const elegido = forzado || elegirCiclo(obs, desdeIdx, hastaIdx);
   if (!elegido) {
     res.motivoSinCiclo = obs.length < 6
       ? `Pocos días para leer el ciclo (${obs.length})`
@@ -937,8 +1018,167 @@ export function proponerGuardia(input: ContinuarInput, g: ContinuarInput['guardi
   return res;
 }
 
+function etiquetaDeCodigos(dias: string[], codes: Record<string, string>): string {
+  const runs: Array<[string, number]> = [];
+  for (const d of dias.slice(0, 16)) {
+    const c = codes[d] || '?';
+    const last = runs[runs.length - 1];
+    if (last && last[0] === c) last[1] += 1;
+    else runs.push([c, 1]);
+  }
+  return runs.map(([c, n]) => (n > 1 ? `${c}×${n}` : c)).join(' · ');
+}
+
+function continuaEnDeCodes(dias: string[], codes: Record<string, string>): string {
+  const hoy = codes[dias[0]];
+  if (!hoy) return 'sin dato el primer día';
+  let largo = 0;
+  while (largo < dias.length && codes[dias[largo]] === hoy) largo += 1;
+  return largo > 1 ? `${hoy} (${ordinal(1)} de ${largo}+)` : hoy;
+}
+
+/** El plan c2 como ciclo para el resto del armado (puesto, SLA del mes nuevo, licencias, celdas). */
+function cicloDesdePlan(plan: PlanC2, fuente: Obs[], dias: string[]): CicloElegido {
+  const dia = (code: string, idx: number): DiaCiclo => {
+    if (code === 'F') return { code: 'F', positionName: 'General' };
+    const p = puestoDelCodigo(fuente, code);
+    const base: DiaCiclo = { code, positionName: p.pos || '' };
+    return code === 'RET' ? { ...base, ...horarioRet({ idx, code, fam: 'RET', pos: base.positionName, start: p.start, end: p.end }) } : base;
+  };
+  const previas = fuente.filter((o) => o.idx < diaIndex(dias[0]));
+  const ultimoDia = ymdDeIndex(previas.length ? Math.max(...previas.map((o) => o.idx)) : diaIndex(dias[0]) - 1);
+  const porDia = new Map<string, DiaCiclo>();
+  for (const d of dias) {
+    const c = plan.codes[d];
+    if (c) porDia.set(d, dia(c, diaIndex(d)));
+  }
+  if (plan.periodo) {
+    const fases = plan.fases.map((c, i) => (c ? dia(c, i) : null));
+    const ciclo: CicloDetectado = {
+      periodo: plan.periodo,
+      fases,
+      consistencia: plan.ajuste,
+      muestras: fuente.length,
+      ultimoDia,
+      etiqueta: etiquetaCiclo(fases),
+    };
+    return { ciclo, origen: 'plantilla', estimado: false, nota: null, continuaEn: null, diaDe: (d) => porDia.get(d) || null };
+  }
+  const ciclo: CicloDetectado = {
+    periodo: 0,
+    fases: [],
+    consistencia: 0,
+    muestras: fuente.length,
+    ultimoDia,
+    etiqueta: etiquetaDeCodigos(dias, plan.codes),
+  };
+  return {
+    ciclo,
+    origen: 'bloques',
+    estimado: true,
+    nota: 'ciclo estimado (por rachas)',
+    continuaEn: continuaEnDeCodes(dias, plan.codes),
+    diaDe: (d) => porDia.get(d) || null,
+  };
+}
+
+function sugerenciasDe(
+  input: ContinuarInput,
+  res: ResultadoGuardia,
+  nivelaciones: NivelacionC2[],
+): SugerenciaNivelacion[] {
+  const habilitado = input.turnoHabilitado
+    || ((pos: string, code: string, ds: string) => turnoHabilitadoPorEstructura(input.estructura, pos, code, ds));
+  const out: SugerenciaNivelacion[] = [];
+  for (const n of nivelaciones) {
+    const actual = res.propuestas.find((c) => c.dateStr === n.dateStr && !c.isFranco);
+    if (!actual) continue;
+    const r = resolverPuesto(input.estructura, actual.positionName, n.a);
+    if ('motivo' in r || !habilitado(r.pos.positionName, n.a, n.dateStr)) continue;
+    out.push({ dateStr: n.dateStr, de: n.de, a: n.a, texto: n.texto, celda: celdaDeTrabajo(res.employeeId, n.dateStr, r.pos, n.a) });
+  }
+  return out;
+}
+
 export function proponerContinuacion(input: ContinuarInput): ResultadoGuardia[] {
-  return input.guardias.map((g) => proponerGuardia(input, g));
+  if (input.regla === 'anterior') return input.guardias.map((g) => proponerGuardia(input, g));
+  const todos = [...input.guardias, ...(input.salientes || [])];
+  const obsPor = new Map(todos.map((g) => [g.id, observacionesDelGuardia(g.previos, input.objectiveId)]));
+  const nombres = new Map(todos.map((g) => [g.id, g.nombre]));
+  const historias = todos.map((g) => ({ id: g.id, nombre: g.nombre, crudo: (obsPor.get(g.id) || []).map((o) => ({ idx: o.idx, code: o.code })) }));
+  const planes = continuarC2({
+    historias,
+    orden: input.guardias.map((g) => g.id),
+    salientes: (input.salientes || []).map((s) => s.id),
+    dias: input.dias,
+  });
+  const resultados = input.guardias.map((g) => {
+    const plan = planes.get(g.id);
+    if (!plan || !input.dias.length || plan.via === 'rachas') return proponerGuardia(input, g);
+    const fuente = obsPor.get(plan.copiaDeId || g.id) || [];
+    const res = proponerGuardia(input, g, cicloDesdePlan(plan, fuente.length ? fuente : obsPor.get(g.id) || [], input.dias));
+    const copiaDe = plan.copiaDeId ? nombres.get(plan.copiaDeId) || plan.copiaDeId : null;
+    res.plantilla = { periodo: plan.periodo, grupo: plan.grupo, via: plan.via, copiaDe };
+    if (plan.grupo && res.continuaEn) res.continuaEn = `${res.continuaEn} · grupo ${plan.grupo}`;
+    if (plan.via === 'herencia' || plan.via === 'compañero') {
+      res.estimado = plan.via === 'herencia';
+      res.notaEstimado = copiaDe ? `copia de ${copiaDe.split(',')[0].trim()}` : null;
+    }
+    return res;
+  });
+  if (input.cupoDia) {
+    const nivel = nivelarResultados(input, resultados, historias);
+    for (const r of resultados) r.sugerencias = sugerenciasDe(input, r, nivel.get(r.employeeId) || []);
+  }
+  return resultados;
+}
+
+/** `continuarPuntero` del mes nuevo: quién cierra con un cambio de nivelación aceptado en su último bloque. */
+export function punteroParaGuardar(resultados: ResultadoGuardia[], aceptadas: SugerenciaNivelacion[], dias: string[]): string[] {
+  return punteroAlCierre(resultados.map((r) => ({
+    id: r.employeeId,
+    codes: Object.fromEntries(r.propuestas.map((c) => [c.dateStr, c.code])),
+    aceptadas: aceptadas
+      .filter((s) => s.celda.employeeId === r.employeeId)
+      .map((s): NivelacionC2 => ({ dateStr: s.dateStr, de: s.de, a: s.a, cubre: (bandaDe(s.a) || 'T') as NivelacionC2['cubre'], texto: s.texto })),
+  })), dias);
+}
+
+/** Nivelación sobre la propuesta de todos más lo ya cargado en el mes (licencias y celdas cerradas no cuentan). */
+function nivelarResultados(
+  input: ContinuarInput,
+  resultados: ResultadoGuardia[],
+  historias: Array<{ id: string; nombre: string; crudo: Array<{ idx: number; code: string }> }>,
+): Map<string, NivelacionC2[]> {
+  const grid = new Map<string, Map<string, string>>();
+  const bloqueadas = new Set<string>();
+  for (const r of resultados) {
+    const row = new Map<string, string>();
+    for (const c of r.propuestas) if (!c.isFranco && c.code !== 'RET') row.set(c.dateStr, c.code);
+    if (input.cargado) {
+      for (const d of input.dias) {
+        const code = input.cargado(r.employeeId, d);
+        if (!code) continue;
+        row.set(d, code);
+        bloqueadas.add(`${r.employeeId}|${d}`);
+      }
+    }
+    grid.set(r.employeeId, row);
+  }
+  const rasgos = rasgosDeHistoria(historias, input.dias);
+  const dia1 = input.dias[0];
+  const puntero = input.punteroPrevio
+    ?? resultados.filter((r) => rasgos.cierraConCambio.has(r.employeeId) && grid.get(r.employeeId)?.has(dia1)).map((r) => r.employeeId);
+  return nivelarContraCupo({
+    grid,
+    orden: resultados.map((r) => r.employeeId),
+    dias: input.dias,
+    nombres: new Map(resultados.map((r) => [r.employeeId, r.nombre])),
+    fijos: rasgos.fijos,
+    cupo: input.cupoDia!,
+    punteroPrevio: puntero,
+    bloqueadas,
+  });
 }
 
 /** Forma del borrador de la grilla (`pendingChanges`). Horario del SLA del mes nuevo, nunca el del mes anterior. */

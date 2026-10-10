@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { AlertTriangle, CalendarClock, Clock, Moon, Repeat, ShieldAlert, X } from 'lucide-react';
+import { AlertTriangle, CalendarClock, Clock, Moon, Repeat, Scale, ShieldAlert, X } from 'lucide-react';
 import {
   textoDias,
   type AlertaCupo,
@@ -7,6 +7,7 @@ import {
   type AlertaHoras,
   type AvisosCobertura,
   type ResultadoGuardia,
+  type SugerenciaNivelacion,
 } from '@/lib/planificacion/continuarMesAnterior';
 
 export type DiaCorto = { dateStr: string; cerrados: number; requeridos: number };
@@ -24,7 +25,7 @@ export type ContinuarMesVista = {
 
 type Props = {
   vista: ContinuarMesVista;
-  onAplicar: (employeeIds: string[]) => void;
+  onAplicar: (employeeIds: string[], sugerencias: SugerenciaNivelacion[]) => void;
   onCancelar: () => void;
 };
 
@@ -44,6 +45,10 @@ function Seccion({ icon, titulo, tono, children }: { icon: React.ReactNode; titu
 
 function apellido(nombre: string): string {
   return String(nombre || '').split(',')[0].trim();
+}
+
+function claveSugerencia(s: SugerenciaNivelacion): string {
+  return `${s.celda.employeeId}|${s.dateStr}`;
 }
 
 /** Un renglón por cambio de puesto (todos los guardias juntos) y uno por guardia cuando no se propone. */
@@ -70,11 +75,27 @@ function agruparRevisar(resultados: ResultadoGuardia[]): Array<{ texto: string; 
   return [...out, ...sinProponer];
 }
 
+/** «Plantilla del objetivo (24 días)» / «Su propio ciclo» / «Copia de X» / «Hereda la fila de X». */
+function textoOrigen(r: ResultadoGuardia): string {
+  const p = r.plantilla;
+  if (p?.via === 'compañero' && p.copiaDe) return `copia de ${apellido(p.copiaDe)}`;
+  if (p?.via === 'herencia' && p.copiaDe) return `hereda la fila de ${apellido(p.copiaDe)}`;
+  if (p?.via === 'plantilla') return `plantilla del objetivo${p.periodo ? ` (${p.periodo} días)` : ''}${p.grupo ? ` · grupo ${p.grupo}` : ''}`;
+  return 'su propio ciclo';
+}
+
 export function ContinuarMesModal({ vista, onAplicar, onCancelar }: Props) {
   const conCiclo = useMemo(() => vista.resultados.filter((r) => r.ciclo && r.propuestas.length > 0), [vista.resultados]);
   const sinCiclo = useMemo(() => vista.resultados.filter((r) => !r.ciclo), [vista.resultados]);
   const sinNada = useMemo(() => vista.resultados.filter((r) => r.ciclo && r.propuestas.length === 0), [vista.resultados]);
   const [elegidos, setElegidos] = useState<Set<string>>(() => new Set(conCiclo.filter((r) => !r.estimado).map((r) => r.employeeId)));
+  const [nivelar, setNivelar] = useState<Set<string>>(() => new Set());
+
+  const sugerencias = useMemo(
+    () => conCiclo.flatMap((r) => r.sugerencias || []).sort((a, b) => a.dateStr.localeCompare(b.dateStr)),
+    [conCiclo],
+  );
+  const sugerenciasVisibles = useMemo(() => sugerencias.filter((s) => elegidos.has(s.celda.employeeId)), [sugerencias, elegidos]);
 
   const totales = useMemo(() => {
     let turnos = 0; let francos = 0;
@@ -98,10 +119,16 @@ export function ContinuarMesModal({ vista, onAplicar, onCancelar }: Props) {
     if (next.has(id)) next.delete(id); else next.add(id);
     return next;
   });
+  const toggleNivelar = (k: string) => setNivelar((prev) => {
+    const next = new Set(prev);
+    if (next.has(k)) next.delete(k); else next.add(k);
+    return next;
+  });
+  const aceptadas = sugerenciasVisibles.filter((s) => nivelar.has(claveSugerencia(s)));
 
   return (
     <div className="fixed inset-0 z-[10050] flex items-center justify-center bg-black/45 backdrop-blur-sm p-4" onClick={onCancelar} data-continuar-mes-modal>
-      <div className="bg-white rounded-2xl shadow-sm w-full max-w-[980px] max-h-[88vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-white rounded-2xl shadow-sm w-full max-w-[1040px] max-h-[88vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-slate-200">
           <div>
             <div className="flex items-center gap-2 text-slate-900 font-black text-base">
@@ -109,9 +136,9 @@ export function ContinuarMesModal({ vista, onAplicar, onCancelar }: Props) {
               Continuar desde {vista.mesAnteriorLabel}
             </div>
             <div className="text-[12px] text-slate-500 mt-0.5">
-              Se lee el ciclo de cada guardia en las últimas semanas y se sigue en {vista.mesLabel} desde donde quedó
+              Se lee el plan de cada guardia (sin coberturas, extensiones ni eventos) y se sigue en {vista.mesLabel} desde donde quedó
               {ultimoLeido ? <> (último día cargado: {ultimoLeido.slice(8)}/{ultimoLeido.slice(5, 7)})</> : null}.
-              Las licencias cargadas y las celdas que ya tienen algo no se tocan. Queda en borrador hasta «Guardar cronograma».
+              Los que rotan igual siguen la plantilla del objetivo. Las licencias cargadas y las celdas que ya tienen algo no se tocan. Queda en borrador hasta «Guardar cronograma».
             </div>
           </div>
           <button type="button" onClick={onCancelar} aria-label="Cerrar" className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500"><X size={18} /></button>
@@ -159,7 +186,7 @@ export function ContinuarMesModal({ vista, onAplicar, onCancelar }: Props) {
               <tr className="text-left text-[10px] uppercase tracking-wide text-slate-500 border-b border-slate-200">
                 <th className="py-1.5 pr-2 w-6" />
                 <th className="py-1.5 pr-2">Guardia</th>
-                <th className="py-1.5 pr-2">Ciclo detectado</th>
+                <th className="py-1.5 pr-2">Ciclo</th>
                 <th className="py-1.5 pr-2">El 1.º sigue en</th>
                 <th className="py-1.5 pr-2 text-right">Propone</th>
                 <th className="py-1.5">No se toca</th>
@@ -177,19 +204,19 @@ export function ContinuarMesModal({ vista, onAplicar, onCancelar }: Props) {
                   o.excluida ? `${o.excluida} fuera del SLA` : '',
                   o.sinDato ? `${o.sinDato} sin dato` : '',
                 ].filter(Boolean).join(' · ');
+                const origen = textoOrigen(r);
                 return (
-                  <tr key={r.employeeId} className={`border-b border-slate-100 align-top ${r.estimado ? 'bg-amber-50/70' : ''}`} data-continuar-guardia={r.employeeId} data-continuar-estimado={r.estimado ? r.origenCiclo : undefined}>
+                  <tr key={r.employeeId} className={`border-b border-slate-100 align-top ${r.estimado ? 'bg-amber-50/70' : ''}`} data-continuar-guardia={r.employeeId} data-continuar-estimado={r.estimado ? r.origenCiclo : undefined} data-continuar-via={r.plantilla?.via || 'propio'}>
                     <td className="py-1.5 pr-2">
                       <input type="checkbox" checked={elegidos.has(r.employeeId)} onChange={() => toggle(r.employeeId)} aria-label={`Incluir a ${r.nombre}`} />
                     </td>
                     <td className="py-1.5 pr-2 font-bold text-slate-800">{r.nombre}</td>
                     <td className="py-1.5 pr-2 font-mono text-slate-700">
                       {r.ciclo!.etiqueta}
-                      {r.estimado ? (
+                      <div className={`text-[10px] font-sans font-bold ${r.plantilla?.via === 'compañero' || r.plantilla?.via === 'herencia' ? 'text-indigo-700' : 'text-slate-400'}`} data-continuar-origen>{origen}</div>
+                      {r.estimado && r.notaEstimado && !r.plantilla?.copiaDe ? (
                         <div className="text-[10px] font-sans font-bold text-amber-800" data-continuar-nota={r.notaEstimado}>{r.notaEstimado}</div>
-                      ) : (
-                        <span className="ml-1 text-[10px] text-slate-400 font-sans">({r.ciclo!.periodo} días)</span>
-                      )}
+                      ) : null}
                     </td>
                     <td className="py-1.5 pr-2 font-bold text-teal-700">{r.continuaEn}</td>
                     <td className="py-1.5 pr-2 text-right tabular-nums">{turnos} turnos · {francos} F</td>
@@ -207,11 +234,40 @@ export function ContinuarMesModal({ vista, onAplicar, onCancelar }: Props) {
               ))}
             </tbody>
           </table>
+
+          {sugerenciasVisibles.length > 0 && (
+            <div className="rounded-2xl border border-indigo-200 bg-indigo-50/60 px-3 py-2.5 shadow-sm" data-continuar-nivelacion>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wide text-indigo-900">
+                  <Scale size={12} /> Nivelar con el servicio · {sugerenciasVisibles.length} sugerencia(s)
+                </div>
+                <div className="flex gap-2 text-[11px] font-bold">
+                  <button type="button" className="text-indigo-700 hover:underline" onClick={() => setNivelar(new Set(sugerenciasVisibles.map(claveSugerencia)))}>Tildar todas</button>
+                  <button type="button" className="text-slate-500 hover:underline" onClick={() => setNivelar(new Set())}>Ninguna</button>
+                </div>
+              </div>
+              <div className="text-[11px] text-indigo-900/80 mt-0.5 mb-1.5">
+                Opcional. Lo principal es seguir la racha: estos cambios de banda dejan cada día con el cupo del servicio. Se aplican solo los que tildes.
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-0.5">
+                {sugerenciasVisibles.map((s) => {
+                  const k = claveSugerencia(s);
+                  return (
+                    <label key={k} className="flex items-center gap-2 text-[11px] text-slate-800 cursor-pointer hover:bg-white/70 rounded-lg px-1 py-0.5" data-continuar-sugerencia={k}>
+                      <input type="checkbox" checked={nivelar.has(k)} onChange={() => toggleNivelar(k)} />
+                      <span className="font-medium">{s.texto}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center justify-between gap-3 px-5 py-3 border-t border-slate-200 bg-slate-50">
           <div className="text-[12px] text-slate-600">
             {elegidos.size} guardia(s) · {totales.turnos} turnos y {totales.francos} francos en borrador
+            {aceptadas.length > 0 ? <> · {aceptadas.length} cambio(s) de nivelación</> : null}
           </div>
           <div className="flex gap-2">
             <button type="button" onClick={onCancelar} className="px-4 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 text-[12px] font-bold hover:bg-slate-100">Cancelar</button>
@@ -219,7 +275,7 @@ export function ContinuarMesModal({ vista, onAplicar, onCancelar }: Props) {
               type="button"
               data-continuar-aplicar
               disabled={elegidos.size === 0 || totales.turnos + totales.francos === 0}
-              onClick={() => onAplicar([...elegidos])}
+              onClick={() => onAplicar([...elegidos], aceptadas)}
               className="px-4 py-2 rounded-lg bg-teal-600 text-white text-[12px] font-black hover:bg-teal-700 disabled:bg-white disabled:text-slate-400 disabled:border disabled:border-slate-300"
             >
               Aplicar

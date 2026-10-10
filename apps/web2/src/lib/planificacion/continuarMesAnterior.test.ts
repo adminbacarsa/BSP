@@ -413,7 +413,9 @@ function estructuraDe(previos: TurnoPrevio[]): PuestoSla[] {
 test('un ciclo claro de todo el historial no se marca como estimado', () => {
   const previos = armar(ROTA_6_2, '2026-08-01', '2026-09-30', 0);
   const [res] = proponerContinuacion(input([{ id: 'g', nombre: 'G', previos }], diasDelMes(2026, 10)));
-  assert.equal(res.origenCiclo, 'fijo');
+  assert.equal(res.origenCiclo, 'plantilla');
+  const [anterior] = proponerContinuacion({ ...input([{ id: 'g', nombre: 'G', previos }], diasDelMes(2026, 10)), regla: 'anterior' });
+  assert.equal(anterior.origenCiclo, 'fijo');
   assert.equal(res.estimado, false);
   assert.equal(res.notaEstimado, null);
 });

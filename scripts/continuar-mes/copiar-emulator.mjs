@@ -3,7 +3,7 @@
  * «Continuar desde el mes anterior». El mes destino queda vacío salvo sus licencias (lo que ya estaría
  * cargado al planificar): así se ve qué propone la continuación.
  *
- *   node scripts/continuar-mes/copiar-emulator.mjs --obj 9CbYIDmsUGnabENKvXZt --mes 2026-10 [--fs 127.0.0.1:8291 --auth 127.0.0.1:9291]
+ *   node scripts/continuar-mes/copiar-emulator.mjs --obj 9CbYIDmsUGnabENKvXZt --mes 2026-10 [--fs 127.0.0.1:8291 --auth 127.0.0.1:9291] [--anonimizar]
  *
  * No escribe en producción: las escrituras van a la app «emu», que apunta al emulador.
  */
@@ -100,10 +100,27 @@ for (let i = 0; i < viejos.docs.length; i += 400) {
   viejos.docs.slice(i, i + 400).forEach((d) => b.delete(d.ref));
   await b.commit();
 }
+// --anonimizar: las capturas van al repo y no pueden llevar nombres reales.
+const ANON = args.includes('--anonimizar');
+const alias = new Map(ids.sort().map((id, i) => [id, `GUARDIA ${String(i + 1).padStart(2, '0')}`]));
+const sinNombre = (x) => {
+  if (!ANON) return x;
+  const a = alias.get(String(x.employeeId || '')) || 'GUARDIA';
+  const out = { ...x, employeeName: `${a}, Test` };
+  for (const k of ['dni', 'cuil', 'phone', 'telefono', 'email', 'address', 'domicilio']) delete out[k];
+  return out;
+};
+const empleadoSinNombre = (e, d) => {
+  if (!ANON) return e;
+  const a = alias.get(d.id) || 'GUARDIA';
+  const out = { ...e, name: `${a}, Test`, lastName: a, firstName: 'Test', nombre: 'Test', apellido: a };
+  for (const k of ['dni', 'cuil', 'phone', 'telefono', 'email', 'address', 'domicilio', 'fileNumber', 'legajo']) delete out[k];
+  return out;
+};
 await batchWrite('servicios_sla', slas.docs);
-await batchWrite('empleados', empleados, (e) => ({ ...e, ...(e.preferredObjectiveId ? {} : { preferredObjectiveId: OBJ }) }));
-await batchWrite('turnos', copiar);
-await batchWrite('ausencias', ausencias);
+await batchWrite('empleados', empleados, (e, d) => ({ ...empleadoSinNombre(e, d), ...(e.preferredObjectiveId ? {} : { preferredObjectiveId: OBJ }) }));
+await batchWrite('turnos', copiar, sinNombre);
+await batchWrite('ausencias', ausencias, sinNombre);
 await batchWrite('planificacion_estados', estados.docs.filter((d) => !d.id.endsWith(`_${Y}_${M}`)));
 
 // La grilla toma el campo `id` del documento si existe (clientes legacy): el deep link usa ese.
