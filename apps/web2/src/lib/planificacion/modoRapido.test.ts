@@ -262,6 +262,25 @@ describe('modo rápido · pegado de Excel', () => {
         assert.match(p.resumen, /Pegadas 3 filas: 2 guardias encontrados, 1 sin encontrar \(QUIROGA FABIAN\), 7 celdas, 1 códigos desconocidos \(VF\/T\)/);
     });
 
+    it('una fila con casi todas M no se toma como la fila de letras de los días (ROMERO / GOYOCHEA)', () => {
+        const romero = ['M', 'M', 'F', 'F', ...Array(5).fill('M'), 'F', 'F', ...Array(5).fill('M'), 'F', 'F', ...Array(5).fill('M'), 'F', 'F', ...Array(5).fill('M'), 'F'].join('\t');
+        const tsv = [`NIEVAS ADRIANA\t3733\t${romero}`, `PERALTA JEREMIAS\t\t${romero}`].join('\n');
+        const p = prepararPegadoExcel(parsearTsv(tsv), { guardias, cursor: null, cols: 31, conocidos: CONOCIDOS });
+        assert.equal(p.filas.length, 2);
+        assert.equal(p.filas[0].celdas.length, 31);
+    });
+
+    it('la licencia en celdas combinadas se extiende a los días que dice', () => {
+        const dias = ['F', 'M', 'M', 'LIC ANUAL 2025 X 14 DIAS', ...Array(13).fill(''), 'F', 'F', 'M'].join('\t');
+        const tsv = `NIEVAS ADRIANA\t3733\t${dias}`;
+        const p = prepararPegadoExcel(parsearTsv(tsv), { guardias, cursor: null, cols: 31, conocidos: CONOCIDOS });
+        const codes = p.filas[0].celdas.map((c) => c.code);
+        assert.equal(codes.filter((c) => c === 'V').length, 14);
+        assert.deepEqual(codes.slice(0, 4), ['F', 'M', 'M', 'V']);
+        assert.deepEqual(codes.slice(-3), ['F', 'F', 'M']);
+        assert.equal(p.desconocidos.length, 0);
+    });
+
     it('una fila del mes entero no se descarta por el largo del texto', () => {
         const dias = Array.from({ length: 31 }, () => 'P2  T').join('\t');
         const tsv = `NIEVAS ADRIANA\t3733\tRELEVANTE\t${dias}`;

@@ -98,7 +98,7 @@ function CeldaGrillaBase({ vista: v, fila, col, seleccionada, colElegir, elegirA
             data-evento={v.evento}
             title={v.titulo}
         >
-            <div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${v.estilo}${comparada ? ' ring-2 ring-violet-600 ring-offset-1 z-20' : ''}${v.sufijoUsado} ${v.ringExtra}${v.marcaTope ? ' border-b-2 border-rose-600' : ''}`}>
+            <div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${v.estilo}${comparada ? ' ring-2 ring-violet-600 ring-offset-1 z-20' : ''}${v.sufijoUsado} ${v.ringExtra}${v.marcaTope ? ' border-b-2 border-rose-600' : ''}${v.descansoReducido ? ' border-t-2 border-amber-500' : ''}`}>
                 {v.consulta ? (
                     <IndicadorConsultaCelda
                         texto={v.consultaTexto || ''}
@@ -118,7 +118,6 @@ function CeldaGrillaBase({ vista: v, fila, col, seleccionada, colElegir, elegirA
                 {v.mas && <div className="absolute -top-1 -right-1 text-[8px] bg-red-900 text-white px-1 rounded-full border border-white/40">+</div>}
                 {v.liberado && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-emerald-600 text-white px-0.5 rounded">RET</div>}
                 {v.usado && <div className="absolute -top-1 -left-1 text-[7px] font-black bg-violet-600 text-white px-0.5 rounded z-10" title="Turno usado en cobertura operativa">U</div>}
-                {v.descansoReducido && <div className="absolute -top-1 left-0 text-[7px] font-black bg-amber-500 text-white px-0.5 rounded z-10" title="Descanso reducido autorizado">8–12</div>}
                 {v.menuRol ? (
                     <div className={`absolute -top-1 left-1/2 -translate-x-1/2 max-w-full truncate text-[6.5px] font-black text-white px-0.5 rounded z-10 ${v.menuRol === 'CUBRE' ? 'bg-indigo-600' : 'bg-emerald-600'}`} data-marca-menu={v.menuRol}>{v.menuMarca}</div>
                 ) : null}
