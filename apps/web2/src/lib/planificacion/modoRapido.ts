@@ -419,7 +419,8 @@ export function opcionesDeCodigo(slaPuesto: TurnoSla[], slaTodos: TurnoSla[], ul
 export type TurnoAviso = { code: string; startTime?: string; endTime?: string; hours?: number; trabajo: boolean };
 
 export type AvisoRapido = {
-    tipo: 'DESCANSO' | 'TOPE' | 'LICENCIA' | 'SOLAPE' | 'SERVICIO';
+    tipo: 'DESCANSO' | 'TOPE' | 'LICENCIA' | 'SOLAPE' | 'SERVICIO' | 'SOBRECOBERTURA' | 'SIN_PUESTO';
+    puestoSugerido?: string;
     empId: string;
     nombre: string;
     dateStr: string;
@@ -559,6 +560,10 @@ export function agruparAvisos(avisos: AvisoRapido[]): GrupoAviso[] {
         } else if (a.tipo === 'SERVICIO') {
             const que = a.code === 'HORARIO' ? 'horario distinto' : a.code === 'DIA' ? 'día no habilitado' : 'código fuera del servicio';
             texto = items.length > 1 ? `${ap} · ${items.length} fuera del servicio (${que}, ${dias})` : `${ap} · ${que} (${dias})`;
+        } else if (a.tipo === 'SIN_PUESTO') {
+            texto = items.length > 1 ? `${ap} · sin puesto (${dias})` : a.texto;
+        } else if (a.tipo === 'SOBRECOBERTURA') {
+            texto = a.texto;
         } else if (items.length > 1) {
             const etiq = a.tipo === 'LICENCIA' ? 'licencias' : 'solapes';
             texto = `${ap} · ${items.length} ${etiq} (${dias})`;
@@ -1058,6 +1063,7 @@ export const ATAJOS_MODO_RAPIDO: Array<{ teclas: string; que: string }> = [
     { teclas: '+ / −', que: 'Pasar M o N a 12 h (D12 / N12) o volver a 8 h. Si falta una banda, propone el par y Enter confirma' },
     { teclas: 'Shift + +', que: 'Cerrar todas las bandas faltantes de ese día' },
     { teclas: 'Ctrl + L  o  /', que: 'Cargar una novedad del catálogo en la selección (un registro por rango)' },
+    { teclas: 'Alt + L', que: 'Liberar el turno a RET y cerrar la banda con 12 h' },
     { teclas: 'Colores de Excel', que: 'Al pegar desde Excel la M y N rojas pasan a D12 y N12 y la E amarilla es evento. Desde otro lado sin color: escribí D12 y N12 o usá +, y la E se pregunta en el resumen. Un código que el servicio no tiene no se pega y queda en el resumen' },
     { teclas: 'Ctrl + D / Ctrl + R', que: 'Rellenar hacia abajo / a la derecha' },
     { teclas: 'Cuadradito de la esquina', que: 'Arrastrar para repetir el patrón (sigue ciclos: M M M M M M F F)' },

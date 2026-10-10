@@ -78,6 +78,11 @@ export function ServicioPlanillaEditor({ cuadro, year, month, mesLabel, vigente,
 
   return (
     <div className="space-y-3" data-servicio-planilla>
+      {propuesta.lectura ? (
+        <p className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] text-slate-700 shadow-sm" data-servicio-lectura>
+          {propuesta.lectura}
+        </p>
+      ) : null}
       <div className="grid gap-3 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <div className="overflow-auto rounded-2xl border border-slate-200 shadow-sm" data-servicio-propuesta>
           <table className="w-full text-left text-[12px]">

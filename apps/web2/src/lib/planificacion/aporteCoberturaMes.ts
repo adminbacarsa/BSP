@@ -13,8 +13,10 @@ import {
 } from '@/lib/planificacion/positionCoverageUnits';
 import {
   calcPlanningBillableHoursAttributedToPosition,
+  calcPlanningBillableShiftHours,
   planningShiftBillableBreakdown,
 } from '@/lib/planificacion/planningScheduledHours';
+import { SIN_PUESTO } from '@/lib/planificacion/lecturaBandas';
 
 export type AportePorDiaYPuesto = Record<string, Record<string, number>>;
 
@@ -73,10 +75,17 @@ export function sumarAportePorDiaYPuesto(input: {
       if (input.objectiveIdOf(emp.id, shift, docDate) !== String(input.selectedObjective)) continue;
       const code = String(shift.code || '').toUpperCase();
       if (PLANNING_NON_BILLABLE_CODES.has(code)) continue;
-      const homePos = String(shift.positionName || input.dominantPositionName || 'General');
+      const acredita = diaAcreditacionCobertura(shift, docDate);
+      const declarado = String(shift.positionName || '').trim();
+      if (!declarado) {
+        const horas = calcPlanningBillableShiftHours(shift, input.slaCodeHoursHint);
+        const dia = dias.has(acredita) ? acredita : docDate;
+        sumar(dia, SIN_PUESTO, horas);
+        continue;
+      }
+      const homePos = declarado;
       const coverPos = String(shift.coversPositionName || homePos);
       const tramo = esTramoCobertura(shift);
-      const acredita = diaAcreditacionCobertura(shift, docDate);
       const consultas: Array<{ dia: string; aporte: 'completo' | 'solo-base' | 'solo-tramo' }> = [];
       if (dias.has(docDate)) {
         consultas.push({ dia: docDate, aporte: !tramo || acredita === docDate ? 'completo' : 'solo-base' });
