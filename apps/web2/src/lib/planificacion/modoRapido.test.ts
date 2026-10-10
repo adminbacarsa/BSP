@@ -2,12 +2,14 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
     autorizacionesAlGuardar,
+    agruparAvisos,
     avisosModoRapido,
     continuarPatron,
     crearHistorial,
     descansoEntre,
     deshacer,
     detectarCiclo,
+    codigoAlConfirmar,
     horarioDeCodigo,
     matrizATsv,
     moverCursor,
@@ -17,8 +19,10 @@ import {
     prepararPegadoExcel,
     planPegado,
     planRelleno,
+    fusionarNovedadesContinuas,
     planSerie,
     registrarCambio,
+    resolverNovedad,
     rehacer,
     sugerirCodigos,
     tipoDeCodigo,
@@ -134,6 +138,15 @@ describe('modo rápido · deshacer y rehacer', () => {
 });
 
 describe('modo rápido · códigos y horario', () => {
+    it('E tipeada en la grilla es Enfermedad y no se completa a EV', () => {
+        const ops = [{ code: 'EV' }, { code: 'EN' }, { code: 'E' }, { code: 'M' }];
+        assert.equal(codigoAlConfirmar('E', ops), 'E');
+        assert.equal(codigoAlConfirmar('e', [{ code: 'EV' }]), 'E');
+        assert.equal(codigoAlConfirmar('E', ops, 0), 'E');
+        const conocidos = new Set(['M', 'T', 'N', 'E', 'EV', 'V', 'F']);
+        assert.equal(normalizarCodigoExcel('E', conocidos).code, 'E');
+        assert.equal(normalizarCodigoExcel('EV', conocidos).code, 'EV');
+    });
     it('autocompletar: exacto primero, después por prefijo y sin repetir', () => {
         const ops = [{ code: 'N12' }, { code: 'N' }, { code: 'M' }, { code: 'N' }, { code: 'NX' }];
         assert.deepEqual(sugerirCodigos('n', ops).map((o) => o.code), ['N', 'N12', 'NX']);
@@ -342,5 +355,51 @@ describe('modo rápido · pegado de Excel', () => {
         const p = prepararPegadoExcel(parsearTsv(tsv), { guardias, cursor: null, cols: 31, conocidos: CONOCIDOS });
         assert.equal(p.filas.length, 1);
         assert.deepEqual(p.filas[0].celdas.map((c) => c.code), ['M', 'T']);
+    });
+});
+
+describe('modo rápido · avisos agrupados', () => {
+    it('junta los descansos del mismo guardia y de las mismas horas', () => {
+        const avisos = [
+            { tipo: 'DESCANSO' as const, empId: 'v', nombre: 'VIDELA, Juan', dateStr: '2026-10-12', restHours: 8, texto: 'largo' },
+            { tipo: 'DESCANSO' as const, empId: 'v', nombre: 'VIDELA, Juan', dateStr: '2026-10-15', restHours: 8, texto: 'largo' },
+            { tipo: 'DESCANSO' as const, empId: 'v', nombre: 'VIDELA, Juan', dateStr: '2026-10-20', restHours: 10, texto: 'otro' },
+        ];
+        const g = agruparAvisos(avisos);
+        assert.equal(g.length, 2);
+        assert.equal(g[0].texto, 'VIDELA · 2 descansos de 8 h (12/10, 15/10)');
+        assert.equal(g[0].items.length, 2);
+        assert.match(g[1].texto, /descanso de 10 h \(20\/10\)/);
+    });
+});
+
+describe('modo rápido · novedades', () => {
+    const catalogo = [
+        { code: 'V', label: 'Vacaciones' },
+        { code: 'A', label: 'ART' },
+        { code: 'SGS', label: 'Sin goce de sueldo' },
+        { code: 'L', label: 'MAVIC' },
+        { code: 'L', label: 'Licencia Esp.' },
+    ];
+
+    it('resuelve el código del catálogo y el nombre único', () => {
+        assert.deepEqual(resolverNovedad('SGS', catalogo), { code: 'SGS', label: 'Sin goce de sueldo' });
+        assert.deepEqual(resolverNovedad('ART', catalogo), { code: 'A', label: 'ART' });
+        assert.equal(resolverNovedad('MAVIC', catalogo)?.label, 'MAVIC');
+        assert.equal(resolverNovedad('MAVIC', catalogo)?.code, 'L');
+        assert.equal(resolverNovedad('M', catalogo), null);
+    });
+
+    it('un rango continuo del mismo guardia es un solo registro', () => {
+        const dias = Array.from({ length: 14 }, (_, i) => `2026-10-${String(10 + i).padStart(2, '0')}`);
+        const items = dias.map((d) => ({
+            employeeId: 'herr', employeeName: 'HERRANTE', type: 'Vacaciones', startDate: d, endDate: d, reason: 'Cargado en modo rápido', status: 'APPROVED',
+        }));
+        items.push({ employeeId: 'herr', employeeName: 'HERRANTE', type: 'Vacaciones', startDate: '2026-10-25', endDate: '2026-10-25', reason: 'Cargado en modo rápido', status: 'APPROVED' });
+        const fusion = fusionarNovedadesContinuas(items);
+        assert.equal(fusion.length, 2);
+        assert.equal(fusion[0].startDate, '2026-10-10');
+        assert.equal(fusion[0].endDate, '2026-10-23');
+        assert.equal(fusion[1].startDate, '2026-10-25');
     });
 });

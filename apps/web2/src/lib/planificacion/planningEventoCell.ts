@@ -169,7 +169,7 @@ export function eventoCellOverlay(
   const franco = pickFrancoTurno(cellTurnos) || (isFrancoTurno(baseShift) ? baseShift! : null);
   if (franco) return { ev, mode: 'FRANCO_USADO', franco, tooltip };
   if (!baseShift || baseShift.isDeleted === true || isEventoTurno(baseShift)) return { ev, mode: 'EV', franco: null, tooltip };
-  if (NO_TRABAJA.has(codigoDe(baseShift))) return { ev, mode: 'EV', franco: null, tooltip };
+  // Licencia (E, V, AA) o turno de trabajo: la celda no se pinta como EV. El evento queda en la marca.
   return { ev, mode: 'BADGE', franco: null, tooltip };
 }
 

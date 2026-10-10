@@ -229,16 +229,23 @@ import {
     type VistaCelda,
 } from '@/components/planificacion/GrillaCelda';
 import { ModoRapidoCapa, type CapaModoRapidoApi, type MarcaAviso } from '@/components/planificacion/ModoRapidoCapa';
-import { ModoRapidoAyuda, ModoRapidoAvisosPanel, CopiarDeModal, PegarExcelModal, type CopiarDeEleccion, type PegarExcelEstado } from '@/components/planificacion/ModoRapidoPiezas';
+import { Cierre12Banner, ModoRapidoAyuda, ModoRapidoAvisosPanel, PegarExcelModal, SelectorNovedad, type DecisionDiaE, type PegarExcelEstado } from '@/components/planificacion/ModoRapidoPiezas';
+import { coloresParaTsv } from '@/lib/planificacion/pegadoExcelColor';
+import { asignarNominaAServicioEvento } from '@/services/eventoAssignService';
 import {
     type AvisoRapido,
+    type PreviewPegadoExcel,
+    avisosSinVer,
+    claveAvisosVistos,
+    idAviso,
+    textoCargarEvento,
     type CeldaRC,
     type RangoRC,
     type TurnoSla,
-    CODIGOS_LICENCIA_RAPIDA,
     HORARIO_ESTANDAR,
     autorizacionesAlGuardar,
     avisosModoRapido,
+    fusionarNovedadesContinuas,
     horarioDeCodigo,
     matrizATsv,
     normalizarCodigo,
@@ -248,8 +255,12 @@ import {
     planPegado,
     planRelleno,
     planSerie,
+    resolverNovedad,
     tipoDeCodigo,
+    type TipoNovedadRapida,
 } from '@/lib/planificacion/modoRapido';
+import { NOVEDAD_TYPE_SEEDS } from '@/lib/rrhh/novedadTypes';
+import { absenceService } from '@/services/absenceService';
 import {
     compareObjectiveMonthSchedules,
     formatCompareObjectiveMonthsReport,
@@ -435,7 +446,8 @@ type CtxMenuRapido = {
     absence: any;
 };
 type CovMenuRapido = { mode: 'substitute'; id: string } | { mode: 'split'; extId: string; adelId: string };
-import { applyOperationalGapCloseToChanges } from '@/lib/planificacion/operationalGapCoverage';
+import { applyOperationalGapCloseToChanges, applySingleWorkerFullGapCloseToChanges } from '@/lib/planificacion/operationalGapCoverage';
+import { horarioDoce, proponerCierre12h, textoResumen12h, volverA8, type Propuesta12h, type TurnoPuesto12 } from '@/lib/planificacion/cierre12h';
 import {
     clasificarSeleccionLicencia,
     diasQueQuedaron,
@@ -458,6 +470,7 @@ import { resolveCellSecondBlock, slaBlocksForPositionShift } from '@/lib/planifi
 import {
     listExtensionCandidates,
     listEarlyStartCandidates,
+    previousCalendarDayStr,
     defaultSplitForBand,
     defaultSplitForBandAtPosition,
     neighborBandsForTarget,
@@ -2019,11 +2032,59 @@ function PlanificacionDesktop() {
     const grillaScrollRef = useRef<HTMLDivElement | null>(null);
     const [ayudaRapidaOpen, setAyudaRapidaOpen] = useState(false);
     const [pegarExcel, setPegarExcel] = useState<PegarExcelEstado | null>(null);
-    const [copiarDeOpen, setCopiarDeOpen] = useState(false);
-    const [copiarDeTick, setCopiarDeTick] = useState(0);
-    const pendienteCopiarDeRef = useRef<{ porEmpDia: Map<string, FuenteRapida>; empIds: string[]; soloVacias: boolean; nombre: string } | null>(null);
-    const copiarDeIntentosRef = useRef(0);
+    const [catalogoNovedad, setCatalogoNovedad] = useState<TipoNovedadRapida[]>(() => NOVEDAD_TYPE_SEEDS.map((s) => ({ code: s.code, label: s.label })));
+    const [propuesta12, setPropuesta12] = useState<Propuesta12h[] | null>(null);
+    const [selectorNovedad, setSelectorNovedad] = useState<CeldaRC[] | null>(null);
+    const motivoNovedadRef = useRef('Cargado en modo rápido');
     const avisosRapidoRef = useRef<AvisoRapido[]>([]);
+    const [avisosVistos, setAvisosVistos] = useState<Set<string>>(() => new Set());
+    /** Celdas pegadas como evento sin vincular: `${empId}_${dateStr}` → texto de la marca. */
+    const [afectadoEvento, setAfectadoEvento] = useState<Record<string, string>>({});
+    const claveVistosRapido = selectedObjective ? claveAvisosVistos(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1) : '';
+    const claveAfectadoEvento = selectedObjective ? `cosp-planif-afectado-evento:${selectedObjective}:${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}` : '';
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        try {
+            const raw = claveVistosRapido ? window.localStorage.getItem(claveVistosRapido) : null;
+            setAvisosVistos(new Set(raw ? (JSON.parse(raw) as string[]) : []));
+        } catch { setAvisosVistos(new Set()); }
+        try {
+            const raw = claveAfectadoEvento ? window.localStorage.getItem(claveAfectadoEvento) : null;
+            setAfectadoEvento(raw ? (JSON.parse(raw) as Record<string, string>) : {});
+        } catch { setAfectadoEvento({}); }
+    }, [claveVistosRapido, claveAfectadoEvento]);
+    const marcarAvisosVistos = (ids: string[]) => {
+        setAvisosVistos((prev) => {
+            const next = new Set(prev);
+            for (const id of ids) next.add(id);
+            if (claveVistosRapido && typeof window !== 'undefined') {
+                try { window.localStorage.setItem(claveVistosRapido, JSON.stringify([...next].slice(-500))); } catch { /* sin espacio */ }
+            }
+            return next;
+        });
+    };
+    const guardarAfectadoEvento = (fn: (prev: Record<string, string>) => Record<string, string>) => {
+        setAfectadoEvento((prev) => {
+            const next = fn(prev);
+            if (claveAfectadoEvento && typeof window !== 'undefined') {
+                try {
+                    if (Object.keys(next).length) window.localStorage.setItem(claveAfectadoEvento, JSON.stringify(next));
+                    else window.localStorage.removeItem(claveAfectadoEvento);
+                } catch { /* sin espacio */ }
+            }
+            return next;
+        });
+    };
+    useEffect(() => {
+        if (!empresaId) return;
+        const q = empresaCollectionQuery('tipos_novedad', empresaId, scopeEmpresa);
+        return onSnapshot(q, (snap) => {
+            const rows = snap.docs
+                .map((d) => d.data() as { code?: string; label?: string; status?: string })
+                .filter((d) => d.status !== 'INACTIVE' && d.code && d.label);
+            if (rows.length) setCatalogoNovedad(rows.map((d) => ({ code: String(d.code), label: String(d.label) })));
+        }, () => {});
+    }, [empresaId, scopeEmpresa]);
     const modoRapidoStorageKey = `cosp-planif-modo-rapido:${authUser?.uid || 'anon'}`;
     useEffect(() => {
         if (typeof window === 'undefined') return;
@@ -8381,7 +8442,7 @@ function PlanificacionDesktop() {
                     );
                 }
 
-                const novedades = Object.values(savedPendingNovedades);
+                const novedades = fusionarNovedadesContinuas(Object.values(savedPendingNovedades) as Array<{ employeeId: string; type: string; startDate: string; endDate: string; reason?: string }>);
                 if (novedades.length > 0) {
                     postSaveTasks.push((async () => {
                         let ausBatch = writeBatch(db);
@@ -13384,7 +13445,9 @@ function PlanificacionDesktop() {
             if (!s || s.isDeleted) continue;
             if (selectedObjective && s.objectiveId && s.objectiveId !== selectedObjective) continue;
             const code = normalizarCodigo(s.code);
-            if (!code || out[code] || tipoDeCodigo(code) !== 'TRABAJO') continue;
+            if (!code || out[code] || code === 'EV' || String(s.origin || '').toUpperCase() === 'EVENTO') continue;
+            if (selectedObjective && String(s.objectiveId || '') !== selectedObjective) continue;
+            if (tipoDeCodigo(code) !== 'TRABAJO') continue;
             const st = hhmmRapido(s.startTime);
             const et = hhmmRapido(s.endTime);
             if (!st || !et) continue;
@@ -13429,7 +13492,7 @@ function PlanificacionDesktop() {
         const { emp, ctx } = ctxRapido(r, c);
         const pos = emp ? puestoFilaRapido(emp.id, ctx) : 'General';
         const objId = emp ? resolveObjectiveForEmp(emp.id) : selectedObjective;
-        return opcionesDeCodigo(getShiftsForPosition(pos, objId) as TurnoSla[], slaTodosRapido, ultimoUsadoRapido);
+        return opcionesDeCodigo(getShiftsForPosition(pos, objId) as TurnoSla[], slaTodosRapido, ultimoUsadoRapido, catalogoNovedad);
     };
 
     const bloqueoGlobalRapido = (): string | null => {
@@ -13475,12 +13538,21 @@ function PlanificacionDesktop() {
             const nombres: Record<string, string> = { F: 'Franco', FF: 'Franco feriado', FP: 'Franco permuta' };
             return { change: { ...base, code, name: nombres[code], hours: 0, startTime: '00:00', ...(code === 'FP' ? { endTime: '23:59' } : {}), isFranco: true, positionName: pos } };
         }
-        if (tipo === 'LICENCIA') {
-            const name = CODIGOS_LICENCIA_RAPIDA[code];
+        const novedadRes = resolverNovedad(code, catalogoNovedad);
+        if (novedadRes) {
             return {
-                change: { code, name, isTemp: true, isNovedad: true, hours: 0, startTime: '00:00', ...camposBandaConservada(c?.s || null) },
-                novedad: { employeeId: emp.id, employeeName: emp.name || '', startDate: ds, endDate: ds, type: name, reason: 'Cargado en modo rápido', status: 'APPROVED', _modoRapido: true },
+                change: { code: novedadRes.code, name: novedadRes.label, isTemp: true, isNovedad: true, hours: 0, startTime: '00:00', ...camposBandaConservada((c?.p && !c.p.isDeleted ? c.p : c?.s) || null) },
+                novedad: { employeeId: emp.id, employeeName: emp.name || '', startDate: ds, endDate: ds, type: novedadRes.label, reason: motivoNovedadRef.current || 'Cargado en modo rápido', status: 'APPROVED', _modoRapido: true },
             };
+        }
+        if (tipo === 'LICENCIA') {
+            return {
+                change: { code, name: code, isTemp: true, isNovedad: true, hours: 0, startTime: '00:00', ...camposBandaConservada((c?.p && !c.p.isDeleted ? c.p : c?.s) || null) },
+                novedad: { employeeId: emp.id, employeeName: emp.name || '', startDate: ds, endDate: ds, type: code, reason: motivoNovedadRef.current || 'Cargado en modo rápido', status: 'APPROVED', _modoRapido: true },
+            };
+        }
+        if (code === 'EV') {
+            return { error: 'EV es un evento: no se escribe desde la grilla. Para enfermedad usá E.' };
         }
         if (tipo === 'RET') {
             return { change: { ...base, code: 'RET', name: 'Retén', hours: 0, startTime: '00:00', positionName: 'Retén', isFranco: false } };
@@ -13521,15 +13593,70 @@ function PlanificacionDesktop() {
         if (global) { toast.message(global); return; }
         const next = { ...pendingChangesRef.current };
         const novedades: Record<string, any> = {};
+        const quitarNovedad = new Set<string>();
         const motivos = new Map<string, number>();
         const anotar = (m: string) => motivos.set(m, (motivos.get(m) || 0) + 1);
         let hechos = 0;
+        const diaMas = (ds: string) => {
+            const [y, m, d] = ds.split('-').map(Number);
+            const dt = new Date(y, (m || 1) - 1, d || 1);
+            dt.setDate(dt.getDate() + 1);
+            return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+        };
+        const esNovedadCelda = (ctx: CtxCeldaGrilla | undefined, key: string) => {
+            if (pendingChangesRef.current[key]?.isNovedad || next[key]?.isNovedad) return true;
+            if (ctx?.isLeaveCell) return true;
+            return !!resolverNovedad(codigoCtxRapido(ctx), catalogoNovedad);
+        };
+        const bajas = new Map<string, { id: string; empId: string; nombre: string; type: string; start: string; end: string }>();
+        for (const it of items) {
+            if (!(it.borrar || !it.code)) continue;
+            const { emp, key, ctx } = ctxRapido(it.r, it.c);
+            if (!emp || !esNovedadCelda(ctx, key)) continue;
+            const aus = absencesMap[key];
+            if (!aus?.id) continue;
+            bajas.set(String(aus.id), {
+                id: String(aus.id),
+                empId: emp.id,
+                nombre: String(emp.name || emp.id),
+                type: String(aus.type || aus.absenceType || aus.inferredCode || 'ausencia'),
+                start: String(aus.startDate || '').slice(0, 10),
+                end: String(aus.endDate || aus.startDate || '').slice(0, 10),
+            });
+        }
+        const bajasOk = new Map(bajas);
+        if (bajas.size) {
+            const lineas = [...bajas.values()].map((b) => `${b.nombre}: ${b.type} ${b.start.slice(8, 10)}/${b.start.slice(5, 7)} → ${b.end.slice(8, 10)}/${b.end.slice(5, 7)}`);
+            if (!window.confirm(`Dar de baja la ausencia ya guardada?\n${lineas.join('\n')}`)) bajasOk.clear();
+        }
+        for (const b of bajasOk.values()) {
+            void absenceService.update(b.id, { status: 'Rechazada' }).catch(() => toast.error('No se pudo dar de baja la ausencia.'));
+            let ds = b.start;
+            let guard = 0;
+            while (ds && ds <= b.end && guard < 400) {
+                if (diasRapido.includes(ds)) {
+                    const key = `${b.empId}_${ds}`;
+                    next[key] = { isDeleted: true };
+                    quitarNovedad.add(key);
+                    hechos++;
+                }
+                ds = diaMas(ds);
+                guard++;
+            }
+        }
+        const sinMarcaEvento: string[] = [];
         for (const it of items) {
             const { emp, ds, key, ctx } = ctxRapido(it.r, it.c);
             if (!emp) continue;
+            if (afectadoEvento[key]) sinMarcaEvento.push(key);
             if (it.borrar || !it.code) {
+                if (bajas.has(String(absencesMap[key]?.id || '')) && esNovedadCelda(ctx, key)) {
+                    if (!bajasOk.has(String(absencesMap[key]?.id || ''))) anotar('Ausencia guardada: no se dio de baja.');
+                    continue;
+                }
                 const bl = bloqueoCeldaRapido(emp, ds, ctx, null);
                 if (bl) { anotar(bl); continue; }
+                if (pendingNovedades[key]) quitarNovedad.add(key);
                 const guardado = !!(shiftsMap[key] && !shiftsMap[key].isDeleted);
                 if (next[key] && !guardado) { delete next[key]; hechos++; }
                 else if (guardado && !next[key]?.isDeleted) { next[key] = { isDeleted: true }; hechos++; }
@@ -13544,10 +13671,22 @@ function PlanificacionDesktop() {
             if (res.novedad) novedades[key] = res.novedad;
             hechos++;
         }
-        if (hechos) {
-            commitPendingChanges(next);
-            if (Object.keys(novedades).length) setPendingNovedades((prev) => ({ ...prev, ...novedades }));
+        if (sinMarcaEvento.length) {
+            guardarAfectadoEvento((prev) => {
+                const out = { ...prev };
+                for (const k of sinMarcaEvento) delete out[k];
+                return out;
+            });
         }
+        if (hechos) commitPendingChanges(next);
+        if (hechos || quitarNovedad.size || Object.keys(novedades).length) {
+            setPendingNovedades((prev) => {
+                const out = { ...prev, ...novedades };
+                for (const k of quitarNovedad) delete out[k];
+                return out;
+            });
+        }
+        motivoNovedadRef.current = 'Cargado en modo rápido';
         if (motivos.size) {
             const lista = [...motivos.entries()];
             const total = lista.reduce((a, [, n]) => a + n, 0);
@@ -13588,7 +13727,18 @@ function PlanificacionDesktop() {
             fuente: fuente ? fuente[p.fila]?.[p.col] : null,
         })));
     };
-    const pegarRapido = (inicio: CeldaRC | null, rg: RangoRC | null, texto: string) => {
+    const abrirResumenPegado = (preview: PreviewPegadoExcel) => {
+        const asignacion: Record<number, number | null> = {};
+        for (const f of preview.filas) asignacion[f.indice] = f.filaGrilla;
+        const decisiones: Record<number, DecisionDiaE> = {};
+        for (const d of preview.diasE) {
+            const ds = diasRapido[d.col] || '';
+            const ops = d.porDefecto === 'EVENTO' ? opcionesEventoPegado(ds) : [];
+            decisiones[d.col] = { tipo: d.porDefecto, vinculo: ops.length === 1 ? ops[0].value : null };
+        }
+        setPegarExcel({ paso: 'resumen', preview, asignacion, decisiones });
+    };
+    const pegarRapido = (inicio: CeldaRC | null, rg: RangoRC | null, texto: string, html?: string) => {
         const interno = portapapelesRapidoRef.current;
         const limpio = (t: string) => t.replace(/\r/g, '').trim();
         const usarInterno = !!interno && (!limpio(texto) || limpio(texto) === limpio(interno.tsv));
@@ -13598,41 +13748,105 @@ function PlanificacionDesktop() {
         }
         const matriz = parsearTsv(texto);
         if (!matriz.length) return;
-        const conocidos = new Set(opcionesDeCodigo([], slaTodosRapido, ultimoUsadoRapido).map((o) => normalizarCodigo(o.code)));
-        const preview = prepararPegadoExcel(matriz, { guardias: guardiasPegado(), cursor: inicio, cols: dimsRapido.cols, conocidos });
+        const conocidos = new Set(opcionesDeCodigo([], slaTodosRapido, ultimoUsadoRapido, catalogoNovedad).map((o) => normalizarCodigo(o.code)));
+        const colores = html ? coloresParaTsv(matriz, html) : null;
+        const preview = prepararPegadoExcel(matriz, { guardias: guardiasPegado(), cursor: inicio, cols: dimsRapido.cols, conocidos, colores });
         if (preview.modo === 'posicion') {
             pegarPorPosicion(matriz, inicio || { r: 0, c: 0 }, rg, null);
             return;
         }
-        const asignacion: Record<number, number | null> = {};
-        for (const f of preview.filas) asignacion[f.indice] = f.filaGrilla;
-        setPegarExcel({ paso: 'resumen', preview, asignacion });
+        abrirResumenPegado(preview);
     };
-    const revisarPegadoExcel = (texto: string) => {
+    const revisarPegadoExcel = (texto: string, html?: string) => {
         const matriz = parsearTsv(texto);
         if (!matriz.length) return;
-        const conocidos = new Set(opcionesDeCodigo([], slaTodosRapido, ultimoUsadoRapido).map((o) => normalizarCodigo(o.code)));
-        const preview = prepararPegadoExcel(matriz, { guardias: guardiasPegado(), cursor: null, cols: dimsRapido.cols, conocidos });
+        const conocidos = new Set(opcionesDeCodigo([], slaTodosRapido, ultimoUsadoRapido, catalogoNovedad).map((o) => normalizarCodigo(o.code)));
+        const colores = html ? coloresParaTsv(matriz, html) : null;
+        const preview = prepararPegadoExcel(matriz, { guardias: guardiasPegado(), cursor: null, cols: dimsRapido.cols, conocidos, colores });
         if (preview.modo === 'posicion') {
             setPegarExcel(null);
             pegarPorPosicion(matriz, { r: 0, c: 0 }, null, null);
             return;
         }
-        const asignacion: Record<number, number | null> = {};
-        for (const f of preview.filas) asignacion[f.indice] = f.filaGrilla;
-        setPegarExcel({ paso: 'resumen', preview, asignacion });
+        abrirResumenPegado(preview);
     };
+    const serviciosEventoPegado = (ds: string) => serviciosParaFecha(eventos, ds, true)
+        .filter(({ evento, servicio }) => !!evento.id && (evento.servicios || []).some((s) => s.id === servicio.id));
+    const opcionesEventoPegado = (ds: string) => serviciosEventoPegado(ds).map(({ evento, servicio }) => ({
+        value: `${evento.id}|${servicio.id}`,
+        label: `${evento.nombre} · ${servicio.nombre} · ${servicio.horaInicio}–${servicio.horaFin}${servicio.cupo ? ` · cupo ${servicio.cupo}` : ''}`,
+    }));
     const aplicarPegadoExcel = () => {
         if (!pegarExcel || pegarExcel.paso !== 'resumen') return;
-        const { preview, asignacion } = pegarExcel;
+        const { preview, asignacion, decisiones } = pegarExcel;
         const items: Array<{ r: number; c: number; code: string }> = [];
+        const sinVincular: Array<{ key: string; ds: string }> = [];
+        const vinculadas: Array<{ emp: any; ds: string; vinculo: string }> = [];
         for (const f of preview.filas) {
             const r = asignacion[f.indice];
             if (r == null) continue;
-            for (const cel of f.celdas) items.push({ r, c: cel.col, code: cel.code });
+            for (const cel of f.celdas) {
+                if (!cel.evento) { items.push({ r, c: cel.col, code: cel.code }); continue; }
+                const d = preview.diasE.find((x) => x.col === cel.col);
+                const dec = decisiones[cel.col] || { tipo: d?.porDefecto || 'E', vinculo: null };
+                if (dec.tipo === 'E') { items.push({ r, c: cel.col, code: 'E' }); continue; }
+                const emp = displayedEmployees[r];
+                const ds = diasRapido[cel.col];
+                if (!emp || !ds) continue;
+                if (dec.vinculo) vinculadas.push({ emp, ds, vinculo: dec.vinculo });
+                else sinVincular.push({ key: `${emp.id}_${ds}`, ds });
+            }
         }
         setPegarExcel(null);
-        escribirRapido(items);
+        if (items.length) escribirRapido(items);
+        if (sinVincular.length) {
+            guardarAfectadoEvento((prev) => {
+                const next = { ...prev };
+                for (const s of sinVincular) next[s.key] = 'Afectado a evento (sin vincular, sin horas)';
+                return next;
+            });
+            toast.message(textoCargarEvento(sinVincular.map((s) => s.ds)));
+        }
+        if (vinculadas.length) void asignarPegadoAEventos(vinculadas);
+    };
+    const asignarPegadoAEventos = async (lista: Array<{ emp: any; ds: string; vinculo: string }>) => {
+        if (!empresaId) return;
+        const convocadoPor = authUser?.uid || '';
+        let ok = 0;
+        const errores: string[] = [];
+        for (const it of lista) {
+            const [eventoId, servicioId] = it.vinculo.split('|');
+            const par = serviciosEventoPegado(it.ds).find(({ evento, servicio }) => evento.id === eventoId && servicio.id === servicioId);
+            if (!par) { errores.push(`${it.emp.name}: el evento ya no está`); continue; }
+            try {
+                await asignarNominaAServicioEvento({
+                    empresaId,
+                    evento: par.evento,
+                    servicio: par.servicio,
+                    empleado: {
+                        id: it.emp.id,
+                        name: String(it.emp.name || it.emp.id),
+                        genero: it.emp.genero || '',
+                        preferredObjectiveId: it.emp.preferredObjectiveId,
+                        preferredObjectiveName: it.emp.preferredObjectiveName,
+                        objectiveId: it.emp.objectiveId,
+                        objectiveName: it.emp.objectiveName,
+                    },
+                    convocadoPor,
+                });
+                ok++;
+                guardarAfectadoEvento((prev) => {
+                    if (!prev[`${it.emp.id}_${it.ds}`]) return prev;
+                    const next = { ...prev };
+                    delete next[`${it.emp.id}_${it.ds}`];
+                    return next;
+                });
+            } catch (e: any) {
+                errores.push(`${it.emp.name}: ${e?.message || 'no se pudo asignar'}`);
+            }
+        }
+        if (ok) toast.success(`${ok} guardia(s) asignado(s) al evento`);
+        if (errores.length) toast.error(`${errores.length} sin asignar: ${errores.slice(0, 3).join(' · ')}${errores.length > 3 ? '…' : ''}`);
     };
     const rellenarRapido = (rg: RangoRC, dir: 'abajo' | 'derecha') => {
         const pares = planRelleno(rg, dir);
@@ -13691,7 +13905,6 @@ function PlanificacionDesktop() {
     avisosRapidoRef.current = avisosRapido;
 
     const marcasRapido = useMemo<MarcaAviso[]>(() => {
-        if (!avisosRapido.length) return [];
         const filaDe = new Map(displayedEmployees.map((e: any, i: number) => [e.id, i]));
         const colDe = new Map(diasRapido.map((d, i) => [d, i]));
         const out: MarcaAviso[] = [];
@@ -13699,10 +13912,26 @@ function PlanificacionDesktop() {
             const r = filaDe.get(a.empId);
             const c = colDe.get(a.dateStr);
             if (r == null || c == null) continue;
-            out.push({ r, c, tipo: a.tipo, texto: a.texto });
+            out.push({ r, c, tipo: a.tipo, texto: a.texto, tenue: avisosVistos.has(idAviso(a)) });
+        }
+        for (const [key, texto] of Object.entries(afectadoEvento)) {
+            const i = key.lastIndexOf('_');
+            const r = filaDe.get(key.slice(0, i));
+            const c = colDe.get(key.slice(i + 1));
+            if (r == null || c == null) continue;
+            out.push({ r, c, tipo: 'EVENTO', texto: `${texto} · cargá el evento en Eventos para asignarlo` });
+        }
+        for (const prop of propuesta12 || []) {
+            for (const ch of prop.cambios) {
+                const r = filaDe.get(ch.empId);
+                const c = colDe.get(ch.dateStr);
+                if (r == null || c == null) continue;
+                out.push({ r, c, tipo: 'CIERRE', texto: prop.texto });
+            }
         }
         return out;
-    }, [avisosRapido, displayedEmployees, diasRapido]);
+    }, [avisosRapido, avisosVistos, afectadoEvento, propuesta12, displayedEmployees, diasRapido]);
+    const avisosRapidoSinVer = useMemo(() => avisosSinVer(avisosRapido, avisosVistos), [avisosRapido, avisosVistos]);
 
     const irAvisoRapido = (a: AvisoRapido) => {
         const r = displayedEmployees.findIndex((e: any) => e.id === a.empId);
@@ -13724,86 +13953,150 @@ function PlanificacionDesktop() {
         requestAnimationFrame(() => grillaScrollRef.current?.focus({ preventScroll: true }));
     };
 
-    const [copiarDeCargando, setCopiarDeCargando] = useState(false);
-    const copiarDeObjetivo = async (e: CopiarDeEleccion) => {
-        const global = bloqueoGlobalRapido();
-        if (global) { toast.message(global); return; }
-        setCopiarDeCargando(true);
-        try {
-            const desde = new Date(e.year, e.month - 1, 1);
-            const hasta = new Date(e.year, e.month, 0, 23, 59, 59);
-            const snap = await getDocs(query(
-                collection(db, 'turnos'),
-                where('objectiveId', '==', e.objectiveId),
-                where('startTime', '>=', Timestamp.fromDate(desde)),
-                where('startTime', '<=', Timestamp.fromDate(hasta)),
-            ));
-            const porEmpDia = new Map<string, FuenteRapida>();
-            const empIds = new Set<string>();
-            for (const d of snap.docs) {
-                const t = d.data() as any;
-                if (t.isDeleted) continue;
-                if (empresaId && t.empresaId && t.empresaId !== empresaId) continue;
-                if (t.origin === 'OPERATIONS_COVERAGE' || t.origin === 'SLA_VIRTUAL' || t.origin === 'RETEN' || t.resolvedBy === 'OPERACIONES') continue;
-                const empId = String(t.employeeId || '');
-                if (!empId || empId.toUpperCase().startsWith('VACANTE')) continue;
-                const start = t.startTime?.toDate ? t.startTime.toDate() : null;
-                if (!start) continue;
+    const puestoNorm12 = (s: string) => s.trim().toUpperCase().replace(/\s+/g, ' ');
+    const turnos12 = (dateStr: string): TurnoPuesto12[] => {
+        const prev = previousCalendarDayStr(dateStr);
+        const out: TurnoPuesto12[] = [];
+        for (const emp of displayedEmployees) {
+            for (const ds of [prev, dateStr]) {
+                const key = `${emp.id}_${ds}`;
+                const p = pendingChangesRef.current[key];
+                const t = p ? (p.isDeleted ? null : p) : shiftsMap[key];
+                if (!t || t.isDeleted || t.isNovedad || t.isFranco || t.isAbsent) continue;
                 const code = normalizarCodigo(t.code || '');
-                if (!code) continue;
-                porEmpDia.set(`${empId}_${start.getDate()}`, {
-                    code,
-                    startTime: hhmmRapido(t.startTime) || undefined,
-                    endTime: hhmmRapido(t.endTime) || undefined,
-                    hours: Number(t.hours) || undefined,
-                    name: t.type || t.name,
-                    positionName: t.positionName,
-                });
-                empIds.add(empId);
+                if (!code || code === 'F' || code === 'FF' || code === 'FP' || code === 'FT' || code === 'RET' || code === 'EV') continue;
+                const aus = absencesMap[key];
+                const bloqueado = esCeldaLicencia({ code, tieneAusencia: !!(aus && isActiveAbsence(aus)) });
+                if (bloqueado) continue;
+                const pos = String(t.positionName || getEmpDefaultPos(emp.id) || '').trim();
+                if (!pos || pos === 'General' || pos === 'Retén') continue;
+                out.push({ empId: emp.id, nombre: String(emp.name || emp.id), dateStr: ds, code, positionName: pos });
             }
-            if (!porEmpDia.size) { toast.message(`${e.objectiveName}: no hay turnos en ${String(e.month).padStart(2, '0')}/${e.year}.`); return; }
-            const enGrilla = new Set(displayedEmployees.map((x: any) => x.id));
-            const conocidos = new Set(employees.map((x: any) => x.id));
-            const agregar = [...empIds].filter((id) => !enGrilla.has(id) && conocidos.has(id));
-            const desconocidos = [...empIds].filter((id) => !conocidos.has(id)).length;
-            if (agregar.length) setPinnedExternalEmpIds((prev) => new Set([...prev, ...agregar]));
-            pendienteCopiarDeRef.current = { porEmpDia, empIds: [...empIds].filter((id) => conocidos.has(id)), soloVacias: e.soloVacias, nombre: e.objectiveName };
-            setCopiarDeTick((n) => n + 1);
-            setCopiarDeOpen(false);
-            if (desconocidos) toast.message(`${desconocidos} guardia(s) del origen no están en esta empresa y no se copiaron.`);
-        } catch (err) {
-            console.error(err);
-            toast.error('No se pudo leer el cronograma de origen.');
-        } finally {
-            setCopiarDeCargando(false);
         }
+        return out;
     };
-    useEffect(() => {
-        const pend = pendienteCopiarDeRef.current;
-        if (!pend) return;
-        const filaDe = new Map(displayedEmployees.map((x: any, i: number) => [x.id, i]));
-        if (pend.empIds.some((id) => !filaDe.has(id)) && copiarDeIntentosRef.current < 3) {
-            copiarDeIntentosRef.current += 1;
+    const propuestas12De = (dateStr: string, soloPos?: string, preferido?: string): Propuesta12h[] => {
+        const report = buildDayCoverageReport(dateStr);
+        if (!report) return [];
+        const turnos = turnos12(dateStr);
+        const out: Propuesta12h[] = [];
+        for (const pos of report.positions || []) {
+            if ((pos.missingUnits || 0) <= 0) continue;
+            if (soloPos && puestoNorm12(pos.positionName) !== puestoNorm12(soloPos)) continue;
+            const faltantes = (pos.missingBandsPrimary || [])
+                .map((b: { code?: string }) => String(b.code || '').toUpperCase())
+                .filter((c: string) => c === 'M' || c === 'T' || c === 'N');
+            if (!faltantes.length) continue;
+            const sla = getShiftsForPosition(pos.positionName, selectedObjective) as TurnoSla[];
+            const prop = proponerCierre12h({
+                dateStr,
+                positionName: pos.positionName,
+                faltantes,
+                turnos,
+                preferidoEmpId: preferido,
+                sla,
+            });
+            if (prop) out.push(prop);
+        }
+        return out;
+    };
+    const abrirPropuesta12 = (lista: Propuesta12h[]) => {
+        const utiles = lista.filter((p) => p.cambios.length);
+        if (!utiles.length) {
+            toast.message(lista.map((p) => p.texto).filter(Boolean).join(' · ') || 'Ese día no tiene una banda de 8 h para cerrar con 12 h.');
             return;
         }
-        pendienteCopiarDeRef.current = null;
-        copiarDeIntentosRef.current = 0;
-        const items: ItemRapido[] = [];
-        for (const empId of pend.empIds) {
-            const r = filaDe.get(empId);
-            if (r == null) continue;
-            diasRapido.forEach((ds, c) => {
-                const f = pend.porEmpDia.get(`${empId}_${Number(ds.slice(8, 10))}`);
-                if (!f) return;
-                if (pend.soloVacias && codigoCtxRapido(ctxRapido(r, c).ctx)) return;
-                items.push({ r, c, code: f.code, fuente: f });
-            });
+        setPropuesta12(utiles);
+    };
+    const masRapido = (r: number, c: number, columna: boolean) => {
+        const global = bloqueoGlobalRapido();
+        if (global) { toast.message(global); return; }
+        const { emp, ds, ctx } = ctxRapido(r, c);
+        if (!emp || !ds) return;
+        if (columna) { abrirPropuesta12(propuestas12De(ds)); return; }
+        const pos = puestoFilaRapido(emp.id, ctx);
+        const delPuesto = propuestas12De(ds, pos, emp.id);
+        if (delPuesto.length) { setPropuesta12(delPuesto); return; }
+        const code = codigoCtxRapido(ctx);
+        if (code === 'T') { toast.message('La T pasa a 12 h solo si falta una banda de un lado.'); return; }
+        if (code !== 'M' && code !== 'N') { toast.message('Solo M o N pasan a 12 h.'); return; }
+        const doce = horarioDoce(code === 'M' ? 'D12' : 'N12', getShiftsForPosition(pos, resolveObjectiveForEmp(emp.id)) as TurnoSla[]);
+        escribirRapido([{
+            r, c, code: doce.code,
+            fuente: { code: doce.code, startTime: doce.startTime, endTime: doce.endTime, hours: doce.hours, name: doce.code, positionName: pos },
+        }]);
+    };
+    const menosRapido = (r: number, c: number) => {
+        const global = bloqueoGlobalRapido();
+        if (global) { toast.message(global); return; }
+        const { emp, ctx } = ctxRapido(r, c);
+        if (!emp) return;
+        const vuelta = volverA8(codigoCtxRapido(ctx));
+        if (!vuelta) { toast.message('Solo D12 o N12 vuelven a 8 h.'); return; }
+        const pos = puestoFilaRapido(emp.id, ctx);
+        escribirRapido([{
+            r, c, code: vuelta.code,
+            fuente: { code: vuelta.code, startTime: vuelta.startTime, endTime: vuelta.endTime, hours: vuelta.hours, name: vuelta.code, positionName: pos },
+        }]);
+    };
+    const confirmar12 = () => {
+        const lista = propuesta12;
+        setPropuesta12(null);
+        if (!lista?.length) return;
+        const global = bloqueoGlobalRapido();
+        if (global) { toast.message(global); return; }
+        let next = { ...pendingChangesRef.current };
+        const byId: Record<string, any> = {};
+        employees.forEach((e: any) => { byId[e.id] = e; });
+        const filaDe = new Map(displayedEmployees.map((e: any, i: number) => [e.id, i]));
+        const listCtx = {
+            positionStructure: effectivePosStructure as import('@/lib/planificacion/vacancySplitBands').VacancyPositionSla[],
+            preferSamePosition: true as const,
+        };
+        for (const prop of lista) {
+            if (prop.modo === 'par') {
+                for (const ch of prop.cambios) {
+                    const r = filaDe.get(ch.empId);
+                    const c = diasRapido.indexOf(ch.dateStr);
+                    if (r == null || c < 0) continue;
+                    const celda = ctxRapido(r, c);
+                    if (!celda.emp) continue;
+                    const fuente: FuenteRapida = {
+                        code: ch.code, startTime: ch.startTime, endTime: ch.endTime, hours: ch.hours, name: ch.code, positionName: prop.positionName,
+                    };
+                    const res = cambioRapido(celda.emp, ch.dateStr, ch.code, celda.ctx, fuente);
+                    if ('error' in res) { toast.message(res.error); continue; }
+                    next[`${ch.empId}_${ch.dateStr}`] = res.change;
+                }
+                continue;
+            }
+            const ch = prop.cambios[0];
+            if (!ch) continue;
+            const ctxLista = { ...listCtx, gapPositionName: prop.positionName, gapBand: prop.banda };
+            const ext = listExtensionCandidates(prop.banda, prop.dateStr, selectedObjective || '', employees, shiftsMap, next, [], ctxLista);
+            const adel = listEarlyStartCandidates(prop.banda, prop.dateStr, selectedObjective || '', employees, shiftsMap, next, [], ctxLista);
+            const hit = [...ext, ...adel].find((x) => x.id === ch.empId);
+            if (!hit) {
+                toast.message(`${ch.nombre.split(',')[0]} no queda del lado de la ${prop.banda}.`);
+                continue;
+            }
+            try {
+                next = applySingleWorkerFullGapCloseToChanges(next, {
+                    objectiveId: selectedObjective || '',
+                    clientId: selectedClient || undefined,
+                    dateStr: prop.dateStr,
+                    gapPosition: prop.positionName,
+                    gapBand: prop.banda,
+                    employeeId: ch.empId,
+                    applyDateStr: hit.extensionApplyDate || hit.earlyStartApplyDate || ch.dateStr,
+                    positionStructure: effectivePosStructure as import('@/lib/planificacion/vacancySplitBands').VacancyPositionSla[],
+                }, { shiftsMap, employeesById: byId });
+            } catch (err) {
+                toast.message(err instanceof Error ? err.message : 'No se pudo cerrar la banda.');
+            }
         }
-        if (!items.length) { toast.message('No había celdas para completar.'); return; }
-        escribirRapido(items);
-        toast.success(`Copiado de ${pend.nombre}: ${items.length} celda(s) como borrador. Revisá y guardá el cronograma.`);
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [copiarDeTick, displayedEmployees]);
+        commitPendingChanges(next);
+    };
 
     const ctlCeldas = useRef<ControlCeldas>(null as unknown as ControlCeldas);
     ctlCeldas.current = {
@@ -14557,6 +14850,7 @@ function PlanificacionDesktop() {
                             <td
                                 key={dateStr}
                                 data-cobertura-dia={dateStr}
+                                tabIndex={modoRapido ? 0 : undefined}
                                 className={`text-center border-r border-b text-[10px] font-black ${cls}`}
                                 colSpan={1}
                                 title={bloqueoMesCerrado
@@ -15865,15 +16159,6 @@ function PlanificacionDesktop() {
                                             <>
                                                 <button
                                                     type="button"
-                                                    onClick={() => setCopiarDeOpen(true)}
-                                                    data-copiar-de-abrir
-                                                    title="Copiar el cronograma de otro objetivo o mes como borrador"
-                                                    className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-2 py-2 text-[10px] font-black uppercase text-slate-600 hover:bg-slate-50"
-                                                >
-                                                    <Copy size={13}/> Copiar de…
-                                                </button>
-                                                <button
-                                                    type="button"
                                                     onClick={() => setPegarExcel({ paso: 'texto', borrador: '' })}
                                                     data-pegar-excel-abrir
                                                     title="Pegar un bloque copiado de Excel, alineado por guardia"
@@ -16239,10 +16524,20 @@ function PlanificacionDesktop() {
                                     onDeshacer={() => undoLastPending(true)}
                                     onRehacer={redoLastPending}
                                     onGuardar={() => { void handleSaveAll(); }}
+                                    onMas={masRapido}
+                                    onMenos={menosRapido}
+                                    onMasDia={(dateStr) => {
+                                        const global = bloqueoGlobalRapido();
+                                        if (global) { toast.message(global); return; }
+                                        abrirPropuesta12(propuestas12De(dateStr));
+                                    }}
+                                    onNovedad={(celdas) => { if (celdas.length) setSelectorNovedad(celdas); }}
+                                    onConfirmar12={confirmar12}
+                                    onCancelar12={() => setPropuesta12(null)}
                                 />
                             </div>
                             {modoRapido && !comparingSnapshot && (
-                                <ModoRapidoAvisosPanel avisos={avisosRapido} sinServicio={sinServicioEnMes} onIr={irAvisoRapido} />
+                                <ModoRapidoAvisosPanel avisos={avisosRapidoSinVer} sinServicio={sinServicioEnMes} onIr={irAvisoRapido} onVisto={marcarAvisosVistos} />
                             )}
                             </div>
                         )}
@@ -18302,21 +18597,36 @@ function PlanificacionDesktop() {
                             if (!prev || prev.paso !== 'resumen') return prev;
                             return { ...prev, asignacion: { ...prev.asignacion, [indice]: fila } };
                         })}
+                        dias={diasRapido}
+                        eventosDe={opcionesEventoPegado}
+                        onDecidir={(col, decision) => setPegarExcel((prev) => {
+                            if (!prev || prev.paso !== 'resumen') return prev;
+                            return { ...prev, decisiones: { ...prev.decisiones, [col]: decision } };
+                        })}
                         onAplicar={aplicarPegadoExcel}
                     />,
                     document.body,
                 )}
-                {copiarDeOpen && selectedObjective && createPortal(
-                    <CopiarDeModal
-                        clientes={clients as any[]}
-                        objetivoActual={selectedObjective}
-                        year={currentDate.getFullYear()}
-                        month={currentDate.getMonth() + 1}
-                        cargando={copiarDeCargando}
-                        onCancelar={() => setCopiarDeOpen(false)}
-                        onConfirmar={(e) => { void copiarDeObjetivo(e); }}
-                    />,
-                    document.body,
+                {propuesta12 && propuesta12.length > 0 && (
+                    <Cierre12Banner
+                        texto={textoResumen12h(propuesta12)}
+                        onConfirmar={confirmar12}
+                        onCancelar={() => setPropuesta12(null)}
+                    />
+                )}
+                {selectorNovedad && (
+                    <SelectorNovedad
+                        tipos={catalogoNovedad}
+                        onCerrar={() => setSelectorNovedad(null)}
+                        onElegir={(tipo, motivo) => {
+                            const celdas = selectorNovedad;
+                            setSelectorNovedad(null);
+                            motivoNovedadRef.current = motivo || 'Cargado en modo rápido';
+                            const porLabel = resolverNovedad(tipo.label, catalogoNovedad);
+                            const code = porLabel && porLabel.label === tipo.label ? tipo.label : tipo.code;
+                            escribirRapido(celdas.map((x) => ({ ...x, code })));
+                        }}
+                    />
                 )}
                 {deployBandPicker && createPortal(
                     <div className="fixed inset-0 z-[9100] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm" onClick={() => setDeployBandPicker(null)}>

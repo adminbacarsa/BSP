@@ -6,7 +6,7 @@ import {
     type OpcionCodigo,
     type RangoRC,
     moverCursor,
-    normalizarCodigo,
+    codigoAlConfirmar,
     normalizarRango,
     sugerirCodigos,
     tamanoRango,
@@ -19,7 +19,8 @@ export type CapaModoRapidoApi = {
     arrastrando: () => boolean;
 };
 
-export type MarcaAviso = { r: number; c: number; tipo: string; texto: string };
+/** `tenue`: aviso marcado como visto (la marca queda, más suave). */
+export type MarcaAviso = { r: number; c: number; tipo: string; texto: string; tenue?: boolean };
 
 type Props = {
     activo: boolean;
@@ -33,13 +34,20 @@ type Props = {
     onEscribir: (celdas: CeldaRC[], code: string) => void;
     onBorrar: (celdas: CeldaRC[]) => void;
     onCopiar: (rg: RangoRC, cortar: boolean) => string;
-    onPegar: (inicio: CeldaRC | null, rg: RangoRC | null, texto: string) => void;
+    /** `html`: lo que Excel pone junto al TSV (trae el color de cada celda). */
+    onPegar: (inicio: CeldaRC | null, rg: RangoRC | null, texto: string, html?: string) => void;
     onRelleno: (rg: RangoRC, dir: 'abajo' | 'derecha') => void;
     onSerie: (origen: RangoRC, destino: CeldaRC) => void;
     onDeshacer: () => void;
     onRehacer: () => void;
     onGuardar: () => void;
     onCursor?: (cur: CeldaRC | null) => void;
+    onMas?: (r: number, c: number, columna: boolean) => void;
+    onMenos?: (r: number, c: number) => void;
+    onMasDia?: (dateStr: string) => void;
+    onNovedad?: (celdas: CeldaRC[]) => void;
+    onConfirmar12?: () => void;
+    onCancelar12?: () => void;
 };
 
 type Caja = { left: number; top: number; width: number; height: number };
@@ -264,11 +272,7 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
     const confirmar = useCallback((tecla: string, shift: boolean) => {
         const { texto: t, elegida: idx, cursor: cur } = estado.current;
         if (t == null || !cur) return;
-        const sug = sugerirCodigos(t, propsRef.current.opciones(cur.r, cur.c), 8);
-        const escrito = normalizarCodigo(t);
-        let code = escrito;
-        if (idx >= 0 && sug[idx]) code = sug[idx].code;
-        else if (!sug.some((s) => s.code.toUpperCase() === escrito) && sug[0]) code = sug[0].code;
+        const code = codigoAlConfirmar(t, propsRef.current.opciones(cur.r, cur.c), idx);
         setTexto(null);
         setElegida(-1);
         enfocarContenedor();
@@ -282,7 +286,12 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
     useEffect(() => {
         if (!activo) return;
         const onKey = (e: KeyboardEvent) => {
-            if (document.querySelector('[data-modo-rapido-ayuda], [data-pegar-excel]')) return;
+            if (document.querySelector('[data-modo-rapido-ayuda], [data-pegar-excel], [data-novedad-rapida]')) return;
+            if (document.querySelector('[data-cierre-12h]')) {
+                if (e.key === 'Enter') { e.preventDefault(); e.stopImmediatePropagation(); propsRef.current.onConfirmar12?.(); }
+                else if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); propsRef.current.onCancelar12?.(); }
+                return;
+            }
             const p = propsRef.current;
             const { cursor: cur, texto: t } = estado.current;
             const activeEl = document.activeElement;
@@ -298,6 +307,12 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
             const cortar = () => { e.preventDefault(); e.stopImmediatePropagation(); };
 
             if (mod && key === 's') { cortar(); if (t != null) confirmar('Enter', false); p.onGuardar(); return; }
+            const cob = (activeEl as HTMLElement | null)?.closest?.('[data-cobertura-dia]') as HTMLElement | null;
+            if (cob?.dataset.coberturaDia && (e.key === '+' || e.code === 'NumpadAdd' || (e.shiftKey && e.key === '='))) {
+                cortar();
+                p.onMasDia?.(cob.dataset.coberturaDia);
+                return;
+            }
             if (!cur) {
                 if (p.dims.filas > 0 && p.dims.cols > 0 && (e.key.startsWith('Arrow') || e.key === 'Home' || e.key === 'Enter' || e.key === 'Tab')) {
                     cortar();
@@ -363,6 +378,23 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
                 setElegida(-1);
                 return;
             }
+            const esMas = e.key === '+' || e.code === 'NumpadAdd' || (e.shiftKey && e.key === '=');
+            const esMenos = (e.key === '-' || e.code === 'NumpadSubtract') && !e.shiftKey;
+            if (!mod && !e.altKey && esMas) {
+                cortar();
+                p.onMas?.(cur.r, cur.c, e.shiftKey);
+                return;
+            }
+            if (!mod && !e.altKey && esMenos) {
+                cortar();
+                p.onMenos?.(cur.r, cur.c);
+                return;
+            }
+            if ((mod && key === 'l') || (!mod && e.key === '/')) {
+                cortar();
+                p.onNovedad?.(celdasActuales());
+                return;
+            }
             const next = moverCursor(cur, e.key, { ctrl: mod, shift: e.shiftKey }, p.dims, (r, c) => !!p.valorDe(r, c));
             if (next) {
                 cortar();
@@ -411,9 +443,10 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
             const rg = rangoRef.current;
             const cur = estado.current.cursor;
             const txt = e.clipboardData?.getData('text/plain') ?? '';
+            const html = e.clipboardData?.getData('text/html') || undefined;
             e.preventDefault();
             const inicio = cur ? { r: rg?.minR ?? cur.r, c: rg?.minC ?? cur.c } : null;
-            propsRef.current.onPegar(inicio, rg, txt);
+            propsRef.current.onPegar(inicio, rg, txt, html);
         };
         document.addEventListener('copy', onCopy);
         document.addEventListener('cut', onCut);
@@ -443,10 +476,11 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
             {cajas.marcas.map((m, i) => (
                 <span
                     key={`${m.r}:${m.c}:${m.tipo}:${i}`}
-                    className={`absolute rounded-sm border-2 ${m.tipo === 'DESCANSO' ? 'border-amber-500' : m.tipo === 'TOPE' ? 'border-rose-500' : m.tipo === 'LICENCIA' ? 'border-fuchsia-500' : 'border-orange-500'}`}
+                    className={`absolute rounded-sm ${m.tipo === 'EVENTO' ? 'border-2 border-dashed border-yellow-500 bg-yellow-300/25' : 'border-2'} ${m.tipo === 'DESCANSO' ? 'border-amber-500' : m.tipo === 'TOPE' ? 'border-rose-500' : m.tipo === 'LICENCIA' ? 'border-fuchsia-500' : m.tipo === 'CIERRE' ? 'border-indigo-600 bg-indigo-500/10' : m.tipo === 'EVENTO' ? '' : 'border-orange-500'} ${m.tenue ? 'opacity-40' : ''}`}
                     style={{ left: m.left + 1, top: m.top + 1, width: m.width - 2, height: m.height - 2 }}
                     title={m.texto}
                     data-modo-rapido-marca={m.tipo}
+                    data-modo-rapido-marca-tenue={m.tenue ? '1' : undefined}
                 />
             ))}
             {rc && rango && tamanoRango(rango) > 1 && (
