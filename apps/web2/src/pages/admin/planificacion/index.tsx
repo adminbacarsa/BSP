@@ -508,6 +508,11 @@ import {
     type OrigenArmado,
 } from '@/lib/planificacion/armadoCronograma';
 import { ContinuarMesModal, type ContinuarMesVista, type DiaCorto } from '@/components/planificacion/ContinuarMesModal';
+import { AltaDesdePadronModal, type PedidoAlta } from '@/components/planificacion/AltaDesdePadronModal';
+import { decidirActivarServicio } from '@/lib/planificacion/activarServicioMes';
+import { ejecutarAgregarMeses, proponerAgregarMeses, vistaPreviaAgregarMeses, type SlaRow } from '@/lib/servicios/appendMonthsClient';
+import type { AppendMonthsPlan } from '@/lib/servicios/slaMonthSplit';
+import type { AltaHecha } from '@/lib/rrhh/altaLegajoClient';
 import { ImportarExcelModal, type AplicarImportPayload, type ImportarExcelContexto, type ServicioDestino } from '@/components/planificacion/ImportarExcelModal';
 import { ServicioPlanillaModal, type ServicioMesPlanilla } from '@/components/planificacion/ServicioPlanillaModal';
 import { avisosFueraDeServicio } from '@/lib/planificacion/servicioDesdePlanilla';
@@ -2214,6 +2219,10 @@ function PlanificacionDesktop() {
 
     const [prevMonthLoading, setPrevMonthLoading] = useState(false);
     const [continuarVista, setContinuarVista] = useState<ContinuarMesVista | null>(null);
+    const activarServicioRef = useRef<{ services: SlaRow[]; last: SlaRow; plan: AppendMonthsPlan; newEndDate: string } | null>(null);
+    const altasLocalesRef = useRef<Map<string, any>>(new Map());
+    const altaPegadoRef = useRef<{ indice: number; employeeId: string } | null>(null);
+    const [pedidoAlta, setPedidoAlta] = useState<(PedidoAlta & { indice: number }) | null>(null);
     const [importarCtx, setImportarCtx] = useState<ImportarExcelContexto | null>(null);
     const [servicioPlanilla, setServicioPlanilla] = useState<null | {
         year: number;
@@ -3052,6 +3061,18 @@ function PlanificacionDesktop() {
         const ids = new Set(sorted.map((e: any) => e.id));
         return [...sorted, ...dotacionPoolCandidates.filter((e: any) => !ids.has(e.id))];
     }, [dotacionBaseEmployees, bandFilter, employeeMonthStats, sortBy, sortDir, selectedObjective, customOrderMap, empDefaultPos, clients, forceShowAll, dotacionPoolCandidates]);
+
+    useEffect(() => {
+        const pendiente = altaPegadoRef.current;
+        if (!pendiente) return;
+        const fila = displayedEmployees.findIndex((e: { id: string }) => e.id === pendiente.employeeId);
+        if (fila < 0) return;
+        altaPegadoRef.current = null;
+        setPegarExcel((prev) => {
+            if (!prev || prev.paso !== 'resumen') return prev;
+            return { ...prev, asignacion: { ...prev.asignacion, [pendiente.indice]: fila } };
+        });
+    }, [displayedEmployees]);
 
     const etiquetasGrupo = useMemo(() => {
         const map = new Map<string, EtiquetaFilaGrupo>();
@@ -6184,45 +6205,65 @@ function PlanificacionDesktop() {
                 .filter((c) => isClientOperational((c as { status?: unknown }).status)));
         }, (e) => console.error('[plan] clients error:', e));
         const unsubAg = onSnapshot(collection(db, 'convenios_colectivos'), snap => setAgreements(snap.docs.map(d => ({ id: d.id, ...d.data() }))), (e) => console.error('[plan] convenios error:', e));
+        const filaEmpleado = (id: string, data: Record<string, any>) => {
+            const firstName = String(data.firstName || '').trim();
+            const lastName = String(data.lastName || '').trim();
+            const composedName = `${lastName} ${firstName}`.trim() || `${firstName} ${lastName}`.trim();
+            return {
+                id,
+                name: String(data.name || '').trim() || composedName,
+                firstName,
+                lastName,
+                fileNumber: String(data.fileNumber || data.legajo || '').trim(),
+                dni: String(data.dni || '').trim(),
+                preferredObjectiveId: data.preferredObjectiveId,
+                planificacionDotacion: (data.planificacionDotacion || {}) as PlanificacionDotacionMap,
+                genero: data.genero || '',
+                experienciaObjetivos: data.experienciaObjetivos || {},
+                laborAgreement: data.laborAgreement,
+                status: data.status || 'activo',
+                lat: data.lat ?? data.latitude ?? null,
+                lng: data.lng ?? data.longitude ?? null,
+                address: data.address || '',
+                restriccionesObjetivo: data.restriccionesObjetivo || [],
+                restriccionesCliente: data.restriccionesCliente || [],
+                conflictosEmpleados: data.conflictosEmpleados || [],
+                volante: data.volante || [],
+                modalidad: data.modalidad || '',
+                bolsaCuil: data.bolsaCuil || '',
+                uid: String(data.uid || ''),
+                mail: String(data.email || data.mail || ''),
+                pushEstado: String(data.pushEstado || ''),
+            };
+        };
+        let propios: any[] = [];
+        let habilitados: any[] = [];
+        const publicarEmpleados = () => {
+            const porId = new Map<string, any>();
+            for (const e of propios) porId.set(e.id, e);
+            for (const e of habilitados) if (!porId.has(e.id)) porId.set(e.id, e);
+            for (const [id, e] of altasLocalesRef.current) {
+                if (porId.has(id)) altasLocalesRef.current.delete(id);
+                else porId.set(id, e);
+            }
+            setEmployees([...porId.values()]);
+        };
         const unsubE = onSnapshot(empleadosQ, snap => {
             dataSyncRef.current.employees = true;
             checkSynced();
-            const map = (s: typeof snap) => s.docs
+            propios = snap.docs
                 .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
-                .map(d => {
-                    const data = d.data();
-                    const firstName = String(data.firstName || '').trim();
-                    const lastName = String(data.lastName || '').trim();
-                    const composedName = `${lastName} ${firstName}`.trim() || `${firstName} ${lastName}`.trim();
-                    return {
-                        id: d.id,
-                        name: String(data.name || '').trim() || composedName,
-                        firstName,
-                        lastName,
-                        fileNumber: String(data.fileNumber || data.legajo || '').trim(),
-                        dni: String(data.dni || '').trim(),
-                        preferredObjectiveId: data.preferredObjectiveId,
-                        planificacionDotacion: (data.planificacionDotacion || {}) as PlanificacionDotacionMap,
-                        genero: data.genero || '',
-                        experienciaObjetivos: data.experienciaObjetivos || {},
-                        laborAgreement: data.laborAgreement,
-                        status: data.status || 'activo',
-                        lat: data.lat ?? data.latitude ?? null,
-                        lng: data.lng ?? data.longitude ?? null,
-                        address: data.address || '',
-                        restriccionesObjetivo: data.restriccionesObjetivo || [],
-                        restriccionesCliente: data.restriccionesCliente || [],
-                        conflictosEmpleados: data.conflictosEmpleados || [],
-                        volante: data.volante || [],
-                        modalidad: data.modalidad || '',
-                        bolsaCuil: data.bolsaCuil || '',
-                        uid: String(data.uid || ''),
-                        mail: String(data.email || data.mail || ''),
-                        pushEstado: String(data.pushEstado || ''),
-                    };
-                });
-            setEmployees(map(snap));
+                .map(d => filaEmpleado(d.id, d.data() as Record<string, any>));
+            publicarEmpleados();
         }, (e) => console.error('[plan] empleados error:', e));
+        const unsubHab = onSnapshot(
+            query(collection(db, 'empleados'), where('habilitadoEn', 'array-contains', empresaId)),
+            (snap) => {
+                habilitados = snap.docs.map((d) => filaEmpleado(d.id, d.data() as Record<string, any>));
+                publicarEmpleados();
+            },
+            () => { habilitados = []; publicarEmpleados(); },
+        );
 
         // Actividad Reciente (audit_logs) — acotada por empresa activa del panel.
         const unsubLogs = onSnapshot(
@@ -6347,7 +6388,7 @@ function PlanificacionDesktop() {
             setHasUnread(alerts.length > 0);
         }, (e) => console.error('[plan] novedades error:', e));
         
-        return () => { clearTimeout(syncTimeout); unsubC(); unsubE(); unsubLogs(); unsubNotifs(); unsubA(); unsubAg(); unsubN(); };
+        return () => { clearTimeout(syncTimeout); unsubC(); unsubE(); unsubHab(); unsubLogs(); unsubNotifs(); unsubA(); unsubAg(); unsubN(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [empresaId, migracionCompleta, scopeEmpresa]);
 
@@ -11311,7 +11352,7 @@ function PlanificacionDesktop() {
     // «Continuar desde el mes anterior»: sigue el ciclo de cada guardia (no copia día por número).
     const abrirContinuarMesAnterior = async () => {
         if (!selectedObjective) return;
-        if (msgBloqueoEdicion) { toast.error(msgBloqueoEdicion); return; }
+        if (msgBloqueoEdicion && !sinServicioEnMes) { toast.error(msgBloqueoEdicion); return; }
         if (selectedGrupo && grupoUnifiedMode) { toast.message('Elegí un objetivo del grupo para continuar su mes anterior.'); return; }
         setPrevMonthLoading(true);
         try {
@@ -11354,6 +11395,80 @@ function PlanificacionDesktop() {
                     ultimosPrevios.push({ employeeId: t.employeeId, code: t.code, startTime: t.startTime, endTime: t.endTime, realEndTime: t.realEndTime, hours: t.hours, objectiveId: t.objectiveId, origin: t.origin });
                 }
             }
+            let estructuraContinuar = (positionStructure || []) as PuestoSlaContinuar[];
+            let activarVista: ContinuarMesVista['activar'];
+            activarServicioRef.current = null;
+            try {
+                const snapSla = await getDocs(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa));
+                const allSla = filterSlasForPlanningTenant(
+                    snapSla.docs.map((d) => ({ id: d.id, ...(d.data() as any) })),
+                    empresaId,
+                    scopeEmpresa,
+                    tenantClientIds,
+                );
+                const matching = filterSlasForPlanningContext(
+                    allSla,
+                    selectedClient,
+                    selectedObjective,
+                    clients,
+                    slaIdToObjId,
+                ) as SlaRow[];
+                const cliente = clients.find((c: { id: string; status?: unknown }) => c.id === selectedClient);
+                const decision = decidirActivarServicio({
+                    slas: matching.map((s) => ({
+                        id: s.id,
+                        startDate: toYyyyMmDd(s.startDate),
+                        endDate: toYyyyMmDd(s.endDate),
+                        closed: (s as { closed?: boolean }).closed === true,
+                        status: String((s as { status?: string }).status || ''),
+                    })),
+                    year: y,
+                    month: m + 1,
+                    clienteActivo: !!cliente && isClientOperational(cliente.status),
+                });
+                const permisoServicio = isSuperAdmin || (rolePermissions['SERVICES'] || []).includes('update');
+                if (decision.mostrar) {
+                    activarVista = {
+                        mes: decision.mes,
+                        marcado: decision.marcado && decision.puede,
+                        puede: decision.puede,
+                        motivo: decision.motivo,
+                        permiso: permisoServicio,
+                    };
+                }
+                if (decision.puede && decision.lastId) {
+                    const seed = matching.find((s) => s.id === decision.lastId);
+                    if (seed) {
+                        const propuesta = proponerAgregarMeses(matching, seed);
+                        const preview = vistaPreviaAgregarMeses({
+                            services: matching,
+                            last: propuesta.last,
+                            mode: propuesta.mode,
+                            newEndDate: decision.newEndDate,
+                        });
+                        if (propuesta.error || preview.error) {
+                            activarVista = {
+                                mes: decision.mes,
+                                marcado: false,
+                                puede: false,
+                                motivo: propuesta.error || preview.error || decision.motivo,
+                                permiso: permisoServicio,
+                            };
+                        } else {
+                            activarServicioRef.current = {
+                                services: matching,
+                                last: propuesta.last,
+                                plan: preview.plan,
+                                newEndDate: decision.newEndDate,
+                            };
+                            const built = buildPlanningPositionStructure(propuesta.last, { monthHasSla: true, hasExactMatch: true });
+                            if (built.structure.length) estructuraContinuar = built.structure as PuestoSlaContinuar[];
+                        }
+                    }
+                }
+            } catch (err) {
+                console.error('[continuar activar servicio]', err);
+            }
             const dias = daysInMonth.map((d) => getDateKey(d));
             const estadoCelda = (empId: string, dateStr: string): EstadoCeldaContinuar => {
                 const key = `${empId}_${dateStr}`;
@@ -11365,7 +11480,7 @@ function PlanificacionDesktop() {
                 return doc ? 'ocupada' : null;
             };
             const turnoHabilitado = (positionName: string, code: string, dateStr: string) => {
-                const posCfg = (positionStructure || []).find((p: any) => p.positionName === positionName);
+                const posCfg = estructuraContinuar.find((p: any) => p.positionName === positionName);
                 if (!posCfg) return false;
                 const dayLetter = getDayLetter(dateStr);
                 if (!isPosActiveOnDay(posCfg, dayLetter, dateStr) || isPosExcludedOnDate(posCfg, dateStr)) return false;
@@ -11380,6 +11495,7 @@ function PlanificacionDesktop() {
                 const code = String(sh.code || '').toUpperCase();
                 return code && !esCeldaLicencia({ code, tieneAusencia: false }) ? code : null;
             };
+            const extenderServicio = !!activarServicioRef.current;
             const estadoPrevio = await fetchPlanificacionEstadoDoc(empresaId, selectedObjective, m === 0 ? y - 1 : y, m === 0 ? 12 : m).catch(() => null);
             const punteroGuardado = estadoPrevio?.data?.continuarPuntero;
             const resultados = proponerContinuacion({
@@ -11387,11 +11503,11 @@ function PlanificacionDesktop() {
                 dias,
                 guardias: guardiasBase.map((e: any) => ({ id: e.id, nombre: e.name || e.id, previos: previosPorEmp.get(e.id) || [] })),
                 salientes: [...salientesPorEmp].map(([id, s]) => ({ id, nombre: s.nombre, previos: s.previos })),
-                estructura: (positionStructure || []) as PuestoSlaContinuar[],
+                estructura: estructuraContinuar,
                 estadoCelda,
-                diaBloqueado: (ds) => isPlanningDateLocked(ds) || isOutsideServiceRange(ds),
+                diaBloqueado: (ds) => isPlanningDateLocked(ds) || (!extenderServicio && isOutsideServiceRange(ds)),
                 turnoHabilitado,
-                cupoDia: (ds) => (isOutsideServiceRange(ds) ? null : cupoDelServicio((positionStructure || []) as PuestoSlaContinuar[], ds, turnoHabilitado)),
+                cupoDia: (ds) => (!extenderServicio && isOutsideServiceRange(ds) ? null : cupoDelServicio(estructuraContinuar, ds, turnoHabilitado)),
                 punteroPrevio: Array.isArray(punteroGuardado) ? punteroGuardado.map(String) : null,
                 cargado,
             });
@@ -11407,11 +11523,11 @@ function PlanificacionDesktop() {
             const celdas: { dateStr: string; positionName: string; code: string; nombre?: string }[] = [];
             const diasConPropuesta = new Set(Object.keys(cambios).map((k) => k.slice(-10)));
             for (const dateStr of dias) {
-                if (isOutsideServiceRange(dateStr)) continue;
+                if (!extenderServicio && isOutsideServiceRange(dateStr)) continue;
                 const dayLetter = getDayLetter(dateStr);
                 let requeridos = 0;
                 let cerrados = 0;
-                (positionStructure || []).forEach((pos: any) => {
+                estructuraContinuar.forEach((pos: any) => {
                     const units = countPositionClosedUnits(dateStr, pos, dayLetter, guardiasBase, merged, shiftsMap, cyclesForCoverage);
                     requeridos += units.required;
                     cerrados += units.closed;
@@ -11428,7 +11544,7 @@ function PlanificacionDesktop() {
                     celdas.push({ dateStr, positionName: sh.positionName || '', code: String(sh.code || ''), nombre: e.name || e.id });
                 }
             }
-            const sobrados = sobrantesPorDia((positionStructure || []) as PuestoSlaContinuar[], celdas);
+            const sobrados = sobrantesPorDia(estructuraContinuar, celdas);
             const horasYaCargadas = (empId: string) => {
                 let h = 0;
                 for (const dateStr of dias) {
@@ -11453,7 +11569,8 @@ function PlanificacionDesktop() {
                 resultados,
                 cortos,
                 sobrados,
-                avisos: avisosCoberturaPuesto((positionStructure || []) as PuestoSlaContinuar[], celdas, puestosCortos),
+                avisos: avisosCoberturaPuesto(estructuraContinuar, celdas, puestosCortos),
+                activar: activarVista,
                 descanso: alertasDescansoCambioMes(ultimosPrevios, resultados, dias[0]),
                 tope: alertasTope(resultados, horasYaCargadas),
             });
@@ -11465,8 +11582,28 @@ function PlanificacionDesktop() {
         }
     };
 
-    const aplicarContinuarMesAnterior = (employeeIds: string[], sugerencias: SugerenciaNivelacion[]) => {
+    const aplicarContinuarMesAnterior = async (employeeIds: string[], sugerencias: SugerenciaNivelacion[], activarServicio = false) => {
         if (!continuarVista || !selectedObjective) return;
+        const planActivar = activarServicio ? activarServicioRef.current : null;
+        if (planActivar && empresaId) {
+            try {
+                await ejecutarAgregarMeses({
+                    services: planActivar.services,
+                    last: planActivar.last,
+                    plan: planActivar.plan,
+                    newEndDate: planActivar.newEndDate,
+                    empresaId,
+                    migracionCompleta,
+                    scopeEmpresa,
+                    via: 'CONTINUAR_MES',
+                });
+                setDataRefreshNonce((n) => n + 1);
+                toast.success(`Servicio de ${continuarVista.activar?.mes || 'este mes'} activado`);
+            } catch (e) {
+                console.error('[continuar activar servicio]', e);
+                toast.error('No se pudo activar el servicio. La copia queda en borrador.');
+            }
+        }
         const elegidos = new Set(employeeIds);
         const next = { ...pendingChangesRef.current };
         let turnos = 0;
@@ -11494,8 +11631,57 @@ function PlanificacionDesktop() {
         );
         commitPendingChanges(next);
         setContinuarVista(null);
-        const niv = aceptadas.length ? ` y ${aceptadas.length} cambio(s) de nivelación` : '';
-        toast.success(`Continuado desde el mes anterior: ${turnos} turnos y ${francos} francos${niv} en borrador. Revisalos y guardá el cronograma.`);
+        if (turnos + francos > 0) {
+            const niv = aceptadas.length ? ` y ${aceptadas.length} cambio(s) de nivelación` : '';
+            toast.success(`Continuado desde el mes anterior: ${turnos} turnos y ${francos} francos${niv} en borrador. Revisalos y guardá el cronograma.`);
+        }
+    };
+
+    const incorporarEmpleadoAlta = (emp: AltaHecha, objectiveId: string) => {
+        const row = {
+            id: emp.id,
+            name: emp.name,
+            firstName: emp.firstName,
+            lastName: emp.lastName,
+            fileNumber: emp.fileNumber,
+            dni: emp.dni,
+            preferredObjectiveId: emp.preferredObjectiveId || objectiveId,
+            preferredClientId: emp.preferredClientId,
+            planificacionDotacion: emp.habilitado && objectiveId ? { [objectiveId]: { positionName: 'Vigilador' } } : {},
+            genero: emp.genero || '',
+            status: emp.status || 'activo',
+            experienciaObjetivos: {},
+            restriccionesObjetivo: [],
+            restriccionesCliente: [],
+            conflictosEmpleados: [],
+            volante: [],
+            address: '',
+            mail: '',
+            uid: '',
+            pushEstado: '',
+        };
+        altasLocalesRef.current.set(emp.id, row);
+        setEmployees((prev: any[]) => {
+            const i = prev.findIndex((e: { id: string }) => e.id === emp.id);
+            if (i < 0) return [...prev, row];
+            const next = [...prev];
+            const prevDot = prev[i].planificacionDotacion || {};
+            next[i] = { ...prev[i], ...row, planificacionDotacion: { ...prevDot, ...row.planificacionDotacion } };
+            return next;
+        });
+        setImportarCtx((prev) => {
+            if (!prev || prev.empleados.some((e) => e.id === emp.id)) return prev;
+            return {
+                ...prev,
+                empleados: [...prev.empleados, {
+                    id: emp.id,
+                    nombre: emp.name,
+                    legajo: emp.fileNumber,
+                    empresaId: empresaId || '',
+                    objetivoPreferido: emp.preferredObjectiveId || objectiveId,
+                }],
+            };
+        });
     };
 
     const armarCatalogoPlanilla = async () => {
@@ -16034,8 +16220,8 @@ function PlanificacionDesktop() {
                                     type="button"
                                     data-continuar-mes
                                     onClick={abrirContinuarMesAnterior}
-                                    disabled={!selectedObjective || prevMonthLoading || !!msgBloqueoEdicion}
-                                    title={msgBloqueoEdicion || 'Continuar desde el mes anterior: sigue el ciclo de cada guardia desde donde quedó (vista previa antes de aplicar)'}
+                                    disabled={!selectedObjective || prevMonthLoading || (!!msgBloqueoEdicion && !sinServicioEnMes)}
+                                    title={(msgBloqueoEdicion && !sinServicioEnMes ? msgBloqueoEdicion : null) || (sinServicioEnMes ? 'Continuar desde el mes anterior y activar el servicio del mes' : 'Continuar desde el mes anterior: sigue el ciclo de cada guardia desde donde quedó (vista previa antes de aplicar)')}
                                     aria-label="Continuar desde el mes anterior"
                                     className="p-2 bg-slate-100 rounded-lg hover:bg-teal-50 hover:text-teal-600 transition-colors disabled:opacity-40"
                                 >
@@ -18764,6 +18950,28 @@ function PlanificacionDesktop() {
                             return { ...prev, decisiones: { ...prev.decisiones, [col]: decision } };
                         })}
                         onAplicar={aplicarPegadoExcel}
+                        puedeAlta={isSuperAdmin || (rolePermissions['RRHH'] || []).includes('create')}
+                        onDarDeAlta={(fila) => setPedidoAlta({
+                            indice: fila.indice,
+                            nombre: fila.nombre,
+                            legajo: fila.legajo,
+                            empresaId: empresaId || '',
+                            empresaNombre: empresa?.name || '',
+                            objectiveId: selectedObjective || '',
+                            clientId: selectedClient || '',
+                        })}
+                    />,
+                    document.body,
+                )}
+                {pedidoAlta && typeof document !== 'undefined' && createPortal(
+                    <AltaDesdePadronModal
+                        pedido={pedidoAlta}
+                        onCerrar={() => setPedidoAlta(null)}
+                        onCreado={(empleado) => {
+                            altaPegadoRef.current = { indice: pedidoAlta.indice, employeeId: empleado.id };
+                            incorporarEmpleadoAlta(empleado, pedidoAlta.objectiveId);
+                            setPedidoAlta(null);
+                        }}
                     />,
                     document.body,
                 )}
@@ -20946,6 +21154,9 @@ function PlanificacionDesktop() {
                         puedeEditarServicio={isSuperAdmin || (rolePermissions['SERVICES'] || []).includes('update')}
                         migracionCompleta={migracionCompleta}
                         onServicioGuardado={() => setDataRefreshNonce((n) => n + 1)}
+                        puedeAltaLegajo={isSuperAdmin || (rolePermissions['RRHH'] || []).includes('create')}
+                        empresaNombre={empresa?.name || ''}
+                        onEmpleadoCreado={(empleado) => incorporarEmpleadoAlta(empleado, empleado.preferredObjectiveId || selectedObjective || '')}
                     />,
                     document.body,
                 )}

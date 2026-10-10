@@ -21,11 +21,19 @@ export type ContinuarMesVista = {
   avisos: AvisosCobertura;
   descanso: AlertaDescanso[];
   tope: AlertaHoras[];
+  /** El contrato no cubre el mes que se está armando. */
+  activar?: {
+    mes: string;
+    marcado: boolean;
+    puede: boolean;
+    motivo: string;
+    permiso: boolean;
+  };
 };
 
 type Props = {
   vista: ContinuarMesVista;
-  onAplicar: (employeeIds: string[], sugerencias: SugerenciaNivelacion[]) => void;
+  onAplicar: (employeeIds: string[], sugerencias: SugerenciaNivelacion[], activarServicio: boolean) => void;
   onCancelar: () => void;
 };
 
@@ -90,6 +98,7 @@ export function ContinuarMesModal({ vista, onAplicar, onCancelar }: Props) {
   const sinNada = useMemo(() => vista.resultados.filter((r) => r.ciclo && r.propuestas.length === 0), [vista.resultados]);
   const [elegidos, setElegidos] = useState<Set<string>>(() => new Set(conCiclo.filter((r) => !r.estimado).map((r) => r.employeeId)));
   const [nivelar, setNivelar] = useState<Set<string>>(() => new Set());
+  const [activarMes, setActivarMes] = useState(() => !!(vista.activar?.marcado && vista.activar.puede && vista.activar.permiso));
 
   const sugerencias = useMemo(
     () => conCiclo.flatMap((r) => r.sugerencias || []).sort((a, b) => a.dateStr.localeCompare(b.dateStr)),
@@ -145,6 +154,24 @@ export function ContinuarMesModal({ vista, onAplicar, onCancelar }: Props) {
         </div>
 
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+          {vista.activar && (
+            <div className="rounded-2xl border border-teal-200 bg-teal-50 px-3 py-2.5 text-[12px] text-teal-950 shadow-sm" data-continuar-activar>
+              {vista.activar.puede && vista.activar.permiso ? (
+                <label className="flex flex-wrap items-center gap-2 cursor-pointer">
+                  <b>El servicio de {vista.activar.mes} no está activo.</b>
+                  <input type="checkbox" checked={activarMes} onChange={(e) => setActivarMes(e.target.checked)} data-continuar-activar-check />
+                  <span>Activar el servicio de {vista.activar.mes} (agregar el mes al contrato)</span>
+                </label>
+              ) : (
+                <p>
+                  <b>El servicio de {vista.activar.mes} no está activo.</b>{' '}
+                  {vista.activar.puede && !vista.activar.permiso
+                    ? 'Pedile a quien administra Servicios que lo active. La copia igual se arma en borrador.'
+                    : vista.activar.motivo}
+                </p>
+              )}
+            </div>
+          )}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-2 items-start" data-continuar-alertas>
             {avisos.lineas.length > 0 ? (
               <Seccion icon={<ShieldAlert size={12} />} titulo="Cobertura del puesto" tono={hayFalta ? 'rojo' : 'ambar'}>
@@ -274,8 +301,8 @@ export function ContinuarMesModal({ vista, onAplicar, onCancelar }: Props) {
             <button
               type="button"
               data-continuar-aplicar
-              disabled={elegidos.size === 0 || totales.turnos + totales.francos === 0}
-              onClick={() => onAplicar([...elegidos], aceptadas)}
+              disabled={(elegidos.size === 0 || totales.turnos + totales.francos === 0) && !activarMes}
+              onClick={() => onAplicar([...elegidos], aceptadas, activarMes && !!vista.activar?.puede && !!vista.activar?.permiso)}
               className="px-4 py-2 rounded-lg bg-teal-600 text-white text-[12px] font-black hover:bg-teal-700 disabled:bg-white disabled:text-slate-400 disabled:border disabled:border-slate-300"
             >
               Aplicar

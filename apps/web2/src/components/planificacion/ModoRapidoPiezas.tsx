@@ -290,6 +290,8 @@ export function PegarExcelModal({
     onAsignar,
     onDecidir,
     onAplicar,
+    puedeAlta,
+    onDarDeAlta,
 }: {
     estado: PegarExcelEstado;
     guardias: GuardiaPegado[];
@@ -301,6 +303,9 @@ export function PegarExcelModal({
     onAsignar: (indice: number, fila: number | null) => void;
     onDecidir: (col: number, decision: DecisionDiaE) => void;
     onAplicar: () => void;
+    /** RRHH create o SuperAdmin. Sin permiso, la fila dice que hay que pedirle el alta a RRHH. */
+    puedeAlta?: boolean;
+    onDarDeAlta?: (fila: FilaPegadoExcel) => void;
 }) {
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
@@ -398,7 +403,7 @@ export function PegarExcelModal({
                         )}
                         <ul className="mb-3 max-h-64 space-y-1 overflow-auto">
                             {estado.preview.filas.map((f) => (
-                                <FilaResumen key={f.indice} fila={f} guardias={guardias} ocupadas={ocupadas} asignada={estado.asignacion[f.indice] ?? null} onAsignar={onAsignar} />
+                                <FilaResumen key={f.indice} fila={f} guardias={guardias} ocupadas={ocupadas} asignada={estado.asignacion[f.indice] ?? null} onAsignar={onAsignar} puedeAlta={puedeAlta} onDarDeAlta={onDarDeAlta} />
                             ))}
                         </ul>
                         {estado.preview.desconocidos.length > 0 && (
@@ -429,12 +434,16 @@ function FilaResumen({
     ocupadas,
     asignada,
     onAsignar,
+    puedeAlta,
+    onDarDeAlta,
 }: {
     fila: FilaPegadoExcel;
     guardias: GuardiaPegado[];
     ocupadas: Set<number>;
     asignada: number | null;
     onAsignar: (indice: number, fila: number | null) => void;
+    puedeAlta?: boolean;
+    onDarDeAlta?: (fila: FilaPegadoExcel) => void;
 }) {
     const guardia = guardias.find((g) => g.fila === asignada);
     if (asignada != null && guardia) {
@@ -458,6 +467,11 @@ function FilaResumen({
                 <option value="">Sin encontrar · elegí la fila</option>
                 {opciones.map((g) => <option key={g.fila} value={g.fila}>{g.nombre}{g.legajo ? ` · ${g.legajo}` : ''}</option>)}
             </select>
+            {puedeAlta ? (
+                <button type="button" className="shrink-0 rounded-lg bg-indigo-600 px-2 py-1 text-[10px] font-black text-white shadow-sm hover:bg-indigo-700" data-pegar-alta={fila.indice} onClick={() => onDarDeAlta?.(fila)}>Dar de alta</button>
+            ) : (
+                <span className="shrink-0 text-[10px] font-bold text-slate-500" data-pegar-alta-rrhh={fila.indice}>Pedile a RRHH el alta de {fila.nombre.split(',')[0].split(' ')[0]}</span>
+            )}
         </li>
     );
 }

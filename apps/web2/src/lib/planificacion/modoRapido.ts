@@ -888,7 +888,7 @@ function partirBloques(matriz: string[][]): string[][][] {
     return blocks.filter(tieneDatos);
 }
 
-function elegirGuardia(
+export function elegirGuardia(
     nombre: string,
     legajo: string,
     guardias: GuardiaPegado[],

@@ -93,7 +93,7 @@ export interface AppendMonthsResultado {
   created: SlaRow[];
 }
 
-async function registrarAuditoria(accion: string, detalle: string, empresaId: string | undefined, scopeEmpresa: boolean): Promise<void> {
+async function registrarAuditoria(accion: string, detalle: string, empresaId: string | undefined, scopeEmpresa: boolean, via?: string): Promise<void> {
   try {
     const currentUser = getAuth().currentUser;
     await addDoc(collection(db, 'audit_logs'), {
@@ -104,7 +104,7 @@ async function registrarAuditoria(accion: string, detalle: string, empresaId: st
       module: 'SERVICIOS_SLA',
       details: detalle,
       ...(scopeEmpresa && empresaId ? { empresaId } : {}),
-      metadata: { platform: 'web_admin_crono_movil' },
+      metadata: { platform: 'web_admin_crono_movil', ...(via ? { via } : {}) },
     });
   } catch (error) {
     console.error('Error auditoría:', error);
@@ -125,6 +125,8 @@ export async function ejecutarAgregarMeses(input: {
   empresaId: string;
   migracionCompleta: boolean;
   scopeEmpresa: boolean;
+  /** Marca del llamador (`CONTINUAR_MES` cuando lo dispara «Continuar»). */
+  via?: string;
 }): Promise<AppendMonthsResultado> {
   const { last, plan, empresaId, migracionCompleta, scopeEmpresa } = input;
   const positions = (last.positions || []).map((p) => ({ ...p, allowedShiftTypes: (p.allowedShiftTypes || []).map((s) => ({ ...s })) }));
@@ -146,7 +148,7 @@ export async function ejecutarAgregarMeses(input: {
   if (plan.mode === 'agrupados' && plan.extendTo) {
     const patch = { endDate: plan.extendTo, totalMonthlyHours: totalContractHours };
     await slaService.update(last.id, patch, { empresaId, migracionCompleta });
-    await registrarAuditoria('UPDATE_CONTRACT', `Extendió vigencia hasta ${plan.extendTo}: ${last.clientName} - ${last.objectiveName}`, empresaId, scopeEmpresa);
+    await registrarAuditoria('UPDATE_CONTRACT', `Extendió vigencia hasta ${plan.extendTo}: ${last.clientName} - ${last.objectiveName}`, empresaId, scopeEmpresa, input.via);
     return { summary: plan.summary, patches: [{ id: last.id, patch }], created: [] };
   }
 
@@ -172,6 +174,6 @@ export async function ejecutarAgregarMeses(input: {
     const ref = await slaService.add(row, empresaId);
     created.push({ ...row, id: ref.id } as SlaRow);
   }
-  await registrarAuditoria('CREATE_CONTRACT', `Agregó meses (${plan.segments.map((s) => s.label).join(', ')}): ${last.clientName} - ${last.objectiveName}`, empresaId, scopeEmpresa);
+  await registrarAuditoria('CREATE_CONTRACT', `Agregó meses (${plan.segments.map((s) => s.label).join(', ')}): ${last.clientName} - ${last.objectiveName}`, empresaId, scopeEmpresa, input.via);
   return { summary: plan.summary, patches, created };
 }

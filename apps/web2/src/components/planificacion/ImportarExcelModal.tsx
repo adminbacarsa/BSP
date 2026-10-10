@@ -3,6 +3,8 @@ import { format } from 'date-fns';
 import { AlertTriangle, FileSpreadsheet, X } from 'lucide-react';
 import { aplicarServicioPlanilla } from '@/lib/servicios/aplicarServicioPlanilla';
 import { ServicioPlanillaEditor } from '@/components/planificacion/ServicioPlanillaEditor';
+import { AltaDesdePadronModal } from '@/components/planificacion/AltaDesdePadronModal';
+import type { AltaHecha } from '@/lib/rrhh/altaLegajoClient';
 import { rangoMes } from '@/lib/planificacion/servicioDesdePlanilla';
 import type { EquivalenciaCodigo } from '@/lib/planificacion/equivalenciaCodigo';
 import {
@@ -69,6 +71,10 @@ type Props = {
   puedeEditarServicio: boolean;
   migracionCompleta: boolean;
   onServicioGuardado: () => void;
+  /** RRHH create o SuperAdmin. Sin permiso, la fila pide el alta a RRHH. */
+  puedeAltaLegajo?: boolean;
+  empresaNombre?: string;
+  onEmpleadoCreado?: (empleado: AltaHecha) => void;
 };
 
 type Eleccion = {
@@ -179,7 +185,7 @@ function reglasConEquivalencias(reglas: ReglaMapeo[], eqs: EquivalenciaCodigo[])
   });
 }
 
-export function ImportarExcelModal({ ctx, onCargar, onAplicar, onCancelar, puedeCrearServicio, puedeEditarServicio, migracionCompleta, onServicioGuardado }: Props) {
+export function ImportarExcelModal({ ctx, onCargar, onAplicar, onCancelar, puedeCrearServicio, puedeEditarServicio, migracionCompleta, onServicioGuardado, puedeAltaLegajo, empresaNombre, onEmpleadoCreado }: Props) {
   const [paso, setPaso] = useState(1);
   const [archivo, setArchivo] = useState('');
   const [error, setError] = useState('');
@@ -193,6 +199,8 @@ export function ImportarExcelModal({ ctx, onCargar, onAplicar, onCancelar, puede
   const [cargando, setCargando] = useState(false);
   const [cargado, setCargado] = useState<{ clave: string; actuales: CeldaActual[]; reglas: ReglaMapeo[] } | null>(null);
   const [serviciosEstado, setServiciosEstado] = useState(ctx.servicios);
+  const [altas, setAltas] = useState<EmpleadoCruce[]>([]);
+  const [altaFila, setAltaFila] = useState<CruceFila | null>(null);
   const ctxVivo = useMemo(() => ({ ...ctx, servicios: serviciosEstado }), [ctx, serviciosEstado]);
   const cargarRef = useRef(onCargar);
   cargarRef.current = onCargar;
@@ -235,9 +243,13 @@ export function ImportarExcelModal({ ctx, onCargar, onAplicar, onCancelar, puede
     () => ctx.empleados.filter((e) => !!grupo && e.objetivoPreferido === grupo.objectiveId),
     [ctx.empleados, grupo],
   );
+  const empleadosCruce = useMemo(() => {
+    const ids = new Set(ctx.empleados.map((e) => e.id));
+    return [...ctx.empleados, ...altas.filter((a) => !ids.has(a.id))];
+  }, [ctx.empleados, altas]);
   const cruce = useMemo(
-    () => (cuadro && cuadro.filas.length ? cruzarGuardias(cuadro.filas, ctx.empleados, ctx.empresaId) : []),
-    [cuadro, ctx.empleados, ctx.empresaId],
+    () => (cuadro && cuadro.filas.length ? cruzarGuardias(cuadro.filas, empleadosCruce, ctx.empresaId) : []),
+    [cuadro, empleadosCruce, ctx.empresaId],
   );
   const cruceOk = useMemo(() => cruceResuelto(cruce, decisiones), [cruce, decisiones]);
   const faltan = useMemo(() => faltanEnPlanilla(cruceOk, dotacion), [cruceOk, dotacion]);
@@ -618,6 +630,20 @@ export function ImportarExcelModal({ ctx, onCargar, onAplicar, onCancelar, puede
                         placeholder="Buscar en la empresa"
                         className="rounded-xl border border-slate-200 px-2 py-1"
                       />
+                      {c.estado === 'no' && (puedeAltaLegajo ? (
+                        <button
+                          type="button"
+                          className="rounded-xl bg-indigo-600 px-2.5 py-1 text-[11px] font-black text-white shadow-sm hover:bg-indigo-700"
+                          data-importar-alta={c.fila}
+                          onClick={() => setAltaFila(c)}
+                        >
+                          Dar de alta
+                        </button>
+                      ) : (
+                        <span className="text-[11px] font-bold text-slate-500" data-importar-alta-rrhh={c.fila}>
+                          Pedile a RRHH el alta de {c.nombrePlanilla.split(',')[0].split(' ')[0]}
+                        </span>
+                      ))}
                     </div>
                   )}
                   {(busqueda[c.fila] || '').trim().length >= 3 && (
@@ -725,6 +751,31 @@ export function ImportarExcelModal({ ctx, onCargar, onAplicar, onCancelar, puede
           )}
         </div>
       </div>
+      {altaFila && grupo && (
+        <AltaDesdePadronModal
+          pedido={{
+            nombre: altaFila.nombrePlanilla,
+            legajo: altaFila.legajo || '',
+            empresaId: ctx.empresaId,
+            empresaNombre: empresaNombre || '',
+            objectiveId: grupo.objectiveId,
+            clientId: grupo.clienteId,
+          }}
+          onCerrar={() => setAltaFila(null)}
+          onCreado={(empleado) => {
+            setAltas((prev) => (prev.some((a) => a.id === empleado.id) ? prev : [...prev, {
+              id: empleado.id,
+              nombre: empleado.name,
+              legajo: empleado.fileNumber,
+              empresaId: ctx.empresaId,
+              objetivoPreferido: empleado.preferredObjectiveId || grupo.objectiveId,
+            }]));
+            setDecisiones((prev) => ({ ...prev, [altaFila.fila]: empleado.id }));
+            onEmpleadoCreado?.(empleado);
+            setAltaFila(null);
+          }}
+        />
+      )}
     </div>
   );
 }
