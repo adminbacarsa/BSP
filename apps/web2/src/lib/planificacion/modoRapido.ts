@@ -463,6 +463,293 @@ export function autorizacionesAlGuardar(avisos: AvisoRapido[], minimoAbsoluto = 
     return { bloquean, piden };
 }
 
+/* ── Pegado desde Excel (alinea por guardia) ────────────────────────────── */
+
+export type GuardiaPegado = { fila: number; nombre: string; legajo?: string };
+
+export type FilaPegadoExcel = {
+    indice: number;
+    nombre: string;
+    legajo: string;
+    filaGrilla: number | null;
+    via: 'legajo' | 'nombre' | 'parecido' | null;
+    celdas: Array<{ col: number; code: string }>;
+    desconocidos: string[];
+};
+
+export type PreviewPegadoExcel = {
+    modo: 'nombre' | 'posicion';
+    filas: FilaPegadoExcel[];
+    desconocidos: string[];
+    resumen: string;
+};
+
+const ALIAS_EXCEL: Record<string, string> = {
+    RETEN: 'RET',
+    RETENIDO: 'RET',
+    VAC: 'V',
+    VACACIONES: 'V',
+    LICANUAL: 'V',
+    LICENCIAANUAL: 'V',
+    ART: 'A',
+    CM: 'E',
+    CERTIFICADOMEDICO: 'E',
+    FRANCO: 'F',
+};
+
+/** Cómo se muestra un código que no se escribe (conserva la barra de VF/T). */
+export function etiquetaCodigoExcel(crudo: string): string {
+    return String(crudo || '').trim().replace(/\s+/g, ' ').toUpperCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+/**
+ * Código de una celda de Excel: saca los espacios («P1 M» → P1M), traduce los alias
+ * (RETEN → RET, LIC ANUAL → V, ART → A, CM → E, FRANCO → F; R → RET si R no es un código del servicio)
+ * y descarta lo que no está en el catálogo.
+ */
+export function normalizarCodigoExcel(crudo: string, conocidos: ReadonlySet<string>): { code: string | null; desconocido: string | null } {
+    const visible = etiquetaCodigoExcel(crudo);
+    if (!visible) return { code: null, desconocido: null };
+    let compact = visible.replace(/[\s.\-]/g, '');
+    if (compact === 'R' && !conocidos.has('R') && conocidos.has('RET')) compact = 'RET';
+    const alias = ALIAS_EXCEL[compact];
+    if (alias) compact = alias;
+    if (conocidos.has(compact)) return { code: compact, desconocido: null };
+    return { code: null, desconocido: visible };
+}
+
+function sinAcento(s: string): string {
+    return String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+}
+
+export function tokensDeNombre(s: string): string[] {
+    return sinAcento(s).replace(/[^A-Z0-9\s]/g, ' ').split(/\s+/).filter((t) => t.length >= 2);
+}
+
+function claveNombre(s: string): string {
+    return tokensDeNombre(s).slice().sort().join(' ');
+}
+
+function apellidoDe(s: string): string {
+    const antes = sinAcento(s).split(',')[0];
+    return tokensDeNombre(antes)[0] || '';
+}
+
+function normLegajo(s: string): string {
+    return String(s || '').replace(/\D/g, '').replace(/^0+/, '');
+}
+
+/** 0 si no se parecen; 100 si son los mismos tokens. El apellido (primera palabra) tiene que coincidir. */
+function puntajeNombre(excel: string, guardia: string): number {
+    const a = tokensDeNombre(excel);
+    const b = tokensDeNombre(guardia);
+    if (a.length < 2 || b.length < 2) return 0;
+    if (claveNombre(excel) === claveNombre(guardia)) return 100;
+    const ap = apellidoDe(excel);
+    if (!ap || apellidoDe(guardia) !== ap) return 0;
+    let hit = 0;
+    for (const t of a) {
+        if (b.includes(t)) hit += 2;
+        else if (b.some((x) => x.startsWith(t) || t.startsWith(x))) hit += 1;
+    }
+    if (hit < 3) return 0;
+    return 40 + hit * 10;
+}
+
+function pareceNombre(v: string): boolean {
+    const alpha = v.trim().split(/\s+/).filter((p) => /[A-Za-zÁÉÍÓÚÑáéíóúñ]{2,}/.test(p));
+    return alpha.filter((p) => p.length >= 3).length >= 1 && alpha.length >= 2 && v.trim().length >= 6;
+}
+
+const PALABRAS_DIA = new Set(['RETEN', 'RETENIDO', 'FRANCO', 'VACACIONES', 'LICANUAL', 'LICENCIAANUAL', 'VAC', 'ART']);
+
+/** Una celda de día (M, P1 M, RETEN, 11 A 23) y no un rótulo de puesto (PLAYA, PUESTO 5). */
+function pareceDia(v: string): boolean {
+    const t = sinAcento(v).trim();
+    if (!t || pareceNombre(t)) return false;
+    if (/^\d{3,}$/.test(t)) return false;
+    if (/\bPUESTO\b/.test(t)) return false;
+    const compact = t.replace(/[\s.\-]/g, '');
+    if (PALABRAS_DIA.has(compact) || ALIAS_EXCEL[compact]) return true;
+    if (/^[A-Z]{5,}$/.test(compact)) return false;
+    return compact.length > 0 && compact.length <= 10;
+}
+
+function esEncabezado(fila: string[]): boolean {
+    const vals = fila.map((v) => sinAcento(v).trim()).filter(Boolean);
+    if (!vals.length) return false;
+    if (vals.some((v) => /^(LEGAJO|PUESTO|APELLIDO|APELLIDOS|NOMBRE|NOMBRES)$/.test(v))) return true;
+    const nums = vals.filter((v) => /^\d{1,2}$/.test(v)).map(Number);
+    if (nums.length >= 20 && nums.includes(1)) return true;
+    const letras = vals.filter((v) => /^[DLMXJVS]$/.test(v));
+    if (letras.length >= 20) return true;
+    return false;
+}
+
+function esNota(fila: string[]): boolean {
+    const celdas = fila.map((v) => v.trim()).filter(Boolean);
+    if (celdas.some((v) => v.length > 40 && !pareceDia(v) && !pareceNombre(v))) return true;
+    const nombre = celdas.find((v) => v && !pareceDia(v) && !/^\d{3,6}$/.test(v)) || '';
+    return /^(REFERENCIA|BACAR)\b/i.test(sinAcento(nombre)) || /^\*/.test(nombre);
+}
+
+type KindCol = 'vacio' | 'nombre' | 'legajo' | 'puesto' | 'dia';
+
+function clasificarColumnas(rows: string[][]): { kinds: KindCol[]; diaDesde: number; nombreCol: number; legajoCol: number } {
+    const cols = rows.reduce((m, f) => Math.max(m, f.length), 0);
+    const kinds: KindCol[] = [];
+    for (let c = 0; c < cols; c++) {
+        const vals = rows.map((f) => (f[c] || '').trim()).filter(Boolean);
+        if (!vals.length) { kinds.push('vacio'); continue; }
+        const n = vals.length;
+        const nombres = vals.filter(pareceNombre).length;
+        const legajos = vals.filter((v) => /^\d{3,6}$/.test(v.trim())).length;
+        const dias = vals.filter(pareceDia).length;
+        if (nombres / n >= 0.5 && nombres >= legajos) kinds.push('nombre');
+        else if (legajos / n >= 0.5 && legajos > dias) kinds.push('legajo');
+        else if (dias / n >= 0.5) kinds.push('dia');
+        else kinds.push('puesto');
+    }
+    let diaDesde = -1;
+    for (let c = 0; c < cols; c++) {
+        if (kinds[c] !== 'dia') continue;
+        diaDesde = c;
+        break;
+    }
+    return {
+        kinds,
+        diaDesde,
+        nombreCol: kinds.indexOf('nombre'),
+        legajoCol: kinds.indexOf('legajo'),
+    };
+}
+
+function partirBloques(matriz: string[][]): string[][][] {
+    const blocks: string[][][] = [];
+    let cur: string[][] = [];
+    const tieneDatos = (b: string[][]) => b.some((f) => !esEncabezado(f) && f.some((v) => v.trim()));
+    for (const fila of matriz) {
+        if (esEncabezado(fila) && tieneDatos(cur)) {
+            blocks.push(cur);
+            cur = [];
+        }
+        cur.push(fila);
+    }
+    if (cur.length) blocks.push(cur);
+    return blocks.filter(tieneDatos);
+}
+
+function elegirGuardia(
+    nombre: string,
+    legajo: string,
+    guardias: GuardiaPegado[],
+    ocupadas: Set<number>,
+): { fila: number; via: 'legajo' | 'nombre' | 'parecido' } | null {
+    const libres = guardias.filter((g) => !ocupadas.has(g.fila));
+    const leg = normLegajo(legajo);
+    if (leg.length >= 3) {
+        const hits = libres.filter((g) => normLegajo(g.legajo || '') === leg);
+        if (hits.length === 1) return { fila: hits[0].fila, via: 'legajo' };
+        if (hits.length > 1) return null;
+    }
+    const clave = claveNombre(nombre);
+    if (clave) {
+        const exactos = libres.filter((g) => claveNombre(g.nombre) === clave);
+        if (exactos.length === 1) return { fila: exactos[0].fila, via: 'nombre' };
+        if (exactos.length > 1) return null;
+    }
+    const scored = libres
+        .map((g) => ({ g, s: puntajeNombre(nombre, g.nombre) }))
+        .filter((x) => x.s >= 50)
+        .sort((a, b) => b.s - a.s);
+    if (!scored.length) return null;
+    if (scored.length === 1 || scored[0].s >= scored[1].s + 10) return { fila: scored[0].g.fila, via: 'parecido' };
+    return null;
+}
+
+export function textoResumenPegado(p: { filas: number; encontrados: number; sinEncontrar: string[]; celdas: number; desconocidos: string[] }): string {
+    const corto = (xs: string[]) => `${xs.slice(0, 4).join(', ')}${xs.length > 4 ? '…' : ''}`;
+    let s = `Pegadas ${p.filas} filas: ${p.encontrados} guardias encontrados`;
+    if (p.sinEncontrar.length) s += `, ${p.sinEncontrar.length} sin encontrar (${corto(p.sinEncontrar)})`;
+    s += `, ${p.celdas} celdas`;
+    if (p.desconocidos.length) s += `, ${p.desconocidos.length} códigos desconocidos (${corto(p.desconocidos)})`;
+    return s;
+}
+
+/**
+ * Si el bloque trae nombre (y legajo o puesto) antes de los días, propone la fila de cada guardia.
+ * Un mes de 28 a 31 días arranca en el día 1; un recorte más corto arranca en el día del cursor.
+ * Sin nombres, `modo: 'posicion'` y el llamador pega como hasta ahora.
+ */
+export function prepararPegadoExcel(
+    matriz: string[][],
+    opts: { guardias: GuardiaPegado[]; cursor: { r: number; c: number } | null; cols: number; conocidos: ReadonlySet<string> },
+): PreviewPegadoExcel {
+    const vacio: PreviewPegadoExcel = { modo: 'posicion', filas: [], desconocidos: [], resumen: '' };
+    const bloques = partirBloques(matriz);
+    if (!bloques.length) return vacio;
+    const ocupadas = new Set<number>();
+    const filas: FilaPegadoExcel[] = [];
+    const descSet = new Set<string>();
+    let algunoConNombre = false;
+    for (const bloque of bloques) {
+        const datos = bloque.filter((f) => !esEncabezado(f) && !esNota(f) && f.some((v) => v.trim()));
+        if (!datos.length) continue;
+        const { diaDesde, nombreCol, legajoCol } = clasificarColumnas(datos);
+        if (diaDesde < 0 || nombreCol < 0 || nombreCol >= diaDesde) continue;
+        algunoConNombre = true;
+        const nDias = datos.reduce((m, f) => Math.max(m, f.length), 0) - diaDesde;
+        const colInicio = nDias >= 28 && nDias <= 31 ? 0 : (opts.cursor?.c ?? 0);
+        for (const f of datos) {
+            const nombre = nombreCol >= 0 ? (f[nombreCol] || '').trim() : '';
+            const legajo = legajoCol >= 0 ? (f[legajoCol] || '').trim() : '';
+            if (!pareceNombre(nombre) && normLegajo(legajo).length < 3) continue;
+            const celdas: Array<{ col: number; code: string }> = [];
+            const desconocidos: string[] = [];
+            for (let i = 0; i < nDias; i++) {
+                const col = colInicio + i;
+                if (col >= opts.cols) break;
+                const raw = f[diaDesde + i] || '';
+                if (!raw.trim()) continue;
+                const res = normalizarCodigoExcel(raw, opts.conocidos);
+                if (res.code) celdas.push({ col, code: res.code });
+                else if (res.desconocido && !desconocidos.includes(res.desconocido)) desconocidos.push(res.desconocido);
+            }
+            const elegido = elegirGuardia(nombre, legajo, opts.guardias, ocupadas);
+            const yaCargado = !elegido && celdas.length === 0 && elegirGuardia(nombre, legajo, opts.guardias, new Set());
+            if (yaCargado) continue;
+            if (elegido) ocupadas.add(elegido.fila);
+            for (const d of desconocidos) descSet.add(d);
+            filas.push({
+                indice: filas.length,
+                nombre: etiquetaCodigoExcel(nombre) || nombre.trim(),
+                legajo: legajo.trim(),
+                filaGrilla: elegido?.fila ?? null,
+                via: elegido?.via ?? null,
+                celdas,
+                desconocidos,
+            });
+        }
+    }
+    if (!algunoConNombre || !filas.length) return vacio;
+    const sinEncontrar = filas.filter((f) => f.filaGrilla == null).map((f) => f.nombre);
+    const desconocidos = [...descSet];
+    const celdas = filas.reduce((a, f) => a + (f.filaGrilla == null ? 0 : f.celdas.length), 0);
+    return {
+        modo: 'nombre',
+        filas,
+        desconocidos,
+        resumen: textoResumenPegado({
+            filas: filas.length,
+            encontrados: filas.length - sinEncontrar.length,
+            sinEncontrar,
+            celdas,
+            desconocidos,
+        }),
+    };
+}
+
 export const ATAJOS_MODO_RAPIDO: Array<{ teclas: string; que: string }> = [
     { teclas: 'Flechas · Tab · Enter', que: 'Mover la celda activa (Shift invierte)' },
     { teclas: 'Inicio / Fin', que: 'Primer / último día (Ctrl: primera / última celda)' },
@@ -471,7 +758,8 @@ export const ATAJOS_MODO_RAPIDO: Array<{ teclas: string; que: string }> = [
     { teclas: '↑ ↓ en la lista', que: 'Elegir del autocompletar' },
     { teclas: 'Supr / Retroceso', que: 'Borrar la celda o el rango' },
     { teclas: 'Shift + flecha / clic / arrastre', que: 'Seleccionar un rango (lo que escribís va a todo el rango)' },
-    { teclas: 'Ctrl + C / X / V', que: 'Copiar, cortar y pegar bloques (sirve entre guardias, objetivos y meses; pega desde Excel)' },
+    { teclas: 'Ctrl + C / X / V', que: 'Copiar, cortar y pegar. Desde Excel: copiá desde la columna del nombre hasta el último día y Ctrl+V (se acomoda por guardia)' },
+    { teclas: 'M y N de 12 h', que: 'El color no se copia: escribí D12 y N12. Un código que el servicio no tiene no se pega y queda en el resumen' },
     { teclas: 'Ctrl + D / Ctrl + R', que: 'Rellenar hacia abajo / a la derecha' },
     { teclas: 'Cuadradito de la esquina', que: 'Arrastrar para repetir el patrón (sigue ciclos: M M M M M M F F)' },
     { teclas: 'Ctrl + Z / Ctrl + Y', que: 'Deshacer / rehacer' },

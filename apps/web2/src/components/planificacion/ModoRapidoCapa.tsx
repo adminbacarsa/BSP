@@ -1,4 +1,5 @@
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
     type CeldaRC,
     type Dimensiones,
@@ -32,7 +33,7 @@ type Props = {
     onEscribir: (celdas: CeldaRC[], code: string) => void;
     onBorrar: (celdas: CeldaRC[]) => void;
     onCopiar: (rg: RangoRC, cortar: boolean) => string;
-    onPegar: (inicio: CeldaRC, rg: RangoRC, texto: string) => void;
+    onPegar: (inicio: CeldaRC | null, rg: RangoRC | null, texto: string) => void;
     onRelleno: (rg: RangoRC, dir: 'abajo' | 'derecha') => void;
     onSerie: (origen: RangoRC, destino: CeldaRC) => void;
     onDeshacer: () => void;
@@ -58,6 +59,7 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
     const [texto, setTexto] = useState<string | null>(null);
     const [elegida, setElegida] = useState(-1);
     const [serie, setSerie] = useState<CeldaRC | null>(null);
+    const [sugLugar, setSugLugar] = useState<{ left: number; arriba: boolean; top: number; bottom: number } | null>(null);
     const [cajas, setCajas] = useState<{ cursor: Caja | null; rango: Caja | null; serie: Caja | null; marcas: Array<Caja & MarcaAviso> }>({ cursor: null, rango: null, serie: null, marcas: [] });
     const inputRef = useRef<HTMLInputElement>(null);
     const arrastre = useRef<'rango' | 'serie' | null>(null);
@@ -117,6 +119,25 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
     }, [cajaDe]);
 
     useLayoutEffect(() => { if (activo) medir(); }, [activo, cursor, ancla, serie, version, marcas, medir]);
+
+    useLayoutEffect(() => {
+        if (!activo || texto == null || !cursor || sugerencias.length === 0) { setSugLugar(null); return; }
+        const medirSug = () => {
+            const t = td(cursor.r, cursor.c);
+            if (!t) { setSugLugar(null); return; }
+            const r = t.getBoundingClientRect();
+            const abajo = window.innerHeight - r.bottom;
+            setSugLugar({ left: Math.max(8, r.left), arriba: abajo < 220 && r.top > abajo, top: r.bottom + 4, bottom: window.innerHeight - r.top + 4 });
+        };
+        medirSug();
+        const cont = contenedorRef.current;
+        cont?.addEventListener('scroll', medirSug, { passive: true });
+        window.addEventListener('resize', medirSug);
+        return () => {
+            cont?.removeEventListener('scroll', medirSug);
+            window.removeEventListener('resize', medirSug);
+        };
+    }, [activo, texto, cursor, sugerencias.length, td, contenedorRef]);
 
     useEffect(() => {
         if (!activo) return;
@@ -261,6 +282,7 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
     useEffect(() => {
         if (!activo) return;
         const onKey = (e: KeyboardEvent) => {
+            if (document.querySelector('[data-modo-rapido-ayuda], [data-pegar-excel]')) return;
             const p = propsRef.current;
             const { cursor: cur, texto: t } = estado.current;
             const activeEl = document.activeElement;
@@ -368,6 +390,7 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
             return !a || a === document.body || !!(cont && cont.contains(a));
         };
         const onCopy = (e: ClipboardEvent) => {
+            if (document.querySelector('[data-modo-rapido-ayuda], [data-pegar-excel]')) return;
             const rg = rangoRef.current;
             if (!rg || !enGrilla()) return;
             const tsv = propsRef.current.onCopiar(rg, false);
@@ -375,6 +398,7 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
             e.preventDefault();
         };
         const onCut = (e: ClipboardEvent) => {
+            if (document.querySelector('[data-modo-rapido-ayuda], [data-pegar-excel]')) return;
             const rg = rangoRef.current;
             if (!rg || !enGrilla()) return;
             const tsv = propsRef.current.onCopiar(rg, true);
@@ -382,12 +406,14 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
             e.preventDefault();
         };
         const onPaste = (e: ClipboardEvent) => {
+            if (document.querySelector('[data-modo-rapido-ayuda], [data-pegar-excel]')) return;
+            if (!enGrilla()) return;
             const rg = rangoRef.current;
             const cur = estado.current.cursor;
-            if (!rg || !cur || !enGrilla()) return;
             const txt = e.clipboardData?.getData('text/plain') ?? '';
             e.preventDefault();
-            propsRef.current.onPegar({ r: rg.minR, c: rg.minC }, rg, txt);
+            const inicio = cur ? { r: rg?.minR ?? cur.r, c: rg?.minC ?? cur.c } : null;
+            propsRef.current.onPegar(inicio, rg, txt);
         };
         document.addEventListener('copy', onCopy);
         document.addEventListener('cut', onCut);
@@ -459,8 +485,12 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
                         spellCheck={false}
                         autoComplete="off"
                     />
-                    {sugerencias.length > 0 && (
-                        <ul className="mt-1 min-w-[180px] overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-lg" data-modo-rapido-sugerencias>
+                    {sugLugar && sugerencias.length > 0 && createPortal(
+                        <ul
+                            className="fixed z-[12000] min-w-[180px] overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-lg"
+                            style={sugLugar.arriba ? { left: sugLugar.left, bottom: sugLugar.bottom } : { left: sugLugar.left, top: sugLugar.top }}
+                            data-modo-rapido-sugerencias
+                        >
                             {sugerencias.map((s, i) => (
                                 <li
                                     key={`${s.code}-${i}`}
@@ -472,7 +502,8 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
                                     {s.detalle && <span className="ml-auto truncate text-[9px] font-bold uppercase text-slate-400">{s.detalle}</span>}
                                 </li>
                             ))}
-                        </ul>
+                        </ul>,
+                        document.body,
                     )}
                 </div>
             )}

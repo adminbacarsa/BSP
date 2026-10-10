@@ -228,7 +228,7 @@ import {
     type VistaCelda,
 } from '@/components/planificacion/GrillaCelda';
 import { ModoRapidoCapa, type CapaModoRapidoApi, type MarcaAviso } from '@/components/planificacion/ModoRapidoCapa';
-import { ModoRapidoAyuda, ModoRapidoAvisosPanel, CopiarDeModal, type CopiarDeEleccion } from '@/components/planificacion/ModoRapidoPiezas';
+import { ModoRapidoAyuda, ModoRapidoAvisosPanel, CopiarDeModal, PegarExcelModal, type CopiarDeEleccion, type PegarExcelEstado } from '@/components/planificacion/ModoRapidoPiezas';
 import {
     type AvisoRapido,
     type CeldaRC,
@@ -243,6 +243,7 @@ import {
     normalizarCodigo,
     opcionesDeCodigo,
     parsearTsv,
+    prepararPegadoExcel,
     planPegado,
     planRelleno,
     planSerie,
@@ -2014,6 +2015,7 @@ function PlanificacionDesktop() {
     const capaRapidaRef = useRef<CapaModoRapidoApi | null>(null);
     const grillaScrollRef = useRef<HTMLDivElement | null>(null);
     const [ayudaRapidaOpen, setAyudaRapidaOpen] = useState(false);
+    const [pegarExcel, setPegarExcel] = useState<PegarExcelEstado | null>(null);
     const [copiarDeOpen, setCopiarDeOpen] = useState(false);
     const [copiarDeTick, setCopiarDeTick] = useState(0);
     const pendienteCopiarDeRef = useRef<{ porEmpDia: Map<string, FuenteRapida>; empIds: string[]; soloVacias: boolean; nombre: string } | null>(null);
@@ -13383,20 +13385,67 @@ function PlanificacionDesktop() {
         toast.message(`${cortar ? 'Cortado' : 'Copiado'} ${celdas.length}×${celdas[0]?.length || 0} · se mantiene al cambiar de objetivo o mes`);
         return tsv;
     };
-    const pegarRapido = (inicio: CeldaRC, rg: RangoRC, texto: string) => {
-        const interno = portapapelesRapidoRef.current;
-        const limpio = (t: string) => t.replace(/\r/g, '').trim();
-        const usarInterno = !!interno && (!limpio(texto) || limpio(texto) === limpio(interno.tsv));
-        const matriz = usarInterno ? interno!.celdas.map((f) => f.map((x) => x?.code || '')) : parsearTsv(texto);
-        if (!matriz.length) return;
-        const plan = planPegado(matriz, inicio, dimsRapido, rg);
+    const guardiasPegado = () => displayedEmployees.map((e: any, fila: number) => ({
+        fila,
+        nombre: String(e.name || e.id || ''),
+        legajo: String(e.fileNumber || e.legajo || ''),
+    }));
+    const pegarPorPosicion = (matriz: string[][], inicio: CeldaRC, rg: RangoRC | null, fuente: Array<Array<FuenteRapida | null>> | null) => {
+        const rango = rg && (rg.maxR > rg.minR || rg.maxC > rg.minC) ? rg : undefined;
+        const plan = planPegado(matriz, inicio, dimsRapido, rango);
         escribirRapido(plan.map((p) => ({
             r: p.r,
             c: p.c,
             code: p.valor,
             borrar: !p.valor,
-            fuente: usarInterno ? interno!.celdas[p.fila]?.[p.col] : null,
+            fuente: fuente ? fuente[p.fila]?.[p.col] : null,
         })));
+    };
+    const pegarRapido = (inicio: CeldaRC | null, rg: RangoRC | null, texto: string) => {
+        const interno = portapapelesRapidoRef.current;
+        const limpio = (t: string) => t.replace(/\r/g, '').trim();
+        const usarInterno = !!interno && (!limpio(texto) || limpio(texto) === limpio(interno.tsv));
+        if (usarInterno) {
+            pegarPorPosicion(interno!.celdas.map((f) => f.map((x) => x?.code || '')), inicio || { r: 0, c: 0 }, rg, interno!.celdas);
+            return;
+        }
+        const matriz = parsearTsv(texto);
+        if (!matriz.length) return;
+        const conocidos = new Set(opcionesDeCodigo([], slaTodosRapido, ultimoUsadoRapido).map((o) => normalizarCodigo(o.code)));
+        const preview = prepararPegadoExcel(matriz, { guardias: guardiasPegado(), cursor: inicio, cols: dimsRapido.cols, conocidos });
+        if (preview.modo === 'posicion') {
+            pegarPorPosicion(matriz, inicio || { r: 0, c: 0 }, rg, null);
+            return;
+        }
+        const asignacion: Record<number, number | null> = {};
+        for (const f of preview.filas) asignacion[f.indice] = f.filaGrilla;
+        setPegarExcel({ paso: 'resumen', preview, asignacion });
+    };
+    const revisarPegadoExcel = (texto: string) => {
+        const matriz = parsearTsv(texto);
+        if (!matriz.length) return;
+        const conocidos = new Set(opcionesDeCodigo([], slaTodosRapido, ultimoUsadoRapido).map((o) => normalizarCodigo(o.code)));
+        const preview = prepararPegadoExcel(matriz, { guardias: guardiasPegado(), cursor: null, cols: dimsRapido.cols, conocidos });
+        if (preview.modo === 'posicion') {
+            setPegarExcel(null);
+            pegarPorPosicion(matriz, { r: 0, c: 0 }, null, null);
+            return;
+        }
+        const asignacion: Record<number, number | null> = {};
+        for (const f of preview.filas) asignacion[f.indice] = f.filaGrilla;
+        setPegarExcel({ paso: 'resumen', preview, asignacion });
+    };
+    const aplicarPegadoExcel = () => {
+        if (!pegarExcel || pegarExcel.paso !== 'resumen') return;
+        const { preview, asignacion } = pegarExcel;
+        const items: Array<{ r: number; c: number; code: string }> = [];
+        for (const f of preview.filas) {
+            const r = asignacion[f.indice];
+            if (r == null) continue;
+            for (const cel of f.celdas) items.push({ r, c: cel.col, code: cel.code });
+        }
+        setPegarExcel(null);
+        escribirRapido(items);
     };
     const rellenarRapido = (rg: RangoRC, dir: 'abajo' | 'derecha') => {
         const pares = planRelleno(rg, dir);
@@ -15613,6 +15662,15 @@ function PlanificacionDesktop() {
                                                     className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-2 py-2 text-[10px] font-black uppercase text-slate-600 hover:bg-slate-50"
                                                 >
                                                     <Copy size={13}/> Copiar de…
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setPegarExcel({ paso: 'texto', borrador: '' })}
+                                                    data-pegar-excel-abrir
+                                                    title="Pegar un bloque copiado de Excel, alineado por guardia"
+                                                    className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-2 py-2 text-[10px] font-black uppercase text-slate-600 hover:bg-slate-50"
+                                                >
+                                                    <ClipboardPaste size={13}/> Pegar
                                                 </button>
                                                 <button
                                                     type="button"
@@ -18023,6 +18081,20 @@ function PlanificacionDesktop() {
                             </div>
                         </div>
                     </div>,
+                    document.body,
+                )}
+                {pegarExcel && createPortal(
+                    <PegarExcelModal
+                        estado={pegarExcel}
+                        guardias={displayedEmployees.map((e: any, fila: number) => ({ fila, nombre: String(e.name || ''), legajo: String(e.fileNumber || e.legajo || '') }))}
+                        onCerrar={() => setPegarExcel(null)}
+                        onRevisar={revisarPegadoExcel}
+                        onAsignar={(indice, fila) => setPegarExcel((prev) => {
+                            if (!prev || prev.paso !== 'resumen') return prev;
+                            return { ...prev, asignacion: { ...prev.asignacion, [indice]: fila } };
+                        })}
+                        onAplicar={aplicarPegadoExcel}
+                    />,
                     document.body,
                 )}
                 {copiarDeOpen && selectedObjective && createPortal(

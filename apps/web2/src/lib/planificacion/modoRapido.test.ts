@@ -12,7 +12,9 @@ import {
     matrizATsv,
     moverCursor,
     normalizarRango,
+    normalizarCodigoExcel,
     parsearTsv,
+    prepararPegadoExcel,
     planPegado,
     planRelleno,
     planSerie,
@@ -202,5 +204,124 @@ describe('modo rápido · avisos', () => {
             topeAutorizado: () => true,
         });
         assert.equal(avisos.length, 0);
+    });
+});
+
+const CONOCIDOS = new Set(['M', 'T', 'N', 'F', 'RET', 'REF', 'E', 'V', 'A', 'P1M', 'P2T', 'P2M', 'D12', 'N12']);
+const guardias = [
+    { fila: 0, nombre: 'CACERES, Walter', legajo: '3730' },
+    { fila: 1, nombre: 'NIEVAS, Adriana', legajo: '3733' },
+    { fila: 2, nombre: 'PERALTA, Jeremias', legajo: '3734' },
+    { fila: 3, nombre: 'VERGARA, Osvaldo', legajo: '1111' },
+    { fila: 4, nombre: 'VERGARA, Oscar', legajo: '2222' },
+];
+
+describe('modo rápido · pegado de Excel', () => {
+    it('normaliza espacios y alias, y descarta lo que no está en el catálogo', () => {
+        assert.equal(normalizarCodigoExcel('P1 M', CONOCIDOS).code, 'P1M');
+        assert.equal(normalizarCodigoExcel('P2  T', CONOCIDOS).code, 'P2T');
+        assert.equal(normalizarCodigoExcel('RETEN', CONOCIDOS).code, 'RET');
+        assert.equal(normalizarCodigoExcel('R', CONOCIDOS).code, 'RET');
+        assert.equal(normalizarCodigoExcel('R', new Set(['R', 'M'])).code, 'R');
+        assert.equal(normalizarCodigoExcel('LIC ANUAL', CONOCIDOS).code, 'V');
+        assert.equal(normalizarCodigoExcel('VAC', CONOCIDOS).code, 'V');
+        assert.equal(normalizarCodigoExcel('ART', CONOCIDOS).code, 'A');
+        assert.equal(normalizarCodigoExcel('CM', CONOCIDOS).code, 'E');
+        assert.equal(normalizarCodigoExcel('FRANCO', CONOCIDOS).code, 'F');
+        assert.equal(normalizarCodigoExcel('VF/T', CONOCIDOS).code, null);
+        assert.equal(normalizarCodigoExcel('VF/T', CONOCIDOS).desconocido, 'VF/T');
+    });
+
+    it('alinea por legajo y por nombre aunque el orden no sea el de la grilla', () => {
+        const tsv = [
+            '\t\tLEGAJO\tPUESTO\tJ\tV\tS\tD',
+            '\t\t\t\t1\t2\t3\t4',
+            'QUIROGA FABIAN\t\t9999\tPUESTO 5\tM\tN\tF\tT',
+            'NIEVAS ADRIANA\t\t3733\t\tT\tM\tRETEN\tF',
+            'PERALTA JEREMIAS\t\t\tPLAYA\tP1 M\tVF/T\tLIC ANUAL\tART',
+            'REFERENCIAS\t\t\t\tM\tMañana\tT\tTarde',
+        ].join('\n');
+        const p = prepararPegadoExcel(parsearTsv(tsv), { guardias, cursor: { r: 0, c: 0 }, cols: 31, conocidos: CONOCIDOS });
+        assert.equal(p.modo, 'nombre');
+        assert.equal(p.filas.length, 3);
+        const nievas = p.filas.find((f) => f.nombre.startsWith('NIEVAS'))!;
+        assert.equal(nievas.filaGrilla, 1);
+        assert.equal(nievas.via, 'legajo');
+        assert.deepEqual(nievas.celdas.map((c) => c.code), ['T', 'M', 'RET', 'F']);
+        assert.deepEqual(nievas.celdas.map((c) => c.col), [0, 1, 2, 3]);
+        const peralta = p.filas.find((f) => f.nombre.startsWith('PERALTA'))!;
+        assert.equal(peralta.filaGrilla, 2);
+        assert.equal(peralta.via, 'nombre');
+        assert.deepEqual(peralta.celdas.map((c) => c.code), ['P1M', 'V', 'A']);
+        assert.ok(peralta.desconocidos.includes('VF/T'));
+        const quiroga = p.filas.find((f) => f.nombre.startsWith('QUIROGA'))!;
+        assert.equal(quiroga.filaGrilla, null);
+        assert.match(p.resumen, /Pegadas 3 filas: 2 guardias encontrados, 1 sin encontrar \(QUIROGA FABIAN\), 7 celdas, 1 códigos desconocidos \(VF\/T\)/);
+    });
+
+    it('una fila del mes entero no se descarta por el largo del texto', () => {
+        const dias = Array.from({ length: 31 }, () => 'P2  T').join('\t');
+        const tsv = `NIEVAS ADRIANA\t3733\tRELEVANTE\t${dias}`;
+        const p = prepararPegadoExcel(parsearTsv(tsv), { guardias, cursor: null, cols: 31, conocidos: CONOCIDOS });
+        assert.equal(p.filas.length, 1);
+        assert.equal(p.filas[0].filaGrilla, 1);
+        assert.equal(p.filas[0].celdas.length, 31);
+        assert.equal(p.filas[0].celdas[0].code, 'P2T');
+    });
+
+    it('un mes completo arranca en el día 1 aunque el cursor esté en otro día', () => {
+        const dias = Array.from({ length: 31 }, (_, i) => (i % 3 === 0 ? 'M' : 'F')).join('\t');
+        const tsv = `SOSA MATIAS\t${dias}`;
+        const p = prepararPegadoExcel(parsearTsv(tsv), {
+            guardias: [{ fila: 2, nombre: 'SOSA, Matias', legajo: '' }],
+            cursor: { r: 0, c: 10 },
+            cols: 31,
+            conocidos: CONOCIDOS,
+        });
+        assert.equal(p.filas[0].filaGrilla, 2);
+        assert.equal(p.filas[0].via, 'nombre');
+        assert.equal(p.filas[0].celdas[0].col, 0);
+        assert.equal(p.filas[0].celdas.length, 31);
+    });
+
+    it('un recorte de pocos días arranca en el día del cursor', () => {
+        const tsv = 'SOSA MATIAS\tM\tT';
+        const p = prepararPegadoExcel(parsearTsv(tsv), {
+            guardias: [{ fila: 0, nombre: 'SOSA, Matias' }],
+            cursor: { r: 0, c: 4 },
+            cols: 31,
+            conocidos: CONOCIDOS,
+        });
+        assert.deepEqual(p.filas[0].celdas.map((c) => c.col), [4, 5]);
+    });
+
+    it('sin nombres pega por posición', () => {
+        const p = prepararPegadoExcel(parsearTsv('M\tT\nF\tN'), { guardias, cursor: { r: 0, c: 0 }, cols: 31, conocidos: CONOCIDOS });
+        assert.equal(p.modo, 'posicion');
+    });
+
+    it('«VERGARA OS» cae en el parecido si hay un solo Vergara, y queda sin asignar si hay dos', () => {
+        const uno = prepararPegadoExcel(parsearTsv('VERGARA OS\tM'), {
+            guardias: [{ fila: 3, nombre: 'VERGARA, Osvaldo', legajo: '' }],
+            cursor: null,
+            cols: 31,
+            conocidos: CONOCIDOS,
+        });
+        assert.equal(uno.filas[0].filaGrilla, 3);
+        assert.equal(uno.filas[0].via, 'parecido');
+        const dos = prepararPegadoExcel(parsearTsv('VERGARA OS\tM'), { guardias, cursor: null, cols: 31, conocidos: CONOCIDOS });
+        assert.equal(dos.filas[0].filaGrilla, null);
+    });
+
+    it('la segunda copia vacía del mismo guardia no se cuenta de nuevo', () => {
+        const tsv = [
+            'LEGAJO\t1\t2',
+            'NIEVAS ADRIANA\t3733\tM\tT',
+            'LEGAJO\t1\t2',
+            'NIEVAS ADRIANA\t3733\t\t',
+        ].join('\n');
+        const p = prepararPegadoExcel(parsearTsv(tsv), { guardias, cursor: null, cols: 31, conocidos: CONOCIDOS });
+        assert.equal(p.filas.length, 1);
+        assert.deepEqual(p.filas[0].celdas.map((c) => c.code), ['M', 'T']);
     });
 });
