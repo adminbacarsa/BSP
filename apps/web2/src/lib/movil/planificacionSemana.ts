@@ -169,7 +169,7 @@ export function estructuraSlaDelMes(input: {
   clientId: string;
   objectiveId: string;
   ym: string;
-}): { estructura: PlanningPositionRow[]; conSla: boolean; cerrado: boolean } {
+}): { estructura: PlanningPositionRow[]; conSla: boolean; cerrado: boolean; exigeCobertura: boolean } {
   const [year, month1] = input.ym.split('-').map(Number);
   const month = month1 - 1;
   const tenantClientIds = new Set(input.clientes.map((c) => c.id));
@@ -181,7 +181,12 @@ export function estructuraSlaDelMes(input: {
   const hasExactMatch = openPick.hasExactMatch || !!closedSla;
   const monthHasSla = planningMonthHasActiveSla(matching, year, month) || !!closedSla;
   const { structure } = buildPlanningPositionStructure(srv ?? openPick.fallback, { monthHasSla, hasExactMatch });
-  return { estructura: structure, conSla: monthHasSla, cerrado: !!closedSla && !openPick.vigente };
+  return {
+    estructura: structure,
+    conSla: monthHasSla,
+    cerrado: !!closedSla && !openPick.vigente,
+    exigeCobertura: (srv as { exigeCobertura?: boolean } | null | undefined)?.exigeCobertura !== false,
+  };
 }
 
 export type FilaSemana = {

@@ -161,6 +161,7 @@ export async function renovarSlaAlPublicar(
     encargadoEmployeeId: data.encargadoEmployeeId || '',
     encargadoEmployeeName: data.encargadoEmployeeName || '',
     autoRenewMonthly: true,
+    ...(data.exigeCobertura === false ? { exigeCobertura: false } : {}),
     slaSeriesId: seriesId,
     status: 'active',
     closed: false,

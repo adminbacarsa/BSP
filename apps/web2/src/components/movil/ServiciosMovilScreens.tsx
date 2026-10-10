@@ -160,6 +160,8 @@ export function ServiciosMovilScreens({
                   <p className="text-sm font-semibold text-slate-900">{detalle.vigencia}</p>
                   <p className="mt-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">Facturación</p>
                   <p className="text-sm font-semibold text-slate-900">{detalle.facturacion}</p>
+                  <p className="mt-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">Cobertura</p>
+                  <p className="text-sm font-semibold text-slate-900" data-exige-cobertura-movil>{detalle.cobertura}</p>
                   {row.cronogramaAviso && (
                     <p className="mt-2 text-[12px] font-medium text-amber-600" data-servicio-cronograma="1">
                       {row.cronogramaAviso} · el mes no entra en operación hasta publicarlo (Planificación).
