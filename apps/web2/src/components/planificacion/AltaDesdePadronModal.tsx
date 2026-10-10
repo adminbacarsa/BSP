@@ -15,6 +15,8 @@ import {
   type DecisionAlta,
   type FilaPadron,
 } from '@/lib/planificacion/padronAlta';
+import { fechaPadronVisible } from '@/lib/rrhh/padronComparar';
+import { leerEstadoPadron, listarPadron } from '@/lib/rrhh/padronClient';
 
 export type PedidoAlta = {
   nombre: string;
@@ -43,6 +45,9 @@ const inputCls = 'w-full rounded-xl border border-slate-200 px-2.5 py-1.5 text-[
 export function AltaDesdePadronModal({ pedido, onCerrar, onCreado }: Props) {
   const ctx = { empresaId: pedido.empresaId, objectiveId: pedido.objectiveId, clientId: pedido.clientId };
   const [padron, setPadron] = useState<FilaPadron[] | null>(() => padronEnSesion());
+  const [fechaPadron, setFechaPadron] = useState('');
+  const [buscando, setBuscando] = useState(!padronEnSesion());
+  const [manual, setManual] = useState(false);
   const [form, setForm] = useState<AltaForm | null>(null);
   const [enPadron, setEnPadron] = useState(false);
   const [guardando, setGuardando] = useState(false);
@@ -50,7 +55,30 @@ export function AltaDesdePadronModal({ pedido, onCerrar, onCreado }: Props) {
   const [decision, setDecision] = useState<DecisionAlta | null>(null);
 
   useEffect(() => {
-    if (!padron) return;
+    if (padronEnSesion() || !pedido.empresaId) { setBuscando(false); return; }
+    let vivo = true;
+    Promise.all([leerEstadoPadron(pedido.empresaId), listarPadron(pedido.empresaId)])
+      .then(([estado, filas]) => {
+        if (!vivo) return;
+        if (estado && filas.length) {
+          recordarPadron(filas);
+          setPadron(filas);
+          setFechaPadron(estado.fecha);
+        }
+      })
+      .catch(() => {})
+      .finally(() => { if (vivo) setBuscando(false); });
+    return () => { vivo = false; };
+  }, [pedido.empresaId]);
+
+  useEffect(() => {
+    if (!padron) {
+      if (manual) {
+        setEnPadron(false);
+        setForm(formVacio(pedido.nombre, pedido.legajo, ctx));
+      }
+      return;
+    }
     const hit = buscarEnPadron(padron, { legajo: pedido.legajo, nombre: pedido.nombre });
     setEnPadron(!!hit);
     setForm(hit ? formDesdeFila(hit.fila, ctx) : formVacio(pedido.nombre, pedido.legajo, ctx));
@@ -110,9 +138,10 @@ export function AltaDesdePadronModal({ pedido, onCerrar, onCreado }: Props) {
         <p className="mb-3 text-[12px] text-slate-600">
           <b>{pedido.nombre}</b> no está en la empresa. El alta usa el mismo legajo que RRHH y queda con objetivo preferido en este servicio.
         </p>
-        {!padron ? (
+        {buscando && <p className="text-[12px] text-slate-500" data-alta-buscando>Buscando en el padrón…</p>}
+        {!buscando && !padron && !manual ? (
           <div className="space-y-2" data-alta-pedir-padron>
-            <p className="text-[12px] text-slate-500">Elegí el padrón de empleados (.xlsx, hoja SP). Se lee en este navegador y no se sube a ningún lado. Vale para el resto de la sesión.</p>
+            <p className="text-[12px] text-slate-500">No hay un padrón cargado en el sistema. Podés subir el Excel (hoja SP) o completar el alta a mano.</p>
             <input
               type="file"
               accept=".xlsx,.xls"
@@ -120,8 +149,11 @@ export function AltaDesdePadronModal({ pedido, onCerrar, onCreado }: Props) {
               className="block w-full text-[12px]"
               onChange={(e) => { const f = e.target.files?.[0]; if (f) void onArchivo(f); }}
             />
+            <button type="button" className="text-[12px] font-bold text-indigo-700" data-alta-manual onClick={() => setManual(true)}>Alta manual</button>
           </div>
         ) : form && (
+          <>
+          {fechaPadron && <p className="mb-2 text-[12px] font-bold text-slate-600" data-alta-fecha-padron>Padrón del {fechaPadronVisible(fechaPadron)}</p>}
           <div className="space-y-2" data-alta-formulario data-alta-en-padron={enPadron ? '1' : '0'}>
             <p className={`rounded-xl px-3 py-2 text-[12px] ${enPadron ? 'border border-emerald-200 bg-emerald-50 text-emerald-900' : 'border border-amber-200 bg-amber-50 text-amber-900'}`}>
               {enPadron ? 'Encontrado en el padrón. Revisá los datos y confirmá.' : 'No está en el padrón. Completá el alta a mano.'}
@@ -153,6 +185,7 @@ export function AltaDesdePadronModal({ pedido, onCerrar, onCreado }: Props) {
               <p key={a} className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-1.5 text-[12px] text-amber-950" data-alta-aviso>{a}</p>
             ))}
           </div>
+          </>
         )}
         {error && <p className="mt-2 text-[12px] font-bold text-rose-700" data-alta-error>{error}</p>}
         <div className="mt-4 flex justify-end gap-2">

@@ -11,9 +11,10 @@ import {
     sugerirCodigos,
     tamanoRango,
 } from '@/lib/planificacion/modoRapido';
+import { alternarCelda, diagonal, unicas } from '@/lib/planificacion/seleccionLibre';
 
 export type CapaModoRapidoApi = {
-    click: (r: number, c: number, shift: boolean) => void;
+    click: (r: number, c: number, shift: boolean | { shift?: boolean; ctrl?: boolean; alt?: boolean }) => void;
     extender: (r: number, c: number) => void;
     irA: (r: number, c: number) => void;
     arrastrando: () => boolean;
@@ -68,10 +69,14 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
     const [texto, setTexto] = useState<string | null>(null);
     const [elegida, setElegida] = useState(-1);
     const [serie, setSerie] = useState<CeldaRC | null>(null);
+    const [extra, setExtra] = useState<CeldaRC[]>([]);
     const [sugLugar, setSugLugar] = useState<{ left: number; arriba: boolean; top: number; bottom: number } | null>(null);
     const [cajas, setCajas] = useState<{ cursor: Caja | null; rango: Caja | null; serie: Caja | null; marcas: Array<Caja & MarcaAviso> }>({ cursor: null, rango: null, serie: null, marcas: [] });
     const inputRef = useRef<HTMLInputElement>(null);
-    const arrastre = useRef<'rango' | 'serie' | null>(null);
+    const arrastre = useRef<'rango' | 'serie' | 'diagonal' | null>(null);
+    const extraRef = useRef<CeldaRC[]>([]);
+    extraRef.current = extra;
+    const origenDiag = useRef<CeldaRC | null>(null);
     const propsRef = useRef(props);
     propsRef.current = props;
     const estado = useRef({ cursor, ancla, texto, elegida, serie });
@@ -127,7 +132,7 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
         });
     }, [cajaDe]);
 
-    useLayoutEffect(() => { if (activo) medir(); }, [activo, cursor, ancla, serie, version, marcas, medir]);
+    useLayoutEffect(() => { if (activo) medir(); }, [activo, cursor, ancla, serie, extra, version, marcas, medir]);
 
     useLayoutEffect(() => {
         if (!activo || texto == null || !cursor || sugerencias.length === 0) { setSugLugar(null); return; }
@@ -193,13 +198,29 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
     }, [contenedorRef]);
 
     useImperativeHandle(ref, () => ({
-        click: (r, c, shift) => {
+        click: (r, c, mod) => {
+            const shift = typeof mod === 'boolean' ? mod : !!mod.shift;
+            const ctrl = typeof mod === 'object' && !!mod.ctrl;
+            const alt = typeof mod === 'object' && !!mod.alt;
             setTexto(null);
             enfocarContenedor();
-            if (shift && estado.current.cursor) {
+            if (ctrl) {
+                setExtra((prev) => unicas(alternarCelda(prev.length ? prev : (estado.current.cursor ? [estado.current.cursor] : []), { r, c })));
+                setCursor({ r, c });
+                setAncla(null);
+                arrastre.current = null;
+            } else if (alt && estado.current.cursor) {
+                origenDiag.current = estado.current.cursor;
+                arrastre.current = 'diagonal';
+                setAncla(null);
+                setCursor({ r, c });
+                setExtra(diagonal(estado.current.cursor, { r, c }, propsRef.current.dims));
+            } else if (shift && estado.current.cursor) {
+                setExtra([]);
                 setAncla(estado.current.ancla || estado.current.cursor);
                 setCursor({ r, c });
             } else {
+                setExtra([]);
                 setAncla(null);
                 setCursor({ r, c });
                 arrastre.current = 'rango';
@@ -212,6 +233,9 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
                 setCursor({ r, c });
             } else if (arrastre.current === 'serie') {
                 setSerie({ r, c });
+            } else if (arrastre.current === 'diagonal' && origenDiag.current) {
+                setCursor({ r, c });
+                setExtra(diagonal(origenDiag.current, { r, c }, propsRef.current.dims));
             }
         },
         irA: (r, c) => {
@@ -247,6 +271,7 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
             setCursor(null);
             setAncla(null);
             setTexto(null);
+            setExtra([]);
             propsRef.current.onCursor?.(null);
         }
     }, [activo]);
@@ -263,6 +288,7 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
     }, [dims.filas, dims.cols, cursor]);
 
     const celdasActuales = useCallback((): CeldaRC[] => {
+        if (extraRef.current.length > 1) return extraRef.current;
         const rg = rangoRef.current;
         if (!rg) return [];
         const out: CeldaRC[] = [];
@@ -364,8 +390,29 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
             }
             if (e.key === 'Escape') {
                 cortar();
-                if (estado.current.ancla) setAncla(null);
+                if (extraRef.current.length) setExtra([]);
+                else if (estado.current.ancla) setAncla(null);
                 else { setCursor(null); p.onCursor?.(null); }
+                return;
+            }
+            if (mod && e.key === ' ' && cur) {
+                cortar();
+                setExtra((prev) => unicas(alternarCelda(prev.length ? prev : [cur], cur)));
+                setAncla(null);
+                return;
+            }
+            if (e.altKey && e.shiftKey && cur && (e.key === 'ArrowRight' || e.key === 'ArrowLeft' || e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+                cortar();
+                const dc = e.key === 'ArrowLeft' ? -1 : 1;
+                const dr = e.key === 'ArrowUp' ? -1 : 1;
+                const hasta = {
+                    r: Math.max(0, Math.min(p.dims.filas - 1, cur.r + (e.key === 'ArrowLeft' || e.key === 'ArrowRight' ? 1 : dr))),
+                    c: Math.max(0, Math.min(p.dims.cols - 1, cur.c + (e.key === 'ArrowUp' || e.key === 'ArrowDown' ? dc : dc))),
+                };
+                const desde = extraRef.current[0] || cur;
+                setExtra(diagonal(desde, hasta, p.dims));
+                setCursor(hasta);
+                setAncla(null);
                 return;
             }
             if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -383,7 +430,8 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
             const esMenos = (e.key === '-' || e.code === 'NumpadSubtract') && !e.shiftKey;
             if (!mod && !e.altKey && esMas) {
                 cortar();
-                p.onMas?.(cur.r, cur.c, e.shiftKey);
+                const sueltas = extraRef.current.length > 1 ? extraRef.current : [{ r: cur.r, c: cur.c }];
+                for (const cel of sueltas) p.onMas?.(cel.r, cel.c, e.shiftKey);
                 return;
             }
             if (!mod && !e.altKey && esMenos) {
@@ -489,7 +537,12 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
                     data-modo-rapido-marca-tenue={m.tenue ? '1' : undefined}
                 />
             ))}
-            {rc && rango && tamanoRango(rango) > 1 && (
+            {extra.length > 1 && extra.map((cel) => {
+                const cj = cajaDe(cel);
+                if (!cj) return null;
+                return <div key={`${cel.r}:${cel.c}`} className="absolute border-2 border-indigo-500 bg-indigo-500/15" style={{ left: cj.left, top: cj.top, width: cj.width, height: cj.height }} data-modo-rapido-suelta={`${cel.r}:${cel.c}`} />;
+            })}
+            {extra.length <= 1 && rc && rango && tamanoRango(rango) > 1 && (
                 <div className="absolute border-2 border-indigo-500 bg-indigo-500/10" style={{ left: rc.left, top: rc.top, width: rc.width, height: rc.height }} data-modo-rapido-rango={`${tamanoRango(rango)}`} />
             )}
             {cajas.serie && (

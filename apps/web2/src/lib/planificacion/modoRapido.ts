@@ -661,6 +661,8 @@ export type FilaPegadoExcel = {
     via: 'legajo' | 'nombre' | 'parecido' | null;
     celdas: CeldaPegadoExcel[];
     desconocidos: string[];
+    /** Siglas que no se escribieron, con la columna, para definirlas en el resumen. */
+    crudos?: Array<{ col: number; raw: string }>;
 };
 
 /** Un día con celdas «E» de evento o dudosas. */
@@ -971,6 +973,7 @@ export function prepararPegadoExcel(
             if (!pareceNombre(nombre) && normLegajo(legajo).length < 3) continue;
             const celdas: CeldaPegadoExcel[] = [];
             const desconocidos: string[] = [];
+            const crudos: Array<{ col: number; raw: string }> = [];
             // Una licencia en celdas combinadas («LIC ANUAL 2025 X 14 DIAS») llega en la primera celda y las demás vacías.
             let licencia: { code: string; quedan: number } | null = null;
             const coloresFila = colorDeFila.get(f) ?? null;
@@ -1012,8 +1015,10 @@ export function prepararPegadoExcel(
                     celdas.push({ col, code: lic.code });
                     licencia = { code: lic.code, quedan: lic.dias != null ? lic.dias - 1 : Number.POSITIVE_INFINITY };
                 } else if (res.code && (!eq.aplicada || pasaSinEquivalencia)) celdas.push({ col, code: res.code });
-                else if (eq.aplicada && eq.desconocido && !desconocidos.includes(eq.desconocido)) desconocidos.push(eq.desconocido);
-                else if (res.desconocido && !desconocidos.includes(res.desconocido)) desconocidos.push(res.desconocido);
+                else if (eq.aplicada && eq.desconocido && !desconocidos.includes(eq.desconocido)) { desconocidos.push(eq.desconocido); crudos.push({ col, raw: compact }); }
+                else if (res.desconocido && !desconocidos.includes(res.desconocido)) { desconocidos.push(res.desconocido); crudos.push({ col, raw: compact }); }
+                else if (eq.aplicada && eq.desconocido) crudos.push({ col, raw: compact });
+                else if (res.desconocido) crudos.push({ col, raw: compact });
             }
             const elegido = elegirGuardia(nombre, legajo, opts.guardias, ocupadas);
             const yaCargado = !elegido && celdas.length === 0 && elegirGuardia(nombre, legajo, opts.guardias, new Set());
@@ -1028,6 +1033,7 @@ export function prepararPegadoExcel(
                 via: elegido?.via ?? null,
                 celdas,
                 desconocidos,
+                crudos,
             });
         }
     }
@@ -1059,6 +1065,8 @@ export const ATAJOS_MODO_RAPIDO: Array<{ teclas: string; que: string }> = [
     { teclas: '↑ ↓ en la lista', que: 'Elegir del autocompletar' },
     { teclas: 'Supr / Retroceso', que: 'Borrar la celda o el rango' },
     { teclas: 'Shift + flecha / clic / arrastre', que: 'Seleccionar un rango (lo que escribís va a todo el rango)' },
+    { teclas: 'Ctrl + clic · Ctrl + espacio', que: 'Sumar o quitar celdas sueltas (cualquier forma). Lo que escribís, Supr, + y Ctrl+C valen para esas celdas' },
+    { teclas: 'Alt + arrastre · Alt + Shift + flecha', que: 'Diagonal: un guardia por día, un día por fila, hacia la derecha o la izquierda' },
     { teclas: 'Ctrl + C / X / V', que: 'Copiar, cortar y pegar. Desde Excel: copiá desde la columna del nombre hasta el último día y Ctrl+V (se acomoda por guardia)' },
     { teclas: '+ / −', que: 'Pasar M o N a 12 h (D12 / N12) o volver a 8 h. Si falta una banda, propone el par y Enter confirma' },
     { teclas: 'Shift + +', que: 'Cerrar todas las bandas faltantes de ese día' },

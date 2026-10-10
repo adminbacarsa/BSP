@@ -11,6 +11,8 @@ export type EquivalenciaCodigo = {
   startTime: string;
   endTime: string;
   muestras: number;
+  /** Si está, la celda se deja vacía: trabaja en otro objetivo. */
+  otroObjetivo?: string;
 };
 
 export function claveEquivalencia(codigo: string, rojo: boolean): string {
@@ -30,6 +32,7 @@ export function resolverEquivalencia(
   const compact = visible.replace(/[\s.\-]/g, '');
   const hit = equivalencias.find((e) => e.clave === claveEquivalencia(compact, rojo))
     || equivalencias.find((e) => e.clave === claveEquivalencia(compact, false) && !rojo);
+  if (hit?.otroObjetivo) return { code: null, desconocido: null, aplicada: true };
   if (hit?.code) return { code: hit.code, desconocido: null, aplicada: true };
   return { code: null, desconocido: visible, aplicada: true };
 }

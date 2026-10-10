@@ -419,6 +419,59 @@ function puestosDeFranjas(franjas: readonly FranjaLectura[], pax: number): Puest
 }
 
 /** Cómo se lee la planilla (o la copia) por día de la semana: juegos, custom y lo que falta. */
+export type TramoReloj = { inicio: string; fin: string };
+
+function minutosHm(hm: string): number {
+  const m = String(hm || '').match(/(\d{1,2}):(\d{2})/);
+  if (!m) return -1;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+
+/** Un día de 24 h queda cerrado si los tramos no dejan minutos libres. fin <= inicio cruza medianoche. */
+export function cubreDia24(tramos: readonly TramoReloj[]): { cubierto: boolean; huecoMin: number } {
+  const marcas = new Array(24 * 60).fill(0);
+  for (const t of tramos) {
+    const a = minutosHm(t.inicio);
+    let b = minutosHm(t.fin);
+    if (a < 0 || b < 0) continue;
+    if (b <= a) b += 24 * 60;
+    for (let m = a; m < b; m++) marcas[m % (24 * 60)] = 1;
+  }
+  const huecoMin = marcas.filter((x) => !x).length;
+  return { cubierto: huecoMin === 0, huecoMin };
+}
+
+function tramosDe(turnos: readonly TurnoDia[]): TramoReloj[] {
+  const out: TramoReloj[] = [];
+  for (const t of turnos) {
+    if (!t.startTime) continue;
+    const a = minutosHm(t.startTime);
+    if (a < 0) continue;
+    const fin = t.startTime && Number(t.hours) > 0
+      ? (a + Math.round(Number(t.hours) * 60)) % (24 * 60)
+      : -1;
+    if (fin < 0) continue;
+    out.push({
+      inicio: String(t.startTime).slice(0, 5),
+      fin: `${String(Math.floor(fin / 60)).padStart(2, '0')}:${String(fin % 60).padStart(2, '0')}`,
+    });
+  }
+  return out;
+}
+
+/**
+ * Un puesto de 24 h cierra por bandas (M+T+N o D12+N12) o por el reloj
+ * (06–14 / 14–22 / 22–06, o cualquier suma sin huecos). Las dos lecturas coinciden
+ * cuando los códigos son las bandas y los horarios cubren el día.
+ */
+export function puesto24Cerrado(turnos: readonly TurnoDia[]): { porBandas: boolean; porHoras: boolean; cerrado: boolean } {
+  const { cuentas } = contarEstandar(turnos);
+  const porBandas = Math.min(cuentas.M, cuentas.T, cuentas.N) >= 1;
+  const tramos = tramosDe(turnos);
+  const porHoras = tramos.length > 0 && cubreDia24(tramos).cubierto;
+  return { porBandas, porHoras, cerrado: porBandas || porHoras };
+}
+
 export function textoLecturaFranjas(franjas: readonly FranjaLectura[], puestosFijos?: readonly PuestoServicio[]): string {
   const letras = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
   const turnosDe = (letra: string): TurnoDia[] => {

@@ -229,6 +229,7 @@ import {
     type VistaCelda,
 } from '@/components/planificacion/GrillaCelda';
 import { ModoRapidoCapa, type CapaModoRapidoApi, type MarcaAviso } from '@/components/planificacion/ModoRapidoCapa';
+import { LeyendaModoRapido } from '@/components/planificacion/LeyendaModoRapido';
 import { Cierre12Banner, ModoRapidoAyuda, ModoRapidoAvisosPanel, PegarExcelModal, SelectorNovedad, type DecisionDiaE, type PegarExcelEstado } from '@/components/planificacion/ModoRapidoPiezas';
 import { coloresParaTsv } from '@/lib/planificacion/pegadoExcelColor';
 import { asignarNominaAServicioEvento } from '@/services/eventoAssignService';
@@ -259,6 +260,8 @@ import {
     tipoDeCodigo,
     type TipoNovedadRapida,
 } from '@/lib/planificacion/modoRapido';
+import { tablaCodigosPlanilla } from '@/lib/planificacion/codigosHorarioPegado';
+import { actualizarHorariosServicio } from '@/lib/servicios/aplicarServicioPlanilla';
 import { NOVEDAD_TYPE_SEEDS } from '@/lib/rrhh/novedadTypes';
 import { absenceService } from '@/services/absenceService';
 import {
@@ -2046,6 +2049,15 @@ function PlanificacionDesktop() {
     const undoStackRef = useRef<Record<string, any>[]>([]);
     const redoStackRef = useRef<Record<string, any>[]>([]);
     const [modoRapido, setModoRapido] = useState(false);
+    const [leyendaAbierta, setLeyendaAbierta] = useState(true);
+    const codigosUsadosLeyenda = useMemo(() => {
+        const s = new Set<string>();
+        for (const sh of Object.values(shiftsMap)) {
+            const c = String((sh as { code?: string })?.code || '').toUpperCase();
+            if (c) s.add(c);
+        }
+        return s;
+    }, [shiftsMap]);
     const modoRapidoRef = useRef(false);
     const capaRapidaRef = useRef<CapaModoRapidoApi | null>(null);
     const grillaScrollRef = useRef<HTMLDivElement | null>(null);
@@ -2229,6 +2241,9 @@ function PlanificacionDesktop() {
     const activarServicioRef = useRef<{ services: SlaRow[]; last: SlaRow; plan: AppendMonthsPlan; newEndDate: string } | null>(null);
     const altasLocalesRef = useRef<Map<string, any>>(new Map());
     const altaPegadoRef = useRef<{ indice: number; employeeId: string } | null>(null);
+    const agregarPegadoRef = useRef<Array<{ indice: number; employeeId: string }>>([]);
+    const definicionesPegadoRef = useRef<Record<string, import('@/lib/planificacion/definirCodigo').EquivalenciaGuardada>>({});
+    const horariosPegadoRef = useRef<Record<string, { inicio: string; fin: string }>>({});
     const [pedidoAlta, setPedidoAlta] = useState<(PedidoAlta & { indice: number }) | null>(null);
     const [importarCtx, setImportarCtx] = useState<ImportarExcelContexto | null>(null);
     const [servicioPlanilla, setServicioPlanilla] = useState<null | {
@@ -3079,6 +3094,24 @@ function PlanificacionDesktop() {
         setPegarExcel((prev) => {
             if (!prev || prev.paso !== 'resumen') return prev;
             return { ...prev, asignacion: { ...prev.asignacion, [pendiente.indice]: fila } };
+        });
+    }, [displayedEmployees]);
+
+    useEffect(() => {
+        const cola = agregarPegadoRef.current;
+        if (!cola.length) return;
+        const pendientes = cola.filter((p) => displayedEmployees.findIndex((e: { id: string }) => e.id === p.employeeId) < 0);
+        const listos = cola.filter((p) => displayedEmployees.findIndex((e: { id: string }) => e.id === p.employeeId) >= 0);
+        if (!listos.length) return;
+        agregarPegadoRef.current = pendientes;
+        setPegarExcel((prev) => {
+            if (!prev || prev.paso !== 'resumen') return prev;
+            const asignacion = { ...prev.asignacion };
+            for (const p of listos) {
+                const fila = displayedEmployees.findIndex((e: { id: string }) => e.id === p.employeeId);
+                if (fila >= 0) asignacion[p.indice] = fila;
+            }
+            return { ...prev, asignacion };
         });
     }, [displayedEmployees]);
 
@@ -13976,7 +14009,7 @@ function PlanificacionDesktop() {
         };
     };
 
-    type ItemRapido = { r: number; c: number; code?: string; borrar?: boolean; fuente?: FuenteRapida | null };
+    type ItemRapido = { r: number; c: number; code?: string; borrar?: boolean; fuente?: FuenteRapida | null; startTime?: string; endTime?: string };
     const escribirRapido = (items: ItemRapido[]) => {
         const global = bloqueoGlobalRapido();
         if (global) { toast.message(global); return; }
@@ -14056,7 +14089,7 @@ function PlanificacionDesktop() {
             if (bl) { anotar(bl); continue; }
             const res = cambioRapido(emp, ds, code, ctx, it.fuente);
             if ('error' in res) { anotar(res.error); continue; }
-            next[key] = res.change;
+            next[key] = it.startTime ? { ...res.change, startTime: it.startTime, endTime: it.endTime || res.change.endTime } : res.change;
             if (res.novedad) novedades[key] = res.novedad;
             hechos++;
         }
@@ -14186,7 +14219,8 @@ function PlanificacionDesktop() {
             const r = asignacion[f.indice];
             if (r == null) continue;
             for (const cel of f.celdas) {
-                if (!cel.evento) { items.push({ r, c: cel.col, code: cel.code }); continue; }
+                const horario = horariosPegadoRef.current[cel.code];
+                if (!cel.evento) { items.push({ r, c: cel.col, code: cel.code, ...(horario ? { startTime: horario.inicio, endTime: horario.fin } : {}) }); continue; }
                 const d = preview.diasE.find((x) => x.col === cel.col);
                 const dec = decisiones[cel.col] || { tipo: d?.porDefecto || 'E', vinculo: null };
                 if (dec.tipo === 'E') { items.push({ r, c: cel.col, code: 'E' }); continue; }
@@ -14195,6 +14229,11 @@ function PlanificacionDesktop() {
                 if (!emp || !ds) continue;
                 if (dec.vinculo) vinculadas.push({ emp, ds, vinculo: dec.vinculo });
                 else sinVincular.push({ key: `${emp.id}_${ds}`, ds });
+            }
+            for (const cr of f.crudos || []) {
+                const def = definicionesPegadoRef.current[cr.raw.replace(/\s/g, '').toUpperCase()];
+                if (!def || def.otroObjetivo || !def.code) continue;
+                items.push({ r, c: cr.col, code: def.code, ...(def.startTime ? { startTime: def.startTime, endTime: def.endTime } : {}) });
             }
         }
         setPegarExcel(null);
@@ -14651,7 +14690,7 @@ function PlanificacionDesktop() {
             }
             if (modoRapidoRef.current && capaRapidaRef.current) {
                 ev.preventDefault();
-                capaRapidaRef.current.click(fila, col, ev.shiftKey);
+                capaRapidaRef.current.click(fila, col, { shift: ev.shiftKey, ctrl: ev.ctrlKey || ev.metaKey, alt: ev.altKey });
                 return;
             }
             handleMouseDown(fila, col);
@@ -17578,6 +17617,19 @@ function PlanificacionDesktop() {
                     </div>
                 )}
 
+                {modoRapido && selectedObjective && (
+                    <LeyendaModoRapido
+                        puestos={(positionStructure || []).map((p: any) => ({
+                            name: String(p.positionName || p.name || 'Puesto'),
+                            shifts: (p.shifts || []).map((s: any) => ({ code: String(s.code || ''), startTime: s.startTime, endTime: s.endTime, hours: Number(s.hours) || 0, name: s.name })),
+                        }))}
+                        usados={codigosUsadosLeyenda}
+                        abierta={leyendaAbierta}
+                        onToggle={() => setLeyendaAbierta((v) => !v)}
+                        estilo={(code) => getDefaultStyle(code) || ''}
+                    />
+                )}
+
                 {/* RESUMEN DE HORAS PLANIFICADAS */}
                 {selectedObjective && !comparingSnapshot && Object.keys(empMonthlyHours).length > 0 && (
                     statsBarCollapsed ? (
@@ -19192,6 +19244,56 @@ function PlanificacionDesktop() {
                         })}
                         onAplicar={aplicarPegadoExcel}
                         puedeAlta={isSuperAdmin || (rolePermissions['RRHH'] || []).includes('create')}
+                        plataforma={(employees || []).filter((e: any) => e.status !== 'inactivo').map((e: any) => ({
+                            id: e.id,
+                            nombre: String(e.name || ''),
+                            legajo: String(e.fileNumber || ''),
+                            objetivoNombre: e.preferredObjectiveId ? getObjectiveName(e.preferredObjectiveId) : '',
+                        }))}
+                        fechaPadron=""
+                        onAgregar={(fila, personaId) => {
+                            setPinnedExternalEmpIds((prev) => new Set([...prev, personaId]));
+                            agregarPegadoRef.current = [...agregarPegadoRef.current, { indice: fila.indice, employeeId: personaId }];
+                        }}
+                        onAgregarTodos={(items) => {
+                            setPinnedExternalEmpIds((prev) => new Set([...prev, ...items.map((i) => i.personaId)]));
+                            agregarPegadoRef.current = [...agregarPegadoRef.current, ...items.map((i) => ({ indice: i.fila.indice, employeeId: i.personaId }))];
+                        }}
+                        onDefinir={(codigo, eq) => {
+                            definicionesPegadoRef.current[codigo.replace(/\s/g, '').toUpperCase()] = eq;
+                            if (!empresaId || !selectedObjective) return;
+                            void setDoc(doc(db, 'planificacion_import_mapeos', `${empresaId}_${selectedObjective}`), {
+                                empresaId,
+                                objectiveId: selectedObjective,
+                                equivalencias: Object.values(definicionesPegadoRef.current),
+                                actualizadoAt: new Date().toISOString(),
+                            }, { merge: true });
+                        }}
+                        tabla={pegarExcel.paso === 'resumen' ? tablaCodigosPlanilla(
+                            [...new Set(pegarExcel.preview.filas.flatMap((f) => f.celdas.map((c) => c.code)).filter(Boolean))].map((sigla) => ({ sigla })),
+                            [],
+                            (positionStructure || []).flatMap((p: any) => (p.shifts || []).map((s: any) => ({ code: String(s.code || ''), startTime: String(s.startTime || ''), endTime: String(s.endTime || '') }))),
+                        ) : []}
+                        onHorario={(sigla, inicio, fin) => { horariosPegadoRef.current[sigla] = { inicio, fin }; }}
+                        onActualizarServicio={(cambios) => {
+                            const id = String((activePlanningSlaRow as { id?: string } | null)?.id || '');
+                            if (!id || !empresaId) { toast.message('No hay servicio de este mes para actualizar. Las celdas quedan con el horario de la planilla.'); return; }
+                            const texto = cambios.map((c) => `${c.code} ${c.antes} → ${c.despues}`).join('\n');
+                            if (!window.confirm(`Actualizar los horarios del servicio?\n${texto}`)) {
+                                toast.message('Las celdas se escriben con el horario de la planilla. Quedan avisos de horario fuera del servicio.');
+                                return;
+                            }
+                            void actualizarHorariosServicio({
+                                servicioId: id,
+                                empresaId,
+                                migracionCompleta,
+                                objectiveName: getObjectiveName(selectedObjective),
+                                cambios: cambios.map((c) => {
+                                    const [inicio, fin] = c.despues.split('–');
+                                    return { code: c.code, inicio, fin };
+                                }),
+                            }).then(() => toast.success('Horarios del servicio actualizados')).catch((e) => toast.error(e?.message || 'No se pudo actualizar el servicio'));
+                        }}
                         onDarDeAlta={(fila) => setPedidoAlta({
                             indice: fila.indice,
                             nombre: fila.nombre,
