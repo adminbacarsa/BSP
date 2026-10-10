@@ -839,7 +839,7 @@ export function buildCodeCountsByPositionForDay(
         if (!shiftBelongsToObjective(raw, options.selectedObjective, options.isPendingChange(emp.id, dateStr))) return;
         const code = String(raw.code || '').toUpperCase();
         if (PLANNING_NON_BILLABLE_CODES.has(code)) return;
-        const shiftPos = raw.positionName || options.dominantPositionName || 'General';
+        const shiftPos = String(raw.positionName || '').trim() || 'sin puesto';
         if (!byPos[shiftPos]) byPos[shiftPos] = {};
         byPos[shiftPos][code] = (byPos[shiftPos][code] || 0) + 1;
     });

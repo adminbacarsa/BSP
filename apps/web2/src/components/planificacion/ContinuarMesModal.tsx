@@ -21,6 +21,8 @@ export type ContinuarMesVista = {
   avisos: AvisosCobertura;
   descanso: AlertaDescanso[];
   tope: AlertaHoras[];
+  /** Lectura por día de la semana: custom, juegos y lo que falta o sobra. */
+  lectura?: string;
   /** El contrato no cubre el mes que se está armando. */
   activar?: {
     mes: string;
@@ -154,6 +156,11 @@ export function ContinuarMesModal({ vista, onAplicar, onCancelar }: Props) {
         </div>
 
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+          {vista.lectura ? (
+            <p className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] text-slate-700 shadow-sm" data-continuar-lectura>
+              {vista.lectura}
+            </p>
+          ) : null}
           {vista.activar && (
             <div className="rounded-2xl border border-teal-200 bg-teal-50 px-3 py-2.5 text-[12px] text-teal-950 shadow-sm" data-continuar-activar>
               {vista.activar.puede && vista.activar.permiso ? (

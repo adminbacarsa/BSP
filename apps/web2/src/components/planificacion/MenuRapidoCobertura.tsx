@@ -10,6 +10,7 @@ type MenuProps = {
   onExtAdel: () => void;
   onAbrir: () => void;
   onClose: () => void;
+  onLiberar?: () => void;
 };
 
 function useEscape(onEscape: () => void, activo = true) {
@@ -28,7 +29,7 @@ function useEscape(onEscape: () => void, activo = true) {
 }
 
 /** Menú de clic derecho: dos acciones y, abajo, el modal completo. */
-export default function MenuRapidoCobertura({ x, y, opciones, onAsignar, onExtAdel, onAbrir, onClose }: MenuProps) {
+export default function MenuRapidoCobertura({ x, y, opciones, onAsignar, onExtAdel, onAbrir, onClose, onLiberar }: MenuProps) {
   useEscape(onClose);
   const vw = typeof window !== 'undefined' ? window.innerWidth : 1440;
   const vh = typeof window !== 'undefined' ? window.innerHeight : 900;
@@ -53,6 +54,11 @@ export default function MenuRapidoCobertura({ x, y, opciones, onAsignar, onExtAd
       {opciones.extAdel && (
         <button type="button" role="menuitem" onClick={onExtAdel} className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-sm font-black text-slate-800 hover:bg-slate-50" data-menu-accion="ext">
           <UnfoldHorizontal size={15} className="text-indigo-600" /> Ext / Adel
+        </button>
+      )}
+      {onLiberar && (
+        <button type="button" role="menuitem" onClick={onLiberar} className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-sm font-black text-slate-800 hover:bg-slate-50" data-menu-accion="liberar">
+          Liberar a RET
         </button>
       )}
       {opciones.abrirCompleta && (

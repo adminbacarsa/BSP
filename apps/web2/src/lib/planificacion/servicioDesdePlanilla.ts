@@ -13,6 +13,7 @@ import {
 } from './importarExcel';
 import { claveEquivalencia, type EquivalenciaCodigo } from './equivalenciaCodigo';
 import { HORARIO_ESTANDAR, horasEntre, type AvisoRapido } from './modoRapido';
+import { textoLecturaFranjas } from './lecturaBandas';
 
 export type DiaSemana = 'L' | 'M' | 'X' | 'J' | 'V' | 'S' | 'D';
 const ORDEN_DIAS: DiaSemana[] = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
@@ -54,6 +55,8 @@ export type DiffFranja = {
 export type PropuestaServicio = {
   franjas: FranjaServicioPlanilla[];
   equivalencias: EquivalenciaCodigo[];
+  /** Juegos de 24 h, custom y lo que falta o sobra, por día de la semana. */
+  lectura: string;
 };
 
 const EXCLUIDOS = new Set(['F', 'FF', 'FP', 'FRANCO', 'RET', 'RETEN', 'RT', 'REF', 'ESC', 'FT', 'EV', 'EVENTO', 'R']);
@@ -219,7 +222,14 @@ export function proponerServicioDesdePlanilla(cuadro: CuadroPlanilla, year: numb
     }))
     .sort((a, b) => b.muestras - a.muestras || a.codigo.localeCompare(b.codigo));
 
-  return { franjas, equivalencias };
+  const lectura = textoLecturaFranjas(franjas.map((f) => ({
+    puesto: f.puesto,
+    code: f.code,
+    cantidad: f.cantidad,
+    dias: f.dias,
+    startTime: f.startTime,
+  })));
+  return { franjas, equivalencias, lectura };
 }
 
 function normDias(dias: readonly string[]): string {

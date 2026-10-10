@@ -47,6 +47,8 @@ const ETIQUETA: Record<AvisoRapido['tipo'], string> = {
     LICENCIA: 'Licencia',
     SOLAPE: 'Solape',
     SERVICIO: 'Fuera del servicio',
+    SOBRECOBERTURA: 'Sobrecobertura',
+    SIN_PUESTO: 'Sin puesto',
 };
 const COLOR: Record<AvisoRapido['tipo'], string> = {
     DESCANSO: 'bg-amber-500',
@@ -54,6 +56,8 @@ const COLOR: Record<AvisoRapido['tipo'], string> = {
     LICENCIA: 'bg-fuchsia-500',
     SOLAPE: 'bg-orange-500',
     SERVICIO: 'bg-slate-600',
+    SOBRECOBERTURA: 'bg-amber-600',
+    SIN_PUESTO: 'bg-slate-500',
 };
 
 const AVISOS_ABIERTOS_KEY = 'cosp-planif-avisos-abierto';
@@ -63,12 +67,14 @@ export function ModoRapidoAvisosPanel({
     sinServicio,
     onIr,
     onVisto,
+    onAsignarPuesto,
 }: {
     /** Solo los que no se marcaron como vistos. */
     avisos: AvisoRapido[];
     sinServicio: boolean;
     onIr: (a: AvisoRapido) => void;
     onVisto: (ids: string[]) => void;
+    onAsignarPuesto?: (a: AvisoRapido) => void;
 }) {
     const grupos = useMemo(() => agruparAvisos(avisos), [avisos]);
     const [abierto, setAbierto] = useState(false);
@@ -135,6 +141,16 @@ export function ModoRapidoAvisosPanel({
                                     <span className={`mt-0.5 shrink-0 rounded px-1 text-[8px] font-black uppercase text-white ${COLOR[g.tipo]}`}>{ETIQUETA[g.tipo]}</span>
                                     <span className="text-[11px] leading-snug text-slate-700">{g.texto}</span>
                                 </button>
+                                {g.tipo === 'SIN_PUESTO' && g.items[0]?.puestoSugerido && onAsignarPuesto && (
+                                    <button
+                                        type="button"
+                                        onClick={() => onAsignarPuesto(g.items[0])}
+                                        className="mt-0.5 shrink-0 rounded-lg border border-indigo-200 px-1.5 py-0.5 text-[10px] font-black text-indigo-700 hover:bg-indigo-50"
+                                        data-aviso-asignar-puesto={g.items[0].puestoSugerido}
+                                    >
+                                        Asignar {g.items[0].puestoSugerido}
+                                    </button>
+                                )}
                                 <button
                                     type="button"
                                     onClick={() => onVisto(g.items.map(idAviso))}

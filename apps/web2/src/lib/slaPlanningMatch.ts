@@ -302,6 +302,7 @@ export type PlanningPositionRow = {
   /** Fecha → { código → pax excluidos } (turno con quantity>1). */
   excludedShiftPaxDates?: Record<string, Record<string, number>>;
   preferenciaGenero?: string;
+  exigeCobertura?: boolean;
   _serviceId?: string;
   _serviceRange?: string;
 };
@@ -400,6 +401,7 @@ export function buildPlanningPositionStructure(
         activeDays: derivePlanningPositionActiveDays(pos.activeDays as string[] | undefined, normalizedShifts),
         coverageType: posCoverageType,
         ...(pos.preferenciaGenero ? { preferenciaGenero: String(pos.preferenciaGenero) } : {}),
+        ...(pos.exigeCobertura === false ? { exigeCobertura: false as const } : {}),
         ...(posExcluded.length > 0 ? { positionExcludedDates: [...posExcluded] } : {}),
         ...(mergedExcluded.length > 0 ? { excludedDates: mergedExcluded } : {}),
         ...(excludedShiftDates && Object.keys(excludedShiftDates).length > 0
