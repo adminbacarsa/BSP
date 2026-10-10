@@ -10,6 +10,7 @@ import {
 import { sumPublishedPlanHours } from '@cosp/hours-core';
 import { findLctRestGaps, type LctShiftInput } from '@/lib/planificacion/lctRestGap';
 import { mesCerrado } from '@/lib/planificacion/mesCerradoPlanif';
+import { slaExigeCobertura } from '@/lib/planificacion/cierre12h';
 import {
   acumularArmado,
   parseArmado,
@@ -258,6 +259,21 @@ export async function loadCronogramaOverview(params: {
     });
   });
 
+  const sinExigencia = new Set<string>();
+  const fromMes = `${year}-${String(month).padStart(2, '0')}-01`;
+  const ultimo = new Date(year, month, 0).getDate();
+  const toMes = `${year}-${String(month).padStart(2, '0')}-${String(ultimo).padStart(2, '0')}`;
+  const slaSnap = await getDocs(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa));
+  slaSnap.docs.forEach((d) => {
+    const data = d.data() as { empresaId?: unknown; objectiveId?: string; startDate?: string; endDate?: string; exigeCobertura?: boolean; status?: string };
+    if (!belongsToEmpresaView(data, empresaId, migracionCompleta)) return;
+    if (slaExigeCobertura(data)) return;
+    const obj = String(data.objectiveId || '').trim();
+    const start = String(data.startDate || '').slice(0, 10);
+    const end = String(data.endDate || '9999-12-31').slice(0, 10);
+    if (obj && start <= toMes && end >= fromMes) sinExigencia.add(obj);
+  });
+
   const shiftCountsByObjective = new Map<string, ShiftCounts>();
   const turnosByObjective = new Map<string, any[]>();
   const activityFromShifts = new Map<string, ActivityMeta>();
@@ -284,7 +300,7 @@ export async function loadCronogramaOverview(params: {
     if (!objId || !turnoCuentaParaCrono(data, objId)) return;
     const counts = shiftCountsByObjective.get(objId) || { draft: 0, published: 0, openVacancies: 0 };
     const code = String(data.code || '').toUpperCase();
-    if (ABSENCE_CODES.has(code) && !data.coveredBy) {
+    if (ABSENCE_CODES.has(code) && !data.coveredBy && !sinExigencia.has(objId)) {
       counts.openVacancies += 1;
     } else if (data.draft === true) {
       counts.draft += 1;

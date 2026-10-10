@@ -255,6 +255,57 @@ export function SelectorNovedad({
     );
 }
 
+export type DiaUi12 = { dateStr: string; aplicable: boolean; linea: string };
+
+export function Cobertura12RangoBanner({
+    titulo,
+    dias,
+    onAplicarTodo,
+    onAplicarDia,
+    onCerrar,
+}: {
+    titulo: string;
+    dias: DiaUi12[];
+    onAplicarTodo: () => void;
+    onAplicarDia: (dateStr: string) => void;
+    onCerrar: () => void;
+}) {
+    const [indice, setIndice] = useState<number | null>(null);
+    if (typeof document === 'undefined') return null;
+    const revisando = indice != null ? dias[indice] : null;
+    const hay = dias.some((d) => d.aplicable);
+    return createPortal(
+        <div className="fixed left-1/2 top-20 z-[90] w-[min(720px,calc(100vw-2rem))] -translate-x-1/2 rounded-2xl border border-red-200 bg-white px-4 py-3 shadow-lg no-print" data-cobertura-12h>
+            <p className="whitespace-pre-line text-[12px] font-bold leading-snug text-slate-800" data-cobertura-12h-texto>{revisando ? revisando.linea : titulo}</p>
+            {revisando ? (
+                <p className="mt-1 text-[11px] text-slate-500">Día {indice! + 1} de {dias.length}</p>
+            ) : (
+                <p className="mt-1 text-[11px] text-slate-500">Es un cambio de turno a D12 y N12. Descanso de 8 a 12 h y el tope piden el PIN al guardar.</p>
+            )}
+            <div className="mt-2 flex flex-wrap justify-end gap-2">
+                <button type="button" onClick={onCerrar} className="rounded-xl border border-slate-200 px-3 py-1 text-[11px] font-bold text-slate-600 hover:bg-slate-50" data-cobertura-12h-no>No cubrir</button>
+                {revisando ? (
+                    <>
+                        <button type="button" onClick={() => setIndice(null)} className="rounded-xl border border-slate-200 px-3 py-1 text-[11px] font-bold text-slate-600 hover:bg-slate-50">Volver</button>
+                        <button type="button" onClick={() => setIndice((i) => (i == null ? 0 : (i + 1) % dias.length))} className="rounded-xl border border-slate-200 px-3 py-1 text-[11px] font-bold text-slate-600 hover:bg-slate-50">Siguiente</button>
+                        {revisando.aplicable && (
+                            <button type="button" onClick={() => onAplicarDia(revisando.dateStr)} className="rounded-xl bg-red-600 px-3 py-1 text-[11px] font-black text-white shadow-sm hover:bg-red-700" data-cobertura-12h-dia>Aplicar este día</button>
+                        )}
+                    </>
+                ) : (
+                    <>
+                        <button type="button" onClick={() => setIndice(0)} className="rounded-xl border border-slate-200 px-3 py-1 text-[11px] font-bold text-slate-600 hover:bg-slate-50" data-cobertura-12h-revisar>Día por día</button>
+                        {hay && (
+                            <button type="button" onClick={onAplicarTodo} className="rounded-xl bg-red-600 px-3 py-1 text-[11px] font-black text-white shadow-sm hover:bg-red-700" data-cobertura-12h-aplicar>Aplicar todo</button>
+                        )}
+                    </>
+                )}
+            </div>
+        </div>,
+        document.body,
+    );
+}
+
 export function Cierre12Banner({ texto, onConfirmar, onCancelar }: { texto: string; onConfirmar: () => void; onCancelar: () => void }) {
     if (typeof document === 'undefined') return null;
     return createPortal(

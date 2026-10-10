@@ -13,6 +13,7 @@ import {
   type SeleccionPlan,
   buscarClientes,
 } from '@/lib/movil/planificacionSemana';
+import { esJornada12h } from '@/lib/planificacion/cierre12h';
 import { MOVIL_BORDER, MOVIL_BTN_PRIMARY, MOVIL_BTN_SECONDARY, MOVIL_CARD, MOVIL_FILETE, MOVIL_PRIMARY_BG, MOVIL_PRIMARY_BORDER, MOVIL_PRIMARY_TEXT, MOVIL_TEXT } from './ui/tones';
 import { MovilBadge } from './ui/MovilBadge';
 
@@ -91,30 +92,33 @@ function diaNumero(fecha: string): string {
   return String(Number(fecha.slice(8, 10)));
 }
 
-function Celda({ celda, hoy, onClick, marca, onMarca }: {
+function Celda({ celda, hoy, onClick, marca, onMarca, sinHuecos }: {
   celda: CeldaSemana;
   hoy: string;
   onClick: () => void;
   marca?: { texto: string; tooltip: string } | null;
   onMarca?: () => void;
+  sinHuecos?: boolean;
 }) {
-  const esHueco = celda.kind === 'hueco';
+  const esHueco = celda.kind === 'hueco' && !sinHuecos;
   const sinServicio = celda.kind === 'sin-servicio';
   const asignados = celda.guardias.filter((g) => !g.vacante);
+  const doce = esJornada12h(celda.fila.code, celda.fila.hours) && asignados.length > 0;
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={sinServicio}
       data-plan-celda={`${celda.fila.id}|${celda.fecha}`}
-      data-plan-estado={celda.kind}
+      data-plan-estado={sinHuecos && celda.kind === 'hueco' ? 'libre' : celda.kind}
+      data-jornada-12={doce ? '1' : undefined}
       aria-label={`${celda.fila.positionName} ${celda.fila.code} ${celda.fecha}: ${esHueco ? `${celda.faltan} hueco` : asignados.map((g) => g.employeeName).join(', ') || 'sin servicio'}`}
-      className={`relative flex min-h-12 flex-col items-start justify-center overflow-hidden rounded border bg-white px-1 py-1 text-left ${MOVIL_BORDER} ${celda.fecha === hoy ? 'border-slate-400' : ''} disabled:bg-[#f7f8fa]`}
+      className={`relative flex min-h-12 flex-col items-start justify-center overflow-hidden rounded border px-1 py-1 text-left ${doce ? 'border-red-800 bg-red-600' : `bg-white ${MOVIL_BORDER}`} ${celda.fecha === hoy ? 'border-slate-400' : ''} disabled:bg-[#f7f8fa]`}
     >
       {esHueco && <span aria-hidden="true" className={`absolute inset-y-0 left-0 w-[3px] ${MOVIL_FILETE.rose}`} />}
       {sinServicio && <span className="block w-full text-center text-[10px] font-medium text-slate-300">—</span>}
       {asignados.map((g) => (
-        <span key={g.id} className="block w-full truncate pl-0.5 text-[9px] font-semibold leading-3 text-slate-900">{apellidoCorto(g.employeeName)}</span>
+        <span key={g.id} className={`block w-full truncate pl-0.5 text-[9px] font-semibold leading-3 ${doce ? 'text-white' : 'text-slate-900'}`}>{apellidoCorto(g.employeeName)}</span>
       ))}
       {esHueco && (
         <span className={`block w-full truncate pl-0.5 text-[9px] font-bold uppercase leading-3 ${MOVIL_TEXT.rose}`}>
@@ -151,6 +155,7 @@ export function SemanaGrilla(props: {
   sinEstructura?: string | null;
   marcaConsulta?: (fecha: string, positionName: string) => { texto: string; tooltip: string } | null;
   onConsulta?: (fecha: string, positionName: string) => void;
+  sinHuecos?: boolean;
 }) {
   const eventos = props.eventos || [];
   const touch = useRef<{ x: number; y: number } | null>(null);
@@ -190,7 +195,7 @@ export function SemanaGrilla(props: {
       {props.filas.map((fila, r) => (
         <div key={fila.id} className="mt-3" data-plan-fila={fila.id}>
           <div className="mb-1 flex items-center gap-2 px-0.5">
-            <MovilBadge outline>{fila.code}</MovilBadge>
+            <MovilBadge outline className={esJornada12h(fila.code, fila.hours) ? '!border-red-800 !bg-red-600 !text-white' : ''} attrs={esJornada12h(fila.code, fila.hours) ? { 'data-jornada-12': '1' } : undefined}>{fila.code}</MovilBadge>
             <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-slate-900">{fila.positionName}</span>
             <span className="text-[11px] font-medium tabular-nums text-slate-500">{fila.start && fila.end ? `${fila.start}–${fila.end}` : ''}{fila.qty > 1 ? ` · ×${fila.qty}` : ''}</span>
           </div>
@@ -203,6 +208,7 @@ export function SemanaGrilla(props: {
                 marca={props.marcaConsulta?.(celda.fecha, celda.fila.positionName) || null}
                 onMarca={() => props.onConsulta?.(celda.fecha, celda.fila.positionName)}
                 onClick={() => props.onCelda(celda)}
+                sinHuecos={props.sinHuecos}
               />
             ))}
           </div>
@@ -272,6 +278,7 @@ export function SemanaEncabezado(props: {
   publicado: boolean | null;
   publicadoPor?: string | null;
   huecos: number;
+  ocultarHuecos?: boolean;
   cambios: number;
   mesLabel: string;
 }) {
@@ -295,7 +302,7 @@ export function SemanaEncabezado(props: {
           <span className="text-slate-500">{props.mesLabel}</span>
           {estado && <span className={estado === 'Publicado' ? MOVIL_TEXT.emerald : MOVIL_TEXT.amber}>{estado}{estado === 'Publicado' && props.publicadoPor ? ` · ${props.publicadoPor}` : ''}</span>}
           <span className="flex-1" />
-          <span className={`rounded border px-1.5 leading-5 ${props.huecos > 0 ? `border-slate-300 ${MOVIL_TEXT.rose}` : 'border-slate-300 text-slate-500'}`} data-plan-huecos={props.huecos}>{props.huecos} hueco{props.huecos === 1 ? '' : 's'}</span>
+          {!props.ocultarHuecos && <span className={`rounded border px-1.5 leading-5 ${props.huecos > 0 ? `border-slate-300 ${MOVIL_TEXT.rose}` : 'border-slate-300 text-slate-500'}`} data-plan-huecos={props.huecos}>{props.huecos} hueco{props.huecos === 1 ? '' : 's'}</span>}
           {props.cambios > 0 && <span className={`rounded border px-1.5 leading-5 ${MOVIL_PRIMARY_BG} border-transparent`} data-plan-cambios={props.cambios}>{props.cambios} sin guardar</span>}
         </div>
       )}

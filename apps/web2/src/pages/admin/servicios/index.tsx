@@ -3241,6 +3241,20 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                      <span className="block text-[10px] font-bold text-slate-500">Al publicar el cronograma del último mes se crea el mes siguiente. No entra en operación hasta que se publique ese cronograma.</span>
                    </span>
                  </label>
+                 <label className={`flex items-start gap-2 rounded-2xl border px-3 py-2 ${form.exigeCobertura === false ? 'border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-900/40' : 'border-red-200 bg-red-50/70 dark:border-red-900 dark:bg-red-950/30'}`}>
+                   <input
+                     type="checkbox"
+                     className="mt-0.5"
+                     data-exige-cobertura
+                     disabled={isClosedContract}
+                     checked={form.exigeCobertura !== false}
+                     onChange={(e) => setForm({ ...form, exigeCobertura: e.target.checked })}
+                   />
+                   <span>
+                     <span className="block text-[10px] font-black uppercase text-slate-700 dark:text-slate-200">Exige cobertura</span>
+                     <span className="block text-[10px] font-bold text-slate-500">Si está apagado, la grilla muestra solo los turnos que se usan: no hay huecos, fila Cobertura ni propuestas. Las horas se siguen contando.</span>
+                   </span>
+                 </label>
                  {!isEditing && (
                    <p className="text-[10px] font-bold text-slate-500 -mt-3">El mes de arriba solo propone el desde. Podés elegir meses posteriores.</p>
                  )}

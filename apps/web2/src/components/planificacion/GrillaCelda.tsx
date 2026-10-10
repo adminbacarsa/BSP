@@ -124,7 +124,7 @@ function CeldaGrillaBase({ vista: v, fila, col, seleccionada, colElegir, elegirA
                 {v.cubiertoTitulo != null && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-orange-500 text-white px-0.5 rounded" title={v.cubiertoTitulo}>✓</div>}
                 {v.estado && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${v.estado}`}></div>}
                 {v.conflicto && (
-                    <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md" /></div>
+                    <div className="absolute inset-0 flex items-center justify-center z-20 ring-2 ring-amber-300 ring-inset bg-slate-900/45" data-conflicto-celda><Siren size={14} className="text-amber-200 drop-shadow-md" /></div>
                 )}
                 {v.invitado && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm" /></div>)}
                 {v.otroObjetivo && contenidoVisible && (<div className="absolute bottom-0 left-0"><MapPin size={7} className="text-slate-300 drop-shadow-sm" /></div>)}

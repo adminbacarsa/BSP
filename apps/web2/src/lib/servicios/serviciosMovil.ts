@@ -163,6 +163,7 @@ export interface ServicioMovilPuesto {
 export interface ServicioMovilDetalle {
   vigencia: string;
   facturacion: string;
+  cobertura: string;
   cerrado: boolean;
   cerradoMotivo: string;
   reabiertoManual: boolean;
@@ -179,6 +180,7 @@ export function slaMovilDetalle(sla: ServiceSLA, ctx: { clientHasOpenContract?: 
   return {
     vigencia: `${fechaCorta(sla.startDate)} → ${fechaCorta(sla.endDate) || 'sin fin'}`,
     facturacion,
+    cobertura: sla.exigeCobertura === false ? 'No exige cobertura' : 'Exige cobertura',
     cerrado: sla.closed === true,
     cerradoMotivo: closedReason === 'VENCIDO' ? 'vencido' : closedReason === 'MANUAL' ? 'manual' : '',
     reabiertoManual: (sla as { reopenedManually?: unknown }).reopenedManually === true,

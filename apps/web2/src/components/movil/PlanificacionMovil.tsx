@@ -280,8 +280,17 @@ export function PlanificacionMovil() {
       slas, empresaId, scopeEmpresa, clientes: clientesCat, clientId: clienteSel?.id || objetivoSel.clientId, objectiveId: objetivoSel.id, ym: ymSemana,
     });
   }, [slas, empresaId, scopeEmpresa, clientesCat, clienteSel, objetivoSel, ymSemana]);
-  const filas = useMemo(() => (estructura ? filasSemana(estructura.estructura) : []), [estructura]);
-  const celdas = useMemo(() => (objetivoSel ? celdasSemana(filas, diasSemana, visibles, objetivoSel.id) : []), [filas, diasSemana, visibles, objetivoSel]);
+  const filasBase = useMemo(() => (estructura ? filasSemana(estructura.estructura) : []), [estructura]);
+  const celdasBase = useMemo(() => (objetivoSel ? celdasSemana(filasBase, diasSemana, visibles, objetivoSel.id) : []), [filasBase, diasSemana, visibles, objetivoSel]);
+  const exigeCobertura = estructura?.exigeCobertura !== false;
+  const filas = useMemo(() => {
+    if (exigeCobertura) return filasBase;
+    return filasBase.filter((_, i) => (celdasBase[i] || []).some((c) => c.guardias.some((g) => !g.vacante)));
+  }, [filasBase, celdasBase, exigeCobertura]);
+  const celdas = useMemo(() => {
+    if (exigeCobertura) return celdasBase;
+    return celdasBase.filter((row) => row.some((c) => c.guardias.some((g) => !g.vacante)));
+  }, [celdasBase, exigeCobertura]);
   const licencias = useMemo(() => (objetivoSel ? licenciasSemana(diasSemana, visibles, objetivoSel.id) : []), [diasSemana, visibles, objetivoSel]);
   // Guardias del plantel afectados a un evento: el EV vive en el objetivo del evento, se busca por guardia.
   const eventosPlantel = useMemo(() => (objetivoSel ? eventosSemana(diasSemana, visibles, plantelDe(visibles, objetivoSel.id, empleados)) : []), [diasSemana, visibles, objetivoSel, empleados]);
@@ -666,7 +675,8 @@ export function PlanificacionMovil() {
               onSelector={() => setSheet({ tipo: 'selector' })}
               publicado={estadoMes ? estadoMes.publishedAt : null}
               publicadoPor={estadoMes?.publishedBy}
-              huecos={huecos}
+              huecos={exigeCobertura ? huecos : 0}
+              ocultarHuecos={!exigeCobertura}
               cambios={cambios.length}
               mesLabel={mesLabelDe(ymSemana)}
             />
@@ -678,6 +688,7 @@ export function PlanificacionMovil() {
                   hoy={hoy}
                   filas={filas}
                   celdas={celdas}
+                  sinHuecos={!exigeCobertura}
                   licencias={licencias}
                   eventos={eventosPlantel}
                   sinEstructura={sinEstructura}

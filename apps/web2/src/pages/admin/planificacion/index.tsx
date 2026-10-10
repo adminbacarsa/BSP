@@ -229,7 +229,7 @@ import {
     type VistaCelda,
 } from '@/components/planificacion/GrillaCelda';
 import { ModoRapidoCapa, type CapaModoRapidoApi, type MarcaAviso } from '@/components/planificacion/ModoRapidoCapa';
-import { Cierre12Banner, ModoRapidoAyuda, ModoRapidoAvisosPanel, PegarExcelModal, SelectorNovedad, type DecisionDiaE, type PegarExcelEstado } from '@/components/planificacion/ModoRapidoPiezas';
+import { Cierre12Banner, Cobertura12RangoBanner, ModoRapidoAyuda, ModoRapidoAvisosPanel, PegarExcelModal, SelectorNovedad, type DecisionDiaE, type DiaUi12, type PegarExcelEstado } from '@/components/planificacion/ModoRapidoPiezas';
 import { coloresParaTsv } from '@/lib/planificacion/pegadoExcelColor';
 import { asignarNominaAServicioEvento } from '@/services/eventoAssignService';
 import {
@@ -446,8 +446,10 @@ type CtxMenuRapido = {
     absence: any;
 };
 type CovMenuRapido = { mode: 'substitute'; id: string } | { mode: 'split'; extId: string; adelId: string };
+let colaCobertura12: string[] | null = null;
+let ofrecerCobertura12: (claves: string[]) => void = () => {};
 import { applyOperationalGapCloseToChanges, applySingleWorkerFullGapCloseToChanges } from '@/lib/planificacion/operationalGapCoverage';
-import { horarioDoce, proponerCierre12h, textoResumen12h, volverA8, type Propuesta12h, type TurnoPuesto12 } from '@/lib/planificacion/cierre12h';
+import { estiloJornada12, horarioDoce, proponerCierre12h, slaExigeCobertura, textoRango12h, textoResumen12h, volverA8, type Propuesta12h, type TurnoPuesto12 } from '@/lib/planificacion/cierre12h';
 import {
     clasificarSeleccionLicencia,
     diasQueQuedaron,
@@ -640,8 +642,8 @@ const SHIFT_STYLES: any = {
     'M':   'bg-white text-blue-700 border-blue-400 font-bold',
     'T':   'bg-white text-orange-600 border-orange-400 font-bold',
     'N':   'bg-white text-indigo-700 border-indigo-500 font-bold',
-    'D12': 'bg-white text-cyan-700 border-cyan-400 font-bold',
-    'N12': 'bg-white text-purple-700 border-purple-400 font-bold',
+    'D12': 'bg-red-600 text-white border-red-800 font-black',
+    'N12': 'bg-red-600 text-white border-red-800 font-black',
     'F':   'bg-green-500 text-white border-green-600 font-black shadow-sm',
     'PU':  'bg-white text-pink-700 border-pink-400 font-bold',
     'A':   'bg-white text-red-700 border-red-400 font-black pattern-diagonal',
@@ -655,9 +657,9 @@ const SHIFT_STYLES: any = {
     'SGS': 'bg-orange-50 text-orange-700 border border-orange-300 font-bold',
     'SUS': 'bg-red-100 text-red-700 border border-red-400 font-bold',
     'REF': 'bg-violet-100 text-violet-800 border-violet-500 font-black',
-    'RFZ': 'bg-red-500 text-white border-red-600 font-black',
-    'TURA': 'bg-red-600 text-white border-red-700 font-black',
-    'EXTENDED': 'bg-red-600 text-white border-red-700 font-black shadow-sm',
+    'RFZ': 'bg-red-950 text-white border-2 border-white font-black',
+    'TURA': 'bg-rose-900 text-white border-2 border-white font-black',
+    'EXTENDED': 'bg-amber-600 text-white border-amber-800 font-black shadow-sm',
     'ESC': 'bg-sky-100 text-sky-800 border-sky-500 font-black',
     'EV':  'bg-yellow-400 text-yellow-900 border-yellow-500 font-black',
     'PG':  'bg-white text-blue-700 border-blue-400 font-black',
@@ -1510,7 +1512,7 @@ function calcularCeldaGrilla(e: EntradaCeldaGrilla, emp: any, isGuest: boolean, 
         key,
         contenido: borrado ? null : content,
         borrado,
-        estilo: style,
+        estilo: estiloJornada12(style, String((p && !p.isDeleted ? p.code : s?.code) || content || ''), Number((p && !p.isDeleted ? p.hours : s?.hours) || 0)),
         sufijoUsado,
         ringExtra: lctRest ? 'ring-2 ring-amber-400' : cellPosExcluded ? 'ring-1 ring-rose-400/70' : '',
         editable: !isLockedDate && !e.isServiceLocked && !isOpsCoverageCell && !soloLecturaAjena,
@@ -1784,6 +1786,7 @@ function PlanificacionDesktop() {
         x: number;
         y: number;
     } | null>(null);
+    const [rango12, setRango12] = useState<{ titulo: string; dias: Array<DiaUi12 & { propuesta: Propuesta12h | null }> } | null>(null);
     const [slaGapCloseModal, setSlaGapCloseModal] = useState<SlaGapCloseModalData | null>(null);
     const [shiftExtendModal, setShiftExtendModal] = useState<ShiftExtendModalData | null>(null);
     const [showCoverageDiagnostic, setShowCoverageDiagnostic] = useState(false);
@@ -2092,6 +2095,7 @@ function PlanificacionDesktop() {
     }, [modoRapidoStorageKey]);
     const pendingChangesRef = useRef(pendingChanges);
     pendingChangesRef.current = pendingChanges;
+    const exigeCoberturaGrilla = slaExigeCobertura(activePlanningSlaRow as { exigeCobertura?: boolean } | null);
     const guardCronoRef = useRef({
         shiftsMap,
         cellTurnosMap,
@@ -2168,7 +2172,7 @@ function PlanificacionDesktop() {
         if (pisadas.length) {
             const fechas = [...new Set(pisadas.map((p) => `${p.fecha.slice(8, 10)}/${p.fecha.slice(5, 7)}`))];
             const ok = window.confirm(`Ese día lo resuelve una consulta abierta (${fechas.join(', ')}). Si lo cambiás a mano, se cancela la consulta y se avisa que ya no hace falta. ¿Seguir?`);
-            if (!ok) return;
+            if (!ok) return false;
             for (const id of [...new Set(pisadas.map((p) => p.consultaId))]) {
                 void cancelarConsultaPlan(id).catch(() => toast.error('No se pudo cancelar la consulta.'));
             }
@@ -2176,6 +2180,7 @@ function PlanificacionDesktop() {
         undoStackRef.current = [...undoStackRef.current.slice(-39), { ...prev }];
         redoStackRef.current = [];
         setPendingChanges(resolved);
+        return true;
     }, [cancelarConsultaPlan]);
 
     const undoLastPending = useCallback((silencioso?: boolean) => {
@@ -5681,8 +5686,8 @@ function PlanificacionDesktop() {
                     { code: 'M',   name: 'Mañana',         sub: '07:00–15:00 · 8h · computa SLA' },
                     { code: 'T',   name: 'Tarde',           sub: '15:00–23:00 · 8h · computa SLA' },
                     { code: 'N',   name: 'Noche',           sub: '23:00–07:00 · 8h · computa SLA' },
-                    { code: 'D12', name: 'Diurno 12h',      sub: '07:00–19:00 · 12h · computa SLA' },
-                    { code: 'N12', name: 'Nocturno 12h',    sub: '19:00–07:00 · 12h · computa SLA' },
+                    { code: 'D12', name: 'Diurno 12h',      sub: '07:00–19:00 · 12h · fondo rojo, letra blanca' },
+                    { code: 'N12', name: 'Nocturno 12h',    sub: '19:00–07:00 · 12h · fondo rojo, letra blanca' },
                     { code: 'PU',  name: 'Puesto Único',    sub: 'Horario personalizado' },
                 ],
             },
@@ -8768,6 +8773,8 @@ function PlanificacionDesktop() {
         const code = absenceCodes[rrhhData.type] || 'AA';
         const key = `${selectedCell.empId}_${selectedCell.dateStr}`;
         const empName = employees.find((e: any) => e.id === selectedCell.empId)?.name || '';
+        const bandaPrevia = String(selectedCell.currentShift?.code || '').toUpperCase();
+        if (exigeCoberturaGrilla && (bandaPrevia === 'M' || bandaPrevia === 'T' || bandaPrevia === 'N')) colaCobertura12 = [key];
         setPendingChanges(prev => ({ ...prev, [key]: { code, name: rrhhData.type, isTemp: true, isNovedad: true, hours: 0, startTime: '00:00', ...camposBandaConservada(selectedCell.currentShift) } }));
         setPendingNovedades(prev => ({ ...prev, [key]: { employeeId: selectedCell.empId, employeeName: empName, startDate: selectedCell.dateStr, endDate: selectedCell.dateStr, type: rrhhData.type, reason: rrhhData.reason, status: 'APPROVED' } }));
         toast.success("Novedad pendiente — recordá guardar los cambios");
@@ -13645,6 +13652,7 @@ function PlanificacionDesktop() {
             }
         }
         const sinMarcaEvento: string[] = [];
+        const licenciasNuevas: string[] = [];
         for (const it of items) {
             const { emp, ds, key, ctx } = ctxRapido(it.r, it.c);
             if (!emp) continue;
@@ -13669,6 +13677,8 @@ function PlanificacionDesktop() {
             if ('error' in res) { anotar(res.error); continue; }
             next[key] = res.change;
             if (res.novedad) novedades[key] = res.novedad;
+            const anterior = String((ctx?.p && !ctx.p.isDeleted ? ctx.p.code : ctx?.s?.code) || '').toUpperCase();
+            if (res.novedad && (anterior === 'M' || anterior === 'T' || anterior === 'N')) licenciasNuevas.push(key);
             hechos++;
         }
         if (sinMarcaEvento.length) {
@@ -13678,7 +13688,10 @@ function PlanificacionDesktop() {
                 return out;
             });
         }
-        if (hechos) commitPendingChanges(next);
+        if (hechos) {
+            const applied = commitPendingChanges(next);
+            if (applied && licenciasNuevas.length && exigeCoberturaGrilla) colaCobertura12 = licenciasNuevas;
+        }
         if (hechos || quitarNovedad.size || Object.keys(novedades).length) {
             setPendingNovedades((prev) => {
                 const out = { ...prev, ...novedades };
@@ -13966,16 +13979,29 @@ function PlanificacionDesktop() {
                 const code = normalizarCodigo(t.code || '');
                 if (!code || code === 'F' || code === 'FF' || code === 'FP' || code === 'FT' || code === 'RET' || code === 'EV') continue;
                 const aus = absencesMap[key];
-                const bloqueado = esCeldaLicencia({ code, tieneAusencia: !!(aus && isActiveAbsence(aus)) });
-                if (bloqueado) continue;
+                const licencia = esCeldaLicencia({ code, tieneAusencia: !!(aus && isActiveAbsence(aus)) });
+                const descansoMsg = String(lctRestByCell[key] || '');
+                const descansoMatch = descansoMsg.match(/=\s*(-?\d+)\s*h(?:\s*(\d+)\s*min)?/);
+                const horasDescanso = descansoMatch ? Number(descansoMatch[1]) + (descansoMatch[2] ? Number(descansoMatch[2]) / 60 : 0) : null;
+                const descansoCorto = horasDescanso != null && horasDescanso < 8;
                 const pos = String(t.positionName || getEmpDefaultPos(emp.id) || '').trim();
                 if (!pos || pos === 'General' || pos === 'Retén') continue;
-                out.push({ empId: emp.id, nombre: String(emp.name || emp.id), dateStr: ds, code, positionName: pos });
+                out.push({
+                    empId: emp.id,
+                    nombre: String(emp.name || emp.id),
+                    dateStr: ds,
+                    code,
+                    positionName: pos,
+                    hours: Number(t.hours) || undefined,
+                    bloqueado: licencia || descansoCorto,
+                    motivo: descansoCorto ? 'descanso menor a 8 h' : (licencia ? 'licencia' : undefined),
+                });
             }
         }
         return out;
     };
     const propuestas12De = (dateStr: string, soloPos?: string, preferido?: string): Propuesta12h[] => {
+        if (!exigeCoberturaGrilla) return [];
         const report = buildDayCoverageReport(dateStr);
         if (!report) return [];
         const turnos = turnos12(dateStr);
@@ -14007,6 +14033,62 @@ function PlanificacionDesktop() {
             return;
         }
         setPropuesta12(utiles);
+    };
+    const aplicarPares12 = (lista: Propuesta12h[]) => {
+        const pares = lista.filter((p) => p.modo === 'par' && p.cambios.length >= 2);
+        if (!pares.length) return;
+        const global = bloqueoGlobalRapido();
+        if (global) { toast.message(global); return; }
+        const next = { ...pendingChangesRef.current };
+        const filaDe = new Map(displayedEmployees.map((e: any, i: number) => [e.id, i]));
+        let hechos = 0;
+        for (const prop of pares) {
+            for (const ch of prop.cambios) {
+                const r = filaDe.get(ch.empId);
+                const c = diasRapido.indexOf(ch.dateStr);
+                if (r == null || c < 0) continue;
+                const celda = ctxRapido(r, c);
+                if (!celda.emp) continue;
+                const fuente: FuenteRapida = {
+                    code: ch.code, startTime: ch.startTime, endTime: ch.endTime, hours: ch.hours, name: ch.code, positionName: prop.positionName,
+                };
+                const res = cambioRapido(celda.emp, ch.dateStr, ch.code, celda.ctx, fuente);
+                if ('error' in res) { toast.message(res.error); continue; }
+                next[`${ch.empId}_${ch.dateStr}`] = res.change;
+                hechos++;
+            }
+        }
+        if (hechos) commitPendingChanges(next);
+    };
+    ofrecerCobertura12 = (claves: string[]) => {
+        if (!exigeCoberturaGrilla) return;
+        const porEmp = new Map<string, string[]>();
+        for (const k of claves) {
+            const m = k.match(/^(.*)_(\d{4}-\d{2}-\d{2})$/);
+            if (!m) continue;
+            const list = porEmp.get(m[1]) || [];
+            list.push(m[2]);
+            porEmp.set(m[1], list);
+        }
+        const bloques: string[] = [];
+        const diasUi: Array<DiaUi12 & { propuesta: Propuesta12h | null; motivo: string }> = [];
+        let hubo = false;
+        for (const [empId, fechas] of porEmp) {
+            fechas.sort();
+            const nombre = String(employees.find((e: any) => e.id === empId)?.name || empId);
+            const code = String(pendingChanges[`${empId}_${fechas[0]}`]?.code || 'V');
+            const dias = fechas.map((ds) => {
+                const lista = propuestas12De(ds);
+                if (lista.length) hubo = true;
+                const par = lista.find((p) => p.modo === 'par' && p.cambios.length >= 2) || null;
+                if (par) return { dateStr: ds, aplicable: true, linea: par.texto, propuesta: par, motivo: '' };
+                const motivo = (lista[0]?.texto || 'sin par').replace(/ · Enter confirma, Esc cancela$/, '');
+                return { dateStr: ds, aplicable: false, linea: `${ds.slice(8, 10)}/${ds.slice(5, 7)} sin cubrir: ${motivo}`, propuesta: null, motivo };
+            });
+            bloques.push(textoRango12h({ nombre, code, desde: fechas[0], hasta: fechas[fechas.length - 1], dias }));
+            diasUi.push(...dias);
+        }
+        if (hubo && diasUi.length) setRango12({ titulo: bloques.join('\n\n'), dias: diasUi });
     };
     const masRapido = (r: number, c: number, columna: boolean) => {
         const global = bloqueoGlobalRapido();
@@ -14800,14 +14882,18 @@ function PlanificacionDesktop() {
                                 <span>Hs:</span>
                                 <span>{hoursMode === 'cct' ? 'CCT' : 'Mes'}</span>
                             </button>
-                            <span className={`flex items-center gap-1 ${gridOpts?.highlightCoverageFooter ? 'text-rose-700' : 'text-slate-500'}`}>
-                                <ShieldCheck size={12}/> Cobertura:
+                            <span className={`flex items-center gap-1 ${gridOpts?.highlightCoverageFooter ? 'text-rose-700' : 'text-slate-500'}`} data-exige-cobertura={exigeCoberturaGrilla ? '1' : '0'}>
+                                <ShieldCheck size={12}/> {exigeCoberturaGrilla ? 'Cobertura:' : 'Horas'}
                             </span>
                         </div>
                     </td>
                     {sinServicioEnMes ? (
                         <td colSpan={daysInMonth.length} className="border-b px-3 text-left text-[10px] font-black uppercase text-slate-400" data-cobertura-sin-servicio>
                             Sin servicio: no se valida cobertura
+                        </td>
+                    ) : !exigeCoberturaGrilla ? (
+                        <td colSpan={daysInMonth.length} className="border-b px-3 text-left text-[10px] font-bold text-slate-400" data-cobertura-sin-exigencia>
+                            Sin exigencia de cobertura
                         </td>
                     ) : (daysInMonth.map(day => {
                         const dateStr = getDateKey(day);
@@ -14936,6 +15022,13 @@ function PlanificacionDesktop() {
         setCoverageTooltip(null);
         setSlaGapCloseModal({ dateStr, positionName: gap.positionName, gapBand, objectiveId: gap.objectiveId });
     }, []);
+
+    useEffect(() => {
+        const claves = colaCobertura12;
+        if (!claves?.length) return;
+        colaCobertura12 = null;
+        ofrecerCobertura12(claves);
+    }, [pendingChanges]);
 
     return (
         <DashboardLayout>
@@ -15112,7 +15205,7 @@ function PlanificacionDesktop() {
                     </div>
                 </div>
             )}
-            {coverageTooltip && coverageTooltipLayout && typeof document !== 'undefined' && createPortal(
+            {exigeCoberturaGrilla && coverageTooltip && coverageTooltipLayout && typeof document !== 'undefined' && createPortal(
                 <div
                     className="fixed z-[9999]"
                     style={{ left: coverageTooltipLayout.left, top: coverageTooltipLayout.top }}
@@ -16848,14 +16941,26 @@ function PlanificacionDesktop() {
                                 <div className="flex gap-2 items-center p-2 flex-wrap" data-barra-cubrir>
                                     <span className="text-[11px] font-black px-2 text-white">{clas.textoCubrir || 'Cubrir licencia'}</span>
                                     {clas.mismoTitular && clas.titularId ? (
-                                        <button
-                                            type="button"
-                                            data-barra-cubrir-modal
-                                            onClick={() => abrirCoberturaDias(clas.titularId as string, clas.dias)}
-                                            className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-white font-black text-xs"
-                                        >
-                                            Abrir cobertura
-                                        </button>
+                                        <>
+                                            {exigeCoberturaGrilla && (
+                                                <button
+                                                    type="button"
+                                                    data-barra-cubrir-12h
+                                                    onClick={() => ofrecerCobertura12(clas.dias.map((ds) => `${clas.titularId}_${ds}`))}
+                                                    className="px-3 py-1.5 bg-red-600 hover:bg-red-500 rounded-lg text-white font-black text-xs"
+                                                >
+                                                    Cubrir con 12 h
+                                                </button>
+                                            )}
+                                            <button
+                                                type="button"
+                                                data-barra-cubrir-modal
+                                                onClick={() => abrirCoberturaDias(clas.titularId as string, clas.dias)}
+                                                className="px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg text-white font-black text-xs border border-white/20"
+                                            >
+                                                Abrir cobertura
+                                            </button>
+                                        </>
                                     ) : (
                                         <span className="text-[10px] font-bold text-amber-200">Son de distintas personas: cubrilas de a una.</span>
                                     )}
@@ -18612,6 +18717,27 @@ function PlanificacionDesktop() {
                         texto={textoResumen12h(propuesta12)}
                         onConfirmar={confirmar12}
                         onCancelar={() => setPropuesta12(null)}
+                    />
+                )}
+                {rango12 && (
+                    <Cobertura12RangoBanner
+                        titulo={rango12.titulo}
+                        dias={rango12.dias}
+                        onCerrar={() => setRango12(null)}
+                        onAplicarTodo={() => {
+                            const lista = rango12.dias.map((d) => d.propuesta).filter((p): p is Propuesta12h => !!p && p.modo === 'par');
+                            setRango12(null);
+                            aplicarPares12(lista);
+                        }}
+                        onAplicarDia={(dateStr) => {
+                            const dia = rango12.dias.find((d) => d.dateStr === dateStr && d.propuesta);
+                            if (dia?.propuesta) aplicarPares12([dia.propuesta]);
+                            setRango12((prev) => {
+                                if (!prev) return null;
+                                const dias = prev.dias.map((d) => d.dateStr === dateStr ? { ...d, aplicable: false, linea: `${d.linea} · aplicado`, propuesta: null } : d);
+                                return { ...prev, dias };
+                            });
+                        }}
                     />
                 )}
                 {selectorNovedad && (
