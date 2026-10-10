@@ -44,6 +44,25 @@ XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'Hoja1');
 const xlsxPath = join(tmpdir(), 'planilla-prueba-octubre.xlsx');
 XLSX.writeFile(wb, xlsxPath);
 
+const aoaTadicor = [
+  [],
+  [],
+  [],
+  ['BACAR', '', '', '', '', '', 'Tadicor'],
+  [],
+  filaDias((d) => letras[(dow + d - 1) % 7]),
+  filaDias((d) => d),
+  ['PEREZ JUAN', '', '', '', 1001, 'Vigilancia', ...ciclo.slice(0, 31).concat(Array(31).fill('M')).slice(0, 31)],
+  [],
+  ['REFERENCIAS', '', '', '', '', '', '', '', 'M', 'Mañana', '', '', 'T', 'Tarde', '', '', 'F', 'Franco'],
+  ['', '', '', '', '', '', '', '', '', '07 a 15 hs', '', '', '', '15 a 23 hs'],
+  ['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', 'OCTUBRE 2026'],
+];
+const wbT = XLSX.utils.book_new();
+XLSX.utils.book_append_sheet(wbT, XLSX.utils.aoa_to_sheet(aoaTadicor), 'Hoja1');
+const xlsxTadicor = join(tmpdir(), 'A. TADICOR OCTUBRE.xlsx');
+XLSX.writeFile(wbT, xlsxTadicor);
+
 const { send, evaluate, waitFor, click, shot, cerrar } = await abrirPlanificacion({
   objectiveId: m.objectiveId,
   clientId: m.clientId,
@@ -56,23 +75,37 @@ const { send, evaluate, waitFor, click, shot, cerrar } = await abrirPlanificacio
 
 try {
   await waitFor(`document.querySelector('[data-importar-excel]') && !document.querySelector('[data-importar-excel]').disabled`, 120000, 'botón importar');
-  await evaluate(`document.querySelector('[data-importar-excel]').click()`);
-  await waitFor(`document.querySelector('[data-importar-excel-modal]')`, 20000, 'modal');
-  const doc = await send('DOM.getDocument', { depth: -1 });
-  const input = await send('DOM.querySelector', { nodeId: doc.root.nodeId, selector: 'input[data-importar-archivo]' });
-  if (!input.nodeId) throw new Error('No está el input de archivo');
-  await send('DOM.setFileInputFiles', { files: [xlsxPath], nodeId: input.nodeId });
-  await waitFor(`document.querySelector('[data-import-paso="1"] input[type=checkbox]')`, 20000, 'cuadro detectado');
+  const subir = async (archivo) => {
+    await evaluate(`document.querySelector('[data-importar-excel]').click()`);
+    await waitFor(`document.querySelector('[data-importar-excel-modal]')`, 20000, 'modal');
+    const doc = await send('DOM.getDocument', { depth: -1 });
+    const input = await send('DOM.querySelector', { nodeId: doc.root.nodeId, selector: 'input[data-importar-archivo]' });
+    if (!input.nodeId) throw new Error('No está el input de archivo');
+    await send('DOM.setFileInputFiles', { files: [archivo], nodeId: input.nodeId });
+    await waitFor(`document.querySelector('[data-cuadro-detectado]')`, 20000, 'cuadro detectado');
+  };
+  await subir(xlsxTadicor);
+  await evaluate(`document.querySelector('[data-importar-siguiente]').click()`);
+  await waitFor(`document.querySelector('[data-destino-propuesta]') && document.querySelector('[data-destino-propuesta]').innerText.includes('Tadicor')`, 15000, 'propuesta Tadicor');
+  await evaluate(`document.querySelector('[data-usar-propuesta]').click()`);
+  await waitFor(`document.querySelector('[data-destino-elegido]') && document.querySelector('[data-destino-elegido]').innerText.includes('Tadicor') && document.querySelector('[data-destino-servicio="sin"]')`, 15000, 'servicios de Tadicor');
   await sleep(600);
+  await shot('destino');
+  await evaluate(`document.querySelector('[aria-label="Cerrar"]').click()`);
+  await waitFor(`!document.querySelector('[data-importar-excel-modal]')`, 15000, 'modal cerrado');
+
+  await subir(xlsxPath);
+  await sleep(400);
   await shot('1-archivo');
   const seguir = async (hasta, nombre) => {
     await evaluate(`document.querySelector('[data-importar-siguiente]').click()`);
     await waitFor(hasta, 15000, nombre);
-    await shot(nombre);
+    if (nombre) await shot(nombre);
   };
-  await seguir(`document.querySelector('[data-import-paso="2"]')`, '2-servicio');
-  await seguir(`document.querySelector('[data-import-paso="3"]')`, '3-guardias');
-  await seguir(`document.querySelector('[data-import-paso="4"]')`, '4-codigos');
+  await seguir(`document.querySelector('[data-import-paso="2"]')`, '');
+  await seguir(`document.querySelector('[data-import-paso="3"]')`, '2-servicio');
+  await seguir(`document.querySelector('[data-import-paso="4"]')`, '3-guardias');
+  await seguir(`document.querySelector('[data-import-paso="5"]')`, '4-codigos');
   await seguir(`document.querySelector('[data-importar-resumen]')`, '5-vista');
   console.log(await evaluate(`document.querySelector('[data-importar-resumen]').innerText`));
   await evaluate(`document.querySelector('[data-importar-aplicar]').click()`);

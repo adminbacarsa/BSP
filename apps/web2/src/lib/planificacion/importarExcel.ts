@@ -402,6 +402,126 @@ export function sugerirCuadros(cuadros: CuadroPlanilla[]): number[] {
   return elegidos.sort((a, b) => a - b);
 }
 
+const STOP_DESTINO = new Set([
+  ...MESES, 'XLSX', 'XLS', 'BANCO', 'BANCOS', 'PLANILLA', 'CRONOGRAMA', 'SUCURSAL', 'SUCURSALES',
+  'DE', 'DEL', 'LA', 'LAS', 'LOS', 'EL', 'Y', 'EN', 'SA', 'SRL', 'HS', 'SEDE', 'SEDES', 'INTERIOR', 'CAPITAL',
+]);
+
+const ALIAS_DESTINO: Record<string, string> = { NVO: 'NUEVO', NVA: 'NUEVA', EDIF: 'EDIFICIO' };
+
+export type ObjetivoCatalogo = {
+  id: string;
+  nombre: string;
+  clienteId: string;
+  clienteNombre: string;
+};
+
+export type PropuestaDestino = {
+  objectiveId: string;
+  clienteId: string;
+  nombre: string;
+  clienteNombre: string;
+  confianza: number;
+  motivo: string;
+};
+
+export type BloqueDestino = {
+  key: string;
+  cuadroIndice: number;
+  titulo: string;
+  etiqueta: string;
+  filas: FilaPlanilla[];
+};
+
+/** Tokens del archivo o del título, sin mes, año ni prefijos genéricos (BANCO-, A.). */
+export function tokensDestino(texto: string): string[] {
+  const limpio = normPlanilla(texto).replace(/\b20\d{2}\b/g, ' ').replace(/[^A-Z0-9 ]/g, ' ');
+  const out: string[] = [];
+  for (const raw of limpio.split(' ').filter(Boolean)) {
+    if (/^\d+$/.test(raw)) continue;
+    const t = ALIAS_DESTINO[raw] || raw;
+    if (t.length < 3 || STOP_DESTINO.has(t)) continue;
+    if (!out.includes(t)) out.push(t);
+  }
+  return out;
+}
+
+function pesoToken(t: string): number {
+  if (t.length >= 6) return 3;
+  if (t.length >= 4) return 2;
+  return 1;
+}
+
+function tokenEn(t: string, otros: string[]): boolean {
+  return otros.some((o) => o === t || (Math.min(t.length, o.length) >= 4 && (o.startsWith(t) || t.startsWith(o))));
+}
+
+/** Ordena los objetivos de la empresa según el archivo y el título del cuadro. */
+export function proponerDestinos(textos: string[], objetivos: ObjetivoCatalogo[]): PropuestaDestino[] {
+  const q = tokensDestino(textos.filter(Boolean).join(' '));
+  if (!q.length) return [];
+  const pesoQ = q.reduce((a, t) => a + pesoToken(t), 0);
+  const ranked: PropuestaDestino[] = [];
+  for (const o of objetivos) {
+    const ot = tokensDestino(o.nombre);
+    if (!ot.length) continue;
+    const pesoO = ot.reduce((a, t) => a + pesoToken(t), 0);
+    const dichos = q.filter((t) => tokenEn(t, ot));
+    const hitQ = dichos.reduce((a, t) => a + pesoToken(t), 0);
+    const hitO = ot.filter((t) => tokenEn(t, q)).reduce((a, t) => a + pesoToken(t), 0);
+    if (!hitQ || !pesoO) continue;
+    const confianza = Math.round((70 * hitQ) / pesoQ + (30 * hitO) / pesoO);
+    ranked.push({
+      objectiveId: o.id,
+      clienteId: o.clienteId,
+      nombre: o.nombre,
+      clienteNombre: o.clienteNombre,
+      confianza,
+      motivo: `Coincide ${dichos.join(' ')}`,
+    });
+  }
+  ranked.sort((a, b) => b.confianza - a.confianza || a.nombre.length - b.nombre.length);
+  return ranked;
+}
+
+export function proponerDestino(textos: string[], objetivos: ObjetivoCatalogo[]): PropuestaDestino | null {
+  return proponerDestinos(textos, objetivos)[0] || null;
+}
+
+/**
+ * Un cuadro es un destino. Si cada fila trae un texto largo y distinto (una sucursal),
+ * cada fila es un destino y ese texto no se usa como puesto del SLA.
+ */
+export function bloquesDeCuadros(cuadros: CuadroPlanilla[]): BloqueDestino[] {
+  const out: BloqueDestino[] = [];
+  for (const c of cuadros) {
+    const puestos = c.filas.map((f) => f.puesto.trim()).filter(Boolean);
+    const uniq = [...new Set(puestos.map((p) => normPlanilla(p)))];
+    const lens = puestos.map((p) => p.length).sort((a, b) => a - b);
+    const med = lens.length ? lens[Math.floor(lens.length / 2)] : 0;
+    const porFila = puestos.length >= 3 && uniq.length >= 3 && uniq.length / puestos.length >= 0.8 && med >= 18;
+    if (!porFila) {
+      out.push({ key: String(c.indice), cuadroIndice: c.indice, titulo: c.titulo, etiqueta: '', filas: c.filas });
+      continue;
+    }
+    const vistos = new Set<string>();
+    c.filas.forEach((f, i) => {
+      const etiqueta = f.puesto.trim() || 'Sin sucursal';
+      const base = `${c.indice}::${normPlanilla(etiqueta) || i}`;
+      const key = vistos.has(base) ? `${base}::${i}` : base;
+      vistos.add(base);
+      out.push({
+        key,
+        cuadroIndice: c.indice,
+        titulo: c.titulo,
+        etiqueta,
+        filas: [{ ...f, puesto: '' }],
+      });
+    });
+  }
+  return out;
+}
+
 export function unirCuadros(cuadros: CuadroPlanilla[]): CuadroPlanilla {
   const base = cuadros[0];
   return {

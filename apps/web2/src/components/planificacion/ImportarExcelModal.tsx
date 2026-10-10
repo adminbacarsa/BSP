@@ -1,43 +1,85 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { format } from 'date-fns';
 import { AlertTriangle, FileSpreadsheet, X } from 'lucide-react';
 import {
+  bloquesDeCuadros,
   compararServicio,
   cruzarGuardias,
   detectarCuadros,
   faltanEnPlanilla,
+  normPlanilla,
+  proponerDestino,
   proponerReglas,
   resumenPreview,
   sugerirCuadros,
-  unirCuadros,
   vistaPrevia,
+  type BloqueDestino,
   type CeldaActual,
   type CruceFila,
   type CuadroPlanilla,
   type EmpleadoCruce,
   type ItemPreview,
+  type ObjetivoCatalogo,
+  type PropuestaDestino,
   type ReglaMapeo,
   type TurnoServicio,
 } from '@/lib/planificacion/importarExcel';
+
+export type ServicioDestino = {
+  id: string;
+  objectiveId: string;
+  desde: string;
+  hasta: string;
+  puestos: Array<{ nombre: string; franjas: string }>;
+  turnos: TurnoServicio[];
+};
 
 export type ImportarExcelContexto = {
   year: number;
   month: number;
   mesLabel: string;
-  objectiveName: string;
-  turnos: TurnoServicio[];
-  empleados: EmpleadoCruce[];
-  dotacion: EmpleadoCruce[];
-  actuales: CeldaActual[];
-  diasCerrados: string[];
-  reglasGuardadas: ReglaMapeo[];
-  sinServicio: boolean;
   empresaId: string;
+  objetivos: ObjetivoCatalogo[];
+  servicios: ServicioDestino[];
+  empleados: EmpleadoCruce[];
+  preseleccion: { clienteId: string; objectiveId: string } | null;
+  diasCerrados: string[];
+};
+
+export type AplicarImportPayload = {
+  clientId: string;
+  objectiveId: string;
+  objectiveName: string;
+  items: ItemPreview[];
+  reglas: ReglaMapeo[];
+  sinServicio: boolean;
+  quedaOtro: boolean;
 };
 
 type Props = {
   ctx: ImportarExcelContexto;
-  onAplicar: (items: ItemPreview[], reglas: ReglaMapeo[]) => void;
+  onCargar: (objectiveId: string) => Promise<{ actuales: CeldaActual[]; reglas: ReglaMapeo[] }>;
+  onAplicar: (payload: AplicarImportPayload) => Promise<boolean>;
   onCancelar: () => void;
+};
+
+type Eleccion = {
+  importar: boolean;
+  clienteId: string;
+  objectiveId: string;
+  servicioId: string;
+};
+
+type GrupoImport = {
+  clave: string;
+  clienteId: string;
+  objectiveId: string;
+  servicioId: string;
+  nombre: string;
+  clienteNombre: string;
+  sinServicio: boolean;
+  turnos: TurnoServicio[];
+  bloques: BloqueDestino[];
 };
 
 const LICENCIAS = ['V', 'E', 'A', 'L', 'AA', 'PG', 'SUS'];
@@ -72,43 +114,155 @@ function cruceResuelto(cruce: CruceFila[], decisiones: Record<number, string>): 
   });
 }
 
-export function ImportarExcelModal({ ctx, onAplicar, onCancelar }: Props) {
+function fechaCorta(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || '');
+  if (!m) return 'sin fecha';
+  return format(new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])), 'dd/MM/yyyy');
+}
+
+function serviciosDe(ctx: ImportarExcelContexto, objectiveId: string): ServicioDestino[] {
+  const obj = ctx.objetivos.find((o) => o.id === objectiveId);
+  return ctx.servicios
+    .filter((s) => s.objectiveId === objectiveId || (!!obj && normPlanilla(s.objectiveId) === normPlanilla(obj.nombre)))
+    .sort((a, b) => b.desde.localeCompare(a.desde));
+}
+
+function eleccionInicial(b: BloqueDestino, archivo: string, ctx: ImportarExcelContexto, sugeridos: Set<number>): Eleccion {
+  const propuesta = proponerDestino([archivo, b.titulo, b.etiqueta], ctx.objetivos);
+  const pre = ctx.preseleccion;
+  let clienteId = '';
+  let objectiveId = '';
+  if (pre?.objectiveId) {
+    clienteId = pre.clienteId;
+    objectiveId = pre.objectiveId;
+  } else if (propuesta && propuesta.confianza >= 55) {
+    clienteId = propuesta.clienteId;
+    objectiveId = propuesta.objectiveId;
+  }
+  return {
+    importar: sugeridos.has(b.cuadroIndice),
+    clienteId,
+    objectiveId,
+    servicioId: objectiveId ? (serviciosDe(ctx, objectiveId)[0]?.id || '') : '',
+  };
+}
+
+function cuadroDelGrupo(g: GrupoImport, cuadros: CuadroPlanilla[]): CuadroPlanilla {
+  const fuentes = [...new Set(g.bloques.map((b) => b.cuadroIndice))]
+    .map((i) => cuadros.find((c) => c.indice === i))
+    .filter((c): c is CuadroPlanilla => !!c);
+  return {
+    indice: -1,
+    titulo: g.bloques.map((b) => b.etiqueta || b.titulo).filter(Boolean).join(' · '),
+    letras: fuentes[0]?.letras || '',
+    avisoMes: fuentes.map((c) => c.avisoMes).find(Boolean) || null,
+    filas: g.bloques.flatMap((b) => b.filas),
+    referencias: fuentes.flatMap((c) => c.referencias),
+    avisos: fuentes.flatMap((c) => c.avisos),
+  };
+}
+
+export function ImportarExcelModal({ ctx, onCargar, onAplicar, onCancelar }: Props) {
   const [paso, setPaso] = useState(1);
   const [archivo, setArchivo] = useState('');
   const [error, setError] = useState('');
   const [cuadros, setCuadros] = useState<CuadroPlanilla[]>([]);
-  const [elegidos, setElegidos] = useState<number[]>([]);
+  const [elecciones, setElecciones] = useState<Record<string, Eleccion>>({});
+  const [busquedaDestino, setBusquedaDestino] = useState<Record<string, string>>({});
   const [decisiones, setDecisiones] = useState<Record<number, string>>({});
-  const [reglas, setReglas] = useState<ReglaMapeo[]>([]);
   const [busqueda, setBusqueda] = useState<Record<number, string>>({});
+  const [reglasPorClave, setReglasPorClave] = useState<Record<string, ReglaMapeo[]>>({});
+  const [grupoIdx, setGrupoIdx] = useState(0);
+  const [cargando, setCargando] = useState(false);
+  const [cargado, setCargado] = useState<{ clave: string; actuales: CeldaActual[]; reglas: ReglaMapeo[] } | null>(null);
+  const cargarRef = useRef(onCargar);
+  cargarRef.current = onCargar;
 
-  const seleccion = useMemo(
-    () => unirCuadros(cuadros.filter((c) => elegidos.includes(c.indice))),
-    [cuadros, elegidos],
+  const bloques = useMemo(() => bloquesDeCuadros(cuadros), [cuadros]);
+
+  const grupos = useMemo(() => {
+    const map = new Map<string, GrupoImport>();
+    for (const b of bloques) {
+      const el = elecciones[b.key];
+      if (!el?.importar || !el.objectiveId) continue;
+      const obj = ctx.objetivos.find((o) => o.id === el.objectiveId);
+      const srv = serviciosDe(ctx, el.objectiveId).find((s) => s.id === el.servicioId);
+      const clave = `${el.objectiveId}|${el.servicioId}`;
+      let g = map.get(clave);
+      if (!g) {
+        g = {
+          clave,
+          clienteId: el.clienteId || obj?.clienteId || '',
+          objectiveId: el.objectiveId,
+          servicioId: el.servicioId,
+          nombre: obj?.nombre || el.objectiveId,
+          clienteNombre: obj?.clienteNombre || '',
+          sinServicio: !srv,
+          turnos: srv?.turnos || [],
+          bloques: [],
+        };
+        map.set(clave, g);
+      }
+      g.bloques.push(b);
+    }
+    return [...map.values()];
+  }, [bloques, elecciones, ctx]);
+
+  const grupo = grupos[grupoIdx] || null;
+  const cuadro = useMemo(() => (grupo ? cuadroDelGrupo(grupo, cuadros) : null), [grupo, cuadros]);
+  const reglas = (grupo && reglasPorClave[grupo.clave]) || [];
+  const actuales = cargado && grupo && cargado.clave === grupo.clave ? cargado.actuales : [];
+  const dotacion = useMemo(
+    () => ctx.empleados.filter((e) => !!grupo && e.objetivoPreferido === grupo.objectiveId),
+    [ctx.empleados, grupo],
   );
   const cruce = useMemo(
-    () => (seleccion.filas.length ? cruzarGuardias(seleccion.filas, ctx.empleados, ctx.empresaId) : []),
-    [seleccion, ctx.empleados, ctx.empresaId],
+    () => (cuadro && cuadro.filas.length ? cruzarGuardias(cuadro.filas, ctx.empleados, ctx.empresaId) : []),
+    [cuadro, ctx.empleados, ctx.empresaId],
   );
   const cruceOk = useMemo(() => cruceResuelto(cruce, decisiones), [cruce, decisiones]);
-  const faltan = useMemo(() => faltanEnPlanilla(cruceOk, ctx.dotacion), [cruceOk, ctx.dotacion]);
-  const comparacion = useMemo(
-    () => compararServicio(seleccion, ctx.turnos, reglas.length ? reglas : proponerReglas(seleccion, ctx.reglasGuardadas)),
-    [seleccion, ctx.turnos, ctx.reglasGuardadas, reglas],
-  );
-  const items = useMemo(() => vistaPrevia({
+  const faltan = useMemo(() => faltanEnPlanilla(cruceOk, dotacion), [cruceOk, dotacion]);
+  const comparacion = useMemo(() => {
+    if (!cuadro || !grupo) return { veredicto: 'sin_servicio' as const, planilla: [], diferencias: [] };
+    const base = reglas.length ? reglas : proponerReglas(cuadro, cargado?.clave === grupo.clave ? cargado.reglas : []);
+    return compararServicio(cuadro, grupo.turnos, base);
+  }, [cuadro, grupo, reglas, cargado]);
+  const items = useMemo(() => (cuadro && grupo ? vistaPrevia({
     year: ctx.year,
     month: ctx.month,
-    cuadro: seleccion,
+    cuadro,
     reglas,
     cruce: cruceOk,
     incluirDudosos: false,
-    turnos: ctx.turnos,
-    actuales: ctx.actuales,
+    turnos: grupo.turnos,
+    actuales,
     diasCerrados: ctx.diasCerrados,
-  }), [ctx, seleccion, reglas, cruceOk]);
+  }) : []), [ctx, cuadro, grupo, reglas, cruceOk, actuales]);
   const resumen = resumenPreview(items);
-  const codigosSla = useMemo(() => [...new Set(ctx.turnos.map((t) => t.code).filter(Boolean))], [ctx.turnos]);
+  const codigosSla = useMemo(() => [...new Set((grupo?.turnos || []).map((t) => t.code).filter(Boolean))], [grupo]);
+  const importables = bloques.filter((b) => elecciones[b.key]?.importar);
+  const destinoOk = importables.length > 0 && importables.every((b) => elecciones[b.key]?.objectiveId);
+  const listoParaAplicar = !!grupo && !!cargado && cargado.clave === grupo.clave && !cargando;
+
+  const grupoClave = grupo?.clave || '';
+  const objectiveIdCarga = grupo?.objectiveId || '';
+  useEffect(() => {
+    if (paso < 3 || !grupoClave || !objectiveIdCarga) return;
+    if (cargado?.clave === grupoClave) return;
+    let vivo = true;
+    setCargando(true);
+    void cargarRef.current(objectiveIdCarga).then((r) => {
+      if (!vivo) return;
+      setCargado({ clave: grupoClave, actuales: r.actuales, reglas: r.reglas });
+      setCargando(false);
+    }).catch(() => { if (vivo) setCargando(false); });
+    return () => { vivo = false; };
+  }, [paso, grupoClave, objectiveIdCarga, cargado?.clave]);
+
+  useEffect(() => {
+    if (!cuadro || !grupo || !cargado || cargado.clave !== grupo.clave) return;
+    setReglasPorClave((prev) => (prev[grupo.clave] ? prev : { ...prev, [grupo.clave]: proponerReglas(cuadro, cargado.reglas) }));
+  }, [cuadro, grupo, cargado]);
 
   const leer = async (file: File) => {
     setError('');
@@ -119,26 +273,67 @@ export function ImportarExcelModal({ ctx, onAplicar, onCancelar }: Props) {
       const hallados = detectarCuadros(celdasDesdeArrayBuffer(buf), ctx.year, ctx.month);
       if (!hallados.length) {
         setCuadros([]);
+        setElecciones({});
         setError('No encontré una grilla de días 1 a 31 en la primera hoja.');
         return;
       }
+      const sugeridos = new Set(sugerirCuadros(hallados));
+      const next: Record<string, Eleccion> = {};
+      for (const b of bloquesDeCuadros(hallados)) next[b.key] = eleccionInicial(b, file.name, ctx, sugeridos);
       setCuadros(hallados);
-      setElegidos(sugerirCuadros(hallados));
+      setElecciones(next);
       setDecisiones({});
-      setReglas([]);
+      setReglasPorClave({});
+      setGrupoIdx(0);
+      setCargado(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo leer el archivo.');
     }
   };
 
+  const ponerObjetivo = (key: string, o: ObjetivoCatalogo) => {
+    setElecciones((prev) => ({
+      ...prev,
+      [key]: {
+        ...prev[key],
+        clienteId: o.clienteId,
+        objectiveId: o.id,
+        servicioId: serviciosDe(ctx, o.id)[0]?.id || '',
+      },
+    }));
+    setBusquedaDestino((prev) => ({ ...prev, [key]: '' }));
+  };
+
   const irACodigos = () => {
-    const base = proponerReglas(seleccion, reglas.length ? reglas : ctx.reglasGuardadas);
-    setReglas(base);
-    setPaso(4);
+    if (!cuadro || !grupo) return;
+    setReglasPorClave((prev) => (prev[grupo.clave] ? prev : { ...prev, [grupo.clave]: proponerReglas(cuadro, cargado?.reglas || []) }));
+    setPaso(5);
+  };
+
+  const aplicar = async () => {
+    if (!grupo || !listoParaAplicar) return;
+    const quedaOtro = grupoIdx < grupos.length - 1;
+    const ok = await onAplicar({
+      clientId: grupo.clienteId,
+      objectiveId: grupo.objectiveId,
+      objectiveName: grupo.nombre,
+      items,
+      reglas,
+      sinServicio: grupo.sinServicio,
+      quedaOtro,
+    });
+    if (!ok) return;
+    if (quedaOtro) {
+      setGrupoIdx((i) => i + 1);
+      setPaso(3);
+    }
   };
 
   const opciones = ['ignorar', 'doce', 'RET', ...FRANCOS, ...LICENCIAS, ...codigosSla, 'M', 'T', 'N', 'D12', 'N12', 'ESC', 'REF'];
   const opcionesUnicas = [...new Set(opciones)];
+  const tituloPaso = grupo && paso >= 3
+    ? `${grupo.clienteNombre ? `${grupo.clienteNombre} · ` : ''}${grupo.nombre}${grupos.length > 1 ? ` · objetivo ${grupoIdx + 1} de ${grupos.length}` : ''}`
+    : paso === 2 ? 'Elegir destino' : 'Planificación';
 
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/40 p-4" data-importar-excel-modal>
@@ -146,8 +341,8 @@ export function ImportarExcelModal({ ctx, onAplicar, onCancelar }: Props) {
         <div className="flex items-center gap-3 border-b border-slate-100 px-5 py-4">
           <FileSpreadsheet className="text-indigo-600" size={18} />
           <div className="min-w-0">
-            <h2 className="text-sm font-black text-slate-800">Importar planilla · {ctx.objectiveName}</h2>
-            <p className="text-[11px] text-slate-500">{ctx.mesLabel} · paso {paso} de 5 · queda en borrador hasta Guardar cronograma</p>
+            <h2 className="text-sm font-black text-slate-800">Importar planilla · {tituloPaso}</h2>
+            <p className="text-[11px] text-slate-500">{ctx.mesLabel} · paso {paso} de 6 · queda en borrador hasta Guardar cronograma</p>
           </div>
           <button type="button" onClick={onCancelar} className="ml-auto rounded-xl p-2 text-slate-400 hover:bg-slate-50" aria-label="Cerrar">
             <X size={16} />
@@ -170,25 +365,137 @@ export function ImportarExcelModal({ ctx, onAplicar, onCancelar }: Props) {
               </label>
               {error && <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] text-rose-800">{error}</p>}
               {cuadros.map((c) => (
-                <label key={c.indice} className="flex items-start gap-3 rounded-2xl border border-slate-200 px-3 py-2 shadow-sm">
-                  <input
-                    type="checkbox"
-                    className="mt-1"
-                    checked={elegidos.includes(c.indice)}
-                    onChange={(e) => setElegidos((prev) => e.target.checked ? [...prev, c.indice].sort((a, b) => a - b) : prev.filter((i) => i !== c.indice))}
-                  />
-                  <span className="text-[12px] text-slate-700">
-                    <span className="font-black">Cuadro {c.indice + 1}</span>
-                    {c.titulo ? ` · ${c.titulo}` : ''} · {c.filas.length} guardias · letras {c.letras || '—'}
-                    {c.avisoMes && <span className="mt-1 flex items-center gap-1 text-amber-800"><AlertTriangle size={12} />{c.avisoMes}</span>}
-                  </span>
-                </label>
+                <div key={c.indice} data-cuadro-detectado className="rounded-2xl border border-slate-200 px-3 py-2 text-[12px] text-slate-700 shadow-sm">
+                  <span className="font-black">Cuadro {c.indice + 1}</span>
+                  {c.titulo ? ` · ${c.titulo}` : ''} · {c.filas.length} guardias · letras {c.letras || '—'}
+                  {c.avisoMes && <span className="mt-1 flex items-center gap-1 text-amber-800"><AlertTriangle size={12} />{c.avisoMes}</span>}
+                </div>
               ))}
+              {cuadros.length > 0 && <p className="text-[12px] text-slate-500">En el paso siguiente elegís a qué objetivo va cada cuadro.</p>}
             </div>
           )}
 
           {paso === 2 && (
+            <div className="space-y-3">
+              {bloques.map((b) => {
+                const el = elecciones[b.key];
+                if (!el) return null;
+                const cuadroSrc = cuadros.find((c) => c.indice === b.cuadroIndice);
+                const propuesta: PropuestaDestino | null = proponerDestino([archivo, b.titulo, b.etiqueta], ctx.objetivos);
+                const elegido = ctx.objetivos.find((o) => o.id === el.objectiveId);
+                const q = busquedaDestino[b.key] || '';
+                const qn = normPlanilla(q);
+                const coincidencias = qn.length < 2 ? [] : ctx.objetivos.filter((o) => normPlanilla(`${o.clienteNombre} ${o.nombre}`).includes(qn)).slice(0, 8);
+                const servs = el.objectiveId ? serviciosDe(ctx, el.objectiveId) : [];
+                return (
+                  <div key={b.key} className={`rounded-2xl border px-3 py-3 shadow-sm ${el.importar ? 'border-slate-200' : 'border-slate-100 bg-slate-50 opacity-70'}`}>
+                    <div className="flex flex-wrap items-center gap-2 text-[12px] text-slate-700">
+                      <span className="font-black">Cuadro {b.cuadroIndice + 1}</span>
+                      {b.titulo ? <span>· {b.titulo}</span> : null}
+                      {b.etiqueta ? <span>· {b.etiqueta}</span> : null}
+                      <span>· {b.filas.length} {b.filas.length === 1 ? 'guardia' : 'guardias'}</span>
+                      <label className="ml-auto flex items-center gap-1 font-bold text-slate-500">
+                        <input
+                          data-no-importar
+                          type="checkbox"
+                          checked={!el.importar}
+                          onChange={(e) => setElecciones((prev) => ({ ...prev, [b.key]: { ...el, importar: !e.target.checked } }))}
+                        />
+                        No importar
+                      </label>
+                    </div>
+                    {cuadroSrc?.avisoMes && <p className="mt-1 flex items-center gap-1 text-[12px] text-amber-800"><AlertTriangle size={12} />{cuadroSrc.avisoMes}</p>}
+                    {el.importar && (
+                      <div className="mt-2 space-y-2">
+                        {propuesta && propuesta.confianza >= 40 && (
+                          <p data-destino-propuesta className="flex flex-wrap items-center gap-2 rounded-xl border border-indigo-100 bg-indigo-50 px-3 py-2 text-[12px] text-indigo-900">
+                            <span>Propuesta: {propuesta.clienteNombre ? `${propuesta.clienteNombre} · ` : ''}{propuesta.nombre} · {propuesta.confianza}% · {propuesta.motivo}</span>
+                            {propuesta.objectiveId !== el.objectiveId && (
+                              <button
+                                type="button"
+                                data-usar-propuesta
+                                className="rounded-lg bg-indigo-600 px-2 py-1 text-[11px] font-black text-white"
+                                onClick={() => {
+                                  const o = ctx.objetivos.find((x) => x.id === propuesta.objectiveId);
+                                  if (o) ponerObjetivo(b.key, o);
+                                }}
+                              >
+                                Usar esta propuesta
+                              </button>
+                            )}
+                          </p>
+                        )}
+                        {elegido ? (
+                          <p data-destino-elegido className="flex items-center gap-2 text-[12px] font-bold text-slate-800">
+                            {elegido.clienteNombre} · {elegido.nombre}
+                            <button type="button" className="font-bold text-indigo-600" onClick={() => setElecciones((prev) => ({ ...prev, [b.key]: { ...el, clienteId: '', objectiveId: '', servicioId: '' } }))}>Cambiar</button>
+                          </p>
+                        ) : (
+                          <p className="text-[12px] text-slate-500">Elegí cliente y objetivo.</p>
+                        )}
+                        <input
+                          data-destino-buscar
+                          value={q}
+                          onChange={(e) => setBusquedaDestino((prev) => ({ ...prev, [b.key]: e.target.value }))}
+                          placeholder="Buscar cliente u objetivo"
+                          className="w-full rounded-xl border border-slate-200 px-3 py-2 text-[12px]"
+                        />
+                        {coincidencias.length > 0 && (
+                          <div className="max-h-36 overflow-y-auto rounded-xl border border-slate-100">
+                            {coincidencias.map((o) => (
+                              <button
+                                key={o.id}
+                                type="button"
+                                data-destino-opcion={o.id}
+                                className="block w-full px-3 py-1.5 text-left text-[12px] hover:bg-slate-50"
+                                onClick={() => ponerObjetivo(b.key, o)}
+                              >
+                                {o.clienteNombre} · {o.nombre}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        {el.objectiveId && (
+                          <div className="space-y-1">
+                            {servs.map((s) => (
+                              <label key={s.id} data-destino-servicio={s.id} className="flex items-start gap-2 rounded-xl border border-slate-200 px-3 py-2 text-[12px] text-slate-700">
+                                <input
+                                  type="radio"
+                                  name={`srv-${b.key}`}
+                                  className="mt-1"
+                                  checked={el.servicioId === s.id}
+                                  onChange={() => setElecciones((prev) => ({ ...prev, [b.key]: { ...el, servicioId: s.id } }))}
+                                />
+                                <span>
+                                  <span className="font-black">{fechaCorta(s.desde)} → {fechaCorta(s.hasta)}</span>
+                                  {s.puestos.map((p) => (
+                                    <span key={p.nombre} className="mt-0.5 block text-slate-500">{p.nombre}{p.franjas ? ` · ${p.franjas}` : ''}</span>
+                                  ))}
+                                </span>
+                              </label>
+                            ))}
+                            <label data-destino-servicio="sin" className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-[12px] text-slate-700">
+                              <input
+                                type="radio"
+                                name={`srv-${b.key}`}
+                                checked={!el.servicioId}
+                                onChange={() => setElecciones((prev) => ({ ...prev, [b.key]: { ...el, servicioId: '' } }))}
+                              />
+                              Sin servicio
+                            </label>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {paso === 3 && grupo && (
             <div className="space-y-2 text-[12px] text-slate-700">
+              <p className="text-slate-500">{grupo.clienteNombre ? `${grupo.clienteNombre} · ` : ''}{grupo.nombre}</p>
               <p className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 font-black uppercase tracking-wide">
                 {comparacion.veredicto === 'coincide' && 'Coincide con el servicio de este mes'}
                 {comparacion.veredicto === 'difiere' && 'Difiere del servicio de este mes'}
@@ -198,11 +505,11 @@ export function ImportarExcelModal({ ctx, onAplicar, onCancelar }: Props) {
                 <p key={`${f.puesto}|${f.code}|${f.startTime}`}>{f.puesto || 'Sin puesto'} · {f.code} {f.startTime}–{f.endTime} ×{f.cantidad}</p>
               ))}
               {comparacion.diferencias.map((d) => <p key={d} className="text-amber-800">{d}</p>)}
-              <p className="text-slate-500">Crear o corregir el servicio desde acá queda para otra vuelta. Se sigue con el que ya está, o sin servicio.</p>
+              <p className="text-slate-500">Crear o corregir el servicio desde acá queda para otra vuelta. Se sigue con el elegido, o sin servicio.</p>
             </div>
           )}
 
-          {paso === 3 && (
+          {paso === 4 && (
             <div className="space-y-2">
               {cruce.map((c) => (
                 <div key={c.fila} className="rounded-2xl border border-slate-200 px-3 py-2 text-[12px] shadow-sm" data-importar-guardia={c.estado}>
@@ -256,7 +563,7 @@ export function ImportarExcelModal({ ctx, onAplicar, onCancelar }: Props) {
             </div>
           )}
 
-          {paso === 4 && (
+          {paso === 5 && (
             <table className="w-full text-left text-[12px]">
               <thead className="text-[10px] uppercase tracking-wide text-slate-400">
                 <tr><th className="py-1">Planilla</th><th>Veces</th><th>Pasa a</th><th>Nota</th></tr>
@@ -270,7 +577,14 @@ export function ImportarExcelModal({ ctx, onAplicar, onCancelar }: Props) {
                       <select
                         className="rounded-xl border border-slate-200 px-2 py-1"
                         value={valorRegla(r)}
-                        onChange={(e) => setReglas((prev) => prev.map((x) => x.clave === r.clave ? reglaDesdeValor(x, e.target.value) : x))}
+                        onChange={(e) => {
+                          if (!grupo) return;
+                          const valor = e.target.value;
+                          setReglasPorClave((prev) => ({
+                            ...prev,
+                            [grupo.clave]: (prev[grupo.clave] || []).map((x) => x.clave === r.clave ? reglaDesdeValor(x, valor) : x),
+                          }));
+                        }}
                       >
                         {opcionesUnicas.map((o) => (
                           <option key={o} value={o}>
@@ -286,10 +600,16 @@ export function ImportarExcelModal({ ctx, onAplicar, onCancelar }: Props) {
             </table>
           )}
 
-          {paso === 5 && (
+          {paso === 6 && (
             <div className="space-y-2 text-[12px] text-slate-700" data-importar-resumen>
+              {cargando && <p className="text-slate-500">Leyendo lo que ya está en la grilla…</p>}
               <p><b>{resumen.nuevas}</b> nuevas · <b>{resumen.cambian}</b> cambian · <b>{resumen.iguales}</b> iguales · <b>{resumen.noToca}</b> no se tocan</p>
-              <p className="text-slate-500">Lo igual no se reescribe. Licencias, días cerrados y celdas ignoradas quedan como están. Al aplicar, todo lo demás entra como borrador.</p>
+              <p className="text-slate-500">
+                Lo igual no se reescribe. Licencias, días cerrados y celdas ignoradas quedan como están.
+                {grupoIdx < grupos.length - 1
+                  ? ` Al aplicar se abre ${grupo?.nombre || 'el objetivo'} con el borrador y sigue el objetivo siguiente.`
+                  : ' Al aplicar se abre la grilla de ese objetivo con el borrador.'}
+              </p>
               {items.filter((i) => i.estado === 'cambia').slice(0, 8).map((i) => (
                 <p key={`${i.employeeId}_${i.dateStr}`}>{i.dateStr}: {i.motivo}</p>
               ))}
@@ -301,24 +621,25 @@ export function ImportarExcelModal({ ctx, onAplicar, onCancelar }: Props) {
           <button type="button" onClick={() => (paso === 1 ? onCancelar() : setPaso((p) => p - 1))} className="rounded-xl border border-slate-200 px-3 py-2 text-[12px] font-bold text-slate-600 hover:bg-slate-50">
             {paso === 1 ? 'Cancelar' : 'Atrás'}
           </button>
-          {paso < 5 ? (
+          {paso < 6 ? (
             <button
               type="button"
               data-importar-siguiente
-              disabled={paso === 1 ? elegidos.length === 0 : false}
-              onClick={() => (paso === 3 ? irACodigos() : setPaso((p) => p + 1))}
+              disabled={paso === 1 ? cuadros.length === 0 : paso === 2 ? !destinoOk : false}
+              onClick={() => (paso === 4 ? irACodigos() : paso === 2 ? (setGrupoIdx(0), setPaso(3)) : setPaso((p) => p + 1))}
               className="rounded-xl bg-indigo-600 px-4 py-2 text-[12px] font-black text-white disabled:opacity-40"
             >
-              {paso === 2 && ctx.sinServicio ? 'Seguir sin servicio' : paso === 2 ? 'Seguir con este servicio' : 'Siguiente'}
+              {paso === 3 && grupo?.sinServicio ? 'Seguir sin servicio' : paso === 3 ? 'Seguir con este servicio' : 'Siguiente'}
             </button>
           ) : (
             <button
               type="button"
               data-importar-aplicar
-              onClick={() => onAplicar(items, reglas)}
-              className="rounded-xl bg-indigo-600 px-4 py-2 text-[12px] font-black text-white"
+              disabled={!listoParaAplicar}
+              onClick={() => { void aplicar(); }}
+              className="rounded-xl bg-indigo-600 px-4 py-2 text-[12px] font-black text-white disabled:opacity-40"
             >
-              Aplicar borrador
+              {grupoIdx < grupos.length - 1 ? 'Siguiente objetivo' : 'Aplicar borrador'}
             </button>
           )}
         </div>

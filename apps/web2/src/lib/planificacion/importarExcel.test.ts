@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  bloquesDeCuadros,
   claseDeEstilo,
   compararServicio,
   cruzarGuardias,
   detectarCuadros,
   faltanEnPlanilla,
+  proponerDestino,
+  proponerDestinos,
   proponerRegla,
   proponerReglas,
   puestoDeTexto,
@@ -14,6 +17,7 @@ import {
   sugerirCuadros,
   vistaPrevia,
   type CeldaPlano,
+  type CuadroPlanilla,
   type EmpleadoCruce,
   type TurnoServicio,
 } from './importarExcel';
@@ -191,6 +195,51 @@ describe('importar planilla', () => {
     assert.equal(resolverDestino(regla, 'RECEPCION', turnos, refs).code, 'M');
     assert.equal(puestoDeTexto('VIG. FISICA', turnos.map((t) => t.positionName)), 'BUNKER Y VIG FISICA');
     assert.equal(puestoDeTexto('RECEPCION 1', turnos.map((t) => t.positionName)), 'RECEPCION 1');
+  });
+
+  it('propone el objetivo por el archivo y el título del cuadro', () => {
+    const objetivos = [
+      { id: 't', nombre: 'Tadicor', clienteId: 'c1', clienteNombre: 'Cliente' },
+      { id: 'ta', nombre: 'Tadicor Anexo', clienteId: 'c1', clienteNombre: 'Cliente' },
+      { id: 'cm', nombre: 'Casa Matriz / Centro Cultural', clienteId: 'b', clienteNombre: 'Banco' },
+      { id: 'casa', nombre: 'Casa Mc Donalds', clienteId: 'x', clienteNombre: 'Otro' },
+      { id: 'nec', nombre: 'Nuevo Edificio Corporativo', clienteId: 'b', clienteNombre: 'Banco' },
+      { id: 'cor', nombre: 'Corblock', clienteId: 'a', clienteNombre: 'A' },
+    ];
+    const tadicor = proponerDestino(['A. TADICOR OCTUBRE.xlsx'], objetivos);
+    assert.equal(tadicor?.nombre, 'Tadicor');
+    assert.equal(tadicor?.confianza, 100);
+    assert.match(tadicor?.motivo || '', /TADICOR/);
+    assert.equal(proponerDestinos(['A. TADICOR OCTUBRE.xlsx'], objetivos)[1]?.nombre, 'Tadicor Anexo');
+
+    const matriz = proponerDestino(['BANCO-CASA MATRIZ OCTUBRE.xlsx'], objetivos);
+    assert.equal(matriz?.nombre, 'Casa Matriz / Centro Cultural');
+    assert.equal(matriz?.confianza, 84);
+    assert.match(matriz?.motivo || '', /CASA MATRIZ/);
+    assert.ok((matriz?.confianza || 0) > (proponerDestinos(['BANCO-CASA MATRIZ OCTUBRE.xlsx'], objetivos).find((p) => p.objectiveId === 'casa')?.confianza || 0));
+    assert.equal(proponerDestino(['BANCO-CASA MATRIZ OCTUBRE.xlsx', 'MUSEO'], objetivos)?.nombre, 'Casa Matriz / Centro Cultural');
+
+    assert.equal(proponerDestino(['BANCO-NVO EDIFICIO CORPORATIVO OCTUBRE.xlsx'], objetivos)?.nombre, 'Nuevo Edificio Corporativo');
+    assert.equal(proponerDestino(['A. CORBLOCK OCTUBRE.xlsx'], objetivos)?.nombre, 'Corblock');
+    assert.equal(proponerDestino(['ZZZ SIN NOMBRE.xlsx'], objetivos), null);
+  });
+
+  it('una sucursal distinta por fila es un destino; los puestos cortos siguen en un cuadro', () => {
+    const cuadro = (indice: number, puestos: string[]): CuadroPlanilla => ({
+      indice, titulo: 'Interior', letras: '', avisoMes: null, referencias: [], avisos: [],
+      filas: puestos.map((puesto, i) => ({ fila: i + 1, nombre: `PEREZ ${i}`, legajo: '', puesto, celdas: [] })),
+    });
+    assert.equal(bloquesDeCuadros([cuadro(0, ['Puesto 1', 'Puesto 2', 'Puesto 1'])]).length, 1);
+    const largos = ['Sucursal Alfa Poniente Larga', 'Sucursal Beta Naciente Larga', 'Sucursal Gamma Austral Larga'];
+    const bloques = bloquesDeCuadros([cuadro(1, largos)]);
+    assert.equal(bloques.length, 3);
+    assert.equal(bloques[0].etiqueta, largos[0]);
+    assert.equal(bloques[0].filas[0].puesto, '');
+    const alfa = proponerDestino(['BANCOS SEDES.xlsx', bloques[0].etiqueta], [
+      { id: 'a', nombre: 'Alfa Poniente', clienteId: 'b', clienteNombre: 'Banco' },
+      { id: 'g', nombre: 'Gamma Austral', clienteId: 'b', clienteNombre: 'Banco' },
+    ]);
+    assert.equal(alfa?.objectiveId, 'a');
   });
 
   it('los cuadros del mismo personal son versiones y se queda el último', () => {

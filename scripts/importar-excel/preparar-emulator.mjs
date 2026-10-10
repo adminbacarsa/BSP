@@ -93,13 +93,19 @@ for (const p of paquetes) {
 await commit();
 
 const OBJ = 'obj_import_prueba';
+const TADICOR = 'obj_import_tadicor';
+const MATRIZ = 'obj_import_matriz';
 const CLI = 'cli_import_prueba';
 const turno = (code, start, end, hours) => ({ code, startTime: start, endTime: end, hours, quantity: 1 });
 await emu.collection('clients').doc(CLI).set({
   empresaId: 'bacarsa',
   name: 'Cliente Prueba',
   status: 'ACTIVE',
-  objetivos: [{ id: OBJ, name: 'Objetivo Prueba', status: 'ACTIVE' }],
+  objetivos: [
+    { id: OBJ, name: 'Objetivo Prueba', status: 'ACTIVE' },
+    { id: TADICOR, name: 'Tadicor', status: 'ACTIVE' },
+    { id: MATRIZ, name: 'Casa Matriz / Centro Cultural', status: 'ACTIVE' },
+  ],
 });
 await emu.collection('servicios_sla').doc('sla_import_prueba').set({
   empresaId: 'bacarsa',
@@ -114,6 +120,36 @@ await emu.collection('servicios_sla').doc('sla_import_prueba').set({
     coverageType: '24hs',
     activeDays: ['L', 'M', 'X', 'J', 'V', 'S', 'D'],
     allowedShiftTypes: [turno('M', '07:00', '15:00', 8), turno('T', '15:00', '23:00', 8), turno('N', '23:00', '07:00', 8), turno('D12', '07:00', '19:00', 12), turno('N12', '19:00', '07:00', 12)],
+  }],
+});
+await emu.collection('servicios_sla').doc('sla_import_tadicor').set({
+  empresaId: 'bacarsa',
+  clientId: CLI,
+  objectiveId: TADICOR,
+  status: 'ACTIVE',
+  startDate: '2026-10-01',
+  endDate: '2026-10-31',
+  positions: [{
+    name: 'Vigilancia',
+    quantity: 1,
+    coverageType: '24hs',
+    activeDays: ['L', 'M', 'X', 'J', 'V', 'S', 'D'],
+    allowedShiftTypes: [turno('M', '07:00', '15:00', 8), turno('T', '15:00', '23:00', 8)],
+  }],
+});
+await emu.collection('servicios_sla').doc('sla_import_tadicor_2').set({
+  empresaId: 'bacarsa',
+  clientId: CLI,
+  objectiveId: TADICOR,
+  status: 'ACTIVE',
+  startDate: '2026-10-01',
+  endDate: '2026-10-15',
+  positions: [{
+    name: 'Refuerzo',
+    quantity: 1,
+    coverageType: '24hs',
+    activeDays: ['L', 'M', 'X', 'J', 'V', 'S', 'D'],
+    allowedShiftTypes: [turno('N', '23:00', '07:00', 8)],
   }],
 });
 const gente = [

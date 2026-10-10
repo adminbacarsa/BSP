@@ -119,7 +119,7 @@ import {
     fetchMergedPlanificacionEstadoData,
 } from '@/lib/multiempresa';
 import { isClientOperational } from '@/lib/crm/clientLifecycle';
-import { toYyyyMmDd } from '@/lib/firestoreDates';
+import { slaCoversCalendarMonth, toYyyyMmDd } from '@/lib/firestoreDates';
 import { readSessionJson, writeSessionJson } from '@/lib/persistSession';
 import {
     filterSlasForPlanningTenant,
@@ -127,6 +127,7 @@ import {
     formatSlaRangeHint,
     pickSlaForPlanningMonth,
     pickClosedSlaForPlanningMonth,
+    isSlaOpenForOperations,
     planningMonthHasActiveSla,
     slaBelongsToPlanningClient,
     buildPlanningPositionStructure,
@@ -493,8 +494,8 @@ import {
     type OrigenArmado,
 } from '@/lib/planificacion/armadoCronograma';
 import { ContinuarMesModal, type ContinuarMesVista, type DiaCorto } from '@/components/planificacion/ContinuarMesModal';
-import { ImportarExcelModal, type ImportarExcelContexto } from '@/components/planificacion/ImportarExcelModal';
-import { cambioBorradorImport, type ReglaMapeo } from '@/lib/planificacion/importarExcel';
+import { ImportarExcelModal, type AplicarImportPayload, type ImportarExcelContexto, type ServicioDestino } from '@/components/planificacion/ImportarExcelModal';
+import { cambioBorradorImport, normPlanilla, type CeldaActual, type ObjetivoCatalogo, type ReglaMapeo } from '@/lib/planificacion/importarExcel';
 import {
     alertasDescansoCambioMes,
     alertasTope,
@@ -11372,103 +11373,187 @@ function PlanificacionDesktop() {
         toast.success(`Continuado desde el mes anterior: ${turnos} turnos y ${francos} francos en borrador. Revisalos y guardá el cronograma.`);
     };
 
-    const abrirImportarExcel = async () => {
-        if (!selectedObjective || !empresaId) return;
-        const hm = (v: unknown) => {
-            const m = String(v || '').match(/(\d{1,2}):(\d{2})/);
-            return m ? `${m[1].padStart(2, '0')}:${m[2]}` : '';
-        };
-        const turnos = (positionStructure || []).flatMap((p: any) => (p.shifts || []).map((st: any) => ({
-            positionName: String(p.positionName || 'Puesto'),
-            code: String(st.code || ''),
-            startTime: hm(st.startTime),
-            endTime: hm(st.endTime),
-            quantity: st.quantity ?? p.quantity ?? null,
-        })));
-        const aEmpleado = (e: any) => ({
-            id: String(e.id),
-            nombre: String(e.name || ''),
-            legajo: String(e.fileNumber || e.legajo || ''),
-            empresaId: String(e.empresaId || empresaId),
-            objetivoPreferido: String(e.preferredObjectiveId || ''),
-        });
-        const licencias = new Set(['V', 'L', 'E', 'A', 'AA', 'PG', 'SUS', 'ART', 'SGS']);
-        const actuales = Object.entries(shiftsMap).flatMap(([key, sh]) => {
-            if (!sh || sh.isDeleted) return [];
-            if (sh.objectiveId && sh.objectiveId !== selectedObjective) return [];
-            const dateStr = key.slice(-10);
-            const empId = key.slice(0, -11);
-            if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr) || !empId) return [];
-            const code = String(sh.code || '');
-            const ops = sh.origin === 'OPERATIONS_COVERAGE' || sh.resolvedBy === 'OPERACIONES';
-            return [{
-                employeeId: empId,
-                dateStr,
-                code,
-                licencia: licencias.has(code.toUpperCase()),
-                noTocar: ops ? 'Turno de Operaciones' : undefined,
-            }];
-        });
-        let reglasGuardadas: ReglaMapeo[] = [];
+    const abrirImportarExcel = async (preseleccionar: boolean) => {
+        if (!empresaId || bloqueoMesCerrado) return;
+        if (preseleccionar && !selectedObjective) return;
         try {
-            const snap = await getDoc(doc(db, 'planificacion_import_mapeos', `${empresaId}_${selectedObjective}`));
-            if (snap.exists()) reglasGuardadas = (snap.data().reglas || []) as ReglaMapeo[];
+            const snap = await getDocs(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa));
+            const allDocs = filterSlasForPlanningTenant(
+                snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })),
+                empresaId,
+                scopeEmpresa,
+                tenantClientIds,
+            );
+            const year = currentDate.getFullYear();
+            const monthIndex = currentDate.getMonth();
+            const objetivos: ObjetivoCatalogo[] = [];
+            for (const c of clients) {
+                for (const o of (c.objetivos || []) as Array<{ id?: string; name?: string; status?: string }>) {
+                    const status = String(o.status || 'ACTIVE').toUpperCase();
+                    if (status === 'INACTIVE' || status === 'INACTIVO') continue;
+                    const id = String(o.id || o.name || '');
+                    if (!id) continue;
+                    objetivos.push({ id, nombre: String(o.name || id), clienteId: String(c.id), clienteNombre: String(c.name || '') });
+                }
+            }
+            const hm = (v: unknown) => {
+                const m = String(v || '').match(/(\d{1,2}):(\d{2})/);
+                return m ? `${m[1].padStart(2, '0')}:${m[2]}` : '';
+            };
+            const servicios: ServicioDestino[] = [];
+            for (const d of allDocs) {
+                if (!isSlaOpenForOperations(d)) continue;
+                if (!slaCoversCalendarMonth(d.startDate, d.endDate, year, monthIndex)) continue;
+                const rawObj = String(d.objectiveId || '');
+                const obj = objetivos.find((o) => o.id === rawObj || normPlanilla(o.nombre) === normPlanilla(rawObj));
+                if (!obj && !rawObj) continue;
+                const { structure } = buildPlanningPositionStructure(d, { monthHasSla: true, hasExactMatch: true });
+                servicios.push({
+                    id: String(d.id),
+                    objectiveId: obj?.id || rawObj,
+                    desde: toYyyyMmDd(d.startDate),
+                    hasta: toYyyyMmDd(d.endDate),
+                    puestos: structure.map((p) => ({
+                        nombre: String(p.positionName || 'Puesto'),
+                        franjas: (p.shifts || []).flatMap((st) => {
+                            const a = hm(st.startTime);
+                            const b = hm(st.endTime);
+                            if (!a || !b) return [];
+                            return [`${st.code} ${a}–${b}`];
+                        }).join(' · '),
+                    })),
+                    turnos: structure.flatMap((p) => (p.shifts || []).map((st) => ({
+                        positionName: String(p.positionName || 'Puesto'),
+                        code: String(st.code || ''),
+                        startTime: hm(st.startTime),
+                        endTime: hm(st.endTime),
+                        quantity: st.quantity ?? p.qty ?? null,
+                    }))),
+                });
+            }
+            setImportarCtx({
+                year,
+                month: monthIndex + 1,
+                mesLabel: currentDate.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' }),
+                empresaId,
+                objetivos,
+                servicios,
+                empleados: (employees || []).filter((e: any) => e.status !== 'inactivo').map((e: any) => ({
+                    id: String(e.id),
+                    nombre: String(e.name || ''),
+                    legajo: String(e.fileNumber || e.legajo || ''),
+                    empresaId,
+                    objetivoPreferido: String(e.preferredObjectiveId || ''),
+                })),
+                preseleccion: preseleccionar && selectedObjective ? { clienteId: selectedClient, objectiveId: selectedObjective } : null,
+                diasCerrados: daysInMonth.map((d) => getDateKey(d)).filter((ds) => isPlanningDateLocked(ds)),
+            });
+        } catch (e) {
+            console.error('[importar planilla]', e);
+            toast.error('No se pudieron leer los objetivos para importar.');
+        }
+    };
+
+    const cargarContextoImport = async (objectiveId: string): Promise<{ actuales: CeldaActual[]; reglas: ReglaMapeo[] }> => {
+        let reglas: ReglaMapeo[] = [];
+        try {
+            const snap = await getDoc(doc(db, 'planificacion_import_mapeos', `${empresaId}_${objectiveId}`));
+            if (snap.exists()) reglas = (snap.data().reglas || []) as ReglaMapeo[];
         } catch (e) {
             console.error('[importar planilla] mapeo', e);
         }
-        setImportarCtx({
-            year: currentDate.getFullYear(),
-            month: currentDate.getMonth() + 1,
-            mesLabel: currentDate.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' }),
-            objectiveName: getObjectiveName(selectedObjective) || 'Objetivo',
-            turnos,
-            empleados: (employees || []).map(aEmpleado),
-            dotacion: (displayedEmployees || []).map(aEmpleado),
-            actuales,
-            diasCerrados: daysInMonth.map((d) => getDateKey(d)).filter((ds) => isPlanningDateLocked(ds)),
-            reglasGuardadas,
-            sinServicio: sinServicioEnMes,
-            empresaId,
+        const licencias = new Set(['V', 'L', 'E', 'A', 'AA', 'PG', 'SUS', 'ART', 'SGS']);
+        const aCelda = (empId: string, dateStr: string, sh: any): CeldaActual[] => {
+            if (!sh || sh.isDeleted || !empId || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return [];
+            if (sh.objectiveId && sh.objectiveId !== objectiveId) return [];
+            const code = String(sh.code || '');
+            const ops = sh.origin === 'OPERATIONS_COVERAGE' || sh.resolvedBy === 'OPERACIONES';
+            return [{ employeeId: empId, dateStr, code, licencia: licencias.has(code.toUpperCase()), noTocar: ops ? 'Turno de Operaciones' : undefined }];
+        };
+        if (objectiveId === selectedObjective) {
+            const actuales = Object.entries(shiftsMap).flatMap(([key, sh]) => aCelda(key.slice(0, -11), key.slice(-10), sh));
+            return { actuales, reglas };
+        }
+        const y = currentDate.getFullYear();
+        const m = currentDate.getMonth();
+        const snap = await getDocs(query(
+            collection(db, 'turnos'),
+            where('objectiveId', '==', objectiveId),
+            where('startTime', '>=', Timestamp.fromDate(new Date(y, m, 1))),
+            where('startTime', '<=', Timestamp.fromDate(new Date(y, m + 1, 0, 23, 59, 59))),
+        ));
+        const actuales = snap.docs.flatMap((d) => {
+            const t = d.data() as any;
+            const start = t.startTime?.toDate ? t.startTime.toDate() : null;
+            if (!start) return [];
+            return aCelda(String(t.employeeId || ''), getDateKey(start), t);
         });
+        return { actuales, reglas };
     };
 
-    const aplicarImportarExcel = async (items: Parameters<typeof cambioBorradorImport>[0][], reglas: ReglaMapeo[]) => {
-        if (!selectedObjective || !empresaId) return;
-        const next = { ...pendingChangesRef.current };
+    const aplicarImportarExcel = async (payload: AplicarImportPayload): Promise<boolean> => {
+        if (!empresaId) return false;
+        const mismo = payload.objectiveId === selectedObjective && payload.clientId === selectedClient && !(selectedGrupo && grupoUnifiedMode);
+        if (!mismo && Object.keys(pendingChangesRef.current).length > 0) {
+            if (!confirm('Hay cambios sin guardar en el objetivo abierto. ¿Descartarlos e ir al de la planilla?')) return false;
+        }
+        if (!mismo) {
+            setSelectedGrupo(null);
+            setGrupoUnifiedMode(false);
+            setSelectedClient(payload.clientId);
+            setSelectedObjective(payload.objectiveId);
+            setSearchTerm('');
+            setShowGuardiaSearch(false);
+            setBandFilter(null);
+            setForceShowAll(false);
+            setDotacionPoolSearch('');
+            setSelection({ start: null, end: null });
+            setComparingSnapshot(null);
+            setOpenDrop(null);
+            setAutoGeneratedReady(false);
+        }
+        const next = mismo ? { ...pendingChangesRef.current } : {};
         const novedades: Record<string, any> = {};
         let n = 0;
         const empIds = new Set<string>();
-        for (const item of items) {
-            const borrador = cambioBorradorImport(item, selectedObjective);
+        for (const item of payload.items) {
+            const borrador = cambioBorradorImport(item, payload.objectiveId);
             if (!borrador) continue;
             next[borrador.key] = borrador.change;
             if (borrador.novedad) novedades[borrador.key] = borrador.novedad;
             empIds.add(item.employeeId);
             n += 1;
         }
-        const enGrilla = new Set((displayedEmployees || []).map((e: any) => e.id));
-        const agregar = [...empIds].filter((id) => !enGrilla.has(id));
-        if (agregar.length) setPinnedExternalEmpIds((prev) => new Set([...prev, ...agregar]));
-        if (sinServicioEnMes && !modoRapido) {
+        if (mismo) {
+            const enGrilla = new Set((displayedEmployees || []).map((e: any) => e.id));
+            const agregar = [...empIds].filter((id) => !enGrilla.has(id));
+            if (agregar.length) setPinnedExternalEmpIds((prev) => new Set([...prev, ...agregar]));
+        } else if (empIds.size) {
+            setPinnedExternalEmpIds(new Set(empIds));
+        }
+        if (payload.sinServicio && !modoRapido) {
             setModoRapido(true);
             if (typeof window !== 'undefined') localStorage.setItem(modoRapidoStorageKey, '1');
         }
         if (n > 0 && !origenArranqueRef.current && !armadoGuardado?.iniciadoAt) origenArranqueRef.current = 'IMPORTAR_EXCEL';
         commitPendingChanges(next);
-        if (Object.keys(novedades).length) setPendingNovedades((prev) => ({ ...prev, ...novedades }));
+        if (Object.keys(novedades).length) setPendingNovedades((prev) => (mismo ? { ...prev, ...novedades } : novedades));
         try {
-            await setDoc(doc(db, 'planificacion_import_mapeos', `${empresaId}_${selectedObjective}`), {
+            await setDoc(doc(db, 'planificacion_import_mapeos', `${empresaId}_${payload.objectiveId}`), {
                 empresaId,
-                objectiveId: selectedObjective,
-                reglas,
+                objectiveId: payload.objectiveId,
+                reglas: payload.reglas,
                 actualizadoAt: new Date().toISOString(),
             });
         } catch (e) {
             console.error('[importar planilla] guardar mapeo', e);
             toast.message('El borrador quedó en la grilla. El mapeo de códigos no se pudo guardar.');
         }
-        setImportarCtx(null);
-        toast.success(`${n} celdas en borrador. Revisalas y guardá el cronograma.`);
+        if (!payload.quedaOtro) setImportarCtx(null);
+        toast.success(payload.quedaOtro
+            ? `${n} celdas en borrador en ${payload.objectiveName}. Seguí con el siguiente objetivo.`
+            : `${n} celdas en borrador en ${payload.objectiveName}. Revisalas y guardá el cronograma.`);
+        return true;
     };
 
 
@@ -15084,6 +15169,17 @@ function PlanificacionDesktop() {
                                 )}
                             </div>
                             </div>
+                                <button
+                                    type="button"
+                                    data-importar-excel-barra
+                                    onClick={() => { void abrirImportarExcel(false); }}
+                                    disabled={bloqueoMesCerrado || !empresaId}
+                                    title={bloqueoMesCerrado ? 'Mes cerrado' : 'Importar una planilla y elegir el objetivo'}
+                                    aria-label="Importar planilla"
+                                    className="flex items-center gap-1.5 bg-white text-indigo-700 border border-indigo-200 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wide hover:bg-indigo-50 transition-colors disabled:opacity-40 shrink-0 shadow-sm"
+                                >
+                                    <FileSpreadsheet size={12}/> Importar
+                                </button>
 
                             <div className="flex items-center flex-nowrap justify-end gap-1 min-w-0 ml-auto no-print shrink-0">
                                 {/* CRONOGRAMAS — solo expandido */}
@@ -15445,7 +15541,7 @@ function PlanificacionDesktop() {
                                 <button
                                     type="button"
                                     data-importar-excel
-                                    onClick={() => { void abrirImportarExcel(); }}
+                                    onClick={() => { void abrirImportarExcel(true); }}
                                     disabled={!selectedObjective || isServiceLocked || bloqueoMesCerrado}
                                     title={bloqueoMesCerrado ? 'Mes cerrado' : 'Importar la planilla Excel de este objetivo. Queda en borrador.'}
                                     aria-label="Importar planilla"
@@ -20301,7 +20397,8 @@ function PlanificacionDesktop() {
                 {importarCtx && typeof document !== 'undefined' && createPortal(
                     <ImportarExcelModal
                         ctx={importarCtx}
-                        onAplicar={(items, reglas) => { void aplicarImportarExcel(items, reglas); }}
+                        onCargar={cargarContextoImport}
+                        onAplicar={aplicarImportarExcel}
                         onCancelar={() => setImportarCtx(null)}
                     />,
                     document.body,
