@@ -4,6 +4,7 @@
  */
 
 import { esCeldaLicencia } from './seleccionLicencia';
+import type { ColorCelda } from './pegadoExcelColor';
 
 export type CeldaRC = { r: number; c: number };
 export type RangoRC = { minR: number; maxR: number; minC: number; maxC: number };
@@ -562,6 +563,33 @@ export function agruparAvisos(avisos: AvisoRapido[]): GrupoAviso[] {
     return out;
 }
 
+function horasDeAviso(a: AvisoRapido): string {
+    if (a.tipo === 'DESCANSO') return String(a.restHours ?? '');
+    if (a.tipo === 'TOPE') return String(a.monthHours ?? '');
+    if (a.tipo === 'LICENCIA') return String(a.code ?? '');
+    return '';
+}
+
+/** Identidad de un aviso para «Visto»: tipo, guardia, día y horas. Si cambia algo, es otro aviso. */
+export function idAviso(a: AvisoRapido): string {
+    return `${a.tipo}|${a.empId}|${a.dateStr}|${horasDeAviso(a)}`;
+}
+
+/** Identidad de un grupo: tipo, guardia, días ordenados y horas. */
+export function idGrupoAviso(g: Pick<GrupoAviso, 'tipo' | 'empId' | 'items'>): string {
+    const dias = g.items.map((i) => i.dateStr).sort().join(',');
+    return `${g.tipo}|${g.empId}|${dias}|${g.items[0] ? horasDeAviso(g.items[0]) : ''}`;
+}
+
+export function avisosSinVer(avisos: AvisoRapido[], vistos: ReadonlySet<string>): AvisoRapido[] {
+    if (!vistos.size) return avisos;
+    return avisos.filter((a) => !vistos.has(idAviso(a)));
+}
+
+export function claveAvisosVistos(objectiveId: string, year: number, month1: number): string {
+    return `cosp-planif-avisos-vistos:${objectiveId}:${year}-${String(month1).padStart(2, '0')}`;
+}
+
 export type NovedadRango = {
     employeeId: string;
     employeeName?: string;
@@ -612,14 +640,26 @@ export function fusionarNovedadesContinuas<T extends NovedadRango>(items: readon
 
 export type GuardiaPegado = { fila: number; nombre: string; legajo?: string };
 
+/** `evento`: «E» amarilla o «EV» (SEGURO), o «E» sin color que puede ser evento o enfermedad (DUDA). */
+export type CeldaPegadoExcel = { col: number; code: string; evento?: 'SEGURO' | 'DUDA' };
+
 export type FilaPegadoExcel = {
     indice: number;
     nombre: string;
     legajo: string;
     filaGrilla: number | null;
     via: 'legajo' | 'nombre' | 'parecido' | null;
-    celdas: Array<{ col: number; code: string }>;
+    celdas: CeldaPegadoExcel[];
     desconocidos: string[];
+};
+
+/** Un día con celdas «E» de evento o dudosas. */
+export type DiaEPegado = {
+    col: number;
+    cantidad: number;
+    seguras: number;
+    dudosas: number;
+    porDefecto: 'EVENTO' | 'E';
 };
 
 export type PreviewPegadoExcel = {
@@ -627,7 +667,54 @@ export type PreviewPegadoExcel = {
     filas: FilaPegadoExcel[];
     desconocidos: string[];
     resumen: string;
+    diasE: DiaEPegado[];
+    conColor: boolean;
 };
+
+/** La «E» se toma como evento por defecto si ese día la tienen 3 o más guardias. */
+export const MIN_GUARDIAS_E_EVENTO = 3;
+
+function ddmm(ds: string): string {
+    return ds && ds.length >= 10 ? `${ds.slice(8, 10)}/${ds.slice(5, 7)}` : ds;
+}
+
+export function textoDiaE(d: DiaEPegado, ds: string): string {
+    const n = d.cantidad;
+    const celdas = `${n} celda${n === 1 ? '' : 's'}`;
+    if (d.dudosas === 0) return `${celdas} “E” amarilla${n === 1 ? '' : 's'} del ${ddmm(ds)}: evento`;
+    return `${celdas} “E” del ${ddmm(ds)}: ¿Evento o Enfermedad?`;
+}
+
+export function textoCargarEvento(dias: string[]): string {
+    const lista = [...new Set(dias)].sort().map(ddmm);
+    return `Cargá el evento del ${lista.join(', ')} en Eventos para asignarlos`;
+}
+
+/** Días con «E» de evento (amarilla o «EV») o dudosa, y si por defecto se toman como evento. */
+export function diasConE(filas: FilaPegadoExcel[]): DiaEPegado[] {
+    const map = new Map<number, { seguras: number; dudosas: number }>();
+    for (const f of filas) {
+        for (const c of f.celdas) {
+            if (!c.evento) continue;
+            const x = map.get(c.col) || { seguras: 0, dudosas: 0 };
+            if (c.evento === 'SEGURO') x.seguras++;
+            else x.dudosas++;
+            map.set(c.col, x);
+        }
+    }
+    return [...map.entries()]
+        .sort((a, b) => a[0] - b[0])
+        .map(([col, x]): DiaEPegado => {
+            const cantidad = x.seguras + x.dudosas;
+            return {
+                col,
+                cantidad,
+                seguras: x.seguras,
+                dudosas: x.dudosas,
+                porDefecto: x.seguras > 0 || cantidad >= MIN_GUARDIAS_E_EVENTO ? 'EVENTO' : 'E',
+            };
+        });
+}
 
 const ALIAS_EXCEL: Record<string, string> = {
     RETEN: 'RET',
@@ -717,7 +804,7 @@ function pareceNombre(v: string): boolean {
     return alpha.filter((p) => p.length >= 3).length >= 1 && alpha.length >= 2 && v.trim().length >= 6;
 }
 
-const PALABRAS_DIA = new Set(['RETEN', 'RETENIDO', 'FRANCO', 'VACACIONES', 'LICANUAL', 'LICENCIAANUAL', 'VAC', 'ART']);
+const PALABRAS_DIA = new Set(['RETEN', 'RETENIDO', 'FRANCO', 'VACACIONES', 'LICANUAL', 'LICENCIAANUAL', 'VAC', 'ART', 'EVENTO']);
 
 /** Una celda de día (M, P1 M, RETEN, 11 A 23) y no un rótulo de puesto (PLAYA, PUESTO 5). */
 function pareceDia(v: string): boolean {
@@ -840,9 +927,18 @@ export function textoResumenPegado(p: { filas: number; encontrados: number; sinE
  */
 export function prepararPegadoExcel(
     matriz: string[][],
-    opts: { guardias: GuardiaPegado[]; cursor: { r: number; c: number } | null; cols: number; conocidos: ReadonlySet<string> },
+    opts: {
+        guardias: GuardiaPegado[];
+        cursor: { r: number; c: number } | null;
+        cols: number;
+        conocidos: ReadonlySet<string>;
+        /** Color de cada celda (HTML del portapapeles), alineado a `matriz`. Sin color, la «E» queda dudosa. */
+        colores?: Array<Array<ColorCelda | null> | null> | null;
+    },
 ): PreviewPegadoExcel {
-    const vacio: PreviewPegadoExcel = { modo: 'posicion', filas: [], desconocidos: [], resumen: '' };
+    const vacio: PreviewPegadoExcel = { modo: 'posicion', filas: [], desconocidos: [], resumen: '', diasE: [], conColor: false };
+    const colorDeFila = new Map<string[], Array<ColorCelda | null> | null>();
+    if (opts.colores) matriz.forEach((f, i) => colorDeFila.set(f, opts.colores?.[i] ?? null));
     const bloques = partirBloques(matriz);
     if (!bloques.length) return vacio;
     const ocupadas = new Set<number>();
@@ -861,10 +957,11 @@ export function prepararPegadoExcel(
             const nombre = nombreCol >= 0 ? (f[nombreCol] || '').trim() : '';
             const legajo = legajoCol >= 0 ? (f[legajoCol] || '').trim() : '';
             if (!pareceNombre(nombre) && normLegajo(legajo).length < 3) continue;
-            const celdas: Array<{ col: number; code: string }> = [];
+            const celdas: CeldaPegadoExcel[] = [];
             const desconocidos: string[] = [];
             // Una licencia en celdas combinadas («LIC ANUAL 2025 X 14 DIAS») llega en la primera celda y las demás vacías.
             let licencia: { code: string; quedan: number } | null = null;
+            const coloresFila = colorDeFila.get(f) ?? null;
             for (let i = 0; i < nDias; i++) {
                 const col = colInicio + i;
                 if (col >= opts.cols) break;
@@ -877,6 +974,21 @@ export function prepararPegadoExcel(
                     continue;
                 }
                 licencia = null;
+                const color = coloresFila?.[diaDesde + i] ?? null;
+                const compact = etiquetaCodigoExcel(raw).replace(/[\s.\-]/g, '');
+                if (compact === 'EV' || compact === 'EVENTO') {
+                    celdas.push({ col, code: 'E', evento: 'SEGURO' });
+                    continue;
+                }
+                if (compact === 'E') {
+                    if (color?.fondo === 'AMARILLO') celdas.push({ col, code: 'E', evento: 'SEGURO' });
+                    else if (!coloresFila) celdas.push({ col, code: 'E', evento: 'DUDA' });
+                    else if (opts.conocidos.has('E')) celdas.push({ col, code: 'E' });
+                    continue;
+                }
+                const rojo = color?.fondo === 'ROJO' || color?.letra === 'ROJO';
+                if (rojo && compact === 'M' && opts.conocidos.has('D12')) { celdas.push({ col, code: 'D12' }); continue; }
+                if (rojo && compact === 'N' && opts.conocidos.has('N12')) { celdas.push({ col, code: 'N12' }); continue; }
                 const res = normalizarCodigoExcel(raw, opts.conocidos);
                 const lic = res.code ? null : licenciaCombinada(raw, opts.conocidos);
                 if (lic) {
@@ -909,6 +1021,8 @@ export function prepararPegadoExcel(
         modo: 'nombre',
         filas,
         desconocidos,
+        diasE: diasConE(filas),
+        conColor: !!opts.colores,
         resumen: textoResumenPegado({
             filas: filas.length,
             encontrados: filas.length - sinEncontrar.length,
@@ -931,7 +1045,7 @@ export const ATAJOS_MODO_RAPIDO: Array<{ teclas: string; que: string }> = [
     { teclas: '+ / −', que: 'Pasar M o N a 12 h (D12 / N12) o volver a 8 h. Si falta una banda, propone el par y Enter confirma' },
     { teclas: 'Shift + +', que: 'Cerrar todas las bandas faltantes de ese día' },
     { teclas: 'Ctrl + L  o  /', que: 'Cargar una novedad del catálogo en la selección (un registro por rango)' },
-    { teclas: 'M y N de 12 h', que: 'El color no se copia: escribí D12 y N12, o usá +. Un código que el servicio no tiene no se pega y queda en el resumen' },
+    { teclas: 'Colores de Excel', que: 'Al pegar desde Excel la M y N rojas pasan a D12 y N12 y la E amarilla es evento. Desde otro lado sin color: escribí D12 y N12 o usá +, y la E se pregunta en el resumen. Un código que el servicio no tiene no se pega y queda en el resumen' },
     { teclas: 'Ctrl + D / Ctrl + R', que: 'Rellenar hacia abajo / a la derecha' },
     { teclas: 'Cuadradito de la esquina', que: 'Arrastrar para repetir el patrón (sigue ciclos: M M M M M M F F)' },
     { teclas: 'Ctrl + Z / Ctrl + Y', que: 'Deshacer / rehacer' },

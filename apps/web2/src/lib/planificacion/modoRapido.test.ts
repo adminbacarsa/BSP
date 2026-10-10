@@ -138,7 +138,7 @@ describe('modo rápido · deshacer y rehacer', () => {
 });
 
 describe('modo rápido · códigos y horario', () => {
-    it('E es Enfermedad y no se completa a EV', () => {
+    it('E tipeada en la grilla es Enfermedad y no se completa a EV', () => {
         const ops = [{ code: 'EV' }, { code: 'EN' }, { code: 'E' }, { code: 'M' }];
         assert.equal(codigoAlConfirmar('E', ops), 'E');
         assert.equal(codigoAlConfirmar('e', [{ code: 'EV' }]), 'E');

@@ -228,9 +228,16 @@ import {
     type VistaCelda,
 } from '@/components/planificacion/GrillaCelda';
 import { ModoRapidoCapa, type CapaModoRapidoApi, type MarcaAviso } from '@/components/planificacion/ModoRapidoCapa';
-import { Cierre12Banner, ModoRapidoAyuda, ModoRapidoAvisosPanel, PegarExcelModal, SelectorNovedad, type PegarExcelEstado } from '@/components/planificacion/ModoRapidoPiezas';
+import { Cierre12Banner, ModoRapidoAyuda, ModoRapidoAvisosPanel, PegarExcelModal, SelectorNovedad, type DecisionDiaE, type PegarExcelEstado } from '@/components/planificacion/ModoRapidoPiezas';
+import { coloresParaTsv } from '@/lib/planificacion/pegadoExcelColor';
+import { asignarNominaAServicioEvento } from '@/services/eventoAssignService';
 import {
     type AvisoRapido,
+    type PreviewPegadoExcel,
+    avisosSinVer,
+    claveAvisosVistos,
+    idAviso,
+    textoCargarEvento,
     type CeldaRC,
     type RangoRC,
     type TurnoSla,
@@ -2027,6 +2034,44 @@ function PlanificacionDesktop() {
     const [selectorNovedad, setSelectorNovedad] = useState<CeldaRC[] | null>(null);
     const motivoNovedadRef = useRef('Cargado en modo rápido');
     const avisosRapidoRef = useRef<AvisoRapido[]>([]);
+    const [avisosVistos, setAvisosVistos] = useState<Set<string>>(() => new Set());
+    /** Celdas pegadas como evento sin vincular: `${empId}_${dateStr}` → texto de la marca. */
+    const [afectadoEvento, setAfectadoEvento] = useState<Record<string, string>>({});
+    const claveVistosRapido = selectedObjective ? claveAvisosVistos(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1) : '';
+    const claveAfectadoEvento = selectedObjective ? `cosp-planif-afectado-evento:${selectedObjective}:${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}` : '';
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        try {
+            const raw = claveVistosRapido ? window.localStorage.getItem(claveVistosRapido) : null;
+            setAvisosVistos(new Set(raw ? (JSON.parse(raw) as string[]) : []));
+        } catch { setAvisosVistos(new Set()); }
+        try {
+            const raw = claveAfectadoEvento ? window.localStorage.getItem(claveAfectadoEvento) : null;
+            setAfectadoEvento(raw ? (JSON.parse(raw) as Record<string, string>) : {});
+        } catch { setAfectadoEvento({}); }
+    }, [claveVistosRapido, claveAfectadoEvento]);
+    const marcarAvisosVistos = (ids: string[]) => {
+        setAvisosVistos((prev) => {
+            const next = new Set(prev);
+            for (const id of ids) next.add(id);
+            if (claveVistosRapido && typeof window !== 'undefined') {
+                try { window.localStorage.setItem(claveVistosRapido, JSON.stringify([...next].slice(-500))); } catch { /* sin espacio */ }
+            }
+            return next;
+        });
+    };
+    const guardarAfectadoEvento = (fn: (prev: Record<string, string>) => Record<string, string>) => {
+        setAfectadoEvento((prev) => {
+            const next = fn(prev);
+            if (claveAfectadoEvento && typeof window !== 'undefined') {
+                try {
+                    if (Object.keys(next).length) window.localStorage.setItem(claveAfectadoEvento, JSON.stringify(next));
+                    else window.localStorage.removeItem(claveAfectadoEvento);
+                } catch { /* sin espacio */ }
+            }
+            return next;
+        });
+    };
     useEffect(() => {
         if (!empresaId) return;
         const q = empresaCollectionQuery('tipos_novedad', empresaId, scopeEmpresa);
@@ -13412,9 +13457,11 @@ function PlanificacionDesktop() {
                 guard++;
             }
         }
+        const sinMarcaEvento: string[] = [];
         for (const it of items) {
             const { emp, ds, key, ctx } = ctxRapido(it.r, it.c);
             if (!emp) continue;
+            if (afectadoEvento[key]) sinMarcaEvento.push(key);
             if (it.borrar || !it.code) {
                 if (bajas.has(String(absencesMap[key]?.id || '')) && esNovedadCelda(ctx, key)) {
                     if (!bajasOk.has(String(absencesMap[key]?.id || ''))) anotar('Ausencia guardada: no se dio de baja.');
@@ -13436,6 +13483,13 @@ function PlanificacionDesktop() {
             next[key] = res.change;
             if (res.novedad) novedades[key] = res.novedad;
             hechos++;
+        }
+        if (sinMarcaEvento.length) {
+            guardarAfectadoEvento((prev) => {
+                const out = { ...prev };
+                for (const k of sinMarcaEvento) delete out[k];
+                return out;
+            });
         }
         if (hechos) commitPendingChanges(next);
         if (hechos || quitarNovedad.size || Object.keys(novedades).length) {
@@ -13486,7 +13540,18 @@ function PlanificacionDesktop() {
             fuente: fuente ? fuente[p.fila]?.[p.col] : null,
         })));
     };
-    const pegarRapido = (inicio: CeldaRC | null, rg: RangoRC | null, texto: string) => {
+    const abrirResumenPegado = (preview: PreviewPegadoExcel) => {
+        const asignacion: Record<number, number | null> = {};
+        for (const f of preview.filas) asignacion[f.indice] = f.filaGrilla;
+        const decisiones: Record<number, DecisionDiaE> = {};
+        for (const d of preview.diasE) {
+            const ds = diasRapido[d.col] || '';
+            const ops = d.porDefecto === 'EVENTO' ? opcionesEventoPegado(ds) : [];
+            decisiones[d.col] = { tipo: d.porDefecto, vinculo: ops.length === 1 ? ops[0].value : null };
+        }
+        setPegarExcel({ paso: 'resumen', preview, asignacion, decisiones });
+    };
+    const pegarRapido = (inicio: CeldaRC | null, rg: RangoRC | null, texto: string, html?: string) => {
         const interno = portapapelesRapidoRef.current;
         const limpio = (t: string) => t.replace(/\r/g, '').trim();
         const usarInterno = !!interno && (!limpio(texto) || limpio(texto) === limpio(interno.tsv));
@@ -13497,40 +13562,104 @@ function PlanificacionDesktop() {
         const matriz = parsearTsv(texto);
         if (!matriz.length) return;
         const conocidos = new Set(opcionesDeCodigo([], slaTodosRapido, ultimoUsadoRapido, catalogoNovedad).map((o) => normalizarCodigo(o.code)));
-        const preview = prepararPegadoExcel(matriz, { guardias: guardiasPegado(), cursor: inicio, cols: dimsRapido.cols, conocidos });
+        const colores = html ? coloresParaTsv(matriz, html) : null;
+        const preview = prepararPegadoExcel(matriz, { guardias: guardiasPegado(), cursor: inicio, cols: dimsRapido.cols, conocidos, colores });
         if (preview.modo === 'posicion') {
             pegarPorPosicion(matriz, inicio || { r: 0, c: 0 }, rg, null);
             return;
         }
-        const asignacion: Record<number, number | null> = {};
-        for (const f of preview.filas) asignacion[f.indice] = f.filaGrilla;
-        setPegarExcel({ paso: 'resumen', preview, asignacion });
+        abrirResumenPegado(preview);
     };
-    const revisarPegadoExcel = (texto: string) => {
+    const revisarPegadoExcel = (texto: string, html?: string) => {
         const matriz = parsearTsv(texto);
         if (!matriz.length) return;
         const conocidos = new Set(opcionesDeCodigo([], slaTodosRapido, ultimoUsadoRapido, catalogoNovedad).map((o) => normalizarCodigo(o.code)));
-        const preview = prepararPegadoExcel(matriz, { guardias: guardiasPegado(), cursor: null, cols: dimsRapido.cols, conocidos });
+        const colores = html ? coloresParaTsv(matriz, html) : null;
+        const preview = prepararPegadoExcel(matriz, { guardias: guardiasPegado(), cursor: null, cols: dimsRapido.cols, conocidos, colores });
         if (preview.modo === 'posicion') {
             setPegarExcel(null);
             pegarPorPosicion(matriz, { r: 0, c: 0 }, null, null);
             return;
         }
-        const asignacion: Record<number, number | null> = {};
-        for (const f of preview.filas) asignacion[f.indice] = f.filaGrilla;
-        setPegarExcel({ paso: 'resumen', preview, asignacion });
+        abrirResumenPegado(preview);
     };
+    const serviciosEventoPegado = (ds: string) => serviciosParaFecha(eventos, ds, true)
+        .filter(({ evento, servicio }) => !!evento.id && (evento.servicios || []).some((s) => s.id === servicio.id));
+    const opcionesEventoPegado = (ds: string) => serviciosEventoPegado(ds).map(({ evento, servicio }) => ({
+        value: `${evento.id}|${servicio.id}`,
+        label: `${evento.nombre} · ${servicio.nombre} · ${servicio.horaInicio}–${servicio.horaFin}${servicio.cupo ? ` · cupo ${servicio.cupo}` : ''}`,
+    }));
     const aplicarPegadoExcel = () => {
         if (!pegarExcel || pegarExcel.paso !== 'resumen') return;
-        const { preview, asignacion } = pegarExcel;
+        const { preview, asignacion, decisiones } = pegarExcel;
         const items: Array<{ r: number; c: number; code: string }> = [];
+        const sinVincular: Array<{ key: string; ds: string }> = [];
+        const vinculadas: Array<{ emp: any; ds: string; vinculo: string }> = [];
         for (const f of preview.filas) {
             const r = asignacion[f.indice];
             if (r == null) continue;
-            for (const cel of f.celdas) items.push({ r, c: cel.col, code: cel.code });
+            for (const cel of f.celdas) {
+                if (!cel.evento) { items.push({ r, c: cel.col, code: cel.code }); continue; }
+                const d = preview.diasE.find((x) => x.col === cel.col);
+                const dec = decisiones[cel.col] || { tipo: d?.porDefecto || 'E', vinculo: null };
+                if (dec.tipo === 'E') { items.push({ r, c: cel.col, code: 'E' }); continue; }
+                const emp = displayedEmployees[r];
+                const ds = diasRapido[cel.col];
+                if (!emp || !ds) continue;
+                if (dec.vinculo) vinculadas.push({ emp, ds, vinculo: dec.vinculo });
+                else sinVincular.push({ key: `${emp.id}_${ds}`, ds });
+            }
         }
         setPegarExcel(null);
-        escribirRapido(items);
+        if (items.length) escribirRapido(items);
+        if (sinVincular.length) {
+            guardarAfectadoEvento((prev) => {
+                const next = { ...prev };
+                for (const s of sinVincular) next[s.key] = 'Afectado a evento (sin vincular, sin horas)';
+                return next;
+            });
+            toast.message(textoCargarEvento(sinVincular.map((s) => s.ds)));
+        }
+        if (vinculadas.length) void asignarPegadoAEventos(vinculadas);
+    };
+    const asignarPegadoAEventos = async (lista: Array<{ emp: any; ds: string; vinculo: string }>) => {
+        if (!empresaId) return;
+        const convocadoPor = authUser?.uid || '';
+        let ok = 0;
+        const errores: string[] = [];
+        for (const it of lista) {
+            const [eventoId, servicioId] = it.vinculo.split('|');
+            const par = serviciosEventoPegado(it.ds).find(({ evento, servicio }) => evento.id === eventoId && servicio.id === servicioId);
+            if (!par) { errores.push(`${it.emp.name}: el evento ya no está`); continue; }
+            try {
+                await asignarNominaAServicioEvento({
+                    empresaId,
+                    evento: par.evento,
+                    servicio: par.servicio,
+                    empleado: {
+                        id: it.emp.id,
+                        name: String(it.emp.name || it.emp.id),
+                        genero: it.emp.genero || '',
+                        preferredObjectiveId: it.emp.preferredObjectiveId,
+                        preferredObjectiveName: it.emp.preferredObjectiveName,
+                        objectiveId: it.emp.objectiveId,
+                        objectiveName: it.emp.objectiveName,
+                    },
+                    convocadoPor,
+                });
+                ok++;
+                guardarAfectadoEvento((prev) => {
+                    if (!prev[`${it.emp.id}_${it.ds}`]) return prev;
+                    const next = { ...prev };
+                    delete next[`${it.emp.id}_${it.ds}`];
+                    return next;
+                });
+            } catch (e: any) {
+                errores.push(`${it.emp.name}: ${e?.message || 'no se pudo asignar'}`);
+            }
+        }
+        if (ok) toast.success(`${ok} guardia(s) asignado(s) al evento`);
+        if (errores.length) toast.error(`${errores.length} sin asignar: ${errores.slice(0, 3).join(' · ')}${errores.length > 3 ? '…' : ''}`);
     };
     const rellenarRapido = (rg: RangoRC, dir: 'abajo' | 'derecha') => {
         const pares = planRelleno(rg, dir);
@@ -13596,7 +13725,14 @@ function PlanificacionDesktop() {
             const r = filaDe.get(a.empId);
             const c = colDe.get(a.dateStr);
             if (r == null || c == null) continue;
-            out.push({ r, c, tipo: a.tipo, texto: a.texto });
+            out.push({ r, c, tipo: a.tipo, texto: a.texto, tenue: avisosVistos.has(idAviso(a)) });
+        }
+        for (const [key, texto] of Object.entries(afectadoEvento)) {
+            const i = key.lastIndexOf('_');
+            const r = filaDe.get(key.slice(0, i));
+            const c = colDe.get(key.slice(i + 1));
+            if (r == null || c == null) continue;
+            out.push({ r, c, tipo: 'EVENTO', texto: `${texto} · cargá el evento en Eventos para asignarlo` });
         }
         for (const prop of propuesta12 || []) {
             for (const ch of prop.cambios) {
@@ -13607,7 +13743,8 @@ function PlanificacionDesktop() {
             }
         }
         return out;
-    }, [avisosRapido, propuesta12, displayedEmployees, diasRapido]);
+    }, [avisosRapido, avisosVistos, afectadoEvento, propuesta12, displayedEmployees, diasRapido]);
+    const avisosRapidoSinVer = useMemo(() => avisosSinVer(avisosRapido, avisosVistos), [avisosRapido, avisosVistos]);
 
     const irAvisoRapido = (a: AvisoRapido) => {
         const r = displayedEmployees.findIndex((e: any) => e.id === a.empId);
@@ -16191,7 +16328,7 @@ function PlanificacionDesktop() {
                                 />
                             </div>
                             {modoRapido && !comparingSnapshot && (
-                                <ModoRapidoAvisosPanel avisos={avisosRapido} sinServicio={sinServicioEnMes} onIr={irAvisoRapido} />
+                                <ModoRapidoAvisosPanel avisos={avisosRapidoSinVer} sinServicio={sinServicioEnMes} onIr={irAvisoRapido} onVisto={marcarAvisosVistos} />
                             )}
                             </div>
                         )}
@@ -18250,6 +18387,12 @@ function PlanificacionDesktop() {
                         onAsignar={(indice, fila) => setPegarExcel((prev) => {
                             if (!prev || prev.paso !== 'resumen') return prev;
                             return { ...prev, asignacion: { ...prev.asignacion, [indice]: fila } };
+                        })}
+                        dias={diasRapido}
+                        eventosDe={opcionesEventoPegado}
+                        onDecidir={(col, decision) => setPegarExcel((prev) => {
+                            if (!prev || prev.paso !== 'resumen') return prev;
+                            return { ...prev, decisiones: { ...prev.decisiones, [col]: decision } };
                         })}
                         onAplicar={aplicarPegadoExcel}
                     />,

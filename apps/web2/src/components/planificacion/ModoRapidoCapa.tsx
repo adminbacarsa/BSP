@@ -19,7 +19,8 @@ export type CapaModoRapidoApi = {
     arrastrando: () => boolean;
 };
 
-export type MarcaAviso = { r: number; c: number; tipo: string; texto: string };
+/** `tenue`: aviso marcado como visto (la marca queda, más suave). */
+export type MarcaAviso = { r: number; c: number; tipo: string; texto: string; tenue?: boolean };
 
 type Props = {
     activo: boolean;
@@ -33,7 +34,8 @@ type Props = {
     onEscribir: (celdas: CeldaRC[], code: string) => void;
     onBorrar: (celdas: CeldaRC[]) => void;
     onCopiar: (rg: RangoRC, cortar: boolean) => string;
-    onPegar: (inicio: CeldaRC | null, rg: RangoRC | null, texto: string) => void;
+    /** `html`: lo que Excel pone junto al TSV (trae el color de cada celda). */
+    onPegar: (inicio: CeldaRC | null, rg: RangoRC | null, texto: string, html?: string) => void;
     onRelleno: (rg: RangoRC, dir: 'abajo' | 'derecha') => void;
     onSerie: (origen: RangoRC, destino: CeldaRC) => void;
     onDeshacer: () => void;
@@ -441,9 +443,10 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
             const rg = rangoRef.current;
             const cur = estado.current.cursor;
             const txt = e.clipboardData?.getData('text/plain') ?? '';
+            const html = e.clipboardData?.getData('text/html') || undefined;
             e.preventDefault();
             const inicio = cur ? { r: rg?.minR ?? cur.r, c: rg?.minC ?? cur.c } : null;
-            propsRef.current.onPegar(inicio, rg, txt);
+            propsRef.current.onPegar(inicio, rg, txt, html);
         };
         document.addEventListener('copy', onCopy);
         document.addEventListener('cut', onCut);
@@ -473,10 +476,11 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
             {cajas.marcas.map((m, i) => (
                 <span
                     key={`${m.r}:${m.c}:${m.tipo}:${i}`}
-                    className={`absolute rounded-sm border-2 ${m.tipo === 'DESCANSO' ? 'border-amber-500' : m.tipo === 'TOPE' ? 'border-rose-500' : m.tipo === 'LICENCIA' ? 'border-fuchsia-500' : m.tipo === 'CIERRE' ? 'border-indigo-600 bg-indigo-500/10' : 'border-orange-500'}`}
+                    className={`absolute rounded-sm ${m.tipo === 'EVENTO' ? 'border-2 border-dashed border-yellow-500 bg-yellow-300/25' : 'border-2'} ${m.tipo === 'DESCANSO' ? 'border-amber-500' : m.tipo === 'TOPE' ? 'border-rose-500' : m.tipo === 'LICENCIA' ? 'border-fuchsia-500' : m.tipo === 'CIERRE' ? 'border-indigo-600 bg-indigo-500/10' : m.tipo === 'EVENTO' ? '' : 'border-orange-500'} ${m.tenue ? 'opacity-40' : ''}`}
                     style={{ left: m.left + 1, top: m.top + 1, width: m.width - 2, height: m.height - 2 }}
                     title={m.texto}
                     data-modo-rapido-marca={m.tipo}
+                    data-modo-rapido-marca-tenue={m.tenue ? '1' : undefined}
                 />
             ))}
             {rc && rango && tamanoRango(rango) > 1 && (

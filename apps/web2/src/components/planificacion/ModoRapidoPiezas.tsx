@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AlertTriangle, ClipboardPaste, Keyboard, Search, X } from 'lucide-react';
-import { agruparAvisos, ATAJOS_MODO_RAPIDO, textoResumenPegado, type AvisoRapido, type FilaPegadoExcel, type GuardiaPegado, type PreviewPegadoExcel, type TipoNovedadRapida } from '@/lib/planificacion/modoRapido';
+import { agruparAvisos, ATAJOS_MODO_RAPIDO, idAviso, idGrupoAviso, textoDiaE, textoResumenPegado, type AvisoRapido, type FilaPegadoExcel, type GuardiaPegado, type PreviewPegadoExcel, type TipoNovedadRapida } from '@/lib/planificacion/modoRapido';
 
 export function ModoRapidoAyuda({ onCerrar }: { onCerrar: () => void }) {
     useEffect(() => {
@@ -25,7 +25,7 @@ export function ModoRapidoAyuda({ onCerrar }: { onCerrar: () => void }) {
                 </div>
                 <p className="mb-2 text-[11px] text-slate-500">Hacé clic en una celda y escribí. Nada frena mientras cargás: los avisos quedan marcados y el PIN se pide al guardar.</p>
                 <p className="mb-3 rounded-xl border border-indigo-100 bg-indigo-50 px-3 py-2 text-[11px] font-medium text-indigo-900" data-modo-rapido-ayuda-pegar>
-                    Para pegar desde Excel: copiá desde la columna del nombre hasta el último día y apretá Ctrl+V en la grilla. El color de la celda no viaja: las M y N de 12 h se escriben D12 y N12, o con + si falta una banda.
+                    Para pegar desde Excel: copiá desde la columna del nombre hasta el último día y apretá Ctrl+V en la grilla. Desde Excel se lee el color: M y N rojas pasan a D12 y N12 y la E amarilla es evento (se vincula a un evento cargado o queda «Afectado a evento»). Si el color no viaja, la E se pregunta en el resumen y las de 12 h se escriben D12 y N12, o con + si falta una banda.
                 </p>
                 <ul className="space-y-1">
                     {ATAJOS_MODO_RAPIDO.map((a) => (
@@ -60,10 +60,13 @@ export function ModoRapidoAvisosPanel({
     avisos,
     sinServicio,
     onIr,
+    onVisto,
 }: {
+    /** Solo los que no se marcaron como vistos. */
     avisos: AvisoRapido[];
     sinServicio: boolean;
     onIr: (a: AvisoRapido) => void;
+    onVisto: (ids: string[]) => void;
 }) {
     const grupos = useMemo(() => agruparAvisos(avisos), [avisos]);
     const [abierto, setAbierto] = useState(false);
@@ -117,30 +120,52 @@ export function ModoRapidoAvisosPanel({
                     const abiertoGrupo = desplegado === g.clave;
                     return (
                         <div key={g.clave}>
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    if (g.items.length === 1) onIr(g.items[0]);
-                                    else setDesplegado(abiertoGrupo ? null : g.clave);
-                                }}
-                                className="flex w-full items-start gap-2 rounded-lg px-1.5 py-1 text-left hover:bg-slate-50"
-                                data-aviso-grupo={g.empId}
-                            >
-                                <span className={`mt-0.5 shrink-0 rounded px-1 text-[8px] font-black uppercase text-white ${COLOR[g.tipo]}`}>{ETIQUETA[g.tipo]}</span>
-                                <span className="text-[11px] leading-snug text-slate-700">{g.texto}</span>
-                            </button>
+                            <div className="flex items-start gap-1 rounded-lg hover:bg-slate-50">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        if (g.items.length === 1) onIr(g.items[0]);
+                                        else setDesplegado(abiertoGrupo ? null : g.clave);
+                                    }}
+                                    className="flex min-w-0 flex-1 items-start gap-2 px-1.5 py-1 text-left"
+                                    data-aviso-grupo={g.empId}
+                                >
+                                    <span className={`mt-0.5 shrink-0 rounded px-1 text-[8px] font-black uppercase text-white ${COLOR[g.tipo]}`}>{ETIQUETA[g.tipo]}</span>
+                                    <span className="text-[11px] leading-snug text-slate-700">{g.texto}</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => onVisto(g.items.map(idAviso))}
+                                    className="mt-0.5 shrink-0 rounded-md p-1 text-slate-300 hover:bg-white hover:text-slate-600"
+                                    title="Visto: deja de mostrarse acá. La marca de la celda y el PIN al guardar siguen."
+                                    aria-label="Marcar como visto"
+                                    data-aviso-visto={idGrupoAviso(g)}
+                                >
+                                    <X size={12} />
+                                </button>
+                            </div>
                             {abiertoGrupo && g.items.length > 1 && (
                                 <div className="mb-1 ml-8 flex flex-wrap gap-1">
                                     {g.items.map((a) => (
-                                        <button
-                                            key={`${a.dateStr}-${a.tipo}`}
-                                            type="button"
-                                            onClick={() => onIr(a)}
-                                            className="rounded-lg border border-slate-200 px-1.5 py-0.5 text-[10px] font-bold text-slate-600 hover:bg-slate-50"
-                                            data-aviso-dia={a.dateStr}
-                                        >
-                                            {a.dateStr.slice(8, 10)}/{a.dateStr.slice(5, 7)}
-                                        </button>
+                                        <span key={`${a.dateStr}-${a.tipo}`} className="inline-flex items-center rounded-lg border border-slate-200">
+                                            <button
+                                                type="button"
+                                                onClick={() => onIr(a)}
+                                                className="px-1.5 py-0.5 text-[10px] font-bold text-slate-600 hover:bg-slate-50"
+                                                data-aviso-dia={a.dateStr}
+                                            >
+                                                {a.dateStr.slice(8, 10)}/{a.dateStr.slice(5, 7)}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => onVisto([idAviso(a)])}
+                                                className="border-l border-slate-200 px-1 py-0.5 text-slate-300 hover:text-slate-600"
+                                                title="Visto"
+                                                aria-label="Marcar este día como visto"
+                                            >
+                                                <X size={9} />
+                                            </button>
+                                        </span>
                                     ))}
                                 </div>
                             )}
@@ -148,8 +173,20 @@ export function ModoRapidoAvisosPanel({
                     );
                 })}
             </div>
+            {avisos.length > 1 && (
+                <div className="border-t border-slate-100 px-3 py-1.5 text-right">
+                    <button
+                        type="button"
+                        onClick={() => onVisto(avisos.map(idAviso))}
+                        className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800"
+                        data-avisos-todos-vistos
+                    >
+                        Marcar todos como vistos
+                    </button>
+                </div>
+            )}
             <p className="border-t border-slate-100 px-3 py-2 text-[10px] leading-snug text-slate-400" data-modo-rapido-avisos-ayuda>
-                Descanso de 8 a 12 h y tope piden un PIN al guardar; menos de 8 h no se guarda
+                Descanso de 8 a 12 h y tope piden un PIN al guardar; menos de 8 h no se guarda. Visto solo lo saca de esta lista.
             </p>
         </div>,
         document.body,
@@ -233,23 +270,34 @@ export function Cierre12Banner({ texto, onConfirmar, onCancelar }: { texto: stri
     );
 }
 
+/** Qué es la «E» de un día: evento (vinculado a `eventoId|servicioId` o sin vincular) o enfermedad. */
+export type DecisionDiaE = { tipo: 'EVENTO' | 'E'; vinculo: string | null };
+export type OpcionEventoPegado = { value: string; label: string };
+
 export type PegarExcelEstado =
-    | { paso: 'texto'; borrador: string }
-    | { paso: 'resumen'; preview: PreviewPegadoExcel; asignacion: Record<number, number | null> };
+    | { paso: 'texto'; borrador: string; html?: string }
+    | { paso: 'resumen'; preview: PreviewPegadoExcel; asignacion: Record<number, number | null>; decisiones: Record<number, DecisionDiaE> };
 
 export function PegarExcelModal({
     estado,
     guardias,
+    dias,
+    eventosDe,
     onCerrar,
     onRevisar,
     onAsignar,
+    onDecidir,
     onAplicar,
 }: {
     estado: PegarExcelEstado;
     guardias: GuardiaPegado[];
+    /** dateStr por columna de la grilla. */
+    dias: string[];
+    eventosDe: (dateStr: string) => OpcionEventoPegado[];
     onCerrar: () => void;
-    onRevisar: (texto: string) => void;
+    onRevisar: (texto: string, html?: string) => void;
     onAsignar: (indice: number, fila: number | null) => void;
+    onDecidir: (col: number, decision: DecisionDiaE) => void;
     onAplicar: () => void;
 }) {
     useEffect(() => {
@@ -290,7 +338,7 @@ export function PegarExcelModal({
                                 if (t.trim()) {
                                     e.preventDefault();
                                     setBorrador(t);
-                                    onRevisar(t);
+                                    onRevisar(t, e.clipboardData.getData('text/html') || undefined);
                                 }
                             }}
                             placeholder="Pegá acá con Ctrl+V"
@@ -305,13 +353,54 @@ export function PegarExcelModal({
                 ) : (
                     <>
                         <p className="mb-3 rounded-xl border border-indigo-100 bg-indigo-50 px-3 py-2 text-[12px] font-medium text-indigo-950" data-pegar-resumen>{resumen}</p>
+                        {estado.preview.diasE.length > 0 && (
+                            <div className="mb-3 space-y-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2" data-pegar-dias-e={estado.preview.diasE.length}>
+                                {estado.preview.diasE.map((d) => {
+                                    const ds = dias[d.col] || '';
+                                    const dec = estado.decisiones[d.col] || { tipo: d.porDefecto, vinculo: null };
+                                    const opciones = eventosDe(ds);
+                                    return (
+                                        <div key={d.col} className="space-y-1" data-pegar-dia-e={ds}>
+                                            <p className="text-[11px] font-black text-amber-950">{textoDiaE(d, ds)}</p>
+                                            <div className="flex flex-wrap items-center gap-1.5">
+                                                {d.dudosas > 0 && (
+                                                    <select
+                                                        value={dec.tipo}
+                                                        onChange={(e) => onDecidir(d.col, { tipo: e.target.value === 'E' ? 'E' : 'EVENTO', vinculo: dec.vinculo })}
+                                                        className="rounded-lg border border-amber-200 bg-white px-1.5 py-1 text-[11px] font-bold"
+                                                        data-pegar-e-tipo={ds}
+                                                    >
+                                                        <option value="EVENTO">Evento</option>
+                                                        <option value="E">Enfermedad (E)</option>
+                                                    </select>
+                                                )}
+                                                {dec.tipo === 'EVENTO' && (opciones.length > 0 ? (
+                                                    <select
+                                                        value={dec.vinculo || ''}
+                                                        onChange={(e) => onDecidir(d.col, { tipo: 'EVENTO', vinculo: e.target.value || null })}
+                                                        className="min-w-0 flex-1 rounded-lg border border-amber-200 bg-white px-1.5 py-1 text-[11px]"
+                                                        data-pegar-e-evento={ds}
+                                                    >
+                                                        <option value="">Sin vincular · queda «Afectado a evento»</option>
+                                                        {opciones.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                                                    </select>
+                                                ) : (
+                                                    <span className="text-[11px] text-amber-900" data-pegar-e-sin-evento={ds}>No hay eventos cargados ese día: queda «Afectado a evento», sin horas.</span>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                                <p className="text-[10px] leading-snug text-amber-800">Vincular asigna a cada guardia al servicio del evento (respeta el cupo). Sin vincular, la celda queda marcada «Afectado a evento» y no se escribe ningún turno.</p>
+                            </div>
+                        )}
                         <ul className="mb-3 max-h-64 space-y-1 overflow-auto">
                             {estado.preview.filas.map((f) => (
                                 <FilaResumen key={f.indice} fila={f} guardias={guardias} ocupadas={ocupadas} asignada={estado.asignacion[f.indice] ?? null} onAsignar={onAsignar} />
                             ))}
                         </ul>
                         {estado.preview.desconocidos.length > 0 && (
-                            <p className="mb-3 text-[11px] text-slate-500">No se escriben: {estado.preview.desconocidos.join(', ')}. El color no se copia: las de 12 h van como D12 y N12.</p>
+                            <p className="mb-3 text-[11px] text-slate-500">No se escriben: {estado.preview.desconocidos.join(', ')}.{estado.preview.conColor ? '' : ' Sin color: las de 12 h van como D12 y N12.'}</p>
                         )}
                         <div className="flex justify-end gap-2">
                             <button type="button" onClick={onCerrar} className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50" data-pegar-cancelar>Cancelar</button>
