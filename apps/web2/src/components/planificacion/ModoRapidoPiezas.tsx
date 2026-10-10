@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AlertTriangle, CalendarRange, ClipboardPaste, Copy, Keyboard, X } from 'lucide-react';
-import { ATAJOS_MODO_RAPIDO, textoResumenPegado, type AvisoRapido, type FilaPegadoExcel, type GuardiaPegado, type PreviewPegadoExcel } from '@/lib/planificacion/modoRapido';
+import { AlertTriangle, ClipboardPaste, Keyboard, Search, X } from 'lucide-react';
+import { agruparAvisos, ATAJOS_MODO_RAPIDO, textoResumenPegado, type AvisoRapido, type FilaPegadoExcel, type GuardiaPegado, type PreviewPegadoExcel, type TipoNovedadRapida } from '@/lib/planificacion/modoRapido';
 
 export function ModoRapidoAyuda({ onCerrar }: { onCerrar: () => void }) {
     useEffect(() => {
@@ -25,7 +25,7 @@ export function ModoRapidoAyuda({ onCerrar }: { onCerrar: () => void }) {
                 </div>
                 <p className="mb-2 text-[11px] text-slate-500">Hacé clic en una celda y escribí. Nada frena mientras cargás: los avisos quedan marcados y el PIN se pide al guardar.</p>
                 <p className="mb-3 rounded-xl border border-indigo-100 bg-indigo-50 px-3 py-2 text-[11px] font-medium text-indigo-900" data-modo-rapido-ayuda-pegar>
-                    Para pegar desde Excel: copiá desde la columna del nombre hasta el último día y apretá Ctrl+V en la grilla. El color de la celda no viaja: las M y N de 12 h hay que escribirlas como D12 y N12.
+                    Para pegar desde Excel: copiá desde la columna del nombre hasta el último día y apretá Ctrl+V en la grilla. El color de la celda no viaja: las M y N de 12 h se escriben D12 y N12, o con + si falta una banda.
                 </p>
                 <ul className="space-y-1">
                     {ATAJOS_MODO_RAPIDO.map((a) => (
@@ -54,6 +54,8 @@ const COLOR: Record<AvisoRapido['tipo'], string> = {
     SOLAPE: 'bg-orange-500',
 };
 
+const AVISOS_ABIERTOS_KEY = 'cosp-planif-avisos-abierto';
+
 export function ModoRapidoAvisosPanel({
     avisos,
     sinServicio,
@@ -63,121 +65,171 @@ export function ModoRapidoAvisosPanel({
     sinServicio: boolean;
     onIr: (a: AvisoRapido) => void;
 }) {
-    const [abierto, setAbierto] = useState(true);
+    const grupos = useMemo(() => agruparAvisos(avisos), [avisos]);
+    const [abierto, setAbierto] = useState(false);
+    const [desplegado, setDesplegado] = useState<string | null>(null);
+    const listo = useRef(false);
+    useEffect(() => {
+        if (listo.current) return;
+        listo.current = true;
+        const guardado = typeof window !== 'undefined' ? window.localStorage.getItem(AVISOS_ABIERTOS_KEY) : null;
+        if (guardado === '1') setAbierto(true);
+        else if (guardado === '0') setAbierto(false);
+        else setAbierto(avisos.length <= 3);
+    }, [avisos.length]);
+    const toggle = () => {
+        setAbierto((v) => {
+            const next = !v;
+            if (typeof window !== 'undefined') window.localStorage.setItem(AVISOS_ABIERTOS_KEY, next ? '1' : '0');
+            return next;
+        });
+    };
     if (!avisos.length && !sinServicio) return null;
     if (typeof document === 'undefined') return null;
+    if (!abierto) {
+        return createPortal(
+            <button
+                type="button"
+                onClick={toggle}
+                className="fixed bottom-16 right-4 z-[80] flex items-center gap-1.5 rounded-full border border-amber-200 bg-white px-3 py-1.5 text-[11px] font-black text-amber-800 shadow-lg hover:bg-amber-50 no-print"
+                data-modo-rapido-avisos={avisos.length}
+                data-modo-rapido-avisos-pill
+            >
+                <AlertTriangle size={13} className="text-amber-500" />
+                {avisos.length} aviso{avisos.length === 1 ? '' : 's'}
+            </button>,
+            document.body,
+        );
+    }
     return createPortal(
-        <div className="fixed bottom-4 right-4 z-[80] w-[300px] rounded-2xl border border-slate-200 bg-white shadow-lg no-print" data-modo-rapido-avisos={avisos.length}>
-            <button type="button" onClick={() => setAbierto((v) => !v)} className="flex w-full items-center gap-2 px-3 py-2 text-left">
+        <div className="fixed bottom-16 right-4 z-[80] w-[320px] rounded-2xl border border-slate-200 bg-white shadow-lg no-print" data-modo-rapido-avisos={avisos.length}>
+            <button type="button" onClick={toggle} className="flex w-full items-center gap-2 px-3 py-2 text-left">
                 <AlertTriangle size={14} className={avisos.length ? 'text-amber-500' : 'text-slate-400'} />
-                <span className="text-[11px] font-black uppercase text-slate-700">Avisos ({avisos.length})</span>
-                <span className="ml-auto text-[10px] font-bold text-slate-400">{abierto ? 'Ocultar' : 'Ver'}</span>
+                <span className="text-[11px] font-black uppercase text-slate-700">{avisos.length} aviso{avisos.length === 1 ? '' : 's'}</span>
+                <span className="ml-auto text-[10px] font-bold text-slate-400">Ocultar</span>
             </button>
-            {abierto && (
-                <div className="max-h-[260px] overflow-auto border-t border-slate-100 px-2 py-1.5">
-                    {sinServicio && (
-                        <p className="px-1 pb-1.5 text-[10px] font-bold text-slate-500">Sin servicio: no se valida cobertura.</p>
-                    )}
-                    {avisos.length === 0 && <p className="px-1 py-1 text-[11px] text-slate-400">Sin avisos.</p>}
-                    {avisos.map((a, i) => (
-                        <button
-                            key={`${a.tipo}-${a.empId}-${a.dateStr}-${i}`}
-                            type="button"
-                            onClick={() => onIr(a)}
-                            className="flex w-full items-start gap-2 rounded-lg px-1.5 py-1 text-left hover:bg-slate-50"
-                        >
-                            <span className={`mt-0.5 shrink-0 rounded px-1 text-[8px] font-black uppercase text-white ${COLOR[a.tipo]}`}>{ETIQUETA[a.tipo]}</span>
-                            <span className="text-[11px] leading-snug text-slate-700">{a.texto}</span>
-                        </button>
-                    ))}
-                    {avisos.length > 0 && (
-                        <p className="px-1 pt-1.5 text-[10px] text-slate-400">Descanso de 8 a 12 h y tope piden PIN al guardar, una sola vez. Menos de 8 h no se guarda.</p>
-                    )}
-                </div>
-            )}
+            <div className="max-h-[260px] overflow-auto border-t border-slate-100 px-2 py-1.5">
+                {sinServicio && (
+                    <p className="px-1 pb-1.5 text-[10px] font-bold text-slate-500">Sin servicio: no se valida cobertura.</p>
+                )}
+                {grupos.length === 0 && <p className="px-1 py-1 text-[11px] text-slate-400">Sin avisos.</p>}
+                {grupos.map((g) => {
+                    const abiertoGrupo = desplegado === g.clave;
+                    return (
+                        <div key={g.clave}>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    if (g.items.length === 1) onIr(g.items[0]);
+                                    else setDesplegado(abiertoGrupo ? null : g.clave);
+                                }}
+                                className="flex w-full items-start gap-2 rounded-lg px-1.5 py-1 text-left hover:bg-slate-50"
+                                data-aviso-grupo={g.empId}
+                            >
+                                <span className={`mt-0.5 shrink-0 rounded px-1 text-[8px] font-black uppercase text-white ${COLOR[g.tipo]}`}>{ETIQUETA[g.tipo]}</span>
+                                <span className="text-[11px] leading-snug text-slate-700">{g.texto}</span>
+                            </button>
+                            {abiertoGrupo && g.items.length > 1 && (
+                                <div className="mb-1 ml-8 flex flex-wrap gap-1">
+                                    {g.items.map((a) => (
+                                        <button
+                                            key={`${a.dateStr}-${a.tipo}`}
+                                            type="button"
+                                            onClick={() => onIr(a)}
+                                            className="rounded-lg border border-slate-200 px-1.5 py-0.5 text-[10px] font-bold text-slate-600 hover:bg-slate-50"
+                                            data-aviso-dia={a.dateStr}
+                                        >
+                                            {a.dateStr.slice(8, 10)}/{a.dateStr.slice(5, 7)}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    );
+                })}
+            </div>
+            <p className="border-t border-slate-100 px-3 py-2 text-[10px] leading-snug text-slate-400" data-modo-rapido-avisos-ayuda>
+                Descanso de 8 a 12 h y tope piden un PIN al guardar; menos de 8 h no se guarda
+            </p>
         </div>,
         document.body,
     );
 }
 
-export type CopiarDeEleccion = { objectiveId: string; objectiveName: string; year: number; month: number; soloVacias: boolean };
-
-export function CopiarDeModal({
-    clientes,
-    objetivoActual,
-    year,
-    month,
-    cargando,
-    onCancelar,
-    onConfirmar,
+export function SelectorNovedad({
+    tipos,
+    onCerrar,
+    onElegir,
 }: {
-    clientes: Array<{ id: string; name?: string; objetivos?: Array<{ id?: string; name?: string }> }>;
-    objetivoActual: string;
-    year: number;
-    month: number;
-    cargando: boolean;
-    onCancelar: () => void;
-    onConfirmar: (e: CopiarDeEleccion) => void;
+    tipos: TipoNovedadRapida[];
+    onCerrar: () => void;
+    onElegir: (tipo: TipoNovedadRapida, motivo: string) => void;
 }) {
-    const prev = month === 1 ? { y: year - 1, m: 12 } : { y: year, m: month - 1 };
-    const [objId, setObjId] = useState(objetivoActual);
-    const [mes, setMes] = useState(`${prev.y}-${String(prev.m).padStart(2, '0')}`);
-    const [soloVacias, setSoloVacias] = useState(true);
-    const [filtro, setFiltro] = useState('');
-    const opciones = useMemo(() => {
-        const out: Array<{ id: string; label: string }> = [];
-        for (const c of clientes) {
-            for (const o of c.objetivos || []) {
-                const id = String(o.id || o.name || '');
-                if (!id) continue;
-                out.push({ id, label: `${c.name || ''} · ${o.name || id}` });
-            }
-        }
-        const f = filtro.trim().toLowerCase();
-        return (f ? out.filter((o) => o.label.toLowerCase().includes(f)) : out).sort((a, b) => a.label.localeCompare(b.label));
-    }, [clientes, filtro]);
-    const elegido = opciones.find((o) => o.id === objId);
-    const [y, m] = mes.split('-').map(Number);
-    const mismo = objId === objetivoActual && y === year && m === month;
-    return (
-        <div className="fixed inset-0 z-[9200] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm" onClick={onCancelar}>
-            <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-5 shadow-lg" onClick={(e) => e.stopPropagation()} data-copiar-de>
-                <div className="mb-3 flex items-center gap-2">
-                    <Copy size={16} className="text-indigo-600" />
-                    <h3 className="text-sm font-black uppercase text-slate-800">Copiar de…</h3>
+    const [q, setQ] = useState('');
+    const [motivo, setMotivo] = useState('');
+    const [idx, setIdx] = useState(0);
+    const lista = useMemo(() => {
+        const f = q.trim().toLowerCase();
+        return tipos.filter((t) => !f || `${t.code} ${t.label}`.toLowerCase().includes(f));
+    }, [tipos, q]);
+    useEffect(() => { setIdx(0); }, [q]);
+    useEffect(() => {
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onCerrar(); return; }
+            if (e.key === 'ArrowDown') { e.preventDefault(); setIdx((i) => Math.min(lista.length - 1, i + 1)); return; }
+            if (e.key === 'ArrowUp') { e.preventDefault(); setIdx((i) => Math.max(0, i - 1)); return; }
+            if (e.key === 'Enter' && lista[idx]) { e.preventDefault(); e.stopPropagation(); onElegir(lista[idx], motivo.trim()); }
+        };
+        window.addEventListener('keydown', onKey, true);
+        return () => window.removeEventListener('keydown', onKey, true);
+    }, [idx, lista, motivo, onCerrar, onElegir]);
+    if (typeof document === 'undefined') return null;
+    return createPortal(
+        <div className="fixed inset-0 z-[12000] flex items-center justify-center bg-slate-900/40 p-4" onClick={onCerrar} data-novedad-rapida>
+            <div className="w-full max-w-sm rounded-3xl border border-slate-200 bg-white p-4 shadow-lg" onClick={(e) => e.stopPropagation()}>
+                <div className="mb-2 flex items-center gap-2">
+                    <p className="text-xs font-black uppercase text-slate-800">Novedad</p>
+                    <button type="button" onClick={onCerrar} className="ml-auto rounded-lg p-1 text-slate-400 hover:bg-slate-50" aria-label="Cerrar"><X size={14} /></button>
                 </div>
-                <p className="mb-3 text-[11px] text-slate-500">Trae el cronograma de otro objetivo o mes como borrador. Los guardias que ya están en la dotación se alinean por persona; los demás se agregan como filas.</p>
-                <label className="mb-1 block text-[10px] font-black uppercase text-slate-500">Objetivo</label>
-                <input
-                    value={filtro}
-                    onChange={(e) => setFiltro(e.target.value)}
-                    placeholder="Buscar cliente u objetivo…"
-                    className="mb-1.5 w-full rounded-xl border border-slate-200 px-2.5 py-1.5 text-xs"
-                />
-                <select value={objId} onChange={(e) => setObjId(e.target.value)} size={6} className="mb-3 w-full rounded-xl border border-slate-200 p-1 text-xs" data-copiar-de-objetivo>
-                    {opciones.map((o) => <option key={o.id} value={o.id}>{o.label}{o.id === objetivoActual ? ' (este)' : ''}</option>)}
-                </select>
-                <label className="mb-1 block text-[10px] font-black uppercase text-slate-500"><CalendarRange size={11} className="mr-1 inline" />Mes</label>
-                <input type="month" value={mes} onChange={(e) => setMes(e.target.value)} className="mb-3 w-full rounded-xl border border-slate-200 px-2.5 py-1.5 text-xs" data-copiar-de-mes />
-                <label className="mb-4 flex items-center gap-2 text-[11px] text-slate-600">
-                    <input type="checkbox" checked={soloVacias} onChange={(e) => setSoloVacias(e.target.checked)} />
-                    Solo celdas vacías (no pisa lo que ya está cargado)
-                </label>
-                {mismo && <p className="mb-2 text-[11px] font-bold text-rose-600">Elegí otro objetivo u otro mes.</p>}
-                <div className="flex justify-end gap-2">
-                    <button type="button" onClick={onCancelar} className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50">Cancelar</button>
-                    <button
-                        type="button"
-                        disabled={!objId || !y || !m || mismo || cargando}
-                        onClick={() => onConfirmar({ objectiveId: objId, objectiveName: elegido?.label || objId, year: y, month: m, soloVacias })}
-                        className="rounded-xl bg-indigo-600 px-3 py-1.5 text-xs font-black text-white shadow-sm hover:bg-indigo-700 disabled:border disabled:border-slate-200 disabled:bg-white disabled:text-slate-400"
-                        data-copiar-de-confirmar
-                    >
-                        {cargando ? 'Trayendo…' : 'Traer como borrador'}
-                    </button>
+                <div className="mb-2 flex items-center gap-2 rounded-xl border border-slate-200 px-2.5 py-1.5">
+                    <Search size={13} className="text-slate-400" />
+                    <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Código o nombre" className="w-full bg-transparent text-xs outline-none" data-novedad-buscar />
                 </div>
+                <ul className="mb-2 max-h-52 overflow-auto">
+                    {lista.map((t, i) => (
+                        <li key={`${t.code}-${t.label}`}>
+                            <button
+                                type="button"
+                                onClick={() => onElegir(t, motivo.trim())}
+                                className={`flex w-full items-baseline gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] ${i === idx ? 'bg-indigo-50 text-indigo-900' : 'hover:bg-slate-50'}`}
+                                data-novedad-tipo={t.code}
+                            >
+                                <span className="w-10 font-black">{t.code}</span>
+                                <span className="text-slate-600">{t.label}</span>
+                            </button>
+                        </li>
+                    ))}
+                    {lista.length === 0 && <li className="px-2 py-2 text-[11px] text-slate-400">Sin coincidencias.</li>}
+                </ul>
+                <input value={motivo} onChange={(e) => setMotivo(e.target.value)} placeholder="Motivo (opcional)" className="w-full rounded-xl border border-slate-200 px-2.5 py-1.5 text-xs" data-novedad-motivo />
             </div>
-        </div>
+        </div>,
+        document.body,
+    );
+}
+
+export function Cierre12Banner({ texto, onConfirmar, onCancelar }: { texto: string; onConfirmar: () => void; onCancelar: () => void }) {
+    if (typeof document === 'undefined') return null;
+    return createPortal(
+        <div className="fixed left-1/2 top-20 z-[90] w-[min(640px,calc(100vw-2rem))] -translate-x-1/2 rounded-2xl border border-indigo-200 bg-white px-4 py-3 shadow-lg no-print" data-cierre-12h>
+            <p className="whitespace-pre-line text-[12px] font-bold leading-snug text-slate-800" data-cierre-12h-texto>{texto}</p>
+            <p className="mt-1 text-[11px] text-slate-500">Enter confirma, Esc cancela</p>
+            <div className="mt-2 flex justify-end gap-2">
+                <button type="button" onClick={onCancelar} className="rounded-xl border border-slate-200 px-3 py-1 text-[11px] font-bold text-slate-600 hover:bg-slate-50">Cancelar</button>
+                <button type="button" onClick={onConfirmar} className="rounded-xl bg-indigo-600 px-3 py-1 text-[11px] font-black text-white shadow-sm hover:bg-indigo-700" data-cierre-12h-confirmar>Confirmar</button>
+            </div>
+        </div>,
+        document.body,
     );
 }
 

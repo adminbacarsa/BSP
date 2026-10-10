@@ -40,6 +40,12 @@ type Props = {
     onRehacer: () => void;
     onGuardar: () => void;
     onCursor?: (cur: CeldaRC | null) => void;
+    onMas?: (r: number, c: number, columna: boolean) => void;
+    onMenos?: (r: number, c: number) => void;
+    onMasDia?: (dateStr: string) => void;
+    onNovedad?: (celdas: CeldaRC[]) => void;
+    onConfirmar12?: () => void;
+    onCancelar12?: () => void;
 };
 
 type Caja = { left: number; top: number; width: number; height: number };
@@ -282,7 +288,12 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
     useEffect(() => {
         if (!activo) return;
         const onKey = (e: KeyboardEvent) => {
-            if (document.querySelector('[data-modo-rapido-ayuda], [data-pegar-excel]')) return;
+            if (document.querySelector('[data-modo-rapido-ayuda], [data-pegar-excel], [data-novedad-rapida]')) return;
+            if (document.querySelector('[data-cierre-12h]')) {
+                if (e.key === 'Enter') { e.preventDefault(); e.stopImmediatePropagation(); propsRef.current.onConfirmar12?.(); }
+                else if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); propsRef.current.onCancelar12?.(); }
+                return;
+            }
             const p = propsRef.current;
             const { cursor: cur, texto: t } = estado.current;
             const activeEl = document.activeElement;
@@ -298,6 +309,12 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
             const cortar = () => { e.preventDefault(); e.stopImmediatePropagation(); };
 
             if (mod && key === 's') { cortar(); if (t != null) confirmar('Enter', false); p.onGuardar(); return; }
+            const cob = (activeEl as HTMLElement | null)?.closest?.('[data-cobertura-dia]') as HTMLElement | null;
+            if (cob?.dataset.coberturaDia && (e.key === '+' || e.code === 'NumpadAdd' || (e.shiftKey && e.key === '='))) {
+                cortar();
+                p.onMasDia?.(cob.dataset.coberturaDia);
+                return;
+            }
             if (!cur) {
                 if (p.dims.filas > 0 && p.dims.cols > 0 && (e.key.startsWith('Arrow') || e.key === 'Home' || e.key === 'Enter' || e.key === 'Tab')) {
                     cortar();
@@ -361,6 +378,23 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
                 cortar();
                 setTexto(p.valorDe(cur.r, cur.c) || '');
                 setElegida(-1);
+                return;
+            }
+            const esMas = e.key === '+' || e.code === 'NumpadAdd' || (e.shiftKey && e.key === '=');
+            const esMenos = (e.key === '-' || e.code === 'NumpadSubtract') && !e.shiftKey;
+            if (!mod && !e.altKey && esMas) {
+                cortar();
+                p.onMas?.(cur.r, cur.c, e.shiftKey);
+                return;
+            }
+            if (!mod && !e.altKey && esMenos) {
+                cortar();
+                p.onMenos?.(cur.r, cur.c);
+                return;
+            }
+            if ((mod && key === 'l') || (!mod && e.key === '/')) {
+                cortar();
+                p.onNovedad?.(celdasActuales());
                 return;
             }
             const next = moverCursor(cur, e.key, { ctrl: mod, shift: e.shiftKey }, p.dims, (r, c) => !!p.valorDe(r, c));
@@ -443,7 +477,7 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
             {cajas.marcas.map((m, i) => (
                 <span
                     key={`${m.r}:${m.c}:${m.tipo}:${i}`}
-                    className={`absolute rounded-sm border-2 ${m.tipo === 'DESCANSO' ? 'border-amber-500' : m.tipo === 'TOPE' ? 'border-rose-500' : m.tipo === 'LICENCIA' ? 'border-fuchsia-500' : 'border-orange-500'}`}
+                    className={`absolute rounded-sm border-2 ${m.tipo === 'DESCANSO' ? 'border-amber-500' : m.tipo === 'TOPE' ? 'border-rose-500' : m.tipo === 'LICENCIA' ? 'border-fuchsia-500' : m.tipo === 'CIERRE' ? 'border-indigo-600 bg-indigo-500/10' : 'border-orange-500'}`}
                     style={{ left: m.left + 1, top: m.top + 1, width: m.width - 2, height: m.height - 2 }}
                     title={m.texto}
                     data-modo-rapido-marca={m.tipo}
