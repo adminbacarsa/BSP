@@ -15501,7 +15501,12 @@ function PlanificacionDesktop() {
                                     });
                                 }}
                             >
-                                {requiredPax > 0 ? `${closedPax}/${requiredPax}${extra > 0 ? ` +${extra}` : ''}` : (extra > 0 ? `+${extra}` : '-')}
+                                {requiredPax > 0 ? (
+                                    <span className="inline-flex flex-col items-center leading-none">
+                                        <span>{closedPax}/{requiredPax}</span>
+                                        {extra > 0 && <span className="mt-0.5 text-[8px] font-black text-amber-600" title={`${extra} turnos de más`}>+{extra}</span>}
+                                    </span>
+                                ) : (extra > 0 ? <span className="text-[9px] text-amber-600">+{extra}</span> : '-')}
                             </td>
                         );
                     }))}
@@ -15532,7 +15537,10 @@ function PlanificacionDesktop() {
 
     const coverageTooltipLayout = useMemo(() => {
         if (!coverageTooltip) return null;
-        const estH = 56 + coverageTooltip.gaps.length * 92;
+        const textoLectura = (coverageTooltip.lectura || '').length + (coverageTooltip.sinPuesto || []).join(', ').length;
+        const estH = 56 + coverageTooltip.gaps.length * 92
+            + (coverageTooltip.deMas ? 40 : 0)
+            + Math.ceil(textoLectura / 48) * 16;
         return clampPlanifFloatingPos(coverageTooltip.x, coverageTooltip.y, 320, estH);
     }, [coverageTooltip]);
 
@@ -15744,7 +15752,7 @@ function PlanificacionDesktop() {
                     onClick={(e) => e.stopPropagation()}
                     onMouseDown={(e) => e.stopPropagation()}
                 >
-                    <div className="bg-slate-900 text-white text-[10px] font-black px-3 py-2 rounded-lg shadow-sm flex flex-col gap-1.5 min-w-[240px] max-w-[420px]" data-puestos-sin-cerrar>
+                    <div className="bg-slate-900 text-white text-[10px] font-black px-3 py-2 rounded-lg shadow-sm flex flex-col gap-1.5 min-w-[240px] max-w-[420px] max-h-[calc(100dvh-24px)] overflow-y-auto" data-puestos-sin-cerrar>
                         <div className={`text-[9px] uppercase tracking-wide mb-0.5 ${coverageTooltip.deMas && coverageTooltip.gaps.length === 0 ? 'text-amber-300' : 'text-rose-300'}`}>
                             {coverageTooltip.gaps.length === 0 ? 'Puestos con de más' : 'Puestos sin cerrar'} · {coverageTooltip.dateStr.slice(8)}
                         </div>
