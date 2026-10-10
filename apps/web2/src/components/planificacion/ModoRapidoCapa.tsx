@@ -521,7 +521,7 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
                     />
                     {sugLugar && sugerencias.length > 0 && createPortal(
                         <ul
-                            className="fixed z-[12000] min-w-[180px] overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-lg"
+                            className="fixed z-[12000] min-w-[220px] max-w-[340px] overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-lg"
                             style={sugLugar.arriba ? { left: sugLugar.left, bottom: sugLugar.bottom } : { left: sugLugar.left, top: sugLugar.top }}
                             data-modo-rapido-sugerencias
                         >
@@ -531,9 +531,11 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
                                     onMouseDown={(e) => { e.preventDefault(); setElegida(i); requestAnimationFrame(() => confirmar('Enter', false)); }}
                                     className={`flex cursor-pointer items-center gap-2 px-2.5 py-1 text-[11px] ${i === elegida || (elegida < 0 && i === 0) ? 'bg-indigo-50 text-indigo-800' : 'text-slate-700 hover:bg-slate-50'}`}
                                 >
-                                    <span className="w-10 font-black">{s.code}</span>
-                                    {s.horario && <span className="font-mono text-[10px] text-slate-500">{s.horario}</span>}
-                                    {s.detalle && <span className="ml-auto truncate text-[9px] font-bold uppercase text-slate-400">{s.detalle}</span>}
+                                    <span className="min-w-[2.5rem] max-w-[8rem] shrink-0 truncate font-black" title={s.code}>{s.code}</span>
+                                    {s.horario && <span className="shrink-0 font-mono text-[10px] text-slate-500">{s.horario}</span>}
+                                    {s.detalle && s.detalle.replace(/\s+/g, '').toUpperCase() !== s.code.toUpperCase() && (
+                                        <span className="ml-auto min-w-0 truncate text-[9px] font-bold uppercase text-slate-400" title={s.detalle}>{s.detalle}</span>
+                                    )}
                                 </li>
                             ))}
                         </ul>,
