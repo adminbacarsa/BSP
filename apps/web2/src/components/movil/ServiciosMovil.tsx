@@ -221,7 +221,7 @@ export function ServiciosMovil(props: Props) {
         {propuesta && (
           <div data-servicios-meses={propuesta.mode}>
             <p className="text-[13px] text-slate-700">
-              Último vigente hasta <b className="font-semibold">{formatDmy(String(propuesta.last.endDate || ''))}</b> · {propuesta.mode === 'agrupados' ? 'se extiende el mismo servicio' : 'un servicio por mes, misma estructura'}.
+              Último vigente hasta <b className="font-semibold">{formatDmy(String(propuesta.last.endDate || ''))}</b> · un servicio por mes, misma estructura.
             </p>
             <div className="mt-3 flex gap-1.5">
               {MESES_OPCIONES.map((n) => (

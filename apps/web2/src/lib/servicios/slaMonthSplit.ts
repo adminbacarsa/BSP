@@ -278,3 +278,133 @@ export function buildSlaDraftsForSegments<T extends { startDate: string; endDate
     ...(segments.length > 1 && seriesId ? { slaSeriesId: seriesId } : {}),
   }));
 }
+
+/** Un doc que cruza más de un mes calendario. Un mes solo no se separa. */
+export function vigenciaAbarcaVariosMeses(startDate?: string, endDate?: string): boolean {
+  return splitRangeByCalendarMonth(String(startDate || ''), String(endDate || '')).length > 1;
+}
+
+export type SepararOmitido = { monthKey: string; label: string; motivo: string };
+
+export type SepararPorMesesPlan = {
+  error: string | null;
+  seriesId: string | null;
+  conservar: SlaMonthSegment | null;
+  crear: SlaMonthSegment[];
+  omitidos: SepararOmitido[];
+  summary: string;
+};
+
+const SEPARAR_VACIO: SepararPorMesesPlan = {
+  error: null,
+  seriesId: null,
+  conservar: null,
+  crear: [],
+  omitidos: [],
+  summary: '',
+};
+
+/**
+ * Parte un SLA agrupado: el doc original se queda con el primer mes y el resto
+ * son docs nuevos. No pisa un mes que ya tenga SLA (cerrado o no) del mismo objetivo.
+ * Si no queda ningún mes para crear, no se recorta el original.
+ */
+export function planSepararPorMeses(opts: {
+  sla: SlaChainRow & { startDate?: string; endDate?: string; clientId?: string; objectiveId?: string };
+  existing: Array<SlaRangeLike & { closed?: boolean; status?: string }>;
+}): SepararPorMesesPlan {
+  const sla = opts.sla;
+  if (sla.closed === true) {
+    return { ...SEPARAR_VACIO, error: 'Está cerrado. Reabrilo para separarlo por meses.' };
+  }
+  if (!isOpenSla(sla)) {
+    return { ...SEPARAR_VACIO, error: 'El servicio no está activo.' };
+  }
+  const segments = splitRangeByCalendarMonth(String(sla.startDate || ''), String(sla.endDate || ''));
+  if (segments.length <= 1) {
+    return { ...SEPARAR_VACIO, error: 'Ya es de un solo mes.' };
+  }
+  const conservar = segments[0];
+  const clientId = String(sla.clientId || '');
+  const objectiveId = String(sla.objectiveId || '');
+  const crear: SlaMonthSegment[] = [];
+  const omitidos: SepararOmitido[] = [];
+  for (const seg of segments.slice(1)) {
+    const hit = opts.existing.find((row) => {
+      if (!row.id || row.id === sla.id) return false;
+      if (String(row.status || 'active').toLowerCase() === 'inactive') return false;
+      if (String(row.clientId || '') !== clientId || String(row.objectiveId || '') !== objectiveId) return false;
+      const a = String(row.startDate || '').slice(0, 10);
+      const b = String(row.endDate || '').slice(0, 10);
+      if (!a || !b) return false;
+      return a <= seg.endDate && b >= seg.startDate;
+    });
+    if (hit) {
+      omitidos.push({
+        monthKey: seg.monthKey,
+        label: seg.label,
+        motivo: hit.closed === true ? 'ese mes ya tiene un servicio cerrado' : 'ya hay un servicio en ese mes',
+      });
+      continue;
+    }
+    crear.push(seg);
+  }
+  const seriesId = String(sla.slaSeriesId || '').trim() || null;
+  if (crear.length === 0) {
+    return {
+      error: 'No queda ningún mes para crear: los demás ya tienen servicio.',
+      seriesId,
+      conservar,
+      crear,
+      omitidos,
+      summary: 'No se separa: no queda ningún mes libre.',
+    };
+  }
+  const omitTxt = omitidos.length
+    ? ` No se pisan: ${omitidos.map((o) => `${o.label} (${o.motivo})`).join(', ')}.`
+    : '';
+  return {
+    error: null,
+    seriesId,
+    conservar,
+    crear,
+    omitidos,
+    summary: `Se van a crear ${crear.length} servicios: ${crear.map((s) => s.label).join(', ')}. Este queda en ${conservar.label}.${omitTxt}`,
+  };
+}
+
+/** Puestos, facturación, encargado y renovación. No las fechas ni el cierre. */
+export const CAMPOS_APLICAR_SERIE = [
+  'positions',
+  'billingMode',
+  'billingFixedMonthlyHours',
+  'billingFixedMonthlyAmount',
+  'billingPurchaseOrderId',
+  'encargadoEmployeeId',
+  'encargadoEmployeeName',
+  'autoRenewMonthly',
+] as const;
+
+export function parcheAplicarASiguientes(source: Record<string, unknown>): Record<string, unknown> {
+  const patch: Record<string, unknown> = {};
+  for (const key of CAMPOS_APLICAR_SERIE) {
+    if (source[key] !== undefined) patch[key] = source[key];
+  }
+  return patch;
+}
+
+/** Meses posteriores de la misma serie, abiertos. El anterior y los cerrados quedan afuera. */
+export function mesesSiguientesDeSerie<T extends SlaChainRow>(services: readonly T[], source: T): T[] {
+  const series = String(source.slaSeriesId || '').trim();
+  const end = String(source.endDate || '').slice(0, 10);
+  if (!series || !end) return [];
+  return services
+    .filter((s) => {
+      if (!s.id || s.id === source.id) return false;
+      if (String(s.slaSeriesId || '') !== series) return false;
+      if (String(s.endDate || '').slice(0, 10) <= end) return false;
+      return isOpenSla(s);
+    })
+    .slice()
+    .sort((a, b) => String(a.startDate || '').localeCompare(String(b.startDate || '')));
+}

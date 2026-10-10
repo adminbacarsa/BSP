@@ -30,10 +30,10 @@ export interface AppendMonthsPropuesta {
   error: string | null;
 }
 
-/** Igual que `openAppendMonths` del escritorio: último de la cadena, modo según `slaSeriesId`, fin sugerido. */
+/** Igual que `openAppendMonths` del escritorio: último de la cadena, siempre un doc por mes. */
 export function proponerAgregarMeses(services: readonly SlaRow[], srv: SlaRow): AppendMonthsPropuesta {
   const last = (lastOfChain(services as SlaRow[], srv) || srv) as SlaRow;
-  const mode: SlaMonthsMode = last.slaSeriesId ? 'individuales' : 'agrupados';
+  const mode: SlaMonthsMode = 'individuales';
   const suggestedEnd = lastDayOfMonth(firstOfMonthAfter(String(last.endDate || '')));
   const error = (last as { closed?: boolean }).closed === true
     ? 'El último servicio de la cadena está cerrado. Reabrilo para agregar meses.'

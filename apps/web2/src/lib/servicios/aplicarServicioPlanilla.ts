@@ -5,7 +5,7 @@
 import { getAuth } from 'firebase/auth';
 import { addDoc, collection, doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { overlappingSegments, slaSegmentsForMode, validateSlaRange } from '@/lib/servicios/slaMonthSplit';
+import { newSlaSeriesId, overlappingSegments, slaSegmentsForMode, validateSlaRange } from '@/lib/servicios/slaMonthSplit';
 import type { EquivalenciaCodigo } from '@/lib/planificacion/equivalenciaCodigo';
 import {
   horasMesDeFranjas,
@@ -51,7 +51,7 @@ export async function aplicarServicioPlanilla(opts: {
   const { startDate, endDate } = rangoMes(opts.year, opts.month);
   const rangeError = validateSlaRange(startDate, endDate);
   if (rangeError) throw new Error(rangeError);
-  const segments = slaSegmentsForMode('agrupados', startDate, endDate);
+  const segments = slaSegmentsForMode('individuales', startDate, endDate);
   const horas = horasMesDeFranjas(opts.franjas, opts.year, opts.month);
 
   let id = opts.servicioId || '';
@@ -73,6 +73,7 @@ export async function aplicarServicioPlanilla(opts: {
       totalMonthlyHours: horas,
       status: 'active' as const,
       empresaId: opts.empresaId,
+      slaSeriesId: newSlaSeriesId(),
     };
     const ref = await slaService.add(data as ServiceSLA, opts.empresaId);
     id = ref.id;

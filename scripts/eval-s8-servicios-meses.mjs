@@ -10,8 +10,11 @@ import {
   buildSlaDraftsForSegments,
   lastForwardOfObjective,
   lastOfChain,
+  mesesSiguientesDeSerie,
   overlappingSegments,
+  parcheAplicarASiguientes,
   planAppendMonthsForward,
+  planSepararPorMeses,
   slaSegmentsForMode,
   splitRangeByCalendarMonth,
   summarizeSlaSplit,
@@ -106,6 +109,47 @@ check('agrupado sin serie es él mismo', lastForwardOfObjective([agrupado, caden
 const addGrp = planAppendMonthsForward({ mode: 'agrupados', lastEndDate: '2026-12-31', newEndDate: '2027-03-10' });
 check('agrupado extiende hasta el 10/03', addGrp.extendTo === '2027-03-10' && addGrp.segments.length === 1 && addGrp.segments[0].startDate === '2027-01-01', JSON.stringify(addGrp));
 check('el tramo nuevo no pisa el doc agrupado', overlappingSegments(addGrp.segments, [agrupado], { clientId: 'c1', objectiveId: 'o1' }, 'g').length === 0);
+
+const agrupadoLargo = {
+  id: 'g2', clientId: 'c1', objectiveId: 'o1', startDate: '2026-11-01', endDate: '2027-03-31', status: 'active', slaSeriesId: 'serie-g2',
+};
+const sep = planSepararPorMeses({ sla: agrupadoLargo, existing: [] });
+check('separar deja el original en el primer mes', sep.conservar?.startDate === '2026-11-01' && sep.conservar?.endDate === '2026-11-30' && sep.error == null);
+check('separar crea un doc por mes posterior', sep.crear.length === 4 && sep.crear.map((s) => s.monthKey).join(',') === '2026-12,2027-01,2027-02,2027-03', sep.summary);
+check('la vista previa dice cuántos crea', sep.summary.startsWith('Se van a crear 4 servicios:') && sep.summary.includes('dic') && sep.summary.includes('mar'));
+check('reusa la serie', sep.seriesId === 'serie-g2');
+
+const conEnero = planSepararPorMeses({
+  sla: agrupadoLargo,
+  existing: [{ id: 'ene', clientId: 'c1', objectiveId: 'o1', startDate: '2027-01-01', endDate: '2027-01-31', status: 'active' }],
+});
+check('no pisa el mes que ya tiene SLA', !conEnero.crear.some((s) => s.monthKey === '2027-01') && conEnero.omitidos.some((o) => o.monthKey === '2027-01') && conEnero.crear.length === 3);
+
+const eneroCerrado = planSepararPorMeses({
+  sla: agrupadoLargo,
+  existing: [{ id: 'ene', clientId: 'c1', objectiveId: 'o1', startDate: '2027-01-01', endDate: '2027-01-31', status: 'active', closed: true }],
+});
+check('respeta el mes cerrado', eneroCerrado.omitidos.some((o) => o.monthKey === '2027-01' && o.motivo.includes('cerrado')));
+
+const cerrado = planSepararPorMeses({ sla: { ...agrupadoLargo, closed: true }, existing: [] });
+check('un servicio cerrado no se separa', cerrado.error != null && cerrado.crear.length === 0);
+
+const todoPisado = planSepararPorMeses({
+  sla: { id: 'nov', clientId: 'c1', objectiveId: 'o1', startDate: '2026-11-01', endDate: '2026-12-31', status: 'active' },
+  existing: [{ id: 'dic', clientId: 'c1', objectiveId: 'o1', startDate: '2026-12-01', endDate: '2026-12-31', status: 'active' }],
+});
+check('si no queda mes libre no recorta', todoPisado.error != null && todoPisado.crear.length === 0);
+
+const serie = [
+  { id: 'sep', slaSeriesId: 's1', startDate: '2026-09-01', endDate: '2026-09-30', status: 'active' },
+  { id: 'oct', slaSeriesId: 's1', startDate: '2026-10-01', endDate: '2026-10-31', status: 'active', positions: [{ name: 'Puesto 1' }] },
+  { id: 'nov', slaSeriesId: 's1', startDate: '2026-11-01', endDate: '2026-11-30', status: 'active' },
+  { id: 'dic', slaSeriesId: 's1', startDate: '2026-12-01', endDate: '2026-12-31', status: 'active', closed: true },
+];
+const siguientes = mesesSiguientesDeSerie(serie, serie[1]);
+check('aplicar a siguientes solo los abiertos posteriores', siguientes.map((s) => s.id).join(',') === 'nov');
+const parche = parcheAplicarASiguientes({ positions: [{ name: 'Puesto 2' }], startDate: '2026-10-01', endDate: '2026-10-31', billingMode: 'EJECUTADO' });
+check('el parche no lleva fechas', parche.positions?.[0]?.name === 'Puesto 2' && parche.billingMode === 'EJECUTADO' && parche.startDate == null && parche.endDate == null);
 
 if (failed) {
   console.error(`S8_SERVICIOS_MESES_FAIL ${failed}`);

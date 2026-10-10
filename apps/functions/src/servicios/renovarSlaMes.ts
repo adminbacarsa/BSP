@@ -1,6 +1,7 @@
 /**
  * Al publicar el cronograma del último mes de un SLA con renovación automática,
- * crea (o extiende) solo el mes siguiente. Despublicar no borra. Idempotente.
+ * crea el doc del mes siguiente (y le pone slaSeriesId al origen si no tenía).
+ * Despublicar no borra. Idempotente.
  */
 import * as admin from 'firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
@@ -131,22 +132,11 @@ export async function renovarSlaAlPublicar(
   if (clash) return { action: 'skip', reason: 'ya_existe' };
 
   const nombre = String(data.objectiveName || data.clientName || objectiveId);
-  const grouped = !String(data.slaSeriesId || '').trim();
-  if (grouped) {
-    await last.ref.update({ endDate: next.end });
-    await registrar(db, {
-      empresaId: String(data.empresaId || empresaId),
-      objectiveId,
-      objectiveName: nombre,
-      clientId,
-      slaId: last.id,
-      description: `Se creó el servicio de ${next.nombre} para ${nombre}`,
-      extended: true,
-    });
-    return { action: 'extended', slaId: last.id, reason: next.key };
+  const seriesId = String(data.slaSeriesId || '').trim()
+    || `sla_series_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  if (!String(data.slaSeriesId || '').trim()) {
+    await last.ref.update({ slaSeriesId: seriesId });
   }
-
-  const seriesId = String(data.slaSeriesId);
   const copy: Record<string, unknown> = {
     clientId: data.clientId,
     clientName: data.clientName || '',

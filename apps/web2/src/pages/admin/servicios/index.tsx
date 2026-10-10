@@ -53,13 +53,19 @@ import {
   lastDayOfMonth,
   lastForwardOfObjective,
   lastOfChain,
+  mesesSiguientesDeSerie,
+  monthLabel,
   newSlaSeriesId,
   overlappingSegments,
+  parcheAplicarASiguientes,
   planAppendMonthsForward,
+  planSepararPorMeses,
   slaSegmentsForMode,
   splitRangeByCalendarMonth,
   summarizeSlaSplit,
   validateSlaRange,
+  vigenciaAbarcaVariosMeses,
+  type SepararPorMesesPlan,
   type SlaMonthsMode,
 } from '@/lib/servicios/slaMonthSplit';
 import { cerrarContratoSla, reabrirContratoSla } from '@/lib/servicios/contratoCierreClient';
@@ -310,12 +316,16 @@ export default function ServiciosSLAPage() {
 
   const [isEditing, setIsEditing] = useState(false);
   const [externalChange, setExternalChange] = useState(false);
-  const [slaMonthsMode, setSlaMonthsMode] = useState<SlaMonthsMode>('agrupados');
+  const [slaMonthsMode, setSlaMonthsMode] = useState<SlaMonthsMode>('individuales');
   const [appendingMonths, setAppendingMonths] = useState(false);
+  const [aplicarASiguientes, setAplicarASiguientes] = useState(false);
+  const [separar, setSeparar] = useState<Array<{ sla: ServiceSLA; plan: SepararPorMesesPlan }> | null>(null);
+  const [separando, setSeparando] = useState(false);
   useEffect(() => {
     if (view !== 'form') {
-      setSlaMonthsMode('agrupados');
+      setSlaMonthsMode('individuales');
       setAppendingMonths(false);
+      setAplicarASiguientes(false);
     }
   }, [view]);
 
@@ -1439,7 +1449,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
     if ((last as { closed?: boolean }).closed === true) {
       return addToast('El último servicio de la cadena está cerrado. Reabrilo para agregar meses.', 'error');
     }
-    const mode: SlaMonthsMode = last.slaSeriesId ? 'individuales' : 'agrupados';
+    const mode: SlaMonthsMode = 'individuales';
     const suggestedEnd = lastDayOfMonth(firstOfMonthAfter(last.endDate));
     const client = clients.find(c => c.id === last.clientId);
     const clientObjectives = client?.objectives || client?.objetivos || [];
@@ -1588,6 +1598,14 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
       if (!window.confirm('La vigencia que elegiste ya terminó. El servicio se va a crear cerrado.\n\n¿Continuar?')) return;
     }
 
+    const siguientesSerie = isEditing && !splitting && aplicarASiguientes && form.id
+      ? mesesSiguientesDeSerie(services, { ...form, id: form.id })
+      : [];
+    if (siguientesSerie.length > 0) {
+      const nombres = siguientesSerie.map((s) => monthLabel(String(s.startDate || '').slice(0, 7))).join(', ');
+      if (!window.confirm(`Se copian puestos, facturación y encargado a los meses siguientes abiertos: ${nombres}.\n\nNo se cambian sus fechas ni los cerrados.\n\n¿Confirmar?`)) return;
+    }
+
     const turnosBelong = (data: Record<string, unknown>) =>
       !scopeEmpresa || belongsToEmpresa(data, empresaId, true);
 
@@ -1705,11 +1723,26 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
             `${isEditing ? 'Dividió' : 'Creó'} contrato por meses (${segments.map((s) => s.label).join(', ')}): ${form.clientName} - ${form.objectiveName}`,
           );
       } else if (isEditing && form.id) {
+          const siguientes = siguientesSerie;
           savedSelfRef.current = true;
           await slaService.update(form.id, dataToSave, { empresaId, migracionCompleta });
-          // Actualización optimista: no esperar al snapshot
-          setServices(prev => prev.map(s => s.id === form.id ? { ...dataToSave, id: form.id } : s));
-          await registrarAuditoria('UPDATE_CONTRACT', `Editó contrato: ${form.clientName} - ${form.objectiveName}`);
+          const seriePatch = siguientes.length > 0 ? parcheAplicarASiguientes(dataToSave as Record<string, unknown>) : null;
+          for (const row of siguientes) {
+            if (!row.id) continue;
+            await slaService.update(row.id, seriePatch || {}, { empresaId, migracionCompleta });
+          }
+          const siguientesIds = new Set(siguientes.map((s) => s.id));
+          setServices(prev => prev.map(s => {
+            if (s.id === form.id) return { ...dataToSave, id: form.id };
+            if (seriePatch && siguientesIds.has(s.id)) return { ...s, ...seriePatch };
+            return s;
+          }));
+          await registrarAuditoria(
+            'UPDATE_CONTRACT',
+            siguientes.length > 0
+              ? `Editó contrato y lo aplicó a ${siguientes.length} meses siguientes: ${form.clientName} - ${form.objectiveName}`
+              : `Editó contrato: ${form.clientName} - ${form.objectiveName}`,
+          );
       } else {
           delete dataToSave.id; // garantizar que no va id undefined al crear
           const ref = await slaService.add(dataToSave, empresaId);
@@ -1766,6 +1799,9 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
       ? clientObjectives
       : [...clientObjectives, { id: srv.objectiveId, name: srv.objectiveName }];
     setAvailableObjectives(objectives);
+    const varios = vigenciaAbarcaVariosMeses(srv.startDate, srv.endDate);
+    setSlaMonthsMode(varios && !srv.slaSeriesId ? 'agrupados' : 'individuales');
+    setAplicarASiguientes(false);
     setIsEditing(true); setView('form');
   };
 
@@ -1871,8 +1907,77 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
     }
   };
 
+  const abrirSeparar = (rows: ServiceSLA[]) => {
+    const items = rows
+      .filter((srv) => !!srv.id && vigenciaAbarcaVariosMeses(srv.startDate, srv.endDate) && !(srv as { closed?: boolean }).closed)
+      .map((sla) => ({ sla, plan: planSepararPorMeses({ sla, existing: services }) }));
+    if (!items.some((item) => !item.plan.error)) {
+      addToast(items[0]?.plan.error || 'No hay servicios agrupados para separar.', 'error');
+      return;
+    }
+    setSeparar(items);
+  };
+
+  const confirmarSeparar = async () => {
+    if (!separar?.length) return;
+    const listos = separar.filter((item) => item.sla.id && item.plan.conservar && !item.plan.error && item.plan.crear.length > 0);
+    if (!listos.length) {
+      addToast('No queda ningún mes para crear.', 'error');
+      return;
+    }
+    setSeparando(true);
+    try {
+      const today = localTodayYmd();
+      const created: Array<ServiceSLA & { id: string }> = [];
+      const patched: Array<{ id: string; startDate: string; endDate: string; slaSeriesId: string }> = [];
+      for (const { sla, plan } of listos) {
+        const seriesId = plan.seriesId || newSlaSeriesId();
+        const conservar = plan.conservar!;
+        const base = stripSlaLifecycle(JSON.parse(JSON.stringify(sla))) as ServiceSLA;
+        savedSelfRef.current = true;
+        await slaService.update(sla.id!, {
+          startDate: conservar.startDate,
+          endDate: conservar.endDate,
+          slaSeriesId: seriesId,
+        }, { empresaId, migracionCompleta });
+        patched.push({ id: sla.id!, startDate: conservar.startDate, endDate: conservar.endDate, slaSeriesId: seriesId });
+        const drafts = buildSlaDraftsForSegments(
+          { ...base, status: 'active', slaSeriesId: seriesId, startDate: conservar.startDate, endDate: conservar.endDate },
+          plan.crear,
+          seriesId,
+        ).map((d) => {
+          const bornClosed = newSlaBornClosed(String(d.endDate || ''), today);
+          return { ...d, slaSeriesId: seriesId, closed: bornClosed, ...(bornClosed ? { closedReason: 'VENCIDO' } : {}) };
+        });
+        for (const draft of drafts) {
+          const row = { ...draft } as ServiceSLA & { id?: string };
+          delete row.id;
+          const ref = await slaService.add(row, empresaId);
+          created.push({ ...row, id: ref.id });
+        }
+        await registrarAuditoria(
+          'UPDATE_CONTRACT',
+          `Separó por meses (${plan.crear.map((s) => s.label).join(', ')}): ${sla.clientName} - ${sla.objectiveName}`,
+        );
+      }
+      const patchById = new Map(patched.map((p) => [p.id, p]));
+      setServices((prev) => [
+        ...prev.map((s) => (s.id && patchById.has(s.id) ? { ...s, ...patchById.get(s.id) } : s)),
+        ...created,
+      ]);
+      addToast(`Se crearon ${created.length} servicios.`, 'success');
+      setSeparar(null);
+    } catch (e: unknown) {
+      console.error(e);
+      addToast(e instanceof TenantIsolationError ? e.message : 'No se pudieron separar los meses', 'error');
+    } finally {
+      setSeparando(false);
+    }
+  };
+
   const openNew = () => {
     setAppendingMonths(false);
+    setSlaMonthsMode('individuales');
     const { startDate, endDate } = defaultNewSlaDates(new Date(), { year: kpiYear, monthIndex0: kpiMonth });
     setForm({
         clientId: '', clientName: '', objectiveId: '', objectiveName: '',
@@ -2292,6 +2397,39 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
           }}
         />
       )}
+      {separar && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/40 p-4" data-separar-preview>
+          <div className="w-full max-w-lg rounded-3xl bg-white shadow-lg border border-slate-200 p-6 space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-black uppercase text-slate-800">Separar por meses</h2>
+                <p className="text-[11px] font-bold text-slate-500 mt-1">El servicio original queda con el primer mes. Cada mes siguiente es un documento propio, con la misma estructura.</p>
+              </div>
+              <button type="button" onClick={() => !separando && setSeparar(null)} className="p-2 rounded-xl text-slate-400 hover:bg-slate-100"><X size={16}/></button>
+            </div>
+            <div className="max-h-72 overflow-y-auto space-y-2">
+              {separar.map((item) => (
+                <div key={item.sla.id} className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2">
+                  <p className="text-[11px] font-black text-slate-700">{item.sla.clientName} · {item.sla.objectiveName}</p>
+                  <p className={`text-[11px] font-bold mt-0.5 ${item.plan.error ? 'text-rose-600' : 'text-slate-600'}`}>{item.plan.error || item.plan.summary}</p>
+                </div>
+              ))}
+            </div>
+            <div className="flex justify-end gap-2">
+              <button type="button" disabled={separando} onClick={() => setSeparar(null)} className="px-4 py-2 rounded-xl border border-slate-200 text-[11px] font-black uppercase text-slate-500 hover:bg-slate-50">Cancelar</button>
+              <button
+                type="button"
+                data-separar-confirmar
+                disabled={separando || !separar.some((item) => !item.plan.error)}
+                onClick={() => { void confirmarSeparar(); }}
+                className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-[11px] font-black uppercase shadow-sm hover:bg-indigo-700 disabled:opacity-40"
+              >
+                {separando ? 'Separando…' : 'Confirmar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {view === 'list' && (
         <div className="p-4 md:p-6 space-y-6">
           {/* Header */}
@@ -2320,6 +2458,16 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                 className="bg-white hover:bg-slate-50 transition-colors text-slate-700 border border-slate-200 px-4 py-2.5 rounded-xl font-black text-xs uppercase shadow-sm flex gap-2 items-center"
               >
                 <FileSpreadsheet size={14}/> Desde planilla
+              </button>
+              )}
+              {isSuperAdmin && mainTab === 'sla' && services.some((srv) => vigenciaAbarcaVariosMeses(srv.startDate, srv.endDate) && !(srv as { closed?: boolean }).closed && isSlaContractActive(srv.status)) && (
+              <button
+                type="button"
+                data-separar-masivo
+                onClick={() => abrirSeparar(services)}
+                className="bg-white hover:bg-slate-50 transition-colors text-slate-700 border border-slate-200 px-4 py-2.5 rounded-xl font-black text-xs uppercase shadow-sm flex gap-2 items-center"
+              >
+                <Layers size={14}/> Separar por meses
               </button>
               )}
               {accionesAltaVisiblesConFiltroAnterior(canCreateService).nuevoServicio && mainTab === 'sla' && (
@@ -2669,6 +2817,11 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                       <Copy size={11}/>
                                     </button>
                                   )}
+                                  {canUpdateService && !isClosedRow && vigenciaAbarcaVariosMeses(currentSrv.startDate, currentSrv.endDate) && (
+                                  <button type="button" data-separar-meses={currentSrv.id} onClick={() => abrirSeparar([currentSrv])} title="Separar por meses" className="px-1.5 py-1 rounded-lg bg-white text-indigo-700 border border-indigo-200 text-[8px] font-black uppercase hover:bg-indigo-50 transition-colors">
+                                    Separar
+                                  </button>
+                                  )}
                                   {canUpdateService && (
                                   <button onClick={() => handleEdit(currentSrv)} title={isClosedRow ? 'Ver contrato (cerrado)' : 'Editar'} className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors">
                                     <Edit2 size={11}/>
@@ -2855,6 +3008,11 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                     })()}
                                   </div>
                                   <div className="flex gap-1 shrink-0">
+                                    {canUpdateService && !(srv as { closed?: boolean }).closed && vigenciaAbarcaVariosMeses(srv.startDate, srv.endDate) && (
+                                    <button type="button" data-separar-meses={srv.id} onClick={() => abrirSeparar([srv])} title="Separar por meses" className="px-1.5 py-1 rounded-lg bg-white text-indigo-700 border border-indigo-200 text-[8px] font-black uppercase hover:bg-indigo-50 transition-colors">
+                                      Separar
+                                    </button>
+                                    )}
                                     {canUpdateService && !(srv as { closed?: boolean }).closed && lastOfChain(group.services, srv)?.id === srv.id && (
                                     <button type="button" onClick={() => openAppendMonths(srv)} title="Agregar meses hacia adelante" className="px-1.5 py-1 rounded-lg bg-indigo-600 text-white text-[8px] font-black uppercase hover:bg-indigo-700 transition-colors">
                                       + meses
@@ -3396,6 +3554,22 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                      </div>
                    );
                  })()}
+                 {isEditing && !appendingMonths && !isClosedContract && mesesSiguientesDeSerie(services, form).length > 0 && splitRangeByCalendarMonth(form.startDate, form.endDate).length <= 1 && (
+                   <label data-aplicar-siguientes className="flex items-start gap-2 rounded-2xl border border-indigo-100 dark:border-indigo-900/40 bg-indigo-50/40 dark:bg-indigo-950/20 px-3 py-2">
+                     <input
+                       type="checkbox"
+                       className="mt-0.5"
+                       checked={aplicarASiguientes}
+                       onChange={(e) => setAplicarASiguientes(e.target.checked)}
+                     />
+                     <span>
+                       <span className="block text-[10px] font-black uppercase text-slate-700 dark:text-slate-200">Aplicar a los meses siguientes de la serie</span>
+                       <span className="block text-[10px] font-bold text-slate-500">
+                         Copia puestos, facturación y encargado a {mesesSiguientesDeSerie(services, form).map((s) => monthLabel(String(s.startDate || '').slice(0, 7))).join(', ')}. No cambia sus fechas ni los cerrados.
+                       </span>
+                     </span>
+                   </label>
+                 )}
 
                  <div className="p-4 rounded-2xl border border-indigo-100 dark:border-indigo-900/40 bg-indigo-50/40 dark:bg-indigo-950/20 space-y-3">
                    <p className="text-[10px] font-black uppercase text-indigo-600 tracking-widest">Facturación prefactura</p>
