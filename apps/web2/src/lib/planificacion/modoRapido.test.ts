@@ -9,6 +9,7 @@ import {
     descansoEntre,
     deshacer,
     detectarCiclo,
+    codigoAlConfirmar,
     horarioDeCodigo,
     matrizATsv,
     moverCursor,
@@ -137,6 +138,15 @@ describe('modo rápido · deshacer y rehacer', () => {
 });
 
 describe('modo rápido · códigos y horario', () => {
+    it('E es Enfermedad y no se completa a EV', () => {
+        const ops = [{ code: 'EV' }, { code: 'EN' }, { code: 'E' }, { code: 'M' }];
+        assert.equal(codigoAlConfirmar('E', ops), 'E');
+        assert.equal(codigoAlConfirmar('e', [{ code: 'EV' }]), 'E');
+        assert.equal(codigoAlConfirmar('E', ops, 0), 'E');
+        const conocidos = new Set(['M', 'T', 'N', 'E', 'EV', 'V', 'F']);
+        assert.equal(normalizarCodigoExcel('E', conocidos).code, 'E');
+        assert.equal(normalizarCodigoExcel('EV', conocidos).code, 'EV');
+    });
     it('autocompletar: exacto primero, después por prefijo y sin repetir', () => {
         const ops = [{ code: 'N12' }, { code: 'N' }, { code: 'M' }, { code: 'N' }, { code: 'NX' }];
         assert.deepEqual(sugerirCodigos('n', ops).map((o) => o.code), ['N', 'N12', 'NX']);

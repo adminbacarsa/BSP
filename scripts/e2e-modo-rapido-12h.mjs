@@ -39,32 +39,45 @@ await click(`document.querySelector('[data-modo-rapido-toggle]')`);
 await waitFor(`document.querySelector('[data-modo-rapido-capa]')`, 8000, 'capa del modo rápido');
 await sleep(500);
 
-const hueco = await evaluate(`(() => {
-  const celdas = [...document.querySelectorAll('td[data-cobertura-dia]')];
-  const abierta = celdas.find((td, col) => {
-    const m = (td.textContent || '').trim().match(/^(\\d+)\\/(\\d+)$/);
-    if (!m || Number(m[1]) >= Number(m[2])) return false;
-    const codigos = [...document.querySelectorAll('td[data-rc]')].filter((c) => (c.dataset.rc || '').endsWith(':' + col)).map((c) => (c.innerText || '').trim()).filter(Boolean);
-    return codigos.some((t) => /\\b(M|T|N|D12|N12)\\b/.test(t));
-  });
-  if (!abierta) return null;
-  abierta.focus();
-  return { dia: abierta.dataset.coberturaDia, antes: abierta.textContent.trim() };
-})()`);
-console.log('hueco', hueco);
-if (!hueco) fail('no hay un día con puestos sin cerrar');
-
 async function mas() {
   await send('Input.dispatchKeyEvent', { type: 'keyDown', key: '+', code: 'NumpadAdd', windowsVirtualKeyCode: 107, text: '+' });
   await send('Input.dispatchKeyEvent', { type: 'keyUp', key: '+', code: 'NumpadAdd', windowsVirtualKeyCode: 107 });
 }
-await mas();
-await sleep(600);
-const propuesta = await evaluate(`document.querySelector('[data-cierre-12h-texto]')?.textContent || ''`);
-const aviso = await evaluate(`[...document.querySelectorAll('[data-sonner-toast], li[data-sonner-toast]')].map((n) => n.innerText).join(' | ')`);
-console.log('propuesta', propuesta, 'toast', aviso);
-if (!propuesta.includes('Cubre la')) fail('la tecla + no propuso el cierre de 12 h');
-await shot('12h-propuesta');
+async function esc() {
+  await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+}
+const dias = await evaluate(`(() => {
+  const celdas = [...document.querySelectorAll('td[data-cobertura-dia]')];
+  return celdas.map((td, col) => {
+    const m = (td.textContent || '').trim().match(/^(\\d+)\\/(\\d+)$/);
+    if (!m || Number(m[1]) >= Number(m[2])) return null;
+    const codigos = [...document.querySelectorAll('td[data-rc]')].filter((c) => (c.dataset.rc || '').endsWith(':' + col)).map((c) => (c.innerText || '').trim()).filter(Boolean);
+    if (!codigos.some((t) => /\\b(M|T|N|D12|N12)\\b/.test(t))) return null;
+    return td.dataset.coberturaDia;
+  }).filter(Boolean);
+})()`);
+console.log('días abiertos', dias);
+let hueco = null;
+let propuesta = '';
+for (const dia of dias || []) {
+  await evaluate(`document.querySelector('td[data-cobertura-dia="${dia}"]')?.focus()`);
+  await sleep(150);
+  await mas();
+  await sleep(500);
+  propuesta = await evaluate(`document.querySelector('[data-cierre-12h-texto]')?.textContent || ''`);
+  const toast = await evaluate(`[...document.querySelectorAll('[data-sonner-toast], li[data-sonner-toast]')].map((n) => n.innerText).join(' | ')`);
+  console.log(dia, propuesta || toast);
+  const antes = await evaluate(`document.querySelector('td[data-cobertura-dia="${dia}"]')?.textContent?.trim() || ''`);
+  if (propuesta.includes(' + ') && !propuesta.includes('No hay quién')) {
+    hueco = { dia, antes };
+    await shot('12h-propuesta-v2');
+    break;
+  }
+  if (propuesta) await esc();
+  await sleep(200);
+}
+if (!hueco) fail('no hubo un par de 12 h con los dos guardias en turno');
 
 await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
 await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });

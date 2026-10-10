@@ -13213,7 +13213,9 @@ function PlanificacionDesktop() {
             if (!s || s.isDeleted) continue;
             if (selectedObjective && s.objectiveId && s.objectiveId !== selectedObjective) continue;
             const code = normalizarCodigo(s.code);
-            if (!code || out[code] || tipoDeCodigo(code) !== 'TRABAJO') continue;
+            if (!code || out[code] || code === 'EV' || String(s.origin || '').toUpperCase() === 'EVENTO') continue;
+            if (selectedObjective && String(s.objectiveId || '') !== selectedObjective) continue;
+            if (tipoDeCodigo(code) !== 'TRABAJO') continue;
             const st = hhmmRapido(s.startTime);
             const et = hhmmRapido(s.endTime);
             if (!st || !et) continue;
@@ -13316,6 +13318,9 @@ function PlanificacionDesktop() {
                 change: { code, name: code, isTemp: true, isNovedad: true, hours: 0, startTime: '00:00', ...camposBandaConservada((c?.p && !c.p.isDeleted ? c.p : c?.s) || null) },
                 novedad: { employeeId: emp.id, employeeName: emp.name || '', startDate: ds, endDate: ds, type: code, reason: motivoNovedadRef.current || 'Cargado en modo rápido', status: 'APPROVED', _modoRapido: true },
             };
+        }
+        if (code === 'EV') {
+            return { error: 'EV es un evento: no se escribe desde la grilla. Para enfermedad usá E.' };
         }
         if (tipo === 'RET') {
             return { change: { ...base, code: 'RET', name: 'Retén', hours: 0, startTime: '00:00', positionName: 'Retén', isFranco: false } };
@@ -13633,9 +13638,12 @@ function PlanificacionDesktop() {
                 const key = `${emp.id}_${ds}`;
                 const p = pendingChangesRef.current[key];
                 const t = p ? (p.isDeleted ? null : p) : shiftsMap[key];
-                if (!t || t.isDeleted || t.isNovedad || t.isFranco) continue;
+                if (!t || t.isDeleted || t.isNovedad || t.isFranco || t.isAbsent) continue;
                 const code = normalizarCodigo(t.code || '');
-                if (!code || code === 'F' || code === 'FF' || code === 'FP' || code === 'FT' || code === 'RET') continue;
+                if (!code || code === 'F' || code === 'FF' || code === 'FP' || code === 'FT' || code === 'RET' || code === 'EV') continue;
+                const aus = absencesMap[key];
+                const bloqueado = esCeldaLicencia({ code, tieneAusencia: !!(aus && isActiveAbsence(aus)) });
+                if (bloqueado) continue;
                 const pos = String(t.positionName || getEmpDefaultPos(emp.id) || '').trim();
                 if (!pos || pos === 'General' || pos === 'Retén') continue;
                 out.push({ empId: emp.id, nombre: String(emp.name || emp.id), dateStr: ds, code, positionName: pos });
@@ -13669,11 +13677,12 @@ function PlanificacionDesktop() {
         return out;
     };
     const abrirPropuesta12 = (lista: Propuesta12h[]) => {
-        if (!lista.length) {
-            toast.message('Ese día no tiene una banda de 8 h para cerrar con 12 h.');
+        const utiles = lista.filter((p) => p.cambios.length);
+        if (!utiles.length) {
+            toast.message(lista.map((p) => p.texto).filter(Boolean).join(' · ') || 'Ese día no tiene una banda de 8 h para cerrar con 12 h.');
             return;
         }
-        setPropuesta12(lista);
+        setPropuesta12(utiles);
     };
     const masRapido = (r: number, c: number, columna: boolean) => {
         const global = bloqueoGlobalRapido();

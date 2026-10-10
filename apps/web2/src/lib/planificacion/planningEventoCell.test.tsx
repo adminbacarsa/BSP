@@ -4,6 +4,7 @@ import {
   eventoAssignBlock,
   eventoCellOverlay,
   eventoTooltip,
+  isEventoTurno,
   pickEventoTurno,
   textoTooltipEventoCelda,
   pickShiftForRest,
@@ -80,6 +81,11 @@ test('celda del guardia en su objetivo de base: EV, franco usado o marca sobre o
   // Sin EV no hay nada.
   assert.equal(eventoCellOverlay([manana], manana), null);
   assert.equal(eventoCellOverlay(undefined, null), null);
+  const enfermedad = { id: 'enf', code: 'E' };
+  assert.equal(isEventoTurno(enfermedad), false);
+  assert.equal(isEventoTurno({ code: 'EV' }), true);
+  assert.equal(isEventoTurno({ code: 'M', origin: 'EVENTO' }), true);
+  assert.equal(eventoCellOverlay([ev], enfermedad)?.mode, 'BADGE', 'una E no se pinta como EV');
 });
 
 test('descanso entre turnos: el EV cuenta aunque el doc principal del día sea un franco', () => {

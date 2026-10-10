@@ -276,6 +276,22 @@ export function normalizarCodigo(texto: string): string {
     return String(texto || '').trim().toUpperCase().replace(/\s+/g, '');
 }
 
+/**
+ * Lo que se escribe al confirmar. Una novedad exacta (E = Enfermedad) no se completa
+ * a un código más largo (EV). Solo si el texto no es novedad y no está en la lista se toma el primer prefijo.
+ */
+export function codigoAlConfirmar(texto: string, opciones: OpcionCodigo[], elegida = -1, catalogo: readonly TipoNovedadRapida[] = []): string {
+    const escrito = normalizarCodigo(texto);
+    const sug = sugerirCodigos(escrito, opciones, 8);
+    const novedad = resolverNovedad(escrito, catalogo);
+    if (elegida >= 0 && sug[elegida] && !novedad) return sug[elegida].code;
+    if (novedad && (elegida < 0 || sug[elegida]?.code.toUpperCase() === novedad.code)) return novedad.code;
+    if (sug.some((s) => s.code.toUpperCase() === escrito)) return escrito;
+    if (novedad) return novedad.code;
+    if (sug[0]) return sug[0].code;
+    return escrito;
+}
+
 /** Lista para el autocompletar: primero el exacto, después los que empiezan igual, sin repetir. */
 export function sugerirCodigos(prefijo: string, opciones: OpcionCodigo[], max = 8): OpcionCodigo[] {
     const p = normalizarCodigo(prefijo);
@@ -378,7 +394,10 @@ export function opcionesDeCodigo(slaPuesto: TurnoSla[], slaTodos: TurnoSla[], ul
     for (const s of slaPuesto) out.push({ code: normalizarCodigo(s.code), horario: fmt(s), detalle: s.positionName ? `SLA · ${s.positionName}` : 'SLA' });
     for (const s of slaTodos) out.push({ code: normalizarCodigo(s.code), horario: fmt(s), detalle: s.positionName ? `SLA · ${s.positionName}` : 'SLA' });
     for (const [code, h] of Object.entries(HORARIO_ESTANDAR)) out.push({ code, horario: `${h.startTime}–${h.endTime}`, detalle: 'Estándar' });
-    for (const [code, h] of Object.entries(ultimoUsado)) out.push({ code, horario: `${h.startTime}–${h.endTime}`, detalle: 'Usado en el objetivo' });
+    for (const [code, h] of Object.entries(ultimoUsado)) {
+        if (normalizarCodigo(code) === 'EV') continue;
+        out.push({ code, horario: `${h.startTime}–${h.endTime}`, detalle: 'Usado en el objetivo' });
+    }
     out.push({ code: 'F', detalle: 'Franco' }, { code: 'FF', detalle: 'Franco feriado' }, { code: 'FP', detalle: 'Franco permuta' });
     out.push({ code: 'RET', detalle: 'Retén (stand-by)' }, { code: 'REF', detalle: 'Refuerzo' }, { code: 'ESC', detalle: 'Escuela' });
     for (const [code, name] of Object.entries(CODIGOS_LICENCIA_RAPIDA)) out.push({ code, detalle: name });

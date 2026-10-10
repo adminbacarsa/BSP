@@ -9,6 +9,8 @@ export type TurnoPuesto12 = {
     dateStr: string;
     code: string;
     positionName: string;
+    /** Licencia, ausencia (AA, aviso del portal) o no es turno de trabajo de ese puesto. */
+    bloqueado?: boolean;
 };
 
 export type Horario12 = { startTime: string; endTime: string; hours: number };
@@ -79,9 +81,18 @@ function mismoPuesto(a: string, b: string): boolean {
     return up(a).replace(/\s+/g, ' ') === up(b).replace(/\s+/g, ' ');
 }
 
+const TRABAJO = new Set(['M', 'T', 'N']);
+
 function elegir(lista: TurnoPuesto12[], preferido?: string): TurnoPuesto12 | null {
-    if (!lista.length) return null;
-    return lista.find((t) => t.empId === preferido) || lista[0];
+    const aptos = lista.filter((t) => !t.bloqueado && TRABAJO.has(up(t.code)));
+    if (!aptos.length) return null;
+    return aptos.find((t) => t.empId === preferido) || aptos[0];
+}
+
+function ladoDe(code: string): string {
+    if (code === 'M') return 'el turno de la mañana';
+    if (code === 'T') return 'el turno de la tarde';
+    return 'el turno de la noche';
 }
 
 function cambio(t: TurnoPuesto12, h: Horario12 & { code: 'D12' | 'N12' }): Cambio12h {
@@ -133,16 +144,26 @@ export function proponerCierre12h(input: {
         const cambios = [cambio(a, h)];
         return { dateStr: input.dateStr, positionName: input.positionName, banda, modo: 'uno', cambios, texto: textoDe(banda, input.positionName, cambios) };
     };
+    const sinPar = (banda: string, lado: string, base: Propuesta12h | null): Propuesta12h => {
+        const aviso = `No hay quién cubra la ${banda} de ${input.positionName} con 12 h: falta ${lado}`;
+        if (!base) {
+            return { dateStr: input.dateStr, positionName: input.positionName, banda, modo: 'uno', cambios: [], texto: aviso };
+        }
+        return { ...base, texto: `${aviso}. ${base.texto}` };
+    };
 
     if (falta.has('T') && m && n) return par('T', m, d12, n, n12);
     if (falta.has('M') && t && n) return par('M', t, d12, n, n12);
     if (falta.has('N') && m && t) return par('N', m, d12, t, n12);
-    if (falta.has('T') && m) return uno('T', m, d12);
-    if (falta.has('T') && n) return uno('T', n, n12);
-    if (falta.has('M') && t) return uno('M', t, d12);
-    if (falta.has('M') && n) return uno('M', n, n12);
-    if (falta.has('N') && t) return uno('N', t, n12);
-    if (falta.has('N') && m) return uno('N', m, d12);
+    if (falta.has('T') && m) return sinPar('T', ladoDe('N'), uno('T', m, d12));
+    if (falta.has('T') && n) return sinPar('T', ladoDe('M'), uno('T', n, n12));
+    if (falta.has('M') && t) return sinPar('M', ladoDe('N'), uno('M', t, d12));
+    if (falta.has('M') && n) return sinPar('M', ladoDe('T'), uno('M', n, n12));
+    if (falta.has('N') && t) return sinPar('N', ladoDe('M'), uno('N', t, n12));
+    if (falta.has('N') && m) return sinPar('N', ladoDe('T'), uno('N', m, d12));
+    if (falta.has('T')) return sinPar('T', ladoDe(m ? 'N' : 'M'), null);
+    if (falta.has('M')) return sinPar('M', ladoDe(t ? 'N' : 'T'), null);
+    if (falta.has('N')) return sinPar('N', ladoDe(m ? 'T' : 'M'), null);
     return null;
 }
 

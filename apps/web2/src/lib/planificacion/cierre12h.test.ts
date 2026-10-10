@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { analyzePositionDayGap } from './coverageGapAnalysis';
 import { countPositionClosedUnitsFromShifts } from './positionCoverageUnits';
-import { proponerCierre12h, volverA8 } from './cierre12h';
+import { horarioDoce, proponerCierre12h, volverA8 } from './cierre12h';
 
 const puesto = {
     positionName: 'Puesto 1',
@@ -62,6 +62,30 @@ describe('cierre a 12 h', () => {
         assert.equal(p?.cambios.find((c) => c.empId === 'herr')?.code, 'D12');
         assert.equal(p?.cambios.find((c) => c.empId === 'diaz')?.code, 'N12');
         assert.equal(p?.cambios.find((c) => c.empId === 'diaz')?.dateStr, '2026-10-01');
+    });
+
+    it('el 29/09 no propone a BARRIOS si ese día está ausente (AA)', () => {
+        const p = proponerCierre12h({
+            dateStr: '2026-09-29',
+            positionName: 'Puesto 1',
+            faltantes: ['M'],
+            sla: [
+                { code: 'D12', startTime: '08:00', endTime: '20:00', hours: 12 },
+                { code: 'N12', startTime: '20:00', endTime: '08:00', hours: 12 },
+            ],
+            turnos: [
+                { empId: 'araya', nombre: 'ARAYA, Santiago', dateStr: '2026-09-29', code: 'T', positionName: 'Puesto 1' },
+                { empId: 'barrios', nombre: 'BARRIOS, Erick', dateStr: '2026-09-29', code: 'N', positionName: 'Puesto 1', bloqueado: true },
+            ],
+        });
+        assert.equal(p?.cambios.some((c) => c.empId === 'barrios'), false);
+        assert.match(p!.texto, /No hay quién cubra la M de Puesto 1 con 12 h: falta el turno de la noche/);
+        assert.equal(p?.modo, 'uno');
+        assert.deepEqual(p?.cambios.map((c) => [c.empId, c.code, c.startTime, c.endTime]), [
+            ['araya', 'D12', '08:00', '20:00'],
+        ]);
+        assert.equal(horarioDoce('D12', [{ code: 'D12', startTime: '08:00', endTime: '20:00' }]).startTime, '08:00');
+        assert.equal(horarioDoce('N12', [{ code: 'N12', startTime: '20:00', endTime: '08:00' }]).startTime, '20:00');
     });
 
     it('con un solo lado propone ese guardia', () => {

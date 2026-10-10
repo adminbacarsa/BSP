@@ -6,7 +6,7 @@ import {
     type OpcionCodigo,
     type RangoRC,
     moverCursor,
-    normalizarCodigo,
+    codigoAlConfirmar,
     normalizarRango,
     sugerirCodigos,
     tamanoRango,
@@ -270,11 +270,7 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
     const confirmar = useCallback((tecla: string, shift: boolean) => {
         const { texto: t, elegida: idx, cursor: cur } = estado.current;
         if (t == null || !cur) return;
-        const sug = sugerirCodigos(t, propsRef.current.opciones(cur.r, cur.c), 8);
-        const escrito = normalizarCodigo(t);
-        let code = escrito;
-        if (idx >= 0 && sug[idx]) code = sug[idx].code;
-        else if (!sug.some((s) => s.code.toUpperCase() === escrito) && sug[0]) code = sug[0].code;
+        const code = codigoAlConfirmar(t, propsRef.current.opciones(cur.r, cur.c), idx);
         setTexto(null);
         setElegida(-1);
         enfocarContenedor();
