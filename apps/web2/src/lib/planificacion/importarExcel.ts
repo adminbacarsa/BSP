@@ -19,6 +19,7 @@ export type TurnoServicio = {
   startTime: string;
   endTime: string;
   quantity?: number | null;
+  dias?: string[];
 };
 
 export type EmpleadoCruce = {

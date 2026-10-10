@@ -476,7 +476,7 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
             {cajas.marcas.map((m, i) => (
                 <span
                     key={`${m.r}:${m.c}:${m.tipo}:${i}`}
-                    className={`absolute rounded-sm ${m.tipo === 'EVENTO' ? 'border-2 border-dashed border-yellow-500 bg-yellow-300/25' : 'border-2'} ${m.tipo === 'DESCANSO' ? 'border-amber-500' : m.tipo === 'TOPE' ? 'border-rose-500' : m.tipo === 'LICENCIA' ? 'border-fuchsia-500' : m.tipo === 'CIERRE' ? 'border-indigo-600 bg-indigo-500/10' : m.tipo === 'EVENTO' ? '' : 'border-orange-500'} ${m.tenue ? 'opacity-40' : ''}`}
+                    className={`absolute rounded-sm ${m.tipo === 'EVENTO' ? 'border-2 border-dashed border-yellow-500 bg-yellow-300/25' : 'border-2'} ${m.tipo === 'DESCANSO' ? 'border-amber-500' : m.tipo === 'TOPE' ? 'border-rose-500' : m.tipo === 'LICENCIA' ? 'border-fuchsia-500' : m.tipo === 'SERVICIO' ? 'border-slate-600' : m.tipo === 'CIERRE' ? 'border-indigo-600 bg-indigo-500/10' : m.tipo === 'EVENTO' ? '' : 'border-orange-500'} ${m.tenue ? 'opacity-40' : ''}`}
                     style={{ left: m.left + 1, top: m.top + 1, width: m.width - 2, height: m.height - 2 }}
                     title={m.texto}
                     data-modo-rapido-marca={m.tipo}

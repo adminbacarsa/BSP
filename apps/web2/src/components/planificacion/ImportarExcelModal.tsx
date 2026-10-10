@@ -1,9 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { format } from 'date-fns';
 import { AlertTriangle, FileSpreadsheet, X } from 'lucide-react';
+import { aplicarServicioPlanilla } from '@/lib/servicios/aplicarServicioPlanilla';
+import { ServicioPlanillaEditor } from '@/components/planificacion/ServicioPlanillaEditor';
+import { rangoMes } from '@/lib/planificacion/servicioDesdePlanilla';
+import type { EquivalenciaCodigo } from '@/lib/planificacion/equivalenciaCodigo';
 import {
   bloquesDeCuadros,
-  compararServicio,
   cruzarGuardias,
   detectarCuadros,
   faltanEnPlanilla,
@@ -28,6 +31,7 @@ import {
 export type ServicioDestino = {
   id: string;
   objectiveId: string;
+  clientId?: string;
   desde: string;
   hasta: string;
   puestos: Array<{ nombre: string; franjas: string }>;
@@ -61,6 +65,10 @@ type Props = {
   onCargar: (objectiveId: string) => Promise<{ actuales: CeldaActual[]; reglas: ReglaMapeo[] }>;
   onAplicar: (payload: AplicarImportPayload) => Promise<boolean>;
   onCancelar: () => void;
+  puedeCrearServicio: boolean;
+  puedeEditarServicio: boolean;
+  migracionCompleta: boolean;
+  onServicioGuardado: () => void;
 };
 
 type Eleccion = {
@@ -162,7 +170,16 @@ function cuadroDelGrupo(g: GrupoImport, cuadros: CuadroPlanilla[]): CuadroPlanil
   };
 }
 
-export function ImportarExcelModal({ ctx, onCargar, onAplicar, onCancelar }: Props) {
+function reglasConEquivalencias(reglas: ReglaMapeo[], eqs: EquivalenciaCodigo[]): ReglaMapeo[] {
+  const por = new Map(eqs.map((e) => [e.clave, e]));
+  return reglas.map((r) => {
+    const e = por.get(r.clave);
+    if (!e?.code) return r;
+    return { ...r, accion: 'turno' as const, code: e.code, nota: `${e.code} ${e.startTime}–${e.endTime}` };
+  });
+}
+
+export function ImportarExcelModal({ ctx, onCargar, onAplicar, onCancelar, puedeCrearServicio, puedeEditarServicio, migracionCompleta, onServicioGuardado }: Props) {
   const [paso, setPaso] = useState(1);
   const [archivo, setArchivo] = useState('');
   const [error, setError] = useState('');
@@ -175,6 +192,8 @@ export function ImportarExcelModal({ ctx, onCargar, onAplicar, onCancelar }: Pro
   const [grupoIdx, setGrupoIdx] = useState(0);
   const [cargando, setCargando] = useState(false);
   const [cargado, setCargado] = useState<{ clave: string; actuales: CeldaActual[]; reglas: ReglaMapeo[] } | null>(null);
+  const [serviciosEstado, setServiciosEstado] = useState(ctx.servicios);
+  const ctxVivo = useMemo(() => ({ ...ctx, servicios: serviciosEstado }), [ctx, serviciosEstado]);
   const cargarRef = useRef(onCargar);
   cargarRef.current = onCargar;
 
@@ -185,8 +204,8 @@ export function ImportarExcelModal({ ctx, onCargar, onAplicar, onCancelar }: Pro
     for (const b of bloques) {
       const el = elecciones[b.key];
       if (!el?.importar || !el.objectiveId) continue;
-      const obj = ctx.objetivos.find((o) => o.id === el.objectiveId);
-      const srv = serviciosDe(ctx, el.objectiveId).find((s) => s.id === el.servicioId);
+      const obj = ctxVivo.objetivos.find((o) => o.id === el.objectiveId);
+      const srv = serviciosDe(ctxVivo, el.objectiveId).find((s) => s.id === el.servicioId);
       const clave = `${el.objectiveId}|${el.servicioId}`;
       let g = map.get(clave);
       if (!g) {
@@ -206,7 +225,7 @@ export function ImportarExcelModal({ ctx, onCargar, onAplicar, onCancelar }: Pro
       g.bloques.push(b);
     }
     return [...map.values()];
-  }, [bloques, elecciones, ctx]);
+  }, [bloques, elecciones, ctxVivo]);
 
   const grupo = grupos[grupoIdx] || null;
   const cuadro = useMemo(() => (grupo ? cuadroDelGrupo(grupo, cuadros) : null), [grupo, cuadros]);
@@ -222,11 +241,6 @@ export function ImportarExcelModal({ ctx, onCargar, onAplicar, onCancelar }: Pro
   );
   const cruceOk = useMemo(() => cruceResuelto(cruce, decisiones), [cruce, decisiones]);
   const faltan = useMemo(() => faltanEnPlanilla(cruceOk, dotacion), [cruceOk, dotacion]);
-  const comparacion = useMemo(() => {
-    if (!cuadro || !grupo) return { veredicto: 'sin_servicio' as const, planilla: [], diferencias: [] };
-    const base = reglas.length ? reglas : proponerReglas(cuadro, cargado?.clave === grupo.clave ? cargado.reglas : []);
-    return compararServicio(cuadro, grupo.turnos, base);
-  }, [cuadro, grupo, reglas, cargado]);
   const items = useMemo(() => (cuadro && grupo ? vistaPrevia({
     year: ctx.year,
     month: ctx.month,
@@ -493,19 +507,86 @@ export function ImportarExcelModal({ ctx, onCargar, onAplicar, onCancelar }: Pro
             </div>
           )}
 
-          {paso === 3 && grupo && (
-            <div className="space-y-2 text-[12px] text-slate-700">
-              <p className="text-slate-500">{grupo.clienteNombre ? `${grupo.clienteNombre} · ` : ''}{grupo.nombre}</p>
-              <p className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 font-black uppercase tracking-wide">
-                {comparacion.veredicto === 'coincide' && 'Coincide con el servicio de este mes'}
-                {comparacion.veredicto === 'difiere' && 'Difiere del servicio de este mes'}
-                {comparacion.veredicto === 'sin_servicio' && 'No hay servicio en este mes'}
-              </p>
-              {comparacion.planilla.map((f) => (
-                <p key={`${f.puesto}|${f.code}|${f.startTime}`}>{f.puesto || 'Sin puesto'} · {f.code} {f.startTime}–{f.endTime} ×{f.cantidad}</p>
-              ))}
-              {comparacion.diferencias.map((d) => <p key={d} className="text-amber-800">{d}</p>)}
-              <p className="text-slate-500">Crear o corregir el servicio desde acá queda para otra vuelta. Se sigue con el elegido, o sin servicio.</p>
+          {paso === 3 && grupo && cuadro && (
+            <div className="space-y-2">
+              <p className="text-[12px] text-slate-500">{grupo.clienteNombre ? `${grupo.clienteNombre} · ` : ''}{grupo.nombre}</p>
+              <ServicioPlanillaEditor
+                cuadro={cuadro}
+                year={ctx.year}
+                month={ctx.month}
+                mesLabel={ctx.mesLabel}
+                servicioId={grupo.servicioId}
+                puedeCrear={puedeCrearServicio}
+                puedeActualizar={puedeEditarServicio}
+                hayOtroServicio={!grupo.servicioId && serviciosEstado.some((s) => s.objectiveId === grupo.objectiveId)}
+                vigente={grupo.turnos.filter((t) => t.startTime && t.endTime).map((t) => ({
+                  puesto: t.positionName,
+                  code: t.code,
+                  startTime: t.startTime,
+                  endTime: t.endTime,
+                  cantidad: t.quantity || 1,
+                  dias: t.dias || [],
+                }))}
+                onGuardar={async (accion, franjas, equivalencias) => {
+                  const res = await aplicarServicioPlanilla({
+                    accion,
+                    servicioId: grupo.servicioId,
+                    clientId: grupo.clienteId,
+                    clientName: grupo.clienteNombre,
+                    objectiveId: grupo.objectiveId,
+                    objectiveName: grupo.nombre,
+                    empresaId: ctx.empresaId,
+                    migracionCompleta,
+                    year: ctx.year,
+                    month: ctx.month,
+                    franjas,
+                    equivalencias,
+                    otros: serviciosEstado.map((s) => ({
+                      id: s.id,
+                      objectiveId: s.objectiveId,
+                      clientId: s.clientId || ctx.objetivos.find((o) => o.id === s.objectiveId)?.clienteId || '',
+                      startDate: s.desde,
+                      endDate: s.hasta,
+                    })),
+                  });
+                  const { startDate, endDate } = rangoMes(ctx.year, ctx.month);
+                  const turnos = franjas.map((f) => ({
+                    positionName: f.puesto,
+                    code: f.code,
+                    startTime: f.startTime,
+                    endTime: f.endTime,
+                    quantity: f.cantidad,
+                    dias: f.dias,
+                  }));
+                  setServiciosEstado((prev) => {
+                    if (accion === 'crear') {
+                      return [...prev, {
+                        id: res.id,
+                        objectiveId: grupo.objectiveId,
+                        clientId: grupo.clienteId,
+                        desde: startDate,
+                        hasta: endDate,
+                        puestos: [],
+                        turnos,
+                      }];
+                    }
+                    return prev.map((s) => (s.id === grupo.servicioId ? { ...s, turnos } : s));
+                  });
+                  if (accion === 'crear') {
+                    setElecciones((prev) => {
+                      const next = { ...prev };
+                      for (const b of grupo.bloques) {
+                        const el = next[b.key];
+                        if (el) next[b.key] = { ...el, servicioId: res.id };
+                      }
+                      return next;
+                    });
+                  }
+                  const base = proponerReglas(cuadro, []);
+                  setReglasPorClave((prev) => ({ ...prev, [`${grupo.objectiveId}|${accion === 'crear' ? res.id : grupo.servicioId}`]: reglasConEquivalencias(base, equivalencias) }));
+                  onServicioGuardado();
+                }}
+              />
             </div>
           )}
 

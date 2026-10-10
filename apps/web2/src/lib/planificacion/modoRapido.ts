@@ -5,6 +5,7 @@
 
 import { esCeldaLicencia } from './seleccionLicencia';
 import type { ColorCelda } from './pegadoExcelColor';
+import { resolverEquivalencia, type EquivalenciaCodigo } from './equivalenciaCodigo';
 
 export type CeldaRC = { r: number; c: number };
 export type RangoRC = { minR: number; maxR: number; minC: number; maxC: number };
@@ -418,7 +419,7 @@ export function opcionesDeCodigo(slaPuesto: TurnoSla[], slaTodos: TurnoSla[], ul
 export type TurnoAviso = { code: string; startTime?: string; endTime?: string; hours?: number; trabajo: boolean };
 
 export type AvisoRapido = {
-    tipo: 'DESCANSO' | 'TOPE' | 'LICENCIA' | 'SOLAPE';
+    tipo: 'DESCANSO' | 'TOPE' | 'LICENCIA' | 'SOLAPE' | 'SERVICIO';
     empId: string;
     nombre: string;
     dateStr: string;
@@ -555,6 +556,9 @@ export function agruparAvisos(avisos: AvisoRapido[]): GrupoAviso[] {
                 : `${ap} · descanso de ${h} h (${dias})`;
         } else if (a.tipo === 'TOPE') {
             texto = `${ap} · ${a.monthHours ?? ''} h (tope ${a.cap ?? ''} h)`;
+        } else if (a.tipo === 'SERVICIO') {
+            const que = a.code === 'HORARIO' ? 'horario distinto' : a.code === 'DIA' ? 'día no habilitado' : 'código fuera del servicio';
+            texto = items.length > 1 ? `${ap} · ${items.length} fuera del servicio (${que}, ${dias})` : `${ap} · ${que} (${dias})`;
         } else if (items.length > 1) {
             const etiq = a.tipo === 'LICENCIA' ? 'licencias' : 'solapes';
             texto = `${ap} · ${items.length} ${etiq} (${dias})`;
@@ -567,7 +571,7 @@ export function agruparAvisos(avisos: AvisoRapido[]): GrupoAviso[] {
 function horasDeAviso(a: AvisoRapido): string {
     if (a.tipo === 'DESCANSO') return String(a.restHours ?? '');
     if (a.tipo === 'TOPE') return String(a.monthHours ?? '');
-    if (a.tipo === 'LICENCIA') return String(a.code ?? '');
+    if (a.tipo === 'LICENCIA' || a.tipo === 'SERVICIO') return String(a.code ?? '');
     return '';
 }
 
@@ -935,6 +939,8 @@ export function prepararPegadoExcel(
         conocidos: ReadonlySet<string>;
         /** Color de cada celda (HTML del portapapeles), alineado a `matriz`. Sin color, la «E» queda dudosa. */
         colores?: Array<Array<ColorCelda | null> | null> | null;
+        /** Si el objetivo tiene equivalencias, mandan sobre M/T/N genéricos. Lo que no está no se escribe. */
+        equivalencias?: readonly EquivalenciaCodigo[] | null;
     },
 ): PreviewPegadoExcel {
     const vacio: PreviewPegadoExcel = { modo: 'posicion', filas: [], desconocidos: [], resumen: '', diasE: [], conColor: false };
@@ -988,14 +994,20 @@ export function prepararPegadoExcel(
                     continue;
                 }
                 const rojo = color?.fondo === 'ROJO' || color?.letra === 'ROJO';
-                if (rojo && compact === 'M' && opts.conocidos.has('D12')) { celdas.push({ col, code: 'D12' }); continue; }
-                if (rojo && compact === 'N' && opts.conocidos.has('N12')) { celdas.push({ col, code: 'N12' }); continue; }
+                const eq = resolverEquivalencia(raw, rojo, opts.equivalencias);
+                if (eq.aplicada && eq.code) { celdas.push({ col, code: eq.code }); continue; }
+                if (!eq.aplicada) {
+                    if (rojo && compact === 'M' && opts.conocidos.has('D12')) { celdas.push({ col, code: 'D12' }); continue; }
+                    if (rojo && compact === 'N' && opts.conocidos.has('N12')) { celdas.push({ col, code: 'N12' }); continue; }
+                }
                 const res = normalizarCodigoExcel(raw, opts.conocidos);
+                const pasaSinEquivalencia = !!res.code && ['F', 'FF', 'FP', 'RET', 'V', 'L', 'E', 'A', 'AA', 'PG', 'SUS'].includes(res.code);
                 const lic = res.code ? null : licenciaCombinada(raw, opts.conocidos);
                 if (lic) {
                     celdas.push({ col, code: lic.code });
                     licencia = { code: lic.code, quedan: lic.dias != null ? lic.dias - 1 : Number.POSITIVE_INFINITY };
-                } else if (res.code) celdas.push({ col, code: res.code });
+                } else if (res.code && (!eq.aplicada || pasaSinEquivalencia)) celdas.push({ col, code: res.code });
+                else if (eq.aplicada && eq.desconocido && !desconocidos.includes(eq.desconocido)) desconocidos.push(eq.desconocido);
                 else if (res.desconocido && !desconocidos.includes(res.desconocido)) desconocidos.push(res.desconocido);
             }
             const elegido = elegirGuardia(nombre, legajo, opts.guardias, ocupadas);

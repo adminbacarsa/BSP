@@ -12,11 +12,12 @@ import {
   Shield, Calendar, Users, Plus, Trash2, Edit2, Copy, Zap,
   Search, Save, X, MapPin, Briefcase, Table, Settings,
   AlertCircle, Info, Sun, Moon, Activity, RotateCw, CheckCircle, FileText,
-  Clock, Layers, Building2, ChevronDown, ChevronRight, LayoutGrid, List, UserCheck, User, Ban
+  Clock, Layers, Building2, ChevronDown, ChevronRight, LayoutGrid, List, UserCheck, User, Ban, FileSpreadsheet
 } from 'lucide-react';
 import { ServiceCapacityViabilityModal } from '@/components/servicios/ServiceCapacityViabilityModal';
 import { ServiceCapacityViabilityIcon } from '@/components/servicios/ServiceCapacityViabilityIcon';
 import { EventosPanel } from '@/components/servicios/EventosPanel';
+import { ServicioPlanillaModal } from '@/components/planificacion/ServicioPlanillaModal';
 import { BillingModeHelp } from '@/components/servicios/BillingModeHelp';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { usePersistedState } from '@/hooks/usePersistedState';
@@ -185,6 +186,60 @@ export default function ServiciosSLAPage() {
   const [clients, setClients] = useState<any[]>([]);
   const [publishStatusMap, setPublishStatusMap] = useState<Record<string, boolean>>({});
   const [availableObjectives, setAvailableObjectives] = useState<any[]>([]);
+  const [servicioPlanillaAbierto, setServicioPlanillaAbierto] = useState(false);
+  const planillaMes = useMemo(() => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const monthIndex = now.getMonth();
+    const hm = (v: unknown) => {
+      const m = String(v || '').match(/(\d{1,2}):(\d{2})/);
+      return m ? `${m[1].padStart(2, '0')}:${m[2]}` : '';
+    };
+    const objetivos: Array<{ id: string; nombre: string; clienteId: string; clienteNombre: string }> = [];
+    for (const c of clients) {
+      for (const o of (c.objetivos || []) as Array<{ id?: string; name?: string; status?: string }>) {
+        const status = String(o.status || 'ACTIVE').toUpperCase();
+        if (status === 'INACTIVE' || status === 'INACTIVO') continue;
+        const id = String(o.id || o.name || '');
+        if (!id) continue;
+        objetivos.push({ id, nombre: String(o.name || id), clienteId: String(c.id), clienteNombre: String(c.name || '') });
+      }
+    }
+    const servicios = services
+      .filter((s) => slaCoversCalendarMonth(s.startDate, s.endDate, year, monthIndex) && String(s.status || 'active').toUpperCase() !== 'INACTIVE')
+      .map((s) => ({
+        id: String(s.id),
+        objectiveId: String(s.objectiveId || ''),
+        clientId: String(s.clientId || ''),
+        startDate: String(s.startDate || ''),
+        endDate: String(s.endDate || ''),
+        desde: String(s.startDate || ''),
+        hasta: String(s.endDate || ''),
+        turnos: (s.positions || []).flatMap((p) => {
+          if (p.status === 'INACTIVE' || p.coverageType === 'eventos') return [];
+          return (p.allowedShiftTypes || []).flatMap((st) => {
+            const a = hm(st.startTime);
+            const b = hm(st.endTime);
+            if (!a || !b || !st.code) return [];
+            return [{
+              puesto: String(p.name || 'Puesto'),
+              code: String(st.code),
+              startTime: a,
+              endTime: b,
+              cantidad: st.quantity ?? p.quantity ?? 1,
+              dias: Array.isArray(st.days) ? st.days.map((d) => String(d)) : [],
+            }];
+          });
+        }),
+      }));
+    return {
+      year,
+      month: monthIndex + 1,
+      mesLabel: now.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' }),
+      objetivos,
+      servicios,
+    };
+  }, [clients, services]);
 
   // Fechas por defecto
   const today = new Date();
@@ -2218,6 +2273,25 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
 
   return (
     <DashboardLayout>
+      {servicioPlanillaAbierto && (
+        <ServicioPlanillaModal
+          empresaId={empresaId || ''}
+          migracionCompleta={migracionCompleta}
+          year={planillaMes.year}
+          month={planillaMes.month}
+          mesLabel={planillaMes.mesLabel}
+          puedeCrear={canCreateService}
+          puedeActualizar={canUpdateService}
+          objetivos={planillaMes.objetivos}
+          servicios={planillaMes.servicios}
+          preseleccion={null}
+          onCerrar={() => setServicioPlanillaAbierto(false)}
+          onGuardado={() => {
+            setServicioPlanillaAbierto(false);
+            void loadServices();
+          }}
+        />
+      )}
       {view === 'list' && (
         <div className="p-4 md:p-6 space-y-6">
           {/* Header */}
@@ -2238,6 +2312,16 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
               >
                 <RotateCw size={14} className={loading ? 'animate-spin' : ''}/>
               </button>
+              {mainTab === 'sla' && (canCreateService || canUpdateService) && (
+              <button
+                type="button"
+                data-servicio-planilla
+                onClick={() => setServicioPlanillaAbierto(true)}
+                className="bg-white hover:bg-slate-50 transition-colors text-slate-700 border border-slate-200 px-4 py-2.5 rounded-xl font-black text-xs uppercase shadow-sm flex gap-2 items-center"
+              >
+                <FileSpreadsheet size={14}/> Desde planilla
+              </button>
+              )}
               {accionesAltaVisiblesConFiltroAnterior(canCreateService).nuevoServicio && mainTab === 'sla' && (
               <button data-action="nuevo-servicio" onClick={openNew} className="bg-indigo-600 hover:bg-indigo-700 transition-colors text-white px-5 py-2.5 rounded-xl font-black text-xs uppercase shadow-sm flex gap-2 items-center">
                 <Plus size={14}/> Nuevo Servicio

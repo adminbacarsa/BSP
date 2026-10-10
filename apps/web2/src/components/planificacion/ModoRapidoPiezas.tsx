@@ -46,12 +46,14 @@ const ETIQUETA: Record<AvisoRapido['tipo'], string> = {
     TOPE: 'Tope',
     LICENCIA: 'Licencia',
     SOLAPE: 'Solape',
+    SERVICIO: 'Fuera del servicio',
 };
 const COLOR: Record<AvisoRapido['tipo'], string> = {
     DESCANSO: 'bg-amber-500',
     TOPE: 'bg-rose-500',
     LICENCIA: 'bg-fuchsia-500',
     SOLAPE: 'bg-orange-500',
+    SERVICIO: 'bg-slate-600',
 };
 
 const AVISOS_ABIERTOS_KEY = 'cosp-planif-avisos-abierto';
