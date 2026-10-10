@@ -254,6 +254,7 @@ export const CODIGOS_LICENCIA_RAPIDA: Record<string, string> = {
     AA: 'Injustificada',
     L: 'Licencia Esp.',
     PG: 'PG Permiso Gremial',
+    SUS: 'Suspensión',
 };
 export const CODIGOS_DESPLIEGUE = ['RET', 'REF', 'ESC'] as const;
 

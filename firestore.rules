@@ -440,6 +440,13 @@ service cloud.firestore {
       allow delete: if tenantAdminDelete();
     }
 
+    match /planificacion_import_mapeos/{docId} {
+      allow read: if tenantAdminRead();
+      allow create: if tenantAdminCreate();
+      allow update: if tenantAdminUpdate();
+      allow delete: if tenantAdminDelete();
+    }
+
     match /planificacion_estados/{docId} {
       allow read: if tenantAdminRead() || request.auth != null;
       // Asignación de puestos / estado mensual: admin autenticado con empresa sellada.
