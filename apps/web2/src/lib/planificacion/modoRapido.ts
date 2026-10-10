@@ -519,6 +519,16 @@ export function normalizarCodigoExcel(crudo: string, conocidos: ReadonlySet<stri
     return { code: null, desconocido: visible };
 }
 
+/** «LIC ANUAL 2025 X 14 DIAS», «VACACIONES», «LICENCIA …»: el código de licencia y, si lo dice, cuántos días abarca. */
+export function licenciaCombinada(crudo: string, conocidos: ReadonlySet<string>): { code: string; dias: number | null } | null {
+    const t = etiquetaCodigoExcel(crudo);
+    if (!/^(LIC|LICENCIA|VAC|VACACION|VACACIONES)\b/.test(t)) return null;
+    const code = /^(LIC\s*ANUAL|LICENCIA\s*ANUAL|VAC)/.test(t) ? 'V' : 'L';
+    if (!conocidos.has(code)) return null;
+    const m = t.match(/(\d{1,2})\s*DIAS?\b/);
+    return { code, dias: m ? Number(m[1]) : null };
+}
+
 function sinAcento(s: string): string {
     return String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
 }
@@ -582,8 +592,9 @@ function esEncabezado(fila: string[]): boolean {
     if (vals.some((v) => /^(LEGAJO|PUESTO|APELLIDO|APELLIDOS|NOMBRE|NOMBRES)$/.test(v))) return true;
     const nums = vals.filter((v) => /^\d{1,2}$/.test(v)).map(Number);
     if (nums.length >= 20 && nums.includes(1)) return true;
+    // Una fila de guardia con muchas M no es la fila de letras de los días: esa trae casi solo letras y de varios días distintos.
     const letras = vals.filter((v) => /^[DLMXJVS]$/.test(v));
-    if (letras.length >= 20) return true;
+    if (letras.length >= 20 && letras.length >= vals.length - 2 && new Set(letras).size >= 5) return true;
     return false;
 }
 
@@ -707,13 +718,26 @@ export function prepararPegadoExcel(
             if (!pareceNombre(nombre) && normLegajo(legajo).length < 3) continue;
             const celdas: Array<{ col: number; code: string }> = [];
             const desconocidos: string[] = [];
+            // Una licencia en celdas combinadas («LIC ANUAL 2025 X 14 DIAS») llega en la primera celda y las demás vacías.
+            let licencia: { code: string; quedan: number } | null = null;
             for (let i = 0; i < nDias; i++) {
                 const col = colInicio + i;
                 if (col >= opts.cols) break;
                 const raw = f[diaDesde + i] || '';
-                if (!raw.trim()) continue;
+                if (!raw.trim()) {
+                    if (licencia && licencia.quedan > 0) {
+                        celdas.push({ col, code: licencia.code });
+                        licencia.quedan -= 1;
+                    }
+                    continue;
+                }
+                licencia = null;
                 const res = normalizarCodigoExcel(raw, opts.conocidos);
-                if (res.code) celdas.push({ col, code: res.code });
+                const lic = res.code ? null : licenciaCombinada(raw, opts.conocidos);
+                if (lic) {
+                    celdas.push({ col, code: lic.code });
+                    licencia = { code: lic.code, quedan: lic.dias != null ? lic.dias - 1 : Number.POSITIVE_INFINITY };
+                } else if (res.code) celdas.push({ col, code: res.code });
                 else if (res.desconocido && !desconocidos.includes(res.desconocido)) desconocidos.push(res.desconocido);
             }
             const elegido = elegirGuardia(nombre, legajo, opts.guardias, ocupadas);
