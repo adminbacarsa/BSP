@@ -127,11 +127,15 @@ const closedRows = await db.collection('servicios_sla').where('objectiveId', '==
 check('el cerrado sigue siendo uno', closedRows.size === 1);
 
 const ext = await renovarSlaAlPublicar(db, null, published(objGrp, 4_000));
-check('agrupado extiende', ext.action === 'extended', ext.reason || '');
+check('sin serie crea el mes siguiente', ext.action === 'created', ext.reason || '');
 const grp = (await db.collection('servicios_sla').doc(`${prefix}_grp`).get()).data();
-check('agrupado termina el 31/12 y no hay otro doc', grp?.endDate === '2026-12-31');
+check('noviembre queda en su mes y toma serie', grp?.endDate === '2026-11-30' && !!grp?.slaSeriesId);
 const grpRows = await db.collection('servicios_sla').where('objectiveId', '==', objGrp).get();
-check('agrupado sigue en un solo doc', grpRows.size === 1);
+const grpDec = grpRows.docs.map((d) => d.data()).find((d) => d.startDate === '2026-12-01');
+check('diciembre es otro doc de la misma serie', grpRows.size === 2 && grpDec?.endDate === '2026-12-31' && grpDec?.slaSeriesId === grp?.slaSeriesId, String(grpRows.size));
+const extAgain = await renovarSlaAlPublicar(db, published(objGrp, 4_000), published(objGrp, 5_000));
+const grpRowsAgain = await db.collection('servicios_sla').where('objectiveId', '==', objGrp).get();
+check('volver a publicar noviembre no duplica', extAgain.action === 'skip' && grpRowsAgain.size === 2, `${extAgain.reason || ''} ${grpRowsAgain.size}`);
 
 const beforeEnd = grp?.endDate;
 const off = await renovarSlaAlPublicar(db, published(objGrp, 4_000), { ...published(objGrp, 4_000), publishedAt: null });
