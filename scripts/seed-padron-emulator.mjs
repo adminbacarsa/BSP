@@ -3,7 +3,7 @@
  * FIRESTORE_EMULATOR_HOST y FIREBASE_AUTH_EMULATOR_HOST tienen que estar puestos.
  */
 import { initializeApp } from 'firebase-admin/app';
-import { getFirestore } from 'firebase-admin/firestore';
+import { getFirestore, Timestamp } from 'firebase-admin/firestore';
 import { getAuth } from 'firebase-admin/auth';
 
 const projectId = process.env.GCLOUD_PROJECT || 'demo-padron';
@@ -75,12 +75,26 @@ async function run() {
         { code: 'T', name: 'Tarde', startTime: '15:00', endTime: '23:00', hours: 8, quantity: 1 },
         { code: 'N', name: 'Noche', startTime: '23:00', endTime: '07:00', hours: 8, quantity: 1 },
       ],
+    }, {
+      id: 'p2',
+      name: 'Puesto 2',
+      positionName: 'Puesto 2',
+      quantity: 1,
+      coverageType: 'custom',
+      status: 'ACTIVE',
+      shifts: [
+        { code: 'M', name: 'Mañana', startTime: '06:00', endTime: '14:00', hours: 8 },
+      ],
+      allowedShiftTypes: [
+        { code: 'M', name: 'Mañana', startTime: '06:00', endTime: '14:00', hours: 8, quantity: 1 },
+      ],
     }],
   });
 
   const gente = [
-    { id: 'emp_perez', legajo: '1001', apellido: 'PEREZ', nombre: 'JUAN', mail: 'juan.viejo@prueba.test', dni: '30111222', cuil: cuil('2030111222'), activo: true, objetivo: OBJECTIVE },
-    { id: 'emp_sosa', legajo: '1002', apellido: 'SOSA', nombre: 'LUIS', mail: 'luis@prueba.test', dni: '30999888', cuil: cuil('2030999888'), activo: true, objetivo: OBJECTIVE },
+    { id: 'emp_perez', legajo: '1001', apellido: 'PEREZ', nombre: 'JUAN', mail: 'juan.viejo@prueba.test', dni: '30111222', cuil: cuil('2030111222'), activo: true, objetivo: OBJECTIVE, puesto: 'Puesto 2' },
+    { id: 'emp_sosa', legajo: '1002', apellido: 'SOSA', nombre: 'LUIS', mail: 'luis@prueba.test', dni: '30999888', cuil: cuil('2030999888'), activo: true, objetivo: OBJECTIVE, puesto: 'Puesto 1' },
+    { id: 'emp_regalo', legajo: '1003', apellido: 'REGALO', nombre: 'ANA', mail: 'ana@prueba.test', dni: '30111000', cuil: cuil('2730111000'), activo: true, objetivo: OBJECTIVE, puesto: 'Puesto 1' },
   ];
   for (const g of gente) {
     await db.collection('empleados').doc(g.id).set({
@@ -98,8 +112,23 @@ async function run() {
       status: g.activo ? 'activo' : 'inactivo',
       startDate: '2020-01-01',
       preferredObjectiveId: g.objetivo,
+      planificacionDotacion: { [OBJECTIVE]: { positionName: g.puesto } },
     });
   }
+  const viejos = await db.collection('turnos').where('objectiveId', '==', OBJECTIVE).get();
+  for (const d of viejos.docs) await d.ref.delete();
+  const turno = (id, ymd, hm0, hm1, code, puesto, nombre) => {
+    const start = Timestamp.fromDate(new Date(`${ymd}T${hm0}:00-03:00`));
+    const end = Timestamp.fromDate(new Date(`${ymd}T${hm1}:00-03:00`));
+    return db.collection('turnos').doc(`${id}_${ymd}`).set({
+      empresaId: EMPRESA, clientId: CLIENT, objectiveId: OBJECTIVE, objectiveName: 'Objetivo Prueba',
+      positionName: puesto, employeeId: id, employeeName: nombre, code, name: code, hours: 8,
+      startTime: start, endTime: end, draft: false, isAbsent: false, isFranco: false,
+    });
+  };
+  await turno('emp_perez', '2026-10-01', '06:00', '14:00', 'M', 'Puesto 2', 'PEREZ, JUAN');
+  await turno('emp_perez', '2026-10-02', '06:00', '14:00', 'M', 'Puesto 2', 'PEREZ, JUAN');
+  await turno('emp_sosa', '2026-10-01', '07:00', '15:00', 'M', 'Puesto 1', 'SOSA, LUIS');
   console.log(JSON.stringify({
     empresaId: EMPRESA,
     clientId: CLIENT,

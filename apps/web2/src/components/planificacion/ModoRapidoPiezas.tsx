@@ -52,6 +52,7 @@ const ETIQUETA: Record<AvisoRapido['tipo'], string> = {
     SERVICIO: 'Fuera del servicio',
     SOBRECOBERTURA: 'Sobrecobertura',
     SIN_PUESTO: 'Sin puesto',
+    COPIA: 'Puesto',
 };
 const COLOR: Record<AvisoRapido['tipo'], string> = {
     DESCANSO: 'bg-amber-500',
@@ -61,6 +62,7 @@ const COLOR: Record<AvisoRapido['tipo'], string> = {
     SERVICIO: 'bg-slate-600',
     SOBRECOBERTURA: 'bg-amber-600',
     SIN_PUESTO: 'bg-slate-500',
+    COPIA: 'bg-indigo-500',
 };
 
 const AVISOS_ABIERTOS_KEY = 'cosp-planif-avisos-abierto';
