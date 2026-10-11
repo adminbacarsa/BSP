@@ -54,8 +54,8 @@ test('6 M (2 custom) / 3 T / 4 N contra 2 puestos × 2 pax: falta 1 T y no sobra
 test('el mismo día contra 2 puestos × 1 pax avisa que el servicio está desactualizado', () => {
   const lectura = leerDia({ turnos: dia1(), puestos: puestos2x1 });
   assert.match(lectura.avisoServicio || '', /2 pax por puesto/);
-  assert.match(lectura.texto, /Sobran 56 h: 7 turnos de 8 h fuera del servicio/);
-  assert.equal(lectura.turnosFuera, 7);
+  assert.match(lectura.texto, /Sobran 40 h: 5 turnos de 8 h fuera del servicio/);
+  assert.equal(lectura.turnosFuera, 5);
   assert.equal(lectura.horasVendidas, 48);
 });
 
@@ -238,4 +238,13 @@ test('exigeCobertura false no muestra sobrecobertura ni propone 12 h', () => {
     turnos12: [{ empId: 'a', nombre: 'A', dateStr: DIA, code: 'M', positionName: 'Puesto 1' }],
   });
   assert.equal(faltantes.length, 0);
+});
+
+test('EN y RO más 4 M / 4 T / 4 N contra 2 puestos × 2 pax: cierra sin horas de más', () => {
+  const turnos = [...dia1(), t('regalo', 'REGALO', 'T', 'Puesto 1')];
+  const lectura = leerDia({ turnos, puestos: puestos2x2 });
+  assert.equal(lectura.falta.M + lectura.falta.T + lectura.falta.N, 0);
+  assert.equal(lectura.sobranHoras, 0);
+  assert.equal(lectura.turnosFuera, 0);
+  assert.equal(lectura.horasVendidas, 96);
 });
