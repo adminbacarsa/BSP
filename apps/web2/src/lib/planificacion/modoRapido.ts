@@ -6,6 +6,7 @@
 import { esCeldaLicencia } from './seleccionLicencia';
 import type { ColorCelda } from './pegadoExcelColor';
 import { resolverEquivalencia, type EquivalenciaCodigo } from './equivalenciaCodigo';
+import { partirCodigoAjeno, resolverEquivalenciaOtro, type EquivalenciaOtro } from './asignarOtroObjetivo';
 
 export type CeldaRC = { r: number; c: number };
 export type RangoRC = { minR: number; maxR: number; minC: number; maxC: number };
@@ -672,10 +673,27 @@ export type DiaEPegado = {
     porDefecto: 'EVENTO' | 'E';
 };
 
+/** Código de otro objetivo en el pegado. Sin respuesta queda vacío. */
+export type CodigoAjenoPegado = {
+    codigo: string;
+    marca: string;
+    banda: string | null;
+    fila: number;
+    col: number;
+    objectiveId?: string;
+    clientId?: string;
+    objectiveName?: string;
+    positionName?: string;
+    startTime?: string;
+    endTime?: string;
+    hours?: number;
+};
+
 export type PreviewPegadoExcel = {
     modo: 'nombre' | 'posicion';
     filas: FilaPegadoExcel[];
     desconocidos: string[];
+    codigosAjenos?: CodigoAjenoPegado[];
     resumen: string;
     diasE: DiaEPegado[];
     conColor: boolean;
@@ -946,9 +964,10 @@ export function prepararPegadoExcel(
         colores?: Array<Array<ColorCelda | null> | null> | null;
         /** Si el objetivo tiene equivalencias, mandan sobre M/T/N genéricos. Lo que no está no se escribe. */
         equivalencias?: readonly EquivalenciaCodigo[] | null;
+        equivalenciasOtro?: readonly EquivalenciaOtro[] | null;
     },
 ): PreviewPegadoExcel {
-    const vacio: PreviewPegadoExcel = { modo: 'posicion', filas: [], desconocidos: [], resumen: '', diasE: [], conColor: false };
+    const vacio: PreviewPegadoExcel = { modo: 'posicion', filas: [], desconocidos: [], codigosAjenos: [], resumen: '', diasE: [], conColor: false };
     const colorDeFila = new Map<string[], Array<ColorCelda | null> | null>();
     if (opts.colores) matriz.forEach((f, i) => colorDeFila.set(f, opts.colores?.[i] ?? null));
     const bloques = partirBloques(matriz);
@@ -956,6 +975,7 @@ export function prepararPegadoExcel(
     const ocupadas = new Set<number>();
     const filas: FilaPegadoExcel[] = [];
     const descSet = new Set<string>();
+    const codigosAjenos: CodigoAjenoPegado[] = [];
     let algunoConNombre = false;
     for (const bloque of bloques) {
         const datos = bloque.filter((f) => !esEncabezado(f) && !esNota(f) && f.some((v) => v.trim()));
@@ -1013,7 +1033,27 @@ export function prepararPegadoExcel(
                     licencia = { code: lic.code, quedan: lic.dias != null ? lic.dias - 1 : Number.POSITIVE_INFINITY };
                 } else if (res.code && (!eq.aplicada || pasaSinEquivalencia)) celdas.push({ col, code: res.code });
                 else if (eq.aplicada && eq.desconocido && !desconocidos.includes(eq.desconocido)) desconocidos.push(eq.desconocido);
-                else if (res.desconocido && !desconocidos.includes(res.desconocido)) desconocidos.push(res.desconocido);
+                else if (res.desconocido && !desconocidos.includes(res.desconocido)) {
+                    desconocidos.push(res.desconocido);
+                    const partido = partirCodigoAjeno(raw);
+                    if (partido) {
+                        const ya = resolverEquivalenciaOtro(raw, opts.equivalenciasOtro);
+                        codigosAjenos.push({
+                            codigo: raw.trim(),
+                            marca: partido.marca,
+                            banda: ya?.banda || partido.banda,
+                            fila: filas.length,
+                            col,
+                            objectiveId: ya?.objectiveId,
+                            clientId: ya?.clientId,
+                            objectiveName: ya?.objectiveName,
+                            positionName: ya?.positionName,
+                            startTime: ya?.startTime,
+                            endTime: ya?.endTime,
+                            hours: ya?.hours,
+                        });
+                    }
+                }
             }
             const elegido = elegirGuardia(nombre, legajo, opts.guardias, ocupadas);
             const yaCargado = !elegido && celdas.length === 0 && elegirGuardia(nombre, legajo, opts.guardias, new Set());
@@ -1039,6 +1079,7 @@ export function prepararPegadoExcel(
         modo: 'nombre',
         filas,
         desconocidos,
+        codigosAjenos,
         diasE: diasConE(filas),
         conColor: !!opts.colores,
         resumen: textoResumenPegado({
@@ -1064,6 +1105,7 @@ export const ATAJOS_MODO_RAPIDO: Array<{ teclas: string; que: string }> = [
     { teclas: 'Shift + +', que: 'Cerrar todas las bandas faltantes de ese día' },
     { teclas: 'Ctrl + L  o  /', que: 'Cargar una novedad del catálogo en la selección (un registro por rango)' },
     { teclas: 'Alt + L', que: 'Liberar el turno a RET y cerrar la banda con 12 h' },
+    { teclas: 'Alt + O', que: 'Asignar en otro objetivo (solo celda vacía, sin turno ni licencia ese día)' },
     { teclas: 'Colores de Excel', que: 'Al pegar desde Excel la M y N rojas pasan a D12 y N12 y la E amarilla es evento. Desde otro lado sin color: escribí D12 y N12 o usá +, y la E se pregunta en el resumen. Un código que el servicio no tiene no se pega y queda en el resumen' },
     { teclas: 'Ctrl + D / Ctrl + R', que: 'Rellenar hacia abajo / a la derecha' },
     { teclas: 'Cuadradito de la esquina', que: 'Arrastrar para repetir el patrón (sigue ciclos: M M M M M M F F)' },

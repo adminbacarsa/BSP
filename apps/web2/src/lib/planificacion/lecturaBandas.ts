@@ -50,6 +50,12 @@ export type LecturaDia = {
   sinPuesto: TurnoDia[];
   texto: string;
   textoCorto: string;
+  /** «48/48 h · 2 puestos de 24 h». */
+  textoHoras: string;
+  /** La T (u otra banda) cierra entre puestos. Null si hay falta real. */
+  cubiertoEntre: string | null;
+  /** Todos los puestos de 24 h tienen gente y la suma de bandas cubre lo vendido. */
+  reconcilia: boolean;
 };
 
 export type FaltanteBanda = {
@@ -183,6 +189,50 @@ function textoCustom(custom: LecturaDia['custom']): string {
   return custom.map((g) => `${g.cantidad} pax custom ${g.banda} (${g.etiquetas.join(', ')})`).join(' · ');
 }
 
+function sumarCuentas(a: CuentasBanda, b: CuentasBanda): CuentasBanda {
+  return { M: a.M + b.M, T: a.T + b.T, N: a.N + b.N };
+}
+
+function siglaPuesto(name: string): string {
+  const m = String(name || '').match(/(\d+)\s*$/);
+  return m ? `P${m[1]}` : String(name || '').trim();
+}
+
+/** D12 de un puesto + N12 de otro: cubren la T aunque no estén en el mismo puesto. */
+export function textoEntrePuestos(turnos: readonly TurnoDia[]): string | null {
+  const d12 = turnos.filter((t) => up(t.code) === 'D12' && String(t.positionName || '').trim());
+  const n12 = turnos.filter((t) => up(t.code) === 'N12' && String(t.positionName || '').trim());
+  for (const d of d12) {
+    const n = n12.find((x) => !mismo(String(x.positionName || ''), String(d.positionName || '')));
+    if (!n) continue;
+    return `cubierto entre puestos (D12 ${siglaPuesto(String(d.positionName))} + N12 ${siglaPuesto(String(n.positionName))})`;
+  }
+  return null;
+}
+
+/** Suma la cuenta de cada puesto. Un D12 y un N12 de puestos distintos no se descuentan entre sí. */
+function contarSumandoPuestos(turnos: readonly TurnoDia[]): { cuentas: CuentasBanda; crudo: { M: number; T: number; N: number; D12: number; N12: number } } {
+  const grupos = new Map<string, TurnoDia[]>();
+  for (const t of turnos) {
+    const k = norm(t.positionName || '');
+    const list = grupos.get(k) || [];
+    list.push(t);
+    grupos.set(k, list);
+  }
+  let cuentas: CuentasBanda = { M: 0, T: 0, N: 0 };
+  const crudo = { M: 0, T: 0, N: 0, D12: 0, N12: 0 };
+  for (const list of grupos.values()) {
+    const c = contarEstandar(list);
+    cuentas = sumarCuentas(cuentas, c.cuentas);
+    crudo.M += c.crudo.M;
+    crudo.T += c.crudo.T;
+    crudo.N += c.crudo.N;
+    crudo.D12 += c.crudo.D12;
+    crudo.N12 += c.crudo.N12;
+  }
+  return { cuentas, crudo };
+}
+
 export function leerDia(input: { turnos: readonly TurnoDia[]; puestos: readonly PuestoServicio[] }): LecturaDia {
   const puestos24 = input.puestos.filter(esPuesto24);
   const mostrar = puestos24.length > 0;
@@ -196,8 +246,25 @@ export function leerDia(input: { turnos: readonly TurnoDia[]; puestos: readonly 
   const conPuesto = trabajo.filter((t) => !turnoSinPuesto(t.positionName));
   const customTurnos = conPuesto.filter((t) => esCustom(t, input.puestos));
   const estandar = conPuesto.filter((t) => !esCustom(t, input.puestos));
-  const { cuentas, crudo } = contarEstandar(estandar);
+  const { cuentas, crudo } = contarSumandoPuestos(estandar);
+  const bolsa = contarEstandar(estandar);
   const { falta, sobra } = delta(cuentas, juegosPedidos);
+  const faltaBolsa = delta(bolsa.cuentas, juegosPedidos).falta;
+  const faltaLocal = puestos24.some((pos) => {
+    const qty = Math.max(1, Number(pos.qty) || 1);
+    const del = estandar.filter((t) => mismo(t.positionName || '', pos.positionName));
+    if (!del.length) return false;
+    const loc = delta(contarEstandar(del).cuentas, qty).falta;
+    return loc.M + loc.T + loc.N > 0;
+  });
+  const entre = textoEntrePuestos(estandar);
+  const objetivoCubre = falta.M + falta.T + falta.N === 0;
+  const pareceFaltar = faltaBolsa.M + faltaBolsa.T + faltaBolsa.N > 0 || faltaLocal;
+  const cubiertoEntre = objetivoCubre && pareceFaltar
+    ? (entre || 'cubierto entre puestos')
+    : null;
+  const puestosConGente = puestos24.filter((pos) => estandar.some((t) => mismo(t.positionName || '', pos.positionName))).length;
+  const reconcilia = mostrar && puestos24.length > 0 && puestosConGente === puestos24.length && objetivoCubre;
   const vals = [cuentas.M, cuentas.T, cuentas.N].slice().sort((a, b) => a - b);
   const mediana = vals[1] ?? 0;
   const paxVisto = puestos24.length ? Math.round(mediana / puestos24.length) : 0;
@@ -219,18 +286,20 @@ export function leerDia(input: { turnos: readonly TurnoDia[]; puestos: readonly 
   const turnosFuera = sobranHoras > 0 ? Math.round(sobranHoras / 8) : 0;
   const fs = textoFaltaSobra(falta, sobra);
   const customTxt = textoCustom(custom);
+  const lineaBanda = fs || cubiertoEntre || '';
+  const textoHoras = mostrar ? `${horasTrabajadas}/${horasVendidas} h · ${puestos24.length} puestos de 24 h` : '';
   const base = [
     customTxt,
     `M ${crudo.M} · T ${crudo.T} · N ${crudo.N}`,
-    fs,
+    lineaBanda,
     mostrar ? `servicio: ${puestos24.length} puestos × ${paxServicio} pax` : '',
     avisoServicio || '',
   ].filter(Boolean).join(' · ');
   const sobraTxt = mostrar && sobranHoras > 0
     ? `Sobran ${sobranHoras} h: ${turnosFuera} turnos de 8 h fuera del servicio`
     : '';
-  const texto = [base, sobraTxt].filter(Boolean).join(' · ');
-  const textoCorto = [customTxt, fs || 'en línea', avisoServicio || ''].filter(Boolean).join(' · ');
+  const texto = [textoHoras, base, cubiertoEntre && fs ? cubiertoEntre : '', sobraTxt].filter(Boolean).join(' · ');
+  const textoCorto = [customTxt, fs || cubiertoEntre || 'en línea', cubiertoEntre && fs ? cubiertoEntre : '', avisoServicio || ''].filter(Boolean).join(' · ');
   return {
     mostrar,
     custom,
@@ -250,6 +319,9 @@ export function leerDia(input: { turnos: readonly TurnoDia[]; puestos: readonly 
     sinPuesto,
     texto,
     textoCorto,
+    textoHoras,
+    cubiertoEntre,
+    reconcilia,
   };
 }
 
@@ -304,7 +376,11 @@ function fmtDia(dateStr: string): string {
 
 function textoPropuesta(prop: Propuesta12h | null): string {
   if (!prop || prop.cambios.length < 2) return '';
-  return prop.cambios.map((c) => `${apellidoCorto(c.nombre)} ${c.code}`).join(' + ');
+  const mixto = prop.cambios.some((c) => c.coversPositionName || c.coversObjectiveId);
+  return prop.cambios.map((c) => {
+    const pos = mixto && c.positionName ? ` (${c.positionName})` : '';
+    return `${apellidoCorto(c.nombre)} ${c.code}${pos}`;
+  }).join(' + ');
 }
 
 /**
@@ -332,11 +408,13 @@ export function faltantesDelDia(input: {
     if (cuentas.M + cuentas.T + cuentas.N === 0) continue;
     const { falta } = delta(cuentas, qty);
     const pool = input.turnos12
-      .filter((t) => mismo(t.positionName, pos.positionName))
       .slice()
       .sort((a, b) => (horas[a.empId] || 0) - (horas[b.empId] || 0) || a.nombre.localeCompare(b.nombre, 'es'));
+    const cupos: Record<string, number> = {};
+    for (const p of input.puestos.filter(esPuesto24)) cupos[norm(p.positionName)] = Math.max(1, Number(p.qty) || 1);
     const usados = new Set<string>();
     (['T', 'M', 'N'] as Banda[]).forEach((banda) => {
+      if (lectura.falta[banda] === 0) return;
       for (let i = 0; i < falta[banda]; i += 1) {
         const disponibles = pool.filter((t) => !usados.has(`${t.empId}|${up(t.code)}`));
         const prop = proponerCierre12h({
@@ -345,6 +423,7 @@ export function faltantesDelDia(input: {
           faltantes: [banda],
           turnos: disponibles,
           sla: input.slaDe?.(pos.positionName),
+          cupos,
         });
         const par = !!(prop && prop.modo === 'par' && prop.cambios.length >= 2);
         if (par && prop) {
@@ -379,6 +458,8 @@ export function proponerLiberar(input: {
   positionName: string;
   turnos: readonly TurnoPuesto12[];
   sla?: ReadonlyArray<{ code?: string; startTime?: string; endTime?: string; hours?: number }>;
+  cupos?: Readonly<Record<string, number>>;
+  objectiveId?: string;
 }): Liberacion {
   const banda = up(input.code);
   if (banda !== 'M' && banda !== 'T' && banda !== 'N') {
@@ -391,11 +472,17 @@ export function proponerLiberar(input: {
     faltantes: [banda],
     turnos: resto,
     sla: input.sla,
+    cupos: input.cupos,
+    objectiveId: input.objectiveId,
   });
   if (!prop || prop.modo !== 'par' || prop.cambios.length < 2) {
     return { ok: false, motivo: prop?.texto || `No hay par de 12 h para cubrir la ${banda}. No se libera.` };
   }
-  const quienes = prop.cambios.map((c) => `${apellidoCorto(c.nombre)} ${c.code}`).join(' + ');
+  const mixto = prop.cambios.some((c) => c.coversPositionName || c.coversObjectiveId);
+  const quienes = prop.cambios.map((c) => {
+    const pos = mixto && c.positionName ? ` (${c.positionName})` : '';
+    return `${apellidoCorto(c.nombre)} ${c.code}${pos}`;
+  }).join(' + ');
   return {
     ok: true,
     cambios: prop.cambios,

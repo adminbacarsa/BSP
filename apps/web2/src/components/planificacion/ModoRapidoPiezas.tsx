@@ -308,6 +308,9 @@ export function PegarExcelModal({
     onAplicar,
     puedeAlta,
     onDarDeAlta,
+    objetivosAjenos,
+    franjasAjeno,
+    onAplicarAjenos,
 }: {
     estado: PegarExcelEstado;
     guardias: GuardiaPegado[];
@@ -322,6 +325,9 @@ export function PegarExcelModal({
     /** RRHH create o SuperAdmin. Sin permiso, la fila dice que hay que pedirle el alta a RRHH. */
     puedeAlta?: boolean;
     onDarDeAlta?: (fila: FilaPegadoExcel) => void;
+    objetivosAjenos?: Array<{ id: string; clientId: string; clientName: string; name: string }>;
+    franjasAjeno?: (objectiveId: string) => Promise<Array<{ positionName: string; code: string; startTime: string; endTime: string; hours: number }>>;
+    onAplicarAjenos?: (items: Array<{ fila: number; col: number; objectiveId: string; clientId: string; objectiveName: string; positionName: string; code: string; startTime: string; endTime: string; hours: number; marca: string; banda: string }>) => void;
 }) {
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
@@ -334,6 +340,28 @@ export function PegarExcelModal({
         return () => window.removeEventListener('keydown', onKey, true);
     }, [onCerrar]);
     const [borrador, setBorrador] = useState(estado.paso === 'texto' ? estado.borrador : '');
+    const [ajenoObj, setAjenoObj] = useState<Record<string, string>>({});
+    const [ajenoFranja, setAjenoFranja] = useState<Record<string, string>>({});
+    const [franjasPorMarca, setFranjasPorMarca] = useState<Record<string, Array<{ positionName: string; code: string; startTime: string; endTime: string; hours: number }>>>({});
+    const marcasAjenas = estado.paso === 'resumen'
+        ? [...new Map((estado.preview.codigosAjenos || []).map((c) => [c.marca, c])).values()]
+        : [];
+    const claveAjenos = marcasAjenas.map((c) => `${c.marca}:${c.objectiveId || ''}`).join('|');
+    useEffect(() => {
+        if (!franjasAjeno || !claveAjenos) return;
+        let cancel = false;
+        for (const c of marcasAjenas) {
+            if (!c.objectiveId) continue;
+            setAjenoObj((prev) => (prev[c.marca] ? prev : { ...prev, [c.marca]: c.objectiveId || '' }));
+            void franjasAjeno(c.objectiveId).then((fr) => {
+                if (cancel) return;
+                setFranjasPorMarca((prev) => ({ ...prev, [c.marca]: fr }));
+                const idx = fr.findIndex((f) => f.positionName === c.positionName && f.code === (c.banda || '') && f.startTime === c.startTime);
+                if (idx >= 0) setAjenoFranja((prev) => (prev[c.marca] ? prev : { ...prev, [c.marca]: String(idx) }));
+            });
+        }
+        return () => { cancel = true; };
+    }, [claveAjenos, franjasAjeno]);
     const resumen = estado.paso === 'resumen' ? textoResumenPegado({
         filas: estado.preview.filas.length,
         encontrados: estado.preview.filas.filter((f) => estado.asignacion[f.indice] != null).length,
@@ -350,6 +378,81 @@ export function PegarExcelModal({
                     <h3 className="text-sm font-black uppercase text-slate-800">Pegar desde Excel</h3>
                     <button type="button" onClick={onCerrar} className="ml-auto rounded-lg p-1 text-slate-400 hover:bg-slate-50" aria-label="Cerrar"><X size={14} /></button>
                 </div>
+                {estado.paso === 'resumen' && marcasAjenas.length > 0 && (
+                    <div className="mb-3 rounded-2xl border border-slate-200 bg-slate-50 p-3" data-pegar-ajeno>
+                        <p className="mb-2 text-[11px] font-bold text-slate-700">¿A qué objetivo y qué turno?</p>
+                        {marcasAjenas.map((c) => {
+                            const franjas = franjasPorMarca[c.marca] || [];
+                            const objId = ajenoObj[c.marca] || c.objectiveId || '';
+                            return (
+                                <div key={c.marca} className="mb-2 grid grid-cols-1 gap-1" data-pegar-ajeno-fila={c.marca}>
+                                    <span className="text-[11px] font-semibold text-slate-800">{c.codigo} →</span>
+                                    <select
+                                        className="rounded-xl border border-slate-200 bg-white px-2 py-1.5 text-[11px] text-slate-800"
+                                        data-pegar-ajeno-obj={c.marca}
+                                        value={objId}
+                                        onChange={(e) => {
+                                            const id = e.target.value;
+                                            setAjenoObj((prev) => ({ ...prev, [c.marca]: id }));
+                                            setAjenoFranja((prev) => ({ ...prev, [c.marca]: '' }));
+                                            if (franjasAjeno && id) {
+                                                void franjasAjeno(id).then((fr) => setFranjasPorMarca((prev) => ({ ...prev, [c.marca]: fr })));
+                                            }
+                                        }}
+                                    >
+                                        <option value="">objetivo: buscar…</option>
+                                        {(objetivosAjenos || []).map((o) => (
+                                            <option key={o.id} value={o.id}>{o.clientName} · {o.name}</option>
+                                        ))}
+                                    </select>
+                                    <select
+                                        className="rounded-xl border border-slate-200 bg-white px-2 py-1.5 text-[11px] text-slate-800"
+                                        data-pegar-ajeno-franja={c.marca}
+                                        value={ajenoFranja[c.marca] || ''}
+                                        onChange={(e) => setAjenoFranja((prev) => ({ ...prev, [c.marca]: e.target.value }))}
+                                    >
+                                        <option value="">turno…</option>
+                                        {franjas.map((f, i) => (
+                                            <option key={`${f.positionName}-${f.code}-${i}`} value={String(i)}>{f.code} {f.startTime}–{f.endTime} · {f.positionName}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                            );
+                        })}
+                        <button
+                            type="button"
+                            data-pegar-ajeno-asignar
+                            className="mt-1 rounded-xl bg-indigo-600 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-indigo-700 disabled:bg-white disabled:text-slate-400 disabled:border disabled:border-slate-200"
+                            disabled={!onAplicarAjenos || marcasAjenas.every((c) => !(ajenoObj[c.marca] || c.objectiveId) || ajenoFranja[c.marca] === undefined || ajenoFranja[c.marca] === '')}
+                            onClick={() => {
+                                if (!onAplicarAjenos || estado.paso !== 'resumen') return;
+                                const items = (estado.preview.codigosAjenos || []).flatMap((c) => {
+                                    const id = ajenoObj[c.marca] || c.objectiveId || '';
+                                    const obj = (objetivosAjenos || []).find((o) => o.id === id);
+                                    const fr = (franjasPorMarca[c.marca] || [])[Number(ajenoFranja[c.marca])];
+                                    if (!id || !obj || !fr) return [];
+                                    return [{
+                                        fila: c.fila,
+                                        col: c.col,
+                                        objectiveId: id,
+                                        clientId: obj.clientId,
+                                        objectiveName: obj.name,
+                                        positionName: fr.positionName,
+                                        code: fr.code,
+                                        startTime: fr.startTime,
+                                        endTime: fr.endTime,
+                                        hours: fr.hours,
+                                        marca: c.marca,
+                                        banda: c.banda || fr.code,
+                                    }];
+                                });
+                                onAplicarAjenos(items);
+                            }}
+                        >
+                            Asignar en ese objetivo
+                        </button>
+                    </div>
+                )}
                 {estado.paso === 'texto' ? (
                     <>
                         <p className="mb-2 text-[11px] text-slate-500">Copiá en la planilla desde la columna del nombre hasta el último día y pegalo acá. Si el bloque trae los nombres, se acomoda por guardia antes de escribir.</p>

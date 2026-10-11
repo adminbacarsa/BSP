@@ -220,6 +220,16 @@ import {
     textoAvisoTurnoAjeno,
 } from '@/lib/planificacion/turnoOtroObjetivo';
 import {
+    decidirAsignacionOtroObjetivo,
+    esLicenciaCodigo,
+    fechaCorta,
+    modoEscrituraOtroObjetivo,
+    urlCronograma,
+    validarContraTodos,
+    type EquivalenciaOtro,
+} from '@/lib/planificacion/asignarOtroObjetivo';
+import { AsignarOtroObjetivoModal, type FranjaOpcion, type ObjetivoOpcion } from '@/components/planificacion/AsignarOtroObjetivoModal';
+import {
     CeldaGrilla,
     TooltipCeldaGrilla,
     reusarVista,
@@ -1838,11 +1848,15 @@ function PlanificacionDesktop() {
     }, [planViewReady, selectedClient, selectedObjective, currentDate]);
     /** Deep-link desde Análisis: ?objectiveId=&clientId=&year=&month= (mes 1–12) */
     const deepLinkAppliedRef = useRef(false);
+    const focoCeldaRef = useRef<{ empId: string; dateStr: string } | null>(null);
     useEffect(() => {
         if (!planViewReady || !clients.length || deepLinkAppliedRef.current || !router.isReady) return;
         const oid = String(router.query.objectiveId ?? '').trim();
         if (!oid) return;
         deepLinkAppliedRef.current = true;
+        const dia = String(router.query.dia ?? '').trim();
+        const empFoco = String(router.query.empId ?? '').trim();
+        if (dia && empFoco) focoCeldaRef.current = { empId: empFoco, dateStr: dia };
         let clientId = String(router.query.clientId ?? '').trim();
         if (!clientId) {
             for (const c of clients) {
@@ -1862,7 +1876,7 @@ function PlanificacionDesktop() {
             goToPlanningMonth(y, m - 1);
         }
         void router.replace('/admin/planificacion/', undefined, { shallow: true });
-    }, [planViewReady, clients, router.isReady, router.query.objectiveId, router.query.clientId, router.query.year, router.query.month, goToPlanningMonth]);
+    }, [planViewReady, clients, router.isReady, router.query.objectiveId, router.query.clientId, router.query.year, router.query.month, router.query.dia, router.query.empId, goToPlanningMonth]);
     const [grupos, setGrupos] = useState<GrupoObjetivos[]>([]);
     const [showGrupoForm, setShowGrupoForm] = useState(false);
     const [grupoFormMode, setGrupoFormMode] = useState<'new' | 'edit'>('new');
@@ -2456,7 +2470,11 @@ function PlanificacionDesktop() {
         opciones: OpcionesMenuRapido;
         diasLicencia: string[];
         liberar?: { code: string; positionName: string };
+        asignarOtro?: boolean;
     } | null>(null);
+    const [otroObjetivo, setOtroObjetivo] = useState<{ empId: string; nombre: string; dateStr: string } | null>(null);
+    const [franjasOtro, setFranjasOtro] = useState<FranjaOpcion[]>([]);
+    const [cargandoFranjasOtro, setCargandoFranjasOtro] = useState(false);
     const [modoElegir, setModoElegir] = useState<{
         ctx: CtxMenuRapido;
         accion: AccionElegir;
@@ -3081,6 +3099,20 @@ function PlanificacionDesktop() {
             return { ...prev, asignacion: { ...prev.asignacion, [pendiente.indice]: fila } };
         });
     }, [displayedEmployees]);
+
+    useEffect(() => {
+        const foco = focoCeldaRef.current;
+        if (!foco) return;
+        const fila = displayedEmployees.findIndex((e: { id: string }) => e.id === foco.empId);
+        const col = daysInMonth.findIndex((d) => getDateKey(d) === foco.dateStr);
+        if (fila < 0 || col < 0) return;
+        focoCeldaRef.current = null;
+        const td = document.querySelector(`[data-rc="${fila}:${col}"]`);
+        if (td instanceof HTMLElement) {
+            td.scrollIntoView({ block: 'center', inline: 'center' });
+            td.classList.add('ring-2', 'ring-indigo-500');
+        }
+    }, [displayedEmployees, daysInMonth]);
 
     const etiquetasGrupo = useMemo(() => {
         const map = new Map<string, EtiquetaFilaGrupo>();
@@ -8272,7 +8304,7 @@ function PlanificacionDesktop() {
                         const turnoPayload: Record<string, unknown> = {
                             employeeId: empId,
                             employeeName: empName,
-                            clientId: selectedClient,
+                            clientId: change.clientId || selectedClient,
                             objectiveId: change.objectiveId || resolveObjectiveForEmp(empId),
                             code: change.isFrancoCompensatorio ? 'FF' : change.code,
                             type: change.name||change.code,
@@ -8304,7 +8336,7 @@ function PlanificacionDesktop() {
                             coveredBy: change.coveredBy || null,
                             ...(change.menuRapidoTexto ? { menuRapidoTexto: change.menuRapidoTexto, menuRapidoVia: change.menuRapidoVia || 'MENU_RAPIDO' } : {}),
                             ...(change.menuRapidoRol ? { menuRapidoRol: change.menuRapidoRol, ...(change.menuRapidoCubreA ? { menuRapidoCubreA: change.menuRapidoCubreA } : {}) } : {}),
-                            draft: correctionMode ? false : !isPublished,
+                            draft: change.menuRapidoVia === 'OTRO_OBJETIVO' ? change.draft !== false : (correctionMode ? false : !isPublished),
                             actorName: realActorName,
                             ...deploymentFieldsForFirestore(change),
                         };
@@ -9223,7 +9255,8 @@ function PlanificacionDesktop() {
         const shPre = pendingChanges[keyTurnoPre]?.isDeleted ? null : (pendingChanges[keyTurnoPre] || shiftsMap[keyTurnoPre]);
         const codePre = String(shPre?.code || '').toUpperCase();
         const puedeLiberarPre = !bloqueoMesCerrado && puedeEditarDiaMenu(celda.dateStr) && !celda.isLeave && (codePre === 'M' || codePre === 'T' || codePre === 'N');
-        if (!opciones.visible && !puedeLiberarPre) return;
+        const puedeOtroPre = !bloqueoMesCerrado && puedeEditarDiaMenu(celda.dateStr) && !celda.isLeave && !celda.tieneTurno && !shPre;
+        if (!opciones.visible && !puedeLiberarPre && !puedeOtroPre) return;
         ev.preventDefault();
         ev.stopPropagation();
         setModoElegir(null);
@@ -9238,6 +9271,7 @@ function PlanificacionDesktop() {
         const shMenu = pendingChanges[keyTurno]?.isDeleted ? null : (pendingChanges[keyTurno] || shiftsMap[keyTurno]);
         const codeMenu = String(shMenu?.code || '').toUpperCase();
         const puedeLiberar = !bloqueoMesCerrado && puedeEditarDiaMenu(celda.dateStr) && !celda.isLeave && (codeMenu === 'M' || codeMenu === 'T' || codeMenu === 'N');
+        const puedeOtro = !bloqueoMesCerrado && puedeEditarDiaMenu(celda.dateStr) && !celda.isLeave && !celda.tieneTurno && !shMenu;
         const work = celda.isLeave ? bandaTitularDelDia(celda.emp.id, celda.dateStr, posPreferida) : null;
         const huecosPuesto = !work && dayReport
             ? flattenDayGapsForUi(dayReport).filter((g) => !posPreferida || g.positionName === posPreferida)
@@ -9254,9 +9288,12 @@ function PlanificacionDesktop() {
         setMenuRapido({
             x: ev.clientX,
             y: ev.clientY,
-            opciones: puedeLiberar && !menuOpciones.visible ? { ...menuOpciones, visible: true, titulo: 'Liberar este turno' } : menuOpciones,
+            opciones: (!menuOpciones.visible && (puedeLiberar || puedeOtro))
+                ? { ...menuOpciones, visible: true, titulo: puedeOtro && !puedeLiberar ? 'Celda vacía' : 'Liberar este turno' }
+                : menuOpciones,
             diasLicencia: diasLicencia.length > 1 && diasLicencia.includes(celda.dateStr) ? diasLicencia : [],
             liberar: puedeLiberar ? { code: codeMenu, positionName: String(shMenu?.positionName || posPreferida || '') } : undefined,
+            asignarOtro: puedeOtro,
             ctx: {
                 clase: celda.isLeave ? 'ausente' : 'hueco',
                 empId: celda.emp.id,
@@ -14414,7 +14451,14 @@ function PlanificacionDesktop() {
                 if (bloqueado) continue;
                 const pos = String(t.positionName || getEmpDefaultPos(emp.id) || '').trim();
                 if (!pos || pos === 'General' || pos === 'Retén') continue;
-                out.push({ empId: emp.id, nombre: String(emp.name || emp.id), dateStr: ds, code, positionName: pos });
+                out.push({
+                    empId: emp.id,
+                    nombre: String(emp.name || emp.id),
+                    dateStr: ds,
+                    code,
+                    positionName: pos,
+                    objectiveId: String(t.objectiveId || selectedObjective || ''),
+                });
             }
         }
         return out;
@@ -14423,6 +14467,11 @@ function PlanificacionDesktop() {
         const report = buildDayCoverageReport(dateStr);
         if (!report) return [];
         const turnos = turnos12(dateStr);
+        const cupos12: Record<string, number> = {};
+        for (const p of positionStructure || []) {
+            const nombre = String(p.positionName || '').trim().toUpperCase().replace(/\s+/g, ' ');
+            if (nombre) cupos12[nombre] = Math.max(1, Number(p.qty) || 1);
+        }
         const out: Propuesta12h[] = [];
         for (const pos of report.positions || []) {
             if ((pos.missingUnits || 0) <= 0) continue;
@@ -14439,6 +14488,8 @@ function PlanificacionDesktop() {
                 turnos,
                 preferidoEmpId: preferido,
                 sla,
+                cupos: cupos12,
+                objectiveId: String((pos as { objectiveId?: string }).objectiveId || selectedObjective || ''),
             });
             if (prop) out.push(prop);
         }
@@ -14506,10 +14557,18 @@ function PlanificacionDesktop() {
                     const celda = ctxRapido(r, c);
                     if (!celda.emp) continue;
                     const fuente: FuenteRapida = {
-                        code: ch.code, startTime: ch.startTime, endTime: ch.endTime, hours: ch.hours, name: ch.code, positionName: prop.positionName,
+                        code: ch.code, startTime: ch.startTime, endTime: ch.endTime, hours: ch.hours, name: ch.code, positionName: ch.positionName || prop.positionName,
                     };
                     const res = cambioRapido(celda.emp, ch.dateStr, ch.code, celda.ctx, fuente);
                     if ('error' in res) { toast.message(res.error); continue; }
+                    if (ch.coversPositionName || ch.coversObjectiveId) {
+                        res.change = {
+                            ...res.change,
+                            positionName: ch.positionName || res.change.positionName,
+                            ...(ch.coversPositionName ? { coversPositionName: ch.coversPositionName, coversBandCode: prop.banda, coversDateStr: ch.dateStr } : {}),
+                            ...(ch.coversObjectiveId ? { coversObjectiveId: ch.coversObjectiveId } : {}),
+                        };
+                    }
                     next[`${ch.empId}_${ch.dateStr}`] = res.change;
                 }
                 continue;
@@ -14552,6 +14611,11 @@ function PlanificacionDesktop() {
         if (global) { toast.message(global); return; }
         const emp = displayedEmployees.find((e: any) => e.id === empId) || employees.find((e: any) => e.id === empId);
         if (!emp) return;
+        const cuposLib: Record<string, number> = {};
+        for (const p of positionStructure || []) {
+            const nombre = String(p.positionName || '').trim().toUpperCase().replace(/\s+/g, ' ');
+            if (nombre) cuposLib[nombre] = Math.max(1, Number(p.qty) || 1);
+        }
         const lib = proponerLiberar({
             empId,
             dateStr,
@@ -14559,6 +14623,8 @@ function PlanificacionDesktop() {
             positionName: positionName || 'General',
             turnos: turnos12(dateStr),
             sla: getShiftsForPosition(positionName, selectedObjective) as TurnoSla[],
+            cupos: cuposLib,
+            objectiveId: selectedObjective || undefined,
         });
         if (!lib.ok) { toast.message('motivo' in lib ? lib.motivo : 'No se libera.'); return; }
         const filaDe = new Map(displayedEmployees.map((e: any, i: number) => [e.id, i]));
@@ -14576,14 +14642,172 @@ function PlanificacionDesktop() {
             if (rr == null || cc < 0) continue;
             const otra = ctxRapido(rr, cc);
             if (!otra.emp) continue;
-            const fuente: FuenteRapida = { code: ch.code, startTime: ch.startTime, endTime: ch.endTime, hours: ch.hours, name: ch.code, positionName };
+            const fuente: FuenteRapida = { code: ch.code, startTime: ch.startTime, endTime: ch.endTime, hours: ch.hours, name: ch.code, positionName: ch.positionName || positionName };
             const res = cambioRapido(otra.emp, ch.dateStr, ch.code, otra.ctx, fuente);
             if ('error' in res) { toast.message(res.error); continue; }
+            if (ch.coversPositionName || ch.coversObjectiveId) {
+                res.change = {
+                    ...res.change,
+                    positionName: ch.positionName || res.change.positionName,
+                    ...(ch.coversPositionName ? { coversPositionName: ch.coversPositionName, coversBandCode: code, coversDateStr: ch.dateStr } : {}),
+                    ...(ch.coversObjectiveId ? { coversObjectiveId: ch.coversObjectiveId } : {}),
+                };
+            }
             next[`${ch.empId}_${ch.dateStr}`] = res.change;
         }
         commitPendingChanges(next);
         toast.success(lib.texto);
         setBandasOcultas(false);
+    };
+
+    const objetivosParaOtro = (): ObjetivoOpcion[] => {
+        const out: ObjetivoOpcion[] = [];
+        for (const c of clients || []) {
+            for (const o of (c.objetivos || []) as Array<{ id?: string; name?: string; status?: string }>) {
+                const id = String(o.id || '').trim();
+                if (!id || id === String(selectedObjective || '')) continue;
+                if (String(o.status || 'ACTIVE').toUpperCase() === 'INACTIVE') continue;
+                out.push({ id, clientId: c.id, clientName: String(c.name || c.businessName || 'Cliente'), name: String(o.name || id) });
+            }
+        }
+        return out.sort((a, b) => `${a.clientName} ${a.name}`.localeCompare(`${b.clientName} ${b.name}`, 'es'));
+    };
+    const abrirAsignarOtro = (empId: string, nombre: string, dateStr: string) => {
+        if (bloqueoMesCerrado) { toast.message('Mes cerrado'); return; }
+        const key = `${empId}_${dateStr}`;
+        const local = pendingChangesRef.current[key]?.isDeleted ? null : (pendingChangesRef.current[key] || shiftsMap[key]);
+        const aus = absencesMap[key];
+        if (local || (aus && isActiveAbsence(aus))) {
+            const code = String(local?.code || aus?.inferredCode || 'turno').toUpperCase();
+            const obj = getObjectiveName(local?.objectiveId || selectedObjective) || 'este objetivo';
+            toast.message(`${nombre} ya tiene ${code} en ${obj} el ${fechaCorta(dateStr)}`);
+            return;
+        }
+        setFranjasOtro([]);
+        setOtroObjetivo({ empId, nombre, dateStr });
+    };
+    const cargarFranjasOtro = async (objectiveId: string) => {
+        setCargandoFranjasOtro(true);
+        setFranjasOtro([]);
+        try {
+            const snap = await getDocs(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa));
+            const allDocs = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+            const cliente = clients.find((c) => (c.objetivos || []).some((o: any) => String(o.id) === objectiveId));
+            const matching = filterSlasForPlanningContext(allDocs, cliente?.id || '', objectiveId, clients, slaIdToObjId);
+            const year = currentDate.getFullYear();
+            const month = currentDate.getMonth();
+            const pick = pickSlaForPlanningMonth(matching, year, month);
+            const srv = pick.vigente ?? pickClosedSlaForPlanningMonth(matching, year, month) ?? pick.fallback;
+            const { structure } = buildPlanningPositionStructure(srv, { monthHasSla: !!srv, hasExactMatch: pick.hasExactMatch });
+            const franjas: FranjaOpcion[] = [];
+            for (const pos of structure || []) {
+                for (const sh of pos.shifts || []) {
+                    const code = String(sh.code || '').toUpperCase();
+                    if (!code || code === 'F' || code === 'RET') continue;
+                    franjas.push({
+                        positionName: String(pos.positionName || 'General'),
+                        code,
+                        startTime: String(sh.startTime || '07:00'),
+                        endTime: String(sh.endTime || '15:00'),
+                        hours: Number(sh.hours) || 8,
+                    });
+                }
+            }
+            setFranjasOtro(franjas);
+        } catch {
+            toast.error('No se pudo leer el servicio de ese objetivo.');
+        } finally {
+            setCargandoFranjasOtro(false);
+        }
+    };
+    const confirmarOtroObjetivo = async (sel: { objetivo: ObjetivoOpcion; franja: FranjaOpcion }) => {
+        const ctx = otroObjetivo;
+        if (!ctx || !empresaId) return;
+        const anio = Number(ctx.dateStr.slice(0, 4));
+        const mes = Number(ctx.dateStr.slice(5, 7));
+        let publicados = false;
+        try {
+            const est = await fetchPlanificacionEstadoDoc(empresaId, sel.objetivo.id, anio, mes);
+            publicados = !!(est?.data?.publishedAt);
+        } catch { publicados = false; }
+        const modo = modoEscrituraOtroObjetivo(publicados, canCorrectPlanning);
+        if (!modo.ok) { toast.message(modo.mensaje); return; }
+        const snap = await getDocs(query(collection(db, 'turnos'), where('employeeId', '==', ctx.empId), where('empresaId', '==', empresaId)));
+        const delMes: Array<{ objectiveId: string; clientId?: string; code: string; scheduleDate: string; start?: string; end?: string; hours?: number; isDeleted?: boolean }> = [];
+        snap.forEach((d) => {
+            const data = d.data() as any;
+            if (data.isDeleted) return;
+            const fecha = String(data.scheduleDate || '');
+            if (!fecha.startsWith(`${anio}-${String(mes).padStart(2, '0')}`)) return;
+            delMes.push({
+                objectiveId: String(data.objectiveId || ''),
+                clientId: data.clientId,
+                code: String(data.code || '').toUpperCase(),
+                scheduleDate: fecha,
+                start: typeof data.startTime === 'string' ? data.startTime : '',
+                end: typeof data.endTime === 'string' ? data.endTime : '',
+                hours: Number(data.hours) || 0,
+            });
+        });
+        const eseDia = delMes.filter((t) => t.scheduleDate === ctx.dateStr).map((t) => ({
+            objectiveId: t.objectiveId,
+            objectiveName: getObjectiveName(t.objectiveId) || t.objectiveId,
+            clientId: t.clientId,
+            code: t.code,
+            esLicencia: esLicenciaCodigo(t.code),
+        }));
+        const decision = decidirAsignacionOtroObjetivo({ nombre: ctx.nombre, empId: ctx.empId, dateStr: ctx.dateStr, turnos: eseDia });
+        if (!decision.ok) {
+            const href = decision.abrir ? urlCronograma(decision.abrir) : '';
+            toast.message(decision.mensaje, href ? { action: { label: `Abrir el cronograma de ${decision.abrir ? getObjectiveName(decision.abrir.objectiveId) : ''}`, onClick: () => { window.location.href = href; } } } : undefined);
+            return;
+        }
+        const aMin = (hm: string) => {
+            const [h, m] = String(hm || '0:0').split(':').map(Number);
+            return (Number(h) || 0) * 60 + (Number(m) || 0);
+        };
+        const horasMes = delMes.filter((t) => t.objectiveId !== String(selectedObjective || '')).reduce((s, t) => s + (Number(t.hours) || 0), 0) + (Number(empMonthlyHours[ctx.empId]) || 0);
+        const otros = delMes.filter((t) => t.scheduleDate !== ctx.dateStr && t.start && t.end).map((t) => {
+            const off = t.scheduleDate < ctx.dateStr ? -1 as const : 1 as const;
+            if (Math.abs(Number(t.scheduleDate.slice(8)) - Number(ctx.dateStr.slice(8))) > 1) return null;
+            return { startMin: aMin(t.start || ''), endMin: aMin(t.end || ''), dateOffset: off };
+        }).filter((x): x is { startMin: number; endMin: number; dateOffset: -1 | 1 } => !!x);
+        const val = validarContraTodos({
+            startMin: aMin(sel.franja.startTime),
+            endMin: aMin(sel.franja.endTime),
+            horasMes,
+            horasTurno: sel.franja.hours,
+            otros,
+        });
+        if (!val.ok) { toast.message(val.mensaje); return; }
+        const fila = displayedEmployees.findIndex((e: { id: string }) => e.id === ctx.empId);
+        const col = diasRapido.indexOf(ctx.dateStr);
+        if (fila < 0 || col < 0) { toast.message('Esa celda no está en la grilla.'); return; }
+        const celda = ctxRapido(fila, col);
+        const res = cambioRapido(celda.emp, ctx.dateStr, sel.franja.code, celda.ctx, {
+            code: sel.franja.code,
+            startTime: sel.franja.startTime,
+            endTime: sel.franja.endTime,
+            hours: sel.franja.hours,
+            name: sel.franja.code,
+            positionName: sel.franja.positionName,
+        });
+        if ('error' in res) { toast.message(res.error); return; }
+        const next = {
+            ...pendingChangesRef.current,
+            [`${ctx.empId}_${ctx.dateStr}`]: {
+                ...res.change,
+                objectiveId: sel.objetivo.id,
+                clientId: sel.objetivo.clientId,
+                positionName: sel.franja.positionName,
+                draft: modo.draft,
+                menuRapidoVia: 'OTRO_OBJETIVO',
+                comments: `Asignado en ${sel.objetivo.name}`,
+            },
+        };
+        commitPendingChanges(next);
+        setOtroObjetivo(null);
+        toast.success(`Turno en ${sel.objetivo.name}. Se guarda con el cronograma.`);
     };
 
     const consultarFrancoFaltante = async (faltante: FaltanteBanda, franco: { empId: string; nombre: string }) => {
@@ -15314,7 +15538,16 @@ function PlanificacionDesktop() {
                                 <span>Hs:</span>
                                 <span>{hoursMode === 'cct' ? 'CCT' : 'Mes'}</span>
                             </button>
-                            <span className={`flex items-center gap-1 ${gridOpts?.highlightCoverageFooter ? 'text-rose-700' : 'text-slate-500'}`}>
+                            <span
+                                className={`flex items-center gap-1 ${gridOpts?.highlightCoverageFooter ? 'text-rose-700' : 'text-slate-500'}`}
+                                title={(() => {
+                                    const dias = Object.values(lecturaMes.porDia);
+                                    if (!dias.length) return 'Horas del mes contra puestos × 24';
+                                    const trab = dias.reduce((s, d) => s + (d.horasTrabajadas || 0), 0);
+                                    const vend = dias.reduce((s, d) => s + (d.horasVendidas || 0), 0);
+                                    return `Mes: ${trab}/${vend} h · puestos × 24`;
+                                })()}
+                            >
                                 <ShieldCheck size={12}/> Cobertura:
                             </span>
                         </div>
@@ -15353,8 +15586,10 @@ function PlanificacionDesktop() {
                         });
                         }
 
-                        const isCovered = requiredPax > 0 && closedPax >= requiredPax;
                         const lecturaDia = lecturaMes.porDia[dateStr];
+                        const objetivoCubierto = !!lecturaDia?.reconcilia;
+                        const cerradoMostrar = objetivoCubierto ? requiredPax : closedPax;
+                        const isCovered = requiredPax > 0 && cerradoMostrar >= requiredPax;
                         const extra = lecturaDia?.mostrar && lecturaDia.turnosFuera > 0 ? lecturaDia.turnosFuera : 0;
                         const bandasGrupo = selectedGrupo && grupoUnifiedMode && !isCovered && requiredPax > 0
                             ? bandasAbiertasGrupoEn(dateStr, dayLetter)
@@ -15415,7 +15650,7 @@ function PlanificacionDesktop() {
                                     });
                                 }}
                             >
-                                {requiredPax > 0 ? `${closedPax}/${requiredPax}${extra > 0 ? ` +${extra}` : ''}` : (extra > 0 ? `+${extra}` : '-')}
+                                {requiredPax > 0 ? `${cerradoMostrar}/${requiredPax}${extra > 0 ? ` +${extra}` : ''}` : (extra > 0 ? `+${extra}` : '-')}
                             </td>
                         );
                     }))}
@@ -15492,10 +15727,27 @@ function PlanificacionDesktop() {
                             cerrarMenuRapido();
                             if (lib) liberarGuardia(ctx.empId, ctx.dateStr, lib.code, lib.positionName);
                         } : undefined}
+                        onAsignarOtro={menuRapido.asignarOtro ? () => {
+                            const ctx = menuRapido.ctx;
+                            cerrarMenuRapido();
+                            abrirAsignarOtro(ctx.empId, ctx.empName, ctx.dateStr);
+                        } : undefined}
                         onClose={cerrarMenuRapido}
                     />
                 </>,
                 document.body,
+            )}
+            {otroObjetivo && (
+                <AsignarOtroObjetivoModal
+                    nombre={otroObjetivo.nombre}
+                    fecha={fechaCorta(otroObjetivo.dateStr)}
+                    objetivos={objetivosParaOtro()}
+                    franjas={franjasOtro}
+                    cargando={cargandoFranjasOtro}
+                    onElegirObjetivo={(id) => { void cargarFranjasOtro(id); }}
+                    onCerrar={() => setOtroObjetivo(null)}
+                    onConfirmar={(sel) => { void confirmarOtroObjetivo(sel); }}
+                />
             )}
             {modoElegir && typeof document !== 'undefined' && createPortal((() => {
                 const idsCronograma = new Set(displayedEmployees.map((e: { id: string }) => e.id));
@@ -17101,6 +17353,17 @@ function PlanificacionDesktop() {
                                             const pos = puestoFilaRapido(emp.id, ctx);
                                             liberarGuardia(emp.id, ds, code, pos === 'General' ? '' : pos);
                                         }
+                                    }}
+                                    onOtroObjetivo={(celdas) => {
+                                        const cel = celdas[0];
+                                        if (!cel) return;
+                                        const { emp, ctx } = ctxRapido(cel.r, cel.c);
+                                        if (!emp) return;
+                                        const code = codigoCtxRapido(ctx);
+                                        const ds = diasRapido[cel.c];
+                                        if (!ds) return;
+                                        if (code) { toast.message('Asignar en otro objetivo es solo en una celda vacía.'); return; }
+                                        abrirAsignarOtro(emp.id, String(emp.name || emp.id), ds);
                                     }}
                                 />
                             </div>

@@ -47,6 +47,7 @@ type Props = {
     onMasDia?: (dateStr: string) => void;
     onNovedad?: (celdas: CeldaRC[]) => void;
     onLiberar?: (celdas: CeldaRC[]) => void;
+    onOtroObjetivo?: (celdas: CeldaRC[]) => void;
     onConfirmar12?: () => void;
     onCancelar12?: () => void;
 };
@@ -399,6 +400,11 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
             if (e.altKey && !mod && key === 'l') {
                 cortar();
                 p.onLiberar?.(celdasActuales());
+                return;
+            }
+            if (e.altKey && !mod && key === 'o') {
+                cortar();
+                p.onOtroObjetivo?.(celdasActuales());
                 return;
             }
             const next = moverCursor(cur, e.key, { ctrl: mod, shift: e.shiftKey }, p.dims, (r, c) => !!p.valorDe(r, c));

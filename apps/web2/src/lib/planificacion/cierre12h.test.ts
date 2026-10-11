@@ -102,6 +102,44 @@ describe('cierre a 12 h', () => {
         assert.equal(p?.cambios[0].code, 'D12');
     });
 
+    it('el par mixto sale de otro puesto y nombra de dónde viene cada uno', () => {
+        const p = proponerCierre12h({
+            dateStr: '2026-10-12',
+            positionName: 'Puesto 1',
+            faltantes: ['T'],
+            cupos: { 'PUESTO 1': 1, 'PUESTO 2': 1 },
+            turnos: [
+                { empId: 'pala', nombre: 'PALACIOS, Juan', dateStr: '2026-10-12', code: 'N', positionName: 'Puesto 1' },
+                { empId: 'herr', nombre: 'HERRERA, Luis', dateStr: '2026-10-12', code: 'M', positionName: 'Puesto 2' },
+                { empId: 'lopez', nombre: 'LOPEZ, Ana', dateStr: '2026-10-12', code: 'M', positionName: 'Puesto 2' },
+            ],
+        });
+        assert.equal(p?.modo, 'par');
+        assert.match(p!.texto, /HERRERA D12 \(Puesto 2\)/);
+        assert.match(p!.texto, /PALACIOS N12 \(Puesto 1\)/);
+        const herr = p?.cambios.find((c) => c.empId === 'herr');
+        assert.equal(herr?.code, 'D12');
+        assert.equal(herr?.coversPositionName, 'Puesto 1');
+        assert.equal(herr?.positionName, 'Puesto 2');
+        const pala = p?.cambios.find((c) => c.empId === 'pala');
+        assert.equal(pala?.coversPositionName, undefined);
+    });
+
+    it('no abre un hueco en el puesto de origen para cerrar otro', () => {
+        const p = proponerCierre12h({
+            dateStr: '2026-10-12',
+            positionName: 'Puesto 1',
+            faltantes: ['T'],
+            cupos: { 'PUESTO 1': 1, 'PUESTO 2': 1 },
+            turnos: [
+                { empId: 'pala', nombre: 'PALACIOS', dateStr: '2026-10-12', code: 'N', positionName: 'Puesto 1' },
+                { empId: 'herr', nombre: 'HERRERA', dateStr: '2026-10-12', code: 'M', positionName: 'Puesto 2' },
+            ],
+        });
+        assert.equal(p?.cambios.some((c) => c.empId === 'herr'), false);
+        assert.notEqual(p?.modo, 'par');
+    });
+
     it('− vuelve D12 a M y N12 a N', () => {
         assert.equal(volverA8('D12')?.code, 'M');
         assert.equal(volverA8('N12')?.code, 'N');

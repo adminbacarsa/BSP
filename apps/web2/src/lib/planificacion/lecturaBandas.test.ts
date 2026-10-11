@@ -153,6 +153,42 @@ test('un día vacío no lista bandas faltantes', () => {
   assert.equal(faltantes.length, 0);
 });
 
+test('Puesto 1 M+N+D12 y Puesto 2 M+N12 cubren 48 h y no marcan falta de T', () => {
+  const puestos: PuestoServicio[] = [
+    { positionName: 'Puesto 1', qty: 1, coverageType: '24hs' },
+    { positionName: 'Puesto 2', qty: 1, coverageType: '24hs' },
+  ];
+  const turnos: TurnoDia[] = [
+    t('a', 'A', 'M', 'Puesto 1'),
+    t('b', 'B', 'N', 'Puesto 1'),
+    t('c', 'C', 'D12', 'Puesto 1'),
+    t('d', 'D', 'M', 'Puesto 2'),
+    t('e', 'E', 'N12', 'Puesto 2'),
+  ];
+  const lectura = leerDia({ turnos, puestos });
+  assert.equal(lectura.falta.T, 0);
+  assert.equal(lectura.falta.M, 0);
+  assert.equal(lectura.falta.N, 0);
+  assert.equal(lectura.horasTrabajadas, 48);
+  assert.equal(lectura.horasVendidas, 48);
+  assert.equal(lectura.reconcilia, true);
+  assert.equal(lectura.textoHoras, '48/48 h · 2 puestos de 24 h');
+  assert.equal(lectura.cubiertoEntre, 'cubierto entre puestos (D12 P1 + N12 P2)');
+  assert.match(lectura.texto, /48\/48 h · 2 puestos de 24 h/);
+  assert.match(lectura.texto, /cubierto entre puestos \(D12 P1 \+ N12 P2\)/);
+  assert.doesNotMatch(lectura.texto, /falta 1 T/);
+  assert.doesNotMatch(lectura.textoCorto, /falta/);
+  const faltantes = faltantesDelDia({
+    dateStr: DIA,
+    puestos,
+    turnos,
+    turnos12: turnos.map((x) => ({
+      empId: x.empId, nombre: x.nombre, dateStr: DIA, code: x.code, positionName: x.positionName || '',
+    })),
+  });
+  assert.equal(faltantes.some((f) => f.banda === 'T'), false);
+});
+
 test('exigeCobertura false no muestra sobrecobertura ni propone 12 h', () => {
   const puestos: PuestoServicio[] = [{ positionName: 'Puesto 1', qty: 1, coverageType: '24hs', exigeCobertura: false }];
   const lectura = leerDia({ turnos: [t('a', 'A', 'M', 'Puesto 1'), t('b', 'B', 'M', 'Puesto 1')], puestos });
