@@ -30,6 +30,10 @@ export type TurnoDiaIn = {
   absenceShiftId?: string;
   coveredShiftId?: string;
   coversEmployeeId?: string;
+  coversEmployeeName?: string;
+  coversAbsenceCode?: string;
+  coverageMode?: string;
+  employeeName?: string;
   comments?: string;
   coverageSuperseded?: boolean;
   isExtended?: boolean;
@@ -206,7 +210,25 @@ function opsDe(titular: TurnoDiaIn | null, turnos: TurnoDiaIn[], titularEmp: str
   return out;
 }
 
+function textoPar12(turnos: TurnoDiaIn[], titularEmp: string): { texto: string; empId: string } | null {
+  const lados = turnos.filter((t) => (
+    t && !t.isDeleted
+    && String(t.coverageMode || '').toUpperCase() === '12H'
+    && String(t.coversEmployeeId || '') === titularEmp
+  ));
+  const d12 = lados.find((t) => String(t.code || '').toUpperCase() === 'D12');
+  const n12 = lados.find((t) => String(t.code || '').toUpperCase() === 'N12');
+  if (!d12?.employeeId || !n12?.employeeId) return null;
+  const a = apellidoCorto(String(d12.employeeName || d12.employeeId));
+  const b = apellidoCorto(String(n12.employeeName || n12.employeeId));
+  return { texto: `cubierta por ${a} D12 + ${b} N12`, empId: String(d12.employeeId) };
+}
+
 function planificadaDe(titular: TurnoDiaIn | null, turnos: TurnoDiaIn[], titularEmp: string, titularName: string): Extract<CoberturaExistente, { origen: 'planificada' }> | null {
+  const par12 = textoPar12(turnos, titularEmp);
+  if (par12) {
+    return { origen: 'planificada', cobertura: { mode: 'substitute', employeeId: par12.empId }, texto: par12.texto };
+  }
   const needle = titularName ? `Cubriendo a ${titularName}` : '';
   const hermanos = turnos.filter((t) => {
     if (!t || t.isDeleted || String(t.employeeId || '') === titularEmp) return false;
@@ -542,6 +564,7 @@ function lineaCubierto(ex: CoberturaExistente, turnos: TurnoDiaIn[]): string | n
     return [ex.nombre, ex.codigo, `desde Operaciones${ex.desdeHm ? ` ${ex.desdeHm}` : ''}`].filter(Boolean).join(' · ');
   }
   if (ex.origen === 'planificada') {
+    if (ex.texto.startsWith('cubierta por')) return ex.texto;
     if (ex.cobertura.mode === 'split') {
       return `${apellidoDeTurno(turnos, ex.cobertura.extEmpId)} (ext) · ${apellidoDeTurno(turnos, ex.cobertura.adelEmpId)} (adel)`;
     }

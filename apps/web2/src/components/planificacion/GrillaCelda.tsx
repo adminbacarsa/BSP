@@ -37,6 +37,9 @@ export type VistaCelda = {
     marcaTope: boolean;
     menuRol?: string;
     menuMarca?: string;
+    /** Licencia cubierta por un par D12+N12. */
+    marca12?: string;
+    marca12Titulo?: string;
     cubiertoTitulo?: string;
     estado?: string;
     conflicto: boolean;
@@ -120,6 +123,9 @@ function CeldaGrillaBase({ vista: v, fila, col, seleccionada, colElegir, elegirA
                 {v.usado && <div className="absolute -top-1 -left-1 text-[7px] font-black bg-violet-600 text-white px-0.5 rounded z-10" title="Turno usado en cobertura operativa">U</div>}
                 {v.menuRol ? (
                     <div className={`absolute -top-1 left-1/2 -translate-x-1/2 max-w-full truncate text-[6.5px] font-black text-white px-0.5 rounded z-10 ${v.menuRol === 'CUBRE' ? 'bg-indigo-600' : 'bg-emerald-600'}`} data-marca-menu={v.menuRol}>{v.menuMarca}</div>
+                ) : null}
+                {v.marca12 ? (
+                    <div className="absolute -bottom-0.5 right-0 text-[6.5px] font-black bg-red-700 text-white px-0.5 rounded z-10" data-marca-12h title={v.marca12Titulo}>{v.marca12}</div>
                 ) : null}
                 {v.cubiertoTitulo != null && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-orange-500 text-white px-0.5 rounded" title={v.cubiertoTitulo}>✓</div>}
                 {v.estado && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${v.estado}`}></div>}

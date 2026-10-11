@@ -13,6 +13,7 @@ import {
 } from './importarExcel';
 import { claveEquivalencia, type EquivalenciaCodigo } from './equivalenciaCodigo';
 import { HORARIO_ESTANDAR, horasEntre, type AvisoRapido } from './modoRapido';
+import { LICENCIA_CODES } from './bandaLicencia';
 import { textoLecturaFranjas } from './lecturaBandas';
 
 export type DiaSemana = 'L' | 'M' | 'X' | 'J' | 'V' | 'S' | 'D';
@@ -508,4 +509,93 @@ export function avisosFueraDeServicio(input: {
     }
   }
   return out;
+}
+
+export type TurnoServicioIn = {
+  dateStr: string;
+  positionName: string;
+  code: string;
+  startTime: string;
+  endTime: string;
+};
+
+const ESTANDAR_BANDA = new Set(['M', 'T', 'N', 'D12', 'N12']);
+
+function modaDe(vals: string[]): string {
+  const c = new Map<string, number>();
+  for (const v of vals) c.set(v, (c.get(v) || 0) + 1);
+  let best = vals[0] || '';
+  let n = 0;
+  for (const [v, k] of c) if (k > n) { best = v; n = k; }
+  return best;
+}
+
+function esPuestoCustom(puesto: string): boolean {
+  const n = normPlanilla(puesto);
+  return n === 'RO' || n === 'EN' || /RONDIN|ENCARGAD|CORTINA/.test(n);
+}
+
+/** Arma la propuesta desde los turnos ya cargados en el cronograma del mes. */
+export function proponerServicioDesdeTurnos(turnos: readonly TurnoServicioIn[], _year: number, _month: number): PropuestaServicio {
+  const grupos = new Map<string, TurnoServicioIn[]>();
+  for (const t of turnos) {
+    const code = String(t.code || '').trim().toUpperCase();
+    const puesto = String(t.positionName || '').trim();
+    if (!code || !puesto || !t.dateStr) continue;
+    if (LICENCIA_CODES.has(code) || EXCLUIDOS.has(code)) continue;
+    const k = `${normPlanilla(puesto)}|${code}`;
+    const lista = grupos.get(k) || [];
+    lista.push({ ...t, code, positionName: puesto });
+    grupos.set(k, lista);
+  }
+  const franjas: FranjaServicioPlanilla[] = [];
+  for (const lista of grupos.values()) {
+    const code = lista[0].code;
+    const puesto = lista[0].positionName;
+    const diasDistintos = new Set(lista.map((t) => t.dateStr));
+    const custom = esPuestoCustom(puesto) || !ESTANDAR_BANDA.has(code);
+    if (!custom && (code === 'D12' || code === 'N12') && diasDistintos.size < 4) continue;
+    const porDia = new Map<string, number>();
+    for (const t of lista) porDia.set(t.dateStr, (porDia.get(t.dateStr) || 0) + 1);
+    const cantidades = [...porDia.values()];
+    const cantidad = Number(modaDe(cantidades.map(String))) || 1;
+    const horarios = lista.map((t) => `${t.startTime || ''}|${t.endTime || ''}`).filter((h) => h !== '|');
+    const horario = modaDe(horarios);
+    const std = HORARIO_ESTANDAR[code];
+    const [startTime, endTime] = horario
+      ? horario.split('|')
+      : [std?.startTime || '07:00', std?.endTime || '15:00'];
+    const letras = new Set<DiaSemana>();
+    for (const ds of diasDistintos) {
+      const [y, m, d] = ds.split('-').map(Number);
+      if (y && m && d) letras.add(letraDia(y, m, d));
+    }
+    const dias = letras.size >= 7 ? [] : ORDEN_DIAS.filter((d) => letras.has(d));
+    franjas.push({
+      id: `turnos|${normPlanilla(puesto)}|${code}`,
+      puesto,
+      code,
+      startTime,
+      endTime,
+      cantidad,
+      dias,
+    });
+  }
+  franjas.sort((a, b) => a.puesto.localeCompare(b.puesto, 'es') || a.code.localeCompare(b.code));
+  const lectura = textoLecturaFranjas(franjas.map((f) => ({
+    puesto: f.puesto, code: f.code, cantidad: f.cantidad, dias: f.dias, startTime: f.startTime,
+  })));
+  return { franjas, equivalencias: [], lectura: lectura || 'Leído de los turnos de este mes.' };
+}
+
+export function franjasDesdeVigente(vigente: readonly FranjaVigente[]): FranjaServicioPlanilla[] {
+  return vigente.map((f, i) => ({
+    id: `anterior|${i}|${normPlanilla(f.puesto)}|${f.code}`,
+    puesto: f.puesto,
+    code: f.code,
+    startTime: f.startTime,
+    endTime: f.endTime,
+    cantidad: f.cantidad || 1,
+    dias: ORDEN_DIAS.filter((d) => (f.dias || []).map((x) => x.toUpperCase()).includes(d)),
+  }));
 }
