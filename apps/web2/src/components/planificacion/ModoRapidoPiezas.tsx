@@ -329,15 +329,68 @@ export function Cobertura12RangoBanner({
     );
 }
 
-export function Cierre12Banner({ texto, onConfirmar, onCancelar }: { texto: string; onConfirmar: () => void; onCancelar: () => void }) {
+export function Cierre12Banner({
+    texto,
+    alternativas,
+    onElegir,
+    onConfirmar,
+    onCancelar,
+    ancla,
+}: {
+    texto: string;
+    alternativas?: Array<{ empId: string; nombre: string; positionName: string; code: string; hours?: number; lado: string; bloqueado?: boolean; motivo?: string; elegido?: boolean }>;
+    onElegir?: (empId: string) => void;
+    onConfirmar: () => void;
+    onCancelar: () => void;
+    ancla?: { left: number; top: number; width: number; height: number } | null;
+}) {
+    const btnRef = useRef<HTMLButtonElement>(null);
+    const [medida, setMedida] = useState(ancla || null);
+    useEffect(() => { btnRef.current?.focus(); }, [texto]);
+    useEffect(() => {
+        if (ancla) { setMedida(ancla); return; }
+        const el = document.querySelector('[data-modo-rapido-cursor]');
+        if (!el) return;
+        const r = el.getBoundingClientRect();
+        setMedida({ left: r.left, top: r.top, width: r.width, height: r.height });
+    }, [ancla, texto]);
     if (typeof document === 'undefined') return null;
+    const ancho = 420;
+    const left = medida
+        ? Math.max(8, Math.min(medida.left, window.innerWidth - ancho - 8))
+        : Math.max(8, window.innerWidth - ancho - 16);
+    const top = medida
+        ? Math.max(8, Math.min(medida.top + medida.height + 6, window.innerHeight - 280))
+        : Math.max(8, window.innerHeight - 280);
     return createPortal(
-        <div className="fixed left-1/2 top-20 z-[90] w-[min(640px,calc(100vw-2rem))] -translate-x-1/2 rounded-2xl border border-indigo-200 bg-white px-4 py-3 shadow-lg no-print" data-cierre-12h>
-            <p className="whitespace-pre-line text-[12px] font-bold leading-snug text-slate-800" data-cierre-12h-texto>{texto}</p>
-            <p className="mt-1 text-[11px] text-slate-500">Enter confirma, Esc cancela</p>
+        <div
+            className="fixed z-[90] rounded-2xl border border-indigo-200 bg-white px-4 py-3 shadow-lg no-print"
+            style={{ left, top, width: ancho, maxWidth: 'calc(100vw - 16px)' }}
+            data-cierre-12h
+        >
+            <p className="whitespace-pre-line text-[15px] font-black leading-snug text-slate-900" data-cierre-12h-texto>{texto}</p>
+            {!!alternativas?.length && (
+                <ul className="mt-2 max-h-40 space-y-1 overflow-auto" data-cierre-12h-parejas>
+                    {alternativas.map((a) => (
+                        <li key={`${a.lado}-${a.empId}`}>
+                            <button
+                                type="button"
+                                disabled={!!a.bloqueado}
+                                onClick={() => onElegir?.(a.empId)}
+                                className={`flex w-full items-center justify-between rounded-xl px-2 py-1 text-left text-[12px] ${a.bloqueado ? 'cursor-not-allowed text-slate-400' : a.elegido ? 'bg-indigo-600 font-black text-white' : 'bg-slate-50 font-bold text-slate-800 hover:bg-indigo-50'}`}
+                                data-pareja-12={a.empId}
+                            >
+                                <span>{a.nombre} {a.code} → {a.lado} · {a.positionName}{a.hours != null ? ` · ${a.hours} h` : ''}</span>
+                                {a.bloqueado && <span>{a.motivo || 'no disponible'}</span>}
+                            </button>
+                        </li>
+                    ))}
+                </ul>
+            )}
+            <p className="mt-1 text-[11px] text-slate-500">Otro + aplica. Enter aplica. Esc cancela. ↑↓ cambia la pareja.</p>
             <div className="mt-2 flex justify-end gap-2">
-                <button type="button" onClick={onCancelar} className="rounded-xl border border-slate-200 px-3 py-1 text-[11px] font-bold text-slate-600 hover:bg-slate-50">Cancelar</button>
-                <button type="button" onClick={onConfirmar} className="rounded-xl bg-indigo-600 px-3 py-1 text-[11px] font-black text-white shadow-sm hover:bg-indigo-700" data-cierre-12h-confirmar>Confirmar</button>
+                <button type="button" onClick={onCancelar} className="rounded-xl border border-slate-200 px-3 py-1.5 text-[12px] font-bold text-slate-600 hover:bg-slate-50">Cancelar (Esc)</button>
+                <button ref={btnRef} type="button" onClick={onConfirmar} className="rounded-xl bg-indigo-600 px-3 py-1.5 text-[12px] font-black text-white shadow-sm hover:bg-indigo-700" data-cierre-12h-confirmar>Aplicar (Enter)</button>
             </div>
         </div>,
         document.body,
@@ -373,6 +426,9 @@ export function PegarExcelModal({
     tabla,
     onHorario,
     onActualizarServicio,
+    objetivosAjenos,
+    franjasAjeno,
+    onAplicarAjenos,
 }: {
     estado: PegarExcelEstado;
     guardias: GuardiaPegado[];
@@ -396,6 +452,9 @@ export function PegarExcelModal({
     tabla?: import('@/lib/planificacion/codigosHorarioPegado').FilaCodigoPlanilla[];
     onHorario?: (sigla: string, inicio: string, fin: string) => void;
     onActualizarServicio?: (cambios: import('@/lib/planificacion/codigosHorarioPegado').CambioHorarioServicio[]) => void;
+    objetivosAjenos?: Array<{ id: string; clientId: string; clientName: string; name: string }>;
+    franjasAjeno?: (objectiveId: string) => Promise<Array<{ positionName: string; code: string; startTime: string; endTime: string; hours: number }>>;
+    onAplicarAjenos?: (items: Array<{ fila: number; col: number; objectiveId: string; clientId: string; objectiveName: string; positionName: string; code: string; startTime: string; endTime: string; hours: number; marca: string; banda: string }>) => void;
 }) {
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
@@ -414,6 +473,29 @@ export function PegarExcelModal({
     const grupos = estado.paso === 'resumen' ? clasificarPegado(estado.preview.filas, plataforma || [], padron || null) : null;
     const enPlataformaIdx = new Set(grupos?.enPlataforma.map((x) => x.fila.indice) ?? []);
     const ocupadas = new Set(estado.paso === 'resumen' ? Object.values(estado.asignacion).filter((v): v is number => v != null) : []);
+    const [ajenoObj, setAjenoObj] = useState<Record<string, string>>({});
+    const [ajenoFranja, setAjenoFranja] = useState<Record<string, string>>({});
+    const [franjasPorMarca, setFranjasPorMarca] = useState<Record<string, Array<{ positionName: string; code: string; startTime: string; endTime: string; hours: number }>>>({});
+    const marcasAjenas = estado.paso === 'resumen'
+        ? [...new Map((estado.preview.codigosAjenos || []).map((c) => [c.marca, c])).values()]
+        : [];
+    const claveAjenos = marcasAjenas.map((c) => `${c.marca}:${c.objectiveId || ''}`).join('|');
+    useEffect(() => {
+        if (!franjasAjeno || !claveAjenos) return;
+        let cancel = false;
+        for (const c of marcasAjenas) {
+            if (!c.objectiveId) continue;
+            setAjenoObj((prev) => (prev[c.marca] ? prev : { ...prev, [c.marca]: c.objectiveId || '' }));
+            void franjasAjeno(c.objectiveId).then((fr) => {
+                if (cancel) return;
+                setFranjasPorMarca((prev) => ({ ...prev, [c.marca]: fr }));
+                const idx = fr.findIndex((f) => f.positionName === c.positionName && f.code === (c.banda || '') && f.startTime === c.startTime);
+                if (idx >= 0) setAjenoFranja((prev) => (prev[c.marca] ? prev : { ...prev, [c.marca]: String(idx) }));
+            });
+        }
+        return () => { cancel = true; };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [claveAjenos]);
     const resumen = estado.paso === 'resumen' ? textoResumenPegado({
         filas: estado.preview.filas.length,
         encontrados: estado.preview.filas.filter((f) => estado.asignacion[f.indice] != null).length,
@@ -429,6 +511,81 @@ export function PegarExcelModal({
                     <h3 className="text-sm font-black uppercase text-slate-800">Pegar desde Excel</h3>
                     <button type="button" onClick={onCerrar} className="ml-auto rounded-lg p-1 text-slate-400 hover:bg-slate-50" aria-label="Cerrar"><X size={14} /></button>
                 </div>
+                {estado.paso === 'resumen' && marcasAjenas.length > 0 && (
+                    <div className="mb-3 rounded-2xl border border-slate-200 bg-slate-50 p-3" data-pegar-ajeno>
+                        <p className="mb-2 text-[11px] font-bold text-slate-700">¿A qué objetivo y qué turno?</p>
+                        {marcasAjenas.map((c) => {
+                            const franjas = franjasPorMarca[c.marca] || [];
+                            const objId = ajenoObj[c.marca] || c.objectiveId || '';
+                            return (
+                                <div key={c.marca} className="mb-2 grid grid-cols-1 gap-1" data-pegar-ajeno-fila={c.marca}>
+                                    <span className="text-[11px] font-semibold text-slate-800">{c.codigo} →</span>
+                                    <select
+                                        className="rounded-xl border border-slate-200 bg-white px-2 py-1.5 text-[11px] text-slate-800"
+                                        data-pegar-ajeno-obj={c.marca}
+                                        value={objId}
+                                        onChange={(e) => {
+                                            const id = e.target.value;
+                                            setAjenoObj((prev) => ({ ...prev, [c.marca]: id }));
+                                            setAjenoFranja((prev) => ({ ...prev, [c.marca]: '' }));
+                                            if (franjasAjeno && id) {
+                                                void franjasAjeno(id).then((fr) => setFranjasPorMarca((prev) => ({ ...prev, [c.marca]: fr })));
+                                            }
+                                        }}
+                                    >
+                                        <option value="">objetivo: buscar…</option>
+                                        {(objetivosAjenos || []).map((o) => (
+                                            <option key={o.id} value={o.id}>{o.clientName} · {o.name}</option>
+                                        ))}
+                                    </select>
+                                    <select
+                                        className="rounded-xl border border-slate-200 bg-white px-2 py-1.5 text-[11px] text-slate-800"
+                                        data-pegar-ajeno-franja={c.marca}
+                                        value={ajenoFranja[c.marca] || ''}
+                                        onChange={(e) => setAjenoFranja((prev) => ({ ...prev, [c.marca]: e.target.value }))}
+                                    >
+                                        <option value="">turno…</option>
+                                        {franjas.map((f, i) => (
+                                            <option key={`${f.positionName}-${f.code}-${i}`} value={String(i)}>{f.code} {f.startTime}–{f.endTime} · {f.positionName}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                            );
+                        })}
+                        <button
+                            type="button"
+                            data-pegar-ajeno-asignar
+                            className="mt-1 rounded-xl bg-indigo-600 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-indigo-700 disabled:bg-white disabled:text-slate-400 disabled:border disabled:border-slate-200"
+                            disabled={!onAplicarAjenos || marcasAjenas.every((c) => !(ajenoObj[c.marca] || c.objectiveId) || ajenoFranja[c.marca] === undefined || ajenoFranja[c.marca] === '')}
+                            onClick={() => {
+                                if (!onAplicarAjenos || estado.paso !== 'resumen') return;
+                                const items = (estado.preview.codigosAjenos || []).flatMap((c) => {
+                                    const id = ajenoObj[c.marca] || c.objectiveId || '';
+                                    const obj = (objetivosAjenos || []).find((o) => o.id === id);
+                                    const fr = (franjasPorMarca[c.marca] || [])[Number(ajenoFranja[c.marca])];
+                                    if (!id || !obj || !fr) return [];
+                                    return [{
+                                        fila: c.fila,
+                                        col: c.col,
+                                        objectiveId: id,
+                                        clientId: obj.clientId,
+                                        objectiveName: obj.name,
+                                        positionName: fr.positionName,
+                                        code: fr.code,
+                                        startTime: fr.startTime,
+                                        endTime: fr.endTime,
+                                        hours: fr.hours,
+                                        marca: c.marca,
+                                        banda: c.banda || fr.code,
+                                    }];
+                                });
+                                onAplicarAjenos(items);
+                            }}
+                        >
+                            Asignar en ese objetivo
+                        </button>
+                    </div>
+                )}
                 {estado.paso === 'texto' ? (
                     <>
                         <p className="mb-2 text-[11px] text-slate-500">Copiá en la planilla desde la columna del nombre hasta el último día y pegalo acá. Si el bloque trae los nombres, se acomoda por guardia antes de escribir.</p>

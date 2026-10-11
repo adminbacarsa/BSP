@@ -153,6 +153,79 @@ test('un día vacío no lista bandas faltantes', () => {
   assert.equal(faltantes.length, 0);
 });
 
+test('un par D12+N12 cubre una sola T: con dos puestos todavía falta la otra', () => {
+  const puestos: PuestoServicio[] = [
+    { positionName: 'Puesto 1', qty: 1, coverageType: '24hs' },
+    { positionName: 'Puesto 2', qty: 1, coverageType: '24hs' },
+  ];
+  const turnos: TurnoDia[] = [
+    t('a', 'A', 'M', 'Puesto 1'),
+    t('b', 'B', 'N', 'Puesto 1'),
+    t('c', 'C', 'D12', 'Puesto 1'),
+    t('d', 'D', 'M', 'Puesto 2'),
+    t('e', 'E', 'N12', 'Puesto 2'),
+  ];
+  const lectura = leerDia({ turnos, puestos });
+  assert.equal(lectura.falta.M, 0);
+  assert.equal(lectura.falta.N, 0);
+  assert.equal(lectura.falta.T, 1);
+  assert.equal(lectura.horasTrabajadas, 48);
+  assert.equal(lectura.horasVendidas, 48);
+  assert.match(lectura.texto, /falta 1 T/);
+});
+
+test('Obrador día 2: D12 cubre la M y no inventa una N; el par cierra la T de Puesto 2', () => {
+  const puestos: PuestoServicio[] = [
+    { positionName: 'Puesto 1', qty: 1, coverageType: '24hs' },
+    { positionName: 'Puesto 2', qty: 1, coverageType: '24hs' },
+  ];
+  const base: TurnoDia[] = [
+    t('bai', 'BAIGORRIA', 'M', 'Puesto 1'),
+    t('otro', 'DIAZ', 'M', 'Puesto 1'),
+    t('tarde', 'PEREZ', 'T', 'Puesto 1'),
+    t('bar', 'BARRIOS CARRANZA', 'N', 'Puesto 1'),
+    t('noche2', 'MARTINEZ', 'N', 'Puesto 1'),
+    t('p2m', 'GOMEZ', 'M', 'Puesto 2'),
+    t('p2n', 'LOPEZ', 'N', 'Puesto 2'),
+  ];
+  const conD12 = base.map((x) => (x.empId === 'bai' ? { ...x, code: 'D12' } : x));
+  const soloD12 = leerDia({ turnos: conD12, puestos });
+  assert.equal(soloD12.falta.M, 0);
+  assert.equal(soloD12.falta.N, 0);
+  assert.equal(soloD12.falta.T, 1);
+  assert.match(soloD12.textoCorto, /falta T en Puesto 2/);
+  assert.match(soloD12.textoCorto, /D12 de BAIGORRIA/);
+  assert.match(soloD12.textoCorto, /BARRIOS/);
+  assert.doesNotMatch(soloD12.textoCorto, /falta \d+ N/);
+  const conPar = conD12.map((x) => (x.empId === 'bar' ? { ...x, code: 'N12' } : x));
+  const cerrado = leerDia({ turnos: conPar, puestos });
+  assert.equal(cerrado.falta.M, 0);
+  assert.equal(cerrado.falta.T, 0);
+  assert.equal(cerrado.falta.N, 0);
+  assert.doesNotMatch(cerrado.textoCorto, /falta/);
+});
+
+test('un D12 solo no dice falta M; RO de una franja no pide T ni N', () => {
+  const puestos: PuestoServicio[] = [
+    { positionName: 'Puesto 1', qty: 1, coverageType: '24hs', shifts: [{ code: 'M' }, { code: 'T' }, { code: 'N' }] },
+    { positionName: 'RO', qty: 1, coverageType: '24hs', shifts: [{ code: 'M', startTime: '07:00' }] },
+  ];
+  const lectura = leerDia({
+    turnos: [t('a', 'A', 'D12', 'Puesto 1'), t('r', 'RONDIN', 'M', 'RO')],
+    puestos,
+  });
+  assert.equal(lectura.falta.M, 0);
+  assert.ok(lectura.falta.T >= 1);
+  const faltantes = faltantesDelDia({
+    dateStr: DIA,
+    puestos,
+    turnos: [t('a', 'A', 'D12', 'Puesto 1'), t('r', 'RONDIN', 'M', 'RO')],
+    turnos12: [],
+  });
+  assert.equal(faltantes.some((f) => f.positionName === 'RO'), false);
+  assert.equal(faltantes.some((f) => f.positionName === 'Puesto 1' && f.banda === 'M'), false);
+});
+
 test('exigeCobertura false no muestra sobrecobertura ni propone 12 h', () => {
   const puestos: PuestoServicio[] = [{ positionName: 'Puesto 1', qty: 1, coverageType: '24hs', exigeCobertura: false }];
   const lectura = leerDia({ turnos: [t('a', 'A', 'M', 'Puesto 1'), t('b', 'B', 'M', 'Puesto 1')], puestos });

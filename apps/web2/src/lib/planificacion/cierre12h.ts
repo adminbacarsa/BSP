@@ -9,6 +9,8 @@ export type TurnoPuesto12 = {
     dateStr: string;
     code: string;
     positionName: string;
+    /** Objetivo del turno. En la vista agrupada puede ser otro del grupo. */
+    objectiveId?: string;
     hours?: number;
     /** Licencia, ausencia (AA, aviso del portal) o no es turno de trabajo de ese puesto. */
     bloqueado?: boolean;
@@ -26,6 +28,23 @@ export type Cambio12h = {
     startTime: string;
     endTime: string;
     hours: number;
+    /** Puesto de donde sale. */
+    positionName: string;
+    /** Puesto al que se acredita la cobertura cuando no es el propio. */
+    coversPositionName?: string;
+    /** Objetivo al que se acredita cuando el turno es de otro objetivo del grupo. */
+    coversObjectiveId?: string;
+};
+
+export type OpcionPareja12 = {
+    empId: string;
+    nombre: string;
+    positionName: string;
+    code: string;
+    hours?: number;
+    lado: 'D12' | 'N12';
+    bloqueado?: boolean;
+    motivo?: string;
 };
 
 export type Propuesta12h = {
@@ -35,6 +54,7 @@ export type Propuesta12h = {
     modo: 'par' | 'uno';
     cambios: Cambio12h[];
     texto: string;
+    alternativas?: OpcionPareja12[];
 };
 
 const OCHO: Record<'M' | 'T' | 'N', Horario12> = {
@@ -102,7 +122,90 @@ function ladoDe(code: string): string {
     return 'el turno de la noche';
 }
 
-function cambio(t: TurnoPuesto12, h: Horario12 & { code: 'D12' | 'N12' }): Cambio12h {
+function normPos(v: string): string {
+    return up(v).replace(/\s+/g, ' ');
+}
+
+function clavePuesto(t: { positionName: string; objectiveId?: string }): string {
+    return `${t.objectiveId || ''}|${normPos(t.positionName)}`;
+}
+
+function bandaQueDeja(code: string): 'M' | 'T' | 'N' | null {
+    const c = up(code);
+    if (c === 'M' || c === 'T' || c === 'N') return c;
+    return null;
+}
+
+function cubreBanda(code: string, banda: string): boolean {
+    const c = up(code);
+    if (banda === 'M') return c === 'M' || c === 'D12';
+    if (banda === 'T') return c === 'T' || c === 'D12' || c === 'N12';
+    if (banda === 'N') return c === 'N' || c === 'N12';
+    return false;
+}
+
+function cupoDe(
+    cupos: Readonly<Record<string, number>> | undefined,
+    t: { positionName: string; objectiveId?: string },
+): number {
+    if (!cupos) return 1;
+    const full = clavePuesto(t);
+    if (cupos[full] != null) return cupos[full];
+    const n = normPos(t.positionName);
+    if (cupos[n] != null) return cupos[n];
+    if (cupos[t.positionName] != null) return cupos[t.positionName];
+    return 1;
+}
+
+function esDelPuestoObjetivo(
+    t: { positionName: string; objectiveId?: string },
+    positionName: string,
+    objectiveId?: string,
+): boolean {
+    if (!mismoPuesto(t.positionName, positionName)) return false;
+    if (t.objectiveId && objectiveId && t.objectiveId !== objectiveId) return false;
+    return true;
+}
+
+/** Sacar a esta persona de su puesto no puede dejar su banda por debajo del cupo. */
+function noAbreHueco(
+    turnos: readonly TurnoPuesto12[],
+    dateStr: string,
+    salientes: readonly TurnoPuesto12[],
+    cupos: Readonly<Record<string, number>> | undefined,
+): boolean {
+    const porPuesto = new Map<string, TurnoPuesto12[]>();
+    for (const s of salientes) {
+        const k = clavePuesto(s);
+        const list = porPuesto.get(k) || [];
+        list.push(s);
+        porPuesto.set(k, list);
+    }
+    for (const [, grupo] of porPuesto) {
+        const sample = grupo[0];
+        const excluir = new Set(grupo.map((g) => g.empId));
+        const bandas = new Set(grupo.map((g) => bandaQueDeja(g.code)).filter((b): b is 'M' | 'T' | 'N' => !!b));
+        for (const banda of bandas) {
+            const quedan = turnos.filter((t) =>
+                t.dateStr === dateStr
+                && clavePuesto(t) === clavePuesto(sample)
+                && !excluir.has(t.empId)
+                && !t.bloqueado
+                && cubreBanda(t.code, banda));
+            if (quedan.length < cupoDe(cupos, sample)) return false;
+        }
+    }
+    return true;
+}
+
+function cambio(
+    t: TurnoPuesto12,
+    h: Horario12 & { code: 'D12' | 'N12' },
+    targetPos: string,
+    targetObj?: string,
+): Cambio12h {
+    const otroPuesto = !esDelPuestoObjetivo(t, targetPos, targetObj);
+    const otroObj = !!(t.objectiveId && targetObj && t.objectiveId !== targetObj);
     return {
         empId: t.empId,
         nombre: t.nombre,
@@ -111,17 +214,69 @@ function cambio(t: TurnoPuesto12, h: Horario12 & { code: 'D12' | 'N12' }): Cambi
         startTime: h.startTime,
         endTime: h.endTime,
         hours: h.hours,
+        positionName: t.positionName,
+        ...(otroPuesto ? { coversPositionName: targetPos } : {}),
+        ...(otroObj ? { coversObjectiveId: targetObj } : {}),
     };
 }
 
-function textoDe(banda: string, puesto: string, cambios: Cambio12h[]): string {
-    const partes = cambios.map((c) => `${apellidoCorto(c.nombre)} ${c.code} ${c.startTime}–${c.endTime}`);
+function codigosLado(banda: string, lado: 'D12' | 'N12'): string[] {
+    if (lado === 'D12') return banda === 'N' ? ['M'] : banda === 'M' ? ['T'] : ['M', 'T'];
+    return banda === 'M' ? ['N'] : banda === 'N' ? ['T'] : ['N', 'T'];
+}
+
+export function alternativasPareja(turnos: readonly TurnoPuesto12[], dateStr: string, banda: string): OpcionPareja12[] {
+    const out: OpcionPareja12[] = [];
+    for (const lado of ['D12', 'N12'] as const) {
+        const codes = new Set(codigosLado(banda, lado));
+        for (const t of turnos) {
+            if (t.dateStr !== dateStr || yaEs12h(t) || !codes.has(up(t.code))) continue;
+            out.push({
+                empId: t.empId,
+                nombre: t.nombre,
+                positionName: t.positionName,
+                code: up(t.code),
+                hours: t.hours,
+                lado,
+                bloqueado: !!t.bloqueado,
+                motivo: t.motivo,
+            });
+        }
+    }
+    return out;
+}
+
+/** Cambia quién pasa a D12 o a N12. La pareja bloqueada no se elige. */
+export function cambiarPareja(propuesta: Propuesta12h, empId: string, turnos: readonly TurnoPuesto12[]): Propuesta12h {
+    const op = (propuesta.alternativas || []).find((a) => a.empId === empId && !a.bloqueado);
+    if (!op) return propuesta;
+    const origen = turnos.find((t) => t.empId === empId && t.dateStr === propuesta.dateStr && up(t.code) === op.code);
+    if (!origen) return propuesta;
+    const horario = horarioDoce(op.lado, undefined);
+    const nuevo = cambio(origen, horario, propuesta.positionName);
+    const cambios = propuesta.cambios.filter((c) => c.code !== op.lado);
+    if (cambios.length === propuesta.cambios.length) return propuesta;
+    const siguiente = [...cambios, nuevo];
+    return {
+        ...propuesta,
+        cambios: siguiente,
+        texto: textoDe(propuesta.banda, propuesta.positionName, siguiente, siguiente.some((c) => c.coversPositionName)),
+    };
+}
+
+function textoDe(banda: string, puesto: string, cambios: Cambio12h[], mixto: boolean): string {
+    const partes = cambios.map((c) => {
+        const pos = mixto && c.positionName ? ` (${c.positionName})` : '';
+        return `${apellidoCorto(c.nombre)} ${c.code}${pos} ${c.startTime}–${c.endTime}`;
+    });
     return `Cubre la ${banda} de ${puesto}: ${partes.join(' + ')} · Enter confirma, Esc cancela`;
 }
 
 /**
  * Falta una banda de 8 h y en el puesto ya hay las otras dos: el par pasa a D12 + N12.
- * Si solo hay un lado, lo propone solo (la grilla lo escribe con el cierre de un guardia).
+ * Si en el puesto no hay par, busca la banda vecina ese día en los otros puestos
+ * (y, si el turno trae objectiveId, en los otros objetivos). No mueve a quien deje
+ * su puesto descubierto. Si solo hay un lado, lo propone solo.
  */
 export function proponerCierre12h(input: {
     dateStr: string;
@@ -130,9 +285,13 @@ export function proponerCierre12h(input: {
     turnos: readonly TurnoPuesto12[];
     preferidoEmpId?: string;
     sla?: ReadonlyArray<{ code?: string; startTime?: string; endTime?: string; hours?: number }>;
+    /** Cupo por puesto (`nombre` o `objectiveId|nombre`). Sin dato, 1. */
+    cupos?: Readonly<Record<string, number>>;
+    /** Objetivo al que se acredita el hueco. */
+    objectiveId?: string;
 }): Propuesta12h | null {
     const falta = new Set(input.faltantes.map(up));
-    const delPuesto = input.turnos.filter((t) => mismoPuesto(t.positionName, input.positionName));
+    const delPuesto = input.turnos.filter((t) => esDelPuestoObjetivo(t, input.positionName, input.objectiveId));
     const delDia = (code: string, dateStr = input.dateStr) =>
         delPuesto.filter((t) => up(t.code) === code && t.dateStr === dateStr);
     const m = elegir(delDia('M'), input.preferidoEmpId);
@@ -146,12 +305,21 @@ export function proponerCierre12h(input: {
     };
 
     const par = (banda: string, a: TurnoPuesto12, ha: Horario12 & { code: 'D12' | 'N12' }, b: TurnoPuesto12, hb: Horario12 & { code: 'D12' | 'N12' }): Propuesta12h => {
-        const cambios = [cambio(a, ha), cambio(b, hb)];
-        return { dateStr: input.dateStr, positionName: input.positionName, banda, modo: 'par', cambios, texto: textoDe(banda, input.positionName, cambios) };
+        const cambios = [cambio(a, ha, input.positionName, input.objectiveId), cambio(b, hb, input.positionName, input.objectiveId)];
+        const mixto = cambios.some((c) => c.coversPositionName || c.coversObjectiveId);
+        return {
+            dateStr: input.dateStr,
+            positionName: input.positionName,
+            banda,
+            modo: 'par',
+            cambios,
+            texto: textoDe(banda, input.positionName, cambios, mixto),
+            alternativas: alternativasPareja(input.turnos, input.dateStr, banda),
+        };
     };
     const uno = (banda: string, a: TurnoPuesto12, h: Horario12 & { code: 'D12' | 'N12' }): Propuesta12h => {
-        const cambios = [cambio(a, h)];
-        return { dateStr: input.dateStr, positionName: input.positionName, banda, modo: 'uno', cambios, texto: textoDe(banda, input.positionName, cambios) };
+        const cambios = [cambio(a, h, input.positionName, input.objectiveId)];
+        return { dateStr: input.dateStr, positionName: input.positionName, banda, modo: 'uno', cambios, texto: textoDe(banda, input.positionName, cambios, false) };
     };
     const sinPar = (banda: string, lado: string, base: Propuesta12h | null): Propuesta12h => {
         const aviso = `No hay quién cubra la ${banda} de ${input.positionName} con 12 h: falta ${lado}`;
@@ -161,9 +329,18 @@ export function proponerCierre12h(input: {
         return { ...base, texto: `${aviso}. ${base.texto}` };
     };
 
-    if (falta.has('T') && m && n) return par('T', m, d12, n, n12);
-    if (falta.has('M') && t && n) return par('M', t, d12, n, n12);
-    if (falta.has('N') && m && t) return par('N', m, d12, t, n12);
+    const local = (): Propuesta12h | null => {
+        if (falta.has('T') && m && n) return par('T', m, d12, n, n12);
+        if (falta.has('M') && t && n) return par('M', t, d12, n, n12);
+        if (falta.has('N') && m && t) return par('N', m, d12, t, n12);
+        return null;
+    };
+    const propio = local();
+    if (propio?.modo === 'par') return propio;
+
+    const cruzado = parEntrePuestos(input, falta, d12, n12);
+    if (cruzado) return cruzado;
+
     if (falta.has('T') && m) return sinPar('T', ladoDe('N') + extra('N'), uno('T', m, d12));
     if (falta.has('T') && n) return sinPar('T', ladoDe('M') + extra('M'), uno('T', n, n12));
     if (falta.has('M') && t) return sinPar('M', ladoDe('N') + extra('N'), uno('M', t, d12));
@@ -174,6 +351,65 @@ export function proponerCierre12h(input: {
     if (falta.has('M')) return sinPar('M', ladoDe(t ? 'N' : 'T') + extra(t ? 'N' : 'T'), null);
     if (falta.has('N')) return sinPar('N', ladoDe(m ? 'T' : 'M') + extra(m ? 'T' : 'M'), null);
     return null;
+}
+
+/** D12 sale de un M o T de ese día; N12 de un T o N. Primero el mismo puesto (ya resuelto). */
+function parEntrePuestos(
+    input: {
+        dateStr: string;
+        positionName: string;
+        turnos: readonly TurnoPuesto12[];
+        preferidoEmpId?: string;
+        cupos?: Readonly<Record<string, number>>;
+        objectiveId?: string;
+    },
+    falta: Set<string>,
+    d12: Horario12 & { code: 'D12' | 'N12' },
+    n12: Horario12 & { code: 'D12' | 'N12' },
+): Propuesta12h | null {
+    const orden: Array<{ banda: string; dCodes: string[]; nCodes: string[] }> = [
+        { banda: 'T', dCodes: ['M', 'T'], nCodes: ['T', 'N'] },
+        { banda: 'M', dCodes: ['T'], nCodes: ['N'] },
+        { banda: 'N', dCodes: ['M'], nCodes: ['T'] },
+    ];
+    const indice = new Map(input.turnos.map((t, i) => [`${t.empId}|${t.dateStr}|${up(t.code)}`, i]));
+    let best: Propuesta12h | null = null;
+    let bestScore = Number.POSITIVE_INFINITY;
+    for (const lado of orden) {
+        if (!falta.has(lado.banda)) continue;
+        const dCands = input.turnos.filter((t) => t.dateStr === input.dateStr && !t.bloqueado && !yaEs12h(t) && lado.dCodes.includes(up(t.code)));
+        const nCands = input.turnos.filter((t) => t.dateStr === input.dateStr && !t.bloqueado && !yaEs12h(t) && lado.nCodes.includes(up(t.code)));
+        for (const a of dCands) {
+            for (const b of nCands) {
+                if (a.empId === b.empId) continue;
+                const salientes = [a, b].filter((t) => !esDelPuestoObjetivo(t, input.positionName, input.objectiveId));
+                if (!salientes.length) continue;
+                if (!noAbreHueco(input.turnos, input.dateStr, salientes, input.cupos)) continue;
+                const cambios = [
+                    cambio(a, d12, input.positionName, input.objectiveId),
+                    cambio(b, n12, input.positionName, input.objectiveId),
+                ];
+                const afuera = salientes.length;
+                const otroObj = salientes.filter((t) => t.objectiveId && input.objectiveId && t.objectiveId !== input.objectiveId).length;
+                const prefer = (a.empId === input.preferidoEmpId || b.empId === input.preferidoEmpId) ? 0 : 1;
+                const ordenLista = (indice.get(`${a.empId}|${a.dateStr}|${up(a.code)}`) || 0) + (indice.get(`${b.empId}|${b.dateStr}|${up(b.code)}`) || 0);
+                const score = afuera * 1000 + otroObj * 100 + prefer * 10 + ordenLista;
+                if (score >= bestScore) continue;
+                bestScore = score;
+                best = {
+                    dateStr: input.dateStr,
+                    positionName: input.positionName,
+                    banda: lado.banda,
+                    modo: 'par',
+                    cambios,
+                    texto: textoDe(lado.banda, input.positionName, cambios, true),
+                    alternativas: alternativasPareja(input.turnos, input.dateStr, lado.banda),
+                };
+            }
+        }
+        if (best) return best;
+    }
+    return best;
 }
 
 export type DiaRango12 = {

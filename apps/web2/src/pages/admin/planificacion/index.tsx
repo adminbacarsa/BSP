@@ -220,6 +220,15 @@ import {
     textoAvisoTurnoAjeno,
 } from '@/lib/planificacion/turnoOtroObjetivo';
 import {
+    decidirAsignacionOtroObjetivo,
+    esLicenciaCodigo,
+    modoEscrituraOtroObjetivo,
+    urlCronograma,
+    validarContraTodos,
+    type EquivalenciaOtro,
+} from '@/lib/planificacion/asignarOtroObjetivo';
+import { AsignarOtroObjetivoModal, type FranjaOpcion, type ObjetivoOpcion } from '@/components/planificacion/AsignarOtroObjetivoModal';
+import {
     CeldaGrilla,
     TooltipCeldaGrilla,
     reusarVista,
@@ -463,7 +472,7 @@ type CovMenuRapido = { mode: 'substitute'; id: string } | { mode: 'split'; extId
 let colaCobertura12: string[] | null = null;
 let ofrecerCobertura12: (claves: string[]) => void = () => {};
 import { applyOperationalGapCloseToChanges, applySingleWorkerFullGapCloseToChanges } from '@/lib/planificacion/operationalGapCoverage';
-import { estiloJornada12, horarioDoce, proponerCierre12h, slaExigeCobertura, textoRango12h, textoResumen12h, volverA8, type Propuesta12h, type TurnoPuesto12 } from '@/lib/planificacion/cierre12h';
+import { cambiarPareja, estiloJornada12, horarioDoce, proponerCierre12h, slaExigeCobertura, textoRango12h, textoResumen12h, volverA8, type Propuesta12h, type TurnoPuesto12 } from '@/lib/planificacion/cierre12h';
 import { avisosDesdeLectura, faltantesDelDia, leerDia, proponerLiberar, SIN_PUESTO, type FaltanteBanda, type PuestoServicio, type TurnoDia } from '@/lib/planificacion/lecturaBandas';
 import { BandasFaltantesPanel } from '@/components/planificacion/BandasFaltantesPanel';
 import {
@@ -1855,11 +1864,15 @@ function PlanificacionDesktop() {
     }, [planViewReady, selectedClient, selectedObjective, currentDate]);
     /** Deep-link desde Análisis: ?objectiveId=&clientId=&year=&month= (mes 1–12) */
     const deepLinkAppliedRef = useRef(false);
+    const focoCeldaRef = useRef<{ empId: string; dateStr: string } | null>(null);
     useEffect(() => {
         if (!planViewReady || !clients.length || deepLinkAppliedRef.current || !router.isReady) return;
         const oid = String(router.query.objectiveId ?? '').trim();
         if (!oid) return;
         deepLinkAppliedRef.current = true;
+        const dia = String(router.query.dia ?? '').trim();
+        const empFoco = String(router.query.empId ?? '').trim();
+        if (dia && empFoco) focoCeldaRef.current = { empId: empFoco, dateStr: dia };
         let clientId = String(router.query.clientId ?? '').trim();
         if (!clientId) {
             for (const c of clients) {
@@ -1879,7 +1892,7 @@ function PlanificacionDesktop() {
             goToPlanningMonth(y, m - 1);
         }
         void router.replace('/admin/planificacion/', undefined, { shallow: true });
-    }, [planViewReady, clients, router.isReady, router.query.objectiveId, router.query.clientId, router.query.year, router.query.month, goToPlanningMonth]);
+    }, [planViewReady, clients, router.isReady, router.query.objectiveId, router.query.clientId, router.query.year, router.query.month, router.query.dia, router.query.empId, goToPlanningMonth]);
     const [grupos, setGrupos] = useState<GrupoObjetivos[]>([]);
     const [showGrupoForm, setShowGrupoForm] = useState(false);
     const [grupoFormMode, setGrupoFormMode] = useState<'new' | 'edit'>('new');
@@ -1962,6 +1975,8 @@ function PlanificacionDesktop() {
         superAdminOverride: boolean;
         objectiveName: string;
         periodLabel: string;
+        excepciones: string[];
+        bloqueaDescanso: boolean;
     } | null>(null);
     const [publishConfirmPin, setPublishConfirmPin] = useState('');
     const [publishConfirmPinError, setPublishConfirmPinError] = useState('');
@@ -2487,7 +2502,11 @@ function PlanificacionDesktop() {
         opciones: OpcionesMenuRapido;
         diasLicencia: string[];
         liberar?: { code: string; positionName: string };
+        asignarOtro?: boolean;
     } | null>(null);
+    const [otroObjetivo, setOtroObjetivo] = useState<{ empId: string; nombre: string; dateStr: string } | null>(null);
+    const [franjasOtro, setFranjasOtro] = useState<FranjaOpcion[]>([]);
+    const [cargandoFranjasOtro, setCargandoFranjasOtro] = useState(false);
     const [modoElegir, setModoElegir] = useState<{
         ctx: CtxMenuRapido;
         accion: AccionElegir;
@@ -3138,6 +3157,20 @@ function PlanificacionDesktop() {
             return { ...prev, asignacion };
         });
     }, [displayedEmployees]);
+
+    useEffect(() => {
+        const foco = focoCeldaRef.current;
+        if (!foco) return;
+        const fila = displayedEmployees.findIndex((e: { id: string }) => e.id === foco.empId);
+        const col = daysInMonth.findIndex((d) => getDateKey(d) === foco.dateStr);
+        if (fila < 0 || col < 0) return;
+        focoCeldaRef.current = null;
+        const td = document.querySelector(`[data-rc="${fila}:${col}"]`);
+        if (td instanceof HTMLElement) {
+            td.scrollIntoView({ block: 'center', inline: 'center' });
+            td.classList.add('ring-2', 'ring-indigo-500');
+        }
+    }, [displayedEmployees, daysInMonth]);
 
     const etiquetasGrupo = useMemo(() => {
         const map = new Map<string, EtiquetaFilaGrupo>();
@@ -7828,11 +7861,18 @@ function PlanificacionDesktop() {
             : `¿Guardar ${_rotCount} turno${_rotCount !== 1 ? 's' : ''} de ciclo?`;
         if (!opts?.autorizadoRapido && !confirm(_confirmMsg)) return;
 
-        if (modoRapidoRef.current && !opts?.autorizadoRapido) {
+        const publicaAlGuardar = !!correctionMode && isPlanificacionPublished(publishStatusMap[planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1)]);
+        if (!publicaAlGuardar && modoRapidoRef.current && !opts?.autorizadoRapido) {
+            const { bloquean, piden } = autorizacionesAlGuardar(avisosRapidoRef.current);
+            if (bloquean.length || piden.length) {
+                toast.message(`Se guarda en borrador. ${bloquean.length} descanso(s) menor a 8 h y ${piden.length} excepción(es) de 8–12 h o tope: el PIN se pide al publicar.`, { duration: 8000 });
+            }
+        }
+        if (publicaAlGuardar && modoRapidoRef.current && !opts?.autorizadoRapido) {
             const { bloquean, piden } = autorizacionesAlGuardar(avisosRapidoRef.current);
             if (bloquean.length) {
                 const lista = bloquean.slice(0, 3).map((a) => a.texto).join(' · ');
-                toast.error(`No se guarda: descanso menor a 8 h. ${lista}${bloquean.length > 3 ? ` · y ${bloquean.length - 3} más` : ''}`, { duration: 9000 });
+                toast.error(`No se publica la corrección: descanso menor a 8 h. ${lista}${bloquean.length > 3 ? ` · y ${bloquean.length - 3} más` : ''}`, { duration: 9000 });
                 return;
             }
             if (piden.length) {
@@ -7982,7 +8022,7 @@ function PlanificacionDesktop() {
             const pubMonth = currentDate.getMonth() + 1;
             const publishLookupKey = planificacionPublishLookupKey(selectedObjective, pubYear, pubMonth);
             const isPublished = isPlanificacionPublished(publishStatusMap[publishLookupKey]);
-            const logData: { empId: string; date: string; action: string; detail: string; via?: string }[] = [];
+            const logData: { empId: string; date: string; action: string; detail: string; via?: string; destinoId?: string }[] = [];
             const employeesById: Record<string, any> = {};
             employees.forEach((e: any) => { employeesById[e.id] = e; });
             // snapshotData ya armado en doSave (grilla completa del mes)
@@ -8329,7 +8369,7 @@ function PlanificacionDesktop() {
                         const turnoPayload: Record<string, unknown> = {
                             employeeId: empId,
                             employeeName: empName,
-                            clientId: selectedClient,
+                            clientId: change.clientId || selectedClient,
                             objectiveId: change.objectiveId || resolveObjectiveForEmp(empId),
                             code: change.isFrancoCompensatorio ? 'FF' : change.code,
                             type: change.name||change.code,
@@ -8361,7 +8401,7 @@ function PlanificacionDesktop() {
                             coveredBy: change.coveredBy || null,
                             ...(change.menuRapidoTexto ? { menuRapidoTexto: change.menuRapidoTexto, menuRapidoVia: change.menuRapidoVia || 'MENU_RAPIDO' } : {}),
                             ...(change.menuRapidoRol ? { menuRapidoRol: change.menuRapidoRol, ...(change.menuRapidoCubreA ? { menuRapidoCubreA: change.menuRapidoCubreA } : {}) } : {}),
-                            draft: correctionMode ? false : !isPublished,
+                            draft: change.menuRapidoVia === 'OTRO_OBJETIVO' ? change.draft !== false : (correctionMode ? false : !isPublished),
                             actorName: realActorName,
                             ...deploymentFieldsForFirestore(change),
                         };
@@ -8460,7 +8500,7 @@ function PlanificacionDesktop() {
                                 change.menuRapidoVia,
                             );
                         } else {
-                            logData.push({ empId, date: dateStr, action: actionType, detail: actionDetail, via: change.menuRapidoVia || undefined });
+                            logData.push({ empId, date: dateStr, action: actionType, detail: actionDetail, via: change.menuRapidoVia || undefined, ...(change.menuRapidoVia === 'OTRO_OBJETIVO' ? { destinoId: String(change.objectiveId || '') } : {}) });
                         }
                     }
                     await flushBatchWhenFull();
@@ -8501,6 +8541,26 @@ function PlanificacionDesktop() {
                             bumpBatchOp();
                         }
                     }
+                    await flushBatchWhenFull();
+                }
+                for (const entry of logData) {
+                    if (entry.via !== 'OTRO_OBJETIVO') continue;
+                    if (isPublished && !correctionMode && logData.length < AUDIT_CONSOLIDATE_MIN) continue;
+                    batch.set(doc(collection(db, 'audit_logs')), stampEmpresaId({
+                        action: 'ASIGNACION_OTRO_OBJETIVO',
+                        module: 'PLANIFICADOR',
+                        details: `${entry.detail} en ${getObjectiveName(entry.destinoId || '') || 'otro objetivo'} desde ${getObjectiveName(selectedObjective)}`,
+                        timestamp: serverTimestamp(),
+                        actorName: realActorName,
+                        actorUid: auth.currentUser?.uid,
+                        objectiveId: entry.destinoId || null,
+                        objectiveName: getObjectiveName(entry.destinoId || '') || null,
+                        origenObjectiveId: selectedObjective,
+                        employeeId: entry.empId,
+                        fecha: entry.date,
+                        via: 'OTRO_OBJETIVO',
+                    }, empresaId));
+                    bumpBatchOp();
                     await flushBatchWhenFull();
                 }
 
@@ -8662,7 +8722,7 @@ function PlanificacionDesktop() {
             })();
         };
 
-        if (overCap.length > 0 && !opts?.autorizadoRapido) {
+        if (publicaAlGuardar && overCap.length > 0 && !opts?.autorizadoRapido) {
             setAuthModal({
                 pendingFn: doSave,
                 employees: overCap,
@@ -8727,12 +8787,22 @@ function PlanificacionDesktop() {
         }
 
         const objectiveName = getObjectiveName(selectedObjective) || selectedObjective;
+        const authPub = autorizacionesAlGuardar(avisosRapidoRef.current);
+        const excepciones = [...authPub.bloquean, ...authPub.piden].map((a) => a.texto);
+        for (const [empId, hours] of Object.entries(empMonthlyHours)) {
+            const h = Number(hours) || 0;
+            if (h <= planningLimits.monthly) continue;
+            const name = displayedEmployees.find((e: any) => e.id === empId)?.name || empId;
+            if (!excepciones.some((t) => t.includes(name))) excepciones.push(`${name}: ${Math.round(h)} h en el mes (tope ${planningLimits.monthly} h)`);
+        }
         setPublishConfirmModal({
             isRepublish: isAlreadyPublished,
             warnings,
             superAdminOverride: isSuperAdmin && (slaHoursMismatch || hasCoverageGaps),
             objectiveName,
             periodLabel: `${String(month).padStart(2, '0')}/${year}`,
+            excepciones,
+            bloqueaDescanso: authPub.bloquean.length > 0,
         });
         setPublishConfirmPin('');
         setPublishConfirmPinError('');
@@ -9282,7 +9352,8 @@ function PlanificacionDesktop() {
         const shPre = pendingChanges[keyTurnoPre]?.isDeleted ? null : (pendingChanges[keyTurnoPre] || shiftsMap[keyTurnoPre]);
         const codePre = String(shPre?.code || '').toUpperCase();
         const puedeLiberarPre = !bloqueoMesCerrado && puedeEditarDiaMenu(celda.dateStr) && !celda.isLeave && (codePre === 'M' || codePre === 'T' || codePre === 'N');
-        if (!opciones.visible && !puedeLiberarPre) return;
+        const puedeOtroPre = !bloqueoMesCerrado && puedeEditarDiaMenu(celda.dateStr) && !celda.isLeave && !celda.tieneTurno && !shPre;
+        if (!opciones.visible && !puedeLiberarPre && !puedeOtroPre) return;
         ev.preventDefault();
         ev.stopPropagation();
         setModoElegir(null);
@@ -9297,6 +9368,7 @@ function PlanificacionDesktop() {
         const shMenu = pendingChanges[keyTurno]?.isDeleted ? null : (pendingChanges[keyTurno] || shiftsMap[keyTurno]);
         const codeMenu = String(shMenu?.code || '').toUpperCase();
         const puedeLiberar = !bloqueoMesCerrado && puedeEditarDiaMenu(celda.dateStr) && !celda.isLeave && (codeMenu === 'M' || codeMenu === 'T' || codeMenu === 'N');
+        const puedeOtro = !bloqueoMesCerrado && puedeEditarDiaMenu(celda.dateStr) && !celda.isLeave && !celda.tieneTurno && !shMenu;
         const work = celda.isLeave ? bandaTitularDelDia(celda.emp.id, celda.dateStr, posPreferida) : null;
         const huecosPuesto = !work && dayReport
             ? flattenDayGapsForUi(dayReport).filter((g) => !posPreferida || g.positionName === posPreferida)
@@ -9310,12 +9382,38 @@ function PlanificacionDesktop() {
         const horario = work?.scheduleLabel && work.scheduleLabel !== '—'
             ? work.scheduleLabel
             : (opt?.startTime && opt?.endTime ? `${opt.startTime}–${opt.endTime}` : '');
+        const permitidosMenu = idsObjetivosDelCrono(selectedObjective, selectedGrupo?.objectiveIds, !!(selectedGrupo && grupoUnifiedMode));
+        const ajenoMenu = (cellTurnosMap[keyTurno] || []).find((d: any) => d && !d.isDeleted && esTurnoAjenoAlCrono(d.objectiveId, permitidosMenu))
+            || (shMenu && esTurnoAjenoAlCrono(shMenu.objectiveId, permitidosMenu) ? shMenu : null);
+        if (ajenoMenu && !menuOpciones.visible) {
+            const objAjeno = String(ajenoMenu.objectiveId || '');
+            const nombreObj = getObjectiveName(objAjeno) || 'otro objetivo';
+            avisarResultadoOtro({
+                escritos: 0,
+                avisos: [{
+                    mensaje: `${celda.emp.name || 'El guardia'} ya tiene ${String(ajenoMenu.code || 'turno').toUpperCase()} en ${nombreObj} el ${fechaCorta(celda.dateStr)}`,
+                    href: urlCronograma({
+                        objectiveId: objAjeno,
+                        clientId: String(ajenoMenu.clientId || clients.find((c) => (c.objetivos || []).some((o: any) => String(o.id) === objAjeno))?.id || ''),
+                        year: Number(celda.dateStr.slice(0, 4)),
+                        month: Number(celda.dateStr.slice(5, 7)),
+                        dateStr: celda.dateStr,
+                        empId: celda.emp.id,
+                    }),
+                    objetivoNombre: nombreObj,
+                }],
+            });
+            return;
+        }
         setMenuRapido({
             x: ev.clientX,
             y: ev.clientY,
-            opciones: puedeLiberar && !menuOpciones.visible ? { ...menuOpciones, visible: true, titulo: 'Liberar este turno' } : menuOpciones,
+            opciones: (!menuOpciones.visible && (puedeLiberar || puedeOtro))
+                ? { ...menuOpciones, visible: true, titulo: puedeOtro && !puedeLiberar ? 'Celda vacía' : 'Liberar este turno' }
+                : menuOpciones,
             diasLicencia: diasLicencia.length > 1 && diasLicencia.includes(celda.dateStr) ? diasLicencia : [],
             liberar: puedeLiberar ? { code: codeMenu, positionName: String(shMenu?.positionName || posPreferida || '') } : undefined,
+            asignarOtro: puedeOtro,
             ctx: {
                 clase: celda.isLeave ? 'ausente' : 'hueco',
                 empId: celda.emp.id,
@@ -9801,22 +9899,8 @@ function PlanificacionDesktop() {
             escribir(granted);
             return;
         }
-        requestSupervisorLaborAuth(pedir, () => {
-            const motivo = authReasonRef.current;
-            const marks: Record<string, ShiftAuthMark> = { ...granted };
-            for (const auth of pedir) {
-                const key = `${auth.employeeId}_${auth.dateStr}`;
-                marks[key] = {
-                    ...(marks[key] || {}),
-                    autorizacionMotivo: motivo,
-                    ...(auth.kind === 'DESCANSO'
-                        ? { descansoReducido: true, descansoHoras: auth.restHours != null ? Math.round(auth.restHours * 10) / 10 : undefined }
-                        : {}),
-                    ...(auth.kind === 'TOPE' ? { topeExcedido: true, horasMes: auth.monthHours } : {}),
-                };
-            }
-            escribir(marks);
-        });
+        toast.message('El PIN de descanso y de tope se pide al publicar, con el detalle del mes.');
+        escribir(granted);
     };
     const diaCubiertoMenu = (ctx: CtxMenuRapido, dia: string) => {
         if (isPlanningDateLocked(dia)) return true;
@@ -11626,7 +11710,7 @@ function PlanificacionDesktop() {
             const resultados = proponerContinuacion({
                 objectiveId: selectedObjective,
                 dias,
-                guardias: guardiasBase.map((e: any) => ({ id: e.id, nombre: e.name || e.id, previos: previosPorEmp.get(e.id) || [] })),
+                guardias: guardiasBase.map((e: any) => ({ id: e.id, nombre: e.name || e.id, previos: previosPorEmp.get(e.id) || [], puestoPreferido: getEmpDefaultPos(e.id) || '' })),
                 salientes: [...salientesPorEmp].map(([id, s]) => ({ id, nombre: s.nombre, previos: s.previos })),
                 estructura: estructuraContinuar,
                 estadoCelda,
@@ -14283,6 +14367,15 @@ function PlanificacionDesktop() {
             return [];
         }
     };
+    const equivalenciasOtroDelObjetivo = async (): Promise<EquivalenciaOtro[]> => {
+        if (!empresaId || !selectedObjective) return [];
+        try {
+            const snap = await getDoc(doc(db, 'planificacion_import_mapeos', `${empresaId}_${selectedObjective}`));
+            return (snap.exists() ? (snap.data().equivalenciasOtro || []) : []) as EquivalenciaOtro[];
+        } catch {
+            return [];
+        }
+    };
     const pegarRapido = async (inicio: CeldaRC | null, rg: RangoRC | null, texto: string, html?: string) => {
         const limpio = (t: string) => t.replace(/\r/g, '').trim();
         const fresco = leerPortapapeles();
@@ -14302,7 +14395,7 @@ function PlanificacionDesktop() {
         const conocidos = new Set(opcionesDeCodigo([], slaTodosRapido, ultimoUsadoRapido, catalogoNovedad).map((o) => normalizarCodigo(o.code)));
         const colores = html ? coloresParaTsv(matriz, html) : null;
         const equivalencias = await equivalenciasDelObjetivo();
-        const preview = prepararPegadoExcel(matriz, { guardias: guardiasPegado(), cursor: inicio, cols: dimsRapido.cols, conocidos, colores, equivalencias });
+        const preview = prepararPegadoExcel(matriz, { guardias: guardiasPegado(), cursor: inicio, cols: dimsRapido.cols, conocidos, colores, equivalencias, equivalenciasOtro: await equivalenciasOtroDelObjetivo() });
         if (preview.modo === 'posicion') {
             pegarPorPosicion(matriz, inicio || { r: 0, c: 0 }, rg, null);
             return;
@@ -14315,7 +14408,7 @@ function PlanificacionDesktop() {
         const conocidos = new Set(opcionesDeCodigo([], slaTodosRapido, ultimoUsadoRapido, catalogoNovedad).map((o) => normalizarCodigo(o.code)));
         const colores = html ? coloresParaTsv(matriz, html) : null;
         const equivalencias = await equivalenciasDelObjetivo();
-        const preview = prepararPegadoExcel(matriz, { guardias: guardiasPegado(), cursor: null, cols: dimsRapido.cols, conocidos, colores, equivalencias });
+        const preview = prepararPegadoExcel(matriz, { guardias: guardiasPegado(), cursor: null, cols: dimsRapido.cols, conocidos, colores, equivalencias, equivalenciasOtro: await equivalenciasOtroDelObjetivo() });
         if (preview.modo === 'posicion') {
             setPegarExcel(null);
             pegarPorPosicion(matriz, { r: 0, c: 0 }, null, null);
@@ -14598,6 +14691,7 @@ function PlanificacionDesktop() {
                     dateStr: ds,
                     code,
                     positionName: pos,
+                    objectiveId: String(t.objectiveId || selectedObjective || ''),
                     hours: Number(t.hours) || undefined,
                     bloqueado: licencia || descansoCorto,
                     motivo: descansoCorto ? 'descanso menor a 8 h' : (licencia ? 'licencia' : undefined),
@@ -14611,6 +14705,11 @@ function PlanificacionDesktop() {
         const report = buildDayCoverageReport(dateStr);
         if (!report) return [];
         const turnos = turnos12(dateStr);
+        const cupos12: Record<string, number> = {};
+        for (const p of positionStructure || []) {
+            const nombre = String(p.positionName || '').trim().toUpperCase().replace(/\s+/g, ' ');
+            if (nombre) cupos12[nombre] = Math.max(1, Number(p.qty) || 1);
+        }
         const out: Propuesta12h[] = [];
         for (const pos of report.positions || []) {
             if ((pos.missingUnits || 0) <= 0) continue;
@@ -14627,6 +14726,8 @@ function PlanificacionDesktop() {
                 turnos,
                 preferidoEmpId: preferido,
                 sla,
+                cupos: cupos12,
+                objectiveId: String((pos as { objectiveId?: string }).objectiveId || selectedObjective || ''),
             });
             if (prop) out.push(prop);
         }
@@ -14750,10 +14851,19 @@ function PlanificacionDesktop() {
                     const celda = ctxRapido(r, c);
                     if (!celda.emp) continue;
                     const fuente: FuenteRapida = {
-                        code: ch.code, startTime: ch.startTime, endTime: ch.endTime, hours: ch.hours, name: ch.code, positionName: prop.positionName,
+                        code: ch.code, startTime: ch.startTime, endTime: ch.endTime, hours: ch.hours, name: ch.code, positionName: ch.positionName || prop.positionName,
                     };
                     const res = cambioRapido(celda.emp, ch.dateStr, ch.code, celda.ctx, fuente);
                     if ('error' in res) { toast.message(res.error); continue; }
+                    res.change = {
+                        ...res.change,
+                        positionName: ch.positionName || res.change.positionName,
+                        coverageMode: '12H',
+                        coversBandCode: prop.banda,
+                        coversDateStr: prop.dateStr,
+                        coversPositionName: ch.coversPositionName || prop.positionName,
+                        ...(ch.coversObjectiveId ? { coversObjectiveId: ch.coversObjectiveId } : {}),
+                    };
                     next[`${ch.empId}_${ch.dateStr}`] = res.change;
                 }
                 continue;
@@ -14796,6 +14906,11 @@ function PlanificacionDesktop() {
         if (global) { toast.message(global); return; }
         const emp = displayedEmployees.find((e: any) => e.id === empId) || employees.find((e: any) => e.id === empId);
         if (!emp) return;
+        const cuposLib: Record<string, number> = {};
+        for (const p of positionStructure || []) {
+            const nombre = String(p.positionName || '').trim().toUpperCase().replace(/\s+/g, ' ');
+            if (nombre) cuposLib[nombre] = Math.max(1, Number(p.qty) || 1);
+        }
         const lib = proponerLiberar({
             empId,
             dateStr,
@@ -14803,6 +14918,8 @@ function PlanificacionDesktop() {
             positionName: positionName || 'General',
             turnos: turnos12(dateStr),
             sla: getShiftsForPosition(positionName, selectedObjective) as TurnoSla[],
+            cupos: cuposLib,
+            objectiveId: selectedObjective || undefined,
         });
         if (!lib.ok) { toast.message('motivo' in lib ? lib.motivo : 'No se libera.'); return; }
         const filaDe = new Map(displayedEmployees.map((e: any, i: number) => [e.id, i]));
@@ -14820,14 +14937,297 @@ function PlanificacionDesktop() {
             if (rr == null || cc < 0) continue;
             const otra = ctxRapido(rr, cc);
             if (!otra.emp) continue;
-            const fuente: FuenteRapida = { code: ch.code, startTime: ch.startTime, endTime: ch.endTime, hours: ch.hours, name: ch.code, positionName };
+            const fuente: FuenteRapida = { code: ch.code, startTime: ch.startTime, endTime: ch.endTime, hours: ch.hours, name: ch.code, positionName: ch.positionName || positionName };
             const res = cambioRapido(otra.emp, ch.dateStr, ch.code, otra.ctx, fuente);
             if ('error' in res) { toast.message(res.error); continue; }
+            if (ch.coversPositionName || ch.coversObjectiveId) {
+                res.change = {
+                    ...res.change,
+                    positionName: ch.positionName || res.change.positionName,
+                    ...(ch.coversPositionName ? { coversPositionName: ch.coversPositionName, coversBandCode: code, coversDateStr: ch.dateStr } : {}),
+                    ...(ch.coversObjectiveId ? { coversObjectiveId: ch.coversObjectiveId } : {}),
+                };
+            }
             next[`${ch.empId}_${ch.dateStr}`] = res.change;
         }
         commitPendingChanges(next);
         toast.success(lib.texto);
         setBandasOcultas(false);
+    };
+
+    const objetivosParaOtro = (): ObjetivoOpcion[] => {
+        const out: ObjetivoOpcion[] = [];
+        for (const c of clients || []) {
+            for (const o of (c.objetivos || []) as Array<{ id?: string; name?: string; status?: string }>) {
+                const id = String(o.id || '').trim();
+                if (!id || id === String(selectedObjective || '')) continue;
+                if (String(o.status || 'ACTIVE').toUpperCase() === 'INACTIVE') continue;
+                out.push({ id, clientId: c.id, clientName: String(c.name || c.businessName || 'Cliente'), name: String(o.name || id) });
+            }
+        }
+        return out.sort((a, b) => `${a.clientName} ${a.name}`.localeCompare(`${b.clientName} ${b.name}`, 'es'));
+    };
+    const abrirAsignarOtro = (empId: string, nombre: string, dateStr: string) => {
+        if (bloqueoMesCerrado) { toast.message('Mes cerrado'); return; }
+        const key = `${empId}_${dateStr}`;
+        const local = pendingChangesRef.current[key]?.isDeleted ? null : (pendingChangesRef.current[key] || shiftsMap[key]);
+        const aus = absencesMap[key];
+        if (local || (aus && isActiveAbsence(aus))) {
+            const code = String(local?.code || aus?.inferredCode || 'turno').toUpperCase();
+            const objId = String(local?.objectiveId || selectedObjective || '');
+            const obj = getObjectiveName(objId) || 'este objetivo';
+            const ajeno = !!local && esTurnoAjenoAlCrono(local.objectiveId, idsObjetivosDelCrono(selectedObjective, selectedGrupo?.objectiveIds, !!(selectedGrupo && grupoUnifiedMode)));
+            avisarResultadoOtro({
+                escritos: 0,
+                avisos: [{
+                    mensaje: `${nombre} ya tiene ${code} en ${obj} el ${fechaCorta(dateStr)}`,
+                    href: ajeno ? urlCronograma({
+                        objectiveId: objId,
+                        clientId: String(local?.clientId || clients.find((c) => (c.objetivos || []).some((o: any) => String(o.id) === objId))?.id || ''),
+                        year: Number(dateStr.slice(0, 4)),
+                        month: Number(dateStr.slice(5, 7)),
+                        dateStr,
+                        empId,
+                    }) : undefined,
+                    objetivoNombre: obj,
+                }],
+            });
+            return;
+        }
+        setFranjasOtro([]);
+        setOtroObjetivo({ empId, nombre, dateStr });
+    };
+    const leerFranjasDe = async (objectiveId: string): Promise<FranjaOpcion[]> => {
+        const snap = await getDocs(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa));
+        const allDocs = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+        const cliente = clients.find((c) => (c.objetivos || []).some((o: any) => String(o.id) === objectiveId));
+        const matching = filterSlasForPlanningContext(allDocs, cliente?.id || '', objectiveId, clients, slaIdToObjId);
+        const year = currentDate.getFullYear();
+        const month = currentDate.getMonth();
+        const pick = pickSlaForPlanningMonth(matching, year, month);
+        const srv = pick.vigente ?? pickClosedSlaForPlanningMonth(matching, year, month) ?? pick.fallback;
+        const { structure } = buildPlanningPositionStructure(srv, { monthHasSla: !!srv, hasExactMatch: pick.hasExactMatch });
+        const franjas: FranjaOpcion[] = [];
+        for (const pos of structure || []) {
+            for (const sh of pos.shifts || []) {
+                const code = String(sh.code || '').toUpperCase();
+                if (!code || code === 'F' || code === 'RET') continue;
+                franjas.push({
+                    positionName: String(pos.positionName || 'General'),
+                    code,
+                    startTime: String(sh.startTime || '07:00'),
+                    endTime: String(sh.endTime || '15:00'),
+                    hours: Number(sh.hours) || 8,
+                });
+            }
+        }
+        return franjas;
+    };
+    const cargarFranjasOtro = async (objectiveId: string) => {
+        setCargandoFranjasOtro(true);
+        setFranjasOtro([]);
+        try {
+            setFranjasOtro(await leerFranjasDe(objectiveId));
+        } catch {
+            toast.error('No se pudo leer el servicio de ese objetivo.');
+        } finally {
+            setCargandoFranjasOtro(false);
+        }
+    };
+    type PedidoOtro = { empId: string; nombre: string; dateStr: string; objetivo: ObjetivoOpcion; franja: FranjaOpcion };
+    type AvisoOtro = { mensaje: string; href?: string; objetivoNombre?: string };
+    type ResultadoOtro = { escritos: number; avisos: AvisoOtro[] };
+    type TurnoDelGuardia = { objectiveId: string; clientId?: string; code: string; scheduleDate: string; start: string; end: string; hours: number };
+    const horaAr = (v: unknown): string => {
+        if (typeof v === 'string') return /^\d{1,2}:\d{2}/.test(v) ? v.slice(0, 5) : '';
+        const d = v && typeof (v as { toDate?: () => Date }).toDate === 'function'
+            ? (v as { toDate: () => Date }).toDate()
+            : (v instanceof Date ? v : null);
+        if (!d || Number.isNaN(d.getTime())) return '';
+        return d.toLocaleTimeString('en-GB', { timeZone: 'America/Argentina/Buenos_Aires', hour: '2-digit', minute: '2-digit', hour12: false });
+    };
+    const asignarEnOtroObjetivo = async (pedidos: PedidoOtro[]): Promise<ResultadoOtro> => {
+        const out: ResultadoOtro = { escritos: 0, avisos: [] };
+        if (!empresaId || !pedidos.length) return out;
+        const estados = new Map<string, ReturnType<typeof modoEscrituraOtroObjetivo>>();
+        const turnosEmp = new Map<string, TurnoDelGuardia[]>();
+        const aMin = (hm: string) => {
+            const [h, m] = String(hm || '0:0').split(':').map(Number);
+            return (Number(h) || 0) * 60 + (Number(m) || 0);
+        };
+        const diaAbs = (ds: string) => Math.round(Date.UTC(Number(ds.slice(0, 4)), Number(ds.slice(5, 7)) - 1, Number(ds.slice(8, 10))) / 86400000);
+        const next: Record<string, any> = { ...pendingChangesRef.current };
+        const horasLote = new Map<string, number>();
+        for (const ped of pedidos) {
+            const anio = Number(ped.dateStr.slice(0, 4));
+            const mes = Number(ped.dateStr.slice(5, 7));
+            const kEstado = `${ped.objetivo.id}_${anio}_${mes}`;
+            if (!estados.has(kEstado)) {
+                let publicado = false;
+                try {
+                    const est = await fetchPlanificacionEstadoDoc(empresaId, ped.objetivo.id, anio, mes);
+                    publicado = !!(est?.data?.publishedAt);
+                } catch { publicado = false; }
+                estados.set(kEstado, modoEscrituraOtroObjetivo(publicado, canCorrectPlanning));
+            }
+            const modo = estados.get(kEstado)!;
+            if (modo.ok === false) { out.avisos.push({ mensaje: `${ped.objetivo.name}: ${'mensaje' in modo ? modo.mensaje : ''}` }); continue; }
+            const key = `${ped.empId}_${ped.dateStr}`;
+            const local = next[key]?.isDeleted ? null : (next[key] || shiftsMap[key]);
+            const aus = absencesMap[key];
+            if (local || (aus && isActiveAbsence(aus))) {
+                const code = String(local?.code || aus?.inferredCode || 'turno').toUpperCase();
+                const obj = getObjectiveName(local?.objectiveId || selectedObjective) || 'este objetivo';
+                out.avisos.push({ mensaje: `${ped.nombre} ya tiene ${code} en ${obj} el ${fechaCorta(ped.dateStr)}` });
+                continue;
+            }
+            if (!turnosEmp.has(ped.empId)) {
+                const snap = await getDocs(query(collection(db, 'turnos'), where('employeeId', '==', ped.empId), where('empresaId', '==', empresaId)));
+                const lista: TurnoDelGuardia[] = [];
+                snap.forEach((d) => {
+                    const data = d.data() as any;
+                    if (data.isDeleted) return;
+                    const fecha = String(data.scheduleDate || '');
+                    if (!fecha) return;
+                    lista.push({
+                        objectiveId: String(data.objectiveId || ''),
+                        clientId: data.clientId,
+                        code: String(data.code || '').toUpperCase(),
+                        scheduleDate: fecha,
+                        start: horaAr(data.startTime),
+                        end: horaAr(data.endTime),
+                        hours: Number(data.hours) || 0,
+                    });
+                });
+                turnosEmp.set(ped.empId, lista);
+            }
+            const todos = turnosEmp.get(ped.empId)!;
+            const eseDia = todos.filter((t) => t.scheduleDate === ped.dateStr).map((t) => ({
+                objectiveId: t.objectiveId,
+                objectiveName: getObjectiveName(t.objectiveId) || t.objectiveId,
+                clientId: t.clientId,
+                code: t.code,
+                esLicencia: esLicenciaCodigo(t.code),
+            }));
+            const decision = decidirAsignacionOtroObjetivo({ nombre: ped.nombre, empId: ped.empId, dateStr: ped.dateStr, turnos: eseDia });
+            if (decision.ok === false && 'mensaje' in decision) {
+                out.avisos.push({
+                    mensaje: decision.mensaje,
+                    href: decision.abrir ? urlCronograma(decision.abrir) : undefined,
+                    objetivoNombre: decision.abrir ? getObjectiveName(decision.abrir.objectiveId) : undefined,
+                });
+                continue;
+            }
+            const mesKey = ped.dateStr.slice(0, 7);
+            const horasMes = todos.filter((t) => t.scheduleDate.startsWith(mesKey) && t.objectiveId !== String(selectedObjective || '')).reduce((s, t) => s + t.hours, 0)
+                + (Number(empMonthlyHours[ped.empId]) || 0)
+                + (horasLote.get(ped.empId) || 0);
+            const hoy = diaAbs(ped.dateStr);
+            const otros = todos.filter((t) => t.start && t.end && Math.abs(diaAbs(t.scheduleDate) - hoy) === 1).map((t) => ({
+                startMin: aMin(t.start),
+                endMin: aMin(t.end),
+                dateOffset: (diaAbs(t.scheduleDate) < hoy ? -1 : 1) as -1 | 1,
+            }));
+            const val = validarContraTodos({
+                startMin: aMin(ped.franja.startTime),
+                endMin: aMin(ped.franja.endTime),
+                horasMes,
+                horasTurno: ped.franja.hours,
+                otros,
+            });
+            if (val.ok === false && 'mensaje' in val) { out.avisos.push({ mensaje: `${ped.nombre} ${fechaCorta(ped.dateStr)}: ${val.mensaje}` }); continue; }
+            const fila = displayedEmployees.findIndex((e: { id: string }) => e.id === ped.empId);
+            const col = diasRapido.indexOf(ped.dateStr);
+            if (fila < 0 || col < 0) { out.avisos.push({ mensaje: `${ped.nombre}: esa celda no está en la grilla.` }); continue; }
+            const celda = ctxRapido(fila, col);
+            const res = cambioRapido(celda.emp, ped.dateStr, ped.franja.code, celda.ctx, {
+                code: ped.franja.code,
+                startTime: ped.franja.startTime,
+                endTime: ped.franja.endTime,
+                hours: ped.franja.hours,
+                name: ped.franja.code,
+                positionName: ped.franja.positionName,
+            });
+            if ('error' in res) { out.avisos.push({ mensaje: `${ped.nombre}: ${res.error}` }); continue; }
+            next[key] = {
+                ...res.change,
+                objectiveId: ped.objetivo.id,
+                clientId: ped.objetivo.clientId,
+                positionName: ped.franja.positionName,
+                draft: modo.draft,
+                menuRapidoVia: 'OTRO_OBJETIVO',
+                comments: `Asignado en ${ped.objetivo.name}`,
+            };
+            horasLote.set(ped.empId, (horasLote.get(ped.empId) || 0) + ped.franja.hours);
+            out.escritos += 1;
+        }
+        if (out.escritos) commitPendingChanges(next);
+        return out;
+    };
+    const avisarResultadoOtro = (r: ResultadoOtro) => {
+        if (r.avisos.length === 1) {
+            const a = r.avisos[0];
+            toast.message(a.mensaje, a.href ? { action: { label: `Abrir el cronograma de ${a.objetivoNombre || 'ese objetivo'}`, onClick: () => { window.location.href = a.href!; } } } : undefined);
+        } else if (r.avisos.length > 1) {
+            toast.message(`${r.avisos.length} celdas no se asignaron: ${r.avisos.slice(0, 3).map((a) => a.mensaje).join(' · ')}${r.avisos.length > 3 ? '…' : ''}`);
+        }
+    };
+    const confirmarOtroObjetivo = async (sel: { objetivo: ObjetivoOpcion; franja: FranjaOpcion }) => {
+        const ctx = otroObjetivo;
+        if (!ctx) return;
+        const r = await asignarEnOtroObjetivo([{ empId: ctx.empId, nombre: ctx.nombre, dateStr: ctx.dateStr, objetivo: sel.objetivo, franja: sel.franja }]);
+        avisarResultadoOtro(r);
+        if (r.escritos) {
+            setOtroObjetivo(null);
+            toast.success(`Turno en ${sel.objetivo.name}. Se guarda con el cronograma.`);
+        }
+    };
+    const aplicarAjenosPegado = async (items: Array<{ fila: number; col: number; objectiveId: string; clientId: string; objectiveName: string; positionName: string; code: string; startTime: string; endTime: string; hours: number; marca: string; banda: string }>) => {
+        if (!pegarExcel || pegarExcel.paso !== 'resumen' || !items.length) return;
+        const { preview, asignacion } = pegarExcel;
+        const pedidos: PedidoOtro[] = [];
+        for (const it of items) {
+            const filaPreview = preview.filas[it.fila];
+            const filaGrilla = filaPreview ? asignacion[filaPreview.indice] : null;
+            const emp = filaGrilla != null ? displayedEmployees[filaGrilla] : null;
+            const ds = diasRapido[it.col];
+            if (!emp || !ds) continue;
+            pedidos.push({
+                empId: emp.id,
+                nombre: String(emp.name || emp.id),
+                dateStr: ds,
+                objetivo: { id: it.objectiveId, clientId: it.clientId, clientName: '', name: it.objectiveName },
+                franja: { positionName: it.positionName, code: it.code, startTime: it.startTime, endTime: it.endTime, hours: it.hours },
+            });
+        }
+        const equivs = new Map<string, EquivalenciaOtro>();
+        for (const it of items) {
+            equivs.set(it.marca, {
+                codigo: it.marca,
+                objectiveId: it.objectiveId,
+                clientId: it.clientId,
+                objectiveName: it.objectiveName,
+                banda: it.banda || it.code,
+                positionName: it.positionName,
+                startTime: it.startTime,
+                endTime: it.endTime,
+                hours: it.hours,
+            });
+        }
+        if (empresaId && selectedObjective && equivs.size) {
+            try {
+                const ref = doc(db, 'planificacion_import_mapeos', `${empresaId}_${selectedObjective}`);
+                const snap = await getDoc(ref);
+                const previas = (snap.exists() ? (snap.data().equivalenciasOtro || []) : []) as EquivalenciaOtro[];
+                const merged = [...previas.filter((e) => !equivs.has(e.codigo)), ...equivs.values()];
+                await setDoc(ref, { empresaId, objectiveId: selectedObjective, equivalenciasOtro: merged, updatedAt: serverTimestamp() }, { merge: true });
+            } catch {
+                toast.message('No se pudo guardar la equivalencia; la próxima vez se vuelve a preguntar.');
+            }
+        }
+        const r = await asignarEnOtroObjetivo(pedidos);
+        avisarResultadoOtro(r);
+        if (r.escritos) toast.success(`${r.escritos} turno(s) en otro objetivo. Se guardan con el cronograma.`);
     };
 
     const consultarFrancoFaltante = async (faltante: FaltanteBanda, franco: { empId: string; nombre: string }) => {
@@ -14865,8 +15265,24 @@ function PlanificacionDesktop() {
             if (c.soloLecturaAjena) {
                 ev.preventDefault();
                 ev.stopPropagation();
-                const objId = c.activeShift?.objectiveId || c.s?.objectiveId;
-                toast.message(textoAvisoTurnoAjeno(c.emp?.name, getObjectiveName(objId)));
+                const ajeno = c.activeShift || c.s;
+                const objId = String(ajeno?.objectiveId || '');
+                const nombreObj = getObjectiveName(objId) || 'otro objetivo';
+                avisarResultadoOtro({
+                    escritos: 0,
+                    avisos: [{
+                        mensaje: `${c.emp?.name || 'El guardia'} ya tiene ${String(ajeno?.code || 'turno').toUpperCase()} en ${nombreObj} el ${fechaCorta(c.dateStr)}`,
+                        href: objId ? urlCronograma({
+                            objectiveId: objId,
+                            clientId: String(ajeno?.clientId || clients.find((cl) => (cl.objetivos || []).some((o: any) => String(o.id) === objId))?.id || ''),
+                            year: Number(c.dateStr.slice(0, 4)),
+                            month: Number(c.dateStr.slice(5, 7)),
+                            dateStr: c.dateStr,
+                            empId: c.emp?.id,
+                        }) : undefined,
+                        objetivoNombre: nombreObj,
+                    }],
+                });
                 return;
             }
             abrirMenuRapidoCelda(ev, {
@@ -15558,7 +15974,17 @@ function PlanificacionDesktop() {
                                 <span>Hs:</span>
                                 <span>{hoursMode === 'cct' ? 'CCT' : 'Mes'}</span>
                             </button>
-                            <span className={`flex items-center gap-1 ${gridOpts?.highlightCoverageFooter ? 'text-rose-700' : 'text-slate-500'}`} data-exige-cobertura={exigeCoberturaGrilla ? '1' : '0'}>
+                            <span
+                                className={`flex items-center gap-1 ${gridOpts?.highlightCoverageFooter ? 'text-rose-700' : 'text-slate-500'}`}
+                                data-exige-cobertura={exigeCoberturaGrilla ? '1' : '0'}
+                                title={(() => {
+                                    const dias = Object.values(lecturaMes.porDia);
+                                    if (!dias.length) return 'Horas del mes contra puestos × 24';
+                                    const trab = dias.reduce((s, d) => s + (d.horasTrabajadas || 0), 0);
+                                    const vend = dias.reduce((s, d) => s + (d.horasVendidas || 0), 0);
+                                    return `Mes: ${trab}/${vend} h · puestos × 24`;
+                                })()}
+                            >
                                 <ShieldCheck size={12}/> {exigeCoberturaGrilla ? 'Cobertura:' : 'Horas'}
                             </span>
                         </div>
@@ -15601,8 +16027,10 @@ function PlanificacionDesktop() {
                         });
                         }
 
-                        const isCovered = requiredPax > 0 && closedPax >= requiredPax;
                         const lecturaDia = lecturaMes.porDia[dateStr];
+                        const objetivoCubierto = !!lecturaDia?.reconcilia;
+                        const cerradoMostrar = objetivoCubierto ? requiredPax : closedPax;
+                        const isCovered = requiredPax > 0 && cerradoMostrar >= requiredPax;
                         const extra = lecturaDia?.mostrar && lecturaDia.turnosFuera > 0 ? lecturaDia.turnosFuera : 0;
                         const bandasGrupo = selectedGrupo && grupoUnifiedMode && !isCovered && requiredPax > 0
                             ? bandasAbiertasGrupoEn(dateStr, dayLetter)
@@ -15665,7 +16093,7 @@ function PlanificacionDesktop() {
                             >
                                 {requiredPax > 0 ? (
                                     <span className="inline-flex flex-col items-center leading-none">
-                                        <span>{closedPax}/{requiredPax}</span>
+                                        <span>{cerradoMostrar}/{requiredPax}</span>
                                         {extra > 0 && <span className="mt-0.5 text-[8px] font-black text-amber-600" title={`${extra} turnos de más`}>+{extra}</span>}
                                     </span>
                                 ) : (extra > 0 ? <span className="text-[9px] text-amber-600">+{extra}</span> : '-')}
@@ -15755,10 +16183,27 @@ function PlanificacionDesktop() {
                             cerrarMenuRapido();
                             if (lib) liberarGuardia(ctx.empId, ctx.dateStr, lib.code, lib.positionName);
                         } : undefined}
+                        onAsignarOtro={menuRapido.asignarOtro ? () => {
+                            const ctx = menuRapido.ctx;
+                            cerrarMenuRapido();
+                            abrirAsignarOtro(ctx.empId, ctx.empName, ctx.dateStr);
+                        } : undefined}
                         onClose={cerrarMenuRapido}
                     />
                 </>,
                 document.body,
+            )}
+            {otroObjetivo && (
+                <AsignarOtroObjetivoModal
+                    nombre={otroObjetivo.nombre}
+                    fecha={fechaCorta(otroObjetivo.dateStr)}
+                    objetivos={objetivosParaOtro()}
+                    franjas={franjasOtro}
+                    cargando={cargandoFranjasOtro}
+                    onElegirObjetivo={(id) => { void cargarFranjasOtro(id); }}
+                    onCerrar={() => setOtroObjetivo(null)}
+                    onConfirmar={(sel) => { void confirmarOtroObjetivo(sel); }}
+                />
             )}
             {modoElegir && typeof document !== 'undefined' && createPortal((() => {
                 const idsCronograma = new Set(displayedEmployees.map((e: { id: string }) => e.id));
@@ -17333,6 +17778,7 @@ function PlanificacionDesktop() {
                                     valorDe={(r, c) => codigoCtxRapido(ctxRapido(r, c).ctx)}
                                     marcas={marcasRapido}
                                     onEscribir={(celdas, code) => escribirRapido(celdas.map((x) => ({ ...x, code })))}
+                                    onRechazo={(motivo) => toast.message(motivo)}
                                     onBorrar={(celdas) => escribirRapido(celdas.map((x) => ({ ...x, borrar: true })))}
                                     onCopiar={copiarRapido}
                                     onPegar={pegarRapido}
@@ -17365,6 +17811,17 @@ function PlanificacionDesktop() {
                                             liberarGuardia(emp.id, ds, code, pos === 'General' ? '' : pos);
                                         }
                                     }}
+                                    onOtroObjetivo={(celdas) => {
+                                        const cel = celdas[0];
+                                        if (!cel) return;
+                                        const { emp, ctx } = ctxRapido(cel.r, cel.c);
+                                        if (!emp) return;
+                                        const code = codigoCtxRapido(ctx);
+                                        const ds = diasRapido[cel.c];
+                                        if (!ds) return;
+                                        if (code) { toast.message('Asignar en otro objetivo es solo en una celda vacía.'); return; }
+                                        abrirAsignarOtro(emp.id, String(emp.name || emp.id), ds);
+                                    }}
                                 />
                             </div>
                             {modoRapido && !comparingSnapshot && (
@@ -17380,9 +17837,11 @@ function PlanificacionDesktop() {
                     <BandasFaltantesPanel
                         faltantes={lecturaMes.faltantes}
                         puedeFranco={canAssignFT}
+                        storageKey={`cosp-planif-bandas-min:${selectedObjective}:${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`}
                         onAplicar={(f) => { if (f.propuesta) aplicarPropuestas12([f.propuesta]); }}
                         onAplicarTodas={() => aplicarPropuestas12(lecturaMes.faltantes.flatMap((f) => (f.propuesta ? [f.propuesta] : [])))}
                         onConsultarFranco={(f, fr) => { void consultarFrancoFaltante(f, fr); }}
+                        onElegirOtro={(f) => { if (f.propuesta) setPropuesta12([f.propuesta]); }}
                         onCerrar={() => setBandasOcultas(true)}
                     />
                 )}
@@ -19366,6 +19825,18 @@ function PlanificacionDesktop() {
                                         ))}
                                     </div>
                                 )}
+                                {publishConfirmModal.excepciones.length > 0 && (
+                                    <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 space-y-1 max-h-48 overflow-auto" data-publicar-excepciones>
+                                        <p className="text-[10px] font-black uppercase text-amber-900">
+                                            {publishConfirmModal.bloqueaDescanso
+                                                ? 'No se puede publicar: hay descansos de menos de 8 h'
+                                                : 'Excepciones del mes · un PIN las autoriza'}
+                                        </p>
+                                        {publishConfirmModal.excepciones.map((linea, i) => (
+                                            <p key={i} className="text-[11px] font-medium text-amber-950">{linea}</p>
+                                        ))}
+                                    </div>
+                                )}
                                 {!publishConfirmModal.superAdminOverride && publishConfirmModal.warnings.length > 0 && (
                                     <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 space-y-1" data-publicar-sin-servicio>
                                         {publishConfirmModal.warnings.map((w, i) => (
@@ -19451,7 +19922,7 @@ function PlanificacionDesktop() {
                                             setPublishConfirmPinChecking(false);
                                         }
                                     }}
-                                    disabled={isPublishing || publishConfirmPinChecking || Object.keys(pendingChanges).length > 0 || backgroundSaveCount > 0 || publishConfirmPin.length !== 4}
+                                    disabled={isPublishing || publishConfirmPinChecking || Object.keys(pendingChanges).length > 0 || backgroundSaveCount > 0 || publishConfirmPin.length !== 4 || !!publishConfirmModal.bloqueaDescanso}
                                     className="flex-1 py-3 rounded-xl text-xs font-black text-white bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
                                 >
                                     {(isPublishing || publishConfirmPinChecking) ? <Loader2 size={14} className="animate-spin"/> : <CheckCircle size={14}/>}
@@ -19479,6 +19950,9 @@ function PlanificacionDesktop() {
                             return { ...prev, decisiones: { ...prev.decisiones, [col]: decision } };
                         })}
                         onAplicar={aplicarPegadoExcel}
+                        objetivosAjenos={objetivosParaOtro()}
+                        franjasAjeno={leerFranjasDe}
+                        onAplicarAjenos={(items) => { void aplicarAjenosPegado(items); }}
                         puedeAlta={isSuperAdmin || (rolePermissions['RRHH'] || []).includes('create')}
                         plataforma={(() => {
                             const month = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
@@ -19568,6 +20042,17 @@ function PlanificacionDesktop() {
                 {propuesta12 && propuesta12.length > 0 && (
                     <Cierre12Banner
                         texto={textoResumen12h(propuesta12)}
+                        alternativas={(propuesta12[0]?.alternativas || []).map((a) => ({
+                            ...a,
+                            elegido: propuesta12[0]?.cambios.some((c) => c.empId === a.empId && c.code === a.lado),
+                        }))}
+                        onElegir={(empId) => {
+                            setPropuesta12((prev) => {
+                                if (!prev?.[0]) return prev;
+                                const turnos = turnos12(prev[0].dateStr);
+                                return [cambiarPareja(prev[0], empId, turnos), ...prev.slice(1)];
+                            });
+                        }}
                         onConfirmar={confirmar12}
                         onCancelar={() => setPropuesta12(null)}
                     />
@@ -20277,25 +20762,7 @@ function PlanificacionDesktop() {
                             commit(extraMarks);
                         };
                         if (clasificado.pedir.length) {
-                            requestSupervisorLaborAuth(clasificado.pedir, () => {
-                                const motivo = authReasonRef.current;
-                                const marks: Record<string, ShiftAuthMark> = { ...grantedMarks };
-                                for (const auth of clasificado.pedir) {
-                                    const key = `${auth.employeeId}_${auth.dateStr}`;
-                                    const prev = marks[key] || {};
-                                    marks[key] = {
-                                        ...prev,
-                                        autorizacionMotivo: motivo,
-                                        ...(auth.kind === 'DESCANSO'
-                                            ? { descansoReducido: true, descansoHoras: auth.restHours != null ? Math.round(auth.restHours * 10) / 10 : undefined }
-                                            : {}),
-                                        ...(auth.kind === 'TOPE' ? { topeExcedido: true, horasMes: auth.monthHours } : {}),
-                                    };
-                                }
-                                if (francoConflicts.length > 0) setVacancyFrancoAuthApproved(true);
-                                commit(marks);
-                            });
-                            return;
+                            toast.message('El PIN de descanso y de tope se pide al publicar, con el detalle del mes.');
                         }
                         finish(Object.keys(grantedMarks).length ? grantedMarks : undefined);
                     };
@@ -20480,20 +20947,8 @@ function PlanificacionDesktop() {
                         const sinPin = plan.consultables.filter((c: { employeeId: string }) => !conPinIds.has(c.employeeId));
                         const conPin = candidatosEnvio.filter((c) => conPinIds.has(c.employeeId));
                         if (pedir.length) {
-                            requestSupervisorLaborAuth(pedir, () => {
-                                const motivo = authReasonRef.current;
-                                const actor = authActorRef.current || 'Supervisor';
-                                const vistos = new Set<string>();
-                                const autorizaciones = pedir.flatMap((p) => {
-                                    const key = `${p.employeeId}|${p.kind}`;
-                                    if (vistos.has(key)) return [];
-                                    vistos.add(key);
-                                    return [{ employeeId: p.employeeId, kind: p.kind, motivo, autorizadoPor: actor }];
-                                });
-                                void despacharConsultaNomina([...sinPin, ...conPin], autorizaciones);
-                            }, () => {
-                                if (sinPin.length) void despacharConsultaNomina(sinPin, []);
-                            });
+                            toast.message('El PIN de descanso y de tope se pide al publicar, con el detalle del mes.');
+                            void despacharConsultaNomina([...sinPin, ...conPin], []);
                             return;
                         }
                         void despacharConsultaNomina(sinPin, []);

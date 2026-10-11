@@ -170,7 +170,7 @@ export type ContinuarInput = {
   objectiveId: string;
   /** Días del mes nuevo (YYYY-MM-DD), en orden. */
   dias: string[];
-  guardias: Array<{ id: string; nombre: string; previos: TurnoPrevio[] }>;
+  guardias: Array<{ id: string; nombre: string; previos: TurnoPrevio[]; puestoPreferido?: string }>;
   estructura: PuestoSla[];
   /** Licencia cargada o celda con algo (turno, borrador). No se pisa. */
   estadoCelda: (employeeId: string, dateStr: string) => EstadoCelda;
@@ -874,10 +874,32 @@ const CCT: Record<string, { start: string; end: string; hours: number }> = {
   N12: { start: '19:00', end: '07:00', hours: 12 },
 };
 
+function puestoNorm(name: string): string {
+  return String(name || '').trim().toUpperCase().replace(/\s+/g, ' ');
+}
+
+function puestoPreferidoDe(
+  g: { puestoPreferido?: string; previos: TurnoPrevio[] },
+  estructura: PuestoSla[],
+): string {
+  const hit = (name: string) => estructura.find((p) => puestoNorm(p.positionName) === puestoNorm(name))?.positionName || '';
+  const pref = hit(g.puestoPreferido || '');
+  if (pref) return pref;
+  const counts = new Map<string, number>();
+  for (const t of g.previos) {
+    const p = hit(String((t as { positionName?: string }).positionName || ''));
+    if (p) counts.set(p, (counts.get(p) || 0) + 1);
+  }
+  let best = '';
+  let n = 0;
+  for (const [p, c] of counts) if (c > n) { best = p; n = c; }
+  return best;
+}
+
 /** Puesto del mes nuevo para ese turno. Si el del mes anterior ya no está, el único que lo ofrece. */
 function resolverPuesto(estructura: PuestoSla[], positionName: string, code: string):
   { pos: PuestoSla; reasignadoDe?: string } | { motivo: string } {
-  const mismo = estructura.find((p) => p.positionName === positionName);
+  const mismo = estructura.find((p) => puestoNorm(p.positionName) === puestoNorm(positionName));
   if (mismo && turnoDelPuesto(mismo, code)) return { pos: mismo };
   const duenos = estructura.filter((p) => turnoDelPuesto(p, code));
   if (mismo) {
@@ -988,7 +1010,11 @@ export function proponerGuardia(
         continue;
       }
     }
-    const r = resolverPuesto(input.estructura, dia.positionName, dia.code);
+    let r = resolverPuesto(input.estructura, dia.positionName, dia.code);
+    if ('motivo' in r) {
+      const preferido = puestoPreferidoDe(g, input.estructura);
+      if (preferido) r = resolverPuesto(input.estructura, preferido, dia.code);
+    }
     if ('motivo' in r) {
       const k = `${dia.positionName}|${dia.code}`;
       const item = revisar.get(k) || { positionName: dia.positionName, code: dia.code, dias: [], motivo: r.motivo };
