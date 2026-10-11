@@ -247,8 +247,8 @@ export function alternativasPareja(turnos: readonly TurnoPuesto12[], dateStr: st
 }
 
 /** Cambia quién pasa a D12 o a N12. La pareja bloqueada no se elige. */
-export function cambiarPareja(propuesta: Propuesta12h, empId: string, turnos: readonly TurnoPuesto12[]): Propuesta12h {
-    const op = (propuesta.alternativas || []).find((a) => a.empId === empId && !a.bloqueado);
+export function cambiarPareja(propuesta: Propuesta12h, empId: string, turnos: readonly TurnoPuesto12[], lado?: 'D12' | 'N12'): Propuesta12h {
+    const op = (propuesta.alternativas || []).find((a) => a.empId === empId && !a.bloqueado && (!lado || a.lado === lado));
     if (!op) return propuesta;
     const origen = turnos.find((t) => t.empId === empId && t.dateStr === propuesta.dateStr && up(t.code) === op.code);
     if (!origen) return propuesta;

@@ -339,7 +339,7 @@ export function Cierre12Banner({
 }: {
     texto: string;
     alternativas?: Array<{ empId: string; nombre: string; positionName: string; code: string; hours?: number; lado: string; bloqueado?: boolean; motivo?: string; elegido?: boolean }>;
-    onElegir?: (empId: string) => void;
+    onElegir?: (empId: string, lado: string) => void;
     onConfirmar: () => void;
     onCancelar: () => void;
     ancla?: { left: number; top: number; width: number; height: number } | null;
@@ -376,7 +376,7 @@ export function Cierre12Banner({
                             <button
                                 type="button"
                                 disabled={!!a.bloqueado}
-                                onClick={() => onElegir?.(a.empId)}
+                                onClick={() => onElegir?.(a.empId, a.lado)}
                                 className={`flex w-full items-center justify-between rounded-xl px-2 py-1 text-left text-[12px] ${a.bloqueado ? 'cursor-not-allowed text-slate-400' : a.elegido ? 'bg-indigo-600 font-black text-white' : 'bg-slate-50 font-bold text-slate-800 hover:bg-indigo-50'}`}
                                 data-pareja-12={a.empId}
                             >
@@ -387,7 +387,7 @@ export function Cierre12Banner({
                     ))}
                 </ul>
             )}
-            <p className="mt-1 text-[11px] text-slate-500">Otro + aplica. Enter aplica. Esc cancela. ↑↓ cambia la pareja.</p>
+            <p className="mt-1 text-[11px] text-slate-500">Para cambiar la pareja: clic en la lista o en la celda de ese día del guardia que quieras. Otro + o Enter aplica. Esc cancela.</p>
             <div className="mt-2 flex justify-end gap-2">
                 <button type="button" onClick={onCancelar} className="rounded-xl border border-slate-200 px-3 py-1.5 text-[12px] font-bold text-slate-600 hover:bg-slate-50">Cancelar (Esc)</button>
                 <button ref={btnRef} type="button" onClick={onConfirmar} className="rounded-xl bg-indigo-600 px-3 py-1.5 text-[12px] font-black text-white shadow-sm hover:bg-indigo-700" data-cierre-12h-confirmar>Aplicar (Enter)</button>

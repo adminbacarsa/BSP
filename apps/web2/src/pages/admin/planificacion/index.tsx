@@ -473,7 +473,7 @@ type CovMenuRapido = { mode: 'substitute'; id: string } | { mode: 'split'; extId
 let colaCobertura12: string[] | null = null;
 let ofrecerCobertura12: (claves: string[]) => void = () => {};
 import { applyOperationalGapCloseToChanges, applySingleWorkerFullGapCloseToChanges } from '@/lib/planificacion/operationalGapCoverage';
-import { cambiarPareja, estiloJornada12, horarioDoce, proponerCierre12h, slaExigeCobertura, textoRango12h, textoResumen12h, volverA8, type Propuesta12h, type TurnoPuesto12 } from '@/lib/planificacion/cierre12h';
+import { alternativasPareja, cambiarPareja, estiloJornada12, horarioDoce, proponerCierre12h, slaExigeCobertura, textoRango12h, textoResumen12h, volverA8, type Propuesta12h, type TurnoPuesto12 } from '@/lib/planificacion/cierre12h';
 import { avisosDesdeLectura, faltantesDelDia, leerDia, proponerLiberar, SIN_PUESTO, type FaltanteBanda, type PuestoServicio, type TurnoDia } from '@/lib/planificacion/lecturaBandas';
 import { BandasFaltantesPanel } from '@/components/planificacion/BandasFaltantesPanel';
 import {
@@ -14953,6 +14953,40 @@ function PlanificacionDesktop() {
             fuente: { code: vuelta.code, startTime: vuelta.startTime, endTime: vuelta.endTime, hours: vuelta.hours, name: vuelta.code, positionName: pos },
         }]);
     };
+    /** Todos los guardias del objetivo que ese día pueden pasar a D12 o N12, no solo los del puesto propuesto. */
+    const alternativasTodas12 = (p: Propuesta12h | undefined) => (p ? alternativasPareja(turnos12(p.dateStr), p.dateStr, p.banda) : []);
+    const elegirPareja12 = (empId: string, lado?: 'D12' | 'N12') => {
+        setPropuesta12((prev) => {
+            if (!prev?.[0]) return prev;
+            const turnos = turnos12(prev[0].dateStr);
+            const conTodas = { ...prev[0], alternativas: alternativasPareja(turnos, prev[0].dateStr, prev[0].banda) };
+            const opciones = conTodas.alternativas.filter((a) => a.empId === empId && !a.bloqueado);
+            if (!opciones.length) {
+                const bloq = conTodas.alternativas.find((a) => a.empId === empId);
+                toast.message(bloq ? `${bloq.nombre} no puede: ${bloq.motivo || 'no disponible'}` : 'Ese guardia no tiene ese día un turno que pueda pasar a 12 h para esta banda.');
+                return prev;
+            }
+            const ladoElegido = lado || (opciones.length === 1 ? opciones[0].lado : (opciones.find((a) => a.code === 'M')?.lado || opciones.find((a) => a.code === 'N')?.lado || opciones[0].lado));
+            return [cambiarPareja(conTodas, empId, turnos, ladoElegido), ...prev.slice(1)];
+        });
+    };
+    useEffect(() => {
+        if (!propuesta12?.length) return;
+        const onDown = (e: MouseEvent) => {
+            const td = (e.target as HTMLElement | null)?.closest?.('td[data-rc]') as HTMLElement | null;
+            if (!td) return;
+            const [r, c] = String(td.getAttribute('data-rc') || '').split(':').map(Number);
+            const emp = displayedEmployees[r];
+            const dia = daysInMonth[c];
+            if (!emp || !dia || getDateKey(dia) !== propuesta12[0].dateStr) return;
+            e.preventDefault();
+            e.stopPropagation();
+            elegirPareja12(emp.id);
+        };
+        document.addEventListener('mousedown', onDown, true);
+        return () => document.removeEventListener('mousedown', onDown, true);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [propuesta12, displayedEmployees, daysInMonth]);
     const confirmar12 = (listaArg?: Propuesta12h[]) => {
         const lista = listaArg && listaArg.length ? listaArg : propuesta12;
         setPropuesta12(null);
@@ -20169,17 +20203,11 @@ function PlanificacionDesktop() {
                 {propuesta12 && propuesta12.length > 0 && (
                     <Cierre12Banner
                         texto={textoResumen12h(propuesta12)}
-                        alternativas={(propuesta12[0]?.alternativas || []).map((a) => ({
+                        alternativas={alternativasTodas12(propuesta12[0]).map((a) => ({
                             ...a,
                             elegido: propuesta12[0]?.cambios.some((c) => c.empId === a.empId && c.code === a.lado),
                         }))}
-                        onElegir={(empId) => {
-                            setPropuesta12((prev) => {
-                                if (!prev?.[0]) return prev;
-                                const turnos = turnos12(prev[0].dateStr);
-                                return [cambiarPareja(prev[0], empId, turnos), ...prev.slice(1)];
-                            });
-                        }}
+                        onElegir={(empId, lado) => elegirPareja12(empId, lado as 'D12' | 'N12')}
                         onConfirmar={confirmar12}
                         onCancelar={() => setPropuesta12(null)}
                     />
