@@ -87,9 +87,13 @@ function mismo(a: string, b: string): boolean {
 export function esFranjaPropia(pos: PuestoServicio): boolean {
   const tipo = String(pos.coverageType || '').toLowerCase();
   if (tipo === 'encargado' || tipo === 'eventos') return true;
-  if (/RONDIN|ENCARGAD|CORTINA/.test(norm(pos.positionName))) return true;
-  const codes = (pos.shifts || []).map((s) => up(s.code)).filter(Boolean);
-  return codes.length > 0 && codes.every((c) => !BANDAS.has(c));
+  const nombre = norm(pos.positionName);
+  if (nombre === 'RO' || nombre === 'EN' || /RONDIN|ENCARGAD|CORTINA/.test(nombre)) return true;
+  const codes = [...new Set((pos.shifts || []).map((s) => up(s.code)).filter(Boolean))];
+  if (codes.length > 0 && codes.every((c) => !BANDAS.has(c))) return true;
+  const es24 = tipo === '24hs' || tipo === '24' || tipo === '24h';
+  const bandas = codes.filter((c) => c === 'M' || c === 'T' || c === 'N' || c === 'D12' || c === 'N12');
+  return !es24 && bandas.length <= 1 && codes.length > 0;
 }
 
 export function esPuesto24(pos: PuestoServicio): boolean {
@@ -143,7 +147,11 @@ function etiquetaCustom(t: TurnoDia): string {
   return pos || up(t.code);
 }
 
-/** D12 cubre M y T; N12 cubre T y N. Un par D12+N12 es un solo juego (la T no se cuenta dos veces). */
+/**
+ * D12 cubre la M (y 4 h de la T, que no cierran la T solas).
+ * N12 cubre la N (y las otras 4 h de la T).
+ * La T de 8 h se cierra con un T o con un par D12+N12, aunque sean de puestos distintos.
+ */
 export function contarEstandar(turnos: readonly TurnoDia[]): { cuentas: CuentasBanda; crudo: { M: number; T: number; N: number; D12: number; N12: number } } {
   let M = 0;
   let T = 0;
@@ -160,8 +168,20 @@ export function contarEstandar(turnos: readonly TurnoDia[]): { cuentas: CuentasB
   }
   const pares = Math.min(D12, N12);
   return {
-    cuentas: { M: M + D12, T: T + (D12 + N12 - pares), N: N + N12 },
+    cuentas: { M: M + D12, T: T + pares, N: N + N12 },
     crudo: { M, T, N, D12, N12 },
+  };
+}
+
+/** Lo que un puesto acredita a las bandas de 8 h. Un D12 no dice «falta M»; un N12 no dice «falta N». */
+export function acreditarCodigos(codeCounts: Record<string, number>): Record<string, number> {
+  const d12 = codeCounts.D12 || 0;
+  const n12 = codeCounts.N12 || 0;
+  return {
+    ...codeCounts,
+    M: (codeCounts.M || 0) + d12,
+    T: (codeCounts.T || 0) + Math.min(d12, n12),
+    N: (codeCounts.N || 0) + n12,
   };
 }
 
@@ -199,7 +219,32 @@ function siglaPuesto(name: string): string {
 }
 
 /** D12 de un puesto + N12 de otro: cubren la T aunque no estén en el mismo puesto. */
-export function textoEntrePuestos(turnos: readonly TurnoDia[]): string | null {
+export function apellido(nombre: string): string {
+  const limpio = String(nombre || '').replace(/,/g, ' ').trim();
+  return (limpio.split(/\s+/)[0] || '').toUpperCase();
+}
+
+/** Con un D12 suelto y la T abierta, el cartel dice a quién pasar a N12 (y al revés). */
+export function textoCompletarPar(turnos: readonly TurnoDia[], falta: CuentasBanda, puesto = ''): string {
+  if (falta.T <= 0) return '';
+  const d12 = turnos.filter((t) => up(t.code) === 'D12');
+  const n12 = turnos.filter((t) => up(t.code) === 'N12');
+  const de = (lista: TurnoDia[]) => lista.map((t) => apellido(t.nombre)).filter(Boolean).slice(0, 3).join(', ');
+  const donde = puesto ? ` en ${puesto}` : '';
+  if (d12.length > n12.length) {
+    const ns = de(turnos.filter((t) => up(t.code) === 'N'));
+    const quien = apellido(d12[0]?.nombre || '') || 'un D12';
+    return `falta T${donde}: con D12 de ${quien}, completá con N12 de un N${ns ? ` (${ns})` : ''}`;
+  }
+  if (n12.length > d12.length) {
+    const ms = de(turnos.filter((t) => up(t.code) === 'M' || up(t.code) === 'T'));
+    const quien = apellido(n12[0]?.nombre || '') || 'un N12';
+    return `falta T: con N12 de ${quien}, completá con D12 de un M o T${ms ? ` (${ms})` : ''}`;
+  }
+  return '';
+}
+
+function textoEntrePuestos(turnos: readonly TurnoDia[]): string | null {
   const d12 = turnos.filter((t) => up(t.code) === 'D12' && String(t.positionName || '').trim());
   const n12 = turnos.filter((t) => up(t.code) === 'N12' && String(t.positionName || '').trim());
   for (const d of d12) {
@@ -246,10 +291,12 @@ export function leerDia(input: { turnos: readonly TurnoDia[]; puestos: readonly 
   const conPuesto = trabajo.filter((t) => !turnoSinPuesto(t.positionName));
   const customTurnos = conPuesto.filter((t) => esCustom(t, input.puestos));
   const estandar = conPuesto.filter((t) => !esCustom(t, input.puestos));
-  const { cuentas, crudo } = contarSumandoPuestos(estandar);
+  const local = contarSumandoPuestos(estandar);
   const bolsa = contarEstandar(estandar);
+  const cuentas = bolsa.cuentas;
+  const crudo = bolsa.crudo;
   const { falta, sobra } = delta(cuentas, juegosPedidos);
-  const faltaBolsa = delta(bolsa.cuentas, juegosPedidos).falta;
+  const faltaLocalDelta = delta(local.cuentas, juegosPedidos).falta;
   const faltaLocal = puestos24.some((pos) => {
     const qty = Math.max(1, Number(pos.qty) || 1);
     const del = estandar.filter((t) => mismo(t.positionName || '', pos.positionName));
@@ -259,7 +306,7 @@ export function leerDia(input: { turnos: readonly TurnoDia[]; puestos: readonly 
   });
   const entre = textoEntrePuestos(estandar);
   const objetivoCubre = falta.M + falta.T + falta.N === 0;
-  const pareceFaltar = faltaBolsa.M + faltaBolsa.T + faltaBolsa.N > 0 || faltaLocal;
+  const pareceFaltar = faltaLocalDelta.M + faltaLocalDelta.T + faltaLocalDelta.N > 0 || faltaLocal;
   const cubiertoEntre = objetivoCubre && pareceFaltar
     ? (entre || 'cubierto entre puestos')
     : null;
@@ -288,6 +335,11 @@ export function leerDia(input: { turnos: readonly TurnoDia[]; puestos: readonly 
   const customTxt = textoCustom(custom);
   const lineaBanda = fs || cubiertoEntre || '';
   const textoHoras = mostrar ? `${horasTrabajadas}/${horasVendidas} h · ${puestos24.length} puestos de 24 h` : '';
+  const puestoFaltaT = puestos24.find((pos) => {
+    const del = estandar.filter((t) => mismo(t.positionName || '', pos.positionName));
+    return contarEstandar(del).cuentas.T < (pos.qty || 1);
+  })?.positionName || '';
+  const completar = textoCompletarPar(estandar, falta, puestoFaltaT);
   const base = [
     customTxt,
     `M ${crudo.M} · T ${crudo.T} · N ${crudo.N}`,
@@ -298,8 +350,8 @@ export function leerDia(input: { turnos: readonly TurnoDia[]; puestos: readonly 
   const sobraTxt = mostrar && sobranHoras > 0
     ? `Sobran ${sobranHoras} h: ${turnosFuera} turnos de 8 h fuera del servicio`
     : '';
-  const texto = [textoHoras, base, cubiertoEntre && fs ? cubiertoEntre : '', sobraTxt].filter(Boolean).join(' · ');
-  const textoCorto = [customTxt, fs || cubiertoEntre || 'en línea', cubiertoEntre && fs ? cubiertoEntre : '', avisoServicio || ''].filter(Boolean).join(' · ');
+  const texto = [textoHoras, base, completar, cubiertoEntre && fs ? cubiertoEntre : '', sobraTxt].filter(Boolean).join(' · ');
+  const textoCorto = [customTxt, fs || cubiertoEntre || 'en línea', completar, cubiertoEntre && fs ? cubiertoEntre : '', avisoServicio || ''].filter(Boolean).join(' · ');
   return {
     mostrar,
     custom,

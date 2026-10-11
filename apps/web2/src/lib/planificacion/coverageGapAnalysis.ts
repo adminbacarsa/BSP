@@ -4,6 +4,7 @@
  */
 
 import { effectiveShiftsForPositionDay } from './autoScheduleEngineV2';
+import { esFranjaPropia } from './lecturaBandas';
 import {
     countPositionClosedUnitsFromShifts,
     positionSchemeLabelForDay,
@@ -130,7 +131,9 @@ export function analyzePositionDayGap(
     if (units.closed >= units.required) return null;
 
     const missingUnits = units.required - units.closed;
-    const coverageType = String(pos.coverageType || 'custom').toLowerCase();
+    const coverageType = esFranjaPropia(pos as any)
+        ? 'custom'
+        : String(pos.coverageType || 'custom').toLowerCase();
     let primaryScheme = schemeLabel;
     let alternateScheme: string | undefined;
     let missingBandsPrimary: BandGap[] = [];
@@ -144,12 +147,19 @@ export function analyzePositionDayGap(
         primaryScheme = mtnBands.join('+');
         alternateScheme = altBands.join('+');
 
-        const has8h = mtnBands.some(c => (codeCounts[c] || 0) > 0);
+        const d12 = codeCounts.D12 || 0;
+        const n12 = codeCounts.N12 || 0;
+        const acred8: Record<string, number> = {
+            ...codeCounts,
+            M: (codeCounts.M || 0) + d12,
+            N: (codeCounts.N || 0) + n12,
+            T: (codeCounts.T || 0) + Math.min(d12, n12),
+        };
+        const has8h = mtnBands.some(c => (acred8[c] || 0) > 0);
         const has12h = altBands.some(c => (codeCounts[c] || 0) > 0);
 
         if (has8h && !has12h) {
-            // Esquema 8h comprometido — solo mostrar bandas faltantes de ese esquema
-            missingBandsPrimary = missingBandsForScheme(qty, codeCounts, mtnBands);
+            missingBandsPrimary = missingBandsForScheme(qty, acred8, mtnBands);
             missingBandsAlternate = [];
             alternateScheme = undefined;
         } else if (has12h && !has8h) {
@@ -160,9 +170,9 @@ export function analyzePositionDayGap(
             alternateScheme = undefined;
         } else {
             // Sin comprometer — mostrar ambas opciones
-            const mtnClosed = Math.min(qty, Math.min(...mtnBands.map(c => codeCounts[c] || 0)));
+            const mtnClosed = Math.min(qty, Math.min(...mtnBands.map(c => acred8[c] || 0)));
             const remainingAfterMtn = qty - mtnClosed;
-            missingBandsPrimary = missingBandsForScheme(qty, codeCounts, mtnBands);
+            missingBandsPrimary = missingBandsForScheme(qty, acred8, mtnBands);
             if (remainingAfterMtn > 0) {
                 missingBandsAlternate = missingBandsForScheme(remainingAfterMtn, codeCounts, altBands);
             }

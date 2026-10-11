@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { analyzePositionDayGap } from './coverageGapAnalysis';
 import { countPositionClosedUnitsFromShifts } from './positionCoverageUnits';
-import { horarioDoce, proponerCierre12h, resumirDias12, slaExigeCobertura, textoRango12h, volverA8 } from './cierre12h';
+import { cambiarPareja, horarioDoce, proponerCierre12h, resumirDias12, slaExigeCobertura, textoRango12h, volverA8 } from './cierre12h';
 
 const puesto = {
     positionName: 'Puesto 1',
@@ -226,6 +226,30 @@ describe('cierre a 12 h', () => {
         });
         assert.equal(p?.cambios.some((c) => c.empId === 'herr'), false);
         assert.notEqual(p?.modo, 'par');
+    });
+
+    it('un D12 acredita la M y no la lista como faltante', () => {
+        assert.deepEqual(faltantes({ D12: 1, N12: 1 }), []);
+        assert.deepEqual(faltantes({ D12: 1, N: 1 }), ['T']);
+        assert.ok(!faltantes({ D12: 1 }).includes('M'));
+        assert.ok(!faltantes({ N12: 1 }).includes('N'));
+    });
+
+    it('cambiar la pareja escribe a esa persona', () => {
+        const turnos = [
+            { empId: 'bai', nombre: 'BAIGORRIA', dateStr: '2026-10-02', code: 'M', positionName: 'Puesto 1', hours: 8 },
+            { empId: 'mar', nombre: 'MARTINEZ', dateStr: '2026-10-02', code: 'N', positionName: 'Puesto 1', hours: 8 },
+            { empId: 'bar', nombre: 'BARRIOS', dateStr: '2026-10-02', code: 'N', positionName: 'Puesto 1', hours: 8 },
+        ];
+        const p = proponerCierre12h({
+            dateStr: '2026-10-02',
+            positionName: 'Puesto 1',
+            faltantes: ['T'],
+            turnos,
+        });
+        assert.ok(p);
+        const cambiada = cambiarPareja(p!, 'bar', turnos);
+        assert.equal(cambiada.cambios.some((c) => c.empId === 'bar' && c.code === 'N12'), true);
     });
 
     it('− vuelve D12 a M y N12 a N', () => {

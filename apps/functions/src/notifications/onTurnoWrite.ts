@@ -54,7 +54,7 @@ function buildMessage(type: string, after: any, before: any, turnoId: string): {
   const rango = from && to ? `${from}–${to}` : from;
   const cuando = [dateStr, rango].filter(Boolean).join(' ');
 
-  if ((type === 'TURNO_NUEVO' || type === 'TURNO_MODIFICADO') && after && esCoberturaAsignada(after) && !(after.isFranco || code === 'F')) {
+  if ((type === 'TURNO_NUEVO' || type === 'TURNO_MODIFICADO') && after && esCoberturaAsignada(after) && after.coverageMode !== '12H' && !(after.isFranco || code === 'F')) {
     const puesto = [after.positionName, objective].map((s: unknown) => String(s || '').trim()).filter(Boolean).join(' · ');
     return {
       title: type === 'TURNO_NUEVO' ? 'Tenés un turno nuevo' : 'Cambió tu cronograma',
@@ -79,15 +79,23 @@ function buildMessage(type: string, after: any, before: any, turnoId: string): {
         body: cuando ? `${cuando}${code && code !== 'F' ? ` · ${code}` : ''}${objective ? ` en ${objective}` : ''}` : (objective || 'Nuevo turno en tu cronograma'),
       };
     case 'TURNO_MODIFICADO': {
+      const dia = ddmmAr(after?.startTime);
+      const puesto = String(after?.positionName || '').trim();
+      const obj = String(after?.objectiveName || objective || '').trim();
+      const horario = from && to ? `${from}–${to}` : '';
+      const cubreNombre = String(after?.coversEmployeeName || '').trim().split(/\s+/)[0];
+      const cubre = cubreNombre
+        ? ` · cubrís a ${cubreNombre}${after?.coversBandCode ? ` (${after.coversBandCode})` : ''}`
+        : '';
+      if (dia && code) {
+        return {
+          title: 'Cambió tu cronograma',
+          body: `Tu turno del ${dia} cambió a ${code}${horario ? ` ${horario}` : ''}${puesto ? ` · ${puesto}` : ''}${obj ? ` · ${obj}` : ''}${cubre}`,
+        };
+      }
       const changes: string[] = [];
       if (before && after) {
-        if (JSON.stringify(before.startTime) !== JSON.stringify(after.startTime) ||
-            JSON.stringify(before.endTime)   !== JSON.stringify(after.endTime)) {
-          changes.push('horario cambiado');
-        }
         if (before.code !== after.code) changes.push(`turno: ${before.code} → ${after.code}`);
-        if (before.objectiveName !== after.objectiveName) changes.push(`objetivo: ${after.objectiveName}`);
-        if (before.positionName !== after.positionName) changes.push(`puesto: ${after.positionName}`);
       }
       const detail = changes.length ? changes.join(', ') : (dateStr ? `${dateStr}${code ? ` · ${code}` : ''}` : '');
       return {

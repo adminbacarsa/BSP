@@ -66,17 +66,19 @@ export function ServicioPlanillaModal(props: Props) {
   };
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-start justify-center overflow-y-auto bg-slate-900/40 p-4" data-servicio-planilla-modal>
-      <div className="my-6 w-full max-w-6xl rounded-3xl border border-slate-200 bg-white shadow-lg">
+    <div className="fixed inset-0 z-[80] flex items-center justify-center overflow-y-auto bg-slate-900/40 p-4" data-servicio-planilla-modal>
+      <div className="my-4 flex max-h-[calc(100vh-2rem)] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-lg">
         <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-3">
           <FileSpreadsheet size={16} className="text-indigo-600" />
           <div>
-            <p className="text-sm font-black text-slate-800">Servicio desde la planilla</p>
-            <p className="text-[11px] text-slate-500">{props.mesLabel}</p>
+            <p className="text-sm font-black text-slate-800">
+              {obj ? `Servicio de ${props.mesLabel} · ${obj.clienteNombre} · ${obj.nombre}` : `Servicio de ${props.mesLabel}`}
+            </p>
+            <p className="text-[11px] text-slate-500">El mes vigente se puede armar desde los turnos, desde una planilla o copiando el mes anterior.</p>
           </div>
           <button type="button" onClick={props.onCerrar} className="ml-auto rounded-lg p-1 text-slate-400 hover:bg-slate-50" aria-label="Cerrar"><X size={16} /></button>
         </div>
-        <div className="space-y-3 px-5 py-4">
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4">
           <div className="flex flex-wrap items-center gap-2 text-[12px]">
             <label className="rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 font-black text-indigo-800">
               Subir planilla
@@ -97,6 +99,43 @@ export function ServicioPlanillaModal(props: Props) {
             )}
           </div>
           {error && <p className="text-[12px] font-bold text-rose-700">{error}</p>}
+          {obj && delMes.length === 0 && (
+            <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] font-bold text-amber-900" data-servicio-sin-mes>
+              {props.mesLabel} no tiene servicio. Crearlo desde los turnos de este mes, desde una planilla o copiando el mes anterior.
+            </p>
+          )}
+          {obj && !cuadro && (
+            <div className="space-y-2" data-servicio-vigente>
+              <p className="text-[12px] font-bold text-slate-600">
+                {vigente.length ? 'Servicio vigente del mes' : 'Todavía no hay franjas cargadas.'}
+              </p>
+              {vigente.length > 0 && (
+                <table className="w-full text-left text-[12px]">
+                  <thead>
+                    <tr className="text-[10px] uppercase tracking-wide text-slate-400">
+                      <th className="py-1 pr-2">Puesto</th><th className="py-1 pr-2">Franja</th><th className="py-1 pr-2">Horario</th><th className="py-1 pr-2">Cant.</th><th className="py-1">Días</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {vigente.map((f, i) => (
+                      <tr key={`${f.puesto}-${f.code}-${i}`} className="border-t border-slate-100">
+                        <td className="py-1 pr-2 font-bold">{f.puesto}</td>
+                        <td className="py-1 pr-2">{f.code}</td>
+                        <td className="py-1 pr-2">{f.startTime}–{f.endTime}</td>
+                        <td className="py-1 pr-2">{f.cantidad}</td>
+                        <td className="py-1">{f.dias?.length ? f.dias.join(' ') : 'todos'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              <div className="flex flex-wrap gap-2 text-[11px]">
+                <span className="rounded-xl border border-slate-200 px-3 py-2 text-slate-600">Desde los turnos de este mes: lee las bandas del cronograma (customs aparte, puestos de 24 h).</span>
+                <span className="rounded-xl border border-slate-200 px-3 py-2 text-slate-600">Desde una planilla: subí el Excel y se compara con el vigente.</span>
+                <span className="rounded-xl border border-slate-200 px-3 py-2 text-slate-600">Copiar del mes anterior: trae puestos y franjas del servicio del mes previo.</span>
+              </div>
+            </div>
+          )}
           {cuadro && obj && (
             <ServicioPlanillaEditor
               cuadro={cuadro}

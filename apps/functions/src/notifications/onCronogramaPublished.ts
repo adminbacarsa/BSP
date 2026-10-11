@@ -101,7 +101,7 @@ export const onCronogramaPublished = functions
     }
 
     // Agrupar por empleado
-    const empMap = new Map<string, { name: string; work: number; franco: number; objectiveName: string }>();
+    const empMap = new Map<string, { name: string; work: number; franco: number; objectiveName: string; lineas: string[] }>();
     turnosSnap.docs.forEach(d => {
       const t = d.data();
       if (!t.employeeId || t.employeeId === 'VACANTE') return;
@@ -113,12 +113,31 @@ export const onCronogramaPublished = functions
           work: 0,
           franco: 0,
           objectiveName: t.objectiveName || '',
+          lineas: [],
         });
       }
       const entry = empMap.get(t.employeeId)!;
       const code = (t.code || '').toUpperCase();
       if (code === 'F' || t.isFranco) entry.franco++;
       else entry.work++;
+      if (entry.lineas.length < 5 && code) {
+        const inicio = t.startTime?.toDate ? t.startTime.toDate() : (t.startTime ? new Date(t.startTime) : null);
+        const dia = inicio && !Number.isNaN(inicio.getTime())
+          ? inicio.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' })
+          : '';
+        const hm = (ts: any) => {
+          const dt = ts?.toDate ? ts.toDate() : ts ? new Date(ts) : null;
+          if (!dt || Number.isNaN(dt.getTime())) return '';
+          return dt.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'America/Argentina/Buenos_Aires' });
+        };
+        const horario = hm(t.startTime) && hm(t.endTime) ? `${hm(t.startTime)}–${hm(t.endTime)}` : '';
+        const cubre = String(t.coversEmployeeName || '').trim().split(/\s+/)[0];
+        if (dia) {
+          entry.lineas.push(
+            `Tu turno del ${dia} cambió a ${code}${horario ? ` ${horario}` : ''}${t.positionName ? ` · ${t.positionName}` : ''}${entry.objectiveName ? ` · ${entry.objectiveName}` : ''}${cubre ? ` · cubrís a ${cubre}${t.coversBandCode ? ` (${t.coversBandCode})` : ''}` : ''}`,
+          );
+        }
+      }
     });
 
     if (empMap.size === 0) {
@@ -139,9 +158,10 @@ export const onCronogramaPublished = functions
       const cronoName = guardFirstName({ firstName: emp.firstName, employeeName: info.name || emp.nombre });
       const counts = `${info.work} turno${info.work !== 1 ? 's' : ''}${info.franco > 0 ? ` y ${info.franco} franco${info.franco !== 1 ? 's' : ''}` : ''}`;
       const title = 'Cronograma publicado';
+      const detalle = info.lineas.length ? ` ${info.lineas.join(' · ')}${info.work + info.franco > info.lineas.length ? ` · y ${info.work + info.franco - info.lineas.length} más` : ''}` : '';
       const body = cronoName
-        ? `${cronoName}, ya está tu cronograma de ${monthName} en ${info.objectiveName || 'tu objetivo'}: ${counts}.`
-        : `Ya está tu cronograma de ${monthName} en ${info.objectiveName || 'tu objetivo'}: ${counts}.`;
+        ? `${cronoName}, ya está tu cronograma de ${monthName} en ${info.objectiveName || 'tu objetivo'}: ${counts}.${detalle}`
+        : `Ya está tu cronograma de ${monthName} en ${info.objectiveName || 'tu objetivo'}: ${counts}.${detalle}`;
 
       const [byEmpId, byUid] = await Promise.all([
         db.collection('device_tokens').where('employeeId', '==', employeeId).get(),

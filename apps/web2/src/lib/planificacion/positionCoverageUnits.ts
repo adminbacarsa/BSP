@@ -4,6 +4,7 @@
  */
 
 import { effectiveShiftsForPositionDay } from './autoScheduleEngineV2';
+import { esFranjaPropia } from './lecturaBandas';
 import { resolveTitularVacancyWorkShift } from './vacancyCoverage';
 import { paxBoostDeltaForDate } from '@/lib/servicios/paxBoostRanges';
 import { diaAcreditacionCobertura, sumarDiasCalendario } from './coberturaDiaHueco';
@@ -632,7 +633,9 @@ export function positionSchemeLabelForDay(
     cycles?: string[],
     dateStr?: string,
 ): string {
-    const coverageType = String(pos?.coverageType || 'custom').toLowerCase();
+    const coverageType = esFranjaPropia(pos as any)
+        ? 'custom'
+        : String(pos?.coverageType || 'custom').toLowerCase();
     const allShifts = Array.isArray(pos?.shifts) ? pos.shifts : [];
     if (coverageType === '24hs' || coverageType === '24' || coverageType === '24h') {
         const bands8 = [...new Set(
@@ -676,7 +679,9 @@ export function countPositionClosedUnitsFromShifts(
     const schemeLabel = positionSchemeLabelForDay(pos, dayLetter, cycles, dateStr);
     if (!isActiveOnDay) return { closed: 0, required: 0, schemeLabel };
 
-    const coverageType = String(pos?.coverageType || 'custom').toLowerCase();
+    const coverageType = esFranjaPropia(pos as any)
+        ? 'custom'
+        : String(pos?.coverageType || 'custom').toLowerCase();
     if (coverageType === 'encargado') {
         return { closed: 0, required: 0, schemeLabel: 'Encargado (sin cobertura)' };
     }
@@ -725,11 +730,19 @@ export function countPositionClosedUnitsFromShifts(
             const allFull = bands.every((b) => (codeCounts[b.code] || 0) >= b.need);
             return { closed: allFull ? 1 : 0, required: 1, schemeLabel };
         }
+        const d12 = codeCounts.D12 || 0;
+        const n12 = codeCounts.N12 || 0;
+        const acred8: Record<string, number> = {
+            ...codeCounts,
+            M: (codeCounts.M || 0) + d12,
+            N: (codeCounts.N || 0) + n12,
+            T: (codeCounts.T || 0) + Math.min(d12, n12),
+        };
         let closed = 0;
         if (bands8.length > 0) {
-            closed = Math.min(qty, closedUnitsFromBandScheme(codeCounts, bands8));
+            closed = Math.min(qty, closedUnitsFromBandScheme(acred8, bands8));
         } else if (bands12.length === 0) {
-            closed = Math.min(qty, closedUnitsFromBandScheme(codeCounts, ['M', 'T', 'N'].filter((c) => !fullSkip.has(c))));
+            closed = Math.min(qty, closedUnitsFromBandScheme(acred8, ['M', 'T', 'N'].filter((c) => !fullSkip.has(c))));
         }
         if (closed < qty && bands12.length >= 2) {
             closed += Math.min(qty - closed, closedUnitsFromBandScheme(codeCounts, bands12));

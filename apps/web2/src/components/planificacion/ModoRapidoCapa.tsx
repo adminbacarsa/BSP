@@ -32,6 +32,8 @@ type Props = {
     valorDe: (r: number, c: number) => string;
     marcas: MarcaAviso[];
     onEscribir: (celdas: CeldaRC[], code: string) => void;
+    /** Motivo cuando el texto no llega a escribirse (no se descarta en silencio). */
+    onRechazo?: (motivo: string) => void;
     onBorrar: (celdas: CeldaRC[]) => void;
     onCopiar: (rg: RangoRC, cortar: boolean) => string;
     /** `html`: lo que Excel pone junto al TSV (trae el color de cada celda). */
@@ -71,6 +73,7 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
     const [serie, setSerie] = useState<CeldaRC | null>(null);
     const [sugLugar, setSugLugar] = useState<{ left: number; arriba: boolean; top: number; bottom: number } | null>(null);
     const [cajas, setCajas] = useState<{ cursor: Caja | null; rango: Caja | null; serie: Caja | null; marcas: Array<Caja & MarcaAviso> }>({ cursor: null, rango: null, serie: null, marcas: [] });
+    const editorCajaRef = useRef<Caja | null>(null);
     const inputRef = useRef<HTMLInputElement>(null);
     const arrastre = useRef<'rango' | 'serie' | null>(null);
     const propsRef = useRef(props);
@@ -290,7 +293,7 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
         const onKey = (e: KeyboardEvent) => {
             if (document.querySelector('[data-modo-rapido-ayuda], [data-pegar-excel], [data-novedad-rapida]')) return;
             if (document.querySelector('[data-cierre-12h]')) {
-                if (e.key === 'Enter') { e.preventDefault(); e.stopImmediatePropagation(); propsRef.current.onConfirmar12?.(); }
+                if (e.key === 'Enter' || e.key === '+' || e.code === 'NumpadAdd') { e.preventDefault(); e.stopImmediatePropagation(); propsRef.current.onConfirmar12?.(); }
                 else if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); propsRef.current.onCancelar12?.(); }
                 return;
             }
@@ -482,6 +485,8 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
 
     if (!activo) return null;
     const cc = cajas.cursor;
+    if (cc) editorCajaRef.current = cc;
+    const cajaEditor = cc || (texto != null ? editorCajaRef.current : null);
     const rc = cajas.rango;
     return (
         <div className="pointer-events-none absolute left-0 top-0 z-[15]" data-modo-rapido-capa aria-hidden={texto == null}>
@@ -518,15 +523,34 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
                     }}
                 />
             )}
-            {cc && texto != null && (
-                <div className="pointer-events-auto absolute" style={{ left: cc.left - 1, top: cc.top - 1 }}>
+            {cajaEditor && texto != null && (
+                <div className="pointer-events-auto absolute" style={{ left: cajaEditor.left - 1, top: cajaEditor.top - 1 }}>
                     <input
                         ref={inputRef}
                         value={texto}
                         onChange={(e) => { setTexto(e.target.value.toUpperCase()); setElegida(-1); }}
-                        onBlur={() => { if (estado.current.texto != null) { setTexto(null); setElegida(-1); } }}
+                        onBlur={() => {
+                            const escrito = estado.current.texto;
+                            if (escrito == null) return;
+                            requestAnimationFrame(() => {
+                                if (estado.current.texto == null) return;
+                                if (inputRef.current && document.activeElement === inputRef.current) return;
+                                const cur = estado.current.cursor;
+                                const opciones = cur ? propsRef.current.opciones(cur.r, cur.c) : [];
+                                const code = codigoAlConfirmar(escrito, opciones, estado.current.elegida);
+                                const completo = code.toUpperCase() === escrito.trim().toUpperCase()
+                                    && opciones.some((o) => o.code.toUpperCase() === code.toUpperCase());
+                                if (completo && cur) {
+                                    confirmar('Enter', false);
+                                    return;
+                                }
+                                propsRef.current.onRechazo?.(`No se escribió «${escrito}»: no es un código completo. Enter confirma.`);
+                                setTexto(null);
+                                setElegida(-1);
+                            });
+                        }}
                         className="block rounded-[3px] border-[3px] border-indigo-700 bg-white px-1 text-center text-[11px] font-black uppercase text-slate-900 shadow-lg outline-none"
-                        style={{ width: Math.max(cc.width + 2, 44), height: cc.height + 2 }}
+                        style={{ width: Math.max(cajaEditor.width + 2, 44), height: cajaEditor.height + 2 }}
                         data-modo-rapido-editor
                         spellCheck={false}
                         autoComplete="off"

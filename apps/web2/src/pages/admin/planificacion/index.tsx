@@ -458,7 +458,7 @@ type CovMenuRapido = { mode: 'substitute'; id: string } | { mode: 'split'; extId
 let colaCobertura12: string[] | null = null;
 let ofrecerCobertura12: (claves: string[]) => void = () => {};
 import { applyOperationalGapCloseToChanges, applySingleWorkerFullGapCloseToChanges } from '@/lib/planificacion/operationalGapCoverage';
-import { estiloJornada12, horarioDoce, proponerCierre12h, slaExigeCobertura, textoRango12h, textoResumen12h, volverA8, type Propuesta12h, type TurnoPuesto12 } from '@/lib/planificacion/cierre12h';
+import { cambiarPareja, estiloJornada12, horarioDoce, proponerCierre12h, slaExigeCobertura, textoRango12h, textoResumen12h, volverA8, type Propuesta12h, type TurnoPuesto12 } from '@/lib/planificacion/cierre12h';
 import { avisosDesdeLectura, faltantesDelDia, leerDia, proponerLiberar, SIN_PUESTO, type FaltanteBanda, type PuestoServicio, type TurnoDia } from '@/lib/planificacion/lecturaBandas';
 import { BandasFaltantesPanel } from '@/components/planificacion/BandasFaltantesPanel';
 import {
@@ -1961,6 +1961,8 @@ function PlanificacionDesktop() {
         superAdminOverride: boolean;
         objectiveName: string;
         periodLabel: string;
+        excepciones: string[];
+        bloqueaDescanso: boolean;
     } | null>(null);
     const [publishConfirmPin, setPublishConfirmPin] = useState('');
     const [publishConfirmPinError, setPublishConfirmPinError] = useState('');
@@ -7807,11 +7809,18 @@ function PlanificacionDesktop() {
             : `¿Guardar ${_rotCount} turno${_rotCount !== 1 ? 's' : ''} de ciclo?`;
         if (!opts?.autorizadoRapido && !confirm(_confirmMsg)) return;
 
-        if (modoRapidoRef.current && !opts?.autorizadoRapido) {
+        const publicaAlGuardar = !!correctionMode && isPlanificacionPublished(publishStatusMap[planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1)]);
+        if (!publicaAlGuardar && modoRapidoRef.current && !opts?.autorizadoRapido) {
+            const { bloquean, piden } = autorizacionesAlGuardar(avisosRapidoRef.current);
+            if (bloquean.length || piden.length) {
+                toast.message(`Se guarda en borrador. ${bloquean.length} descanso(s) menor a 8 h y ${piden.length} excepción(es) de 8–12 h o tope: el PIN se pide al publicar.`, { duration: 8000 });
+            }
+        }
+        if (publicaAlGuardar && modoRapidoRef.current && !opts?.autorizadoRapido) {
             const { bloquean, piden } = autorizacionesAlGuardar(avisosRapidoRef.current);
             if (bloquean.length) {
                 const lista = bloquean.slice(0, 3).map((a) => a.texto).join(' · ');
-                toast.error(`No se guarda: descanso menor a 8 h. ${lista}${bloquean.length > 3 ? ` · y ${bloquean.length - 3} más` : ''}`, { duration: 9000 });
+                toast.error(`No se publica la corrección: descanso menor a 8 h. ${lista}${bloquean.length > 3 ? ` · y ${bloquean.length - 3} más` : ''}`, { duration: 9000 });
                 return;
             }
             if (piden.length) {
@@ -8661,7 +8670,7 @@ function PlanificacionDesktop() {
             })();
         };
 
-        if (overCap.length > 0 && !opts?.autorizadoRapido) {
+        if (publicaAlGuardar && overCap.length > 0 && !opts?.autorizadoRapido) {
             setAuthModal({
                 pendingFn: doSave,
                 employees: overCap,
@@ -8726,12 +8735,22 @@ function PlanificacionDesktop() {
         }
 
         const objectiveName = getObjectiveName(selectedObjective) || selectedObjective;
+        const authPub = autorizacionesAlGuardar(avisosRapidoRef.current);
+        const excepciones = [...authPub.bloquean, ...authPub.piden].map((a) => a.texto);
+        for (const [empId, hours] of Object.entries(empMonthlyHours)) {
+            const h = Number(hours) || 0;
+            if (h <= planningLimits.monthly) continue;
+            const name = displayedEmployees.find((e: any) => e.id === empId)?.name || empId;
+            if (!excepciones.some((t) => t.includes(name))) excepciones.push(`${name}: ${Math.round(h)} h en el mes (tope ${planningLimits.monthly} h)`);
+        }
         setPublishConfirmModal({
             isRepublish: isAlreadyPublished,
             warnings,
             superAdminOverride: isSuperAdmin && (slaHoursMismatch || hasCoverageGaps),
             objectiveName,
             periodLabel: `${String(month).padStart(2, '0')}/${year}`,
+            excepciones,
+            bloqueaDescanso: authPub.bloquean.length > 0,
         });
         setPublishConfirmPin('');
         setPublishConfirmPinError('');
@@ -9828,22 +9847,8 @@ function PlanificacionDesktop() {
             escribir(granted);
             return;
         }
-        requestSupervisorLaborAuth(pedir, () => {
-            const motivo = authReasonRef.current;
-            const marks: Record<string, ShiftAuthMark> = { ...granted };
-            for (const auth of pedir) {
-                const key = `${auth.employeeId}_${auth.dateStr}`;
-                marks[key] = {
-                    ...(marks[key] || {}),
-                    autorizacionMotivo: motivo,
-                    ...(auth.kind === 'DESCANSO'
-                        ? { descansoReducido: true, descansoHoras: auth.restHours != null ? Math.round(auth.restHours * 10) / 10 : undefined }
-                        : {}),
-                    ...(auth.kind === 'TOPE' ? { topeExcedido: true, horasMes: auth.monthHours } : {}),
-                };
-            }
-            escribir(marks);
-        });
+        toast.message('El PIN de descanso y de tope se pide al publicar, con el detalle del mes.');
+        escribir(granted);
     };
     const diaCubiertoMenu = (ctx: CtxMenuRapido, dia: string) => {
         if (isPlanningDateLocked(dia)) return true;
@@ -11653,7 +11658,7 @@ function PlanificacionDesktop() {
             const resultados = proponerContinuacion({
                 objectiveId: selectedObjective,
                 dias,
-                guardias: guardiasBase.map((e: any) => ({ id: e.id, nombre: e.name || e.id, previos: previosPorEmp.get(e.id) || [] })),
+                guardias: guardiasBase.map((e: any) => ({ id: e.id, nombre: e.name || e.id, previos: previosPorEmp.get(e.id) || [], puestoPreferido: getEmpDefaultPos(e.id) || '' })),
                 salientes: [...salientesPorEmp].map(([id, s]) => ({ id, nombre: s.nombre, previos: s.previos })),
                 estructura: estructuraContinuar,
                 estadoCelda,
@@ -14688,14 +14693,15 @@ function PlanificacionDesktop() {
                     };
                     const res = cambioRapido(celda.emp, ch.dateStr, ch.code, celda.ctx, fuente);
                     if ('error' in res) { toast.message(res.error); continue; }
-                    if (ch.coversPositionName || ch.coversObjectiveId) {
-                        res.change = {
-                            ...res.change,
-                            positionName: ch.positionName || res.change.positionName,
-                            ...(ch.coversPositionName ? { coversPositionName: ch.coversPositionName, coversBandCode: prop.banda, coversDateStr: ch.dateStr } : {}),
-                            ...(ch.coversObjectiveId ? { coversObjectiveId: ch.coversObjectiveId } : {}),
-                        };
-                    }
+                    res.change = {
+                        ...res.change,
+                        positionName: ch.positionName || res.change.positionName,
+                        coverageMode: '12H',
+                        coversBandCode: prop.banda,
+                        coversDateStr: prop.dateStr,
+                        coversPositionName: ch.coversPositionName || prop.positionName,
+                        ...(ch.coversObjectiveId ? { coversObjectiveId: ch.coversObjectiveId } : {}),
+                    };
                     next[`${ch.empId}_${ch.dateStr}`] = res.change;
                 }
                 continue;
@@ -17610,6 +17616,7 @@ function PlanificacionDesktop() {
                                     valorDe={(r, c) => codigoCtxRapido(ctxRapido(r, c).ctx)}
                                     marcas={marcasRapido}
                                     onEscribir={(celdas, code) => escribirRapido(celdas.map((x) => ({ ...x, code })))}
+                                    onRechazo={(motivo) => toast.message(motivo)}
                                     onBorrar={(celdas) => escribirRapido(celdas.map((x) => ({ ...x, borrar: true })))}
                                     onCopiar={copiarRapido}
                                     onPegar={pegarRapido}
@@ -17668,9 +17675,11 @@ function PlanificacionDesktop() {
                     <BandasFaltantesPanel
                         faltantes={lecturaMes.faltantes}
                         puedeFranco={canAssignFT}
+                        storageKey={`cosp-planif-bandas-min:${selectedObjective}:${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`}
                         onAplicar={(f) => { if (f.propuesta) aplicarPropuestas12([f.propuesta]); }}
                         onAplicarTodas={() => aplicarPropuestas12(lecturaMes.faltantes.flatMap((f) => (f.propuesta ? [f.propuesta] : [])))}
                         onConsultarFranco={(f, fr) => { void consultarFrancoFaltante(f, fr); }}
+                        onElegirOtro={(f) => { if (f.propuesta) setPropuesta12([f.propuesta]); }}
                         onCerrar={() => setBandasOcultas(true)}
                     />
                 )}
@@ -19641,6 +19650,18 @@ function PlanificacionDesktop() {
                                         ))}
                                     </div>
                                 )}
+                                {publishConfirmModal.excepciones.length > 0 && (
+                                    <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 space-y-1 max-h-48 overflow-auto" data-publicar-excepciones>
+                                        <p className="text-[10px] font-black uppercase text-amber-900">
+                                            {publishConfirmModal.bloqueaDescanso
+                                                ? 'No se puede publicar: hay descansos de menos de 8 h'
+                                                : 'Excepciones del mes · un PIN las autoriza'}
+                                        </p>
+                                        {publishConfirmModal.excepciones.map((linea, i) => (
+                                            <p key={i} className="text-[11px] font-medium text-amber-950">{linea}</p>
+                                        ))}
+                                    </div>
+                                )}
                                 {!publishConfirmModal.superAdminOverride && publishConfirmModal.warnings.length > 0 && (
                                     <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 space-y-1" data-publicar-sin-servicio>
                                         {publishConfirmModal.warnings.map((w, i) => (
@@ -19726,7 +19747,7 @@ function PlanificacionDesktop() {
                                             setPublishConfirmPinChecking(false);
                                         }
                                     }}
-                                    disabled={isPublishing || publishConfirmPinChecking || Object.keys(pendingChanges).length > 0 || backgroundSaveCount > 0 || publishConfirmPin.length !== 4}
+                                    disabled={isPublishing || publishConfirmPinChecking || Object.keys(pendingChanges).length > 0 || backgroundSaveCount > 0 || publishConfirmPin.length !== 4 || !!publishConfirmModal.bloqueaDescanso}
                                     className="flex-1 py-3 rounded-xl text-xs font-black text-white bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
                                 >
                                     {(isPublishing || publishConfirmPinChecking) ? <Loader2 size={14} className="animate-spin"/> : <CheckCircle size={14}/>}
@@ -19785,6 +19806,17 @@ function PlanificacionDesktop() {
                 {propuesta12 && propuesta12.length > 0 && (
                     <Cierre12Banner
                         texto={textoResumen12h(propuesta12)}
+                        alternativas={(propuesta12[0]?.alternativas || []).map((a) => ({
+                            ...a,
+                            elegido: propuesta12[0]?.cambios.some((c) => c.empId === a.empId && c.code === a.lado),
+                        }))}
+                        onElegir={(empId) => {
+                            setPropuesta12((prev) => {
+                                if (!prev?.[0]) return prev;
+                                const turnos = turnos12(prev[0].dateStr);
+                                return [cambiarPareja(prev[0], empId, turnos), ...prev.slice(1)];
+                            });
+                        }}
                         onConfirmar={confirmar12}
                         onCancelar={() => setPropuesta12(null)}
                     />
@@ -20494,25 +20526,7 @@ function PlanificacionDesktop() {
                             commit(extraMarks);
                         };
                         if (clasificado.pedir.length) {
-                            requestSupervisorLaborAuth(clasificado.pedir, () => {
-                                const motivo = authReasonRef.current;
-                                const marks: Record<string, ShiftAuthMark> = { ...grantedMarks };
-                                for (const auth of clasificado.pedir) {
-                                    const key = `${auth.employeeId}_${auth.dateStr}`;
-                                    const prev = marks[key] || {};
-                                    marks[key] = {
-                                        ...prev,
-                                        autorizacionMotivo: motivo,
-                                        ...(auth.kind === 'DESCANSO'
-                                            ? { descansoReducido: true, descansoHoras: auth.restHours != null ? Math.round(auth.restHours * 10) / 10 : undefined }
-                                            : {}),
-                                        ...(auth.kind === 'TOPE' ? { topeExcedido: true, horasMes: auth.monthHours } : {}),
-                                    };
-                                }
-                                if (francoConflicts.length > 0) setVacancyFrancoAuthApproved(true);
-                                commit(marks);
-                            });
-                            return;
+                            toast.message('El PIN de descanso y de tope se pide al publicar, con el detalle del mes.');
                         }
                         finish(Object.keys(grantedMarks).length ? grantedMarks : undefined);
                     };
@@ -20697,20 +20711,8 @@ function PlanificacionDesktop() {
                         const sinPin = plan.consultables.filter((c: { employeeId: string }) => !conPinIds.has(c.employeeId));
                         const conPin = candidatosEnvio.filter((c) => conPinIds.has(c.employeeId));
                         if (pedir.length) {
-                            requestSupervisorLaborAuth(pedir, () => {
-                                const motivo = authReasonRef.current;
-                                const actor = authActorRef.current || 'Supervisor';
-                                const vistos = new Set<string>();
-                                const autorizaciones = pedir.flatMap((p) => {
-                                    const key = `${p.employeeId}|${p.kind}`;
-                                    if (vistos.has(key)) return [];
-                                    vistos.add(key);
-                                    return [{ employeeId: p.employeeId, kind: p.kind, motivo, autorizadoPor: actor }];
-                                });
-                                void despacharConsultaNomina([...sinPin, ...conPin], autorizaciones);
-                            }, () => {
-                                if (sinPin.length) void despacharConsultaNomina(sinPin, []);
-                            });
+                            toast.message('El PIN de descanso y de tope se pide al publicar, con el detalle del mes.');
+                            void despacharConsultaNomina([...sinPin, ...conPin], []);
                             return;
                         }
                         void despacharConsultaNomina(sinPin, []);

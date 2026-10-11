@@ -36,6 +36,17 @@ export type Cambio12h = {
     coversObjectiveId?: string;
 };
 
+export type OpcionPareja12 = {
+    empId: string;
+    nombre: string;
+    positionName: string;
+    code: string;
+    hours?: number;
+    lado: 'D12' | 'N12';
+    bloqueado?: boolean;
+    motivo?: string;
+};
+
 export type Propuesta12h = {
     dateStr: string;
     positionName: string;
@@ -43,6 +54,7 @@ export type Propuesta12h = {
     modo: 'par' | 'uno';
     cambios: Cambio12h[];
     texto: string;
+    alternativas?: OpcionPareja12[];
 };
 
 const OCHO: Record<'M' | 'T' | 'N', Horario12> = {
@@ -208,6 +220,50 @@ function cambio(
     };
 }
 
+function codigosLado(banda: string, lado: 'D12' | 'N12'): string[] {
+    if (lado === 'D12') return banda === 'N' ? ['M'] : banda === 'M' ? ['T'] : ['M', 'T'];
+    return banda === 'M' ? ['N'] : banda === 'N' ? ['T'] : ['N', 'T'];
+}
+
+export function alternativasPareja(turnos: readonly TurnoPuesto12[], dateStr: string, banda: string): OpcionPareja12[] {
+    const out: OpcionPareja12[] = [];
+    for (const lado of ['D12', 'N12'] as const) {
+        const codes = new Set(codigosLado(banda, lado));
+        for (const t of turnos) {
+            if (t.dateStr !== dateStr || yaEs12h(t) || !codes.has(up(t.code))) continue;
+            out.push({
+                empId: t.empId,
+                nombre: t.nombre,
+                positionName: t.positionName,
+                code: up(t.code),
+                hours: t.hours,
+                lado,
+                bloqueado: !!t.bloqueado,
+                motivo: t.motivo,
+            });
+        }
+    }
+    return out;
+}
+
+/** Cambia quién pasa a D12 o a N12. La pareja bloqueada no se elige. */
+export function cambiarPareja(propuesta: Propuesta12h, empId: string, turnos: readonly TurnoPuesto12[]): Propuesta12h {
+    const op = (propuesta.alternativas || []).find((a) => a.empId === empId && !a.bloqueado);
+    if (!op) return propuesta;
+    const origen = turnos.find((t) => t.empId === empId && t.dateStr === propuesta.dateStr && up(t.code) === op.code);
+    if (!origen) return propuesta;
+    const horario = horarioDoce(op.lado, undefined);
+    const nuevo = cambio(origen, horario, propuesta.positionName);
+    const cambios = propuesta.cambios.filter((c) => c.code !== op.lado);
+    if (cambios.length === propuesta.cambios.length) return propuesta;
+    const siguiente = [...cambios, nuevo];
+    return {
+        ...propuesta,
+        cambios: siguiente,
+        texto: textoDe(propuesta.banda, propuesta.positionName, siguiente, siguiente.some((c) => c.coversPositionName)),
+    };
+}
+
 function textoDe(banda: string, puesto: string, cambios: Cambio12h[], mixto: boolean): string {
     const partes = cambios.map((c) => {
         const pos = mixto && c.positionName ? ` (${c.positionName})` : '';
@@ -251,7 +307,15 @@ export function proponerCierre12h(input: {
     const par = (banda: string, a: TurnoPuesto12, ha: Horario12 & { code: 'D12' | 'N12' }, b: TurnoPuesto12, hb: Horario12 & { code: 'D12' | 'N12' }): Propuesta12h => {
         const cambios = [cambio(a, ha, input.positionName, input.objectiveId), cambio(b, hb, input.positionName, input.objectiveId)];
         const mixto = cambios.some((c) => c.coversPositionName || c.coversObjectiveId);
-        return { dateStr: input.dateStr, positionName: input.positionName, banda, modo: 'par', cambios, texto: textoDe(banda, input.positionName, cambios, mixto) };
+        return {
+            dateStr: input.dateStr,
+            positionName: input.positionName,
+            banda,
+            modo: 'par',
+            cambios,
+            texto: textoDe(banda, input.positionName, cambios, mixto),
+            alternativas: alternativasPareja(input.turnos, input.dateStr, banda),
+        };
     };
     const uno = (banda: string, a: TurnoPuesto12, h: Horario12 & { code: 'D12' | 'N12' }): Propuesta12h => {
         const cambios = [cambio(a, h, input.positionName, input.objectiveId)];
@@ -339,6 +403,7 @@ function parEntrePuestos(
                     modo: 'par',
                     cambios,
                     texto: textoDe(lado.banda, input.positionName, cambios, true),
+                    alternativas: alternativasPareja(input.turnos, input.dateStr, lado.banda),
                 };
             }
         }
