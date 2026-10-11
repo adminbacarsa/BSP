@@ -11,12 +11,14 @@ import {
   type DiaSemana,
   type FranjaServicioPlanilla,
   type FranjaVigente,
+  type PropuestaServicio,
 } from '@/lib/planificacion/servicioDesdePlanilla';
 
 const DIAS: DiaSemana[] = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
 
 type Props = {
-  cuadro: CuadroPlanilla;
+  cuadro?: CuadroPlanilla | null;
+  semilla?: PropuestaServicio | null;
   year: number;
   month: number;
   mesLabel: string;
@@ -28,14 +30,16 @@ type Props = {
   onGuardar: (accion: 'crear' | 'actualizar', franjas: FranjaServicioPlanilla[], equivalencias: EquivalenciaCodigo[]) => Promise<void>;
 };
 
-export function ServicioPlanillaEditor({ cuadro, year, month, mesLabel, vigente, servicioId, puedeCrear, puedeActualizar, hayOtroServicio, onGuardar }: Props) {
+export function ServicioPlanillaEditor({ cuadro, semilla, year, month, mesLabel, vigente, servicioId, puedeCrear, puedeActualizar, hayOtroServicio, onGuardar }: Props) {
   const propuesta = useMemo(() => {
-    const p = proponerServicioDesdePlanilla(cuadro, year, month);
-    return { ...p, franjas: alinearPuestos(p.franjas, vigente) };
-  }, [cuadro, year, month, vigente]);
+    const base = semilla || (cuadro ? proponerServicioDesdePlanilla(cuadro, year, month) : { franjas: [], equivalencias: [], lectura: '' });
+    return { ...base, franjas: alinearPuestos(base.franjas, vigente) };
+  }, [cuadro, semilla, year, month, vigente]);
   const [franjas, setFranjas] = useState<FranjaServicioPlanilla[]>(propuesta.franjas);
   const [equivalencias, setEquivalencias] = useState<EquivalenciaCodigo[]>(propuesta.equivalencias);
-  const baseKey = `${cuadro.indice}|${servicioId}`;
+  const baseKey = semilla
+    ? `semilla|${servicioId}|${semilla.franjas.map((f) => f.id).join(',')}`
+    : `${cuadro?.indice ?? 'x'}|${servicioId}`;
   const [baseId, setBaseId] = useState(baseKey);
   const [confirmando, setConfirmando] = useState<'crear' | 'actualizar' | null>(null);
   const [guardando, setGuardando] = useState(false);

@@ -8,9 +8,11 @@ import {
   compararConVigente,
   emparejarPuestos,
   etiquetaDias,
+  franjasDesdeVigente,
   letraDia,
   lineasConfirmacion,
   proponerServicioDesdePlanilla,
+  proponerServicioDesdeTurnos,
 } from './servicioDesdePlanilla';
 
 /** Octubre 2026: el 1 es jueves. */
@@ -190,5 +192,24 @@ describe('servicio desde la planilla', () => {
     });
     assert.deepEqual(avisos.map((a) => a.code).sort(), ['CODIGO', 'DIA', 'HORARIO']);
     assert.match(avisos.find((a) => a.code === 'DIA')?.texto || '', /no está habilitado el S/);
+  });
+
+  it('arma la propuesta desde los turnos del mes y copia el mes anterior', () => {
+    const turnos = ['2026-10-01', '2026-10-02', '2026-10-05', '2026-10-06'].flatMap((dateStr) => ([
+      { dateStr, positionName: 'Puesto 1', code: 'M', startTime: '06:00', endTime: '14:00' },
+      { dateStr, positionName: 'RO', code: 'RO', startTime: '09:00', endTime: '13:00' },
+    ]));
+    turnos.push({ dateStr: '2026-10-01', positionName: 'Puesto 1', code: 'D12', startTime: '07:00', endTime: '19:00' });
+    const prop = proponerServicioDesdeTurnos(turnos, 2026, 10);
+    const m = prop.franjas.find((f) => f.puesto === 'Puesto 1' && f.code === 'M');
+    assert.equal(m?.startTime, '06:00');
+    assert.equal(m?.cantidad, 1);
+    assert.ok(prop.franjas.some((f) => f.puesto === 'RO' && f.code === 'RO'));
+    assert.equal(prop.franjas.some((f) => f.code === 'D12'), false);
+    const copiadas = franjasDesdeVigente([{ puesto: 'Puesto 2', code: 'N', startTime: '22:00', endTime: '06:00', cantidad: 2, dias: ['L', 'M'] }]);
+    assert.equal(copiadas[0].cantidad, 2);
+    assert.deepEqual(copiadas[0].dias, ['L', 'M']);
+    const diff = compararConVigente(copiadas, []);
+    assert.equal(diff[0].estado, 'falta');
   });
 });

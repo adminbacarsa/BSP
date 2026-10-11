@@ -1,10 +1,11 @@
 import React, { useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { FileSpreadsheet, X } from 'lucide-react';
 import { celdasDesdeArrayBuffer } from '@/lib/planificacion/importarExcelXlsx';
 import { detectarCuadros, sugerirCuadros, type CuadroPlanilla } from '@/lib/planificacion/importarExcel';
 import { aplicarServicioPlanilla, type SlaRango } from '@/lib/servicios/aplicarServicioPlanilla';
 import { ServicioPlanillaEditor } from './ServicioPlanillaEditor';
-import type { FranjaVigente } from '@/lib/planificacion/servicioDesdePlanilla';
+import { franjasDesdeVigente, proponerServicioDesdeTurnos, type FranjaVigente, type PropuestaServicio, type TurnoServicioIn } from '@/lib/planificacion/servicioDesdePlanilla';
 
 export type ObjetivoServicioPlanilla = {
   id: string;
@@ -32,6 +33,8 @@ type Props = {
   objetivos: ObjetivoServicioPlanilla[];
   servicios: ServicioMesPlanilla[];
   preseleccion: { clienteId: string; objectiveId: string; servicioId: string } | null;
+  turnosPorObjetivo?: Record<string, TurnoServicioIn[]>;
+  anteriorPorObjetivo?: Record<string, FranjaVigente[]>;
   onCerrar: () => void;
   onGuardado: () => void;
 };
@@ -42,6 +45,7 @@ export function ServicioPlanillaModal(props: Props) {
   const [objectiveId, setObjectiveId] = useState(props.preseleccion?.objectiveId || '');
   const [servicioId, setServicioId] = useState(props.preseleccion?.servicioId || '');
   const [error, setError] = useState('');
+  const [semilla, setSemilla] = useState<PropuestaServicio | null>(null);
   const obj = props.objetivos.find((o) => o.id === objectiveId) || null;
   const delMes = useMemo(
     () => props.servicios.filter((s) => s.objectiveId === objectiveId),
@@ -61,14 +65,47 @@ export function ServicioPlanillaModal(props: Props) {
     }
     const sugeridos = new Set(sugerirCuadros(lista));
     const primero = lista.findIndex((_, i) => sugeridos.has(i));
+    setSemilla(null);
     setCuadros(lista);
     setIndice(primero >= 0 ? primero : 0);
   };
 
-  return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center overflow-y-auto bg-slate-900/40 p-4" data-servicio-planilla-modal>
-      <div className="my-4 flex max-h-[calc(100vh-2rem)] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-lg">
-        <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-3">
+  const desdeTurnos = () => {
+    if (!obj) return;
+    const lista = props.turnosPorObjetivo?.[objectiveId] || [];
+    if (!lista.length) {
+      setSemilla(null);
+      setError('No hay turnos de este objetivo en la grilla.');
+      return;
+    }
+    setError('');
+    setCuadros([]);
+    setSemilla(proponerServicioDesdeTurnos(lista, props.year, props.month));
+  };
+
+  const copiarAnterior = () => {
+    if (!obj) return;
+    const lista = props.anteriorPorObjetivo?.[objectiveId] || [];
+    if (!lista.length) {
+      setSemilla(null);
+      setError('El mes anterior no tiene servicio para copiar.');
+      return;
+    }
+    setError('');
+    setCuadros([]);
+    setSemilla({
+      franjas: franjasDesdeVigente(lista),
+      equivalencias: [],
+      lectura: 'Copiado del servicio del mes anterior. Revisá el diff y confirmá.',
+    });
+  };
+
+  if (typeof document === 'undefined') return null;
+  return createPortal(
+    <div className="fixed inset-0 z-[9300] overflow-y-auto bg-slate-900/40" data-servicio-planilla-modal>
+      <div className="flex min-h-full items-center justify-center p-4">
+      <div className="flex max-h-[calc(100dvh-2rem)] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-lg">
+        <div className="flex shrink-0 items-center gap-2 border-b border-slate-100 px-5 py-3">
           <FileSpreadsheet size={16} className="text-indigo-600" />
           <div>
             <p className="text-sm font-black text-slate-800">
@@ -130,15 +167,25 @@ export function ServicioPlanillaModal(props: Props) {
                 </table>
               )}
               <div className="flex flex-wrap gap-2 text-[11px]">
-                <span className="rounded-xl border border-slate-200 px-3 py-2 text-slate-600">Desde los turnos de este mes: lee las bandas del cronograma (customs aparte, puestos de 24 h).</span>
-                <span className="rounded-xl border border-slate-200 px-3 py-2 text-slate-600">Desde una planilla: subí el Excel y se compara con el vigente.</span>
-                <span className="rounded-xl border border-slate-200 px-3 py-2 text-slate-600">Copiar del mes anterior: trae puestos y franjas del servicio del mes previo.</span>
+                <button type="button" data-servicio-desde-turnos onClick={desdeTurnos} className="rounded-xl border border-indigo-200 bg-white px-3 py-2 text-left text-slate-700 shadow-sm hover:bg-indigo-50">
+                  <span className="block font-black text-indigo-800">Desde los turnos de este mes</span>
+                  Lee las bandas del cronograma (customs aparte, puestos de 24 h) y arma la propuesta.
+                </button>
+                <span className="rounded-xl border border-slate-200 px-3 py-2 text-slate-600">
+                  <span className="block font-black text-slate-700">Desde una planilla</span>
+                  Subí el Excel y se compara con el vigente.
+                </span>
+                <button type="button" data-servicio-copiar-anterior onClick={copiarAnterior} className="rounded-xl border border-indigo-200 bg-white px-3 py-2 text-left text-slate-700 shadow-sm hover:bg-indigo-50">
+                  <span className="block font-black text-indigo-800">Copiar del mes anterior</span>
+                  Trae puestos y franjas del servicio del mes previo.
+                </button>
               </div>
             </div>
           )}
-          {cuadro && obj && (
+          {(cuadro || semilla) && obj && (
             <ServicioPlanillaEditor
               cuadro={cuadro}
+              semilla={semilla}
               year={props.year}
               month={props.month}
               mesLabel={props.mesLabel}
@@ -170,6 +217,8 @@ export function ServicioPlanillaModal(props: Props) {
           {cuadro && !obj && <p className="text-[12px] text-slate-500">Elegí el objetivo al que corresponde la planilla.</p>}
         </div>
       </div>
-    </div>
+      </div>
+    </div>,
+    document.body,
   );
 }

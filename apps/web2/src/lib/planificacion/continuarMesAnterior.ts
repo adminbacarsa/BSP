@@ -1010,11 +1010,11 @@ export function proponerGuardia(
         continue;
       }
     }
-    let r = resolverPuesto(input.estructura, dia.positionName, dia.code);
-    if ('motivo' in r) {
-      const preferido = puestoPreferidoDe(g, input.estructura);
-      if (preferido) r = resolverPuesto(input.estructura, preferido, dia.code);
-    }
+    const casa = puestoPreferidoDe(g, input.estructura);
+    const casaRes = casa ? resolverPuesto(input.estructura, casa, dia.code) : null;
+    let r = casaRes && !('motivo' in casaRes)
+      ? casaRes
+      : resolverPuesto(input.estructura, dia.positionName, dia.code);
     if ('motivo' in r) {
       const k = `${dia.positionName}|${dia.code}`;
       const item = revisar.get(k) || { positionName: dia.positionName, code: dia.code, dias: [], motivo: r.motivo };
@@ -1126,8 +1126,68 @@ function sugerenciasDe(
   return out;
 }
 
+function anclarPorPuesto(input: ContinuarInput, resultados: ResultadoGuardia[]) {
+  const porId = new Map(input.guardias.map((g) => [g.id, g]));
+  const ocupado = new Map<string, number>();
+  const clave = (d: string, p: string, c: string) => `${d}|${puestoNorm(p)}|${up(c)}`;
+  const cupo = (pos: PuestoSla, dateStr: string, code: string) =>
+    getEffectiveShiftQuantityOnDate(pos, dateStr, code, pos.qty) || pos.qty || 1;
+  for (const r of resultados) {
+    if (String(porId.get(r.employeeId)?.puestoPreferido || '').trim()) continue;
+    for (const c of r.propuestas) {
+      if (c.isFranco || c.code === 'F' || c.code === 'RET') continue;
+      const k = clave(c.dateStr, c.positionName, c.code);
+      ocupado.set(k, (ocupado.get(k) || 0) + 1);
+    }
+  }
+  for (const r of resultados) {
+    const chip = String(porId.get(r.employeeId)?.puestoPreferido || '').trim();
+    if (!chip) continue;
+    const nuevas: CeldaPropuesta[] = [];
+    for (const c of r.propuestas) {
+      if (c.isFranco || c.code === 'F' || c.code === 'RET') { nuevas.push(c); continue; }
+      const casa = resolverPuesto(input.estructura, chip, c.code);
+      if ('motivo' in casa) { nuevas.push(c); continue; }
+      const q = cupo(casa.pos, c.dateStr, c.code);
+      const k = clave(c.dateStr, casa.pos.positionName, c.code);
+      const n = ocupado.get(k) || 0;
+      if (n < q) {
+        ocupado.set(k, n + 1);
+        nuevas.push(celdaDeTrabajo(r.employeeId, c.dateStr, casa.pos, c.code));
+        continue;
+      }
+      const otro = input.estructura.find((p) => {
+        if (puestoNorm(p.positionName) === puestoNorm(casa.pos.positionName)) return false;
+        const rr = resolverPuesto(input.estructura, p.positionName, c.code);
+        if ('motivo' in rr) return false;
+        return (ocupado.get(clave(c.dateStr, p.positionName, c.code)) || 0) < cupo(p, c.dateStr, c.code);
+      });
+      if (!otro) {
+        ocupado.set(k, n + 1);
+        nuevas.push(celdaDeTrabajo(r.employeeId, c.dateStr, casa.pos, c.code));
+        continue;
+      }
+      const kk = clave(c.dateStr, otro.positionName, c.code);
+      ocupado.set(kk, (ocupado.get(kk) || 0) + 1);
+      r.sugerencias.push({
+        dateStr: c.dateStr,
+        de: c.code,
+        a: c.code,
+        texto: `${chip} lleno el ${c.dateStr.slice(8, 10)}/${c.dateStr.slice(5, 7)}: ${c.code} en ${otro.positionName}`,
+        celda: celdaDeTrabajo(r.employeeId, c.dateStr, otro, c.code),
+      });
+    }
+    r.propuestas = nuevas;
+    r.horasPropuestas = nuevas.reduce((s, x) => s + (x.isFranco ? 0 : x.hours), 0);
+  }
+}
+
 export function proponerContinuacion(input: ContinuarInput): ResultadoGuardia[] {
-  if (input.regla === 'anterior') return input.guardias.map((g) => proponerGuardia(input, g));
+  if (input.regla === 'anterior') {
+    const resultados = input.guardias.map((g) => proponerGuardia(input, g));
+    anclarPorPuesto(input, resultados);
+    return resultados;
+  }
   const todos = [...input.guardias, ...(input.salientes || [])];
   const obsPor = new Map(todos.map((g) => [g.id, observacionesDelGuardia(g.previos, input.objectiveId)]));
   const nombres = new Map(todos.map((g) => [g.id, g.nombre]));
@@ -1152,9 +1212,10 @@ export function proponerContinuacion(input: ContinuarInput): ResultadoGuardia[] 
     }
     return res;
   });
+  anclarPorPuesto(input, resultados);
   if (input.cupoDia) {
     const nivel = nivelarResultados(input, resultados, historias);
-    for (const r of resultados) r.sugerencias = sugerenciasDe(input, r, nivel.get(r.employeeId) || []);
+    for (const r of resultados) r.sugerencias = [...r.sugerencias, ...sugerenciasDe(input, r, nivel.get(r.employeeId) || [])];
   }
   return resultados;
 }

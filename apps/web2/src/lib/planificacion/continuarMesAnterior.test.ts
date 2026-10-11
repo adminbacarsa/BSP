@@ -503,3 +503,47 @@ test('secuencias reales anonimizadas: vuelta, últimas 4 semanas y bloques', () 
     assert.deepEqual(got, [...caso.dias], caso.nota);
   }
 });
+
+test('cada turno queda en el puesto del guardia, con la franja de ese puesto', () => {
+  const est: PuestoSla[] = [
+    { positionName: 'Puesto 1', qty: 1, shifts: [
+      { code: 'M', hours: 8, startTime: '06:00', endTime: '14:00' },
+      { code: 'T', hours: 8, startTime: '14:00', endTime: '22:00' },
+      { code: 'N', hours: 8, startTime: '22:00', endTime: '06:00' },
+    ] },
+    { positionName: 'Puesto 2', qty: 1, shifts: [
+      { code: 'M', hours: 8, startTime: '08:00', endTime: '16:00' },
+      { code: 'T', hours: 8, startTime: '16:00', endTime: '00:00' },
+      { code: 'N', hours: 8, startTime: '00:00', endTime: '08:00' },
+    ] },
+  ];
+  const patron = ['M', 'T', 'N', 'F', 'F', 'M', 'T', 'N'];
+  const previos = armar(patron, '2026-08-01', '2026-09-30', 0, 'Puesto 1');
+  const [en2, en1] = proponerContinuacion(input([
+    { id: 'a', nombre: 'A', previos, puestoPreferido: 'Puesto 2' },
+    { id: 'b', nombre: 'B', previos, puestoPreferido: 'Puesto 1' },
+  ], diasDelMes(2026, 10), { estructura: est }));
+  const m2 = en2.propuestas.find((c) => c.code === 'M')!;
+  const m1 = en1.propuestas.find((c) => c.code === 'M')!;
+  assert.equal(m2.positionName, 'Puesto 2');
+  assert.equal(m2.startTime, '08:00');
+  assert.equal(m1.positionName, 'Puesto 1');
+  assert.equal(m1.startTime, '06:00');
+});
+
+test('si el puesto del guardia está lleno, el turno pasa al otro como sugerencia', () => {
+  const est: PuestoSla[] = [
+    { positionName: 'Puesto 1', qty: 1, shifts: [{ code: 'M', hours: 8, startTime: '07:00', endTime: '15:00' }] },
+    { positionName: 'Puesto 2', qty: 1, shifts: [{ code: 'M', hours: 8, startTime: '08:00', endTime: '16:00' }] },
+  ];
+  const patron = ['M', 'M', 'M', 'M', 'F', 'F'];
+  const previos = armar(patron, '2026-08-01', '2026-09-30', 0, 'Puesto 1');
+  const [primero, segundo] = proponerContinuacion(input([
+    { id: 'a', nombre: 'A', previos, puestoPreferido: 'Puesto 1' },
+    { id: 'b', nombre: 'B', previos, puestoPreferido: 'Puesto 1' },
+  ], ['2026-10-01'], { estructura: est }));
+  assert.equal(primero.propuestas.find((c) => c.code === 'M')?.positionName, 'Puesto 1');
+  assert.equal(segundo.propuestas.some((c) => c.code === 'M'), false);
+  assert.equal(segundo.sugerencias[0]?.celda.positionName, 'Puesto 2');
+  assert.equal(segundo.sugerencias[0]?.celda.startTime, '08:00');
+});
