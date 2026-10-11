@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AlertTriangle, ClipboardPaste, Keyboard, Search, X } from 'lucide-react';
 import { agruparAvisos, ATAJOS_MODO_RAPIDO, idAviso, idGrupoAviso, textoDiaE, textoResumenPegado, type AvisoRapido, type FilaPegadoExcel, type GuardiaPegado, type PreviewPegadoExcel, type TipoNovedadRapida } from '@/lib/planificacion/modoRapido';
-import { clasificarPegado, textoGruposPegado, textoPlataforma } from '@/lib/planificacion/pegarPersonas';
+import { clasificarPegado, indicesAsignados, sinEncontrarVisibles, textoGruposPegado, textoPlataforma } from '@/lib/planificacion/pegarPersonas';
 import { equivalenciaDeDefinicion, proponerDefinicion, textoCeldasVacias } from '@/lib/planificacion/definirCodigo';
 import { cambiosHorarioServicio } from '@/lib/planificacion/codigosHorarioPegado';
 
@@ -411,14 +411,16 @@ export function PegarExcelModal({
     const [definiendo, setDefiniendo] = useState<string | null>(null);
     const [horarios, setHorarios] = useState(tabla || []);
     useEffect(() => { if (tabla) setHorarios(tabla); }, [tabla]);
+    const grupos = estado.paso === 'resumen' ? clasificarPegado(estado.preview.filas, plataforma || [], padron || null) : null;
+    const enPlataformaIdx = new Set(grupos?.enPlataforma.map((x) => x.fila.indice) ?? []);
+    const ocupadas = new Set(estado.paso === 'resumen' ? Object.values(estado.asignacion).filter((v): v is number => v != null) : []);
     const resumen = estado.paso === 'resumen' ? textoResumenPegado({
         filas: estado.preview.filas.length,
         encontrados: estado.preview.filas.filter((f) => estado.asignacion[f.indice] != null).length,
-        sinEncontrar: estado.preview.filas.filter((f) => estado.asignacion[f.indice] == null).map((f) => f.nombre),
+        sinEncontrar: sinEncontrarVisibles(estado.preview.filas, indicesAsignados(estado.asignacion), enPlataformaIdx),
         celdas: estado.preview.filas.reduce((a, f) => a + (estado.asignacion[f.indice] == null ? 0 : f.celdas.length), 0),
         desconocidos: estado.preview.desconocidos,
     }) : '';
-    const ocupadas = new Set(estado.paso === 'resumen' ? Object.values(estado.asignacion).filter((v): v is number => v != null) : []);
     return (
         <div className="fixed inset-0 z-[12000] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm" onClick={onCerrar} data-pegar-excel={estado.paso}>
             <div className="max-h-[calc(100dvh-2rem)] w-full max-w-xl overflow-auto rounded-3xl border border-slate-200 bg-white p-5 shadow-lg" onClick={(e) => e.stopPropagation()}>
@@ -494,35 +496,45 @@ export function PegarExcelModal({
                                 <p className="text-[10px] leading-snug text-amber-800">Vincular asigna a cada guardia al servicio del evento (respeta el cupo). Sin vincular, la celda queda marcada «Afectado a evento» y no se escribe ningún turno.</p>
                             </div>
                         )}
-                        {estado.paso === 'resumen' && plataforma && (() => {
-                            const g = clasificarPegado(estado.preview.filas, plataforma, padron || null);
-                            return (
-                                <div className="mb-3 space-y-2 text-[12px]" data-pegar-grupos>
-                                    <p className="font-bold text-slate-700" data-pegar-grupos-texto>{textoGruposPegado(g)}{fechaPadron ? ` · Padrón del ${fechaPadron}` : ''}</p>
-                                    <p data-pegar-en-grilla>En la grilla ({g.enGrilla.length})</p>
-                                    <div data-pegar-en-plataforma>
-                                        <div className="flex items-center gap-2">
-                                            <span>En la plataforma, se agregan ({g.enPlataforma.length})</span>
-                                            {g.enPlataforma.length > 0 && onAgregarTodos && (
-                                                <button type="button" className="rounded-lg border border-indigo-200 px-2 py-0.5 text-[11px] font-bold text-indigo-700" data-pegar-agregar-todos onClick={() => onAgregarTodos(g.enPlataforma.map((x) => ({ fila: x.fila, personaId: x.persona.id })))}>Agregar todos</button>
-                                            )}
-                                        </div>
-                                        {g.enPlataforma.map((x) => (
-                                            <div key={x.fila.indice} className="flex items-center gap-2 py-0.5" data-pegar-plataforma={x.persona.legajo}>
-                                                <span className="flex-1">{textoPlataforma(x.persona)}</span>
-                                                <button type="button" className="rounded-lg bg-indigo-600 px-2 py-0.5 text-[11px] font-bold text-white" data-pegar-agregar={x.persona.id} onClick={() => onAgregar?.(x.fila, x.persona.id)}>Agregar al cronograma</button>
-                                            </div>
-                                        ))}
-                                    </div>
-                                    <p data-pegar-para-alta>Para dar de alta ({g.paraAlta.length})</p>
+                        {estado.paso === 'resumen' && grupos && (
+                            <div className="mb-3 space-y-2 text-[12px]" data-pegar-grupos>
+                                <p className="font-bold text-slate-700" data-pegar-grupos-texto>{textoGruposPegado(grupos)}{fechaPadron ? ` · Padrón del ${fechaPadron}` : ''}</p>
+                                <div data-pegar-en-grilla>
+                                    <p>En la grilla ({grupos.enGrilla.length})</p>
+                                    {grupos.enGrilla.map((f) => {
+                                        const guardia = guardias.find((g) => g.fila === (estado.asignacion[f.indice] ?? f.filaGrilla));
+                                        return (
+                                            <p key={f.indice} className="py-0.5 text-[11px] text-slate-600">
+                                                <span className="font-black text-slate-800">{f.nombre}</span>
+                                                {guardia ? ` · ${guardia.nombre}` : ''} · {f.celdas.length} celdas
+                                            </p>
+                                        );
+                                    })}
                                 </div>
-                            );
-                        })()}
-                        <ul className="mb-3 max-h-64 space-y-1 overflow-auto">
-                            {estado.preview.filas.map((f) => (
-                                <FilaResumen key={f.indice} fila={f} guardias={guardias} ocupadas={ocupadas} asignada={estado.asignacion[f.indice] ?? null} onAsignar={onAsignar} puedeAlta={puedeAlta} onDarDeAlta={onDarDeAlta} />
-                            ))}
-                        </ul>
+                                <div data-pegar-en-plataforma>
+                                    <div className="flex items-center gap-2">
+                                        <span>En la plataforma, se agregan ({grupos.enPlataforma.length})</span>
+                                        {grupos.enPlataforma.length > 0 && onAgregarTodos && (
+                                            <button type="button" className="rounded-lg border border-indigo-200 px-2 py-0.5 text-[11px] font-bold text-indigo-700" data-pegar-agregar-todos onClick={() => onAgregarTodos(grupos.enPlataforma.map((x) => ({ fila: x.fila, personaId: x.persona.id })))}>Agregar todos</button>
+                                        )}
+                                    </div>
+                                    {grupos.enPlataforma.map((x) => (
+                                        <div key={x.fila.indice} className="flex items-center gap-2 py-0.5" data-pegar-plataforma={x.persona.legajo}>
+                                            <span className="flex-1">{textoPlataforma(x.persona)}</span>
+                                            <button type="button" className="rounded-lg bg-indigo-600 px-2 py-0.5 text-[11px] font-bold text-white" data-pegar-agregar={x.persona.id} onClick={() => onAgregar?.(x.fila, x.persona.id)}>Agregar al cronograma</button>
+                                        </div>
+                                    ))}
+                                </div>
+                                <div data-pegar-para-alta>
+                                    <p>Para dar de alta ({grupos.paraAlta.length})</p>
+                                    <ul className="max-h-64 space-y-1 overflow-auto">
+                                        {grupos.paraAlta.map((x) => (
+                                            <FilaResumen key={x.fila.indice} fila={x.fila} guardias={guardias} ocupadas={ocupadas} asignada={estado.asignacion[x.fila.indice] ?? null} onAsignar={onAsignar} puedeAlta={puedeAlta} onDarDeAlta={onDarDeAlta} />
+                                        ))}
+                                    </ul>
+                                </div>
+                            </div>
+                        )}
                         {horarios.length > 0 && (
                             <div className="mb-3 rounded-xl border border-slate-200 px-3 py-2" data-pegar-codigos>
                                 <p className="mb-1 text-[11px] font-black uppercase text-slate-500">Códigos de esta planilla</p>

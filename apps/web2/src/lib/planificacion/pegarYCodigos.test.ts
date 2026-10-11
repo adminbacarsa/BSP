@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { clasificarPegado, textoGruposPegado } from './pegarPersonas';
+import { clasificarPegado, indicesAsignados, lugarDeGuardia, sinEncontrarVisibles, textoGruposPegado, textoPlataforma, type ObjetivoCatalogo } from './pegarPersonas';
 import { equivalenciaDeDefinicion, proponerDefinicion, textoCeldasVacias, yaDefinido } from './definirCodigo';
 import { diagonal, alternarCelda, pegarForma } from './seleccionLibre';
 import { cambiosHorarioServicio, tablaCodigosPlanilla, textoFueraDeServicio } from './codigosHorarioPegado';
@@ -38,6 +38,66 @@ describe('orden de búsqueda al pegar', () => {
     assert.equal(g.paraAlta[1].enPadron, false);
     assert.match(textoGruposPegado(g), /En la grilla \(1\)/);
     assert.match(textoGruposPegado(g), /Para dar de alta \(2\)/);
+    const asignados = new Set(g.enGrilla.map((f) => f.indice));
+    const enPlat = new Set(g.enPlataforma.map((x) => x.fila.indice));
+    const sin = sinEncontrarVisibles(
+      [
+        peg({ indice: 0, nombre: 'PEREZ, JUAN', filaGrilla: 2, via: 'nombre' }),
+        peg({ indice: 1, nombre: 'ACOSTA, JULIO', legajo: '3420' }),
+        peg({ indice: 2, nombre: 'SOSA, PEDRO', legajo: '5001' }),
+        peg({ indice: 3, nombre: 'NADIE, RARO' }),
+      ],
+      asignados,
+      enPlat,
+    );
+    assert.deepEqual(sin, ['SOSA, PEDRO', 'NADIE, RARO']);
+    assert.equal(sin.includes('ACOSTA, JULIO'), false);
+    assert.equal(g.enPlataforma.some((x) => g.paraAlta.some((a) => a.fila.indice === x.fila.indice)), false);
+    const filas = [
+      peg({ indice: 0, nombre: 'PEREZ, JUAN' }),
+      peg({ indice: 1, nombre: 'ACOSTA, JULIO' }),
+      peg({ indice: 2, nombre: 'NADIE, RARO' }),
+    ];
+    const malContadas = sinEncontrarVisibles(filas, indicesAsignados({ 0: 2, 1: null, 2: null }), new Set([1]));
+    assert.deepEqual(malContadas, ['NADIE, RARO']);
+  });
+
+  it('el lugar es cliente · objetivo del mes, o sin objetivo asignado', () => {
+    const objetivos: ObjetivoCatalogo[] = [
+      { id: 'obj_padron', nombre: 'Objetivo Prueba', cliente: 'Cliente Prueba' },
+      { id: 'obj_ruta', nombre: 'Peaje Norte', cliente: 'Cliente Ruta' },
+    ];
+    const turnos = [
+      { employeeId: 'acosta', objectiveId: 'obj_ruta', date: '2026-10-01' },
+      { employeeId: 'acosta', objectiveId: 'obj_ruta', date: '2026-10-02' },
+      { employeeId: 'acosta', objectiveId: 'obj_padron', date: '2026-09-30' },
+      { employeeId: 'mixto', objectiveId: 'obj_padron', date: '2026-10-01' },
+      { employeeId: 'mixto', objectiveId: 'obj_ruta', date: '2026-10-02' },
+      { employeeId: 'mixto', objectiveId: 'obj_ruta', date: '2026-10-03' },
+    ];
+    assert.equal(lugarDeGuardia({
+      employeeId: 'acosta', preferredObjectiveId: '', month: '2026-10', turnos, objetivos,
+    }), 'Cliente Ruta · Peaje Norte');
+    assert.equal(lugarDeGuardia({
+      employeeId: 'vacio', preferredObjectiveId: '', month: '2026-10', turnos, objetivos,
+    }), 'sin objetivo asignado');
+    assert.equal(lugarDeGuardia({
+      employeeId: 'vacio', preferredObjectiveId: 'obj_padron', month: '2026-10', turnos: [], objetivos,
+    }), 'Cliente Prueba · Objetivo Prueba');
+    assert.equal(lugarDeGuardia({
+      employeeId: 'mixto', preferredObjectiveId: 'obj_padron', month: '2026-10', turnos, objetivos,
+    }), 'Cliente Ruta · Peaje Norte');
+    assert.equal(lugarDeGuardia({
+      employeeId: 'roto', preferredObjectiveId: 'no-existe', month: '2026-10', turnos: [], objetivos,
+    }), 'sin objetivo asignado');
+    assert.equal(
+      textoPlataforma({ id: 'a', nombre: 'ACOSTA, JULIO', legajo: '2001', objetivoNombre: 'Desconocido' }),
+      'ACOSTA, JULIO (legajo 2001) · está en sin objetivo asignado',
+    );
+    assert.equal(
+      textoPlataforma({ id: 'a', nombre: 'ACOSTA, JULIO', legajo: '2001', objetivoNombre: 'Cliente Ruta · Peaje Norte' }),
+      'ACOSTA, JULIO (legajo 2001) · está en Cliente Ruta · Peaje Norte',
+    );
   });
 });
 

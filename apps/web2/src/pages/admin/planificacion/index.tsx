@@ -263,6 +263,7 @@ import {
 } from '@/lib/planificacion/modoRapido';
 import { tablaCodigosPlanilla } from '@/lib/planificacion/codigosHorarioPegado';
 import { mesLabelDe, resolverTurnoCopiado } from '@/lib/planificacion/copiarTurno';
+import { catalogoObjetivos, lugarDeGuardia, turnosLugarDeMapa } from '@/lib/planificacion/pegarPersonas';
 import {
     CANAL_PORTAPAPELES,
     KEY_PORTAPAPELES,
@@ -3102,8 +3103,10 @@ function PlanificacionDesktop() {
 
     useEffect(() => {
         if (!selectedObjective) return;
+        const ids = displayedEmployees.map((e: { id: string }) => e.id);
+        if (!ids.length) return;
         const month = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
-        publicarOrdenCrono(selectedObjective, displayedEmployees.map((e: { id: string }) => e.id), month);
+        publicarOrdenCrono(selectedObjective, ids, month);
     }, [selectedObjective, displayedEmployees, currentDate]);
 
     useEffect(() => {
@@ -19477,12 +19480,23 @@ function PlanificacionDesktop() {
                         })}
                         onAplicar={aplicarPegadoExcel}
                         puedeAlta={isSuperAdmin || (rolePermissions['RRHH'] || []).includes('create')}
-                        plataforma={(employees || []).filter((e: any) => e.status !== 'inactivo').map((e: any) => ({
-                            id: e.id,
-                            nombre: String(e.name || ''),
-                            legajo: String(e.fileNumber || ''),
-                            objetivoNombre: e.preferredObjectiveId ? getObjectiveName(e.preferredObjectiveId) : '',
-                        }))}
+                        plataforma={(() => {
+                            const month = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
+                            const objetivos = catalogoObjetivos(clients || []);
+                            const turnos = turnosLugarDeMapa(shiftsMap);
+                            return (employees || []).filter((e: any) => e.status !== 'inactivo').map((e: any) => ({
+                                id: e.id,
+                                nombre: String(e.name || ''),
+                                legajo: String(e.fileNumber || ''),
+                                objetivoNombre: lugarDeGuardia({
+                                    employeeId: String(e.id || ''),
+                                    preferredObjectiveId: e.preferredObjectiveId,
+                                    month,
+                                    turnos,
+                                    objetivos,
+                                }),
+                            }));
+                        })()}
                         fechaPadron=""
                         onAgregar={(fila, personaId) => {
                             setPinnedExternalEmpIds((prev) => new Set([...prev, personaId]));
