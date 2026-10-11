@@ -24,6 +24,7 @@ export type FilaPadron = {
   genero: '' | 'M' | 'F';
   ingreso: string;
   estado: string;
+  ultimaActividad: string;
 };
 
 export type AltaForm = {
@@ -139,6 +140,7 @@ export function filasDesdeHoja(rows: unknown[][]): FilaPadron[] {
       genero: normalizeGeneroImport(row[13]),
       ingreso: fechaDePadron(row[16]),
       estado: txt(row[18]),
+      ultimaActividad: fechaDePadron(row[19]),
     });
   }
   return out;

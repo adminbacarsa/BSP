@@ -116,3 +116,44 @@ export async function aplicarServicioPlanilla(opts: {
   }
   return { id };
 }
+
+/** Pasa los horarios confirmados en el pegado al servicio del mes. No crea franjas. */
+export async function actualizarHorariosServicio(opts: {
+  servicioId: string;
+  empresaId: string;
+  migracionCompleta: boolean;
+  objectiveName: string;
+  cambios: readonly { code: string; inicio: string; fin: string }[];
+}): Promise<void> {
+  if (!opts.cambios.length) return;
+  const snap = await getDoc(doc(db, 'servicios_sla', opts.servicioId));
+  if (!snap.exists()) throw new Error('No encontré el servicio');
+  const actual = snap.data() as ServiceSLA & { closed?: boolean; positions?: PosicionServicioDoc[] };
+  if (actual.closed) throw new Error('Contrato cerrado: no se puede modificar');
+  const tocar = <T extends { code?: string; startTime?: string; endTime?: string }>(lista: T[] | undefined) => (lista || []).map((s) => {
+    const hit = opts.cambios.find((c) => c.code.toUpperCase() === String(s.code || '').toUpperCase());
+    return hit ? { ...s, startTime: hit.inicio, endTime: hit.fin } : s;
+  });
+  const positions = (actual.positions || []).map((p) => {
+    const extra = p as PosicionServicioDoc & { shifts?: Array<{ code?: string; startTime?: string; endTime?: string }> };
+    return {
+      ...p,
+      allowedShiftTypes: tocar(p.allowedShiftTypes),
+      ...(extra.shifts ? { shifts: tocar(extra.shifts) } : {}),
+    };
+  });
+  await slaService.update(opts.servicioId, {
+    positions: JSON.parse(JSON.stringify(positions)),
+  }, { empresaId: opts.empresaId, migracionCompleta: opts.migracionCompleta });
+  const user = getAuth().currentUser;
+  await addDoc(collection(db, 'audit_logs'), {
+    timestamp: serverTimestamp(),
+    actorUid: user?.uid || 'SYSTEM',
+    actorName: user?.displayName || user?.email || 'Sistema',
+    action: 'UPDATE_CONTRACT',
+    module: 'SERVICIOS_SLA',
+    details: `Actualizó horarios desde el pegado en ${opts.objectiveName}: ${opts.cambios.map((c) => `${c.code} ${c.inicio}–${c.fin}`).join(', ')}`,
+    ...(opts.empresaId ? { empresaId: opts.empresaId } : {}),
+    metadata: { platform: 'web_admin_crono', via: 'PEGADO_HORARIOS', servicioId: opts.servicioId },
+  });
+}

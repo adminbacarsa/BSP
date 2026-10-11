@@ -2,6 +2,9 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AlertTriangle, ClipboardPaste, Keyboard, Search, X } from 'lucide-react';
 import { agruparAvisos, ATAJOS_MODO_RAPIDO, idAviso, idGrupoAviso, textoDiaE, textoResumenPegado, type AvisoRapido, type FilaPegadoExcel, type GuardiaPegado, type PreviewPegadoExcel, type TipoNovedadRapida } from '@/lib/planificacion/modoRapido';
+import { clasificarPegado, textoGruposPegado, textoPlataforma } from '@/lib/planificacion/pegarPersonas';
+import { equivalenciaDeDefinicion, proponerDefinicion, textoCeldasVacias } from '@/lib/planificacion/definirCodigo';
+import { cambiosHorarioServicio } from '@/lib/planificacion/codigosHorarioPegado';
 
 export function ModoRapidoAyuda({ onCerrar }: { onCerrar: () => void }) {
     useEffect(() => {
@@ -359,6 +362,15 @@ export function PegarExcelModal({
     onAplicar,
     puedeAlta,
     onDarDeAlta,
+    plataforma,
+    padron,
+    fechaPadron,
+    onAgregar,
+    onAgregarTodos,
+    onDefinir,
+    tabla,
+    onHorario,
+    onActualizarServicio,
 }: {
     estado: PegarExcelEstado;
     guardias: GuardiaPegado[];
@@ -373,6 +385,15 @@ export function PegarExcelModal({
     /** RRHH create o SuperAdmin. Sin permiso, la fila dice que hay que pedirle el alta a RRHH. */
     puedeAlta?: boolean;
     onDarDeAlta?: (fila: FilaPegadoExcel) => void;
+    plataforma?: import('@/lib/planificacion/pegarPersonas').PersonaPlataforma[];
+    padron?: import('@/lib/planificacion/padronAlta').FilaPadron[] | null;
+    fechaPadron?: string;
+    onAgregar?: (fila: FilaPegadoExcel, personaId: string) => void;
+    onAgregarTodos?: (items: Array<{ fila: FilaPegadoExcel; personaId: string }>) => void;
+    onDefinir?: (codigo: string, eq: import('@/lib/planificacion/definirCodigo').EquivalenciaGuardada) => void;
+    tabla?: import('@/lib/planificacion/codigosHorarioPegado').FilaCodigoPlanilla[];
+    onHorario?: (sigla: string, inicio: string, fin: string) => void;
+    onActualizarServicio?: (cambios: import('@/lib/planificacion/codigosHorarioPegado').CambioHorarioServicio[]) => void;
 }) {
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
@@ -385,6 +406,9 @@ export function PegarExcelModal({
         return () => window.removeEventListener('keydown', onKey, true);
     }, [onCerrar]);
     const [borrador, setBorrador] = useState(estado.paso === 'texto' ? estado.borrador : '');
+    const [definiendo, setDefiniendo] = useState<string | null>(null);
+    const [horarios, setHorarios] = useState(tabla || []);
+    useEffect(() => { if (tabla) setHorarios(tabla); }, [tabla]);
     const resumen = estado.paso === 'resumen' ? textoResumenPegado({
         filas: estado.preview.filas.length,
         encontrados: estado.preview.filas.filter((f) => estado.asignacion[f.indice] != null).length,
@@ -468,13 +492,75 @@ export function PegarExcelModal({
                                 <p className="text-[10px] leading-snug text-amber-800">Vincular asigna a cada guardia al servicio del evento (respeta el cupo). Sin vincular, la celda queda marcada «Afectado a evento» y no se escribe ningún turno.</p>
                             </div>
                         )}
+                        {estado.paso === 'resumen' && plataforma && (() => {
+                            const g = clasificarPegado(estado.preview.filas, plataforma, padron || null);
+                            return (
+                                <div className="mb-3 space-y-2 text-[12px]" data-pegar-grupos>
+                                    <p className="font-bold text-slate-700" data-pegar-grupos-texto>{textoGruposPegado(g)}{fechaPadron ? ` · Padrón del ${fechaPadron}` : ''}</p>
+                                    <p data-pegar-en-grilla>En la grilla ({g.enGrilla.length})</p>
+                                    <div data-pegar-en-plataforma>
+                                        <div className="flex items-center gap-2">
+                                            <span>En la plataforma, se agregan ({g.enPlataforma.length})</span>
+                                            {g.enPlataforma.length > 0 && onAgregarTodos && (
+                                                <button type="button" className="rounded-lg border border-indigo-200 px-2 py-0.5 text-[11px] font-bold text-indigo-700" data-pegar-agregar-todos onClick={() => onAgregarTodos(g.enPlataforma.map((x) => ({ fila: x.fila, personaId: x.persona.id })))}>Agregar todos</button>
+                                            )}
+                                        </div>
+                                        {g.enPlataforma.map((x) => (
+                                            <div key={x.fila.indice} className="flex items-center gap-2 py-0.5" data-pegar-plataforma={x.persona.legajo}>
+                                                <span className="flex-1">{textoPlataforma(x.persona)}</span>
+                                                <button type="button" className="rounded-lg bg-indigo-600 px-2 py-0.5 text-[11px] font-bold text-white" data-pegar-agregar={x.persona.id} onClick={() => onAgregar?.(x.fila, x.persona.id)}>Agregar al cronograma</button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <p data-pegar-para-alta>Para dar de alta ({g.paraAlta.length})</p>
+                                </div>
+                            );
+                        })()}
                         <ul className="mb-3 max-h-64 space-y-1 overflow-auto">
                             {estado.preview.filas.map((f) => (
                                 <FilaResumen key={f.indice} fila={f} guardias={guardias} ocupadas={ocupadas} asignada={estado.asignacion[f.indice] ?? null} onAsignar={onAsignar} puedeAlta={puedeAlta} onDarDeAlta={onDarDeAlta} />
                             ))}
                         </ul>
+                        {horarios.length > 0 && (
+                            <div className="mb-3 rounded-xl border border-slate-200 px-3 py-2" data-pegar-codigos>
+                                <p className="mb-1 text-[11px] font-black uppercase text-slate-500">Códigos de esta planilla</p>
+                                {horarios.map((h) => (
+                                    <label key={`${h.sigla}-${h.rojo ? 1 : 0}`} className="flex items-center gap-2 py-0.5 text-[12px]" data-pegar-codigo={h.sigla}>
+                                        <span className="w-16 font-black">{h.sigla}{h.rojo ? ' roja' : ''}</span>
+                                        <span className="text-slate-500">{h.code}</span>
+                                        <input className="w-16 rounded border border-slate-200 px-1 py-0.5 font-mono text-[11px]" value={h.inicio} data-pegar-inicio={h.sigla} onChange={(e) => {
+                                            const inicio = e.target.value;
+                                            setHorarios((prev) => prev.map((x) => x.sigla === h.sigla && x.rojo === h.rojo ? { ...x, inicio, difiereServicio: inicio !== x.inicioServicio || x.fin !== x.finServicio } : x));
+                                            onHorario?.(h.sigla, inicio, h.fin);
+                                        }} />
+                                        <span>–</span>
+                                        <input className="w-16 rounded border border-slate-200 px-1 py-0.5 font-mono text-[11px]" value={h.fin} data-pegar-fin={h.sigla} onChange={(e) => {
+                                            const fin = e.target.value;
+                                            setHorarios((prev) => prev.map((x) => x.sigla === h.sigla && x.rojo === h.rojo ? { ...x, fin, difiereServicio: x.inicio !== x.inicioServicio || fin !== x.finServicio } : x));
+                                            onHorario?.(h.sigla, h.inicio, fin);
+                                        }} />
+                                    </label>
+                                ))}
+                                {cambiosHorarioServicio(horarios).length > 0 && (
+                                    <button type="button" className="mt-1 text-[11px] font-bold text-indigo-700" data-pegar-actualizar-servicio onClick={() => onActualizarServicio?.(cambiosHorarioServicio(horarios))}>
+                                        Actualizar los horarios del servicio ({cambiosHorarioServicio(horarios).map((c) => `${c.code} ${c.antes} → ${c.despues}`).join(', ')})
+                                    </button>
+                                )}
+                            </div>
+                        )}
                         {estado.preview.desconocidos.length > 0 && (
-                            <p className="mb-3 text-[11px] text-slate-500">No se escriben: {estado.preview.desconocidos.join(', ')}.{estado.preview.conColor ? '' : ' Sin color: las de 12 h van como D12 y N12.'}</p>
+                            <div className="mb-3 space-y-1 text-[11px] text-slate-600" data-pegar-desconocidos>
+                                {estado.preview.desconocidos.map((cod) => {
+                                    const prop = proponerDefinicion(cod);
+                                    const n = estado.preview.filas.reduce((a, f) => a + (f.crudos || []).filter((c) => c.raw.replace(/\s/g, '') === cod.replace(/\s/g, '')).length, 0);
+                                    return (
+                                        <div key={cod} className="flex flex-wrap items-center gap-2" data-pegar-definir-fila={cod}>
+                                            <span>{prop.vaciar ? textoCeldasVacias(cod, n, prop.partes.find((p) => p.tipo === 'otro_objetivo' && 'etiqueta' in p) ? (prop.partes.find((p) => p.tipo === 'otro_objetivo') as { etiqueta: string }).etiqueta : cod) : `${cod} no se reconoce (${n} celdas). ${prop.nota}`}</span>
+                                            <button type="button" className="rounded-lg border border-slate-300 px-2 py-0.5 font-bold" data-pegar-definir={cod} onClick={() => { setDefiniendo(cod); onDefinir?.(cod, equivalenciaDeDefinicion(cod, prop)); }}>{definiendo === cod ? 'Definido' : 'Definir'}</button>
+                                        </div>
+                                    );
+                                })}
+                            </div>
                         )}
                         <div className="flex justify-end gap-2">
                             <button type="button" onClick={onCerrar} className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50" data-pegar-cancelar>Cancelar</button>

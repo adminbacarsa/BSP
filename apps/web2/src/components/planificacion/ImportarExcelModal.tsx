@@ -7,6 +7,7 @@ import { AltaDesdePadronModal } from '@/components/planificacion/AltaDesdePadron
 import type { AltaHecha } from '@/lib/rrhh/altaLegajoClient';
 import { rangoMes } from '@/lib/planificacion/servicioDesdePlanilla';
 import type { EquivalenciaCodigo } from '@/lib/planificacion/equivalenciaCodigo';
+import { proponerDefinicion, textoCeldasVacias } from '@/lib/planificacion/definirCodigo';
 import {
   bloquesDeCuadros,
   cruzarGuardias,
@@ -612,6 +613,11 @@ export function ImportarExcelModal({ ctx, onCargar, onAplicar, onCancelar, puede
                     <span className={c.estado === 'encontrado' ? 'text-emerald-700' : c.estado === 'dudoso' ? 'text-amber-700' : 'text-rose-700'}>
                       {c.estado === 'encontrado' ? 'Encontrado' : c.estado === 'dudoso' ? 'Dudoso' : 'No encontrado'}
                     </span>
+                    {c.estado === 'encontrado' && c.employeeId && grupo && ctx.empleados.find((e) => e.id === c.employeeId)?.objetivoPreferido && ctx.empleados.find((e) => e.id === c.employeeId)?.objetivoPreferido !== grupo.objectiveId && (
+                      <span className="text-indigo-700" data-importar-agregar={c.employeeId}>
+                        Agregar al cronograma · está en {ctx.objetivos.find((o) => o.id === ctx.empleados.find((e) => e.id === c.employeeId)?.objetivoPreferido)?.nombre || 'otro objetivo'}
+                      </span>
+                    )}
                   </div>
                   {c.nota && <p className="text-slate-500">{c.nota}</p>}
                   {c.estado !== 'encontrado' && (
@@ -700,7 +706,26 @@ export function ImportarExcelModal({ ctx, onCargar, onAplicar, onCancelar, puede
                         ))}
                       </select>
                     </td>
-                    <td className="text-slate-500">{r.nota}</td>
+                    <td className="text-slate-500">
+                      {r.nota}
+                      <button
+                        type="button"
+                        className="ml-2 rounded-lg border border-slate-200 px-1.5 py-0.5 text-[10px] font-bold"
+                        data-importar-definir={r.codigo}
+                        onClick={() => {
+                          if (!grupo) return;
+                          const prop = proponerDefinicion(r.codigo);
+                          const valor = prop.vaciar ? 'ignorar' : (prop.partes.find((p) => p.tipo === 'catalogo') as { code?: string } | undefined)?.code || r.code || 'ignorar';
+                          const nota = prop.vaciar ? textoCeldasVacias(r.codigo, r.muestras, (prop.partes[0] as { etiqueta?: string })?.etiqueta || r.codigo) : prop.nota;
+                          setReglasPorClave((prev) => ({
+                            ...prev,
+                            [grupo.clave]: (prev[grupo.clave] || []).map((x) => x.clave === r.clave ? { ...reglaDesdeValor(x, valor), nota } : x),
+                          }));
+                        }}
+                      >
+                        Definir
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>

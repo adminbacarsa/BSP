@@ -447,6 +447,20 @@ service cloud.firestore {
       allow delete: if tenantAdminDelete();
     }
 
+    // Padrón de legajos. Lo publica Mauro. El guardia y el eventual no lo leen.
+    match /padron_empleados/{docId} {
+      allow read: if tenantAdminRead();
+      allow create: if tenantAdminCreate();
+      allow update: if tenantAdminUpdate();
+      allow delete: if false;
+    }
+    match /padron_estado/{docId} {
+      allow read: if tenantAdminRead();
+      allow create: if tenantAdminCreate();
+      allow update: if tenantAdminUpdate();
+      allow delete: if false;
+    }
+
     match /planificacion_estados/{docId} {
       allow read: if tenantAdminRead() || request.auth != null;
       // Asignación de puestos / estado mensual: admin autenticado con empresa sellada.

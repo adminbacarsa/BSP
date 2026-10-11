@@ -86,7 +86,7 @@ function hecho(id: string, docAlta: Record<string, unknown>, habilitado: boolean
  * Crea el legajo (mismo documento que el alta de RRHH) o habilita el que ya existe en otra empresa.
  * Devuelve el mensaje si la validación no deja seguir.
  */
-export async function confirmarAltaLegajo(form: AltaForm): Promise<{ ok: true; empleado: AltaHecha; avisos: string[] } | { ok: false; mensaje: string }> {
+export async function confirmarAltaLegajo(form: AltaForm, auditoria: 'CREATE_EMPLOYEE' | 'PADRON_ALTA' = 'CREATE_EMPLOYEE'): Promise<{ ok: true; empleado: AltaHecha; avisos: string[] } | { ok: false; mensaje: string }> {
   const existentes = await buscarLegajosExistentes(form);
   const decision = decidirAlta(form, existentes, form.empresaId);
   if (decision.accion === 'bloquear') return { ok: false, mensaje: decision.mensaje };
@@ -106,6 +106,6 @@ export async function confirmarAltaLegajo(form: AltaForm): Promise<{ ok: true; e
     };
   }
   const ref = await addDoc(collection(db, 'empleados'), decision.doc);
-  await auditar('CREATE_EMPLOYEE', `Creó legajo: ${decision.doc.fileNumber} - ${decision.doc.lastName}`, form.empresaId);
+  await auditar(auditoria, `Creó legajo: ${decision.doc.fileNumber} - ${decision.doc.lastName}`, form.empresaId);
   return { ok: true, avisos: decision.avisos, empleado: hecho(ref.id, decision.doc, false) };
 }

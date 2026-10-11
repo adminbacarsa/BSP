@@ -36,6 +36,8 @@ import {
 } from 'lucide-react';
 import { GuardDeviceApprovalBell, GuardDeviceApprovalPanel } from '@/components/rrhh/GuardDeviceApprovalPanel';
 import { RevisionAvisoPortal } from '@/components/rrhh/RevisionAvisoPortal';
+import { PadronPanel } from '@/components/rrhh/PadronPanel';
+import { leerEstadoPadron, type EstadoPadron } from '@/lib/rrhh/padronClient';
 import { useAusenciasPorRevisar } from '@/hooks/useAusenciasPorRevisar';
 import { esAvisoParaActivar, patchDejarInjustificada, patchJustificarAviso } from '@/lib/rrhh/avisoPortal.mjs';
 import CorreccionesTab from '@/components/admin/rrhh/CorreccionesTab';
@@ -332,6 +334,8 @@ export default function EmployeesPage() {
   const [currentUserName, setCurrentUserName] = useState("Cargando...");
   const [currentDate, setCurrentDate] = useState(new Date());
   const [activeTab, setActiveTab] = useState<'dashboard' | 'legajos' | 'ausencias' | 'tipos_novedad' | 'feriados' | 'convenios' | 'correcciones' | 'dispositivos'>('dashboard');
+  const [padronAbierto, setPadronAbierto] = useState(false);
+  const [estadoPadron, setEstadoPadron] = useState<EstadoPadron | null>(null);
   const [novedadTypes, setNovedadTypes] = useState<NovedadType[]>([]);
   const activeNovedadLabels = useMemo(
     () => {
@@ -2164,6 +2168,19 @@ export default function EmployeesPage() {
                                     <ShieldCheckIcon size={15}/>
                                 </a>
                                 {/* Acción primaria */}
+                                {(isSuperAdmin || (rolePermissions['RRHH'] || []).includes('update')) && (
+                                    <button
+                                        type="button"
+                                        data-padron-abrir
+                                        onClick={() => {
+                                            if (empresaId) void leerEstadoPadron(empresaId).then(setEstadoPadron).catch(() => setEstadoPadron(null));
+                                            setPadronAbierto(true);
+                                        }}
+                                        className="bg-white text-indigo-700 border border-indigo-200 px-4 py-2 rounded-xl font-black text-xs uppercase shadow-sm flex items-center gap-1.5 hover:bg-indigo-50"
+                                    >
+                                        Padrón
+                                    </button>
+                                )}
                                 <button onClick={openNew} className="bg-indigo-600 text-white px-4 py-2 rounded-xl font-black text-xs uppercase shadow-lg shadow-indigo-500/25 flex items-center gap-1.5 hover:bg-indigo-700 transition-colors">
                                     <Plus size={14}/> Nuevo Legajo
                                 </button>
@@ -3299,6 +3316,30 @@ export default function EmployeesPage() {
         </div>
 
         {/* MODAL DE IMPORTACIÓN CSV (AMPLIADO) */}
+        {padronAbierto && empresaId && (
+            <PadronPanel
+                empresaId={empresaId}
+                empresaNombre={empresa?.name || empresaId}
+                estado={estadoPadron}
+                empleados={employees.map((e: any) => ({
+                    id: e.id,
+                    legajo: String(e.fileNumber || ''),
+                    apellido: String(e.lastName || ''),
+                    nombre: String(e.firstName || ''),
+                    dni: String(e.dni || ''),
+                    cuil: String(e.cuil || ''),
+                    mail: String(e.email || ''),
+                    telefono: String(e.phone || ''),
+                    domicilio: String(e.address || ''),
+                    puesto: String(e.category || ''),
+                    estado: String(e.status || ''),
+                    ingreso: String(e.startDate || '').slice(0, 10),
+                    activo: String(e.status || '').toLowerCase() !== 'inactivo',
+                }))}
+                onCerrar={() => setPadronAbierto(false)}
+                onAplicado={() => { setPadronAbierto(false); loadData(); }}
+            />
+        )}
         {showImportModal && (
             <div className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center p-4">
                 <div className="bg-white dark:bg-slate-800 p-8 rounded-xl w-full max-w-6xl shadow-2xl relative flex flex-col h-[90vh]">

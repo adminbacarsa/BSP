@@ -1,0 +1,117 @@
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+import { clasificarPegado, textoGruposPegado } from './pegarPersonas';
+import { equivalenciaDeDefinicion, proponerDefinicion, textoCeldasVacias, yaDefinido } from './definirCodigo';
+import { diagonal, alternarCelda, pegarForma } from './seleccionLibre';
+import { cambiosHorarioServicio, tablaCodigosPlanilla, textoFueraDeServicio } from './codigosHorarioPegado';
+import { puesto24Cerrado } from './lecturaBandas';
+import type { FilaPegadoExcel } from './modoRapido';
+import type { FilaPadron } from './padronAlta';
+
+function peg(p: Partial<FilaPegadoExcel> & Pick<FilaPegadoExcel, 'nombre'>): FilaPegadoExcel {
+  return { indice: 0, legajo: '', filaGrilla: null, via: null, celdas: [{ col: 0, code: 'M' }], desconocidos: [], ...p };
+}
+
+const padron: FilaPadron[] = [{
+  legajo: '5001', apellido: 'SOSA', nombre: 'PEDRO', dni: '30111222', cuil: '20301112226',
+  mail: '', telefono: '', domicilio: '', tipo: '', area: '', puesto: 'Vigilador', objetivo: '',
+  nacimiento: '', genero: 'M', ingreso: '2024-01-01', estado: 'Activo', ultimaActividad: '',
+}];
+
+describe('orden de búsqueda al pegar', () => {
+  it('grilla, después plataforma, después padrón, y si no está queda el alta manual', () => {
+    const g = clasificarPegado(
+      [
+        peg({ indice: 0, nombre: 'PEREZ, JUAN', filaGrilla: 2, via: 'nombre' }),
+        peg({ indice: 1, nombre: 'ACOSTA, JULIO', legajo: '3420' }),
+        peg({ indice: 2, nombre: 'SOSA, PEDRO', legajo: '5001' }),
+        peg({ indice: 3, nombre: 'NADIE, RARO' }),
+      ],
+      [{ id: 'a1', nombre: 'ACOSTA, JULIO', legajo: '3420', objetivoNombre: 'Peaje 9 Norte' }],
+      padron,
+    );
+    assert.equal(g.enGrilla.length, 1);
+    assert.equal(g.enPlataforma.length, 1);
+    assert.equal(g.enPlataforma[0].persona.objetivoNombre, 'Peaje 9 Norte');
+    assert.equal(g.paraAlta.length, 2);
+    assert.equal(g.paraAlta[0].enPadron, true);
+    assert.equal(g.paraAlta[1].enPadron, false);
+    assert.match(textoGruposPegado(g), /En la grilla \(1\)/);
+    assert.match(textoGruposPegado(g), /Para dar de alta \(2\)/);
+  });
+});
+
+describe('definir un código', () => {
+  it('FT/N es franco trabajado en la N y se aplica a todas las celdas de esa sigla', () => {
+    const p = proponerDefinicion('FT/N');
+    assert.equal(p.vaciar, false);
+    assert.deepEqual(p.partes.map((x) => x.tipo === 'otro_objetivo' ? x.etiqueta : x.code), ['FT', 'N']);
+    const eq = equivalenciaDeDefinicion('FT/N', p);
+    assert.equal(eq.code, 'FT');
+    assert.equal(yaDefinido('FT/N', []), false);
+    assert.equal(yaDefinido('ft/n', [eq]), true);
+  });
+
+  it('VF/T se deja vacío y se recuerda como otro objetivo', () => {
+    const p = proponerDefinicion('VF/T');
+    assert.equal(p.vaciar, true);
+    assert.match(p.nota, /Vifood/);
+    assert.equal(textoCeldasVacias('VF/T', 6, 'Vifood'), 'Se dejan vacías 6 celdas: trabajan en otro objetivo (VF/T → Vifood)');
+    for (const t of ['BANCO', 'STOCK', 'DECAT', 'MISE 2/T', 'PM / T']) {
+      assert.equal(proponerDefinicion(t).vaciar, true, t);
+    }
+  });
+});
+
+describe('selección libre', () => {
+  const dims = { filas: 10, cols: 31 };
+  it('la diagonal baja a la derecha y a la izquierda', () => {
+    assert.deepEqual(diagonal({ r: 0, c: 5 }, { r: 3, c: 8 }, dims), [
+      { r: 0, c: 5 }, { r: 1, c: 6 }, { r: 2, c: 7 }, { r: 3, c: 8 },
+    ]);
+    assert.deepEqual(diagonal({ r: 0, c: 8 }, { r: 2, c: 6 }, dims).map((c) => c.c), [8, 7, 6]);
+  });
+  it('agrega y quita celdas sueltas, y pega la misma forma', () => {
+    const una = alternarCelda([], { r: 1, c: 2 });
+    const dos = alternarCelda(una, { r: 4, c: 9 });
+    assert.equal(alternarCelda(dos, { r: 1, c: 2 }).length, 1);
+    const pegado = pegarForma(dos, ['M', 'N'], { r: 2, c: 3 }, dims);
+    assert.deepEqual(pegado, [
+      { r: 2, c: 3, valor: 'M' },
+      { r: 5, c: 10, valor: 'N' },
+    ]);
+  });
+});
+
+describe('horarios del pegado', () => {
+  it('guarda el horario editable y propone actualizar el servicio si difiere', () => {
+    const tabla = tablaCodigosPlanilla(
+      [{ sigla: 'M' }, { sigla: 'T' }, { sigla: 'N' }],
+      null,
+      [
+        { code: 'M', startTime: '07:00', endTime: '15:00' },
+        { code: 'T', startTime: '15:00', endTime: '23:00' },
+        { code: 'N', startTime: '23:00', endTime: '07:00' },
+      ],
+    );
+    const editada = tabla.map((f) => f.sigla === 'M' ? { ...f, inicio: '06:00', fin: '14:00', difiereServicio: true } : f);
+    const cambios = cambiosHorarioServicio(editada);
+    assert.equal(cambios.length, 1);
+    assert.equal(cambios[0].antes, '07:00–15:00');
+    assert.equal(cambios[0].despues, '06:00–14:00');
+    assert.match(textoFueraDeServicio(editada[0]), /Fuera del servicio/);
+  });
+
+  it('06–14 / 14–22 / 22–06 cierra por bandas y por horas', () => {
+    const turnos = [
+      { empId: 'a', nombre: 'A', code: 'M', startTime: '06:00', hours: 8, positionName: 'Puesto 1' },
+      { empId: 'b', nombre: 'B', code: 'T', startTime: '14:00', hours: 8, positionName: 'Puesto 1' },
+      { empId: 'c', nombre: 'C', code: 'N', startTime: '22:00', hours: 8, positionName: 'Puesto 1' },
+    ];
+    const r = puesto24Cerrado(turnos);
+    assert.equal(r.porBandas, true);
+    assert.equal(r.porHoras, true);
+    const sinNoche = puesto24Cerrado(turnos.slice(0, 2));
+    assert.equal(sinNoche.cerrado, false);
+  });
+});
