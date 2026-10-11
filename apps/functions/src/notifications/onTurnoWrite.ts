@@ -36,6 +36,21 @@ function esCoberturaAsignada(turn: any): boolean {
   return String(turn.comments || '').trim().startsWith('Cubriendo a');
 }
 
+function apellidoAviso(nombre: unknown): string {
+  const limpio = String(nombre || '').trim();
+  if (!limpio) return '';
+  const antes = limpio.split(',')[0].trim();
+  return (antes.split(/\s+/)[0] || antes).replace(/[.,]$/, '');
+}
+
+/** « · cubrís a BAIGORRIA (T)» cuando el turno quedó atribuido a una licencia. */
+function sufijoCubre(turn: any): string {
+  const quien = apellidoAviso(turn?.coversEmployeeName);
+  if (!quien) return '';
+  const banda = String(turn?.coversBandCode || '').trim();
+  return ` · cubrís a ${quien}${banda ? ` (${banda})` : ''}`;
+}
+
 /** «Se te asignó cubrir 08/10 M 10:45–12:00 · Puesto 1» (mismo texto que `textoAvisoAsignado` en el front). */
 function textoAvisoCubrir(p: { fecha: string; code?: string | null; horario?: string | null; puesto?: string | null }): string {
   const banda = [String(p.code || '').trim(), String(p.horario || '').trim()].filter(Boolean).join(' ');
@@ -76,17 +91,14 @@ function buildMessage(type: string, after: any, before: any, turnoId: string): {
     case 'TURNO_NUEVO':
       return {
         title: 'Tenés un turno nuevo',
-        body: cuando ? `${cuando}${code && code !== 'F' ? ` · ${code}` : ''}${objective ? ` en ${objective}` : ''}` : (objective || 'Nuevo turno en tu cronograma'),
+        body: `${cuando ? `${cuando}${code && code !== 'F' ? ` · ${code}` : ''}${objective ? ` en ${objective}` : ''}` : (objective || 'Nuevo turno en tu cronograma')}${sufijoCubre(after)}`,
       };
     case 'TURNO_MODIFICADO': {
       const dia = ddmmAr(after?.startTime);
       const puesto = String(after?.positionName || '').trim();
       const obj = String(after?.objectiveName || objective || '').trim();
       const horario = from && to ? `${from}–${to}` : '';
-      const cubreNombre = String(after?.coversEmployeeName || '').trim().split(/\s+/)[0];
-      const cubre = cubreNombre
-        ? ` · cubrís a ${cubreNombre}${after?.coversBandCode ? ` (${after.coversBandCode})` : ''}`
-        : '';
+      const cubre = sufijoCubre(after);
       if (dia && code) {
         return {
           title: 'Cambió tu cronograma',

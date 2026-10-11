@@ -433,7 +433,7 @@ import {
     textoDecisionCobertura,
     type CoberturaExistente,
 } from '@/lib/planificacion/coberturaExistente';
-import { recalcularDia12, textoLicencia12, textoTooltip12, type CeldaDia12 } from '@/lib/planificacion/atribuir12h';
+import { aplicarAtribucionAlGuardar, celdasDelDia, recalcularDia12, textoLicencia12, textoPata12, textoTooltip12 } from '@/lib/planificacion/atribuir12h';
 import MenuRapidoCobertura, { FranjaModoElegir } from '@/components/planificacion/MenuRapidoCobertura';
 import {
     apellidoMarca,
@@ -7858,6 +7858,19 @@ function PlanificacionDesktop() {
             if (movidos.size) toast.message(`El puesto se guarda en el objetivo que lo tiene: ${[...movidos].join(' · ')}`);
             pendingParaGuardar = aplicado.changes;
         }
+        {
+            const filaDe = new Map(displayedEmployees.map((e: any, i: number) => [e.id, i]));
+            const byId: Record<string, any> = {};
+            employees.forEach((e: any) => { byId[e.id] = e; });
+            pendingParaGuardar = aplicarAtribucionAlGuardar(pendingParaGuardar, shiftsMap, {
+                ordenDe: (id) => filaDe.get(id) ?? 999,
+                nombreDe: (id, raw) => String(byId[id]?.name || raw?.employeeName || id),
+                hm: (v) => {
+                    const [h, m] = getSafeTime(v);
+                    return `${String(h).padStart(2, '0')}:${String(m || 0).padStart(2, '0')}`;
+                },
+            });
+        }
         const count = Object.keys(pendingParaGuardar).length;
         if (count === 0) return;
         const _userCount = Object.values(pendingParaGuardar).filter((v: any) => !v?._isAutoRotation).length;
@@ -8437,6 +8450,8 @@ function PlanificacionDesktop() {
                             if (change.liberationReason) turnoPayload.liberationReason = change.liberationReason;
                             if (change.redeployNote) turnoPayload.redeployNote = change.redeployNote;
                             if (change.coversEmployeeId) turnoPayload.coversEmployeeId = change.coversEmployeeId;
+                            if (change.coversEmployeeName) turnoPayload.coversEmployeeName = change.coversEmployeeName;
+                            if (change.coversAbsenceCode) turnoPayload.coversAbsenceCode = change.coversAbsenceCode;
                             if (change.coversPositionName) turnoPayload.coversPositionName = change.coversPositionName;
                             if (change.coversBandCode) turnoPayload.coversBandCode = change.coversBandCode;
                             if (change.coversDateStr) turnoPayload.coversDateStr = change.coversDateStr;
@@ -13980,12 +13995,15 @@ function PlanificacionDesktop() {
             if (!avisoTope) return label || null;
             return label ? `${label}\n${avisoTope}` : avisoTope;
         };
+        const nombres12 = {
+            nombreDe: (id: string, raw: { employeeName?: string } | null | undefined) => employees.find((x: any) => x.id === id)?.name || raw?.employeeName || id,
+        };
         const _marca = (p && !p.isDeleted && p.menuRapidoTexto) || s?.menuRapidoTexto;
         if (_marca) return { label: sumarTope(String(_marca)), pos: null, range: null, restHours: null };
         if (c.isLeaveCell) {
             const absType = absence?.type || activeShift?.name || LEGEND_DESCRIPTIONS[leaveCellCode] || leaveCellCode;
             const reason = absence?.reason || activeShift?.comments || p?.comments || '';
-            const cubierta12 = textoLicencia12(pendingChanges, shiftsMap, emp.id, c.dateStr);
+            const cubierta12 = textoLicencia12(pendingChanges, shiftsMap, emp.id, c.dateStr, nombres12);
             const covered = cubierta12 || resolveTitularCoverageName(emp.id, emp.name || '', c.dateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell, cellTurnosMap);
             return { label: sumarTope(buildLeaveCellTooltipLabel({ absenceType: absType, reason, coveredBy: covered })), pos: null, range: null, restHours: null };
         }
@@ -14023,7 +14041,7 @@ function PlanificacionDesktop() {
                     + `${coverageSourceShift?.coverageUsedObjectiveName ? ` en ${coverageSourceShift.coverageUsedObjectiveName}` : ''}`
                     : `\n🔗 Usado: cubrió a ${String(coverageSourceShift?.coverageUsedCoversEmployeeName || coverageSourceShift?.coversEmployeeName || 'titular').trim()}${coverageSourceShift?.coverageUsedObjectiveName ? ` en ${coverageSourceShift.coverageUsedObjectiveName}` : ''}`)
                 : '';
-            const _cubre12 = textoTooltip12(_cellShift);
+            const _cubre12 = textoPata12(pendingChanges, shiftsMap, emp.id, c.dateStr, nombres12) || textoTooltip12(_cellShift);
             const _covHint = (covNote ? `\n📋 ${covNote}` : '') + (_cubre12 ? `\n${_cubre12}` : '') + _covSegHint + _usedHint;
             const _billBr = activeShift && shiftCountsForEmployeeCronoHours(activeShift)
                 ? planningShiftBillableBreakdown(activeShift, slaCodeHoursHint)
@@ -14341,62 +14359,40 @@ function PlanificacionDesktop() {
         const byId: Record<string, any> = {};
         employees.forEach((e: any) => { byId[e.id] = e; });
         const filaDe = new Map(displayedEmployees.map((e: any, i: number) => [e.id, i]));
-        const diaMenos = (ds: string) => {
-            const [y, m, d] = ds.split('-').map(Number);
-            const dt = new Date(y, (m || 1) - 1, (d || 1) - 1);
-            return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
-        };
-        const inicioDe = (empId: string, dateStr: string, code: string) => {
-            let cur = dateStr;
-            let inicio = dateStr;
-            const want = code.toUpperCase();
-            for (let i = 0; i < 40; i++) {
-                const prev = diaMenos(cur);
-                const raw = next[`${empId}_${prev}`] !== undefined ? next[`${empId}_${prev}`] : shiftsMap[`${empId}_${prev}`];
-                if (!raw || raw.isDeleted || String(raw.code || '').toUpperCase() !== want) break;
-                inicio = prev;
-                cur = prev;
-            }
-            return inicio;
+        const nombreDe = (empId: string, raw: { employeeName?: string } | null | undefined) => String(byId[empId]?.name || raw?.employeeName || empId);
+        const hm = (v: unknown) => {
+            const [h, m] = getSafeTime(v);
+            return `${String(h).padStart(2, '0')}:${String(m || 0).padStart(2, '0')}`;
         };
         for (const dateStr of fechas) {
             if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) continue;
-            const celdas: CeldaDia12[] = [];
-            const vistos = new Set<string>();
-            const tomar = (key: string, raw: any) => {
-                if (!key.endsWith(`_${dateStr}`)) return;
-                const empId = key.slice(0, -(dateStr.length + 1));
-                if (!empId || vistos.has(empId)) return;
-                vistos.add(empId);
-                if (!raw || raw.isDeleted) return;
-                const code = String(raw.code || '');
-                celdas.push({
-                    empId,
-                    nombre: String(byId[empId]?.name || raw.employeeName || empId),
-                    code,
-                    positionName: String(raw.originalPositionName || raw.positionName || ''),
-                    originalCode: String(raw.originalCode || ''),
-                    coverageMode: raw.coverageMode,
-                    coversBandCode: raw.coversBandCode,
-                    coversPositionName: raw.coversPositionName,
-                    coversEmployeeId: raw.coversEmployeeId,
-                    orden: filaDe.get(empId) ?? 999,
-                    inicio: inicioDe(empId, dateStr, code),
-                });
-            };
-            for (const [k, raw] of Object.entries(next)) tomar(k, raw);
-            for (const [k, raw] of Object.entries(shiftsMap)) if (next[k] === undefined) tomar(k, raw);
+            const celdas = celdasDelDia(next, shiftsMap, dateStr, { ordenDe: (id) => filaDe.get(id) ?? 999, nombreDe });
             for (const p of recalcularDia12(celdas)) {
                 const key = `${p.empId}_${dateStr}`;
                 const base = next[key] !== undefined ? next[key] : shiftsMap[key];
                 if (!base || base.isDeleted) continue;
-                if (String(base.coversEmployeeId || '') === p.coversEmployeeId && String(base.coversAbsenceCode || '') === p.coversAbsenceCode && !!base.coversVacante === p.limpiar) continue;
+                const igual = String(base.coversEmployeeId || '') === p.coversEmployeeId
+                    && String(base.coversAbsenceCode || '') === p.coversAbsenceCode
+                    && !!base.coversVacante === p.limpiar
+                    && String(base.coverageMode || '').toUpperCase() === (p.coverageMode || String(base.coverageMode || '').toUpperCase())
+                    && String(base.coversBandCode || '') === (p.coversBandCode || String(base.coversBandCode || ''))
+                    && String(base.coversDateStr || '') === (p.limpiar ? String(base.coversDateStr || '') : dateStr);
+                if (igual) continue;
+                if (p.limpiar && !base.coversEmployeeId && !base.coversEmployeeName) continue;
+                const startTime = typeof base.startTime === 'string' ? base.startTime : hm(base.startTime);
+                const endTime = typeof base.endTime === 'string' ? base.endTime : hm(base.endTime);
                 next[key] = {
                     ...base,
-                    employeeName: base.employeeName || String(byId[p.empId]?.name || ''),
+                    startTime,
+                    endTime,
+                    employeeName: base.employeeName || nombreDe(p.empId, base),
+                    coverageMode: p.coverageMode || base.coverageMode || '12H',
                     coversEmployeeId: p.coversEmployeeId,
                     coversEmployeeName: p.coversEmployeeName,
                     coversAbsenceCode: p.coversAbsenceCode,
+                    coversBandCode: p.coversBandCode || base.coversBandCode || '',
+                    coversPositionName: p.coversPositionName || base.coversPositionName || base.positionName || '',
+                    coversDateStr: p.limpiar ? (base.coversDateStr || dateStr) : dateStr,
                     coversVacante: p.limpiar,
                 };
             }
@@ -14462,6 +14458,7 @@ function PlanificacionDesktop() {
         const sinMarcaEvento: string[] = [];
         const licenciasNuevas: string[] = [];
         const fechasAtrib: string[] = [];
+        const fechasToco = new Set<string>();
         for (const it of items) {
             const { emp, ds, key, ctx } = ctxRapido(it.r, it.c);
             if (!emp) continue;
@@ -14475,8 +14472,8 @@ function PlanificacionDesktop() {
                 if (bl) { anotar(bl); continue; }
                 if (pendingNovedades[key]) quitarNovedad.add(key);
                 const guardado = !!(shiftsMap[key] && !shiftsMap[key].isDeleted);
-                if (next[key] && !guardado) { delete next[key]; hechos++; if (esNovedadCelda(ctx, key)) fechasAtrib.push(ds); }
-                else if (guardado && !next[key]?.isDeleted) { next[key] = { isDeleted: true }; hechos++; if (esNovedadCelda(ctx, key)) fechasAtrib.push(ds); }
+                if (next[key] && !guardado) { delete next[key]; hechos++; fechasToco.add(ds); if (esNovedadCelda(ctx, key)) fechasAtrib.push(ds); }
+                else if (guardado && !next[key]?.isDeleted) { next[key] = { isDeleted: true }; hechos++; fechasToco.add(ds); if (esNovedadCelda(ctx, key)) fechasAtrib.push(ds); }
                 continue;
             }
             const code = normalizarCodigo(it.code);
@@ -14487,6 +14484,7 @@ function PlanificacionDesktop() {
             next[key] = it.startTime ? { ...res.change, startTime: it.startTime, endTime: it.endTime || res.change.endTime } : res.change;
             if (res.novedad) novedades[key] = res.novedad;
             if (res.novedad) fechasAtrib.push(ds);
+            fechasToco.add(ds);
             const anterior = String((ctx?.p && !ctx.p.isDeleted ? ctx.p.code : ctx?.s?.code) || '').toUpperCase();
             if (res.novedad && (anterior === 'M' || anterior === 'T' || anterior === 'N')) licenciasNuevas.push(key);
             hechos++;
@@ -14498,7 +14496,7 @@ function PlanificacionDesktop() {
                 return out;
             });
         }
-        if (fechasAtrib.length) sellarAtribucion12(next, fechasAtrib);
+        if (fechasToco.size || fechasAtrib.length) sellarAtribucion12(next, [...new Set([...fechasToco, ...fechasAtrib])]);
         if (hechos) {
             const applied = commitPendingChanges(next);
             if (applied && licenciasNuevas.length && exigeCoberturaGrilla) colaCobertura12 = licenciasNuevas;
@@ -21267,6 +21265,10 @@ function PlanificacionDesktop() {
                     };
                     const estadoDe = (d: string) => {
                         const ops = opsVista(d);
+                        const ex12 = existenteDe(d);
+                        if ((!ops || ops.estado !== 'CUBIERTO') && ex12.origen === 'planificada' && ex12.texto.includes('(12 h)')) {
+                            return { tipo: 'suplente' as const, tono: 'emerald' as const, texto: `Cubierto por: ${ex12.texto}` };
+                        }
                         return estadoDiaCobertura({
                             activo: vacancyActiveDates.has(d),
                             cobertura: coberturaIn(d),

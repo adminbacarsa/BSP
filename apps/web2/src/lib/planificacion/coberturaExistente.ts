@@ -8,6 +8,7 @@ import {
 } from '@/lib/planificacion/vacancyCoverage';
 import { diaAcreditacionCobertura, esTramoCobertura, sumarDiasCalendario } from '@/lib/planificacion/coberturaDiaHueco';
 import type { ConsultaResumenIn } from '@/lib/planificacion/coberturaEventualesUx';
+import { atribuirEnTurnos, textoCubiertaPor } from '@/lib/planificacion/atribuir12h';
 
 export type TurnoDiaIn = {
   id?: string;
@@ -219,9 +220,12 @@ function textoPar12(turnos: TurnoDiaIn[], titularEmp: string): { texto: string; 
   const d12 = lados.find((t) => String(t.code || '').toUpperCase() === 'D12');
   const n12 = lados.find((t) => String(t.code || '').toUpperCase() === 'N12');
   if (!d12?.employeeId || !n12?.employeeId) return null;
-  const a = apellidoCorto(String(d12.employeeName || d12.employeeId));
-  const b = apellidoCorto(String(n12.employeeName || n12.employeeId));
-  return { texto: `cubierta por ${a} D12 + ${b} N12`, empId: String(d12.employeeId) };
+  const texto = textoCubiertaPor([
+    { nombre: String(d12.employeeName || d12.employeeId), code: 'D12' },
+    { nombre: String(n12.employeeName || n12.employeeId), code: 'N12' },
+  ]);
+  if (!texto) return null;
+  return { texto, empId: String(d12.employeeId) };
 }
 
 function planificadaDe(titular: TurnoDiaIn | null, turnos: TurnoDiaIn[], titularEmp: string, titularName: string): Extract<CoberturaExistente, { origen: 'planificada' }> | null {
@@ -290,7 +294,7 @@ export function coberturaExistenteDelDia(p: {
 }): CoberturaExistente {
   const emp = String(p.titularEmployeeId || '').trim();
   const titular = p.titular || null;
-  const turnos = p.turnosDelDia || [];
+  const turnos = atribuirEnTurnos(p.turnosDelDia || []);
   const ops = opsDe(titular, turnos, emp);
   if (ops?.estado === 'CUBIERTO') return ops;
   const consulta = consultaDe(p.consulta);
@@ -564,7 +568,7 @@ function lineaCubierto(ex: CoberturaExistente, turnos: TurnoDiaIn[]): string | n
     return [ex.nombre, ex.codigo, `desde Operaciones${ex.desdeHm ? ` ${ex.desdeHm}` : ''}`].filter(Boolean).join(' · ');
   }
   if (ex.origen === 'planificada') {
-    if (ex.texto.startsWith('cubierta por')) return ex.texto;
+    if (ex.texto.includes('(12 h)') || ex.texto.startsWith('cubierta por')) return ex.texto;
     if (ex.cobertura.mode === 'split') {
       return `${apellidoDeTurno(turnos, ex.cobertura.extEmpId)} (ext) · ${apellidoDeTurno(turnos, ex.cobertura.adelEmpId)} (adel)`;
     }

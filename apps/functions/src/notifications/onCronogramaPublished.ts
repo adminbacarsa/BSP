@@ -131,10 +131,10 @@ export const onCronogramaPublished = functions
           return dt.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'America/Argentina/Buenos_Aires' });
         };
         const horario = hm(t.startTime) && hm(t.endTime) ? `${hm(t.startTime)}–${hm(t.endTime)}` : '';
-        const cubre = String(t.coversEmployeeName || '').trim().split(/\s+/)[0];
+        const cubreApellido = String(t.coversEmployeeName || '').trim().split(',')[0].trim().split(/\s+/)[0].replace(/[.,]$/, '');
         if (dia) {
           entry.lineas.push(
-            `Tu turno del ${dia} cambió a ${code}${horario ? ` ${horario}` : ''}${t.positionName ? ` · ${t.positionName}` : ''}${entry.objectiveName ? ` · ${entry.objectiveName}` : ''}${cubre ? ` · cubrís a ${cubre}${t.coversBandCode ? ` (${t.coversBandCode})` : ''}` : ''}`,
+            `Tu turno del ${dia} cambió a ${code}${horario ? ` ${horario}` : ''}${t.positionName ? ` · ${t.positionName}` : ''}${entry.objectiveName ? ` · ${entry.objectiveName}` : ''}${cubreApellido ? ` · cubrís a ${cubreApellido}${t.coversBandCode ? ` (${t.coversBandCode})` : ''}` : ''}`,
           );
         }
       }

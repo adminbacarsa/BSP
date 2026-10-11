@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { elegirTitular, recalcularDia12, textoLicencia12, type CeldaDia12, type Licencia12 } from './atribuir12h';
+import { aplicarAtribucionAlGuardar, elegirTitular, recalcularDia12, textoLicencia12, textoPata12, type CeldaDia12, type Licencia12 } from './atribuir12h';
 
 const regalo: Licencia12 = {
   empId: 'regalo', nombre: 'REGALO, JUAN', code: 'ART', banda: 'T', positionName: 'Puesto 2', inicio: '2026-10-01', orden: 2,
@@ -90,6 +90,67 @@ test('la marca de la licencia nombra a las dos patas', () => {
     'a_2026-10-01': { code: 'D12', coverageMode: '12H', coversEmployeeId: 'regalo', employeeName: 'BAIGORRIA, LUIS' },
     'b_2026-10-01': { code: 'N12', coverageMode: '12H', coversEmployeeId: 'regalo', employeeName: 'BARRIOS, ANA' },
   };
-  assert.equal(textoLicencia12(pending, {}, 'regalo', '2026-10-01'), 'cubierta por BAIGORRIA D12 + BARRIOS N12');
+  assert.equal(textoLicencia12(pending, {}, 'regalo', '2026-10-01'), 'BAIGORRIA D12 + BARRIOS N12 (12 h)');
   assert.equal(textoLicencia12(pending, {}, 'otro', '2026-10-01'), '');
+});
+
+test('V de BAIGORRIA del 10 al 23: el par tecleado se le atribuye y el día sin par no', () => {
+  const pares: Record<number, [string, string, string, string]> = {
+    12: ['regalo', 'REGALO, JUAN', 'herrante', 'HERRANTE, PEDRO'],
+    13: ['diaz', 'DIAZ, ANA', 'araya', 'ARAYA, LUIS'],
+    14: ['martinez', 'MARTINEZ, JOSE', 'kasianchuk', 'KASIANCHUK, IVAN'],
+    15: ['palacios', 'PALACIOS, MARIA', 'araya', 'ARAYA, LUIS'],
+    16: ['regalo', 'REGALO, JUAN', 'herrante', 'HERRANTE, PEDRO'],
+    20: ['diaz', 'DIAZ, ANA', 'araya', 'ARAYA, LUIS'],
+    23: ['palacios', 'PALACIOS, MARIA', 'kasianchuk', 'KASIANCHUK, IVAN'],
+  };
+  for (let d = 10; d <= 23; d++) {
+    const date = `2026-10-${String(d).padStart(2, '0')}`;
+    const celdas: CeldaDia12[] = [
+      { empId: 'baigorria', nombre: 'BAIGORRIA, LUIS', code: 'V', originalCode: 'T', positionName: 'Puesto 1', orden: 0, inicio: '2026-10-10' },
+    ];
+    const par = pares[d];
+    if (par) {
+      celdas.push({ empId: par[0], nombre: par[1], code: 'D12', positionName: 'Puesto 1', orden: 1 });
+      celdas.push({ empId: par[2], nombre: par[3], code: 'N12', positionName: 'Puesto 1', orden: 2 });
+    }
+    const parches = recalcularDia12(celdas);
+    if (!par) {
+      assert.equal(parches.length, 0, date);
+      continue;
+    }
+    assert.equal(parches.length, 2, date);
+    assert.ok(parches.every((p) => p.coversEmployeeId === 'baigorria' && p.coversAbsenceCode === 'V' && p.coverageMode === '12H' && p.coversBandCode === 'T' && p.coversPositionName === 'Puesto 1'), date);
+    assert.match(parches[0].texto, /Cubre a BAIGORRIA \(V\) · T · Puesto 1/);
+  }
+  const pending: Record<string, { code: string; employeeName?: string; originalCode?: string; positionName?: string }> = {
+    'baigorria_2026-10-12': { code: 'V', originalCode: 'T', positionName: 'Puesto 1', employeeName: 'BAIGORRIA, LUIS' },
+    'regalo_2026-10-12': { code: 'D12', employeeName: 'REGALO, JUAN', positionName: 'Puesto 1' },
+    'herrante_2026-10-12': { code: 'N12', employeeName: 'HERRANTE, PEDRO', positionName: 'Puesto 1' },
+    'baigorria_2026-10-11': { code: 'V', originalCode: 'T', positionName: 'Puesto 1', employeeName: 'BAIGORRIA, LUIS' },
+  };
+  assert.equal(textoLicencia12(pending, {}, 'baigorria', '2026-10-12'), 'REGALO D12 + HERRANTE N12 (12 h)');
+  assert.equal(textoLicencia12(pending, {}, 'baigorria', '2026-10-11'), '');
+  assert.equal(textoPata12(pending, {}, 'regalo', '2026-10-12'), 'Cubre a BAIGORRIA (V) · T · Puesto 1');
+  const guardado = aplicarAtribucionAlGuardar(pending, {}, {
+    hm: (v) => String(v || '07:00'),
+  });
+  assert.equal(guardado['regalo_2026-10-12'].coverageMode, '12H');
+  assert.equal(guardado['regalo_2026-10-12'].coversEmployeeId, 'baigorria');
+  assert.equal(guardado['regalo_2026-10-12'].coversEmployeeName, 'BAIGORRIA, LUIS');
+  assert.equal(guardado['herrante_2026-10-12'].coversBandCode, 'T');
+  assert.equal(guardado['herrante_2026-10-12'].coversDateStr, '2026-10-12');
+  assert.equal(guardado['herrante_2026-10-12'].coversPositionName, 'Puesto 1');
+  assert.equal(guardado['baigorria_2026-10-11'], pending['baigorria_2026-10-11']);
+});
+
+test('un par cubre una sola licencia: gana la que empezó antes', () => {
+  const parches = recalcularDia12([
+    { empId: 'tarde', nombre: 'TARDE', code: 'V', originalCode: 'T', positionName: 'Puesto 1', orden: 0, inicio: '2026-10-12' },
+    { empId: 'antes', nombre: 'ANTES, ANA', code: 'ART', originalCode: 'T', positionName: 'Puesto 1', orden: 5, inicio: '2026-10-01' },
+    { empId: 'd', nombre: 'REGALO', code: 'D12', positionName: 'Puesto 1', orden: 2 },
+    { empId: 'n', nombre: 'HERRANTE', code: 'N12', positionName: 'Puesto 1', orden: 3 },
+  ]);
+  assert.equal(parches.length, 2);
+  assert.ok(parches.every((p) => p.coversEmployeeId === 'antes'));
 });
