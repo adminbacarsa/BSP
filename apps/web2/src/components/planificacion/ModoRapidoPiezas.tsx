@@ -333,6 +333,9 @@ export function Cierre12Banner({
     texto,
     alternativas,
     onElegir,
+    francos,
+    onFranco,
+    aplicar = true,
     onConfirmar,
     onCancelar,
     ancla,
@@ -340,6 +343,9 @@ export function Cierre12Banner({
     texto: string;
     alternativas?: Array<{ empId: string; nombre: string; positionName: string; code: string; hours?: number; lado: string; bloqueado?: boolean; motivo?: string; elegido?: boolean }>;
     onElegir?: (empId: string, lado: string) => void;
+    francos?: Array<{ empId: string; nombre: string }>;
+    onFranco?: (empId: string) => void;
+    aplicar?: boolean;
     onConfirmar: () => void;
     onCancelar: () => void;
     ancla?: { left: number; top: number; width: number; height: number } | null;
@@ -387,10 +393,21 @@ export function Cierre12Banner({
                     ))}
                 </ul>
             )}
-            <p className="mt-1 text-[11px] text-slate-500">Para elegir otra pareja: mové el cursor con las flechas (o clic) al guardia que quieras ese día y apretá + otra vez. Con el cursor donde está, + aplica lo propuesto. Esc cancela.</p>
+            {!!francos?.length && (
+                <ul className="mt-2 space-y-1" data-cierre-12h-ft>
+                    {francos.map((f) => (
+                        <li key={f.empId}>
+                            <button type="button" onClick={() => onFranco?.(f.empId)} className="w-full rounded-xl bg-violet-50 px-2 py-1 text-left text-[12px] font-bold text-violet-900 hover:bg-violet-100" data-cierre-ft={f.empId}>
+                                Pasar a FT a {f.nombre}
+                            </button>
+                        </li>
+                    ))}
+                </ul>
+            )}
+            {aplicar && <p className="mt-1 text-[11px] text-slate-500">Para elegir otra pareja: mové el cursor con las flechas (o clic) al guardia que quieras ese día y apretá + otra vez. Con el cursor donde está, + aplica lo propuesto. Esc cancela.</p>}
             <div className="mt-2 flex justify-end gap-2">
                 <button type="button" onClick={onCancelar} className="rounded-xl border border-slate-200 px-3 py-1.5 text-[12px] font-bold text-slate-600 hover:bg-slate-50">Cancelar (Esc)</button>
-                <button ref={btnRef} type="button" onClick={onConfirmar} className="rounded-xl bg-indigo-600 px-3 py-1.5 text-[12px] font-black text-white shadow-sm hover:bg-indigo-700" data-cierre-12h-confirmar>Aplicar (Enter)</button>
+                {aplicar && <button ref={btnRef} type="button" onClick={onConfirmar} className="rounded-xl bg-indigo-600 px-3 py-1.5 text-[12px] font-black text-white shadow-sm hover:bg-indigo-700" data-cierre-12h-confirmar>Aplicar (Enter)</button>}
             </div>
         </div>,
         document.body,

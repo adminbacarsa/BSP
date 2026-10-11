@@ -11,6 +11,7 @@ import {
     sugerirCodigos,
     tamanoRango,
 } from '@/lib/planificacion/modoRapido';
+import { confirmarFtPideBanda } from '@/lib/planificacion/francoTrabajadoRapido';
 import { alternarCelda, diagonal, unicas } from '@/lib/planificacion/seleccionLibre';
 
 export type CapaModoRapidoApi = {
@@ -303,6 +304,15 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
     const confirmar = useCallback((tecla: string, shift: boolean) => {
         const { texto: t, elegida: idx, cursor: cur } = estado.current;
         if (t == null || !cur) return;
+        if (confirmarFtPideBanda(t, idx)) {
+            const ops = propsRef.current.opciones(cur.r, cur.c);
+            const hayBanda = ops.some((o) => o.code.toUpperCase().startsWith('FT·') || o.code.toUpperCase().startsWith('FT.'));
+            propsRef.current.onRechazo?.(hayBanda
+                ? 'Elegí la banda del franco trabajado: FT · M, T, N…'
+                : 'FT se escribe sobre un franco (F, FF o FP).');
+            if (!hayBanda) { setTexto(null); setElegida(-1); enfocarContenedor(); }
+            return;
+        }
         const code = codigoAlConfirmar(t, propsRef.current.opciones(cur.r, cur.c), idx);
         setTexto(null);
         setElegida(-1);

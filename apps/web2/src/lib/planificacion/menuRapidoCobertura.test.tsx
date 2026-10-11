@@ -125,10 +125,9 @@ describe('clic en la grilla', () => {
     assert.deepEqual(r, { ok: false, motivo: 'Se pisa con su turno M 07:00–15:00' });
   });
 
-  it('el franco no se asigna directo: se consulta desde el modal', () => {
+  it('el franco no se asigna directo: el clic arma una consulta, no un turno', () => {
     const r = validarClicElegir({ ...ok, paso: 'asignar', candidatoId: 'x', rol: 'FRANCO' });
-    assert.equal(r.ok, false);
-    assert.match((r as { motivo: string }).motivo, /franco/);
+    assert.deepEqual(r, { ok: true, consultarFt: true });
   });
 
   it('el titular no se cubre a sí mismo', () => {

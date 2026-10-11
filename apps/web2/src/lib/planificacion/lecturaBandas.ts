@@ -495,7 +495,7 @@ export function faltantesDelDia(input: {
           francos: par ? [] : francos.map((f) => ({ empId: f.empId, nombre: f.nombre })),
           texto: par
             ? `${fmtDia(input.dateStr)} · ${pos.positionName} · falta ${banda} · ${quienes}`
-            : `${fmtDia(input.dateStr)} · ${pos.positionName} · falta ${banda} · Consultar franco (FT)`,
+            : `${fmtDia(input.dateStr)} · ${pos.positionName} · falta ${banda} · pasar a FT a ${francos.map((f) => f.nombre).filter(Boolean).join(', ') || 'un franco'}`,
         });
       }
     });

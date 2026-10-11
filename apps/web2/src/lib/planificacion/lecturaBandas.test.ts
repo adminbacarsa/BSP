@@ -101,7 +101,7 @@ test('falta 1 T propone M→D12 y N→N12 del mismo puesto, el de menos horas', 
   assert.match(faltantes[0].texto, /VIDELA D12 \+ KASIANCHUK N12/);
 });
 
-test('sin par de 12 h ofrece consultar el franco y no asigna FT', () => {
+test('sin par de 12 h ofrece pasar a FT al franco y no arma el par', () => {
   const puestos: PuestoServicio[] = [{ positionName: 'Puesto 1', qty: 1, coverageType: '24hs' }];
   const turnos = [t('solo', 'SOLO', 'M', 'Puesto 1')];
   const faltantes = faltantesDelDia({
@@ -119,7 +119,7 @@ test('sin par de 12 h ofrece consultar el franco y no asigna FT', () => {
   assert.equal(tFalta?.propuesta, null);
   assert.equal(tFalta?.consultarFranco, true);
   assert.equal(tFalta?.francos[0].nombre, 'FRANCO');
-  assert.match(tFalta?.texto || '', /Consultar franco \(FT\)/);
+  assert.match(tFalta?.texto || '', /pasar a FT a FRANCO/);
 });
 
 test('liberar un M pasa el T y el N a 12 h y deja al liberado para RET', () => {

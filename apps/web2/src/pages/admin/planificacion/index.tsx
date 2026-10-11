@@ -270,6 +270,7 @@ import {
     tipoDeCodigo,
     type TipoNovedadRapida,
 } from '@/lib/planificacion/modoRapido';
+import { esCeldaFranco, etiquetaFt, opcionesBandaFt, payloadConsultaFt, resolverEscrituraFt } from '@/lib/planificacion/francoTrabajadoRapido';
 import { tablaCodigosPlanilla } from '@/lib/planificacion/codigosHorarioPegado';
 import { mesLabelDe, resolverTurnoCopiado } from '@/lib/planificacion/copiarTurno';
 import { catalogoObjetivos, lugarDeGuardia, turnosLugarDeMapa } from '@/lib/planificacion/pegarPersonas';
@@ -1422,8 +1423,8 @@ function calcularCeldaGrilla(e: EntradaCeldaGrilla, emp: any, isGuest: boolean, 
     );
     const swapStyle = swapPending ? SHIFT_STYLES['SWAP_PENDING'] : SHIFT_STYLES['SWAP'];
     if (isLockedDate && !p) { style = SHIFT_STYLES['PAST']; if (s) content = s.code; }
-    else if (p) { if (p.isDeleted) { content = CELDA_BORRADA; style = "bg-rose-50 text-rose-300"; } else { if (isFT) { style = SHIFT_STYLES['FT']; content = "FT"; } else if (isFF) { style = SHIFT_STYLES['FF']; content = "FF"; } else { content = p.code; const baseStyle = SHIFT_STYLES[p.code]; style = baseStyle ? `${baseStyle} ring-2 ring-amber-400 ${isSwap ? swapStyle : ''}` : `bg-amber-100 text-amber-700 font-black ring-2 ring-amber-400 ${isSwap ? swapStyle : ''}`; if (content === 'REF' || content === 'ESC') content = cellLabelForDeployment(String(content), p.deploymentBand); } } }
-    else if (s) { if (!isLockedDate) { if (isFT) { style = SHIFT_STYLES['FT']; content = "FT"; } else if (isFF) { style = SHIFT_STYLES['FF']; content = "FF"; } else { style = `${getDefaultStyle(s.code)} ${isSwap ? swapStyle : ''}`; content = s.code; } } }
+    else if (p) { if (p.isDeleted) { content = CELDA_BORRADA; style = "bg-rose-50 text-rose-300"; } else { if (isFT) { style = SHIFT_STYLES['FT']; content = etiquetaFt(p.code); } else if (isFF) { style = SHIFT_STYLES['FF']; content = "FF"; } else { content = p.code; const baseStyle = SHIFT_STYLES[p.code]; style = baseStyle ? `${baseStyle} ring-2 ring-amber-400 ${isSwap ? swapStyle : ''}` : `bg-amber-100 text-amber-700 font-black ring-2 ring-amber-400 ${isSwap ? swapStyle : ''}`; if (content === 'REF' || content === 'ESC') content = cellLabelForDeployment(String(content), p.deploymentBand); } } }
+    else if (s) { if (!isLockedDate) { if (isFT) { style = SHIFT_STYLES['FT']; content = etiquetaFt(s.code); } else if (isFF) { style = SHIFT_STYLES['FF']; content = "FF"; } else { style = `${getDefaultStyle(s.code)} ${isSwap ? swapStyle : ''}`; content = s.code; } } }
     else if (rfzOnCell && !p) {
         content = 'RFZ';
         style = `${SHIFT_STYLES['RFZ']}${rfzOnCell.draft ? ' ring-2 ring-amber-400' : ''}`;
@@ -1515,7 +1516,7 @@ function calcularCeldaGrilla(e: EntradaCeldaGrilla, emp: any, isGuest: boolean, 
     }
     const sufijoUsado = (isCoverageSourceUsed && content != null && !planDualUsedAndCob) ? ' ring-1 ring-violet-500/90' : '';
     const cellPosName = (p && !p.isDeleted ? p.positionName : s?.positionName) || rfzOnCell?.positionName || null;
-    const cellCode = (p && !p.isDeleted) ? (isFT ? 'FT' : isFF ? 'FF' : p.code) : s ? (isFT ? 'FT' : isFF ? 'FF' : s.code) : (rfzOnCell ? 'RFZ' : null);
+    const cellCode = (p && !p.isDeleted) ? (isFF ? 'FF' : p.code) : s ? (isFF ? 'FF' : s.code) : (rfzOnCell ? 'RFZ' : null);
     const cellShift = (p && !p.isDeleted) ? p : s;
     const lctRest = e.lctRestByCell[key] || '';
     const excludedOnDay = e.excludedPositionsByDate[cellDateStr];
@@ -1548,7 +1549,7 @@ function calcularCeldaGrilla(e: EntradaCeldaGrilla, emp: any, isGuest: boolean, 
         key,
         contenido: borrado ? null : content,
         borrado,
-        estilo: estiloJornada12(style, String((p && !p.isDeleted ? p.code : s?.code) || content || ''), Number((p && !p.isDeleted ? p.hours : s?.hours) || 0)),
+        estilo: estiloJornada12(style, isFT ? 'FT' : String((p && !p.isDeleted ? p.code : s?.code) || content || ''), Number((p && !p.isDeleted ? p.hours : s?.hours) || 0)),
         sufijoUsado,
         ringExtra: lctRest ? 'ring-2 ring-amber-400' : cellPosExcluded ? 'ring-1 ring-rose-400/70' : '',
         editable: !isLockedDate && !e.isServiceLocked && !isOpsCoverageCell && !soloLecturaAjena,
@@ -2550,7 +2551,7 @@ function PlanificacionDesktop() {
     const [vacancySplitSecondExtraHours, setVacancySplitSecondExtraHours] = useState<number | null>(null);
     const vacancyReplacementPanelRef = React.useRef<HTMLDivElement>(null);
     /** Consultas del objetivo, también con el modal cerrado: grilla, pastilla y toasts. */
-    const vacancyConsultas = useConsultasDisponibilidadObjetivo(empresaId, selectedObjective, !!selectedObjective && canConsultarEventual);
+    const vacancyConsultas = useConsultasDisponibilidadObjetivo(empresaId, selectedObjective, !!selectedObjective && (canConsultarEventual || canAssignFT));
     consultasCursoRef.current = vacancyConsultas;
     const [consultaFoco, setConsultaFoco] = useState<string | null>(null);
     const [consultaTick, setConsultaTick] = useState(0);
@@ -10015,6 +10016,74 @@ function PlanificacionDesktop() {
         if (!quedaron.length) { setModoElegir(null); return; }
         setModoElegir((prev) => (prev ? { ...prev, aviso: textoRepetirQuedaron(quedaron), resultado: textoRepetirQuedaron(quedaron) } : prev));
     };
+    const consultarFtDesdeMenu = (ctx: CtxMenuRapido, personaId: string) => {
+        if (!canAssignFT) {
+            const aviso = 'Sin permiso para asignar Franco Trabajado (FT).';
+            toast.message(aviso);
+            setModoElegir((prev) => (prev ? { ...prev, aviso } : prev));
+            return;
+        }
+        if (!empresaId) return;
+        const sla = (getShiftsForPosition(ctx.positionName, selectedObjective) as Array<{ code?: string; startTime?: string; endTime?: string; hours?: number }>)
+            .find((s) => normalizarCodigo(s.code || '') === normalizarCodigo(ctx.gapBand));
+        const jornada = jornadaEventualDesdeBanda(ctx.dateStr, ctx.gapBand || 'M', {
+            startTime: sla?.startTime,
+            endTime: sla?.endTime,
+            hours: sla?.hours,
+            scheduleLabel: ctx.horario,
+        });
+        const hours = Number(jornada.horas) || 8;
+        const guard = evaluateCoverageDayGuards({
+            dateStr: ctx.dateStr,
+            proposedByEmp: { [personaId]: { code: jornada.code, startTime: jornada.horaInicio, endTime: jornada.horaFin, hours, addHours: hours } },
+            shiftOf: turnoGuardMenu,
+            monthHoursOf: (id) => empMonthlyHours[id] || 0,
+            nameOf: nombreEmpleadoMenu,
+        });
+        if (guard.blocked.length) {
+            const aviso = guard.blocked[0];
+            toast.message(aviso);
+            setModoElegir((prev) => (prev ? { ...prev, aviso } : prev));
+            return;
+        }
+        const topeYa = guard.authorizations.filter((a) => a.kind === 'TOPE').every((a) => {
+            const grant = topeGrants[personaId];
+            return !!grant && !topeRequierePin(grant, periodoTopeDeFecha(a.dateStr));
+        });
+        const pedir = guard.authorizations.filter((a) => !(a.kind === 'TOPE' && topeYa));
+        const enviar = (autorizaciones: { employeeId: string; kind: 'DESCANSO' | 'TOPE'; motivo: string }[]) => {
+            const payload = payloadConsultaFt({
+                empresaId,
+                objectiveId: selectedObjective || null,
+                clientId: selectedClient || null,
+                objectiveName: getObjectiveName(selectedObjective || '') || null,
+                positionName: ctx.positionName,
+                jornada,
+                franco: { employeeId: personaId, nombre: nombreEmpleadoMenu(personaId) },
+                cubreEmployeeId: ctx.clase === 'ausente' ? ctx.empId : null,
+                cubreNombre: ctx.clase === 'ausente' ? ctx.empName : null,
+                autorizaciones,
+            });
+            void (async () => {
+                try {
+                    const call = httpsCallable<Record<string, unknown>, { resumen?: string; status?: string }>(functions, 'crearConsultaDisponibilidad');
+                    const res = await call(payload);
+                    if (res.data?.status === 'SIN_DESTINATARIOS') toast.message(res.data?.resumen || 'No le llegó a nadie.');
+                    else toast.success(res.data?.resumen || 'Consulta enviada.');
+                    setModoElegir(null);
+                } catch (e) {
+                    toast.error(eventualErrorMessage(e));
+                }
+            })();
+        };
+        if (pedir.length) {
+            requestSupervisorLaborAuth(pedir, () => {
+                enviar(pedir.map((a) => ({ employeeId: a.employeeId, kind: a.kind, motivo: authReasonRef.current })));
+            });
+            return;
+        }
+        enviar([]);
+    };
     const clicPersonaModoElegir = (personaId: string) => {
         const m = modoElegir;
         if (!m || m.repetir || m.resultado) return;
@@ -10038,6 +10107,10 @@ function PlanificacionDesktop() {
             const motivo = res.motivo || '';
             const aviso = motivo.startsWith('Para ') ? motivo : `${apellidoMarca(nombreEmpleadoMenu(personaId))}: ${motivo}`;
             setModoElegir((prev) => (prev ? { ...prev, aviso } : prev));
+            return;
+        }
+        if (res.consultarFt) {
+            consultarFtDesdeMenu(m.ctx, personaId);
             return;
         }
         if (pasoReal === 'adel' && !m.extId) {
@@ -13980,7 +14053,9 @@ function PlanificacionDesktop() {
                     restHours: null,
                 };
             }
-            const shiftLabel = cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : (rfzOnCell ? 'Refuerzo cliente (RFZ)' : null);
+            const esFtTip = !!((p && !p.isDeleted && p.isFrancoTrabajado) || s?.isFrancoTrabajado);
+            const shiftLabelRaw = cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : (rfzOnCell ? 'Refuerzo cliente (RFZ)' : null);
+            const shiftLabel = esFtTip && shiftLabelRaw ? `Franco trabajado · ${shiftLabelRaw}` : shiftLabelRaw;
             const _isFrancoTip = cellCode ? ['F', 'FF', 'FP', 'FT'].includes(String(cellCode).toUpperCase()) : false;
             const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, c.dayIndex) : null;
             const _isRet = String(cellCode || '').toUpperCase() === 'RET';
@@ -14101,7 +14176,10 @@ function PlanificacionDesktop() {
         const { emp, ctx } = ctxRapido(r, c);
         const pos = emp ? puestoFilaRapido(emp.id, ctx) : 'General';
         const objId = emp ? resolveObjectiveForEmp(emp.id) : selectedObjective;
-        return opcionesDeCodigo(getShiftsForPosition(pos, objId) as TurnoSla[], slaTodosRapido, ultimoUsadoRapido, catalogoNovedad);
+        const base = opcionesDeCodigo(getShiftsForPosition(pos, objId) as TurnoSla[], slaTodosRapido, ultimoUsadoRapido, catalogoNovedad);
+        const actual = ctx?.p && !ctx.p.isDeleted ? ctx.p : ctx?.s;
+        if (!esCeldaFranco(actual)) return base;
+        return [...base, ...opcionesBandaFt(getShiftsForPosition(pos, objId) as TurnoSla[])];
     };
 
     const bloqueoGlobalRapido = (): string | null => {
@@ -14158,6 +14236,33 @@ function PlanificacionDesktop() {
             return {
                 change: { code, name: code, isTemp: true, isNovedad: true, hours: 0, startTime: '00:00', ...camposBandaConservada((c?.p && !c.p.isDeleted ? c.p : c?.s) || null) },
                 novedad: { employeeId: emp.id, employeeName: emp.name || '', startDate: ds, endDate: ds, type: code, reason: motivoNovedadRef.current || 'Cargado en modo rápido', status: 'APPROVED', _modoRapido: true },
+            };
+        }
+        const celdaFt = (c?.p && !c.p.isDeleted) ? c.p : c?.s;
+        const ft = resolverEscrituraFt({
+            texto: code,
+            celda: celdaFt,
+            bandas: getShiftsForPosition(pos, objectiveId) as TurnoSla[],
+            puede: canAssignFT,
+        });
+        if (ft.accion === 'pedir_banda') return { error: 'Elegí la banda del franco trabajado: FT · M, T, N…' };
+        if (ft.accion === 'sin_permiso') return { error: 'Sin permiso para asignar Franco Trabajado (FT).' };
+        if (ft.accion === 'no_franco') return { error: 'FT se escribe sobre un franco (F, FF o FP).' };
+        if (ft.accion === 'ft') {
+            const deFuente = !!(fuente && normalizarCodigo(fuente.code || '') === ft.code && fuente.startTime && fuente.endTime);
+            return {
+                change: {
+                    ...base,
+                    code: ft.code,
+                    name: (deFuente && fuente?.name) || ft.name,
+                    hours: deFuente ? (Number(fuente?.hours) || ft.hours) : ft.hours,
+                    startTime: deFuente ? fuente?.startTime : ft.startTime,
+                    endTime: deFuente ? fuente?.endTime : ft.endTime,
+                    positionName: (deFuente && fuente?.positionName) || pos,
+                    isFranco: false,
+                    isFrancoTrabajado: true,
+                    coveredFromFranco: true,
+                },
             };
         }
         if (code === 'EV') {
@@ -14859,12 +14964,11 @@ function PlanificacionDesktop() {
         return out;
     };
     const abrirPropuesta12 = (lista: Propuesta12h[]) => {
-        const utiles = lista.filter((p) => p.cambios.length);
-        if (!utiles.length) {
-            toast.message(lista.map((p) => p.texto).filter(Boolean).join(' · ') || 'Ese día no tiene una banda de 8 h para cerrar con 12 h.');
+        if (!lista.length) {
+            toast.message('Ese día no tiene una banda de 8 h para cerrar con 12 h.');
             return;
         }
-        setPropuesta12(utiles);
+        setPropuesta12(lista);
     };
     const aplicarPares12 = (lista: Propuesta12h[]) => {
         const pares = lista.filter((p) => p.modo === 'par' && p.cambios.length >= 2);
@@ -15413,30 +15517,35 @@ function PlanificacionDesktop() {
         if (r.escritos) toast.success(`${r.escritos} turno(s) en otro objetivo. Se guardan con el cronograma.`);
     };
 
-    const consultarFrancoFaltante = async (faltante: FaltanteBanda, franco: { empId: string; nombre: string }) => {
-        if (!canAssignFT) { toast.message('Para consultar un franco hace falta el permiso de franco trabajado.'); return; }
-        if (!empresaId) return;
-        const sla = (getShiftsForPosition(faltante.positionName, selectedObjective) as Array<{ code?: string; startTime?: string; endTime?: string; hours?: number }>)
-            .find((s) => String(s.code || '').toUpperCase() === faltante.banda);
-        const jornada = jornadaEventualDesdeBanda(faltante.dateStr, faltante.banda, { startTime: sla?.startTime, endTime: sla?.endTime, hours: sla?.hours || 8 });
-        try {
-            const call = httpsCallable<Record<string, unknown>, { resumen?: string; status?: string }>(functions, 'crearConsultaDisponibilidad');
-            const res = await call({
-                empresaId,
-                objectiveId: selectedObjective || null,
-                clientId: selectedClient || null,
-                objectiveName: getObjectiveName(selectedObjective || '') || null,
-                positionName: faltante.positionName,
-                jornadas: [jornada],
-                guardias: [{ employeeId: franco.empId, tipo: 'FT', nombre: franco.nombre }],
-                lugares: 1,
-                venceMinutos: 120,
-            });
-            if (res.data?.status === 'SIN_DESTINATARIOS') toast.message(res.data?.resumen || 'No le llegó a nadie.');
-            else toast.success(res.data?.resumen || 'Consulta enviada.');
-        } catch (e) {
-            toast.error(e instanceof Error ? e.message : 'No se pudo consultar el franco.');
-        }
+    const francosVisibles = (dateStr: string) => displayedEmployees.flatMap((e: { id: string; name?: string }) => {
+        const key = `${e.id}_${dateStr}`;
+        const p = pendingChanges[key];
+        const s = p ? (p.isDeleted ? null : p) : shiftsMap[key];
+        if (!esCeldaFranco(s)) return [];
+        return [{ empId: e.id, nombre: String(e.name || e.id) }];
+    });
+    const pasarAFtDirecto = (empId: string, dateStr: string, banda: string, positionName: string) => {
+        if (!canAssignFT) { toast.message('Sin permiso para asignar Franco Trabajado (FT).'); return; }
+        const r = displayedEmployees.findIndex((e: { id: string }) => e.id === empId);
+        const c = diasRapido.indexOf(dateStr);
+        if (r < 0 || c < 0) { toast.message('Ese franco no está en la grilla.'); return; }
+        const codeBanda = normalizarCodigo(banda);
+        const sla = (getShiftsForPosition(positionName, selectedObjective) as TurnoSla[])
+            .find((s) => normalizarCodigo(s.code) === codeBanda);
+        escribirRapido([{
+            r,
+            c,
+            code: `FT·${codeBanda}`,
+            fuente: {
+                code: codeBanda,
+                startTime: sla?.startTime,
+                endTime: sla?.endTime,
+                hours: sla?.hours,
+                name: sla?.name || codeBanda,
+                positionName,
+            },
+        }]);
+        setPropuesta12(null);
     };
 
     const ctlCeldas = useRef<ControlCeldas>(null as unknown as ControlCeldas);
@@ -16006,7 +16115,7 @@ function PlanificacionDesktop() {
                                         let content = null;
                                         let style = '';
                                         if (snapShift) {
-                                            if (snapShift.isFrancoTrabajado) { content = 'FT'; style = SHIFT_STYLES['FT']; }
+                                            if (snapShift.isFrancoTrabajado) { content = etiquetaFt(snapShift.code); style = SHIFT_STYLES['FT']; }
                                             else if (snapShift.isFrancoCompensatorio) { content = 'FF'; style = SHIFT_STYLES['FF']; }
                                             else {
                                                 content = snapShift.code;
@@ -18023,7 +18132,7 @@ function PlanificacionDesktop() {
                         storageKey={`cosp-planif-bandas-min:${selectedObjective}:${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`}
                         onAplicar={(f) => { if (f.propuesta) aplicarPropuestas12([f.propuesta]); }}
                         onAplicarTodas={() => aplicarPropuestas12(lecturaMes.faltantes.flatMap((f) => (f.propuesta ? [f.propuesta] : [])))}
-                        onConsultarFranco={(f, fr) => { void consultarFrancoFaltante(f, fr); }}
+                        onPasarAFt={(f, fr) => pasarAFtDirecto(fr.empId, f.dateStr, f.banda, f.positionName)}
                         onElegirOtro={(f) => { if (f.propuesta) setPropuesta12([f.propuesta]); }}
                         onCerrar={() => setBandasOcultas(true)}
                     />
@@ -20230,6 +20339,9 @@ function PlanificacionDesktop() {
                             elegido: propuesta12[0]?.cambios.some((c) => c.empId === a.empId && c.code === a.lado),
                         }))}
                         onElegir={(empId, lado) => elegirPareja12(empId, lado as 'D12' | 'N12')}
+                        francos={!propuesta12[0]?.cambios?.length ? francosVisibles(propuesta12[0].dateStr) : []}
+                        onFranco={(empId) => pasarAFtDirecto(empId, propuesta12[0].dateStr, propuesta12[0].banda, propuesta12[0].positionName)}
+                        aplicar={!!propuesta12[0]?.cambios?.length}
                         onConfirmar={confirmar12}
                         onCancelar={() => setPropuesta12(null)}
                     />

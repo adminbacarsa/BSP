@@ -9,7 +9,7 @@ type Props = {
   storageKey?: string;
   onAplicar: (faltante: FaltanteBanda) => void;
   onAplicarTodas: () => void;
-  onConsultarFranco: (faltante: FaltanteBanda, franco: { empId: string; nombre: string }) => void;
+  onPasarAFt: (faltante: FaltanteBanda, franco: { empId: string; nombre: string }) => void;
   onElegirOtro?: (faltante: FaltanteBanda) => void;
   onCerrar: () => void;
 };
@@ -19,7 +19,7 @@ function leerMin(key: string): boolean {
 }
 
 /** Lista del mes, siempre dentro del viewport. Minimizar la deja como pastilla. */
-export function BandasFaltantesPanel({ faltantes, puedeFranco, storageKey, onAplicar, onAplicarTodas, onConsultarFranco, onElegirOtro, onCerrar }: Props) {
+export function BandasFaltantesPanel({ faltantes, puedeFranco, storageKey, onAplicar, onAplicarTodas, onPasarAFt, onElegirOtro, onCerrar }: Props) {
   const [francoDe, setFrancoDe] = useState<string | null>(null);
   const [abiertoDia, setAbiertoDia] = useState<string | null>(null);
   const [min, setMin] = useState(false);
@@ -97,18 +97,18 @@ export function BandasFaltantesPanel({ faltantes, puedeFranco, storageKey, onApl
                           )}
                         </span>
                       ) : (
-                        <button type="button" onClick={() => setFrancoDe(francoDe === clave ? null : clave)} className="shrink-0 rounded-lg border border-amber-300 bg-amber-50 px-2 py-1 text-[10px] font-black text-amber-800" data-faltante-franco={clave}>
-                          Consultar franco
+                        <button type="button" onClick={() => setFrancoDe(francoDe === clave ? null : clave)} className="shrink-0 rounded-lg border border-violet-300 bg-violet-50 px-2 py-1 text-[10px] font-black text-violet-800" data-faltante-franco={clave}>
+                          Pasar a FT
                         </button>
                       )}
                     </div>
                     {francoDe === clave && (
                       <div className="mt-1 space-y-1">
-                        {!puedeFranco && <p className="text-[10px] text-slate-500">Para consultar un franco hace falta el permiso de franco trabajado.</p>}
-                        {f.francos.length === 0 && <p className="text-[10px] text-slate-500">Ese día no hay francos para consultar.</p>}
+                        {!puedeFranco && <p className="text-[10px] text-slate-500">Sin permiso de franco trabajado: no se escribe.</p>}
+                        {f.francos.length === 0 && <p className="text-[10px] text-slate-500">Ese día no hay francos para pasar a FT.</p>}
                         {puedeFranco && f.francos.map((fr) => (
-                          <button key={fr.empId} type="button" onClick={() => onConsultarFranco(f, fr)} className="block w-full rounded-lg px-2 py-1 text-left text-[11px] font-bold text-slate-700 hover:bg-slate-50" data-franco={fr.empId}>
-                            {fr.nombre}
+                          <button key={fr.empId} type="button" onClick={() => onPasarAFt(f, fr)} className="block w-full rounded-lg px-2 py-1 text-left text-[11px] font-bold text-slate-700 hover:bg-violet-50" data-franco={fr.empId}>
+                            Pasar a FT a {fr.nombre}
                           </button>
                         ))}
                       </div>

@@ -230,7 +230,7 @@ function hmMasMin(hm: string, delta: number): string {
   return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
 }
 
-export type ResultadoClic = { ok: boolean; motivo?: string };
+export type ResultadoClic = { ok: boolean; motivo?: string; consultarFt?: boolean };
 
 /** Lo que valida cada clic en modo elegir. Mismas reglas que el modal, sin listas. */
 export function validarClicElegir(c: ClicElegir): ResultadoClic {
@@ -246,7 +246,8 @@ export function validarClicElegir(c: ClicElegir): ResultadoClic {
       return { ok: false, motivo: `Se pisa con su turno${c.turnoTexto ? ` ${c.turnoTexto}` : ''}` };
     }
     if (c.rol === 'FRANCO') {
-      return { ok: false, motivo: 'Está de franco: al franco se le pregunta (Abrir cobertura completa…)' };
+      if (c.bloqueos && c.bloqueos.length) return { ok: false, motivo: c.bloqueos[0] };
+      return { ok: true, consultarFt: true };
     }
     if (!seAsignaDirecto(c.rol)) return { ok: false, motivo: 'No se puede asignar directo' };
   } else {
