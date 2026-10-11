@@ -387,7 +387,7 @@ export function Cierre12Banner({
                     ))}
                 </ul>
             )}
-            <p className="mt-1 text-[11px] text-slate-500">Para cambiar la pareja: clic en la lista o en la celda de ese día del guardia que quieras. Otro + o Enter aplica. Esc cancela.</p>
+            <p className="mt-1 text-[11px] text-slate-500">Para elegir otra pareja: mové el cursor con las flechas (o clic) al guardia que quieras ese día y apretá + otra vez. Con el cursor donde está, + aplica lo propuesto. Esc cancela.</p>
             <div className="mt-2 flex justify-end gap-2">
                 <button type="button" onClick={onCancelar} className="rounded-xl border border-slate-200 px-3 py-1.5 text-[12px] font-bold text-slate-600 hover:bg-slate-50">Cancelar (Esc)</button>
                 <button ref={btnRef} type="button" onClick={onConfirmar} className="rounded-xl bg-indigo-600 px-3 py-1.5 text-[12px] font-black text-white shadow-sm hover:bg-indigo-700" data-cierre-12h-confirmar>Aplicar (Enter)</button>

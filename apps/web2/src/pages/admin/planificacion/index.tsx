@@ -14987,6 +14987,28 @@ function PlanificacionDesktop() {
         return () => document.removeEventListener('mousedown', onDown, true);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [propuesta12, displayedEmployees, daysInMonth]);
+    /** `+`/Enter con el cursor sobre otro guardia del mismo día: ese pasa a ser la pareja y se aplica. Si no, se aplica lo propuesto. */
+    const confirmar12ConCursor = (cur?: { r: number; c: number } | null) => {
+        const p0 = propuesta12?.[0];
+        if (p0 && cur) {
+            const emp = displayedEmployees[cur.r];
+            const dia = daysInMonth[cur.c];
+            if (emp && dia && getDateKey(dia) === p0.dateStr && !p0.cambios.some((c) => c.empId === emp.id)) {
+                const turnos = turnos12(p0.dateStr);
+                const conTodas = { ...p0, alternativas: alternativasPareja(turnos, p0.dateStr, p0.banda) };
+                const opciones = conTodas.alternativas.filter((a) => a.empId === emp.id && !a.bloqueado);
+                if (opciones.length) {
+                    const lado = opciones.length === 1 ? opciones[0].lado : (opciones.find((a) => a.code === 'M')?.lado || opciones.find((a) => a.code === 'N')?.lado || opciones[0].lado);
+                    confirmar12([cambiarPareja(conTodas, emp.id, turnos, lado), ...(propuesta12 || []).slice(1)]);
+                    return;
+                }
+                const bloq = conTodas.alternativas.find((a) => a.empId === emp.id);
+                toast.message(bloq ? `${bloq.nombre} no puede: ${bloq.motivo || 'no disponible'}` : `${emp.name || 'Ese guardia'} no tiene ese día un turno que pueda pasar a 12 h para esta banda.`);
+                return;
+            }
+        }
+        confirmar12();
+    };
     const confirmar12 = (listaArg?: Propuesta12h[]) => {
         const lista = listaArg && listaArg.length ? listaArg : propuesta12;
         setPropuesta12(null);
@@ -17956,7 +17978,7 @@ function PlanificacionDesktop() {
                                         abrirPropuesta12(propuestas12De(dateStr));
                                     }}
                                     onNovedad={(celdas) => { if (celdas.length) setSelectorNovedad(celdas); }}
-                                    onConfirmar12={confirmar12}
+                                    onConfirmar12={(cur) => confirmar12ConCursor(cur)}
                                     onCancelar12={() => setPropuesta12(null)}
                                     onLiberar={(celdas) => {
                                         for (const cel of celdas) {

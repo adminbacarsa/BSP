@@ -51,7 +51,7 @@ type Props = {
     onNovedad?: (celdas: CeldaRC[]) => void;
     onLiberar?: (celdas: CeldaRC[]) => void;
     onOtroObjetivo?: (celdas: CeldaRC[]) => void;
-    onConfirmar12?: () => void;
+    onConfirmar12?: (cursor?: CeldaRC | null) => void;
     onCancelar12?: () => void;
 };
 
@@ -319,9 +319,10 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
         const onKey = (e: KeyboardEvent) => {
             if (document.querySelector('[data-modo-rapido-ayuda], [data-pegar-excel], [data-novedad-rapida]')) return;
             if (document.querySelector('[data-cierre-12h]')) {
-                if (e.key === 'Enter' || e.key === '+' || e.code === 'NumpadAdd') { e.preventDefault(); e.stopImmediatePropagation(); propsRef.current.onConfirmar12?.(); }
+                // Con la propuesta abierta las flechas mueven el cursor: el `+` sobre otro guardia del mismo día lo toma como pareja.
+                if (e.key === 'Enter' || e.key === '+' || e.code === 'NumpadAdd') { e.preventDefault(); e.stopImmediatePropagation(); propsRef.current.onConfirmar12?.(estado.current.cursor); }
                 else if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); propsRef.current.onCancelar12?.(); }
-                return;
+                if (!e.key.startsWith('Arrow')) return;
             }
             const p = propsRef.current;
             const { cursor: cur, texto: t } = estado.current;
