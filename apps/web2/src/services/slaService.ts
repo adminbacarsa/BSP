@@ -228,8 +228,10 @@ export interface ServiceSLA {
   closedReason?: string;
   /** Alta «Meses: Individuales»: enlaza los docs de la misma vigencia partida por mes. */
   slaSeriesId?: string;
-  /** Al publicar el cronograma del último mes, el servidor crea o extiende el mes siguiente. */
+  /** Al publicar el cronograma del último mes, el servidor crea el doc del mes siguiente. */
   autoRenewMonthly?: boolean;
+  /** Si falta, se exige cobertura (huecos, fila COBERTURA, propuestas). false = se planifica libre. */
+  exigeCobertura?: boolean;
   /** Modo de facturación prefactura (default PLANIFICADO). */
   /** null / ausente = Auto: contrato comercial abierto → EJECUTADO, si no PLANIFICADO. */
   billingMode?: 'PLANIFICADO' | 'EJECUTADO' | 'FIJO' | 'ORDEN_COMPRA' | null;

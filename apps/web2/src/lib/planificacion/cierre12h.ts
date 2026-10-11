@@ -11,8 +11,11 @@ export type TurnoPuesto12 = {
     positionName: string;
     /** Objetivo del turno. En la vista agrupada puede ser otro del grupo. */
     objectiveId?: string;
+    hours?: number;
     /** Licencia, ausencia (AA, aviso del portal) o no es turno de trabajo de ese puesto. */
     bloqueado?: boolean;
+    /** Por qué no entra al par (licencia, franco, descanso menor a 8 h). */
+    motivo?: string;
 };
 
 export type Horario12 = { startTime: string; endTime: string; hours: number };
@@ -91,8 +94,12 @@ function mismoPuesto(a: string, b: string): boolean {
 
 const TRABAJO = new Set(['M', 'T', 'N']);
 
+function yaEs12h(t: TurnoPuesto12): boolean {
+    return up(t.code) === 'D12' || up(t.code) === 'N12' || Number(t.hours) >= 12;
+}
+
 function elegir(lista: TurnoPuesto12[], preferido?: string): TurnoPuesto12 | null {
-    const aptos = lista.filter((t) => !t.bloqueado && TRABAJO.has(up(t.code)));
+    const aptos = lista.filter((t) => !t.bloqueado && !yaEs12h(t) && TRABAJO.has(up(t.code)));
     if (!aptos.length) return null;
     return aptos.find((t) => t.empId === preferido) || aptos[0];
 }
@@ -233,11 +240,13 @@ export function proponerCierre12h(input: {
         delPuesto.filter((t) => up(t.code) === code && t.dateStr === dateStr);
     const m = elegir(delDia('M'), input.preferidoEmpId);
     const t = elegir(delDia('T'), input.preferidoEmpId);
-    const nMismo = elegir(delDia('N'), input.preferidoEmpId);
-    const nPrev = elegir(delPuesto.filter((x) => up(x.code) === 'N' && x.dateStr < input.dateStr), input.preferidoEmpId);
-    const n = nMismo || nPrev;
+    const n = elegir(delDia('N'), input.preferidoEmpId);
     const d12 = horarioDoce('D12', input.sla);
     const n12 = horarioDoce('N12', input.sla);
+    const extra = (code: string) => {
+        const b = delDia(code).find((x) => x.bloqueado && x.motivo);
+        return b?.motivo ? ` (${b.motivo})` : '';
+    };
 
     const par = (banda: string, a: TurnoPuesto12, ha: Horario12 & { code: 'D12' | 'N12' }, b: TurnoPuesto12, hb: Horario12 & { code: 'D12' | 'N12' }): Propuesta12h => {
         const cambios = [cambio(a, ha, input.positionName, input.objectiveId), cambio(b, hb, input.positionName, input.objectiveId)];
@@ -268,15 +277,15 @@ export function proponerCierre12h(input: {
     const cruzado = parEntrePuestos(input, falta, d12, n12);
     if (cruzado) return cruzado;
 
-    if (falta.has('T') && m) return sinPar('T', ladoDe('N'), uno('T', m, d12));
-    if (falta.has('T') && n) return sinPar('T', ladoDe('M'), uno('T', n, n12));
-    if (falta.has('M') && t) return sinPar('M', ladoDe('N'), uno('M', t, d12));
-    if (falta.has('M') && n) return sinPar('M', ladoDe('T'), uno('M', n, n12));
-    if (falta.has('N') && t) return sinPar('N', ladoDe('M'), uno('N', t, n12));
-    if (falta.has('N') && m) return sinPar('N', ladoDe('T'), uno('N', m, d12));
-    if (falta.has('T')) return sinPar('T', ladoDe(m ? 'N' : 'M'), null);
-    if (falta.has('M')) return sinPar('M', ladoDe(t ? 'N' : 'T'), null);
-    if (falta.has('N')) return sinPar('N', ladoDe(m ? 'T' : 'M'), null);
+    if (falta.has('T') && m) return sinPar('T', ladoDe('N') + extra('N'), uno('T', m, d12));
+    if (falta.has('T') && n) return sinPar('T', ladoDe('M') + extra('M'), uno('T', n, n12));
+    if (falta.has('M') && t) return sinPar('M', ladoDe('N') + extra('N'), uno('M', t, d12));
+    if (falta.has('M') && n) return sinPar('M', ladoDe('T') + extra('T'), uno('M', n, n12));
+    if (falta.has('N') && t) return sinPar('N', ladoDe('M') + extra('M'), uno('N', t, n12));
+    if (falta.has('N') && m) return sinPar('N', ladoDe('T') + extra('T'), uno('N', m, d12));
+    if (falta.has('T')) return sinPar('T', ladoDe(m ? 'N' : 'M') + extra(m ? 'N' : 'M'), null);
+    if (falta.has('M')) return sinPar('M', ladoDe(t ? 'N' : 'T') + extra(t ? 'N' : 'T'), null);
+    if (falta.has('N')) return sinPar('N', ladoDe(m ? 'T' : 'M') + extra(m ? 'T' : 'M'), null);
     return null;
 }
 
@@ -304,8 +313,8 @@ function parEntrePuestos(
     let bestScore = Number.POSITIVE_INFINITY;
     for (const lado of orden) {
         if (!falta.has(lado.banda)) continue;
-        const dCands = input.turnos.filter((t) => t.dateStr === input.dateStr && !t.bloqueado && lado.dCodes.includes(up(t.code)));
-        const nCands = input.turnos.filter((t) => t.dateStr === input.dateStr && !t.bloqueado && lado.nCodes.includes(up(t.code)));
+        const dCands = input.turnos.filter((t) => t.dateStr === input.dateStr && !t.bloqueado && !yaEs12h(t) && lado.dCodes.includes(up(t.code)));
+        const nCands = input.turnos.filter((t) => t.dateStr === input.dateStr && !t.bloqueado && !yaEs12h(t) && lado.nCodes.includes(up(t.code)));
         for (const a of dCands) {
             for (const b of nCands) {
                 if (a.empId === b.empId) continue;
@@ -336,6 +345,70 @@ function parEntrePuestos(
         if (best) return best;
     }
     return best;
+}
+
+export type DiaRango12 = {
+    dateStr: string;
+    aplicable: boolean;
+    motivo: string;
+    linea: string;
+    propuesta: Propuesta12h | null;
+};
+
+/** Un día del rango de la licencia: el par D12+N12, o «sin cubrir» con el motivo. */
+export function resumirDias12(dias: ReadonlyArray<Parameters<typeof proponerCierre12h>[0]>): DiaRango12[] {
+    return dias.map((d) => {
+        const p = proponerCierre12h(d);
+        if (p?.modo === 'par' && p.cambios.length >= 2) {
+            return { dateStr: d.dateStr, aplicable: true, motivo: '', linea: p.texto, propuesta: p };
+        }
+        const motivo = (p?.texto || 'sin par').replace(/ · Enter confirma, Esc cancela$/, '');
+        return { dateStr: d.dateStr, aplicable: false, motivo, linea: motivo, propuesta: null };
+    });
+}
+
+function fechaCorta(ds: string): string {
+    return `${ds.slice(8, 10)}/${ds.slice(5, 7)}`;
+}
+
+export function textoRango12h(input: {
+    nombre: string;
+    code: string;
+    desde: string;
+    hasta: string;
+    dias: readonly DiaRango12[];
+}): string {
+    const ok = input.dias.filter((d) => d.aplicable);
+    const no = input.dias.filter((d) => !d.aplicable);
+    const pares = ok.map((d) => {
+        const cuerpo = d.linea.replace(/ · Enter confirma, Esc cancela$/, '').replace(/^Cubre la .*?: /, '');
+        return `${cuerpo} el ${fechaCorta(d.dateStr)}`;
+    });
+    const cabeza = `${input.code} de ${apellidoCorto(input.nombre)} ${fechaCorta(input.desde)}→${fechaCorta(input.hasta)}: cubrir con 12 h en los ${ok.length} días`;
+    const sin = no.map((d) => `${fechaCorta(d.dateStr)} sin cubrir: ${d.motivo}`);
+    return [cabeza, pares.join('; '), sin.join('; ')].filter(Boolean).join('\n');
+}
+
+/** Si el campo no está en el SLA, se exige cobertura (igual que antes del 10/10). */
+export function slaExigeCobertura(sla: { exigeCobertura?: boolean } | null | undefined): boolean {
+    return sla?.exigeCobertura !== false;
+}
+
+const NO_PINTAR_12 = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'E', 'A', 'AA', 'PG', 'ART', 'RET', 'REF', 'ESC', 'EV', 'RFZ', 'TURA', 'EXTENDED', 'SGS', 'SUS', 'LT']);
+
+/** D12, N12 o un turno de trabajo del puesto de 12 h o más. */
+export function esJornada12h(code: string, hours?: number): boolean {
+    const c = up(code);
+    if (c === 'D12' || c === 'N12') return true;
+    if (!c || NO_PINTAR_12.has(c)) return false;
+    return Number(hours) >= 12;
+}
+
+/** Fondo rojo y letra blanca. Conserva el anillo de pendiente o de comparación. */
+export function estiloJornada12(style: string, code: string, hours?: number): string {
+    if (!esJornada12h(code, hours)) return style;
+    const extra = String(style || '').split(/\s+/).filter((c) => c.startsWith('ring') || c.startsWith('border-l'));
+    return ['bg-red-600', 'text-white', 'border-red-800', 'font-black', ...extra].join(' ');
 }
 
 export function textoResumen12h(propuestas: readonly Propuesta12h[]): string {
