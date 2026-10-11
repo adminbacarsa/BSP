@@ -300,8 +300,8 @@ function parEntrePuestos(
         objectiveId?: string;
     },
     falta: Set<string>,
-    d12: Horario12 & { code: 'D12' },
-    n12: Horario12 & { code: 'N12' },
+    d12: Horario12 & { code: 'D12' | 'N12' },
+    n12: Horario12 & { code: 'D12' | 'N12' },
 ): Propuesta12h | null {
     const orden: Array<{ banda: string; dCodes: string[]; nCodes: string[] }> = [
         { banda: 'T', dCodes: ['M', 'T'], nCodes: ['T', 'N'] },

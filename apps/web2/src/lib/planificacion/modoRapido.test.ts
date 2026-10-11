@@ -245,6 +245,25 @@ describe('modo rápido · pegado de Excel', () => {
         assert.equal(normalizarCodigoExcel('VF/T', CONOCIDOS).desconocido, 'VF/T');
     });
 
+    it('lista cada celda con código de otro objetivo y usa la equivalencia guardada', () => {
+        const tsv = [
+            '\t\tLEGAJO\tPUESTO\tJ\tV\tS\tD',
+            '\t\t\t\t1\t2\t3\t4',
+            'PERALTA JEREMIAS\t\t\tPLAYA\tVF/T\tM\tVF/T\tBANCO',
+        ].join('\n');
+        const sin = prepararPegadoExcel(parsearTsv(tsv), { guardias, cursor: { r: 0, c: 0 }, cols: 31, conocidos: CONOCIDOS });
+        assert.deepEqual((sin.codigosAjenos || []).map((c) => [c.marca, c.banda, c.col, c.fila]), [['VF', 'T', 0, 0], ['VF', 'T', 2, 0], ['BANCO', null, 3, 0]]);
+        assert.deepEqual(sin.filas[0].celdas.map((c) => c.code), ['M']);
+        const con = prepararPegadoExcel(parsearTsv(tsv), {
+            guardias, cursor: { r: 0, c: 0 }, cols: 31, conocidos: CONOCIDOS,
+            equivalenciasOtro: [{ codigo: 'VF', objectiveId: 'vifood', clientId: 'c1', objectiveName: 'Vifood', banda: 'T', positionName: 'Puesto 1', startTime: '14:00', endTime: '22:00', hours: 8 }],
+        });
+        const vf = (con.codigosAjenos || []).filter((c) => c.marca === 'VF');
+        assert.equal(vf.length, 2);
+        assert.ok(vf.every((c) => c.objectiveId === 'vifood' && c.startTime === '14:00' && c.banda === 'T'));
+        assert.deepEqual(con.filas[0].celdas.map((c) => c.code), ['M']);
+    });
+
     it('alinea por legajo y por nombre aunque el orden no sea el de la grilla', () => {
         const tsv = [
             '\t\tLEGAJO\tPUESTO\tJ\tV\tS\tD',

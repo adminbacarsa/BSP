@@ -222,7 +222,6 @@ import {
 import {
     decidirAsignacionOtroObjetivo,
     esLicenciaCodigo,
-    fechaCorta,
     modoEscrituraOtroObjetivo,
     urlCronograma,
     validarContraTodos,
@@ -7962,7 +7961,7 @@ function PlanificacionDesktop() {
             const pubMonth = currentDate.getMonth() + 1;
             const publishLookupKey = planificacionPublishLookupKey(selectedObjective, pubYear, pubMonth);
             const isPublished = isPlanificacionPublished(publishStatusMap[publishLookupKey]);
-            const logData: { empId: string; date: string; action: string; detail: string; via?: string }[] = [];
+            const logData: { empId: string; date: string; action: string; detail: string; via?: string; destinoId?: string }[] = [];
             const employeesById: Record<string, any> = {};
             employees.forEach((e: any) => { employeesById[e.id] = e; });
             // snapshotData ya armado en doSave (grilla completa del mes)
@@ -8440,7 +8439,7 @@ function PlanificacionDesktop() {
                                 change.menuRapidoVia,
                             );
                         } else {
-                            logData.push({ empId, date: dateStr, action: actionType, detail: actionDetail, via: change.menuRapidoVia || undefined });
+                            logData.push({ empId, date: dateStr, action: actionType, detail: actionDetail, via: change.menuRapidoVia || undefined, ...(change.menuRapidoVia === 'OTRO_OBJETIVO' ? { destinoId: String(change.objectiveId || '') } : {}) });
                         }
                     }
                     await flushBatchWhenFull();
@@ -8481,6 +8480,26 @@ function PlanificacionDesktop() {
                             bumpBatchOp();
                         }
                     }
+                    await flushBatchWhenFull();
+                }
+                for (const entry of logData) {
+                    if (entry.via !== 'OTRO_OBJETIVO') continue;
+                    if (isPublished && !correctionMode && logData.length < AUDIT_CONSOLIDATE_MIN) continue;
+                    batch.set(doc(collection(db, 'audit_logs')), stampEmpresaId({
+                        action: 'ASIGNACION_OTRO_OBJETIVO',
+                        module: 'PLANIFICADOR',
+                        details: `${entry.detail} en ${getObjectiveName(entry.destinoId || '') || 'otro objetivo'} desde ${getObjectiveName(selectedObjective)}`,
+                        timestamp: serverTimestamp(),
+                        actorName: realActorName,
+                        actorUid: auth.currentUser?.uid,
+                        objectiveId: entry.destinoId || null,
+                        objectiveName: getObjectiveName(entry.destinoId || '') || null,
+                        origenObjectiveId: selectedObjective,
+                        employeeId: entry.empId,
+                        fecha: entry.date,
+                        via: 'OTRO_OBJETIVO',
+                    }, empresaId));
+                    bumpBatchOp();
                     await flushBatchWhenFull();
                 }
 
@@ -9292,6 +9311,29 @@ function PlanificacionDesktop() {
         const horario = work?.scheduleLabel && work.scheduleLabel !== '—'
             ? work.scheduleLabel
             : (opt?.startTime && opt?.endTime ? `${opt.startTime}–${opt.endTime}` : '');
+        const permitidosMenu = idsObjetivosDelCrono(selectedObjective, selectedGrupo?.objectiveIds, !!(selectedGrupo && grupoUnifiedMode));
+        const ajenoMenu = (cellTurnosMap[keyTurno] || []).find((d: any) => d && !d.isDeleted && esTurnoAjenoAlCrono(d.objectiveId, permitidosMenu))
+            || (shMenu && esTurnoAjenoAlCrono(shMenu.objectiveId, permitidosMenu) ? shMenu : null);
+        if (ajenoMenu && !menuOpciones.visible) {
+            const objAjeno = String(ajenoMenu.objectiveId || '');
+            const nombreObj = getObjectiveName(objAjeno) || 'otro objetivo';
+            avisarResultadoOtro({
+                escritos: 0,
+                avisos: [{
+                    mensaje: `${celda.emp.name || 'El guardia'} ya tiene ${String(ajenoMenu.code || 'turno').toUpperCase()} en ${nombreObj} el ${fechaCorta(celda.dateStr)}`,
+                    href: urlCronograma({
+                        objectiveId: objAjeno,
+                        clientId: String(ajenoMenu.clientId || clients.find((c) => (c.objetivos || []).some((o: any) => String(o.id) === objAjeno))?.id || ''),
+                        year: Number(celda.dateStr.slice(0, 4)),
+                        month: Number(celda.dateStr.slice(5, 7)),
+                        dateStr: celda.dateStr,
+                        empId: celda.emp.id,
+                    }),
+                    objetivoNombre: nombreObj,
+                }],
+            });
+            return;
+        }
         setMenuRapido({
             x: ev.clientX,
             y: ev.clientY,
@@ -14186,6 +14228,15 @@ function PlanificacionDesktop() {
             return [];
         }
     };
+    const equivalenciasOtroDelObjetivo = async (): Promise<EquivalenciaOtro[]> => {
+        if (!empresaId || !selectedObjective) return [];
+        try {
+            const snap = await getDoc(doc(db, 'planificacion_import_mapeos', `${empresaId}_${selectedObjective}`));
+            return (snap.exists() ? (snap.data().equivalenciasOtro || []) : []) as EquivalenciaOtro[];
+        } catch {
+            return [];
+        }
+    };
     const pegarRapido = async (inicio: CeldaRC | null, rg: RangoRC | null, texto: string, html?: string) => {
         const interno = portapapelesRapidoRef.current;
         const limpio = (t: string) => t.replace(/\r/g, '').trim();
@@ -14199,7 +14250,7 @@ function PlanificacionDesktop() {
         const conocidos = new Set(opcionesDeCodigo([], slaTodosRapido, ultimoUsadoRapido, catalogoNovedad).map((o) => normalizarCodigo(o.code)));
         const colores = html ? coloresParaTsv(matriz, html) : null;
         const equivalencias = await equivalenciasDelObjetivo();
-        const preview = prepararPegadoExcel(matriz, { guardias: guardiasPegado(), cursor: inicio, cols: dimsRapido.cols, conocidos, colores, equivalencias });
+        const preview = prepararPegadoExcel(matriz, { guardias: guardiasPegado(), cursor: inicio, cols: dimsRapido.cols, conocidos, colores, equivalencias, equivalenciasOtro: await equivalenciasOtroDelObjetivo() });
         if (preview.modo === 'posicion') {
             pegarPorPosicion(matriz, inicio || { r: 0, c: 0 }, rg, null);
             return;
@@ -14212,7 +14263,7 @@ function PlanificacionDesktop() {
         const conocidos = new Set(opcionesDeCodigo([], slaTodosRapido, ultimoUsadoRapido, catalogoNovedad).map((o) => normalizarCodigo(o.code)));
         const colores = html ? coloresParaTsv(matriz, html) : null;
         const equivalencias = await equivalenciasDelObjetivo();
-        const preview = prepararPegadoExcel(matriz, { guardias: guardiasPegado(), cursor: null, cols: dimsRapido.cols, conocidos, colores, equivalencias });
+        const preview = prepararPegadoExcel(matriz, { guardias: guardiasPegado(), cursor: null, cols: dimsRapido.cols, conocidos, colores, equivalencias, equivalenciasOtro: await equivalenciasOtroDelObjetivo() });
         if (preview.modo === 'posicion') {
             setPegarExcel(null);
             pegarPorPosicion(matriz, { r: 0, c: 0 }, null, null);
@@ -14755,135 +14806,260 @@ function PlanificacionDesktop() {
         const aus = absencesMap[key];
         if (local || (aus && isActiveAbsence(aus))) {
             const code = String(local?.code || aus?.inferredCode || 'turno').toUpperCase();
-            const obj = getObjectiveName(local?.objectiveId || selectedObjective) || 'este objetivo';
-            toast.message(`${nombre} ya tiene ${code} en ${obj} el ${fechaCorta(dateStr)}`);
+            const objId = String(local?.objectiveId || selectedObjective || '');
+            const obj = getObjectiveName(objId) || 'este objetivo';
+            const ajeno = !!local && esTurnoAjenoAlCrono(local.objectiveId, idsObjetivosDelCrono(selectedObjective, selectedGrupo?.objectiveIds, !!(selectedGrupo && grupoUnifiedMode)));
+            avisarResultadoOtro({
+                escritos: 0,
+                avisos: [{
+                    mensaje: `${nombre} ya tiene ${code} en ${obj} el ${fechaCorta(dateStr)}`,
+                    href: ajeno ? urlCronograma({
+                        objectiveId: objId,
+                        clientId: String(local?.clientId || clients.find((c) => (c.objetivos || []).some((o: any) => String(o.id) === objId))?.id || ''),
+                        year: Number(dateStr.slice(0, 4)),
+                        month: Number(dateStr.slice(5, 7)),
+                        dateStr,
+                        empId,
+                    }) : undefined,
+                    objetivoNombre: obj,
+                }],
+            });
             return;
         }
         setFranjasOtro([]);
         setOtroObjetivo({ empId, nombre, dateStr });
     };
+    const leerFranjasDe = async (objectiveId: string): Promise<FranjaOpcion[]> => {
+        const snap = await getDocs(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa));
+        const allDocs = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+        const cliente = clients.find((c) => (c.objetivos || []).some((o: any) => String(o.id) === objectiveId));
+        const matching = filterSlasForPlanningContext(allDocs, cliente?.id || '', objectiveId, clients, slaIdToObjId);
+        const year = currentDate.getFullYear();
+        const month = currentDate.getMonth();
+        const pick = pickSlaForPlanningMonth(matching, year, month);
+        const srv = pick.vigente ?? pickClosedSlaForPlanningMonth(matching, year, month) ?? pick.fallback;
+        const { structure } = buildPlanningPositionStructure(srv, { monthHasSla: !!srv, hasExactMatch: pick.hasExactMatch });
+        const franjas: FranjaOpcion[] = [];
+        for (const pos of structure || []) {
+            for (const sh of pos.shifts || []) {
+                const code = String(sh.code || '').toUpperCase();
+                if (!code || code === 'F' || code === 'RET') continue;
+                franjas.push({
+                    positionName: String(pos.positionName || 'General'),
+                    code,
+                    startTime: String(sh.startTime || '07:00'),
+                    endTime: String(sh.endTime || '15:00'),
+                    hours: Number(sh.hours) || 8,
+                });
+            }
+        }
+        return franjas;
+    };
     const cargarFranjasOtro = async (objectiveId: string) => {
         setCargandoFranjasOtro(true);
         setFranjasOtro([]);
         try {
-            const snap = await getDocs(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa));
-            const allDocs = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
-            const cliente = clients.find((c) => (c.objetivos || []).some((o: any) => String(o.id) === objectiveId));
-            const matching = filterSlasForPlanningContext(allDocs, cliente?.id || '', objectiveId, clients, slaIdToObjId);
-            const year = currentDate.getFullYear();
-            const month = currentDate.getMonth();
-            const pick = pickSlaForPlanningMonth(matching, year, month);
-            const srv = pick.vigente ?? pickClosedSlaForPlanningMonth(matching, year, month) ?? pick.fallback;
-            const { structure } = buildPlanningPositionStructure(srv, { monthHasSla: !!srv, hasExactMatch: pick.hasExactMatch });
-            const franjas: FranjaOpcion[] = [];
-            for (const pos of structure || []) {
-                for (const sh of pos.shifts || []) {
-                    const code = String(sh.code || '').toUpperCase();
-                    if (!code || code === 'F' || code === 'RET') continue;
-                    franjas.push({
-                        positionName: String(pos.positionName || 'General'),
-                        code,
-                        startTime: String(sh.startTime || '07:00'),
-                        endTime: String(sh.endTime || '15:00'),
-                        hours: Number(sh.hours) || 8,
-                    });
-                }
-            }
-            setFranjasOtro(franjas);
+            setFranjasOtro(await leerFranjasDe(objectiveId));
         } catch {
             toast.error('No se pudo leer el servicio de ese objetivo.');
         } finally {
             setCargandoFranjasOtro(false);
         }
     };
-    const confirmarOtroObjetivo = async (sel: { objetivo: ObjetivoOpcion; franja: FranjaOpcion }) => {
-        const ctx = otroObjetivo;
-        if (!ctx || !empresaId) return;
-        const anio = Number(ctx.dateStr.slice(0, 4));
-        const mes = Number(ctx.dateStr.slice(5, 7));
-        let publicados = false;
-        try {
-            const est = await fetchPlanificacionEstadoDoc(empresaId, sel.objetivo.id, anio, mes);
-            publicados = !!(est?.data?.publishedAt);
-        } catch { publicados = false; }
-        const modo = modoEscrituraOtroObjetivo(publicados, canCorrectPlanning);
-        if (!modo.ok) { toast.message(modo.mensaje); return; }
-        const snap = await getDocs(query(collection(db, 'turnos'), where('employeeId', '==', ctx.empId), where('empresaId', '==', empresaId)));
-        const delMes: Array<{ objectiveId: string; clientId?: string; code: string; scheduleDate: string; start?: string; end?: string; hours?: number; isDeleted?: boolean }> = [];
-        snap.forEach((d) => {
-            const data = d.data() as any;
-            if (data.isDeleted) return;
-            const fecha = String(data.scheduleDate || '');
-            if (!fecha.startsWith(`${anio}-${String(mes).padStart(2, '0')}`)) return;
-            delMes.push({
-                objectiveId: String(data.objectiveId || ''),
-                clientId: data.clientId,
-                code: String(data.code || '').toUpperCase(),
-                scheduleDate: fecha,
-                start: typeof data.startTime === 'string' ? data.startTime : '',
-                end: typeof data.endTime === 'string' ? data.endTime : '',
-                hours: Number(data.hours) || 0,
-            });
-        });
-        const eseDia = delMes.filter((t) => t.scheduleDate === ctx.dateStr).map((t) => ({
-            objectiveId: t.objectiveId,
-            objectiveName: getObjectiveName(t.objectiveId) || t.objectiveId,
-            clientId: t.clientId,
-            code: t.code,
-            esLicencia: esLicenciaCodigo(t.code),
-        }));
-        const decision = decidirAsignacionOtroObjetivo({ nombre: ctx.nombre, empId: ctx.empId, dateStr: ctx.dateStr, turnos: eseDia });
-        if (!decision.ok) {
-            const href = decision.abrir ? urlCronograma(decision.abrir) : '';
-            toast.message(decision.mensaje, href ? { action: { label: `Abrir el cronograma de ${decision.abrir ? getObjectiveName(decision.abrir.objectiveId) : ''}`, onClick: () => { window.location.href = href; } } } : undefined);
-            return;
-        }
+    type PedidoOtro = { empId: string; nombre: string; dateStr: string; objetivo: ObjetivoOpcion; franja: FranjaOpcion };
+    type AvisoOtro = { mensaje: string; href?: string; objetivoNombre?: string };
+    type ResultadoOtro = { escritos: number; avisos: AvisoOtro[] };
+    type TurnoDelGuardia = { objectiveId: string; clientId?: string; code: string; scheduleDate: string; start: string; end: string; hours: number };
+    const horaAr = (v: unknown): string => {
+        if (typeof v === 'string') return /^\d{1,2}:\d{2}/.test(v) ? v.slice(0, 5) : '';
+        const d = v && typeof (v as { toDate?: () => Date }).toDate === 'function'
+            ? (v as { toDate: () => Date }).toDate()
+            : (v instanceof Date ? v : null);
+        if (!d || Number.isNaN(d.getTime())) return '';
+        return d.toLocaleTimeString('en-GB', { timeZone: 'America/Argentina/Buenos_Aires', hour: '2-digit', minute: '2-digit', hour12: false });
+    };
+    const asignarEnOtroObjetivo = async (pedidos: PedidoOtro[]): Promise<ResultadoOtro> => {
+        const out: ResultadoOtro = { escritos: 0, avisos: [] };
+        if (!empresaId || !pedidos.length) return out;
+        const estados = new Map<string, ReturnType<typeof modoEscrituraOtroObjetivo>>();
+        const turnosEmp = new Map<string, TurnoDelGuardia[]>();
         const aMin = (hm: string) => {
             const [h, m] = String(hm || '0:0').split(':').map(Number);
             return (Number(h) || 0) * 60 + (Number(m) || 0);
         };
-        const horasMes = delMes.filter((t) => t.objectiveId !== String(selectedObjective || '')).reduce((s, t) => s + (Number(t.hours) || 0), 0) + (Number(empMonthlyHours[ctx.empId]) || 0);
-        const otros = delMes.filter((t) => t.scheduleDate !== ctx.dateStr && t.start && t.end).map((t) => {
-            const off = t.scheduleDate < ctx.dateStr ? -1 as const : 1 as const;
-            if (Math.abs(Number(t.scheduleDate.slice(8)) - Number(ctx.dateStr.slice(8))) > 1) return null;
-            return { startMin: aMin(t.start || ''), endMin: aMin(t.end || ''), dateOffset: off };
-        }).filter((x): x is { startMin: number; endMin: number; dateOffset: -1 | 1 } => !!x);
-        const val = validarContraTodos({
-            startMin: aMin(sel.franja.startTime),
-            endMin: aMin(sel.franja.endTime),
-            horasMes,
-            horasTurno: sel.franja.hours,
-            otros,
-        });
-        if (!val.ok) { toast.message(val.mensaje); return; }
-        const fila = displayedEmployees.findIndex((e: { id: string }) => e.id === ctx.empId);
-        const col = diasRapido.indexOf(ctx.dateStr);
-        if (fila < 0 || col < 0) { toast.message('Esa celda no está en la grilla.'); return; }
-        const celda = ctxRapido(fila, col);
-        const res = cambioRapido(celda.emp, ctx.dateStr, sel.franja.code, celda.ctx, {
-            code: sel.franja.code,
-            startTime: sel.franja.startTime,
-            endTime: sel.franja.endTime,
-            hours: sel.franja.hours,
-            name: sel.franja.code,
-            positionName: sel.franja.positionName,
-        });
-        if ('error' in res) { toast.message(res.error); return; }
-        const next = {
-            ...pendingChangesRef.current,
-            [`${ctx.empId}_${ctx.dateStr}`]: {
+        const diaAbs = (ds: string) => Math.round(Date.UTC(Number(ds.slice(0, 4)), Number(ds.slice(5, 7)) - 1, Number(ds.slice(8, 10))) / 86400000);
+        const next: Record<string, any> = { ...pendingChangesRef.current };
+        const horasLote = new Map<string, number>();
+        for (const ped of pedidos) {
+            const anio = Number(ped.dateStr.slice(0, 4));
+            const mes = Number(ped.dateStr.slice(5, 7));
+            const kEstado = `${ped.objetivo.id}_${anio}_${mes}`;
+            if (!estados.has(kEstado)) {
+                let publicado = false;
+                try {
+                    const est = await fetchPlanificacionEstadoDoc(empresaId, ped.objetivo.id, anio, mes);
+                    publicado = !!(est?.data?.publishedAt);
+                } catch { publicado = false; }
+                estados.set(kEstado, modoEscrituraOtroObjetivo(publicado, canCorrectPlanning));
+            }
+            const modo = estados.get(kEstado)!;
+            if (modo.ok === false) { out.avisos.push({ mensaje: `${ped.objetivo.name}: ${'mensaje' in modo ? modo.mensaje : ''}` }); continue; }
+            const key = `${ped.empId}_${ped.dateStr}`;
+            const local = next[key]?.isDeleted ? null : (next[key] || shiftsMap[key]);
+            const aus = absencesMap[key];
+            if (local || (aus && isActiveAbsence(aus))) {
+                const code = String(local?.code || aus?.inferredCode || 'turno').toUpperCase();
+                const obj = getObjectiveName(local?.objectiveId || selectedObjective) || 'este objetivo';
+                out.avisos.push({ mensaje: `${ped.nombre} ya tiene ${code} en ${obj} el ${fechaCorta(ped.dateStr)}` });
+                continue;
+            }
+            if (!turnosEmp.has(ped.empId)) {
+                const snap = await getDocs(query(collection(db, 'turnos'), where('employeeId', '==', ped.empId), where('empresaId', '==', empresaId)));
+                const lista: TurnoDelGuardia[] = [];
+                snap.forEach((d) => {
+                    const data = d.data() as any;
+                    if (data.isDeleted) return;
+                    const fecha = String(data.scheduleDate || '');
+                    if (!fecha) return;
+                    lista.push({
+                        objectiveId: String(data.objectiveId || ''),
+                        clientId: data.clientId,
+                        code: String(data.code || '').toUpperCase(),
+                        scheduleDate: fecha,
+                        start: horaAr(data.startTime),
+                        end: horaAr(data.endTime),
+                        hours: Number(data.hours) || 0,
+                    });
+                });
+                turnosEmp.set(ped.empId, lista);
+            }
+            const todos = turnosEmp.get(ped.empId)!;
+            const eseDia = todos.filter((t) => t.scheduleDate === ped.dateStr).map((t) => ({
+                objectiveId: t.objectiveId,
+                objectiveName: getObjectiveName(t.objectiveId) || t.objectiveId,
+                clientId: t.clientId,
+                code: t.code,
+                esLicencia: esLicenciaCodigo(t.code),
+            }));
+            const decision = decidirAsignacionOtroObjetivo({ nombre: ped.nombre, empId: ped.empId, dateStr: ped.dateStr, turnos: eseDia });
+            if (decision.ok === false && 'mensaje' in decision) {
+                out.avisos.push({
+                    mensaje: decision.mensaje,
+                    href: decision.abrir ? urlCronograma(decision.abrir) : undefined,
+                    objetivoNombre: decision.abrir ? getObjectiveName(decision.abrir.objectiveId) : undefined,
+                });
+                continue;
+            }
+            const mesKey = ped.dateStr.slice(0, 7);
+            const horasMes = todos.filter((t) => t.scheduleDate.startsWith(mesKey) && t.objectiveId !== String(selectedObjective || '')).reduce((s, t) => s + t.hours, 0)
+                + (Number(empMonthlyHours[ped.empId]) || 0)
+                + (horasLote.get(ped.empId) || 0);
+            const hoy = diaAbs(ped.dateStr);
+            const otros = todos.filter((t) => t.start && t.end && Math.abs(diaAbs(t.scheduleDate) - hoy) === 1).map((t) => ({
+                startMin: aMin(t.start),
+                endMin: aMin(t.end),
+                dateOffset: (diaAbs(t.scheduleDate) < hoy ? -1 : 1) as -1 | 1,
+            }));
+            const val = validarContraTodos({
+                startMin: aMin(ped.franja.startTime),
+                endMin: aMin(ped.franja.endTime),
+                horasMes,
+                horasTurno: ped.franja.hours,
+                otros,
+            });
+            if (val.ok === false && 'mensaje' in val) { out.avisos.push({ mensaje: `${ped.nombre} ${fechaCorta(ped.dateStr)}: ${val.mensaje}` }); continue; }
+            const fila = displayedEmployees.findIndex((e: { id: string }) => e.id === ped.empId);
+            const col = diasRapido.indexOf(ped.dateStr);
+            if (fila < 0 || col < 0) { out.avisos.push({ mensaje: `${ped.nombre}: esa celda no está en la grilla.` }); continue; }
+            const celda = ctxRapido(fila, col);
+            const res = cambioRapido(celda.emp, ped.dateStr, ped.franja.code, celda.ctx, {
+                code: ped.franja.code,
+                startTime: ped.franja.startTime,
+                endTime: ped.franja.endTime,
+                hours: ped.franja.hours,
+                name: ped.franja.code,
+                positionName: ped.franja.positionName,
+            });
+            if ('error' in res) { out.avisos.push({ mensaje: `${ped.nombre}: ${res.error}` }); continue; }
+            next[key] = {
                 ...res.change,
-                objectiveId: sel.objetivo.id,
-                clientId: sel.objetivo.clientId,
-                positionName: sel.franja.positionName,
+                objectiveId: ped.objetivo.id,
+                clientId: ped.objetivo.clientId,
+                positionName: ped.franja.positionName,
                 draft: modo.draft,
                 menuRapidoVia: 'OTRO_OBJETIVO',
-                comments: `Asignado en ${sel.objetivo.name}`,
-            },
-        };
-        commitPendingChanges(next);
-        setOtroObjetivo(null);
-        toast.success(`Turno en ${sel.objetivo.name}. Se guarda con el cronograma.`);
+                comments: `Asignado en ${ped.objetivo.name}`,
+            };
+            horasLote.set(ped.empId, (horasLote.get(ped.empId) || 0) + ped.franja.hours);
+            out.escritos += 1;
+        }
+        if (out.escritos) commitPendingChanges(next);
+        return out;
+    };
+    const avisarResultadoOtro = (r: ResultadoOtro) => {
+        if (r.avisos.length === 1) {
+            const a = r.avisos[0];
+            toast.message(a.mensaje, a.href ? { action: { label: `Abrir el cronograma de ${a.objetivoNombre || 'ese objetivo'}`, onClick: () => { window.location.href = a.href!; } } } : undefined);
+        } else if (r.avisos.length > 1) {
+            toast.message(`${r.avisos.length} celdas no se asignaron: ${r.avisos.slice(0, 3).map((a) => a.mensaje).join(' · ')}${r.avisos.length > 3 ? '…' : ''}`);
+        }
+    };
+    const confirmarOtroObjetivo = async (sel: { objetivo: ObjetivoOpcion; franja: FranjaOpcion }) => {
+        const ctx = otroObjetivo;
+        if (!ctx) return;
+        const r = await asignarEnOtroObjetivo([{ empId: ctx.empId, nombre: ctx.nombre, dateStr: ctx.dateStr, objetivo: sel.objetivo, franja: sel.franja }]);
+        avisarResultadoOtro(r);
+        if (r.escritos) {
+            setOtroObjetivo(null);
+            toast.success(`Turno en ${sel.objetivo.name}. Se guarda con el cronograma.`);
+        }
+    };
+    const aplicarAjenosPegado = async (items: Array<{ fila: number; col: number; objectiveId: string; clientId: string; objectiveName: string; positionName: string; code: string; startTime: string; endTime: string; hours: number; marca: string; banda: string }>) => {
+        if (!pegarExcel || pegarExcel.paso !== 'resumen' || !items.length) return;
+        const { preview, asignacion } = pegarExcel;
+        const pedidos: PedidoOtro[] = [];
+        for (const it of items) {
+            const filaPreview = preview.filas[it.fila];
+            const filaGrilla = filaPreview ? asignacion[filaPreview.indice] : null;
+            const emp = filaGrilla != null ? displayedEmployees[filaGrilla] : null;
+            const ds = diasRapido[it.col];
+            if (!emp || !ds) continue;
+            pedidos.push({
+                empId: emp.id,
+                nombre: String(emp.name || emp.id),
+                dateStr: ds,
+                objetivo: { id: it.objectiveId, clientId: it.clientId, clientName: '', name: it.objectiveName },
+                franja: { positionName: it.positionName, code: it.code, startTime: it.startTime, endTime: it.endTime, hours: it.hours },
+            });
+        }
+        const equivs = new Map<string, EquivalenciaOtro>();
+        for (const it of items) {
+            equivs.set(it.marca, {
+                codigo: it.marca,
+                objectiveId: it.objectiveId,
+                clientId: it.clientId,
+                objectiveName: it.objectiveName,
+                banda: it.banda || it.code,
+                positionName: it.positionName,
+                startTime: it.startTime,
+                endTime: it.endTime,
+                hours: it.hours,
+            });
+        }
+        if (empresaId && selectedObjective && equivs.size) {
+            try {
+                const ref = doc(db, 'planificacion_import_mapeos', `${empresaId}_${selectedObjective}`);
+                const snap = await getDoc(ref);
+                const previas = (snap.exists() ? (snap.data().equivalenciasOtro || []) : []) as EquivalenciaOtro[];
+                const merged = [...previas.filter((e) => !equivs.has(e.codigo)), ...equivs.values()];
+                await setDoc(ref, { empresaId, objectiveId: selectedObjective, equivalenciasOtro: merged, updatedAt: serverTimestamp() }, { merge: true });
+            } catch {
+                toast.message('No se pudo guardar la equivalencia; la próxima vez se vuelve a preguntar.');
+            }
+        }
+        const r = await asignarEnOtroObjetivo(pedidos);
+        avisarResultadoOtro(r);
+        if (r.escritos) toast.success(`${r.escritos} turno(s) en otro objetivo. Se guardan con el cronograma.`);
     };
 
     const consultarFrancoFaltante = async (faltante: FaltanteBanda, franco: { empId: string; nombre: string }) => {
@@ -14921,8 +15097,24 @@ function PlanificacionDesktop() {
             if (c.soloLecturaAjena) {
                 ev.preventDefault();
                 ev.stopPropagation();
-                const objId = c.activeShift?.objectiveId || c.s?.objectiveId;
-                toast.message(textoAvisoTurnoAjeno(c.emp?.name, getObjectiveName(objId)));
+                const ajeno = c.activeShift || c.s;
+                const objId = String(ajeno?.objectiveId || '');
+                const nombreObj = getObjectiveName(objId) || 'otro objetivo';
+                avisarResultadoOtro({
+                    escritos: 0,
+                    avisos: [{
+                        mensaje: `${c.emp?.name || 'El guardia'} ya tiene ${String(ajeno?.code || 'turno').toUpperCase()} en ${nombreObj} el ${fechaCorta(c.dateStr)}`,
+                        href: objId ? urlCronograma({
+                            objectiveId: objId,
+                            clientId: String(ajeno?.clientId || clients.find((cl) => (cl.objetivos || []).some((o: any) => String(o.id) === objId))?.id || ''),
+                            year: Number(c.dateStr.slice(0, 4)),
+                            month: Number(c.dateStr.slice(5, 7)),
+                            dateStr: c.dateStr,
+                            empId: c.emp?.id,
+                        }) : undefined,
+                        objetivoNombre: nombreObj,
+                    }],
+                });
                 return;
             }
             abrirMenuRapidoCelda(ev, {
@@ -19562,6 +19754,9 @@ function PlanificacionDesktop() {
                             return { ...prev, decisiones: { ...prev.decisiones, [col]: decision } };
                         })}
                         onAplicar={aplicarPegadoExcel}
+                        objetivosAjenos={objetivosParaOtro()}
+                        franjasAjeno={leerFranjasDe}
+                        onAplicarAjenos={(items) => { void aplicarAjenosPegado(items); }}
                         puedeAlta={isSuperAdmin || (rolePermissions['RRHH'] || []).includes('create')}
                         onDarDeAlta={(fila) => setPedidoAlta({
                             indice: fila.indice,

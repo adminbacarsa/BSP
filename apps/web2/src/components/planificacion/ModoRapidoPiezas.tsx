@@ -412,7 +412,8 @@ export function PegarExcelModal({
             });
         }
         return () => { cancel = true; };
-    }, [claveAjenos, franjasAjeno]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [claveAjenos]);
     const resumen = estado.paso === 'resumen' ? textoResumenPegado({
         filas: estado.preview.filas.length,
         encontrados: estado.preview.filas.filter((f) => estado.asignacion[f.indice] != null).length,

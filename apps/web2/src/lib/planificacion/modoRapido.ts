@@ -991,6 +991,7 @@ export function prepararPegadoExcel(
             if (!pareceNombre(nombre) && normLegajo(legajo).length < 3) continue;
             const celdas: CeldaPegadoExcel[] = [];
             const desconocidos: string[] = [];
+            const ajenosFila: CodigoAjenoPegado[] = [];
             // Una licencia en celdas combinadas («LIC ANUAL 2025 X 14 DIAS») llega en la primera celda y las demás vacías.
             let licencia: { code: string; quedan: number } | null = null;
             const coloresFila = colorDeFila.get(f) ?? null;
@@ -1033,16 +1034,16 @@ export function prepararPegadoExcel(
                     licencia = { code: lic.code, quedan: lic.dias != null ? lic.dias - 1 : Number.POSITIVE_INFINITY };
                 } else if (res.code && (!eq.aplicada || pasaSinEquivalencia)) celdas.push({ col, code: res.code });
                 else if (eq.aplicada && eq.desconocido && !desconocidos.includes(eq.desconocido)) desconocidos.push(eq.desconocido);
-                else if (res.desconocido && !desconocidos.includes(res.desconocido)) {
-                    desconocidos.push(res.desconocido);
+                else if (res.desconocido) {
+                    if (!desconocidos.includes(res.desconocido)) desconocidos.push(res.desconocido);
                     const partido = partirCodigoAjeno(raw);
                     if (partido) {
                         const ya = resolverEquivalenciaOtro(raw, opts.equivalenciasOtro);
-                        codigosAjenos.push({
+                        ajenosFila.push({
                             codigo: raw.trim(),
                             marca: partido.marca,
                             banda: ya?.banda || partido.banda,
-                            fila: filas.length,
+                            fila: -1,
                             col,
                             objectiveId: ya?.objectiveId,
                             clientId: ya?.clientId,
@@ -1058,6 +1059,7 @@ export function prepararPegadoExcel(
             const elegido = elegirGuardia(nombre, legajo, opts.guardias, ocupadas);
             const yaCargado = !elegido && celdas.length === 0 && elegirGuardia(nombre, legajo, opts.guardias, new Set());
             if (yaCargado) continue;
+            for (const a of ajenosFila) codigosAjenos.push({ ...a, fila: filas.length });
             if (elegido) ocupadas.add(elegido.fila);
             for (const d of desconocidos) descSet.add(d);
             filas.push({
