@@ -256,11 +256,21 @@ import {
     planPegado,
     planRelleno,
     planSerie,
+    elegirGuardia,
     resolverNovedad,
     tipoDeCodigo,
     type TipoNovedadRapida,
 } from '@/lib/planificacion/modoRapido';
 import { tablaCodigosPlanilla } from '@/lib/planificacion/codigosHorarioPegado';
+import { mesLabelDe, resolverTurnoCopiado } from '@/lib/planificacion/copiarTurno';
+import {
+    CANAL_PORTAPAPELES,
+    KEY_PORTAPAPELES,
+    guardarPortapapeles,
+    leerPortapapeles,
+    publicarOrdenCrono,
+    type PortapapelesCrono,
+} from '@/lib/planificacion/cronoVentana';
 import { actualizarHorariosServicio } from '@/lib/servicios/aplicarServicioPlanilla';
 import { NOVEDAD_TYPE_SEEDS } from '@/lib/rrhh/novedadTypes';
 import { absenceService } from '@/services/absenceService';
@@ -1228,8 +1238,8 @@ const isPosExcludedOnDate = (pos: any, dateStr: string): boolean =>
 
 interface Coords { r: number; c: number; }
 
-/** Lo que se copia de una celda en modo rápido: código y horario. */
-type FuenteRapida = { code: string; startTime?: string; endTime?: string; hours?: number; name?: string; positionName?: string };
+/** Lo que se copia de una celda en modo rápido: código, puesto y horario. */
+type FuenteRapida = { code: string; startTime?: string; endTime?: string; hours?: number; name?: string; positionName?: string; copiarPuesto?: boolean; deploymentBand?: string };
 
 const hhmmRapido = (v: any): string | null => {
     if (!v) return null;
@@ -3084,6 +3094,12 @@ function PlanificacionDesktop() {
         const ids = new Set(sorted.map((e: any) => e.id));
         return [...sorted, ...dotacionPoolCandidates.filter((e: any) => !ids.has(e.id))];
     }, [dotacionBaseEmployees, bandFilter, employeeMonthStats, sortBy, sortDir, selectedObjective, customOrderMap, empDefaultPos, clients, forceShowAll, dotacionPoolCandidates]);
+
+    useEffect(() => {
+        if (!selectedObjective) return;
+        const month = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
+        publicarOrdenCrono(selectedObjective, displayedEmployees.map((e: { id: string }) => e.id), month);
+    }, [selectedObjective, displayedEmployees, currentDate]);
 
     useEffect(() => {
         const pendiente = altaPegadoRef.current;
@@ -13848,7 +13864,27 @@ function PlanificacionDesktop() {
     modoRapidoRef.current = modoRapido && !comparingSnapshot && !!selectedObjective;
     const dimsRapido = useMemo(() => ({ filas: displayedEmployees.length, cols: daysInMonth.length }), [displayedEmployees.length, daysInMonth.length]);
     const diasRapido = useMemo(() => daysInMonth.map((d) => getDateKey(d)), [daysInMonth]);
-    const portapapelesRapidoRef = useRef<{ tsv: string; celdas: Array<Array<FuenteRapida | null>> } | null>(null);
+    const portapapelesRapidoRef = useRef<PortapapelesCrono | null>(null);
+    useEffect(() => {
+        const aplicar = (p: PortapapelesCrono | null) => {
+            if (p && Array.isArray(p.celdas)) portapapelesRapidoRef.current = p;
+        };
+        aplicar(leerPortapapeles());
+        let ch: BroadcastChannel | null = null;
+        try {
+            ch = new BroadcastChannel(CANAL_PORTAPAPELES);
+            ch.onmessage = (e) => aplicar(e.data as PortapapelesCrono);
+        } catch { /* sin canal */ }
+        const onStorage = (e: StorageEvent) => {
+            if (e.key !== KEY_PORTAPAPELES || !e.newValue) return;
+            try { aplicar(JSON.parse(e.newValue) as PortapapelesCrono); } catch { /* ignore */ }
+        };
+        window.addEventListener('storage', onStorage);
+        return () => {
+            ch?.close();
+            window.removeEventListener('storage', onStorage);
+        };
+    }, []);
 
     const slaTodosRapido = useMemo<TurnoSla[]>(() => {
         const out: TurnoSla[] = [];
@@ -13903,6 +13939,7 @@ function PlanificacionDesktop() {
             hours: Number(base?.hours) || undefined,
             name: base?.name || base?.type,
             positionName: base?.positionName,
+            deploymentBand: base?.deploymentBand ? String(base.deploymentBand) : undefined,
         };
     };
     const puestoFilaRapido = (empId: string, c?: CtxCeldaGrilla): string => {
@@ -13978,6 +14015,41 @@ function PlanificacionDesktop() {
         }
         if (tipo === 'RET') {
             return { change: { ...base, code: 'RET', name: 'Retén', hours: 0, startTime: '00:00', positionName: 'Retén', isFranco: false } };
+        }
+        if ((tipo === 'TRABAJO' || tipo === 'DESPLIEGUE') && fuente?.copiarPuesto) {
+            const defecto = (() => {
+                const n = getEmpDefaultPos(emp.id);
+                return n && n !== 'General' && n !== 'Retén' ? String(n) : '';
+            })();
+            const copiado = resolverTurnoCopiado({
+                fuente,
+                puestoDestino: defecto || pos,
+                puestoDefecto: defecto,
+                nombreDestino: String(emp?.name || ''),
+                mesLabel: mesLabelDe(currentDate),
+                puestos: (effectivePosStructure || []).map((p: any) => ({
+                    positionName: String(p.positionName || ''),
+                    shifts: (p.shifts || []).map((s: any) => ({
+                        code: s.code, name: s.name, startTime: s.startTime, endTime: s.endTime, hours: s.hours,
+                    })),
+                })),
+            });
+            if (copiado) {
+                return {
+                    change: {
+                        ...base,
+                        code: copiado.code,
+                        name: copiado.name,
+                        hours: copiado.hours,
+                        startTime: copiado.startTime,
+                        endTime: copiado.endTime,
+                        positionName: copiado.positionName,
+                        isFranco: false,
+                        ...(fuente.deploymentBand ? { deploymentBand: fuente.deploymentBand } : {}),
+                        _copiaAvisos: copiado.avisos,
+                    },
+                };
+            }
         }
         if (tipo === 'DESPLIEGUE') {
             const posReal = pos !== 'General' ? pos : (effectivePosStructure?.[0]?.positionName || 'General');
@@ -14124,7 +14196,9 @@ function PlanificacionDesktop() {
             celdas.push(fila);
         }
         const tsv = matrizATsv(celdas.map((f) => f.map((x) => x?.code || '')));
-        portapapelesRapidoRef.current = { tsv, celdas };
+        const portapapeles: PortapapelesCrono = { tsv, celdas };
+        portapapelesRapidoRef.current = portapapeles;
+        guardarPortapapeles(portapapeles);
         if (cortar) {
             const items: ItemRapido[] = [];
             for (let r = rg.minR; r <= rg.maxR; r++) for (let c = rg.minC; c <= rg.maxC; c++) items.push({ r, c, borrar: true });
@@ -14138,6 +14212,27 @@ function PlanificacionDesktop() {
         nombre: String(e.name || e.id || ''),
         legajo: String(e.fileNumber || e.legajo || ''),
     }));
+    const pegarPorGuardia = (port: PortapapelesCrono, inicioCol: number) => {
+        const ocupadas = new Set<number>();
+        const items: ItemRapido[] = [];
+        (port.nombres || []).forEach((nombre, i) => {
+            if (!nombre) return;
+            const hit = elegirGuardia(nombre, '', guardiasPegado(), ocupadas);
+            if (!hit) return;
+            ocupadas.add(hit.fila);
+            (port.celdas[i] || []).forEach((cel, j) => {
+                items.push({
+                    r: hit.fila,
+                    c: inicioCol + j,
+                    code: cel?.code || '',
+                    borrar: !cel?.code,
+                    fuente: cel ? { ...cel, copiarPuesto: true } : null,
+                });
+            });
+        });
+        if (items.length) escribirRapido(items);
+        else toast.message('Ningún nombre del portapapeles está en este cronograma.');
+    };
     const pegarPorPosicion = (matriz: string[][], inicio: CeldaRC, rg: RangoRC | null, fuente: Array<Array<FuenteRapida | null>> | null) => {
         const rango = rg && (rg.maxR > rg.minR || rg.maxC > rg.minC) ? rg : undefined;
         const plan = planPegado(matriz, inicio, dimsRapido, rango);
@@ -14146,7 +14241,10 @@ function PlanificacionDesktop() {
             c: p.c,
             code: p.valor,
             borrar: !p.valor,
-            fuente: fuente ? fuente[p.fila]?.[p.col] : null,
+            fuente: (() => {
+                const celda = fuente ? fuente[p.fila]?.[p.col] : null;
+                return celda ? { ...celda, copiarPuesto: true } : null;
+            })(),
         })));
     };
     const abrirResumenPegado = (preview: PreviewPegadoExcel) => {
@@ -14170,11 +14268,17 @@ function PlanificacionDesktop() {
         }
     };
     const pegarRapido = async (inicio: CeldaRC | null, rg: RangoRC | null, texto: string, html?: string) => {
-        const interno = portapapelesRapidoRef.current;
         const limpio = (t: string) => t.replace(/\r/g, '').trim();
+        const fresco = leerPortapapeles();
+        if (fresco && (!portapapelesRapidoRef.current || limpio(texto) === limpio(fresco.tsv))) {
+            portapapelesRapidoRef.current = fresco;
+        }
+        const interno = portapapelesRapidoRef.current;
         const usarInterno = !!interno && (!limpio(texto) || limpio(texto) === limpio(interno.tsv));
         if (usarInterno) {
-            pegarPorPosicion(interno!.celdas.map((f) => f.map((x) => x?.code || '')), inicio || { r: 0, c: 0 }, rg, interno!.celdas);
+            const desde = inicio || { r: 0, c: 0 };
+            if (interno!.nombres?.length) pegarPorGuardia(interno!, desde.c);
+            else pegarPorPosicion(interno!.celdas.map((f) => f.map((x) => x?.code || '')), desde, rg, interno!.celdas);
             return;
         }
         const matriz = parsearTsv(texto);
@@ -14292,7 +14396,7 @@ function PlanificacionDesktop() {
         const pares = planRelleno(rg, dir);
         escribirRapido(pares.map((p) => {
             const f = fuenteRapida(p.desde.r, p.desde.c);
-            return { r: p.hacia.r, c: p.hacia.c, code: f?.code, borrar: !f, fuente: f };
+            return { r: p.hacia.r, c: p.hacia.c, code: f?.code, borrar: !f, fuente: f ? { ...f, copiarPuesto: true } : null };
         }));
     };
     const serieRapido = (origen: RangoRC, destino: CeldaRC) => {
@@ -14300,7 +14404,7 @@ function PlanificacionDesktop() {
         if (!plan) return;
         escribirRapido(plan.pares.map((p) => {
             const f = fuenteRapida(p.desde.r, p.desde.c);
-            return { r: p.hacia.r, c: p.hacia.c, code: f?.code, borrar: !f, fuente: f };
+            return { r: p.hacia.r, c: p.hacia.c, code: f?.code, borrar: !f, fuente: f ? { ...f, copiarPuesto: true } : null };
         }));
     };
 
@@ -14337,6 +14441,22 @@ function PlanificacionDesktop() {
                 };
             },
         });
+        const vistosCopia = new Set<string>();
+        const copias: AvisoRapido[] = [];
+        for (const [key, p] of Object.entries(pendingChanges) as [string, any][]) {
+            const textos = p?._copiaAvisos;
+            if (!Array.isArray(textos)) continue;
+            const corte = key.lastIndexOf('_');
+            if (corte < 0) continue;
+            const empId = key.slice(0, corte);
+            const dateStr = key.slice(corte + 1);
+            const nombre = String(displayedEmployees.find((e: any) => e.id === empId)?.name || '');
+            for (const texto of textos) {
+                if (!texto || vistosCopia.has(`${empId}|${texto}`)) continue;
+                vistosCopia.add(`${empId}|${texto}`);
+                copias.push({ tipo: 'COPIA', empId, nombre, dateStr, texto: String(texto) });
+            }
+        }
         return [...deLectura, ...avisosModoRapido({
             filas: displayedEmployees.map((e: any) => ({ id: e.id, nombre: String(e.name || e.id) })),
             dias: diasRapido,
@@ -14367,7 +14487,7 @@ function PlanificacionDesktop() {
             horasMes: (empId) => Number(empMonthlyHours[empId]) || 0,
             tope: planningLimits.monthly,
             topeAutorizado: (empId) => authorizedOver200Ids.has(empId) || !topeRequierePin(topeGrants[empId], periodoPlan),
-        }), ...fuera];
+        }), ...fuera, ...copias];
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [modoRapido, selectedObjective, comparingSnapshot, pendingChanges, shiftsMap, absencesMap, cellTurnosMap, displayedEmployees, diasRapido, empMonthlyHours, planningLimits.monthly, authorizedOver200Ids, topeGrants, periodoPlan, selectedGrupo, grupoUnifiedMode, effectivePosStructure, lecturaMes]);
     avisosRapidoRef.current = avisosRapido;

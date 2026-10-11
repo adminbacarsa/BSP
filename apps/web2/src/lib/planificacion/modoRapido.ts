@@ -419,7 +419,7 @@ export function opcionesDeCodigo(slaPuesto: TurnoSla[], slaTodos: TurnoSla[], ul
 export type TurnoAviso = { code: string; startTime?: string; endTime?: string; hours?: number; trabajo: boolean };
 
 export type AvisoRapido = {
-    tipo: 'DESCANSO' | 'TOPE' | 'LICENCIA' | 'SOLAPE' | 'SERVICIO' | 'SOBRECOBERTURA' | 'SIN_PUESTO';
+    tipo: 'DESCANSO' | 'TOPE' | 'LICENCIA' | 'SOLAPE' | 'SERVICIO' | 'SOBRECOBERTURA' | 'SIN_PUESTO' | 'COPIA';
     puestoSugerido?: string;
     empId: string;
     nombre: string;
@@ -539,7 +539,7 @@ export function agruparAvisos(avisos: AvisoRapido[]): GrupoAviso[] {
     const map = new Map<string, AvisoRapido[]>();
     for (const a of avisos) {
         const horas = a.tipo === 'DESCANSO' ? String(a.restHours ?? '') : '';
-        const clave = `${a.empId}|${a.tipo}|${horas}`;
+        const clave = a.tipo === 'COPIA' ? `${a.empId}|${a.tipo}|${a.texto}` : `${a.empId}|${a.tipo}|${horas}`;
         const list = map.get(clave) || [];
         list.push(a);
         map.set(clave, list);
@@ -562,7 +562,7 @@ export function agruparAvisos(avisos: AvisoRapido[]): GrupoAviso[] {
             texto = items.length > 1 ? `${ap} · ${items.length} fuera del servicio (${que}, ${dias})` : `${ap} · ${que} (${dias})`;
         } else if (a.tipo === 'SIN_PUESTO') {
             texto = items.length > 1 ? `${ap} · sin puesto (${dias})` : a.texto;
-        } else if (a.tipo === 'SOBRECOBERTURA') {
+        } else if (a.tipo === 'SOBRECOBERTURA' || a.tipo === 'COPIA') {
             texto = a.texto;
         } else if (items.length > 1) {
             const etiq = a.tipo === 'LICENCIA' ? 'licencias' : 'solapes';
@@ -582,6 +582,7 @@ function horasDeAviso(a: AvisoRapido): string {
 
 /** Identidad de un aviso para «Visto»: tipo, guardia, día y horas. Si cambia algo, es otro aviso. */
 export function idAviso(a: AvisoRapido): string {
+    if (a.tipo === 'COPIA') return `${a.tipo}|${a.empId}|${a.texto}`;
     return `${a.tipo}|${a.empId}|${a.dateStr}|${horasDeAviso(a)}`;
 }
 
