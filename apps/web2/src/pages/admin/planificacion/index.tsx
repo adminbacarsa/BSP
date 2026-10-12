@@ -11964,7 +11964,6 @@ function PlanificacionDesktop() {
         );
         commitPendingChanges(next);
         setContinuarVista(null);
-        setBandasOcultas(false);
         if (turnos + francos > 0) {
             const niv = aceptadas.length ? ` y ${aceptadas.length} cambio(s) de nivelación` : '';
             toast.success(`Continuado desde el mes anterior: ${turnos} turnos y ${francos} francos${niv} en borrador. Revisalos y guardá el cronograma.`);
@@ -12293,7 +12292,6 @@ function PlanificacionDesktop() {
             toast.message('El borrador quedó en la grilla. El mapeo de códigos no se pudo guardar.');
         }
         if (!payload.quedaOtro) setImportarCtx(null);
-        setBandasOcultas(false);
         toast.success(payload.quedaOtro
             ? `${n} celdas en borrador en ${payload.objectiveName}. Seguí con el siguiente objetivo.`
             : `${n} celdas en borrador en ${payload.objectiveName}. Revisalas y guardá el cronograma.`);
@@ -14713,7 +14711,6 @@ function PlanificacionDesktop() {
             toast.message(textoCargarEvento(sinVincular.map((s) => s.ds)));
         }
         if (vinculadas.length) void asignarPegadoAEventos(vinculadas);
-        setBandasOcultas(false);
     };
     const asignarPegadoAEventos = async (lista: Array<{ emp: any; ds: string; vinculo: string }>) => {
         if (!empresaId) return;
@@ -15230,7 +15227,6 @@ function PlanificacionDesktop() {
         }
         sellarAtribucion12(next, lista.filter((p) => p.modo === 'par').map((p) => p.dateStr));
         commitPendingChanges(next);
-        setBandasOcultas(false);
     };
 
     const aplicarPropuestas12 = (lista: Propuesta12h[]) => {
@@ -15288,7 +15284,6 @@ function PlanificacionDesktop() {
         }
         commitPendingChanges(next);
         toast.success(lib.texto);
-        setBandasOcultas(false);
     };
     const irSobra = (empId: string, dateStr: string) => {
         const r = displayedEmployees.findIndex((e: any) => e.id === empId);
