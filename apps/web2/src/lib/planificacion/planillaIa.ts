@@ -120,13 +120,23 @@ function codigoServicio(item: LeyendaIa): string {
   return (item.banda || item.codigo || '').toUpperCase();
 }
 
+function bandaCodigo(code: string): string {
+  const c = code.toUpperCase().replace(/\s+/g, '');
+  const m = c.match(/^(?:P\d+|PL)(D12|N12|M|T|N)$/);
+  return m ? m[1] : c;
+}
+
 function buscarFranja(franjas: readonly FranjaServicioPlanilla[], puesto: string, code: string): FranjaServicioPlanilla | undefined {
   const p = norm(puesto);
-  const c = code.toUpperCase();
-  const delPuesto = franjas.filter((f) => norm(f.puesto) === p && f.code.toUpperCase() === c);
+  const c = code.toUpperCase().replace(/\s+/g, '');
+  const delPuesto = franjas.filter((f) => norm(f.puesto) === p && f.code.toUpperCase().replace(/\s+/g, '') === c);
   if (delPuesto.length) return delPuesto[0];
+  if (p) {
+    const porBanda = franjas.filter((f) => norm(f.puesto) === p && bandaCodigo(f.code) === bandaCodigo(c));
+    if (porBanda.length === 1) return porBanda[0];
+  }
   if (!p) {
-    const porCodigo = franjas.filter((f) => f.code.toUpperCase() === c);
+    const porCodigo = franjas.filter((f) => f.code.toUpperCase().replace(/\s+/g, '') === c);
     if (porCodigo.length === 1) return porCodigo[0];
   }
   return undefined;

@@ -84,15 +84,23 @@ function mismo(a: string, b: string): boolean {
   return norm(a) === norm(b);
 }
 
+function bandaPlana(code: string): string | null {
+  const c = up(code).replace(/\s+/g, '');
+  if (BANDAS.has(c)) return c;
+  const m = c.match(/^(?:P\d+|PL)(D12|N12|M|T|N)$/);
+  return m ? m[1] : null;
+}
+
 export function esFranjaPropia(pos: PuestoServicio): boolean {
   const tipo = String(pos.coverageType || '').toLowerCase();
   if (tipo === 'encargado' || tipo === 'eventos') return true;
   const nombre = norm(pos.positionName);
   if (nombre === 'RO' || nombre === 'EN' || /RONDIN|ENCARGAD|CORTINA/.test(nombre)) return true;
   const codes = [...new Set((pos.shifts || []).map((s) => up(s.code)).filter(Boolean))];
-  if (codes.length > 0 && codes.every((c) => !BANDAS.has(c))) return true;
+  const planas = codes.map((c) => bandaPlana(c)).filter((c): c is string => !!c);
+  if (codes.length > 0 && planas.length === 0) return true;
   const es24 = tipo === '24hs' || tipo === '24' || tipo === '24h';
-  const bandas = codes.filter((c) => c === 'M' || c === 'T' || c === 'N' || c === 'D12' || c === 'N12');
+  const bandas = planas.filter((c) => c === 'M' || c === 'T' || c === 'N' || c === 'D12' || c === 'N12');
   return !es24 && bandas.length <= 1 && codes.length > 0;
 }
 
@@ -118,15 +126,16 @@ function esCustom(t: TurnoDia, puestos: readonly PuestoServicio[]): boolean {
   const pos = puestoDe(t.positionName, puestos);
   if (pos && esFranjaPropia(pos)) return true;
   const code = up(t.code);
-  if (BANDAS.has(code) || NO_CUENTA.has(code)) return false;
+  if (bandaPlana(code) || NO_CUENTA.has(code)) return false;
   return code.length > 0;
 }
 
 function bandaDe(t: TurnoDia): Banda {
   const code = up(t.code);
-  if (code === 'M' || code === 'D12') return 'M';
-  if (code === 'T') return 'T';
-  if (code === 'N' || code === 'N12') return 'N';
+  const plana = bandaPlana(code);
+  if (plana === 'M' || plana === 'D12') return 'M';
+  if (plana === 'T') return 'T';
+  if (plana === 'N' || plana === 'N12') return 'N';
   const hm = String(t.startTime || '');
   const h = Number(hm.slice(0, 2));
   if (hm.includes(':') && h >= 12 && h < 20) return 'T';
@@ -138,7 +147,8 @@ function horasDe(t: TurnoDia): number {
   const n = Number(t.hours);
   if (n > 0) return n;
   const code = up(t.code);
-  if (code === 'D12' || code === 'N12') return 12;
+  const plana = bandaPlana(code);
+  if (plana === 'D12' || plana === 'N12') return 12;
   return 8;
 }
 
@@ -159,7 +169,7 @@ export function contarEstandar(turnos: readonly TurnoDia[]): { cuentas: CuentasB
   let D12 = 0;
   let N12 = 0;
   for (const t of turnos) {
-    const c = up(t.code);
+    const c = bandaPlana(up(t.code)) || up(t.code);
     if (c === 'M') M += 1;
     else if (c === 'T') T += 1;
     else if (c === 'N') N += 1;

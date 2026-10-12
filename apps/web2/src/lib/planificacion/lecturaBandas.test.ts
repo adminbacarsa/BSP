@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { contarEstandar, faltantesDelDia, leerDia, lineasDeSobra, proponerLiberar, puestoConLugar, type PuestoServicio, type TurnoDia } from './lecturaBandas';
+import { contarEstandar, esFranjaPropia, faltantesDelDia, leerDia, lineasDeSobra, proponerLiberar, puestoConLugar, type PuestoServicio, type TurnoDia } from './lecturaBandas';
 import type { TurnoPuesto12 } from './cierre12h';
 
 const DIA = '2026-10-01';
@@ -269,4 +269,32 @@ test('N de más en Puesto 2 nombra el puesto y los guardias', () => {
   assert.match(linea!.texto, /Puesto 2/);
   assert.match(linea!.texto, /PALACIOS/);
   assert.match(linea!.texto, /BARRIOS/);
+});
+
+test('P1M y P1T cierran la mañana y la tarde del puesto', () => {
+  const compuesto: PuestoServicio[] = [{
+    positionName: 'Puesto 1', qty: 1, coverageType: '24hs',
+    shifts: [{ code: 'P1M' }, { code: 'P1T' }, { code: 'N' }],
+  }];
+  const letras: PuestoServicio[] = [{
+    positionName: 'Puesto 1', qty: 1, coverageType: '24hs',
+    shifts: [{ code: 'M' }, { code: 'T' }, { code: 'N' }],
+  }];
+  const conCodigo = [
+    t('g', 'GANDIA', 'P1M', 'Puesto 1'),
+    t('u', 'GUZMAN', 'P1T', 'Puesto 1'),
+    t('n', 'NAVA', 'N', 'Puesto 1'),
+  ];
+  const conLetra = [
+    t('g', 'GANDIA', 'M', 'Puesto 1'),
+    t('u', 'GUZMAN', 'T', 'Puesto 1'),
+    t('n', 'NAVA', 'N', 'Puesto 1'),
+  ];
+  const a = leerDia({ turnos: conCodigo, puestos: compuesto });
+  const b = leerDia({ turnos: conLetra, puestos: letras });
+  assert.equal(esFranjaPropia(compuesto[0]), false);
+  assert.equal(a.falta.M, 0);
+  assert.equal(a.falta.T, 0);
+  assert.equal(a.falta.N, b.falta.N);
+  assert.equal(a.custom.length, 0);
 });

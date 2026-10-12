@@ -4,8 +4,12 @@ import { detectarCuadros, normPlanilla, type CeldaPlano } from './importarExcel'
 import { prepararPegadoExcel } from './modoRapido';
 import { claveEquivalencia, type EquivalenciaCodigo } from './equivalenciaCodigo';
 import {
+  adoptarCodigoVigente,
   avisosFueraDeServicio,
   compararConVigente,
+  equivalenciasAlCodigoServicio,
+  type DiaSemana,
+  type FranjaServicioPlanilla,
   emparejarPuestos,
   etiquetaDias,
   franjasDesdeVigente,
@@ -252,10 +256,10 @@ describe('servicio desde la planilla', () => {
     ], refs), 2026, 10);
     const prop = proponerServicioDesdePlanilla(cuadro, 2026, 10);
     const franja = (puesto: string, code: string) => prop.franjas.find((f) => f.puesto === puesto && f.code === code);
-    const p1m = franja('Puesto 1', 'M');
-    const p1t = franja('Puesto 1', 'T');
-    const p2m = franja('Puesto 2', 'M');
-    const p2t = franja('Puesto 2', 'T');
+    const p1m = franja('Puesto 1', 'P1M');
+    const p1t = franja('Puesto 1', 'P1T');
+    const p2m = franja('Puesto 2', 'P2M');
+    const p2t = franja('Puesto 2', 'P2T');
     assert.equal(p1m?.startTime, '08:00');
     assert.equal(p1m?.endTime, '15:00');
     assert.equal(p1t?.startTime, '15:00');
@@ -273,5 +277,49 @@ describe('servicio desde la planilla', () => {
     assert.match(prop.funciones?.join(' ') || '', /Relevante: cubre Puesto 1 y Puesto 2/);
     assert.match(prop.resumen || '', /Puesto 1/);
     assert.doesNotMatch(prop.resumen || '', /falta/);
+    const eqP1 = prop.equivalencias.find((e) => e.codigo === 'P1M' && e.positionName === 'Puesto 1');
+    assert.equal(eqP1?.code, 'P1M');
+    assert.equal(eqP1?.startTime, '08:00');
+    assert.equal(eqP1?.endTime, '15:00');
+    assert.equal(prop.equivalencias.some((e) => e.codigo === 'M' && e.code !== 'M'), false);
+  });
+
+  it('mismo puesto y mismo horario conserva el código del servicio (P1M, Cortina, Refuerzo)', () => {
+    const propuesta: FranjaServicioPlanilla[] = [
+      { id: 'a', puesto: 'Puesto 1', code: 'M', startTime: '08:00', endTime: '15:00', cantidad: 1, dias: [] },
+      { id: 'b', puesto: 'Puesto 1', code: 'T', startTime: '15:00', endTime: '22:00', cantidad: 1, dias: [] },
+      { id: 'c', puesto: 'Puesto 2', code: 'M', startTime: '10:00', endTime: '16:00', cantidad: 1, dias: [] },
+      { id: 'd', puesto: 'Puesto 2', code: 'T', startTime: '16:00', endTime: '22:00', cantidad: 1, dias: [] },
+      { id: 'e', puesto: 'Cortina', code: 'C', startTime: '07:00', endTime: '15:00', cantidad: 1, dias: ['L', 'M', 'X', 'J', 'V'] },
+      { id: 'f', puesto: 'Refuerzo', code: 'RF', startTime: '12:00', endTime: '22:00', cantidad: 1, dias: ['V', 'S', 'D'] },
+    ];
+    const vigente = [
+      { puesto: 'Puesto 1', code: 'P1M', startTime: '08:00', endTime: '15:00', cantidad: 1, dias: [] as string[] },
+      { puesto: 'Puesto 1', code: 'P1T', startTime: '15:00', endTime: '22:00', cantidad: 1, dias: [] as string[] },
+      { puesto: 'Puesto 2', code: 'P2M', startTime: '10:00', endTime: '16:00', cantidad: 1, dias: [] as string[] },
+      { puesto: 'Puesto 2', code: 'P2T', startTime: '16:00', endTime: '22:00', cantidad: 1, dias: [] as string[] },
+      { puesto: 'Cortina', code: 'CO', startTime: '07:00', endTime: '15:00', cantidad: 1, dias: ['L', 'M', 'X', 'J', 'V'] },
+      { puesto: 'Refuerzo', code: 'REF', startTime: '12:00', endTime: '22:00', cantidad: 1, dias: ['V', 'S', 'D'] },
+    ];
+    const diff = compararConVigente(propuesta, vigente);
+    assert.equal(diff.some((d) => d.estado === 'falta' || d.estado === 'sobra'), false);
+    assert.match(diff.find((d) => d.code === 'P1M')?.detalle || '', /M coincide \(código P1M en el servicio\)/);
+    assert.match(diff.find((d) => d.code === 'CO')?.detalle || '', /código CO en el servicio/);
+    assert.match(diff.find((d) => d.code === 'REF')?.detalle || '', /código REF en el servicio/);
+    const adoptadas = adoptarCodigoVigente(propuesta, vigente);
+    assert.deepEqual(adoptadas.map((f) => f.code), ['P1M', 'P1T', 'P2M', 'P2T', 'CO', 'REF']);
+    assert.equal(adoptadas[0].codigoPlanilla, 'M');
+    const eqs: EquivalenciaCodigo[] = [{
+      clave: 'M|none', codigo: 'P1M', color: 'none', code: 'M', startTime: '08:00', endTime: '15:00', positionName: 'Puesto 1', muestras: 4,
+    }];
+    assert.equal(equivalenciasAlCodigoServicio(eqs, propuesta, adoptadas)[0].code, 'P1M');
+    const otroHorario = compararConVigente(
+      [{ id: 'z', puesto: 'Puesto 1', code: 'M', startTime: '07:00', endTime: '15:00', cantidad: 1, dias: [] as DiaSemana[] }],
+      [{ puesto: 'Puesto 1', code: 'P1M', startTime: '08:00', endTime: '15:00', cantidad: 1, dias: [] }],
+    );
+    assert.equal(otroHorario.find((d) => d.code === 'M')?.estado, 'falta');
+    assert.equal(otroHorario.find((d) => d.code === 'P1M')?.estado, 'sobra');
+    const lineas = lineasConfirmacion(diff, 'actualizar', 'octubre');
+    assert.match(lineas.join(' '), /No hay diferencias/);
   });
 });

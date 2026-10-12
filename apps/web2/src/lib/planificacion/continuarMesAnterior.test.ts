@@ -11,6 +11,7 @@ import {
   diaIndex,
   observacionesDelGuardia,
   proponerContinuacion,
+  reacomodoRelevante,
   sobrantesPorDia,
   textoDias,
   ymdDeIndex,
@@ -546,4 +547,60 @@ test('si el puesto del guardia está lleno, el turno pasa al otro como sugerenci
   assert.equal(segundo.propuestas.some((c) => c.code === 'M'), false);
   assert.equal(segundo.sugerencias[0]?.celda.positionName, 'Puesto 2');
   assert.equal(segundo.sugerencias[0]?.celda.startTime, '08:00');
+});
+
+test('el relevante se reacomoda, destildado, cuando se mueven los francos de Puesto 1 y 2', () => {
+  const est: PuestoSla[] = [
+    { positionName: 'Puesto 1', shifts: [
+      { code: 'P1M', hours: 8, startTime: '08:00', endTime: '15:00' },
+      { code: 'P1T', hours: 8, startTime: '15:00', endTime: '22:00' },
+    ] },
+    { positionName: 'Puesto 2', shifts: [
+      { code: 'P2M', hours: 8, startTime: '10:00', endTime: '16:00' },
+      { code: 'P2T', hours: 8, startTime: '16:00', endTime: '22:00' },
+    ] },
+  ];
+  const celda = (employeeId: string, dateStr: string, code: string, positionName: string) => ({
+    employeeId, dateStr, code, name: code, positionName: code === 'F' ? 'General' : positionName,
+    startTime: '08:00', endTime: '16:00', hours: code === 'F' ? 0 : 8, isFranco: code === 'F',
+  });
+  const fila = (id: string, nombre: string, dias: Array<[string, string, string]>) => ({
+    employeeId: id, nombre, ciclo: null, origenCiclo: null, estimado: false, notaEstimado: null,
+    continuaEn: '', motivoSinCiclo: null, omitidas: { licencia: 0, ocupada: 0, bloqueada: 0, sinDato: 0, excluida: 0 },
+    revisar: [], horasPropuestas: 0, plantilla: null, sugerencias: [],
+    propuestas: dias.map(([dateStr, code, pos]) => celda(id, dateStr, code, pos)),
+  });
+  const d2 = '2026-11-02';
+  const d3 = '2026-11-03';
+  const d4 = '2026-11-04';
+  const d5 = '2026-11-05';
+  const resultados = [
+    fila('g', 'GANDIA', [[d2, 'F', 'Puesto 1'], [d3, 'M', 'Puesto 1'], [d4, 'M', 'Puesto 1'], [d5, 'F', 'Puesto 1']]),
+    fila('u', 'GUZMAN', [[d2, 'T', 'Puesto 1'], [d3, 'T', 'Puesto 1'], [d4, 'T', 'Puesto 1'], [d5, 'T', 'Puesto 1']]),
+    fila('t', 'TRINKS', [[d2, 'M', 'Puesto 2'], [d3, 'F', 'Puesto 2'], [d4, 'M', 'Puesto 2'], [d5, 'M', 'Puesto 2']]),
+    fila('c', 'CAMEJO', [[d2, 'T', 'Puesto 2'], [d3, 'M', 'Puesto 2'], [d4, 'T', 'Puesto 2'], [d5, 'T', 'Puesto 2']]),
+    fila('b', 'BONILLA', [[d2, 'F', 'Relevante'], [d3, 'P1M', 'Puesto 1'], [d4, 'P2T', 'Puesto 2'], [d5, 'P1M', 'Puesto 1']]),
+  ];
+  const sug = reacomodoRelevante({
+    guardias: [
+      { id: 'g', nombre: 'GANDIA', previos: [] },
+      { id: 'u', nombre: 'GUZMAN', previos: [] },
+      { id: 't', nombre: 'TRINKS', previos: [] },
+      { id: 'c', nombre: 'CAMEJO', previos: [] },
+      { id: 'b', nombre: 'BONILLA', previos: [], puestoPreferido: 'Relevante' },
+    ],
+    estructura: est,
+    dias: [d2, d3, d4, d5],
+    estadoCelda: () => null,
+  }, resultados);
+  assert.ok(sug.every((s) => s.tipo === 'relevante'));
+  const del = (date: string) => sug.find((s) => s.dateStr === date);
+  assert.equal(del(d2)?.a, 'P1M');
+  assert.equal(del(d2)?.celda.positionName, 'Puesto 1');
+  assert.equal(del(d2)?.celda.startTime, '08:00');
+  assert.equal(del(d3)?.a, 'P2T');
+  assert.equal(del(d3)?.celda.positionName, 'Puesto 2');
+  assert.equal(del(d4)?.a, 'F');
+  assert.equal(del(d4)?.celda.isFranco, true);
+  assert.equal(del(d5), undefined);
 });

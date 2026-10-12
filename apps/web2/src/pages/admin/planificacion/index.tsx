@@ -11954,7 +11954,11 @@ function PlanificacionDesktop() {
                 if (c.isFranco) francos += 1; else turnos += 1;
             }
         }
-        const aceptadas = sugerencias.filter((s) => elegidos.has(s.celda.employeeId) && escritas.has(`${s.celda.employeeId}_${s.dateStr}`));
+        const aceptadas = sugerencias.filter((s) => {
+            if (!elegidos.has(s.celda.employeeId)) return false;
+            const key = `${s.celda.employeeId}_${s.dateStr}`;
+            return escritas.has(key) || s.tipo === 'relevante';
+        });
         for (const s of aceptadas) next[`${s.celda.employeeId}_${s.dateStr}`] = cambioPendienteDe(s.celda, selectedObjective);
         if (turnos + francos > 0 && !origenArranqueRef.current && !armadoGuardado?.iniciadoAt) {
             origenArranqueRef.current = ORIGEN_CONTINUAR_MES;

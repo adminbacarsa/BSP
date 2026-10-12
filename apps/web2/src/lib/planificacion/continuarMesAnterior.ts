@@ -135,13 +135,15 @@ export type PlantillaGuardia = {
   copiaDe: string | null;
 };
 
-/** Cambio de banda para nivelar el cupo del día. Se aplica solo si queda tildado. */
+/** Cambio de banda para nivelar el cupo del día, o reacomodo del relevante. Se aplica solo si queda tildado. */
 export type SugerenciaNivelacion = {
   dateStr: string;
   de: string;
   a: string;
   texto: string;
   celda: CeldaPropuesta;
+  /** `relevante` = seguir los francos de los puestos que cubre. Arranca destildada, igual que la nivelación. */
+  tipo?: 'nivelacion' | 'relevante';
 };
 
 export type ResultadoGuardia = {
@@ -838,7 +840,10 @@ export function cupoDelServicio(
   let algo = false;
   for (const pos of estructura) {
     if ((pos as { exigeCobertura?: boolean }).exigeCobertura === false) continue;
-    const de8 = (pos.shifts || []).some((s) => /^[MTN]\d*$/.test(up(s.code)));
+    const de8 = (pos.shifts || []).some((s) => {
+      const code = up(s.code).replace(/\s+/g, '');
+      return !!bandaDe(code) && !/D12$|N12$/.test(code);
+    });
     for (const s of pos.shifts || []) {
       const code = up(s.code);
       const banda = bandaDe(code);
@@ -1182,10 +1187,170 @@ function anclarPorPuesto(input: ContinuarInput, resultados: ResultadoGuardia[]) 
   }
 }
 
+const COMPUESTO_PUESTO = /^(P\d+|PL)(D12|N12|M|T|N)$/;
+
+function siglaDeNombre(nombre: string): string {
+  const n = puestoNorm(nombre);
+  const num = n.match(/^(?:PUESTO|PTO|PSTO|P)\s*(\d+)$/);
+  if (num && /^(?:PUESTO|PTO|PSTO|P)\s*\d+$/.test(n)) return `P${Number(num[1])}`;
+  return '';
+}
+
+function puestoHabitual(r: ResultadoGuardia): string {
+  const counts = new Map<string, number>();
+  for (const c of r.propuestas) {
+    if (c.isFranco || c.code === 'F' || c.code === 'RET') continue;
+    const p = String(c.positionName || '').trim();
+    if (!p || puestoNorm(p) === 'GENERAL' || puestoNorm(p) === 'RELEVANTE') continue;
+    counts.set(p, (counts.get(p) || 0) + 1);
+  }
+  let best = '';
+  let n = 0;
+  for (const [p, c] of counts) if (c > n) { best = p; n = c; }
+  return best;
+}
+
+function esFilaRelevante(r: ResultadoGuardia, preferido?: string): boolean {
+  if (puestoNorm(preferido || '') === 'RELEVANTE') return true;
+  if (r.propuestas.some((c) => puestoNorm(c.positionName) === 'RELEVANTE')) return true;
+  const siglas = new Set<string>();
+  for (const c of r.propuestas) {
+    const m = up(c.code).replace(/\s+/g, '').match(COMPUESTO_PUESTO);
+    if (m) siglas.add(m[1]);
+  }
+  return siglas.size >= 2;
+}
+
+function siglasQueCubre(r: ResultadoGuardia): string[] {
+  const counts = new Map<string, number>();
+  for (const c of r.propuestas) {
+    const m = up(c.code).replace(/\s+/g, '').match(COMPUESTO_PUESTO);
+    if (!m) continue;
+    counts.set(m[1], (counts.get(m[1]) || 0) + 1);
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([s]) => s);
+}
+
+function codigoParaBanda(pos: PuestoSla, sigla: string, banda: 'M' | 'T' | 'N'): string | null {
+  const shifts = pos.shifts || [];
+  const want = `${sigla}${banda}`;
+  const exact = shifts.find((s) => up(s.code).replace(/\s+/g, '') === want);
+  if (exact) return up(exact.code).replace(/\s+/g, '');
+  if (shifts.some((s) => up(s.code) === banda)) return banda;
+  const porBanda = shifts.filter((s) => bandaDe(up(s.code)) === banda && !/D12$|N12$/.test(up(s.code).replace(/\s+/g, '')));
+  return porBanda.length === 1 ? up(porBanda[0].code).replace(/\s+/g, '') : null;
+}
+
+function bandasDelPuesto(pos: PuestoSla): Array<'M' | 'T' | 'N'> {
+  const out: Array<'M' | 'T' | 'N'> = [];
+  for (const s of pos.shifts || []) {
+    const code = up(s.code).replace(/\s+/g, '');
+    if (/D12$|N12$/.test(code)) continue;
+    const b = bandaDe(code);
+    if (b && !out.includes(b)) out.push(b);
+  }
+  return out;
+}
+
+/**
+ * El relevante cubre la banda que queda libre cuando un titular de Puesto 1 o 2 está de franco.
+ * Si el continuar corre esos francos, la sugerencia (destildada) lo sigue. No pisa la racha sola.
+ */
+export function reacomodoRelevante(
+  input: Pick<ContinuarInput, 'guardias' | 'estructura' | 'dias' | 'estadoCelda' | 'diaBloqueado' | 'turnoHabilitado'>,
+  resultados: ResultadoGuardia[],
+): SugerenciaNivelacion[] {
+  const preferido = new Map(input.guardias.map((g) => [g.id, g.puestoPreferido]));
+  const relevantes = resultados.filter((r) => esFilaRelevante(r, preferido.get(r.employeeId)));
+  if (!relevantes.length) return [];
+  const idsRelevantes = new Set(relevantes.map((r) => r.employeeId));
+  const habilitado = input.turnoHabilitado
+    || ((pos: string, code: string, ds: string) => turnoHabilitadoPorEstructura(input.estructura, pos, code, ds));
+  const out: SugerenciaNivelacion[] = [];
+  for (const rel of relevantes) {
+    const siglas = siglasQueCubre(rel);
+    const puestos = siglas
+      .map((sigla) => ({ sigla, pos: input.estructura.find((p) => siglaDeNombre(p.positionName) === sigla) }))
+      .filter((x): x is { sigla: string; pos: PuestoSla } => !!x.pos);
+    if (!puestos.length) continue;
+    for (const dateStr of input.dias) {
+      if (input.diaBloqueado?.(dateStr)) continue;
+      const estado = input.estadoCelda(rel.employeeId, dateStr);
+      if (estado === 'licencia' || estado === 'ocupada') continue;
+      const actual = rel.propuestas.find((c) => c.dateStr === dateStr);
+      let ambiguo = false;
+      let cubierto = false;
+      const huecos: Array<{ sigla: string; pos: PuestoSla; code: string }> = [];
+      for (const { sigla, pos } of puestos) {
+        const titulars = resultados.filter((r) => !idsRelevantes.has(r.employeeId) && puestoNorm(puestoHabitual(r)) === puestoNorm(pos.positionName));
+        if (!titulars.length) continue;
+        const hoy = titulars
+          .map((r) => r.propuestas.find((c) => c.dateStr === dateStr))
+          .filter((c): c is CeldaPropuesta => !!c);
+        if (!hoy.length) continue;
+        const francos = hoy.filter((c) => c.isFranco || c.code === 'F');
+        const presentes = new Set(hoy.map((c) => bandaDe(c.code)).filter((b): b is 'M' | 'T' | 'N' => !!b));
+        const faltan = bandasDelPuesto(pos).filter((b) => !presentes.has(b));
+        if (!faltan.length) { cubierto = true; continue; }
+        if (francos.length >= 1 && faltan.length === 1) {
+          const code = codigoParaBanda(pos, sigla, faltan[0]);
+          if (code) huecos.push({ sigla, pos, code });
+          else ambiguo = true;
+        } else ambiguo = true;
+      }
+      if (ambiguo) continue;
+      const elegido = huecos[0];
+      if (elegido) {
+        if (!habilitado(elegido.pos.positionName, elegido.code, dateStr)) continue;
+        if (actual && up(actual.code).replace(/\s+/g, '') === elegido.code && puestoNorm(actual.positionName) === puestoNorm(elegido.pos.positionName)) continue;
+        const sla = resolverPuesto(input.estructura, elegido.pos.positionName, elegido.code);
+        if ('motivo' in sla) continue;
+        out.push({
+          dateStr,
+          de: actual?.code || 'F',
+          a: elegido.code,
+          tipo: 'relevante',
+          texto: `${ddmm(dateStr)} · ${elegido.code} (franco en ${elegido.pos.positionName})`,
+          celda: celdaDeTrabajo(rel.employeeId, dateStr, sla.pos, elegido.code),
+        });
+        continue;
+      }
+      if (cubierto && actual && !actual.isFranco && actual.code !== 'F') {
+        out.push({
+          dateStr,
+          de: actual.code,
+          a: 'F',
+          tipo: 'relevante',
+          texto: `${ddmm(dateStr)} · franco (${puestos.map((p) => p.pos.positionName).join(' y ')} cubiertos)`,
+          celda: {
+            employeeId: rel.employeeId, dateStr, code: 'F', name: 'Franco', positionName: 'General',
+            startTime: '00:00', endTime: '00:00', hours: 0, isFranco: true,
+          },
+        });
+      }
+    }
+  }
+  return out;
+}
+
+function aplicarReacomodoRelevante(input: ContinuarInput, resultados: ResultadoGuardia[]) {
+  const porId = new Map<string, SugerenciaNivelacion[]>();
+  for (const s of reacomodoRelevante(input, resultados)) {
+    const list = porId.get(s.celda.employeeId) || [];
+    list.push(s);
+    porId.set(s.celda.employeeId, list);
+  }
+  for (const r of resultados) {
+    const extra = porId.get(r.employeeId);
+    if (extra?.length) r.sugerencias = [...r.sugerencias, ...extra];
+  }
+}
+
 export function proponerContinuacion(input: ContinuarInput): ResultadoGuardia[] {
   if (input.regla === 'anterior') {
     const resultados = input.guardias.map((g) => proponerGuardia(input, g));
     anclarPorPuesto(input, resultados);
+    aplicarReacomodoRelevante(input, resultados);
     return resultados;
   }
   const todos = [...input.guardias, ...(input.salientes || [])];
@@ -1217,6 +1382,7 @@ export function proponerContinuacion(input: ContinuarInput): ResultadoGuardia[] 
     const nivel = nivelarResultados(input, resultados, historias);
     for (const r of resultados) r.sugerencias = [...r.sugerencias, ...sugerenciasDe(input, r, nivel.get(r.employeeId) || [])];
   }
+  aplicarReacomodoRelevante(input, resultados);
   return resultados;
 }
 
@@ -1226,7 +1392,7 @@ export function punteroParaGuardar(resultados: ResultadoGuardia[], aceptadas: Su
     id: r.employeeId,
     codes: Object.fromEntries(r.propuestas.map((c) => [c.dateStr, c.code])),
     aceptadas: aceptadas
-      .filter((s) => s.celda.employeeId === r.employeeId)
+      .filter((s) => s.tipo !== 'relevante' && s.celda.employeeId === r.employeeId)
       .map((s): NivelacionC2 => ({ dateStr: s.dateStr, de: s.de, a: s.a, cubre: (bandaDe(s.a) || 'T') as NivelacionC2['cubre'], texto: s.texto })),
   })), dias);
 }

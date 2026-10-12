@@ -4,8 +4,10 @@ import type { EquivalenciaCodigo } from '@/lib/planificacion/equivalenciaCodigo'
 import { PlanillaIaPanel } from '@/components/planificacion/PlanillaIaPanel';
 import type { CuadroPlanilla } from '@/lib/planificacion/importarExcel';
 import {
+  adoptarCodigoVigente,
   alinearPuestos,
   compararConVigente,
+  equivalenciasAlCodigoServicio,
   etiquetaDias,
   lineasConfirmacion,
   proponerServicioDesdePlanilla,
@@ -36,7 +38,9 @@ type Props = {
 export function ServicioPlanillaEditor({ cuadro, semilla, year, month, mesLabel, vigente, servicioId, puedeCrear, puedeActualizar, hayOtroServicio, empresaId, objectiveId, onGuardar }: Props) {
   const propuesta = useMemo(() => {
     const base = semilla || (cuadro ? proponerServicioDesdePlanilla(cuadro, year, month) : { franjas: [], equivalencias: [], lectura: '' });
-    return { ...base, franjas: alinearPuestos(base.franjas, vigente) };
+    const alineadas = alinearPuestos(base.franjas, vigente);
+    const franjas = adoptarCodigoVigente(alineadas, vigente);
+    return { ...base, franjas, equivalencias: equivalenciasAlCodigoServicio(base.equivalencias, alineadas, franjas) };
   }, [cuadro, semilla, year, month, vigente]);
   const [franjas, setFranjas] = useState<FranjaServicioPlanilla[]>(propuesta.franjas);
   const [equivalencias, setEquivalencias] = useState<EquivalenciaCodigo[]>(propuesta.equivalencias);
@@ -110,8 +114,10 @@ export function ServicioPlanillaEditor({ cuadro, semilla, year, month, mesLabel,
           year={year}
           month={month}
           onAplicar={(next) => {
-            setFranjas(next.franjas);
-            setEquivalencias(next.equivalencias);
+            const alineadas = alinearPuestos(next.franjas, vigente);
+            const adoptadas = adoptarCodigoVigente(alineadas, vigente);
+            setFranjas(adoptadas);
+            setEquivalencias(equivalenciasAlCodigoServicio(next.equivalencias, alineadas, adoptadas));
             setFunciones(next.funciones);
           }}
         />

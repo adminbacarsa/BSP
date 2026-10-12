@@ -58,7 +58,7 @@ function apellido(nombre: string): string {
 }
 
 function claveSugerencia(s: SugerenciaNivelacion): string {
-  return `${s.celda.employeeId}|${s.dateStr}`;
+  return `${s.tipo || 'nivelacion'}|${s.celda.employeeId}|${s.dateStr}`;
 }
 
 /** Un renglón por cambio de puesto (todos los guardias juntos) y uno por guardia cuando no se propone. */
@@ -107,6 +107,8 @@ export function ContinuarMesModal({ vista, onAplicar, onCancelar }: Props) {
     [conCiclo],
   );
   const sugerenciasVisibles = useMemo(() => sugerencias.filter((s) => elegidos.has(s.celda.employeeId)), [sugerencias, elegidos]);
+  const sugerenciasNivel = useMemo(() => sugerenciasVisibles.filter((s) => s.tipo !== 'relevante'), [sugerenciasVisibles]);
+  const sugerenciasRelevante = useMemo(() => sugerenciasVisibles.filter((s) => s.tipo === 'relevante'), [sugerenciasVisibles]);
 
   const totales = useMemo(() => {
     let turnos = 0; let francos = 0;
@@ -269,22 +271,57 @@ export function ContinuarMesModal({ vista, onAplicar, onCancelar }: Props) {
             </tbody>
           </table>
 
-          {sugerenciasVisibles.length > 0 && (
+          {sugerenciasNivel.length > 0 && (
             <div className="rounded-2xl border border-indigo-200 bg-indigo-50/60 px-3 py-2.5 shadow-sm" data-continuar-nivelacion>
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wide text-indigo-900">
-                  <Scale size={12} /> Nivelar con el servicio · {sugerenciasVisibles.length} sugerencia(s)
+                  <Scale size={12} /> Nivelar con el servicio · {sugerenciasNivel.length} sugerencia(s)
                 </div>
                 <div className="flex gap-2 text-[11px] font-bold">
-                  <button type="button" className="text-indigo-700 hover:underline" onClick={() => setNivelar(new Set(sugerenciasVisibles.map(claveSugerencia)))}>Tildar todas</button>
-                  <button type="button" className="text-slate-500 hover:underline" onClick={() => setNivelar(new Set())}>Ninguna</button>
+                  <button type="button" className="text-indigo-700 hover:underline" onClick={() => setNivelar((prev) => new Set([...prev, ...sugerenciasNivel.map(claveSugerencia)]))}>Tildar todas</button>
+                  <button type="button" className="text-slate-500 hover:underline" onClick={() => setNivelar((prev) => {
+                    const next = new Set(prev);
+                    for (const s of sugerenciasNivel) next.delete(claveSugerencia(s));
+                    return next;
+                  })}>Ninguna</button>
                 </div>
               </div>
               <div className="text-[11px] text-indigo-900/80 mt-0.5 mb-1.5">
                 Opcional. Lo principal es seguir la racha: estos cambios de banda dejan cada día con el cupo del servicio. Se aplican solo los que tildes.
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-0.5">
-                {sugerenciasVisibles.map((s) => {
+                {sugerenciasNivel.map((s) => {
+                  const k = claveSugerencia(s);
+                  return (
+                    <label key={k} className="flex items-center gap-2 text-[11px] text-slate-800 cursor-pointer hover:bg-white/70 rounded-lg px-1 py-0.5" data-continuar-sugerencia={k}>
+                      <input type="checkbox" checked={nivelar.has(k)} onChange={() => toggleNivelar(k)} />
+                      <span className="font-medium">{s.texto}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {sugerenciasRelevante.length > 0 && (
+            <div className="rounded-2xl border border-teal-200 bg-teal-50/70 px-3 py-2.5 shadow-sm" data-continuar-relevante>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wide text-teal-950">
+                  <Repeat size={12} /> Reacomodar al relevante · {sugerenciasRelevante.length} sugerencia(s)
+                </div>
+                <div className="flex gap-2 text-[11px] font-bold">
+                  <button type="button" className="text-teal-800 hover:underline" onClick={() => setNivelar((prev) => new Set([...prev, ...sugerenciasRelevante.map(claveSugerencia)]))}>Tildar todas</button>
+                  <button type="button" className="text-slate-500 hover:underline" onClick={() => setNivelar((prev) => {
+                    const next = new Set(prev);
+                    for (const s of sugerenciasRelevante) next.delete(claveSugerencia(s));
+                    return next;
+                  })}>Ninguna</button>
+                </div>
+              </div>
+              <div className="text-[11px] text-teal-950/80 mt-0.5 mb-1.5">
+                Opcional. Cuando se mueven los francos de Puesto 1 y Puesto 2, el relevante puede seguir la banda que queda libre. Arranca destildado.
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-0.5">
+                {sugerenciasRelevante.map((s) => {
                   const k = claveSugerencia(s);
                   return (
                     <label key={k} className="flex items-center gap-2 text-[11px] text-slate-800 cursor-pointer hover:bg-white/70 rounded-lg px-1 py-0.5" data-continuar-sugerencia={k}>

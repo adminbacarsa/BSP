@@ -69,11 +69,12 @@ function mod(a: number, p: number): number {
   return ((a % p) + p) % p;
 }
 
-/** Banda M/T/N de un código de puesto (M2, T1… cuentan por su letra), o null. */
+/** Banda M/T/N de un código de puesto (M2, P1M, P2T… cuentan por su letra), o null. */
 export function bandaDe(code: string): 'M' | 'T' | 'N' | null {
-  if (code === 'D12') return 'M';
-  if (code === 'N12') return 'N';
-  const m = code.match(/^([MTN])\d*$/);
+  const c = String(code || '').trim().toUpperCase().replace(/\s+/g, '');
+  if (c === 'D12' || /^(?:P\d+|PL)D12$/.test(c)) return 'M';
+  if (c === 'N12' || /^(?:P\d+|PL)N12$/.test(c)) return 'N';
+  const m = c.match(/^(?:P\d+|PL)?([MTN])\d*$/);
   return m ? (m[1] as 'M' | 'T' | 'N') : null;
 }
 
@@ -418,8 +419,9 @@ function cuentaBandas(grid: Map<string, Map<string, string>>, dateStr: string): 
 }
 
 function haciaBanda(code: string, banda: 'M' | 'T'): string {
-  const m = code.match(/^[MTN](\d*)$/);
-  return m ? `${banda}${m[1]}` : banda;
+  const c = String(code || '').trim().toUpperCase().replace(/\s+/g, '');
+  const m = c.match(/^((?:P\d+|PL)?)([MTN])(\d*)$/);
+  return m ? `${m[1]}${banda}${m[3]}` : banda;
 }
 
 function apellido(nombre: string): string {
