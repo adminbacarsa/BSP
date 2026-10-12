@@ -33,6 +33,7 @@ type Props = {
   onIrAviso: (a: AvisoRapido) => void;
   onVisto: (ids: string[]) => void;
   onAsignarPuesto?: (a: AvisoRapido) => void;
+  onSobra?: (accion: 'ir' | 'ret' | 'quitar', g: { empId: string; nombre: string; code: string; positionName: string }, dateStr: string) => void;
   consultas: ConsultaCurso[];
   consultaFoco?: string | null;
   consultaTick?: number;
@@ -140,6 +141,7 @@ export function PanelesMarco(props: Props) {
                   onIr={props.onIrAviso}
                   onVisto={props.onVisto}
                   onAsignarPuesto={props.onAsignarPuesto}
+                  onSobra={props.onSobra}
                 />
               </>
             )}

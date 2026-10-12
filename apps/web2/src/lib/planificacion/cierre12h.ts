@@ -77,9 +77,16 @@ export function apellidoCorto(nombre: string): string {
     return (base.split(/\s+/)[0] || nombre || '').toUpperCase();
 }
 
+export type Sla12 = { code?: string; startTime?: string; endTime?: string; hours?: number };
+
+export type CtxHorario12 = {
+    slaDe?: (positionName: string, objectiveId?: string) => readonly Sla12[] | undefined;
+    slaCubierto?: readonly Sla12[];
+};
+
 export function horarioDoce(
     code: 'D12' | 'N12',
-    sla?: ReadonlyArray<{ code?: string; startTime?: string; endTime?: string; hours?: number }>,
+    sla?: ReadonlyArray<Sla12>,
 ): Horario12 & { code: 'D12' | 'N12' } {
     const hit = (sla || []).find((s) => up(s.code) === code && s.startTime && s.endTime);
     if (hit) {
@@ -91,6 +98,45 @@ export function horarioDoce(
         };
     }
     return { code, ...DOCE[code] };
+}
+
+function tieneDoce(sla: readonly Sla12[] | undefined, code: 'D12' | 'N12'): boolean {
+    return (sla || []).some((s) => up(s.code) === code && s.startTime && s.endTime);
+}
+
+function parSeToca(d: { startTime: string; endTime: string }, n: { startTime: string; endTime: string }): boolean {
+    return d.endTime === n.startTime && n.endTime === d.startTime;
+}
+
+/**
+ * Cada pata toma el 12 h de su puesto. Si ese puesto no lo tiene, usa el del puesto
+ * que se cubre. Si D12 y N12 no se tocan (el fin de uno no es el inicio del otro),
+ * las dos pasan al par del puesto cubierto. Si ese tampoco cierra, el N12 arranca
+ * cuando termina el D12 y termina cuando el D12 empieza.
+ */
+export function resolverHorarioPar(opts: {
+    ladoA: 'D12' | 'N12';
+    slaA?: readonly Sla12[];
+    ladoB?: 'D12' | 'N12';
+    slaB?: readonly Sla12[];
+    slaCubierto?: readonly Sla12[];
+}): { a: Horario12 & { code: 'D12' | 'N12' }; b?: Horario12 & { code: 'D12' | 'N12' } } {
+    const propio = (lado: 'D12' | 'N12', sla?: readonly Sla12[]) => (tieneDoce(sla, lado) ? horarioDoce(lado, sla) : null);
+    const cubierto = (lado: 'D12' | 'N12') => propio(lado, opts.slaCubierto);
+    const elegir = (lado: 'D12' | 'N12', sla?: readonly Sla12[]) => propio(lado, sla) || cubierto(lado) || horarioDoce(lado);
+    const a = elegir(opts.ladoA, opts.slaA);
+    if (!opts.ladoB) return { a };
+    const b = elegir(opts.ladoB, opts.slaB);
+    const d = opts.ladoA === 'D12' ? a : b;
+    const n = opts.ladoA === 'N12' ? a : b;
+    if (parSeToca(d, n)) return { a, b };
+    const dc = cubierto('D12');
+    const nc = cubierto('N12');
+    if (dc && nc && parSeToca(dc, nc)) {
+        return opts.ladoA === 'D12' ? { a: dc, b: nc } : { a: nc, b: dc };
+    }
+    const derivado = { code: 'N12' as const, startTime: d.endTime, endTime: d.startTime, hours: 12 };
+    return opts.ladoA === 'D12' ? { a: d, b: derivado } : { a: derivado, b: d };
 }
 
 export function volverA8(code: string): { code: 'M' | 'N'; startTime: string; endTime: string; hours: number } | null {
@@ -247,21 +293,99 @@ export function alternativasPareja(turnos: readonly TurnoPuesto12[], dateStr: st
 }
 
 /** Cambia quién pasa a D12 o a N12. La pareja bloqueada no se elige. */
-export function cambiarPareja(propuesta: Propuesta12h, empId: string, turnos: readonly TurnoPuesto12[], lado?: 'D12' | 'N12'): Propuesta12h {
+export function cambiarPareja(
+    propuesta: Propuesta12h,
+    empId: string,
+    turnos: readonly TurnoPuesto12[],
+    lado?: 'D12' | 'N12',
+    ctx?: CtxHorario12,
+): Propuesta12h {
     const op = (propuesta.alternativas || []).find((a) => a.empId === empId && !a.bloqueado && (!lado || a.lado === lado));
     if (!op) return propuesta;
     const origen = turnos.find((t) => t.empId === empId && t.dateStr === propuesta.dateStr && up(t.code) === op.code);
     if (!origen) return propuesta;
-    const horario = horarioDoce(op.lado, undefined);
-    const nuevo = cambio(origen, horario, propuesta.positionName);
-    const cambios = propuesta.cambios.filter((c) => c.code !== op.lado);
+    const otra = propuesta.cambios.find((c) => c.code !== op.lado);
+    const tOtra = otra ? turnos.find((t) => t.empId === otra.empId && t.dateStr === propuesta.dateStr) : undefined;
+    const ladoOtra = otra && (otra.code === 'D12' || otra.code === 'N12') ? otra.code : undefined;
+    const slaCubierto = ctx?.slaCubierto || ctx?.slaDe?.(propuesta.positionName);
+    const res = ctx
+        ? resolverHorarioPar({
+            ladoA: op.lado,
+            slaA: ctx.slaDe?.(origen.positionName, origen.objectiveId),
+            ladoB: ladoOtra,
+            slaB: tOtra && ladoOtra ? ctx.slaDe?.(tOtra.positionName, tOtra.objectiveId) : undefined,
+            slaCubierto,
+        })
+        : { a: horarioDoce(op.lado, undefined) };
+    const nuevo = cambio(origen, res.a, propuesta.positionName);
+    let cambios = propuesta.cambios.filter((c) => c.code !== op.lado);
     if (cambios.length === propuesta.cambios.length) return propuesta;
+    if (otra && res.b && (otra.startTime !== res.b.startTime || otra.endTime !== res.b.endTime || otra.hours !== res.b.hours)) {
+        cambios = cambios.map((c) => (
+            c.empId === otra.empId && c.code === otra.code
+                ? { ...c, startTime: res.b!.startTime, endTime: res.b!.endTime, hours: res.b!.hours }
+                : c
+        ));
+    }
     const siguiente = [...cambios, nuevo];
     return {
         ...propuesta,
         cambios: siguiente,
         texto: textoDe(propuesta.banda, propuesta.positionName, siguiente, siguiente.some((c) => c.coversPositionName)),
     };
+}
+
+export function textoVista12(propuestas: readonly Propuesta12h[]): string {
+    const partes = propuestas.flatMap((p) => p.cambios.map((c) => `${apellidoCorto(c.nombre)} ${c.code}`));
+    if (!partes.length) return 'Esc cancela';
+    return `${partes.join(' + ')} · + aplica · flechas eligen otro · Esc cancela`;
+}
+
+export type AccionVista12 = 'aplicar' | 'cancelar' | 'mover' | 'escribir' | 'seguir';
+
+/** Qué hace una tecla mientras la vista previa del par está abierta. */
+export function accionTeclaVista(key: string, opts?: { shift?: boolean; ctrl?: boolean; alt?: boolean }): AccionVista12 {
+    if (key === 'Enter' || key === '+' || key === 'Add' || (opts?.shift && key === '=')) return 'aplicar';
+    if (key === 'Escape') return 'cancelar';
+    if (key.startsWith('Arrow')) return 'mover';
+    if (!opts?.ctrl && !opts?.alt && /^[a-zA-Z0-9]$/.test(key)) return 'escribir';
+    return 'seguir';
+}
+
+/**
+ * El cursor sobre otro guardia de ese día rearma el par si puede.
+ * Si no puede, la vista previa queda y vuelve el motivo.
+ */
+export function moverVista12(input: {
+    propuestas: Propuesta12h[];
+    cursor: { empId: string; dateStr: string } | null;
+    turnos: readonly TurnoPuesto12[];
+    ctx?: CtxHorario12;
+}): { propuestas: Propuesta12h[]; motivo?: string } {
+    const { propuestas, cursor, turnos } = input;
+    if (!cursor) return { propuestas };
+    const idx = propuestas.findIndex((p) => p.dateStr === cursor.dateStr && p.cambios.length > 0);
+    if (idx < 0) return { propuestas };
+    const p = propuestas[idx];
+    if (p.cambios.some((c) => c.empId === cursor.empId)) return { propuestas };
+    const alts = p.alternativas?.length ? p.alternativas : alternativasPareja(turnos, p.dateStr, p.banda);
+    const deEl = alts.filter((a) => a.empId === cursor.empId);
+    if (!deEl.length) return { propuestas, motivo: 'Sin turno de trabajo para el par' };
+    const libres = deEl.filter((a) => !a.bloqueado);
+    if (!libres.length) return { propuestas, motivo: deEl[0].motivo || 'No puede cubrir' };
+    const lado = libres.length === 1
+        ? libres[0].lado
+        : (libres.find((a) => a.code === 'M')?.lado || libres.find((a) => a.code === 'N')?.lado || libres[0].lado);
+    const ctx = input.ctx
+        ? { ...input.ctx, slaCubierto: input.ctx.slaCubierto || input.ctx.slaDe?.(p.positionName) }
+        : undefined;
+    const siguiente = cambiarPareja({ ...p, alternativas: alts }, cursor.empId, turnos, lado, ctx);
+    if (siguiente.cambios.every((c, i) => p.cambios[i] && c.empId === p.cambios[i].empId && c.code === p.cambios[i].code)) {
+        return { propuestas };
+    }
+    const copy = propuestas.slice();
+    copy[idx] = siguiente;
+    return { propuestas: copy };
 }
 
 function textoDe(banda: string, puesto: string, cambios: Cambio12h[], mixto: boolean): string {
@@ -284,7 +408,9 @@ export function proponerCierre12h(input: {
     faltantes: readonly string[];
     turnos: readonly TurnoPuesto12[];
     preferidoEmpId?: string;
-    sla?: ReadonlyArray<{ code?: string; startTime?: string; endTime?: string; hours?: number }>;
+    sla?: ReadonlyArray<Sla12>;
+    /** 12 h del puesto de quien cubre. Si no tiene, se usa `sla` del puesto cubierto. */
+    slaDe?: (positionName: string, objectiveId?: string) => readonly Sla12[] | undefined;
     /** Cupo por puesto (`nombre` o `objectiveId|nombre`). Sin dato, 1. */
     cupos?: Readonly<Record<string, number>>;
     /** Objetivo al que se acredita el hueco. */
@@ -297,8 +423,6 @@ export function proponerCierre12h(input: {
     const m = elegir(delDia('M'), input.preferidoEmpId);
     const t = elegir(delDia('T'), input.preferidoEmpId);
     const n = elegir(delDia('N'), input.preferidoEmpId);
-    const d12 = horarioDoce('D12', input.sla);
-    const n12 = horarioDoce('N12', input.sla);
     const extra = (code: string) => {
         const b = delDia(code).find((x) => x.bloqueado && x.motivo);
         return b?.motivo ? ` (${b.motivo})` : '';
@@ -329,24 +453,36 @@ export function proponerCierre12h(input: {
         return { ...base, texto: `${aviso}. ${base.texto}` };
     };
 
+    const horarioPar = (a: TurnoPuesto12, ladoA: 'D12' | 'N12', b: TurnoPuesto12, ladoB: 'D12' | 'N12') => resolverHorarioPar({
+        ladoA,
+        slaA: input.slaDe?.(a.positionName, a.objectiveId),
+        ladoB,
+        slaB: input.slaDe?.(b.positionName, b.objectiveId),
+        slaCubierto: input.sla,
+    });
+    const horarioUno = (a: TurnoPuesto12, lado: 'D12' | 'N12') => resolverHorarioPar({
+        ladoA: lado,
+        slaA: input.slaDe?.(a.positionName, a.objectiveId),
+        slaCubierto: input.sla,
+    }).a;
     const local = (): Propuesta12h | null => {
-        if (falta.has('T') && m && n) return par('T', m, d12, n, n12);
-        if (falta.has('M') && t && n) return par('M', t, d12, n, n12);
-        if (falta.has('N') && m && t) return par('N', m, d12, t, n12);
+        if (falta.has('T') && m && n) { const h = horarioPar(m, 'D12', n, 'N12'); return par('T', m, h.a, n, h.b!); }
+        if (falta.has('M') && t && n) { const h = horarioPar(t, 'D12', n, 'N12'); return par('M', t, h.a, n, h.b!); }
+        if (falta.has('N') && m && t) { const h = horarioPar(m, 'D12', t, 'N12'); return par('N', m, h.a, t, h.b!); }
         return null;
     };
     const propio = local();
     if (propio?.modo === 'par') return propio;
 
-    const cruzado = parEntrePuestos(input, falta, d12, n12);
+    const cruzado = parEntrePuestos(input, falta);
     if (cruzado) return cruzado;
 
-    if (falta.has('T') && m) return sinPar('T', ladoDe('N') + extra('N'), uno('T', m, d12));
-    if (falta.has('T') && n) return sinPar('T', ladoDe('M') + extra('M'), uno('T', n, n12));
-    if (falta.has('M') && t) return sinPar('M', ladoDe('N') + extra('N'), uno('M', t, d12));
-    if (falta.has('M') && n) return sinPar('M', ladoDe('T') + extra('T'), uno('M', n, n12));
-    if (falta.has('N') && t) return sinPar('N', ladoDe('M') + extra('M'), uno('N', t, n12));
-    if (falta.has('N') && m) return sinPar('N', ladoDe('T') + extra('T'), uno('N', m, d12));
+    if (falta.has('T') && m) return sinPar('T', ladoDe('N') + extra('N'), uno('T', m, horarioUno(m, 'D12')));
+    if (falta.has('T') && n) return sinPar('T', ladoDe('M') + extra('M'), uno('T', n, horarioUno(n, 'N12')));
+    if (falta.has('M') && t) return sinPar('M', ladoDe('N') + extra('N'), uno('M', t, horarioUno(t, 'D12')));
+    if (falta.has('M') && n) return sinPar('M', ladoDe('T') + extra('T'), uno('M', n, horarioUno(n, 'N12')));
+    if (falta.has('N') && t) return sinPar('N', ladoDe('M') + extra('M'), uno('N', t, horarioUno(t, 'N12')));
+    if (falta.has('N') && m) return sinPar('N', ladoDe('T') + extra('T'), uno('N', m, horarioUno(m, 'D12')));
     if (falta.has('T')) return sinPar('T', ladoDe(m ? 'N' : 'M') + extra(m ? 'N' : 'M'), null);
     if (falta.has('M')) return sinPar('M', ladoDe(t ? 'N' : 'T') + extra(t ? 'N' : 'T'), null);
     if (falta.has('N')) return sinPar('N', ladoDe(m ? 'T' : 'M') + extra(m ? 'T' : 'M'), null);
@@ -362,10 +498,10 @@ function parEntrePuestos(
         preferidoEmpId?: string;
         cupos?: Readonly<Record<string, number>>;
         objectiveId?: string;
+        sla?: ReadonlyArray<Sla12>;
+        slaDe?: (positionName: string, objectiveId?: string) => readonly Sla12[] | undefined;
     },
     falta: Set<string>,
-    d12: Horario12 & { code: 'D12' | 'N12' },
-    n12: Horario12 & { code: 'D12' | 'N12' },
 ): Propuesta12h | null {
     const orden: Array<{ banda: string; dCodes: string[]; nCodes: string[] }> = [
         { banda: 'T', dCodes: ['M', 'T'], nCodes: ['T', 'N'] },
@@ -385,9 +521,16 @@ function parEntrePuestos(
                 const salientes = [a, b].filter((t) => !esDelPuestoObjetivo(t, input.positionName, input.objectiveId));
                 if (!salientes.length) continue;
                 if (!noAbreHueco(input.turnos, input.dateStr, salientes, input.cupos)) continue;
+                const h = resolverHorarioPar({
+                    ladoA: 'D12',
+                    slaA: input.slaDe?.(a.positionName, a.objectiveId),
+                    ladoB: 'N12',
+                    slaB: input.slaDe?.(b.positionName, b.objectiveId),
+                    slaCubierto: input.sla,
+                });
                 const cambios = [
-                    cambio(a, d12, input.positionName, input.objectiveId),
-                    cambio(b, n12, input.positionName, input.objectiveId),
+                    cambio(a, h.a, input.positionName, input.objectiveId),
+                    cambio(b, h.b!, input.positionName, input.objectiveId),
                 ];
                 const afuera = salientes.length;
                 const otroObj = salientes.filter((t) => t.objectiveId && input.objectiveId && t.objectiveId !== input.objectiveId).length;

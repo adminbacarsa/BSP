@@ -72,6 +72,7 @@ export function ModoRapidoAvisosPanel({
     onIr,
     onVisto,
     onAsignarPuesto,
+    onSobra,
 }: {
     /** Solo los que no se marcaron como vistos. */
     avisos: AvisoRapido[];
@@ -79,6 +80,7 @@ export function ModoRapidoAvisosPanel({
     onIr: (a: AvisoRapido) => void;
     onVisto: (ids: string[]) => void;
     onAsignarPuesto?: (a: AvisoRapido) => void;
+    onSobra?: (accion: 'ir' | 'ret' | 'quitar', g: { empId: string; nombre: string; code: string; positionName: string }, dateStr: string) => void;
 }) {
     const grupos = useMemo(() => agruparAvisos(avisos), [avisos]);
     const [desplegado, setDesplegado] = useState<string | null>(null);
@@ -106,6 +108,18 @@ export function ModoRapidoAvisosPanel({
                                     <span className={`mt-0.5 shrink-0 rounded px-1 text-[8px] font-black uppercase text-white ${COLOR[g.tipo]}`}>{ETIQUETA[g.tipo]}</span>
                                     <span className="min-w-0 break-words text-[11px] leading-snug text-slate-700">{g.texto}</span>
                                 </button>
+                                {g.tipo === 'SOBRECOBERTURA' && !!g.items[0]?.guardiasSobra?.length && onSobra && (
+                                    <div className="flex w-full flex-col gap-1 px-1 pb-1">
+                                        {g.items[0].guardiasSobra!.map((gu) => (
+                                            <div key={`${gu.empId}-${gu.code}`} className="flex flex-wrap items-center gap-1" data-sobra-guardia={gu.empId}>
+                                                <span className="text-[10px] font-bold text-slate-600">{gu.nombre.split(',')[0]} {gu.code}</span>
+                                                <button type="button" className="rounded-lg border border-amber-300 px-1.5 py-0.5 text-[10px] font-black text-amber-800 hover:bg-amber-50" data-sobra-ir={gu.empId} onClick={() => onSobra('ir', gu, g.items[0].dateStr)}>Ir a la celda</button>
+                                                <button type="button" className="rounded-lg border border-amber-300 px-1.5 py-0.5 text-[10px] font-black text-amber-800 hover:bg-amber-50" data-sobra-ret={gu.empId} onClick={() => onSobra('ret', gu, g.items[0].dateStr)}>Pasar a RET</button>
+                                                <button type="button" className="rounded-lg border border-amber-300 px-1.5 py-0.5 text-[10px] font-black text-amber-800 hover:bg-amber-50" data-sobra-quitar={gu.empId} onClick={() => onSobra('quitar', gu, g.items[0].dateStr)}>Quitar</button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
                                 {g.tipo === 'SIN_PUESTO' && g.items[0]?.puestoSugerido && onAsignarPuesto && (
                                     <button
                                         type="button"

@@ -388,6 +388,76 @@ export function puestoConLugar(banda: Banda, puestos: readonly PuestoServicio[],
   return null;
 }
 
+export type GuardiaSobra = { empId: string; nombre: string; code: string; positionName: string };
+
+export type LineaSobra = {
+  puesto: string;
+  banda: string;
+  hay: number;
+  cupo: number;
+  sobra: number;
+  guardias: GuardiaSobra[];
+  entrePuestos: boolean;
+  texto: string;
+};
+
+function apellidoSobra(nombre: string): string {
+  return String(nombre || '').split(',')[0].trim().split(/\s+/)[0].toUpperCase();
+}
+
+function alimentaBanda(banda: Banda, code: string): boolean {
+  if (banda === 'M') return code === 'M' || code === 'D12';
+  if (banda === 'N') return code === 'N' || code === 'N12';
+  return code === 'T' || code === 'D12' || code === 'N12';
+}
+
+/** Quién sobra, por puesto y banda. Si el exceso es del objetivo, nombra la banda y quién la arma. */
+export function lineasDeSobra(puestos: readonly PuestoServicio[], turnos: readonly TurnoDia[]): LineaSobra[] {
+  const cuenta = turnos.filter((t) => !NO_CUENTA.has(up(t.code)) && !turnoSinPuesto(t.positionName) && !esCustom(t, puestos));
+  const lineas: LineaSobra[] = [];
+  for (const pos of puestos.filter(esPuesto24)) {
+    const qty = Math.max(1, Number(pos.qty) || 1);
+    const del = cuenta.filter((t) => mismo(t.positionName || '', pos.positionName));
+    for (const code of ['M', 'T', 'N', 'D12', 'N12'] as const) {
+      const gente = del.filter((t) => up(t.code) === code);
+      if (gente.length <= qty) continue;
+      const sobra = gente.length - qty;
+      const quienes = gente.map((g) => `${apellidoSobra(g.nombre)} ${code}`).join(', ');
+      lineas.push({
+        puesto: pos.positionName,
+        banda: code,
+        hay: gente.length,
+        cupo: qty,
+        sobra,
+        guardias: gente.map((g) => ({ empId: g.empId, nombre: g.nombre, code, positionName: pos.positionName })),
+        entrePuestos: false,
+        texto: `${pos.positionName} · ${code}: ${gente.length} de ${qty} → sobra ${sobra} (${quienes})`,
+      });
+    }
+  }
+  const lectura = leerDia({ turnos, puestos });
+  if (lectura.mostrar) {
+    for (const b of ['M', 'T', 'N'] as const) {
+      if (lectura.sobra[b] <= 0) continue;
+      if (lineas.some((l) => !l.entrePuestos && alimentaBanda(b, l.banda))) continue;
+      const gente = cuenta.filter((t) => alimentaBanda(b, up(t.code)));
+      if (!gente.length) continue;
+      const quienes = gente.map((g) => `${apellidoSobra(g.nombre)} ${up(g.code)} (${g.positionName})`).join(' + ');
+      lineas.push({
+        puesto: '',
+        banda: b,
+        hay: gente.length,
+        cupo: 0,
+        sobra: lectura.sobra[b],
+        guardias: gente.map((g) => ({ empId: g.empId, nombre: g.nombre, code: up(g.code), positionName: String(g.positionName || '') })),
+        entrePuestos: true,
+        texto: `${b} del objetivo: la arman ${quienes}`,
+      });
+    }
+  }
+  return lineas;
+}
+
 export function avisosDesdeLectura(dateStr: string, lectura: LecturaDia, turnos: readonly TurnoDia[], puestos: readonly PuestoServicio[]): Array<{
   tipo: 'SOBRECOBERTURA' | 'SIN_PUESTO';
   empId: string;
@@ -395,16 +465,33 @@ export function avisosDesdeLectura(dateStr: string, lectura: LecturaDia, turnos:
   dateStr: string;
   texto: string;
   puestoSugerido?: string;
+  guardiasSobra?: GuardiaSobra[];
 }> {
-  const out: Array<{ tipo: 'SOBRECOBERTURA' | 'SIN_PUESTO'; empId: string; nombre: string; dateStr: string; texto: string; puestoSugerido?: string }> = [];
+  const out: Array<{ tipo: 'SOBRECOBERTURA' | 'SIN_PUESTO'; empId: string; nombre: string; dateStr: string; texto: string; puestoSugerido?: string; guardiasSobra?: GuardiaSobra[] }> = [];
   if (lectura.mostrar && lectura.sobranHoras > 0) {
-    out.push({
-      tipo: 'SOBRECOBERTURA',
-      empId: `dia-${dateStr}`,
-      nombre: 'Cobertura',
-      dateStr,
-      texto: `${dateStr.slice(8, 10)}/${dateStr.slice(5, 7)}: ${lectura.texto}`,
-    });
+    const dia = `${dateStr.slice(8, 10)}/${dateStr.slice(5, 7)}`;
+    const lineas = lineasDeSobra(puestos, turnos);
+    if (lineas.length) {
+      for (const linea of lineas) {
+        const g = linea.guardias[0];
+        out.push({
+          tipo: 'SOBRECOBERTURA',
+          empId: g?.empId || `dia-${dateStr}`,
+          nombre: g?.nombre || 'Cobertura',
+          dateStr,
+          texto: `${dia}: ${linea.texto}`,
+          guardiasSobra: linea.guardias,
+        });
+      }
+    } else {
+      out.push({
+        tipo: 'SOBRECOBERTURA',
+        empId: `dia-${dateStr}`,
+        nombre: 'Cobertura',
+        dateStr,
+        texto: `${dia}: ${lectura.texto}`,
+      });
+    }
   }
   for (const t of lectura.sinPuesto) {
     const banda = bandaDe(t);

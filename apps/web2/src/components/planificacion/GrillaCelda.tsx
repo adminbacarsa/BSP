@@ -35,6 +35,9 @@ export type VistaCelda = {
     topeExcedido: boolean;
     /** Borde rojo desde el día en que el mes pasa 200 h. No tapa el código. */
     marcaTope: boolean;
+    /** Turno que sobra ese día. */
+    marcaSobra: boolean;
+    focoSobra: boolean;
     menuRol?: string;
     menuMarca?: string;
     /** Licencia cubierta por un par D12+N12. */
@@ -101,7 +104,7 @@ function CeldaGrillaBase({ vista: v, fila, col, seleccionada, colElegir, elegirA
             data-evento={v.evento}
             title={v.titulo}
         >
-            <div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${v.estilo}${comparada ? ' ring-2 ring-violet-600 ring-offset-1 z-20' : ''}${v.sufijoUsado} ${v.ringExtra}${v.marcaTope ? ' border-b-2 border-rose-600' : ''}${v.descansoReducido ? ' border-t-2 border-amber-500' : ''}`}>
+            <div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${v.estilo}${comparada ? ' ring-2 ring-violet-600 ring-offset-1 z-20' : ''}${v.sufijoUsado} ${v.ringExtra}${v.marcaTope ? ' border-b-2 border-rose-600' : ''}${v.descansoReducido ? ' border-t-2 border-amber-500' : ''}${v.marcaSobra ? ' border-2 border-amber-500' : ''}${v.focoSobra ? ' ring-2 ring-amber-600 ring-offset-1 z-20' : ''}`} data-sobra={v.marcaSobra ? '1' : undefined}>
                 {v.consulta ? (
                     <IndicadorConsultaCelda
                         texto={v.consultaTexto || ''}

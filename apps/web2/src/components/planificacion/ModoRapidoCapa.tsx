@@ -54,6 +54,11 @@ type Props = {
     onOtroObjetivo?: (celdas: CeldaRC[]) => void;
     onConfirmar12?: (cursor?: CeldaRC | null) => void;
     onCancelar12?: () => void;
+    /** Vista previa del par 12 h: las celdas muestran el código y no hay popover. */
+    vista12?: boolean;
+    fantasmas12?: Array<{ r: number; c: number; code: string }>;
+    barra12?: string;
+    motivo12?: string;
 };
 
 type Caja = { left: number; top: number; width: number; height: number };
@@ -75,7 +80,7 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
     const [serie, setSerie] = useState<CeldaRC | null>(null);
     const [extra, setExtra] = useState<CeldaRC[]>([]);
     const [sugLugar, setSugLugar] = useState<{ left: number; arriba: boolean; top: number; bottom: number } | null>(null);
-    const [cajas, setCajas] = useState<{ cursor: Caja | null; rango: Caja | null; serie: Caja | null; marcas: Array<Caja & MarcaAviso> }>({ cursor: null, rango: null, serie: null, marcas: [] });
+    const [cajas, setCajas] = useState<{ cursor: Caja | null; rango: Caja | null; serie: Caja | null; marcas: Array<Caja & MarcaAviso>; fantasmas: Array<Caja & { code: string }> }>({ cursor: null, rango: null, serie: null, marcas: [], fantasmas: [] });
     const editorCajaRef = useRef<Caja | null>(null);
     const inputRef = useRef<HTMLInputElement>(null);
     const arrastre = useRef<'rango' | 'serie' | 'diagonal' | null>(null);
@@ -122,6 +127,11 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
             const cj = cajaDe({ r: m.r, c: m.c });
             if (cj) nuevasMarcas.push({ ...cj, ...m });
         }
+        const fantasmas: Array<Caja & { code: string }> = [];
+        for (const f of propsRef.current.fantasmas12 || []) {
+            const cj = cajaDe({ r: f.r, c: f.c });
+            if (cj) fantasmas.push({ ...cj, code: f.code });
+        }
         let serieCaja: Caja | null = null;
         if (rg && sr && (sr.r > rg.maxR || sr.c > rg.maxC)) {
             const derecha = sr.c - rg.maxC >= sr.r - rg.maxR;
@@ -134,6 +144,7 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
             rango: rg && tamanoRango(rg) > 1 ? cajaDe({ r: rg.minR, c: rg.minC }, { r: rg.maxR, c: rg.maxC }) : (cur ? cajaDe(cur) : null),
             serie: serieCaja,
             marcas: nuevasMarcas,
+            fantasmas,
         });
     }, [cajaDe]);
 
@@ -328,6 +339,22 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
         if (!activo) return;
         const onKey = (e: KeyboardEvent) => {
             if (document.querySelector('[data-modo-rapido-ayuda], [data-pegar-excel], [data-novedad-rapida]')) return;
+            const vista12 = !!propsRef.current.vista12;
+            if (vista12) {
+                const esMas = e.key === '+' || e.code === 'NumpadAdd' || (e.shiftKey && e.key === '=');
+                if (e.key === 'Enter' || esMas) {
+                    e.preventDefault();
+                    e.stopImmediatePropagation();
+                    propsRef.current.onConfirmar12?.(null);
+                    return;
+                }
+                if (e.key === 'Escape') {
+                    e.preventDefault();
+                    e.stopImmediatePropagation();
+                    propsRef.current.onCancelar12?.();
+                    return;
+                }
+            }
             if (document.querySelector('[data-cierre-12h]')) {
                 // Con la propuesta abierta las flechas mueven el cursor: el `+` sobre otro guardia del mismo día lo toma como pareja.
                 if (e.key === 'Enter' || e.key === '+' || e.code === 'NumpadAdd') { e.preventDefault(); e.stopImmediatePropagation(); propsRef.current.onConfirmar12?.(estado.current.cursor); }
@@ -344,6 +371,7 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
                 const enGrilla = !activeEl || activeEl === document.body || (cont && cont.contains(activeEl));
                 if (!enGrilla) return;
             }
+            if (vista12 && !e.key.startsWith('Arrow')) propsRef.current.onCancelar12?.();
             const mod = e.ctrlKey || e.metaKey;
             const key = e.key.toLowerCase();
             const cortar = () => { e.preventDefault(); e.stopImmediatePropagation(); };
@@ -549,6 +577,16 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
     const rc = cajas.rango;
     return (
         <div className="pointer-events-none absolute left-0 top-0 z-[15]" data-modo-rapido-capa aria-hidden={texto == null}>
+            {cajas.fantasmas.map((f, i) => (
+                <div
+                    key={`f12-${i}-${f.code}`}
+                    className="absolute flex items-center justify-center rounded-sm border-2 border-dashed border-red-700 bg-red-600/40 text-[11px] font-black text-red-950"
+                    style={{ left: f.left + 1, top: f.top + 1, width: Math.max(0, f.width - 2), height: Math.max(0, f.height - 2) }}
+                    data-vista-12={f.code}
+                >
+                    {f.code}
+                </div>
+            ))}
             {cajas.marcas.map((m, i) => (
                 <span
                     key={`${m.r}:${m.c}:${m.tipo}:${i}`}
@@ -572,6 +610,16 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
             )}
             {cc && (
                 <div className="absolute border-[3px] border-indigo-700 rounded-[3px] shadow-sm" style={{ left: cc.left - 1, top: cc.top - 1, width: cc.width + 2, height: cc.height + 2 }} data-modo-rapido-cursor={cursor ? `${cursor.r}:${cursor.c}` : ''} />
+            )}
+            {props.barra12 && (cc || cajas.fantasmas[0]) && (
+                <div
+                    className="absolute z-20 max-w-[440px] rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-bold leading-snug text-slate-800 shadow-lg"
+                    style={{ left: (cc || cajas.fantasmas[0]).left + (cc || cajas.fantasmas[0]).width + 8, top: (cc || cajas.fantasmas[0]).top }}
+                    data-vista-12-barra
+                >
+                    {props.barra12}
+                    {props.motivo12 ? <div className="mt-0.5 font-bold text-amber-700" data-vista-12-motivo>{props.motivo12}</div> : null}
+                </div>
             )}
             {rc && texto == null && (
                 <span

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { analyzePositionDayGap } from './coverageGapAnalysis';
 import { countPositionClosedUnitsFromShifts } from './positionCoverageUnits';
-import { cambiarPareja, horarioDoce, proponerCierre12h, resumirDias12, slaExigeCobertura, textoRango12h, volverA8 } from './cierre12h';
+import { accionTeclaVista, cambiarPareja, horarioDoce, moverVista12, proponerCierre12h, resolverHorarioPar, resumirDias12, slaExigeCobertura, textoRango12h, textoVista12, volverA8 } from './cierre12h';
 
 const puesto = {
     positionName: 'Puesto 1',
@@ -256,5 +256,80 @@ describe('cierre a 12 h', () => {
         assert.equal(volverA8('D12')?.code, 'M');
         assert.equal(volverA8('N12')?.code, 'N');
         assert.equal(volverA8('M'), null);
+    });
+});
+
+describe('vista previa 12 h', () => {
+    const dia = '2026-10-02';
+    const obrador = [
+        { code: 'D12', startTime: '06:00', endTime: '18:00', hours: 12 },
+        { code: 'N12', startTime: '18:00', endTime: '06:00', hours: 12 },
+    ];
+    const lopezSla = [
+        { code: 'D12', startTime: '07:00', endTime: '19:00', hours: 12 },
+        { code: 'N12', startTime: '19:00', endTime: '07:00', hours: 12 },
+    ];
+    const turnos = [
+        { empId: 'her', nombre: 'HERRERA', dateStr: dia, code: 'M', positionName: 'Puesto 1' },
+        { empId: 'kas', nombre: 'KASIANCHUK', dateStr: dia, code: 'N', positionName: 'Puesto 1' },
+        { empId: 'lop', nombre: 'LOPEZ', dateStr: dia, code: 'T', positionName: 'Puesto 2' },
+        { empId: 'dia', nombre: 'DIAZ', dateStr: dia, code: 'M', positionName: 'Puesto 1', bloqueado: true, motivo: 'licencia' },
+    ];
+    const ctx = {
+        slaCubierto: obrador,
+        slaDe: (pos: string) => (pos === 'Puesto 2' ? lopezSla : obrador),
+    };
+
+    it('si el otro puesto no encaja, las dos patas usan el 12 h del puesto cubierto', () => {
+        const h = resolverHorarioPar({
+            ladoA: 'D12', slaA: obrador, ladoB: 'N12', slaB: lopezSla, slaCubierto: obrador,
+        });
+        assert.equal(h.a.startTime, '06:00');
+        assert.equal(h.a.endTime, '18:00');
+        assert.equal(h.b?.startTime, '18:00');
+        assert.equal(h.b?.endTime, '06:00');
+        const propio = resolverHorarioPar({
+            ladoA: 'D12', slaA: obrador, ladoB: 'N12', slaB: obrador, slaCubierto: lopezSla,
+        });
+        assert.equal(propio.a.endTime, '18:00');
+        assert.equal(propio.b?.startTime, '18:00');
+    });
+
+    it('el cursor sobre un guardia válido cambia la pareja y conserva el horario que encaja', () => {
+        const p = proponerCierre12h({ dateStr: dia, positionName: 'Puesto 1', faltantes: ['T'], turnos, sla: obrador, slaDe: ctx.slaDe });
+        assert.ok(p);
+        assert.match(textoVista12([p!]), /HERRERA D12 \+ KASIANCHUK N12/);
+        const mov = moverVista12({ propuestas: [p!], cursor: { empId: 'lop', dateStr: dia }, turnos, ctx });
+        assert.equal(mov.motivo, undefined);
+        const n12 = mov.propuestas[0].cambios.find((c) => c.code === 'N12');
+        const d12 = mov.propuestas[0].cambios.find((c) => c.code === 'D12');
+        assert.ok(mov.propuestas[0].cambios.some((c) => c.empId === 'lop'));
+        assert.equal(d12?.startTime, '06:00');
+        assert.equal(d12?.endTime, '18:00');
+        assert.equal(n12?.startTime, '18:00');
+        assert.equal(n12?.endTime, '06:00');
+    });
+
+    it('el cursor sobre un guardia no válido deja la vista previa y dice el motivo', () => {
+        const p = proponerCierre12h({ dateStr: dia, positionName: 'Puesto 1', faltantes: ['T'], turnos, sla: obrador });
+        const no = moverVista12({ propuestas: [p!], cursor: { empId: 'dia', dateStr: dia }, turnos, ctx });
+        assert.equal(no.motivo, 'licencia');
+        assert.deepEqual(no.propuestas[0].cambios.map((c) => c.empId), p!.cambios.map((c) => c.empId));
+        const fuera = moverVista12({ propuestas: [p!], cursor: { empId: 'nadie', dateStr: dia }, turnos, ctx });
+        assert.equal(fuera.motivo, 'Sin turno de trabajo para el par');
+        assert.deepEqual(fuera.propuestas[0].cambios.map((c) => c.empId), p!.cambios.map((c) => c.empId));
+    });
+
+    it('+ y Enter aplican, Esc cancela y una letra escribe', () => {
+        assert.equal(accionTeclaVista('+'), 'aplicar');
+        assert.equal(accionTeclaVista('Enter'), 'aplicar');
+        assert.equal(accionTeclaVista('Escape'), 'cancelar');
+        assert.equal(accionTeclaVista('ArrowDown'), 'mover');
+        assert.equal(accionTeclaVista('m'), 'escribir');
+        const p = proponerCierre12h({ dateStr: dia, positionName: 'Puesto 1', faltantes: ['T'], turnos, sla: obrador });
+        const aplicada = accionTeclaVista('Enter') === 'aplicar' ? p : null;
+        const cancelada = accionTeclaVista('Escape') === 'cancelar' ? null : p;
+        assert.equal(aplicada, p);
+        assert.equal(cancelada, null);
     });
 });

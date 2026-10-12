@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { contarEstandar, faltantesDelDia, leerDia, proponerLiberar, puestoConLugar, type PuestoServicio, type TurnoDia } from './lecturaBandas';
+import { contarEstandar, faltantesDelDia, leerDia, lineasDeSobra, proponerLiberar, puestoConLugar, type PuestoServicio, type TurnoDia } from './lecturaBandas';
 import type { TurnoPuesto12 } from './cierre12h';
 
 const DIA = '2026-10-01';
@@ -247,4 +247,26 @@ test('EN y RO más 4 M / 4 T / 4 N contra 2 puestos × 2 pax: cierra sin horas d
   assert.equal(lectura.sobranHoras, 0);
   assert.equal(lectura.turnosFuera, 0);
   assert.equal(lectura.horasVendidas, 96);
+});
+
+test('N de más en Puesto 2 nombra el puesto y los guardias', () => {
+  const puestos: PuestoServicio[] = [
+    { positionName: 'Puesto 1', qty: 1, coverageType: '24hs' },
+    { positionName: 'Puesto 2', qty: 1, coverageType: '24hs' },
+  ];
+  const turnos = [
+    t('her', 'HERRERA', 'M', 'Puesto 1'),
+    t('kas', 'KASIANCHUK', 'T', 'Puesto 1'),
+    t('lop', 'LOPEZ', 'N', 'Puesto 1'),
+    t('vid', 'VIDELA', 'M', 'Puesto 2'),
+    t('rom', 'ROMERO', 'T', 'Puesto 2'),
+    t('pal', 'PALACIOS', 'N', 'Puesto 2'),
+    t('bar', 'BARRIOS', 'N', 'Puesto 2'),
+  ];
+  const linea = lineasDeSobra(puestos, turnos).find((l) => l.puesto === 'Puesto 2' && l.banda === 'N');
+  assert.ok(linea);
+  assert.equal(linea?.sobra, 1);
+  assert.match(linea!.texto, /Puesto 2/);
+  assert.match(linea!.texto, /PALACIOS/);
+  assert.match(linea!.texto, /BARRIOS/);
 });

@@ -430,6 +430,7 @@ export type AvisoRapido = {
     monthHours?: number;
     cap?: number;
     code?: string;
+    guardiasSobra?: Array<{ empId: string; nombre: string; code: string; positionName: string }>;
 };
 
 const aMin = (hhmm?: string) => {
@@ -540,7 +541,7 @@ export function agruparAvisos(avisos: AvisoRapido[]): GrupoAviso[] {
     const map = new Map<string, AvisoRapido[]>();
     for (const a of avisos) {
         const horas = a.tipo === 'DESCANSO' ? String(a.restHours ?? '') : '';
-        const clave = a.tipo === 'COPIA' ? `${a.empId}|${a.tipo}|${a.texto}` : `${a.empId}|${a.tipo}|${horas}`;
+        const clave = a.tipo === 'COPIA' || a.tipo === 'SOBRECOBERTURA' ? `${a.empId}|${a.tipo}|${a.texto}` : `${a.empId}|${a.tipo}|${horas}`;
         const list = map.get(clave) || [];
         list.push(a);
         map.set(clave, list);
@@ -583,7 +584,7 @@ function horasDeAviso(a: AvisoRapido): string {
 
 /** Identidad de un aviso para «Visto»: tipo, guardia, día y horas. Si cambia algo, es otro aviso. */
 export function idAviso(a: AvisoRapido): string {
-    if (a.tipo === 'COPIA') return `${a.tipo}|${a.empId}|${a.texto}`;
+    if (a.tipo === 'COPIA' || a.tipo === 'SOBRECOBERTURA') return `${a.tipo}|${a.empId}|${a.texto}`;
     return `${a.tipo}|${a.empId}|${a.dateStr}|${horasDeAviso(a)}`;
 }
 

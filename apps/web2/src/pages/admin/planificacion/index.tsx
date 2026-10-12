@@ -473,8 +473,8 @@ type CovMenuRapido = { mode: 'substitute'; id: string } | { mode: 'split'; extId
 let colaCobertura12: string[] | null = null;
 let ofrecerCobertura12: (claves: string[]) => void = () => {};
 import { applyOperationalGapCloseToChanges, applySingleWorkerFullGapCloseToChanges } from '@/lib/planificacion/operationalGapCoverage';
-import { alternativasPareja, cambiarPareja, estiloJornada12, horarioDoce, proponerCierre12h, slaExigeCobertura, textoRango12h, textoResumen12h, volverA8, type Propuesta12h, type TurnoPuesto12 } from '@/lib/planificacion/cierre12h';
-import { avisosDesdeLectura, faltantesDelDia, leerDia, proponerLiberar, SIN_PUESTO, type FaltanteBanda, type PuestoServicio, type TurnoDia } from '@/lib/planificacion/lecturaBandas';
+import { alternativasPareja, cambiarPareja, estiloJornada12, horarioDoce, moverVista12, proponerCierre12h, slaExigeCobertura, textoRango12h, textoResumen12h, textoVista12, volverA8, type CtxHorario12, type Propuesta12h, type TurnoPuesto12 } from '@/lib/planificacion/cierre12h';
+import { avisosDesdeLectura, faltantesDelDia, leerDia, lineasDeSobra, proponerLiberar, SIN_PUESTO, type FaltanteBanda, type GuardiaSobra, type PuestoServicio, type TurnoDia } from '@/lib/planificacion/lecturaBandas';
 import { PanelesMarco } from '@/components/planificacion/PanelesPlanificacion';
 import {
     clasificarSeleccionLicencia,
@@ -1311,6 +1311,8 @@ type EntradaCeldaGrilla = {
     isServiceLocked: boolean;
     fechaBloqueada: (dateStr: string) => boolean;
     nombreObjetivo: (objId: string) => string;
+    sobraKeys?: ReadonlySet<string>;
+    focoSobra?: string;
 };
 
 type CtxCeldaGrilla = {
@@ -1570,6 +1572,8 @@ function calcularCeldaGrilla(e: EntradaCeldaGrilla, emp: any, isGuest: boolean, 
         descansoReducido: !!cellShift?.descansoReducido,
         topeExcedido: !!cellShift?.topeExcedido,
         marcaTope: !!(e.cruceTopePorEmp[emp.id] && cellDateStr >= e.cruceTopePorEmp[emp.id].dateStr),
+        marcaSobra: !!e.sobraKeys?.has(key),
+        focoSobra: e.focoSobra === key,
         menuRol: menuRol || undefined,
         menuMarca: menuRol ? marcaCeldaMenuRapido(menuRol, menuCubre) : undefined,
         marca12: isLeaveCell ? (textoLicencia12(e.pendingChanges, e.shiftsMap, emp.id, cellDateStr) ? '12h' : undefined) : undefined,
@@ -1829,6 +1833,7 @@ function PlanificacionDesktop() {
         sinPuesto?: string[];
         deMas?: boolean;
     } | null>(null);
+    const [focoSobra, setFocoSobra] = useState('');
     const [rango12, setRango12] = useState<{ titulo: string; dias: Array<DiaUi12 & { propuesta: Propuesta12h | null }> } | null>(null);
     const [slaGapCloseModal, setSlaGapCloseModal] = useState<SlaGapCloseModalData | null>(null);
     const [shiftExtendModal, setShiftExtendModal] = useState<ShiftExtendModalData | null>(null);
@@ -2095,6 +2100,9 @@ function PlanificacionDesktop() {
     const [pegarExcel, setPegarExcel] = useState<PegarExcelEstado | null>(null);
     const [catalogoNovedad, setCatalogoNovedad] = useState<TipoNovedadRapida[]>(() => NOVEDAD_TYPE_SEEDS.map((s) => ({ code: s.code, label: s.label })));
     const [propuesta12, setPropuesta12] = useState<Propuesta12h[] | null>(null);
+    const [motivoVista12, setMotivoVista12] = useState('');
+    const propuesta12Ref = useRef<Propuesta12h[] | null>(null);
+    propuesta12Ref.current = propuesta12;
     const [selectorNovedad, setSelectorNovedad] = useState<CeldaRC[] | null>(null);
     const motivoNovedadRef = useRef('Cargado en modo rápido');
     const avisosRapidoRef = useRef<AvisoRapido[]>([]);
@@ -5239,6 +5247,7 @@ function PlanificacionDesktop() {
 
     const lecturaMes = useMemo(() => {
         const porDia: Record<string, ReturnType<typeof leerDia>> = {};
+        const sobraPorDia: Record<string, ReturnType<typeof lineasDeSobra>> = {};
         const faltantes: FaltanteBanda[] = [];
         const avisos: ReturnType<typeof avisosDesdeLectura> = [];
         const puestos = (positionStructure || []).map((p: any) => ({
@@ -5248,7 +5257,7 @@ function PlanificacionDesktop() {
             exigeCobertura: p.exigeCobertura,
             shifts: p.shifts,
         }));
-        if (!selectedObjective || !puestos.length) return { porDia, faltantes, avisos };
+        if (!selectedObjective || !puestos.length) return { porDia, sobraPorDia, faltantes, avisos };
         for (const day of daysInMonth) {
             const dateStr = getDateKey(day);
             const turnos: TurnoDia[] = [];
@@ -5282,6 +5291,7 @@ function PlanificacionDesktop() {
             }
             const lectura = leerDia({ turnos, puestos });
             porDia[dateStr] = lectura;
+            sobraPorDia[dateStr] = lineasDeSobra(puestos, turnos);
             avisos.push(...avisosDesdeLectura(dateStr, lectura, turnos, puestos));
             const horasMes: Record<string, number> = {};
             for (const emp of dotacionBaseEmployees) horasMes[emp.id] = Number(empMonthlyHours[emp.id]) || 0;
@@ -5295,7 +5305,7 @@ function PlanificacionDesktop() {
                 slaDe: (positionName) => (positionStructure || []).find((p: any) => p.positionName === positionName)?.shifts || [],
             }));
         }
-        return { porDia, faltantes, avisos };
+        return { porDia, sobraPorDia, faltantes, avisos };
     }, [selectedObjective, positionStructure, daysInMonth, dotacionBaseEmployees, pendingChanges, shiftsMap, slaIdToObjId, absencesMap, empMonthlyHours]);
 
     /**
@@ -13928,6 +13938,21 @@ function PlanificacionDesktop() {
     );
     const nombreObjetivoRef = useRef(getObjectiveName);
     nombreObjetivoRef.current = getObjectiveName;
+    const sobraKeys = useMemo(() => {
+        const keys = new Set<string>();
+        const dias = new Set<string>();
+        if (modoRapido) {
+            for (const ds of Object.keys(lecturaMes.sobraPorDia || {})) dias.add(ds);
+        }
+        if (coverageTooltip?.dateStr) dias.add(coverageTooltip.dateStr);
+        for (const ds of dias) {
+            for (const linea of lecturaMes.sobraPorDia?.[ds] || []) {
+                for (const g of linea.guardias) keys.add(`${g.empId}_${ds}`);
+            }
+        }
+        return keys;
+    }, [modoRapido, coverageTooltip?.dateStr, lecturaMes]);
+    const sobraFirma = [...sobraKeys].sort().join('|');
     const entradaCeldas: EntradaCeldaGrilla = {
         selectedObjective,
         selectedGrupo,
@@ -13946,6 +13971,8 @@ function PlanificacionDesktop() {
         isServiceLocked,
         fechaBloqueada: fechaBloqueadaGrilla,
         nombreObjetivo: (objId: string) => nombreObjetivoRef.current(objId),
+        sobraKeys,
+        focoSobra,
     };
     const vistasPrevRef = useRef<Record<string, VistaCelda>>({});
     const filasCeldas = comparingSnapshot ? compareGridEmployees : displayedEmployees;
@@ -13968,6 +13995,7 @@ function PlanificacionDesktop() {
         filasCeldas, daysInMonth, selectedObjective, selectedGrupo, grupoUnifiedMode, slaIdToObjId,
         pendingChanges, shiftsMap, rfzByEmpDate, absencesMap, planPublicadoGrilla, cellTurnosMap, turaMap,
         lctRestByCell, cruceTopePorEmp, excludedPositionsByDate, vacancyConsultas, isServiceLocked, fechaBloqueadaGrilla, clients,
+        sobraFirma, focoSobra,
     ]);
     const ctxCeldasExtraRef = useRef<Record<string, CtxCeldaGrilla>>({});
     const celdaDeGrilla = (emp: any, isGuest: boolean, day: Date, dayIndex: number) => {
@@ -14843,16 +14871,8 @@ function PlanificacionDesktop() {
             if (r == null || c == null) continue;
             out.push({ r, c, tipo: 'EVENTO', texto: `${texto} · cargá el evento en Eventos para asignarlo` });
         }
-        for (const prop of propuesta12 || []) {
-            for (const ch of prop.cambios) {
-                const r = filaDe.get(ch.empId);
-                const c = colDe.get(ch.dateStr);
-                if (r == null || c == null) continue;
-                out.push({ r, c, tipo: 'CIERRE', texto: prop.texto });
-            }
-        }
         return out;
-    }, [avisosRapido, avisosVistos, afectadoEvento, propuesta12, displayedEmployees, diasRapido]);
+    }, [avisosRapido, avisosVistos, afectadoEvento, displayedEmployees, diasRapido]);
     const avisosRapidoSinVer = useMemo(() => avisosSinVer(avisosRapido, avisosVistos), [avisosRapido, avisosVistos]);
 
     const irAvisoRapido = (a: AvisoRapido) => {
@@ -14951,6 +14971,7 @@ function PlanificacionDesktop() {
                 turnos,
                 preferidoEmpId: preferido,
                 sla,
+                slaDe: (positionName, objectiveId) => (getShiftsForPosition(positionName, objectiveId || selectedObjective) as TurnoSla[]) || [],
                 cupos: cupos12,
                 objectiveId: String((pos as { objectiveId?: string }).objectiveId || selectedObjective || ''),
             });
@@ -15054,6 +15075,10 @@ function PlanificacionDesktop() {
     };
     /** Todos los guardias del objetivo que ese día pueden pasar a D12 o N12, no solo los del puesto propuesto. */
     const alternativasTodas12 = (p: Propuesta12h | undefined) => (p ? alternativasPareja(turnos12(p.dateStr), p.dateStr, p.banda) : []);
+    const ctxHorario12 = (puesto: string): CtxHorario12 => ({
+        slaDe: (pos, obj) => (getShiftsForPosition(pos, obj || selectedObjective) as TurnoSla[]) || [],
+        slaCubierto: (getShiftsForPosition(puesto, selectedObjective) as TurnoSla[]) || [],
+    });
     const elegirPareja12 = (empId: string, lado?: 'D12' | 'N12') => {
         setPropuesta12((prev) => {
             if (!prev?.[0]) return prev;
@@ -15066,11 +15091,39 @@ function PlanificacionDesktop() {
                 return prev;
             }
             const ladoElegido = lado || (opciones.length === 1 ? opciones[0].lado : (opciones.find((a) => a.code === 'M')?.lado || opciones.find((a) => a.code === 'N')?.lado || opciones[0].lado));
-            return [cambiarPareja(conTodas, empId, turnos, ladoElegido), ...prev.slice(1)];
+            return [cambiarPareja(conTodas, empId, turnos, ladoElegido, ctxHorario12(prev[0].positionName)), ...prev.slice(1)];
         });
     };
+    const fantasmasVista12 = useMemo(() => {
+        if (!modoRapido || !propuesta12?.length) return [] as Array<{ r: number; c: number; code: string }>;
+        const filaDe = new Map(displayedEmployees.map((e: any, i: number) => [e.id, i]));
+        const out: Array<{ r: number; c: number; code: string }> = [];
+        for (const p of propuesta12) {
+            for (const ch of p.cambios) {
+                const r = filaDe.get(ch.empId);
+                const c = diasRapido.indexOf(ch.dateStr);
+                if (r == null || c < 0) continue;
+                out.push({ r, c, code: ch.code });
+            }
+        }
+        return out;
+    }, [modoRapido, propuesta12, displayedEmployees, diasRapido]);
+    const cursorVista12 = (cur: { r: number; c: number } | null) => {
+        if (!cur || !propuesta12Ref.current?.length) { setMotivoVista12(''); return; }
+        const emp = displayedEmployees[cur.r];
+        const ds = diasRapido[cur.c];
+        if (!emp || !ds) { setMotivoVista12(''); return; }
+        const r = moverVista12({
+            propuestas: propuesta12Ref.current,
+            cursor: { empId: emp.id, dateStr: ds },
+            turnos: turnos12(ds),
+            ctx: ctxHorario12(propuesta12Ref.current.find((p) => p.dateStr === ds)?.positionName || ''),
+        });
+        setMotivoVista12(r.motivo || '');
+        if (r.propuestas !== propuesta12Ref.current) setPropuesta12(r.propuestas);
+    };
     useEffect(() => {
-        if (!propuesta12?.length) return;
+        if (!propuesta12?.length || modoRapido) return;
         const onDown = (e: MouseEvent) => {
             const td = (e.target as HTMLElement | null)?.closest?.('td[data-rc]') as HTMLElement | null;
             if (!td) return;
@@ -15085,7 +15138,7 @@ function PlanificacionDesktop() {
         document.addEventListener('mousedown', onDown, true);
         return () => document.removeEventListener('mousedown', onDown, true);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [propuesta12, displayedEmployees, daysInMonth]);
+    }, [propuesta12, displayedEmployees, daysInMonth, modoRapido]);
     /** `+`/Enter con el cursor sobre otro guardia del mismo día: ese pasa a ser la pareja y se aplica. Si no, se aplica lo propuesto. */
     const confirmar12ConCursor = (cur?: { r: number; c: number } | null) => {
         const p0 = propuesta12?.[0];
@@ -15111,6 +15164,7 @@ function PlanificacionDesktop() {
     const confirmar12 = (listaArg?: Propuesta12h[]) => {
         const lista = listaArg && listaArg.length ? listaArg : propuesta12;
         setPropuesta12(null);
+        setMotivoVista12('');
         if (!lista?.length) return;
         const global = bloqueoGlobalRapido();
         if (global) { toast.message(global); return; }
@@ -15235,6 +15289,24 @@ function PlanificacionDesktop() {
         commitPendingChanges(next);
         toast.success(lib.texto);
         setBandasOcultas(false);
+    };
+    const irSobra = (empId: string, dateStr: string) => {
+        const r = displayedEmployees.findIndex((e: any) => e.id === empId);
+        const c = diasRapido.indexOf(dateStr);
+        if (r < 0 || c < 0) { toast.message('Esa celda no está en la grilla.'); return; }
+        setFocoSobra(`${empId}_${dateStr}`);
+        if (modoRapido) capaRapidaRef.current?.irA(r, c);
+        else document.querySelector(`[data-rc="${r}:${c}"]`)?.scrollIntoView({ block: 'center', inline: 'center' });
+    };
+    const quitarSobra = (empId: string, dateStr: string) => {
+        const global = bloqueoGlobalRapido();
+        if (global) { toast.message(global); return; }
+        commitPendingChanges({ ...pendingChangesRef.current, [`${empId}_${dateStr}`]: { isDeleted: true } });
+    };
+    const accionSobra = (accion: 'ir' | 'ret' | 'quitar', g: GuardiaSobra, dateStr: string) => {
+        if (accion === 'ir') irSobra(g.empId, dateStr);
+        else if (accion === 'ret') liberarGuardia(g.empId, dateStr, g.code, g.positionName);
+        else quitarSobra(g.empId, dateStr);
     };
 
     const objetivosParaOtro = (): ObjetivoOpcion[] => {
@@ -16656,8 +16728,22 @@ function PlanificacionDesktop() {
                         {!!coverageTooltip.sinPuesto?.length && (
                             <p className="text-[10px] font-bold text-slate-300" data-sin-puesto>Sin puesto: {coverageTooltip.sinPuesto.join(', ')}</p>
                         )}
-                        {coverageTooltip.deMas && (
-                            <p className="text-[9px] font-black uppercase text-amber-300" data-puestos-de-mas>Puestos con de más</p>
+                        {!!lecturaMes.sobraPorDia?.[coverageTooltip.dateStr]?.length && (
+                            <div className="flex flex-col gap-1" data-puestos-de-mas>
+                                {lecturaMes.sobraPorDia[coverageTooltip.dateStr].map((linea) => (
+                                    <div key={`${linea.puesto}|${linea.banda}|${linea.entrePuestos}`} className="flex flex-col gap-0.5" data-sobra-linea={linea.texto}>
+                                        <p className="text-[10px] font-bold leading-snug text-amber-100">{linea.texto}</p>
+                                        {linea.guardias.map((g) => (
+                                            <div key={`${g.empId}|${g.code}`} className="flex flex-wrap items-center gap-1 pl-1" data-sobra-guardia={g.empId}>
+                                                <span className="text-[10px] font-bold text-slate-200">{g.nombre.split(',')[0]} {g.code}</span>
+                                                <button type="button" className="rounded border border-amber-400/60 px-1 py-0.5 text-[9px] font-black text-amber-100 hover:bg-amber-500/20" data-sobra-ir={g.empId} onClick={() => irSobra(g.empId, coverageTooltip.dateStr)}>Ir a la celda</button>
+                                                <button type="button" className="rounded border border-amber-400/60 px-1 py-0.5 text-[9px] font-black text-amber-100 hover:bg-amber-500/20" data-sobra-ret={g.empId} onClick={() => liberarGuardia(g.empId, coverageTooltip.dateStr, g.code, g.positionName)}>Pasar a RET</button>
+                                                <button type="button" className="rounded border border-amber-400/60 px-1 py-0.5 text-[9px] font-black text-amber-100 hover:bg-amber-500/20" data-sobra-quitar={g.empId} onClick={() => quitarSobra(g.empId, coverageTooltip.dateStr)}>Quitar</button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ))}
+                            </div>
                         )}
                         {coverageTooltip.gaps.map((g, i) => (
                             <div key={i} className="flex flex-col gap-1 border-b border-slate-700/50 pb-1.5 last:border-0" data-banda-abierta={g.etiqueta || g.positionName}>
@@ -18065,6 +18151,7 @@ function PlanificacionDesktop() {
                                 onIrAviso={irAvisoRapido}
                                 onVisto={marcarAvisosVistos}
                                 onAsignarPuesto={asignarPuestoAviso}
+                                onSobra={accionSobra}
                                 consultas={canConsultarEventual ? vacancyConsultas : []}
                                 consultaFoco={consultaFoco}
                                 consultaTick={consultaTick}
@@ -18089,7 +18176,7 @@ function PlanificacionDesktop() {
                                     activo={modoRapido && !!selectedObjective && !comparingSnapshot}
                                     contenedorRef={grillaScrollRef}
                                     dims={dimsRapido}
-                                    version={`${displayedEmployees.length}|${daysInMonth.length}|${Object.keys(pendingChanges).length}|${anchoDotacion}|${shiftsMapLoaded ? 1 : 0}`}
+                                    version={`${displayedEmployees.length}|${daysInMonth.length}|${Object.keys(pendingChanges).length}|${anchoDotacion}|${shiftsMapLoaded ? 1 : 0}|${propuesta12 ? textoVista12(propuesta12) : ''}|${motivoVista12}`}
                                     opciones={opcionesRapido}
                                     valorDe={(r, c) => codigoCtxRapido(ctxRapido(r, c).ctx)}
                                     marcas={marcasRapido}
@@ -18111,8 +18198,13 @@ function PlanificacionDesktop() {
                                         abrirPropuesta12(propuestas12De(dateStr));
                                     }}
                                     onNovedad={(celdas) => { if (celdas.length) setSelectorNovedad(celdas); }}
-                                    onConfirmar12={(cur) => confirmar12ConCursor(cur)}
-                                    onCancelar12={() => setPropuesta12(null)}
+                                    vista12={!!(modoRapido && propuesta12?.length)}
+                                    fantasmas12={fantasmasVista12}
+                                    barra12={modoRapido && propuesta12?.length ? textoVista12(propuesta12) : ''}
+                                    motivo12={motivoVista12}
+                                    onCursor={cursorVista12}
+                                    onConfirmar12={() => confirmar12()}
+                                    onCancelar12={() => { setPropuesta12(null); setMotivoVista12(''); }}
                                     onLiberar={(celdas) => {
                                         for (const cel of celdas) {
                                             const { emp, ctx } = ctxRapido(cel.r, cel.c);
@@ -20355,7 +20447,7 @@ function PlanificacionDesktop() {
                     />,
                     document.body,
                 )}
-                {propuesta12 && propuesta12.length > 0 && (
+                {propuesta12 && propuesta12.length > 0 && !modoRapido && (
                     <Cierre12Banner
                         texto={textoResumen12h(propuesta12)}
                         alternativas={alternativasTodas12(propuesta12[0]).map((a) => ({
