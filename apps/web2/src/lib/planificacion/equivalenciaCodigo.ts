@@ -11,6 +11,8 @@ export type EquivalenciaCodigo = {
   startTime: string;
   endTime: string;
   muestras: number;
+  /** Puesto del servicio cuando el código es «P1 M» resuelto a mano en este objetivo. */
+  positionName?: string;
   /** Si está, la celda se deja vacía: trabaja en otro objetivo. */
   otroObjetivo?: string;
 };
@@ -25,7 +27,7 @@ export function resolverEquivalencia(
   raw: string,
   rojo: boolean,
   equivalencias: readonly EquivalenciaCodigo[] | null | undefined,
-): { code: string | null; desconocido: string | null; aplicada: boolean } {
+): { code: string | null; desconocido: string | null; aplicada: boolean; startTime?: string; endTime?: string; positionName?: string } {
   const visible = String(raw || '').trim().replace(/\s+/g, ' ').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   if (!equivalencias?.length) return { code: null, desconocido: null, aplicada: false };
   if (!visible) return { code: null, desconocido: null, aplicada: true };
@@ -33,6 +35,14 @@ export function resolverEquivalencia(
   const hit = equivalencias.find((e) => e.clave === claveEquivalencia(compact, rojo))
     || equivalencias.find((e) => e.clave === claveEquivalencia(compact, false) && !rojo);
   if (hit?.otroObjetivo) return { code: null, desconocido: null, aplicada: true };
-  if (hit?.code) return { code: hit.code, desconocido: null, aplicada: true };
+  if (hit?.code) {
+    return {
+      code: hit.code,
+      desconocido: null,
+      aplicada: true,
+      ...(hit.startTime && hit.endTime ? { startTime: hit.startTime, endTime: hit.endTime } : {}),
+      ...(hit.positionName ? { positionName: hit.positionName } : {}),
+    };
+  }
   return { code: null, desconocido: visible, aplicada: true };
 }

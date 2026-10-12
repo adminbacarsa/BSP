@@ -262,6 +262,7 @@ import {
     opcionesDeCodigo,
     parsearTsv,
     prepararPegadoExcel,
+    objetivosBuscadorPegado,
     planPegado,
     planRelleno,
     planSerie,
@@ -272,6 +273,7 @@ import {
 } from '@/lib/planificacion/modoRapido';
 import { esCeldaFranco, etiquetaFt, opcionesBandaFt, payloadConsultaFt, resolverEscrituraFt } from '@/lib/planificacion/francoTrabajadoRapido';
 import { tablaCodigosPlanilla } from '@/lib/planificacion/codigosHorarioPegado';
+import { claveEquivalencia, type EquivalenciaCodigo } from '@/lib/planificacion/equivalenciaCodigo';
 import { mesLabelDe, resolverTurnoCopiado } from '@/lib/planificacion/copiarTurno';
 import { catalogoObjetivos, lugarDeGuardia, turnosLugarDeMapa } from '@/lib/planificacion/pegarPersonas';
 import {
@@ -14618,6 +14620,16 @@ function PlanificacionDesktop() {
             return [];
         }
     };
+    const puestosDelMesPegado = () => (effectivePosStructure || []).map((p: { positionName?: string; shifts?: Array<{ code?: string; name?: string; startTime?: string; endTime?: string; hours?: number }> }) => ({
+        positionName: String(p.positionName || ''),
+        shifts: (p.shifts || []).map((s) => ({
+            code: String(s.code || ''),
+            name: s.name ? String(s.name) : undefined,
+            startTime: s.startTime ? String(s.startTime) : undefined,
+            endTime: s.endTime ? String(s.endTime) : undefined,
+            hours: Number(s.hours) || undefined,
+        })),
+    }));
     const equivalenciasOtroDelObjetivo = async (): Promise<EquivalenciaOtro[]> => {
         if (!empresaId || !selectedObjective) return [];
         try {
@@ -14646,7 +14658,7 @@ function PlanificacionDesktop() {
         const conocidos = new Set(opcionesDeCodigo([], slaTodosRapido, ultimoUsadoRapido, catalogoNovedad).map((o) => normalizarCodigo(o.code)));
         const colores = html ? coloresParaTsv(matriz, html) : null;
         const equivalencias = await equivalenciasDelObjetivo();
-        const preview = prepararPegadoExcel(matriz, { guardias: guardiasPegado(), cursor: inicio, cols: dimsRapido.cols, conocidos, colores, equivalencias, equivalenciasOtro: await equivalenciasOtroDelObjetivo() });
+        const preview = prepararPegadoExcel(matriz, { guardias: guardiasPegado(), cursor: inicio, cols: dimsRapido.cols, conocidos, colores, equivalencias, equivalenciasOtro: await equivalenciasOtroDelObjetivo(), puestosDelMes: puestosDelMesPegado() });
         if (preview.modo === 'posicion') {
             pegarPorPosicion(matriz, inicio || { r: 0, c: 0 }, rg, null);
             return;
@@ -14659,7 +14671,7 @@ function PlanificacionDesktop() {
         const conocidos = new Set(opcionesDeCodigo([], slaTodosRapido, ultimoUsadoRapido, catalogoNovedad).map((o) => normalizarCodigo(o.code)));
         const colores = html ? coloresParaTsv(matriz, html) : null;
         const equivalencias = await equivalenciasDelObjetivo();
-        const preview = prepararPegadoExcel(matriz, { guardias: guardiasPegado(), cursor: null, cols: dimsRapido.cols, conocidos, colores, equivalencias, equivalenciasOtro: await equivalenciasOtroDelObjetivo() });
+        const preview = prepararPegadoExcel(matriz, { guardias: guardiasPegado(), cursor: null, cols: dimsRapido.cols, conocidos, colores, equivalencias, equivalenciasOtro: await equivalenciasOtroDelObjetivo(), puestosDelMes: puestosDelMesPegado() });
         if (preview.modo === 'posicion') {
             setPegarExcel(null);
             pegarPorPosicion(matriz, { r: 0, c: 0 }, null, null);
@@ -14676,15 +14688,28 @@ function PlanificacionDesktop() {
     const aplicarPegadoExcel = () => {
         if (!pegarExcel || pegarExcel.paso !== 'resumen') return;
         const { preview, asignacion, decisiones } = pegarExcel;
-        const items: Array<{ r: number; c: number; code: string }> = [];
+        const items: ItemRapido[] = [];
         const sinVincular: Array<{ key: string; ds: string }> = [];
         const vinculadas: Array<{ emp: any; ds: string; vinculo: string }> = [];
         for (const f of preview.filas) {
             const r = asignacion[f.indice];
             if (r == null) continue;
             for (const cel of f.celdas) {
-                const horario = horariosPegadoRef.current[cel.code];
-                if (!cel.evento) { items.push({ r, c: cel.col, code: cel.code, ...(horario ? { startTime: horario.inicio, endTime: horario.fin } : {}) }); continue; }
+                const horario = cel.startTime ? null : horariosPegadoRef.current[cel.code];
+                if (!cel.evento) {
+                    const inicio = cel.startTime || horario?.inicio;
+                    const fin = cel.endTime || horario?.fin;
+                    const fuente: FuenteRapida | undefined = cel.positionName || inicio
+                        ? {
+                            code: cel.code,
+                            name: cel.code,
+                            ...(cel.positionName ? { positionName: cel.positionName, copiarPuesto: true } : {}),
+                            ...(inicio ? { startTime: inicio, endTime: fin, hours: cel.hours } : {}),
+                        }
+                        : undefined;
+                    items.push({ r, c: cel.col, code: cel.code, ...(inicio ? { startTime: inicio, endTime: fin } : {}), ...(fuente ? { fuente } : {}) });
+                    continue;
+                }
                 const d = preview.diasE.find((x) => x.col === cel.col);
                 const dec = decisiones[cel.col] || { tipo: d?.porDefecto || 'E', vinculo: null };
                 if (dec.tipo === 'E') { items.push({ r, c: cel.col, code: 'E' }); continue; }
@@ -15316,6 +15341,18 @@ function PlanificacionDesktop() {
         }
         return out.sort((a, b) => `${a.clientName} ${a.name}`.localeCompare(`${b.clientName} ${b.name}`, 'es'));
     };
+    const objetivoActualPegado = (): ObjetivoOpcion | null => {
+        const idActual = String(selectedObjective || '');
+        if (!idActual) return null;
+        for (const c of clients || []) {
+            for (const o of (c.objetivos || []) as Array<{ id?: string; name?: string; status?: string }>) {
+                if (String(o.id || '') !== idActual) continue;
+                if (String(o.status || 'ACTIVE').toUpperCase() === 'INACTIVE') return null;
+                return { id: idActual, clientId: c.id, clientName: String(c.name || c.businessName || 'Cliente'), name: String(o.name || idActual) };
+            }
+        }
+        return null;
+    };
     const abrirAsignarOtro = (empId: string, nombre: string, dateStr: string) => {
         if (bloqueoMesCerrado) { toast.message('Mes cerrado'); return; }
         const key = `${empId}_${dateStr}`;
@@ -15531,11 +15568,61 @@ function PlanificacionDesktop() {
             toast.success(`Turno en ${sel.objetivo.name}. Se guarda con el cronograma.`);
         }
     };
-    const aplicarAjenosPegado = async (items: Array<{ fila: number; col: number; objectiveId: string; clientId: string; objectiveName: string; positionName: string; code: string; startTime: string; endTime: string; hours: number; marca: string; banda: string }>) => {
+    const aplicarAjenosPegado = async (items: Array<{ fila: number; col: number; objectiveId: string; clientId: string; objectiveName: string; positionName: string; code: string; startTime: string; endTime: string; hours: number; marca: string; banda: string; codigo?: string }>) => {
         if (!pegarExcel || pegarExcel.paso !== 'resumen' || !items.length) return;
         const { preview, asignacion } = pegarExcel;
+        const idActual = String(selectedObjective || '');
+        const aca = items.filter((it) => it.objectiveId === idActual);
+        const afuera = items.filter((it) => it.objectiveId !== idActual);
+        const locales: ItemRapido[] = [];
+        for (const it of aca) {
+            const filaPreview = preview.filas[it.fila];
+            const filaGrilla = filaPreview ? asignacion[filaPreview.indice] : null;
+            if (filaGrilla == null || !diasRapido[it.col]) continue;
+            locales.push({
+                r: filaGrilla,
+                c: it.col,
+                code: it.code,
+                startTime: it.startTime,
+                endTime: it.endTime,
+                fuente: {
+                    code: it.code,
+                    name: it.code,
+                    positionName: it.positionName,
+                    startTime: it.startTime,
+                    endTime: it.endTime,
+                    hours: it.hours,
+                    copiarPuesto: true,
+                },
+            });
+        }
+        if (locales.length) escribirRapido(locales);
+        if (empresaId && selectedObjective && aca.length) {
+            try {
+                const ref = doc(db, 'planificacion_import_mapeos', `${empresaId}_${selectedObjective}`);
+                const snap = await getDoc(ref);
+                const previas = (snap.exists() ? (snap.data().equivalencias || []) : []) as EquivalenciaCodigo[];
+                const nuevas = new Map(previas.map((e) => [e.clave, e]));
+                for (const it of aca) {
+                    const eq: EquivalenciaCodigo = {
+                        clave: claveEquivalencia(it.codigo || it.marca, false),
+                        codigo: String(it.codigo || it.marca).replace(/\s+/g, '').toUpperCase(),
+                        color: 'none',
+                        code: it.code,
+                        startTime: it.startTime,
+                        endTime: it.endTime,
+                        positionName: it.positionName,
+                        muestras: 1,
+                    };
+                    nuevas.set(eq.clave, eq);
+                }
+                await setDoc(ref, { empresaId, objectiveId: selectedObjective, equivalencias: [...nuevas.values()], updatedAt: serverTimestamp() }, { merge: true });
+            } catch {
+                toast.message('No se pudo guardar la equivalencia; la próxima vez se vuelve a preguntar.');
+            }
+        }
         const pedidos: PedidoOtro[] = [];
-        for (const it of items) {
+        for (const it of afuera) {
             const filaPreview = preview.filas[it.fila];
             const filaGrilla = filaPreview ? asignacion[filaPreview.indice] : null;
             const emp = filaGrilla != null ? displayedEmployees[filaGrilla] : null;
@@ -15550,7 +15637,7 @@ function PlanificacionDesktop() {
             });
         }
         const equivs = new Map<string, EquivalenciaOtro>();
-        for (const it of items) {
+        for (const it of afuera) {
             equivs.set(it.marca, {
                 codigo: it.marca,
                 objectiveId: it.objectiveId,
@@ -15576,6 +15663,7 @@ function PlanificacionDesktop() {
         }
         const r = await asignarEnOtroObjetivo(pedidos);
         avisarResultadoOtro(r);
+        if (locales.length && !pedidos.length) toast.success(`${locales.length} turno(s) en este objetivo. Se guardan con el cronograma.`);
         if (r.escritos) toast.success(`${r.escritos} turno(s) en otro objetivo. Se guardan con el cronograma.`);
     };
 
@@ -20353,7 +20441,7 @@ function PlanificacionDesktop() {
                             return { ...prev, decisiones: { ...prev.decisiones, [col]: decision } };
                         })}
                         onAplicar={aplicarPegadoExcel}
-                        objetivosAjenos={objetivosParaOtro()}
+                        objetivosAjenos={objetivosBuscadorPegado(objetivoActualPegado(), objetivosParaOtro())}
                         franjasAjeno={leerFranjasDe}
                         onAplicarAjenos={(items) => { void aplicarAjenosPegado(items); }}
                         puedeAlta={isSuperAdmin || (rolePermissions['RRHH'] || []).includes('create')}

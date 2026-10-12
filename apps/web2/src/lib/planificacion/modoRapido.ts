@@ -7,6 +7,7 @@ import { esCeldaLicencia } from './seleccionLicencia';
 import type { ColorCelda } from './pegadoExcelColor';
 import { resolverEquivalencia, type EquivalenciaCodigo } from './equivalenciaCodigo';
 import { partirCodigoAjeno, resolverEquivalenciaOtro, type EquivalenciaOtro } from './asignarOtroObjetivo';
+import { horasDeFranja, resolverCodigoPuesto, type PuestoMesPegado } from './codigoPuestoPlanilla';
 
 export type CeldaRC = { r: number; c: number };
 export type RangoRC = { minR: number; maxR: number; minC: number; maxC: number };
@@ -654,7 +655,16 @@ export function fusionarNovedadesContinuas<T extends NovedadRango>(items: readon
 export type GuardiaPegado = { fila: number; nombre: string; legajo?: string };
 
 /** `evento`: «E» amarilla o «EV» (SEGURO), o «E» sin color que puede ser evento o enfermedad (DUDA). */
-export type CeldaPegadoExcel = { col: number; code: string; evento?: 'SEGURO' | 'DUDA' };
+export type CeldaPegadoExcel = {
+    col: number;
+    code: string;
+    evento?: 'SEGURO' | 'DUDA';
+    /** Puesto del servicio cuando el código es «P1 M» / «PL M» / C de Cortina. */
+    positionName?: string;
+    startTime?: string;
+    endTime?: string;
+    hours?: number;
+};
 
 export type FilaPegadoExcel = {
     indice: number;
@@ -943,6 +953,13 @@ export function elegirGuardia(
     return null;
 }
 
+/** El objetivo que se está viendo va primero. El resto es la lista de los otros. */
+export function objetivosBuscadorPegado<T extends { id: string }>(actual: T | null | undefined, otros: readonly T[]): T[] {
+    const id = String(actual?.id || '');
+    const resto = otros.filter((o) => o.id !== id);
+    return actual && id ? [actual, ...resto] : [...resto];
+}
+
 export function textoResumenPegado(p: { filas: number; encontrados: number; sinEncontrar: string[]; celdas: number; desconocidos: string[] }): string {
     const corto = (xs: string[]) => `${xs.slice(0, 4).join(', ')}${xs.length > 4 ? '…' : ''}`;
     let s = `Pegadas ${p.filas} filas: ${p.encontrados} guardias encontrados`;
@@ -966,9 +983,11 @@ export function prepararPegadoExcel(
         conocidos: ReadonlySet<string>;
         /** Color de cada celda (HTML del portapapeles), alineado a `matriz`. Sin color, la «E» queda dudosa. */
         colores?: Array<Array<ColorCelda | null> | null> | null;
-        /** Si el objetivo tiene equivalencias, mandan sobre M/T/N genéricos. Lo que no está no se escribe. */
+        /** Si el objetivo tiene equivalencias, mandan sobre M/T/N genéricos y sobre el patrón P1 M. */
         equivalencias?: readonly EquivalenciaCodigo[] | null;
         equivalenciasOtro?: readonly EquivalenciaOtro[] | null;
+        /** Puestos y franjas del servicio del mes. «P1 M» se resuelve acá antes de preguntar otro objetivo. */
+        puestosDelMes?: readonly PuestoMesPegado[] | null;
     },
 ): PreviewPegadoExcel {
     const vacio: PreviewPegadoExcel = { modo: 'posicion', filas: [], desconocidos: [], codigosAjenos: [], resumen: '', diasE: [], conColor: false };
@@ -1026,7 +1045,16 @@ export function prepararPegadoExcel(
                 }
                 const rojo = color?.fondo === 'ROJO' || color?.letra === 'ROJO';
                 const eq = resolverEquivalencia(raw, rojo, opts.equivalencias);
-                if (eq.aplicada && eq.code) { celdas.push({ col, code: eq.code }); continue; }
+                if (eq.aplicada && eq.code) {
+                    const hours = horasDeFranja(eq.startTime, eq.endTime);
+                    celdas.push({
+                        col,
+                        code: eq.code,
+                        ...(eq.positionName ? { positionName: eq.positionName } : {}),
+                        ...(eq.startTime && eq.endTime ? { startTime: eq.startTime, endTime: eq.endTime, ...(hours != null ? { hours } : {}) } : {}),
+                    });
+                    continue;
+                }
                 if (!eq.aplicada) {
                     if (rojo && compact === 'M' && opts.conocidos.has('D12')) { celdas.push({ col, code: 'D12' }); continue; }
                     if (rojo && compact === 'N' && opts.conocidos.has('N12')) { celdas.push({ col, code: 'N12' }); continue; }
@@ -1034,34 +1062,42 @@ export function prepararPegadoExcel(
                 const res = normalizarCodigoExcel(raw, opts.conocidos);
                 const pasaSinEquivalencia = !!res.code && ['F', 'FF', 'FP', 'RET', 'V', 'L', 'E', 'A', 'AA', 'PG', 'SUS'].includes(res.code);
                 const lic = res.code ? null : licenciaCombinada(raw, opts.conocidos);
+                const vaciarOtro = eq.aplicada && !eq.code && !eq.desconocido;
+                const puesto = vaciarOtro ? null : resolverCodigoPuesto(raw, opts.puestosDelMes);
                 if (lic) {
                     celdas.push({ col, code: lic.code });
                     licencia = { code: lic.code, quedan: lic.dias != null ? lic.dias - 1 : Number.POSITIVE_INFINITY };
+                } else if (puesto?.tipo === 'turno') {
+                    celdas.push({ col, ...puesto.celda });
                 } else if (res.code && (!eq.aplicada || pasaSinEquivalencia)) celdas.push({ col, code: res.code });
-                else if (eq.aplicada && eq.desconocido && !desconocidos.includes(eq.desconocido)) { desconocidos.push(eq.desconocido); crudos.push({ col, raw: compact }); }
-                else if (res.desconocido) {
-                    if (!desconocidos.includes(res.desconocido)) desconocidos.push(res.desconocido);
-                    crudos.push({ col, raw: compact });
-                    const partido = partirCodigoAjeno(raw);
-                    if (partido) {
-                        const ya = resolverEquivalenciaOtro(raw, opts.equivalenciasOtro);
-                        ajenosFila.push({
-                            codigo: raw.trim(),
-                            marca: partido.marca,
-                            banda: ya?.banda || partido.banda,
-                            fila: -1,
-                            col,
-                            objectiveId: ya?.objectiveId,
-                            clientId: ya?.clientId,
-                            objectiveName: ya?.objectiveName,
-                            positionName: ya?.positionName,
-                            startTime: ya?.startTime,
-                            endTime: ya?.endTime,
-                            hours: ya?.hours,
-                        });
+                else {
+                    if (puesto?.tipo === 'de_este' || (eq.aplicada && eq.desconocido)) {
+                        const etiq = (eq.desconocido || res.desconocido || '').trim();
+                        if (etiq && !desconocidos.includes(etiq)) desconocidos.push(etiq);
+                        crudos.push({ col, raw: compact });
+                    } else if (res.desconocido) {
+                        if (!desconocidos.includes(res.desconocido)) desconocidos.push(res.desconocido);
+                        crudos.push({ col, raw: compact });
+                        const partido = partirCodigoAjeno(raw);
+                        if (partido) {
+                            const ya = resolverEquivalenciaOtro(raw, opts.equivalenciasOtro);
+                            ajenosFila.push({
+                                codigo: raw.trim(),
+                                marca: partido.marca,
+                                banda: ya?.banda || partido.banda,
+                                fila: -1,
+                                col,
+                                objectiveId: ya?.objectiveId,
+                                clientId: ya?.clientId,
+                                objectiveName: ya?.objectiveName,
+                                positionName: ya?.positionName,
+                                startTime: ya?.startTime,
+                                endTime: ya?.endTime,
+                                hours: ya?.hours,
+                            });
+                        }
                     }
                 }
-                else if (eq.aplicada && eq.desconocido) crudos.push({ col, raw: compact });
             }
             const elegido = elegirGuardia(nombre, legajo, opts.guardias, ocupadas);
             const yaCargado = !elegido && celdas.length === 0 && elegirGuardia(nombre, legajo, opts.guardias, new Set());

@@ -581,6 +581,7 @@ export function PegarExcelModal({
                                         endTime: fr.endTime,
                                         hours: fr.hours,
                                         marca: c.marca,
+                                        codigo: c.codigo,
                                         banda: c.banda || fr.code,
                                     }];
                                 });

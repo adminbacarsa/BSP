@@ -17,6 +17,7 @@ import {
     normalizarCodigoExcel,
     parsearTsv,
     prepararPegadoExcel,
+    objetivosBuscadorPegado,
     planPegado,
     planRelleno,
     fusionarNovedadesContinuas,
@@ -262,6 +263,78 @@ describe('modo rápido · pegado de Excel', () => {
         assert.equal(vf.length, 2);
         assert.ok(vf.every((c) => c.objectiveId === 'vifood' && c.startTime === '14:00' && c.banda === 'T'));
         assert.deepEqual(con.filas[0].celdas.map((c) => c.code), ['M']);
+    });
+
+    it('P1 M, P2M y PL M son puestos de este objetivo, no otro', () => {
+        const puestos = [
+            { positionName: 'Puesto 1', shifts: [{ code: 'M', startTime: '08:00', endTime: '15:00' }, { code: 'T', startTime: '15:00', endTime: '22:00' }] },
+            { positionName: 'Puesto 2', shifts: [{ code: 'M', startTime: '10:00', endTime: '16:00' }, { code: 'T', startTime: '16:00', endTime: '22:00' }] },
+            { positionName: 'Puesto 5', shifts: [{ code: 'N', startTime: '23:00', endTime: '07:00', hours: 8 }] },
+            { positionName: 'Playa', shifts: [{ code: 'M', startTime: '08:00', endTime: '16:00', hours: 8 }] },
+            { positionName: 'Cortina', shifts: [{ code: 'C', startTime: '08:00', endTime: '16:00', hours: 8 }, { code: 'CS', startTime: '16:00', endTime: '00:00', hours: 8 }] },
+        ];
+        const conocidosPuesto = new Set(['M', 'T', 'N', 'F', 'RET', 'REF', 'E', 'V']);
+        const tsv = [
+            '\t\tLEGAJO\tPUESTO\t1\t2\t3\t4\t5\t6\t7\t8\t9\t10',
+            'PERALTA JEREMIAS\t\t3734\tPUESTO 1\tP1 M\tP1 T\tP2M\tP2 T\tP5 N\tPL M\tC\tCS\tREF\tRETEN',
+        ].join('\n');
+        const p = prepararPegadoExcel(parsearTsv(tsv), { guardias, cursor: { r: 0, c: 0 }, cols: 31, conocidos: conocidosPuesto, puestosDelMes: puestos });
+        assert.deepEqual(p.desconocidos, []);
+        assert.deepEqual(p.codigosAjenos, []);
+        assert.deepEqual(p.filas[0].celdas.map((c) => [c.code, c.positionName, c.startTime, c.endTime]), [
+            ['M', 'Puesto 1', '08:00', '15:00'],
+            ['T', 'Puesto 1', '15:00', '22:00'],
+            ['M', 'Puesto 2', '10:00', '16:00'],
+            ['T', 'Puesto 2', '16:00', '22:00'],
+            ['N', 'Puesto 5', '23:00', '07:00'],
+            ['M', 'Playa', '08:00', '16:00'],
+            ['C', 'Cortina', '08:00', '16:00'],
+            ['CS', 'Cortina', '16:00', '00:00'],
+            ['REF', undefined, undefined, undefined],
+            ['RET', undefined, undefined, undefined],
+        ]);
+        const conEq = prepararPegadoExcel(parsearTsv(tsv), {
+            guardias, cursor: { r: 0, c: 0 }, cols: 31, conocidos: conocidosPuesto, puestosDelMes: puestos,
+            equivalencias: [{ clave: 'P1M|none', codigo: 'P1M', color: 'none', code: 'T', startTime: '15:00', endTime: '22:00', positionName: 'Puesto 1', muestras: 1 }],
+        });
+        assert.deepEqual(conEq.desconocidos, ['REF']);
+        assert.deepEqual(conEq.codigosAjenos, []);
+        assert.deepEqual(conEq.filas[0].celdas[0], { col: 0, code: 'T', positionName: 'Puesto 1', startTime: '15:00', endTime: '22:00', hours: 7 });
+        assert.equal(conEq.filas[0].celdas[2].positionName, 'Puesto 2');
+        const vf = prepararPegadoExcel(parsearTsv('PERALTA JEREMIAS\t\t3734\tPLAYA\tVF/T'), { guardias, cursor: { r: 0, c: 0 }, cols: 31, conocidos: conocidosPuesto, puestosDelMes: puestos });
+        assert.equal((vf.codigosAjenos || []).length, 1);
+        assert.equal(vf.codigosAjenos?.[0].marca, 'VF');
+        const lista = objetivosBuscadorPegado({ id: 'tadicor', name: 'Tadicor' }, [{ id: 'a', name: 'A' }, { id: 'tadicor', name: 'dup' }, { id: 'b', name: 'B' }]);
+        assert.deepEqual(lista.map((o) => o.id), ['tadicor', 'a', 'b']);
+    });
+
+    it('P1 M sigue en Puesto 1 aunque el servicio lo llame P1M, y C es Cortina', () => {
+        const puestos = [
+            { positionName: 'Puesto 1', shifts: [{ code: 'P1M', startTime: '08:00', endTime: '15:00' }, { code: 'P1T', startTime: '15:00', endTime: '22:00' }, { code: 'D12' }] },
+            { positionName: 'Puesto 2', shifts: [{ code: 'P2M', startTime: '10:00', endTime: '16:00' }, { code: 'P2T', startTime: '16:00', endTime: '22:00' }] },
+            { positionName: 'Puesto 5', shifts: [{ code: 'N', startTime: '23:00', endTime: '07:00' }] },
+            { positionName: 'Playa', shifts: [{ code: 'M', startTime: '07:00', endTime: '15:00' }] },
+            { positionName: 'CORTINA', shifts: [{ code: 'CO', startTime: '07:00', endTime: '15:00' }, { code: 'CS', startTime: '07:00', endTime: '11:00' }] },
+        ];
+        const conocidosReales = new Set(['P1M', 'P1T', 'P2M', 'P2T', 'M', 'T', 'N', 'F', 'RET', 'REF', 'CO', 'CS', 'D12']);
+        const tsv = [
+            '\t\tLEGAJO\tPUESTO\t1\t2\t3\t4\t5\t6\t7',
+            'PERALTA JEREMIAS\t\t3734\tPUESTO 1\tP1 M\tP2  M\tP5 N\tPL M\tC\tM\tREF',
+        ].join('\n');
+        const p = prepararPegadoExcel(parsearTsv(tsv), { guardias, cursor: { r: 0, c: 0 }, cols: 31, conocidos: conocidosReales, puestosDelMes: puestos });
+        assert.deepEqual(p.codigosAjenos, []);
+        assert.ok(!p.desconocidos.some((d) => /P1|P2|P5|PL|^C$/.test(d)));
+        assert.deepEqual(p.filas[0].celdas.map((c) => [c.code, c.positionName]), [
+            ['P1M', 'Puesto 1'],
+            ['P2M', 'Puesto 2'],
+            ['N', 'Puesto 5'],
+            ['M', 'Playa'],
+            ['CO', 'CORTINA'],
+            ['M', undefined],
+            ['REF', undefined],
+        ]);
+        assert.equal(p.filas[0].celdas[0].startTime, '08:00');
+        assert.equal(p.filas[0].celdas[1].startTime, '10:00');
     });
 
     it('alinea por legajo y por nombre aunque el orden no sea el de la grilla', () => {
