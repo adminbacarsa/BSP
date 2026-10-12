@@ -55,6 +55,16 @@ export function horasDeFranja(start?: string, end?: string, hours?: number): num
 }
 
 /** Puesto 1 → P1. Playa → PL y PLAYA. Igual criterio que el emparejamiento de la planilla. */
+/** «M» en el bloque PUESTO 1 se lee como «P1 M». Una función (Relevante) no prefija. */
+export function codigoEnBloque(puestoFila: string, raw: string): string | null {
+  const n = normNombre(puestoFila);
+  if (!n || /^(RELEVANTE|VOLANTE|RETEN|RETENCION|REFUERZO)$/.test(n)) return null;
+  const compact = compacto(raw);
+  if (!['M', 'T', 'N', 'D12', 'N12'].includes(compact)) return null;
+  const sigla = siglasDePuesto(puestoFila).find((s) => /^P\d+$/.test(s)) || siglasDePuesto(puestoFila).find((s) => s.length === 2);
+  return sigla ? `${sigla} ${compact}` : null;
+}
+
 export function siglasDePuesto(nombre: string): string[] {
     const n = normNombre(nombre);
     if (!n) return [];

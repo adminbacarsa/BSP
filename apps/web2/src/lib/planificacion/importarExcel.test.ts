@@ -249,5 +249,10 @@ describe('importar planilla', () => {
     });
     assert.deepEqual(sugerirCuadros([cuadro(['PEREZ JUAN', 'GOMEZ ANA']), cuadro(['PEREZ JUAN', 'GOMEZ ANA'])]), [1]);
     assert.deepEqual(sugerirCuadros([cuadro(['PEREZ JUAN']), cuadro(['GOMEZ ANA'])]), [0, 1]);
+    const conDias = (n: number) => ({
+      indice: 0, titulo: '', letras: 'JV', avisoMes: null, referencias: [], avisos: [],
+      filas: [{ fila: 1, nombre: 'PEREZ JUAN', legajo: '', puesto: '', celdas: Array.from({ length: n }, (_, i) => ({ dia: i + 1, raw: 'M', color: 'none' as const })) }],
+    });
+    assert.deepEqual(sugerirCuadros([conDias(31), conDias(5)]), [0]);
   });
 });

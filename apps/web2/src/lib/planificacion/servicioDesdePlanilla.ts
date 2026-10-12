@@ -7,8 +7,11 @@ import {
   claveMapeo,
   normPlanilla,
   proponerRegla,
+  refPorPuestoBanda,
+  siglasPuestoPlanilla,
   type ColorCelda,
   type CuadroPlanilla,
+  type FilaPlanilla,
   type Referencia,
 } from './importarExcel';
 import { claveEquivalencia, type EquivalenciaCodigo } from './equivalenciaCodigo';
@@ -56,8 +59,14 @@ export type DiffFranja = {
 export type PropuestaServicio = {
   franjas: FranjaServicioPlanilla[];
   equivalencias: EquivalenciaCodigo[];
-  /** Juegos de 24 h, custom y lo que falta o sobra, por día de la semana. */
+  /** Comparación por día. Se muestra cuando ya hay un servicio del mes. */
   lectura: string;
+  /** Sin servicio: puestos, días y funciones. No el detalle de bandas faltantes. */
+  resumen?: string;
+  /** Días de la semana que no llegan a la mitad de las ocurrencias. */
+  parciales?: string[];
+  /** Relevante, volante o retén: cubren otro puesto, no crean uno. */
+  funciones?: string[];
 };
 
 const EXCLUIDOS = new Set(['F', 'FF', 'FP', 'FRANCO', 'RET', 'RETEN', 'RT', 'REF', 'ESC', 'FT', 'EV', 'EVENTO', 'R']);
@@ -83,15 +92,86 @@ function diasDelMes(year: number, month: number): number {
   return new Date(Date.UTC(year, month, 0)).getUTCDate();
 }
 
-function horarioDe(code: string, refs: Referencia[], color: ColorCelda): { inicio: string; fin: string } | null {
-  const k = claveCodigo(code);
-  const list = refs.filter((r) => r.codigo === k && r.inicio && r.fin);
-  const ref = color === 'red'
-    ? list.find((r) => r.color === 'red') || list.find((r) => r.horas >= 11)
-    : list.find((r) => r.color !== 'red') || list[0];
-  if (ref?.inicio && ref.fin) return { inicio: ref.inicio, fin: ref.fin };
+const NOMBRE_DIA: Record<DiaSemana, string> = {
+  L: 'lunes', M: 'martes', X: 'miércoles', J: 'jueves', V: 'viernes', S: 'sábado', D: 'domingo',
+};
+
+function horarioTexto(raw: string): { inicio: string; fin: string } | null {
+  const t = normPlanilla(raw);
+  const m = t.match(/(\d{1,2})(?:[:.](\d{2}))?\s*(?:HS|H)?\s*A\s*(\d{1,2})(?:[:.](\d{2}))?/);
+  if (!m) return null;
+  const h1 = Number(m[1]);
+  const h2 = Number(m[3]) % 24;
+  if (h1 > 24 || h2 > 24) return null;
+  return {
+    inicio: `${String(h1).padStart(2, '0')}:${String(m[2] || 0).padStart(2, '0')}`,
+    fin: `${String(h2).padStart(2, '0')}:${String(m[4] || 0).padStart(2, '0')}`,
+  };
+}
+
+/** El código del servicio es la banda (M/T/N). El prefijo de la planilla solo elige el horario. C sábado y finde llevan código propio. */
+function codigoDeRef(ref: Referencia, banda: string): string {
+  const c = claveCodigo(ref.codigo);
+  const desc = normPlanilla(ref.desc);
+  const letra = ['M', 'T', 'N', 'D12', 'N12'].includes(banda) ? banda : '';
+  if (letra && (/^(P\d+|PL)/.test(c) || c === letra)) return letra;
+  if (c === 'C' && (desc.includes('SABADO') || (ref.inicio === '07:00' && ref.fin === '11:00'))) return 'CS';
+  if ((c === 'REF' || c === 'R') && (desc.includes('FINDE') || (ref.inicio === '12:00' && ref.fin === '22:00'))) return 'RF';
+  if (c === 'REF' || c === 'R') return 'REF';
+  if (c === 'C') return 'C';
+  return letra || c;
+}
+
+function horarioDe(code: string, refs: Referencia[], color: ColorCelda, puesto = ''): { inicio: string; fin: string; code: string } | null {
+  const ref = (puesto ? refPorPuestoBanda(refs, puesto, code, color) : null)
+    || refs.find((r) => claveCodigo(r.codigo) === claveCodigo(code) && r.inicio && r.fin && (color === 'none' || r.color === color || r.color === 'none'));
+  if (ref?.inicio && ref.fin) return { inicio: ref.inicio, fin: ref.fin, code: codigoDeRef(ref, claveCodigo(code)) };
   const est = HORARIO_ESTANDAR[code];
-  return est ? { inicio: est.startTime, fin: est.endTime } : null;
+  return est ? { inicio: est.startTime, fin: est.endTime, code: claveCodigo(code) } : null;
+}
+
+function nombreVisible(raw: string): string {
+  const n = normPlanilla(raw);
+  const num = n.match(/^(?:PUESTO|PTO|PSTO)\s*(\d+)$/);
+  if (num) return `Puesto ${Number(num[1])}`;
+  if (n === 'PLAYA') return 'Playa';
+  if (n === 'CORTINA') return 'Cortina';
+  if (n === 'REFUERZO') return 'Refuerzo';
+  return String(raw || '').replace(/\s+/g, ' ').trim() || 'Puesto';
+}
+
+function tipoFuncion(puesto: string): 'relevante' | 'volante' | 'reten' | null {
+  const n = normPlanilla(puesto);
+  if (n === 'RELEVANTE') return 'relevante';
+  if (n === 'VOLANTE') return 'volante';
+  if (n === 'RETEN' || n === 'RETENCION') return 'reten';
+  return null;
+}
+
+function esPuestoRefuerzo(puesto: string): boolean {
+  return normPlanilla(puesto) === 'REFUERZO';
+}
+
+function filaNota(fila: FilaPlanilla): boolean {
+  if (String(fila.legajo || '').trim()) return false;
+  const nombre = normPlanilla(fila.nombre);
+  if (nombre.split(' ').length >= 2) return false;
+  const horarios = fila.celdas.filter((c) => horarioTexto(c.raw)).length;
+  return horarios >= 1 && horarios >= Math.ceil(fila.celdas.length * 0.5);
+}
+
+function partidoBanda(raw: string): { sigla: string; banda: string } | null {
+  const visible = normPlanilla(raw);
+  const spaced = visible.match(/^(P\d+|PL|[A-Z]{2,})\s+(D12|N12|M|T|N)$/);
+  if (spaced) return { sigla: spaced[1], banda: spaced[2] };
+  const compact = claveCodigo(raw);
+  for (const banda of ['D12', 'N12', 'M', 'T', 'N'] as const) {
+    if (!compact.endsWith(banda) || compact.length <= banda.length) continue;
+    const sigla = compact.slice(0, compact.length - banda.length);
+    if (/^(P\d+|PL|[A-Z]{2,})$/.test(sigla)) return { sigla, banda };
+  }
+  if (['M', 'T', 'N', 'D12', 'N12'].includes(compact)) return { sigla: '', banda: compact };
+  return null;
 }
 
 function puestoFila(puesto: string): string {
@@ -136,49 +216,132 @@ function esquemasDoce(cuadro: CuadroPlanilla, year: number, month: number): Set<
   return ok;
 }
 
+function puestoPorSigla(filas: FilaPlanilla[], sigla: string): string {
+  const k = claveCodigo(sigla);
+  for (const f of filas) {
+    if (tipoFuncion(f.puesto) || filaNota(f) || esPuestoRefuerzo(f.puesto)) continue;
+    if (siglasPuestoPlanilla(f.puesto).some((s) => claveCodigo(s) === k)) return nombreVisible(f.puesto);
+  }
+  if (/^P\d+$/.test(k)) return `Puesto ${Number(k.slice(1))}`;
+  return '';
+}
+
+function armarResumen(franjas: FranjaServicioPlanilla[], funciones: string[]): string {
+  const puestos = [...new Set(franjas.map((f) => f.puesto))];
+  const diasDe = (f: FranjaServicioPlanilla) => (f.dias.length ? f.dias : ORDEN_DIAS);
+  const diasPuesto = (p: string) => {
+    const fs = franjas.filter((f) => f.puesto === p);
+    const bandas = fs.every((f) => ['M', 'T', 'N', 'D12', 'N12'].includes(f.code));
+    if (bandas) return ORDEN_DIAS.filter((d) => fs.every((f) => diasDe(f).includes(d)));
+    return ordenarDias(fs.flatMap((f) => diasDe(f)));
+  };
+  const todos = puestos.filter((p) => diasPuesto(p).length === 7);
+  const resto = puestos.filter((p) => !todos.includes(p)).map((p) => `${p} ${etiquetaDias(diasPuesto(p))}`);
+  const partes = [`${puestos.length} puesto${puestos.length === 1 ? '' : 's'}`];
+  if (todos.length) partes.push(`${todos.join(', ')} todos los días`);
+  partes.push(...resto);
+  if (funciones.length) partes.push(`${funciones.length} relevante${funciones.length === 1 ? '' : 's'}`);
+  return partes.join(' · ');
+}
+
 export function proponerServicioDesdePlanilla(cuadro: CuadroPlanilla, year: number, month: number): PropuestaServicio {
   const esquemas = esquemasDoce(cuadro, year, month);
   const cuenta = new Map<string, Map<number, number>>();
   const meta = new Map<string, { puesto: string; code: string; startTime: string; endTime: string }>();
-  const eqCuenta = new Map<string, { codigo: string; color: 'red' | 'none'; code: string; startTime: string; endTime: string; n: number }>();
+  const eqCuenta = new Map<string, { codigo: string; color: 'red' | 'none'; code: string; startTime: string; endTime: string; positionName: string; n: number }>();
+  const notas = new Map<string, Map<number, { inicio: string; fin: string }>>();
+  const funciones = new Map<string, Set<string>>();
+
+  for (const fila of cuadro.filas) {
+    if (!filaNota(fila)) continue;
+    const puesto = nombreVisible(fila.puesto);
+    const dias = notas.get(normPlanilla(puesto)) || new Map<number, { inicio: string; fin: string }>();
+    for (const c of fila.celdas) {
+      const h = horarioTexto(c.raw);
+      if (h) dias.set(c.dia, h);
+    }
+    if (dias.size) notas.set(normPlanilla(puesto), dias);
+  }
 
   const sumar = (puesto: string, code: string, inicio: string, fin: string, dia: number, codigo: string, color: 'red' | 'none') => {
-    const key = `${normPlanilla(puesto)}|${claveCodigo(code)}|${inicio}|${fin}`;
-    if (!meta.has(key)) meta.set(key, { puesto, code: claveCodigo(code), startTime: inicio, endTime: fin });
+    const visible = nombreVisible(puesto);
+    const key = `${normPlanilla(visible)}|${claveCodigo(code)}|${inicio}|${fin}`;
+    if (!meta.has(key)) meta.set(key, { puesto: visible, code: claveCodigo(code), startTime: inicio, endTime: fin });
     const dias = cuenta.get(key) || new Map<number, number>();
     dias.set(dia, (dias.get(dia) || 0) + 1);
     cuenta.set(key, dias);
-    const ck = claveMapeo(codigo, color);
+    const ck = `${claveMapeo(codigo, color)}|${normPlanilla(visible)}|${inicio}`;
     const prev = eqCuenta.get(ck);
     if (prev) prev.n += 1;
-    else eqCuenta.set(ck, { codigo: claveCodigo(codigo), color, code: claveCodigo(code), startTime: inicio, endTime: fin, n: 1 });
+    else eqCuenta.set(ck, { codigo: claveCodigo(codigo), color, code: claveCodigo(code), startTime: inicio, endTime: fin, positionName: visible, n: 1 });
   };
 
   for (const fila of cuadro.filas) {
-    const puesto = puestoFila(fila.puesto);
+    if (filaNota(fila)) continue;
+    const funcion = tipoFuncion(fila.puesto);
+    const refuerzo = esPuestoRefuerzo(fila.puesto);
     for (const c of fila.celdas) {
-      const color: ColorCelda = c.color === 'red' ? 'red' : 'none';
-      const regla = proponerRegla(c.raw, color, cuadro.referencias);
+      const colorReal: ColorCelda = c.color === 'red' ? 'red' : (c.color || 'none');
+      const colorEq: 'red' | 'none' = colorReal === 'red' ? 'red' : 'none';
+      const partido = partidoBanda(c.raw);
       const codigo = claveCodigo(c.raw);
-      if (EXCLUIDOS.has(codigo) || regla.accion === 'franco' || regla.accion === 'ret' || regla.accion === 'licencia' || regla.accion === 'ignorar') continue;
-      if (regla.accion === 'doce') {
+      if (['RET', 'RETEN', 'RT'].includes(codigo)) continue;
+      let puestoDestino = nombreVisible(fila.puesto);
+      let banda = partido?.banda || '';
+      if (funcion) {
+        if (!partido?.sigla) continue;
+        const destino = puestoPorSigla(cuadro.filas, partido.sigla);
+        if (!destino) continue;
+        puestoDestino = destino;
+        const cubre = funciones.get(normPlanilla(fila.puesto)) || new Set<string>();
+        cubre.add(destino);
+        funciones.set(normPlanilla(fila.puesto), cubre);
+      } else if (partido?.sigla && !refuerzo) {
+        const destino = puestoPorSigla(cuadro.filas, partido.sigla);
+        if (destino) puestoDestino = destino;
+      }
+      if (!refuerzo && (codigo === 'REF' || codigo === 'R')) continue;
+      if (refuerzo && codigo === 'C') {
+        const cortina = puestoPorSigla(cuadro.filas, 'C') || puestoPorSigla(cuadro.filas, 'CO');
+        if (cortina) puestoDestino = cortina;
+      }
+      const nota = notas.get(normPlanilla(puestoDestino))?.get(c.dia) || (refuerzo ? notas.get(normPlanilla(fila.puesto))?.get(c.dia) : undefined);
+      const regla = proponerRegla(c.raw, colorReal === 'red' ? 'red' : 'none', cuadro.referencias);
+      if (!nota && (regla.accion === 'franco' || regla.accion === 'ret' || regla.accion === 'licencia' || regla.accion === 'ignorar')) continue;
+      if (!nota && EXCLUIDOS.has(codigo) && codigo !== 'REF') continue;
+      if (regla.accion === 'doce' && !nota) {
         const base = claveCodigo(regla.code || codigo);
-        if (!esquemas.has(`${normPlanilla(puesto)}|${base}`)) continue;
+        if (!esquemas.has(`${normPlanilla(fila.puesto)}|${base}`)) {
+          const h8 = horarioDe(base, cuadro.referencias, 'none', puestoDestino);
+          if (h8) sumar(puestoDestino, h8.code, h8.inicio, h8.fin, c.dia, codigo, 'none');
+          continue;
+        }
         const destino = base === 'N' ? 'N12' : 'D12';
-        const h = horarioDe(base, cuadro.referencias, 'red') || horarioDe(destino, cuadro.referencias, 'none');
+        const refRoja = cuadro.referencias.find((r) => claveCodigo(r.codigo) === base && r.color === 'red' && r.inicio && r.fin)
+          || refPorPuestoBanda(cuadro.referencias, puestoDestino, base, 'red');
+        const h = refRoja
+          ? { inicio: refRoja.inicio, fin: refRoja.fin }
+          : horarioDe(destino, cuadro.referencias, 'none', puestoDestino);
         if (!h) continue;
-        sumar(puesto, destino, h.inicio, h.fin, c.dia, codigo, 'red');
+        sumar(puestoDestino, destino, h.inicio, h.fin, c.dia, codigo, 'red');
         continue;
       }
-      if (EXCLUIDOS.has(claveCodigo(regla.code))) continue;
-      const h = horarioDe(regla.code || codigo, cuadro.referencias, color) || horarioDe(codigo, cuadro.referencias, color);
+      if (nota) {
+        const parecida = cuadro.referencias.find((r) => r.inicio === nota.inicio && r.fin === nota.fin);
+        const code = parecida ? codigoDeRef(parecida, banda || claveCodigo(parecida.codigo)) : (banda || 'REF');
+        sumar(puestoDestino, code, nota.inicio, nota.fin, c.dia, codigo, colorEq);
+        continue;
+      }
+      const busca = banda || claveCodigo(regla.code || codigo);
+      const h = horarioDe(busca, cuadro.referencias, colorReal, puestoDestino) || horarioDe(codigo, cuadro.referencias, colorReal, puestoDestino);
       if (!h) continue;
-      sumar(puesto, regla.code || codigo, h.inicio, h.fin, c.dia, codigo, color === 'red' ? 'red' : 'none');
+      sumar(puestoDestino, h.code, h.inicio, h.fin, c.dia, codigo, colorEq);
     }
   }
 
   const ultimo = diasDelMes(year, month);
   const franjas: FranjaServicioPlanilla[] = [];
+  const parciales: string[] = [];
   for (const [key, porDia] of cuenta) {
     const m = meta.get(key)!;
     const porLetra = new Map<DiaSemana, number[]>();
@@ -190,14 +353,21 @@ export function proponerServicioDesdePlanilla(cuadro: CuadroPlanilla, year: numb
     }
     const grupos = new Map<number, DiaSemana[]>();
     for (const letra of ORDEN_DIAS) {
-      const q = moda(porLetra.get(letra) || []);
-      if (q <= 0) continue;
-      const list = grupos.get(q) || [];
-      list.push(letra);
-      grupos.set(q, list);
+      const xs = porLetra.get(letra) || [];
+      if (!xs.length) continue;
+      const conGente = xs.filter((n) => n > 0);
+      if (!conGente.length) continue;
+      if (conGente.length / xs.length >= 0.5) {
+        const q = moda(conGente);
+        const list = grupos.get(q) || [];
+        list.push(letra);
+        grupos.set(q, list);
+      } else {
+        parciales.push(`${m.puesto} · ${m.code}: parcial (${conGente.length} de ${xs.length} ${NOMBRE_DIA[letra]})`);
+      }
     }
-    for (const [cantidad, dias] of grupos) {
-      const lista = ordenarDias(dias);
+    for (const [cantidad, diasOn] of grupos) {
+      const lista = ordenarDias(diasOn);
       franjas.push({
         id: `${key}|${lista.join('') || 'todos'}|${cantidad}`,
         puesto: m.puesto,
@@ -209,16 +379,23 @@ export function proponerServicioDesdePlanilla(cuadro: CuadroPlanilla, year: numb
       });
     }
   }
-  franjas.sort((a, b) => a.puesto.localeCompare(b.puesto, 'es') || a.startTime.localeCompare(b.startTime) || a.code.localeCompare(b.code) || etiquetaDias(a.dias).localeCompare(etiquetaDias(b.dias)));
+  franjas.sort((a, b) => a.puesto.localeCompare(b.puesto, 'es') || a.startTime.localeCompare(b.startTime) || a.code.localeCompare(b.code));
 
-  const equivalencias: EquivalenciaCodigo[] = [...eqCuenta.values()]
-    .map((e) => ({
-      clave: claveEquivalencia(e.codigo, e.color === 'red'),
+  const porClave = new Map<string, { codigo: string; color: 'red' | 'none'; code: string; startTime: string; endTime: string; positionName: string; n: number }>();
+  for (const e of eqCuenta.values()) {
+    const clave = claveEquivalencia(e.codigo, e.color === 'red');
+    const prev = porClave.get(clave);
+    if (!prev || e.n > prev.n) porClave.set(clave, e);
+  }
+  const equivalencias: EquivalenciaCodigo[] = [...porClave.entries()]
+    .map(([clave, e]) => ({
+      clave,
       codigo: e.codigo,
       color: e.color,
       code: e.code,
       startTime: e.startTime,
       endTime: e.endTime,
+      positionName: e.positionName,
       muestras: e.n,
     }))
     .sort((a, b) => b.muestras - a.muestras || a.codigo.localeCompare(b.codigo));
@@ -230,7 +407,11 @@ export function proponerServicioDesdePlanilla(cuadro: CuadroPlanilla, year: numb
     dias: f.dias,
     startTime: f.startTime,
   })));
-  return { franjas, equivalencias, lectura };
+  const listaFunciones = [...funciones.entries()].map(([k, puestos]) => {
+    const etiqueta = k === 'RELEVANTE' ? 'Relevante' : k === 'VOLANTE' ? 'Volante' : 'Retén';
+    return `${etiqueta}: cubre ${[...puestos].join(' y ')}`;
+  });
+  return { franjas, equivalencias, lectura, resumen: armarResumen(franjas, listaFunciones), parciales, funciones: listaFunciones };
 }
 
 function normDias(dias: readonly string[]): string {

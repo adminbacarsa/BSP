@@ -330,7 +330,7 @@ describe('modo rápido · pegado de Excel', () => {
             ['N', 'Puesto 5'],
             ['M', 'Playa'],
             ['CO', 'CORTINA'],
-            ['M', undefined],
+            ['P1M', 'Puesto 1'],
             ['REF', undefined],
         ]);
         assert.equal(p.filas[0].celdas[0].startTime, '08:00');

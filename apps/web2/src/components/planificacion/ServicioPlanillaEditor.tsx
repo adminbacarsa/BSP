@@ -82,10 +82,18 @@ export function ServicioPlanillaEditor({ cuadro, semilla, year, month, mesLabel,
 
   return (
     <div className="space-y-3" data-servicio-planilla>
-      {propuesta.lectura ? (
-        <p className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] text-slate-700 shadow-sm" data-servicio-lectura>
-          {propuesta.lectura}
-        </p>
+      {(propuesta.resumen || (vigente.length ? propuesta.lectura : '')) ? (
+        <div className="space-y-1">
+          <p className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] text-slate-700 shadow-sm" data-servicio-lectura>
+            {propuesta.resumen || propuesta.lectura}
+          </p>
+          {(propuesta.funciones || []).map((f) => (
+            <p key={f} className="rounded-2xl border border-indigo-100 bg-indigo-50 px-3 py-1.5 text-[12px] text-indigo-950" data-servicio-funcion>{f}</p>
+          ))}
+          {(propuesta.parciales || []).map((p) => (
+            <p key={p} className="text-[11px] text-amber-800" data-servicio-parcial>{p}</p>
+          ))}
+        </div>
       ) : null}
       <div className="grid gap-3 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <div className="overflow-auto rounded-2xl border border-slate-200 shadow-sm" data-servicio-propuesta>

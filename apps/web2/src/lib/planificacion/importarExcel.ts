@@ -384,23 +384,27 @@ export function elegirCuadro(cuadros: CuadroPlanilla[], nombreObjetivo: string):
 }
 
 /** Cuadros con el mismo personal son versiones: queda la última. Los que no comparten nombres se importan juntos. */
+function mismoPersonal(a: CuadroPlanilla, b: CuadroPlanilla): boolean {
+  const nombres = new Set(a.filas.map((f) => normPlanilla(f.nombre)).filter((n) => n.split(' ').length >= 2));
+  const otros = b.filas.map((f) => normPlanilla(f.nombre)).filter((n) => n.split(' ').length >= 2);
+  if (!nombres.size || !otros.length) return false;
+  const hit = otros.filter((n) => nombres.has(n)).length;
+  return hit / otros.length >= 0.6 && hit / nombres.size >= 0.6;
+}
+
+/** Versiones del mismo personal: queda la que tiene más días cargados; si empatan, la última. */
 export function sugerirCuadros(cuadros: CuadroPlanilla[]): number[] {
-  const usados = new Set<number>();
-  const elegidos: number[] = [];
-  for (let i = cuadros.length - 1; i >= 0; i--) {
-    if (usados.has(i)) continue;
-    const nombres = new Set(cuadros[i].filas.map((f) => normPlanilla(f.nombre)).filter(Boolean));
-    for (let j = i - 1; j >= 0; j--) {
-      if (usados.has(j)) continue;
-      const otros = cuadros[j].filas.map((f) => normPlanilla(f.nombre)).filter(Boolean);
-      if (!otros.length || !nombres.size) continue;
-      const hit = otros.filter((n) => nombres.has(n)).length;
-      if (hit / otros.length >= 0.6) usados.add(j);
+  const celdasDe = (c: CuadroPlanilla) => c.filas.reduce((n, f) => n + f.celdas.length, 0);
+  const drop = new Set<number>();
+  for (let i = 0; i < cuadros.length; i++) {
+    if (drop.has(i)) continue;
+    for (let j = i + 1; j < cuadros.length; j++) {
+      if (drop.has(j) || !mismoPersonal(cuadros[i], cuadros[j])) continue;
+      if (celdasDe(cuadros[i]) > celdasDe(cuadros[j])) drop.add(j);
+      else { drop.add(i); break; }
     }
-    usados.add(i);
-    elegidos.push(i);
   }
-  return elegidos.sort((a, b) => a - b);
+  return cuadros.map((_, i) => i).filter((i) => !drop.has(i));
 }
 
 const STOP_DESTINO = new Set([
@@ -633,6 +637,43 @@ export function faltanEnPlanilla(cruce: CruceFila[], dotacion: EmpleadoCruce[]):
   return dotacion.filter((e) => !ids.has(e.id));
 }
 
+/** Puesto 1 → P1. Playa → PL. Igual criterio que el pegado «P1 M». */
+export function siglasPuestoPlanilla(nombre: string): string[] {
+  const n = normPlanilla(nombre);
+  if (!n) return [];
+  const out = new Set<string>();
+  const num = n.match(/^(?:P|PTO|PUESTO|PSTO)\.?\s*(\d+)$/);
+  if (num) out.add(`P${Number(num[1])}`);
+  const palabras = n.split(' ').filter((p) => p.length >= 3 && !/^(PUESTO|PTO|PSTO|DEL|LAS|LOS)$/.test(p) && !/^\d+$/.test(p));
+  if (!num && palabras.length === 1) out.add(palabras[0].slice(0, 2));
+  if (!num) out.add(n.replace(/ /g, ''));
+  if (palabras.length >= 2) {
+    const ini = palabras.map((p) => p[0]).join('');
+    if (ini.length >= 2) out.add(ini);
+  }
+  return [...out];
+}
+
+/**
+ * Horario de la referencia de ese puesto y esa banda (PUESTO 1 + M → P1M 08:00–15:00).
+ * El color de la celda elige la variante (C verde, REF celeste). Sin esa referencia, la banda genérica.
+ */
+export function refPorPuestoBanda(refs: Referencia[], puesto: string, banda: string, color: ColorCelda): Referencia | null {
+  const compuestos = new Set(siglasPuestoPlanilla(puesto).map((s) => claveCodigo(`${s}${banda}`)));
+  const bandaK = claveCodigo(banda);
+  const conHora = refs.filter((r) => r.inicio && r.fin);
+  const porSigla = conHora.filter((r) => compuestos.has(claveCodigo(r.codigo)));
+  const pool = porSigla.length ? porSigla : conHora.filter((r) => claveCodigo(r.codigo) === bandaK);
+  if (!pool.length) return null;
+  const mismo = pool.filter((r) => r.color === color);
+  if (mismo.length) return mismo[0];
+  if (color !== 'none' && color !== 'red') {
+    const pintada = conHora.find((r) => r.color === color && (compuestos.has(claveCodigo(r.codigo)) || claveCodigo(r.codigo) === bandaK));
+    if (pintada) return pintada;
+  }
+  return pool.find((r) => r.color === 'none') || pool.find((r) => r.color !== 'red') || pool[0];
+}
+
 function refDe(refs: Referencia[], codigo: string, color: ColorCelda): Referencia | null {
   const k = claveCodigo(codigo);
   const list = refs.filter((r) => r.codigo === k && (r.inicio || r.desc));
@@ -756,7 +797,7 @@ function turnoDeBanda(turnos: TurnoServicio[], puesto: string, code: string, ref
   const exacto = enPuesto.find((t) => claveCodigo(t.code) === claveCodigo(code));
   if (exacto) return exacto;
   if (!puesto || !['M', 'T', 'N'].includes(claveCodigo(code))) return turnoDe(turnos, puesto, code);
-  const ref = refDe(refs, code, color);
+  const ref = refPorPuestoBanda(refs, puesto, code, color) || refDe(refs, code, color);
   const est = horarioBanda(code);
   const inicio = ref?.inicio || est?.inicio || '';
   const horas = ref?.horas || est?.horas || 8;
@@ -815,7 +856,7 @@ export function resolverDestino(regla: ReglaMapeo, puesto: string, turnos: Turno
     };
   }
   const t = turnoDeBanda(turnos, puesto, regla.code, refs, regla.color);
-  const ref = refDe(refs, regla.codigo, regla.color);
+  const ref = refPorPuestoBanda(refs, puesto, regla.code, regla.color) || refDe(refs, regla.codigo, regla.color);
   const est = horarioBanda(regla.code);
   const startTime = t?.startTime || ref?.inicio || est?.inicio || '';
   const endTime = t?.endTime || ref?.fin || est?.fin || '';

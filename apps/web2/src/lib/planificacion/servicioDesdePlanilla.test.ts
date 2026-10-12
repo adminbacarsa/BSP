@@ -212,4 +212,66 @@ describe('servicio desde la planilla', () => {
     const diff = compararConVigente(copiadas, []);
     assert.equal(diff[0].estado, 'falta');
   });
+
+  it('Tadicor: horario del puesto, todos los días en la rotación y el relevante no es puesto', () => {
+    const ciclo = (offset: number, trabajo: string) => Array.from({ length: 31 }, (_, i) => (
+      ((i + offset) % 8) < 6 ? { raw: trabajo } : { raw: 'F' }
+    ));
+    const cortina = Array.from({ length: 31 }, (_, i) => {
+      const letra = letraDia(2026, 10, i + 1);
+      if (letra === 'S') return { raw: 'C', color: 'rgb:92D050' as const };
+      if (letra === 'D') return { raw: 'F' };
+      return { raw: 'C' };
+    });
+    const relevante = Array.from({ length: 31 }, (_, i) => {
+      const codigos = ['P1 M', 'P1 T', 'P2 M', 'P2 T', 'F'];
+      return { raw: codigos[i % codigos.length] };
+    });
+    const refs: CeldaPlano[] = [
+      { fila: 20, col: 36, valor: 'C', color: 'none' },
+      { fila: 20, col: 37, valor: '07 a 15', color: 'none' },
+      { fila: 20, col: 40, valor: 'P1M', color: 'none' },
+      { fila: 20, col: 41, valor: '08 a 15', color: 'none' },
+      { fila: 20, col: 43, valor: 'P1T', color: 'none' },
+      { fila: 20, col: 44, valor: '15 a 22', color: 'none' },
+      { fila: 20, col: 46, valor: 'P2M', color: 'none' },
+      { fila: 20, col: 47, valor: '10 a 16', color: 'none' },
+      { fila: 20, col: 49, valor: 'P2T', color: 'none' },
+      { fila: 20, col: 50, valor: '16 a 22', color: 'none' },
+      { fila: 20, col: 52, valor: 'C', color: 'rgb:92D050' },
+      { fila: 20, col: 53, valor: 'CORTINA SABADO', color: 'none' },
+      { fila: 21, col: 53, valor: '07 a 11', color: 'none' },
+    ];
+    const [cuadro] = detectarCuadros(planilla([
+      { nombre: 'GANDIA LUIS', puesto: 'PUESTO 1', celdas: ciclo(0, 'M') },
+      { nombre: 'GUZMAN ANA', puesto: 'PUESTO 1', celdas: ciclo(4, 'T') },
+      { nombre: 'TRINKS JOSE', puesto: 'PUESTO 2', celdas: ciclo(0, 'M') },
+      { nombre: 'CAMEJO MARIA', puesto: 'PUESTO 2', celdas: ciclo(4, 'T') },
+      { nombre: 'BONILLA PEDRO', puesto: 'RELEVANTE', celdas: relevante },
+      { nombre: 'CORREA LUCIA', puesto: 'CORTINA', celdas: cortina },
+    ], refs), 2026, 10);
+    const prop = proponerServicioDesdePlanilla(cuadro, 2026, 10);
+    const franja = (puesto: string, code: string) => prop.franjas.find((f) => f.puesto === puesto && f.code === code);
+    const p1m = franja('Puesto 1', 'M');
+    const p1t = franja('Puesto 1', 'T');
+    const p2m = franja('Puesto 2', 'M');
+    const p2t = franja('Puesto 2', 'T');
+    assert.equal(p1m?.startTime, '08:00');
+    assert.equal(p1m?.endTime, '15:00');
+    assert.equal(p1t?.startTime, '15:00');
+    assert.equal(p1t?.endTime, '22:00');
+    assert.equal(p2m?.startTime, '10:00');
+    assert.equal(p2m?.endTime, '16:00');
+    assert.equal(p2t?.startTime, '16:00');
+    assert.equal(p2t?.endTime, '22:00');
+    for (const f of [p1m, p1t, p2m, p2t]) assert.equal(etiquetaDias(f?.dias || []), 'Todos');
+    assert.equal(franja('Cortina', 'C') && etiquetaDias(franja('Cortina', 'C')!.dias), 'L–V');
+    assert.equal(franja('Cortina', 'CS')?.startTime, '07:00');
+    assert.equal(franja('Cortina', 'CS')?.endTime, '11:00');
+    assert.equal(etiquetaDias(franja('Cortina', 'CS')?.dias || []), 'S');
+    assert.equal(prop.franjas.some((f) => /RELEVANTE/i.test(f.puesto)), false);
+    assert.match(prop.funciones?.join(' ') || '', /Relevante: cubre Puesto 1 y Puesto 2/);
+    assert.match(prop.resumen || '', /Puesto 1/);
+    assert.doesNotMatch(prop.resumen || '', /falta/);
+  });
 });

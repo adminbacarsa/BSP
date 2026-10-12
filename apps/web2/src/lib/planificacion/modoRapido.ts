@@ -7,7 +7,7 @@ import { esCeldaLicencia } from './seleccionLicencia';
 import type { ColorCelda } from './pegadoExcelColor';
 import { resolverEquivalencia, type EquivalenciaCodigo } from './equivalenciaCodigo';
 import { partirCodigoAjeno, resolverEquivalenciaOtro, type EquivalenciaOtro } from './asignarOtroObjetivo';
-import { horasDeFranja, resolverCodigoPuesto, type PuestoMesPegado } from './codigoPuestoPlanilla';
+import { codigoEnBloque, horasDeFranja, resolverCodigoPuesto, type PuestoMesPegado } from './codigoPuestoPlanilla';
 
 export type CeldaRC = { r: number; c: number };
 export type RangoRC = { minR: number; maxR: number; minC: number; maxC: number };
@@ -1003,12 +1003,17 @@ export function prepararPegadoExcel(
     for (const bloque of bloques) {
         const datos = bloque.filter((f) => !esEncabezado(f) && !esNota(f) && f.some((v) => v.trim()));
         if (!datos.length) continue;
-        const { diaDesde, nombreCol, legajoCol } = clasificarColumnas(datos);
+        const { kinds, diaDesde, nombreCol, legajoCol } = clasificarColumnas(datos);
         if (diaDesde < 0 || nombreCol < 0 || nombreCol >= diaDesde) continue;
+        const puestoCols = kinds.map((k, i) => (k === 'puesto' && i < diaDesde ? i : -1)).filter((i) => i >= 0);
         algunoConNombre = true;
         const nDias = datos.reduce((m, f) => Math.max(m, f.length), 0) - diaDesde;
         const colInicio = nDias >= 28 && nDias <= 31 ? 0 : (opts.cursor?.c ?? 0);
+        let puestoHeredado = '';
         for (const f of datos) {
+            const puestoCelda = puestoCols.map((c) => (f[c] || '').trim()).find(Boolean) || '';
+            if (puestoCelda) puestoHeredado = puestoCelda;
+            const puestoFila = puestoCelda || puestoHeredado;
             const nombre = nombreCol >= 0 ? (f[nombreCol] || '').trim() : '';
             const legajo = legajoCol >= 0 ? (f[legajoCol] || '').trim() : '';
             if (!pareceNombre(nombre) && normLegajo(legajo).length < 3) continue;
@@ -1044,8 +1049,12 @@ export function prepararPegadoExcel(
                     continue;
                 }
                 const rojo = color?.fondo === 'ROJO' || color?.letra === 'ROJO';
-                const eq = resolverEquivalencia(raw, rojo, opts.equivalencias);
-                if (eq.aplicada && eq.code) {
+                const enBloque = codigoEnBloque(puestoFila, raw);
+                const eqPrefijo = enBloque ? resolverEquivalencia(enBloque, rojo, opts.equivalencias) : null;
+                const eqRaw = resolverEquivalencia(raw, rojo, opts.equivalencias);
+                const eq = (eqPrefijo?.aplicada && eqPrefijo.code) ? eqPrefijo : eqRaw;
+                const eqGenerica = !!(enBloque && !(eqPrefijo?.aplicada && eqPrefijo.code) && eqRaw.aplicada && eqRaw.code && !eqRaw.positionName);
+                if (eq.aplicada && eq.code && !eqGenerica) {
                     const hours = horasDeFranja(eq.startTime, eq.endTime);
                     celdas.push({
                         col,
@@ -1063,12 +1072,19 @@ export function prepararPegadoExcel(
                 const pasaSinEquivalencia = !!res.code && ['F', 'FF', 'FP', 'RET', 'V', 'L', 'E', 'A', 'AA', 'PG', 'SUS'].includes(res.code);
                 const lic = res.code ? null : licenciaCombinada(raw, opts.conocidos);
                 const vaciarOtro = eq.aplicada && !eq.code && !eq.desconocido;
-                const puesto = vaciarOtro ? null : resolverCodigoPuesto(raw, opts.puestosDelMes);
+                const puesto = vaciarOtro ? null : resolverCodigoPuesto(enBloque || raw, opts.puestosDelMes);
                 if (lic) {
                     celdas.push({ col, code: lic.code });
                     licencia = { code: lic.code, quedan: lic.dias != null ? lic.dias - 1 : Number.POSITIVE_INFINITY };
                 } else if (puesto?.tipo === 'turno') {
                     celdas.push({ col, ...puesto.celda });
+                } else if (eqGenerica && eqRaw.code) {
+                    const hours = horasDeFranja(eqRaw.startTime, eqRaw.endTime);
+                    celdas.push({
+                        col,
+                        code: eqRaw.code,
+                        ...(eqRaw.startTime && eqRaw.endTime ? { startTime: eqRaw.startTime, endTime: eqRaw.endTime, ...(hours != null ? { hours } : {}) } : {}),
+                    });
                 } else if (res.code && (!eq.aplicada || pasaSinEquivalencia)) celdas.push({ col, code: res.code });
                 else {
                     if (puesto?.tipo === 'de_este' || (eq.aplicada && eq.desconocido)) {
