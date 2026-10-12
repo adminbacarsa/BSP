@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import type { EquivalenciaCodigo } from '@/lib/planificacion/equivalenciaCodigo';
+import { PlanillaIaPanel } from '@/components/planificacion/PlanillaIaPanel';
 import type { CuadroPlanilla } from '@/lib/planificacion/importarExcel';
 import {
   alinearPuestos,
@@ -27,16 +28,19 @@ type Props = {
   puedeCrear: boolean;
   puedeActualizar: boolean;
   hayOtroServicio?: boolean;
+  empresaId?: string;
+  objectiveId?: string;
   onGuardar: (accion: 'crear' | 'actualizar', franjas: FranjaServicioPlanilla[], equivalencias: EquivalenciaCodigo[]) => Promise<void>;
 };
 
-export function ServicioPlanillaEditor({ cuadro, semilla, year, month, mesLabel, vigente, servicioId, puedeCrear, puedeActualizar, hayOtroServicio, onGuardar }: Props) {
+export function ServicioPlanillaEditor({ cuadro, semilla, year, month, mesLabel, vigente, servicioId, puedeCrear, puedeActualizar, hayOtroServicio, empresaId, objectiveId, onGuardar }: Props) {
   const propuesta = useMemo(() => {
     const base = semilla || (cuadro ? proponerServicioDesdePlanilla(cuadro, year, month) : { franjas: [], equivalencias: [], lectura: '' });
     return { ...base, franjas: alinearPuestos(base.franjas, vigente) };
   }, [cuadro, semilla, year, month, vigente]);
   const [franjas, setFranjas] = useState<FranjaServicioPlanilla[]>(propuesta.franjas);
   const [equivalencias, setEquivalencias] = useState<EquivalenciaCodigo[]>(propuesta.equivalencias);
+  const [funciones, setFunciones] = useState<string[]>(propuesta.funciones || []);
   const baseKey = semilla
     ? `semilla|${servicioId}|${semilla.franjas.map((f) => f.id).join(',')}`
     : `${cuadro?.indice ?? 'x'}|${servicioId}`;
@@ -48,6 +52,7 @@ export function ServicioPlanillaEditor({ cuadro, semilla, year, month, mesLabel,
     setBaseId(baseKey);
     setFranjas(propuesta.franjas);
     setEquivalencias(propuesta.equivalencias);
+    setFunciones(propuesta.funciones || []);
     setConfirmando(null);
   }
   const diff = useMemo(() => compararConVigente(franjas, vigente), [franjas, vigente]);
@@ -87,7 +92,7 @@ export function ServicioPlanillaEditor({ cuadro, semilla, year, month, mesLabel,
           <p className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] text-slate-700 shadow-sm" data-servicio-lectura>
             {propuesta.resumen || propuesta.lectura}
           </p>
-          {(propuesta.funciones || []).map((f) => (
+          {funciones.map((f) => (
             <p key={f} className="rounded-2xl border border-indigo-100 bg-indigo-50 px-3 py-1.5 text-[12px] text-indigo-950" data-servicio-funcion>{f}</p>
           ))}
           {(propuesta.parciales || []).map((p) => (
@@ -95,6 +100,22 @@ export function ServicioPlanillaEditor({ cuadro, semilla, year, month, mesLabel,
           ))}
         </div>
       ) : null}
+      {cuadro && (
+        <PlanillaIaPanel
+          key={baseKey}
+          cuadro={cuadro}
+          propuesta={propuesta}
+          empresaId={empresaId}
+          objectiveId={objectiveId}
+          year={year}
+          month={month}
+          onAplicar={(next) => {
+            setFranjas(next.franjas);
+            setEquivalencias(next.equivalencias);
+            setFunciones(next.funciones);
+          }}
+        />
+      )}
       <div className="grid gap-3 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <div className="overflow-auto rounded-2xl border border-slate-200 shadow-sm" data-servicio-propuesta>
           <table className="w-full text-left text-[12px]">

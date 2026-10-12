@@ -183,9 +183,11 @@ export function ServicioPlanillaModal(props: Props) {
             </div>
           )}
           {(cuadro || semilla) && obj && (
-            <ServicioPlanillaEditor
+              <ServicioPlanillaEditor
               cuadro={cuadro}
               semilla={semilla}
+              empresaId={props.empresaId}
+              objectiveId={obj.id}
               year={props.year}
               month={props.month}
               mesLabel={props.mesLabel}

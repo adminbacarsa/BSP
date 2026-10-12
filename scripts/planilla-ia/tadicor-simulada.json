@@ -1,0 +1,25 @@
+{
+  "puestos": [
+    { "nombre": "Puesto 1", "filas": [8], "tipo": "PUESTO", "confianza": 0.96 },
+    { "nombre": "Puesto 2", "filas": [12], "tipo": "PUESTO", "confianza": 0.95 },
+    { "nombre": "Cortina", "filas": [16], "tipo": "PUESTO", "confianza": 0.93 },
+    { "nombre": "Refuerzo", "filas": [20], "tipo": "REFUERZO", "confianza": 0.9 },
+    { "nombre": "Relevante", "filas": [18], "tipo": "FUNCION", "confianza": 0.92 }
+  ],
+  "leyenda": [
+    { "codigo": "M", "puesto": "Puesto 1", "banda": "M", "inicio": "08:00", "fin": "15:00", "tipo": "TURNO", "confianza": 0.97 },
+    { "codigo": "T", "puesto": "Puesto 1", "banda": "T", "inicio": "15:00", "fin": "22:00", "tipo": "TURNO", "confianza": 0.96 },
+    { "codigo": "C", "color": "verde", "puesto": "Cortina", "banda": "CS", "inicio": "07:00", "fin": "11:00", "tipo": "TURNO", "confianza": 0.94 },
+    { "codigo": "REF", "color": "celeste", "puesto": "Refuerzo", "banda": "REF", "inicio": "11:00", "fin": "23:00", "tipo": "REFUERZO", "confianza": 0.86 },
+    { "codigo": "REF", "puesto": "Refuerzo", "banda": "RF", "inicio": "12:00", "fin": "22:00", "tipo": "REFUERZO", "confianza": 0.88 },
+    { "codigo": "RET", "tipo": "RETEN", "inicio": "00:00", "fin": "00:00", "confianza": 0.9 }
+  ],
+  "funciones": [
+    { "nombre": "Relevante", "cubre": ["Puesto 1", "Puesto 2"], "confianza": 0.93 }
+  ],
+  "excepcionesPorDia": [
+    { "dia": 2, "codigo": "REF", "inicio": "11:00", "fin": "23:00", "fuente": "nota", "confianza": 0.84 },
+    { "dia": 3, "codigo": "REF", "inicio": "11:00", "fin": "23:00", "fuente": "nota", "confianza": 0.84 }
+  ],
+  "dudas": ["El refuerzo de 11 a 23 no llega a la mitad de los viernes: queda como excepción de las notas."]
+}

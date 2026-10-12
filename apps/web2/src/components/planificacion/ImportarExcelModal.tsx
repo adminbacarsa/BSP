@@ -525,6 +525,8 @@ export function ImportarExcelModal({ ctx, onCargar, onAplicar, onCancelar, puede
               <p className="text-[12px] text-slate-500">{grupo.clienteNombre ? `${grupo.clienteNombre} · ` : ''}{grupo.nombre}</p>
               <ServicioPlanillaEditor
                 cuadro={cuadro}
+                empresaId={ctx.empresaId}
+                objectiveId={grupo.objectiveId}
                 year={ctx.year}
                 month={ctx.month}
                 mesLabel={ctx.mesLabel}

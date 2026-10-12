@@ -3842,6 +3842,7 @@ export { gestionarMarcoEventual, pedirCodigoAnexoEventual, confirmarAnexoEventua
 export { subirMarcosLote } from './marcosLote/subirMarcosLote';
 export { acusarReciboContrato } from './eventuales/acusarReciboContrato';
 export { extraerEscalaCct422 } from './escalas/extraerEscalaCct422';
+export { interpretarPlanillaIa } from './planificacion/interpretarPlanillaIa';
 // Escala salarial del anexo (Eventuales → Escala salarial): editar con motivo, aprobar (escribe escalas_salariales), rechazar, importar.
 export { gestionarEscalaCct } from './escalas/gestionarEscalaCct';
 /**
