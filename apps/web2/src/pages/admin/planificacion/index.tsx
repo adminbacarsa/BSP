@@ -239,7 +239,7 @@ import {
 } from '@/components/planificacion/GrillaCelda';
 import { ModoRapidoCapa, type CapaModoRapidoApi, type MarcaAviso } from '@/components/planificacion/ModoRapidoCapa';
 import { LeyendaModoRapido } from '@/components/planificacion/LeyendaModoRapido';
-import { Cierre12Banner, Cobertura12RangoBanner, ModoRapidoAyuda, ModoRapidoAvisosPanel, PegarExcelModal, SelectorNovedad, type DecisionDiaE, type DiaUi12, type PegarExcelEstado } from '@/components/planificacion/ModoRapidoPiezas';
+import { Cierre12Banner, Cobertura12RangoBanner, ModoRapidoAyuda, PegarExcelModal, SelectorNovedad, type DecisionDiaE, type DiaUi12, type PegarExcelEstado } from '@/components/planificacion/ModoRapidoPiezas';
 import { coloresParaTsv } from '@/lib/planificacion/pegadoExcelColor';
 import { asignarNominaAServicioEvento } from '@/services/eventoAssignService';
 import {
@@ -391,7 +391,6 @@ import {
     type DiaFila,
 } from '@/components/planificacion/CoberturaModalV2';
 import { BarraPreguntar } from '@/components/eventuales/EventualesCandidatosUx';
-import { ConsultasEnCursoPill } from '@/components/planificacion/ConsultasEnCurso';
 import { useConsultasDisponibilidadObjetivo, type ConsultaObjetivo } from '@/hooks/useConsultasDisponibilidadObjetivo';
 import {
     TEXTO_AVISO_ASIGNADO_AL_GUARDAR,
@@ -476,7 +475,7 @@ let ofrecerCobertura12: (claves: string[]) => void = () => {};
 import { applyOperationalGapCloseToChanges, applySingleWorkerFullGapCloseToChanges } from '@/lib/planificacion/operationalGapCoverage';
 import { alternativasPareja, cambiarPareja, estiloJornada12, horarioDoce, proponerCierre12h, slaExigeCobertura, textoRango12h, textoResumen12h, volverA8, type Propuesta12h, type TurnoPuesto12 } from '@/lib/planificacion/cierre12h';
 import { avisosDesdeLectura, faltantesDelDia, leerDia, proponerLiberar, SIN_PUESTO, type FaltanteBanda, type PuestoServicio, type TurnoDia } from '@/lib/planificacion/lecturaBandas';
-import { BandasFaltantesPanel } from '@/components/planificacion/BandasFaltantesPanel';
+import { PanelesMarco } from '@/components/planificacion/PanelesPlanificacion';
 import {
     clasificarSeleccionLicencia,
     diasQueQuedaron,
@@ -1830,8 +1829,6 @@ function PlanificacionDesktop() {
         sinPuesto?: string[];
         deMas?: boolean;
     } | null>(null);
-    const [bandasOcultas, setBandasOcultas] = useState(false);
-    useEffect(() => { setBandasOcultas(false); }, [selectedObjective, currentDate]);
     const [rango12, setRango12] = useState<{ titulo: string; dias: Array<DiaUi12 & { propuesta: Propuesta12h | null }> } | null>(null);
     const [slaGapCloseModal, setSlaGapCloseModal] = useState<SlaGapCloseModalData | null>(null);
     const [shiftExtendModal, setShiftExtendModal] = useState<ShiftExtendModalData | null>(null);
@@ -18055,7 +18052,26 @@ function PlanificacionDesktop() {
                                 </div>
                             </div>
                         ) : (
-                            <div className="relative flex-1 min-h-0 h-full flex flex-col">
+                            <PanelesMarco
+                                faltantes={bloqueoMesCerrado ? [] : lecturaMes.faltantes}
+                                puedeFranco={canAssignFT}
+                                onAplicar={(f) => { if (f.propuesta) aplicarPropuestas12([f.propuesta]); }}
+                                onAplicarTodas={() => aplicarPropuestas12(lecturaMes.faltantes.flatMap((f) => (f.propuesta ? [f.propuesta] : [])))}
+                                onPasarAFt={(f, fr) => pasarAFtDirecto(fr.empId, f.dateStr, f.banda, f.positionName)}
+                                onElegirOtro={(f) => { if (f.propuesta) setPropuesta12([f.propuesta]); }}
+                                avisos={modoRapido ? avisosRapidoSinVer : []}
+                                sinServicio={sinServicioEnMes}
+                                modoRapido={modoRapido}
+                                onIrAviso={irAvisoRapido}
+                                onVisto={marcarAvisosVistos}
+                                onAsignarPuesto={asignarPuestoAviso}
+                                consultas={canConsultarEventual ? vacancyConsultas : []}
+                                consultaFoco={consultaFoco}
+                                consultaTick={consultaTick}
+                                onCancelarConsulta={(id) => { void cancelarConsultaPlan(id).catch(() => toast.error('No se pudo cancelar la consulta.')); }}
+                                onConsultarOtros={(c) => reabrirDesdeConsulta(c, true)}
+                                onCubrirOtraForma={(c) => reabrirDesdeConsulta(c, false)}
+                            >
                             <div
                                 data-plan-grilla
                                 ref={grillaScrollRef}
@@ -18065,7 +18081,7 @@ function PlanificacionDesktop() {
                                     e.preventDefault();
                                     arrastreFilaRef.current.clientY = e.clientY;
                                 }}
-                                className={`relative flex-1 min-h-0 h-full overflow-auto custom-scrollbar rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/40 transition-opacity duration-150 outline-none ${(isFilterPending || (selectedObjective && !shiftsMapLoaded)) ? 'opacity-70' : ''} ${correctionMode ? 'pb-2' : ''} ${modoRapido ? 'ring-1 ring-indigo-200' : ''}`}
+                                className={`relative min-w-0 flex-1 min-h-0 overflow-auto custom-scrollbar rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/40 transition-opacity duration-150 outline-none ${(isFilterPending || (selectedObjective && !shiftsMapLoaded)) ? 'opacity-70' : ''} ${correctionMode ? 'pb-2' : ''} ${modoRapido ? 'ring-1 ring-indigo-200' : ''}`}
                             >
                                 {renderGrid(false, undefined, undefined, undefined, correctionMode ? { highlightCoverageFooter: true } : undefined)}
                                 <ModoRapidoCapa
@@ -18124,27 +18140,12 @@ function PlanificacionDesktop() {
                                     }}
                                 />
                             </div>
-                            {modoRapido && !comparingSnapshot && (
-                                <ModoRapidoAvisosPanel avisos={avisosRapidoSinVer} sinServicio={sinServicioEnMes} onIr={irAvisoRapido} onVisto={marcarAvisosVistos} onAsignarPuesto={asignarPuestoAviso} />
-                            )}
-                            </div>
+                            </PanelesMarco>
                         )}
                         </>
                     )}
                 </div>
 
-                {lecturaMes.faltantes.length > 0 && !bandasOcultas && !comparingSnapshot && !bloqueoMesCerrado && (
-                    <BandasFaltantesPanel
-                        faltantes={lecturaMes.faltantes}
-                        puedeFranco={canAssignFT}
-                        storageKey={`cosp-planif-bandas-min:${selectedObjective}:${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`}
-                        onAplicar={(f) => { if (f.propuesta) aplicarPropuestas12([f.propuesta]); }}
-                        onAplicarTodas={() => aplicarPropuestas12(lecturaMes.faltantes.flatMap((f) => (f.propuesta ? [f.propuesta] : [])))}
-                        onPasarAFt={(f, fr) => pasarAFtDirecto(fr.empId, f.dateStr, f.banda, f.positionName)}
-                        onElegirOtro={(f) => { if (f.propuesta) setPropuesta12([f.propuesta]); }}
-                        onCerrar={() => setBandasOcultas(true)}
-                    />
-                )}
                 {/* BARRA FLOTANTE */}
                 {bloqueoMesCerrado && selection.start && (
                     <div data-mes-cerrado className="absolute top-24 left-1/2 -translate-x-1/2 z-[100] bg-slate-700 text-white rounded-xl shadow-2xl border border-slate-500 px-4 py-2 text-xs font-black no-print">
@@ -20646,16 +20647,6 @@ function PlanificacionDesktop() {
                             )}
                         </div>
                     </div>
-                )}
-                {canConsultarEventual && (
-                    <ConsultasEnCursoPill
-                        consultas={vacancyConsultas}
-                        focoId={consultaFoco}
-                        focoTick={consultaTick}
-                        onCancelar={(id) => { void cancelarConsultaPlan(id).catch(() => toast.error('No se pudo cancelar la consulta.')); }}
-                        onConsultarOtros={(c) => reabrirDesdeConsulta(c, true)}
-                        onCubrirOtraForma={(c) => reabrirDesdeConsulta(c, false)}
-                    />
                 )}
                 {showVacancyModal && (() => {
                     const absType = vacancyData?.type || '';

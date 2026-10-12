@@ -9,7 +9,7 @@ function estadoRespuesta(estado: string, consultaVencida: boolean): string {
   return consultaVencida ? 'sin respuesta' : 'pendiente';
 }
 
-const DESCARTADAS_KEY = 'cosp-consultas-descartadas';
+export const DESCARTADAS_KEY = 'cosp-consultas-descartadas';
 
 function leerDescartadas(): string[] {
   try {
@@ -29,6 +29,11 @@ function guardarDescartadas(ids: string[]) {
   }
 }
 
+export function contarConsultasVisibles(consultas: ConsultaCurso[]): number {
+  const descartadas = typeof window === 'undefined' ? [] : leerDescartadas();
+  return consultasVisiblesEnCurso(consultas).filter((c) => c.status === 'ABIERTA' || !descartadas.includes(c.id)).length;
+}
+
 /** Pastilla «Consultas en curso (N)». La lista sale del snapshot que le pasa el padre. */
 export function ConsultasEnCursoPill(props: {
   consultas: ConsultaCurso[];
@@ -38,6 +43,9 @@ export function ConsultasEnCursoPill(props: {
   onCancelar: (consultaId: string) => void;
   onConsultarOtros: (consulta: ConsultaCurso) => void;
   onCubrirOtraForma: (consulta: ConsultaCurso) => void;
+  /** Dentro del dock: solo la lista, sin pastilla flotante. */
+  embebida?: boolean;
+  onConteo?: (n: number) => void;
 }) {
   // Las vencidas se pueden descartar (queda en este navegador); las abiertas siempre se ven.
   const [descartadas, setDescartadas] = useState<string[]>([]);
@@ -51,89 +59,98 @@ export function ConsultasEnCursoPill(props: {
     .filter((c) => c.status === 'ABIERTA' || !descartadas.includes(c.id));
   const enCurso = visibles.filter((c) => c.status === 'ABIERTA').length;
   const vencidasIds = visibles.filter((c) => c.status === 'VENCIDA').map((c) => c.id);
+  const conteo = props.onConteo;
+  useEffect(() => { conteo?.(visibles.length); }, [conteo, visibles.length]);
   const [abierta, setAbierta] = useState(!!props.focoId);
   useEffect(() => {
     if (props.focoId) setAbierta(true);
   }, [props.focoId, props.focoTick]);
+  const lista = (
+    <div data-consultas-lista="1">
+      {vencidasIds.length > 1 && (
+        <div className="mb-2 flex justify-end">
+          <button
+            type="button"
+            data-consultas-descartar-todas="1"
+            onClick={() => descartar(vencidasIds)}
+            className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[10px] font-black text-slate-600"
+          >
+            Descartar vencidas
+          </button>
+        </div>
+      )}
+      {visibles.length === 0 && <p className="px-1 py-2 text-[12px] text-slate-400">Sin consultas en curso.</p>}
+      {visibles.map((c) => (
+        <div key={c.id} className="mb-2 break-words rounded-xl border border-slate-100 bg-slate-50 px-2 py-2" data-consulta-item={c.id}>
+          <p className="text-[11px] font-black text-slate-800">{textoIndicadorConsulta(c)}</p>
+          <p className="break-words text-[11px] font-bold text-indigo-700">{resumenConsultaDia(c)}</p>
+          {(c.respuestas || []).map((r) => (
+            <p key={`${c.id}-${r.nombre}`} className="break-words text-[11px] font-semibold text-slate-600">
+              {r.nombre.split(',')[0]} · {estadoRespuesta(r.estado, c.status === 'VENCIDA')}{r.hora ? ` ${r.hora}` : ''}
+            </p>
+          ))}
+          {c.status === 'ABIERTA' && (
+            <button
+              type="button"
+              data-consulta-cancelar={c.id}
+              onClick={() => props.onCancelar(c.id)}
+              className="mt-1 rounded-lg border border-rose-200 bg-white px-2 py-1 text-[10px] font-black text-rose-700"
+            >
+              Cancelar consulta
+            </button>
+          )}
+          {c.status === 'VENCIDA' && (
+            <div className="mt-1 flex flex-wrap gap-1">
+              <button
+                type="button"
+                data-consulta-otros={c.id}
+                onClick={() => { descartar([c.id]); props.onConsultarOtros(c); }}
+                className="rounded-lg bg-indigo-600 px-2 py-1 text-[10px] font-black text-white"
+              >
+                Consultar a otros
+              </button>
+              <button
+                type="button"
+                data-consulta-otra={c.id}
+                onClick={() => { descartar([c.id]); props.onCubrirOtraForma(c); }}
+                className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[10px] font-black text-slate-700"
+              >
+                Cubrir de otra forma
+              </button>
+              <button
+                type="button"
+                data-consulta-descartar={c.id}
+                onClick={() => descartar([c.id])}
+                className="rounded-lg px-2 py-1 text-[10px] font-black text-slate-500 hover:bg-slate-100"
+              >
+                Descartar
+              </button>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+  if (props.embebida) return <div data-consultas-pill="1">{lista}</div>;
   if (!visibles.length) return null;
   const abajo = props.anclaje === 'celular' ? 'bottom-24' : 'bottom-6';
   return (
     <div className={`fixed ${abajo} right-4 z-40 max-w-sm`} data-consultas-pill="1">
       {abierta && (
-        <div className="mb-2 max-h-80 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-lg">
+        <div className="mb-2 max-h-80 overflow-y-auto overflow-x-hidden rounded-2xl border border-slate-200 bg-white p-3 shadow-lg">
           <div className="mb-2 flex items-center justify-between gap-2">
             <p className="text-[10px] font-black uppercase tracking-wide text-slate-400">En vivo</p>
-            <div className="flex items-center gap-1">
-              {vencidasIds.length > 1 && (
-                <button
-                  type="button"
-                  data-consultas-descartar-todas="1"
-                  onClick={() => descartar(vencidasIds)}
-                  className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[10px] font-black text-slate-600"
-                >
-                  Descartar vencidas
-                </button>
-              )}
-              <button
-                type="button"
-                aria-label="Cerrar"
-                data-consultas-cerrar="1"
-                onClick={() => setAbierta(false)}
-                className="rounded-lg px-2 py-1 text-[12px] font-black text-slate-500 hover:bg-slate-100"
-              >
-                ✕
-              </button>
-            </div>
+            <button
+              type="button"
+              aria-label="Cerrar"
+              data-consultas-cerrar="1"
+              onClick={() => setAbierta(false)}
+              className="rounded-lg px-2 py-1 text-[12px] font-black text-slate-500 hover:bg-slate-100"
+            >
+              ✕
+            </button>
           </div>
-          {visibles.map((c) => (
-            <div key={c.id} className="mb-2 rounded-xl border border-slate-100 bg-slate-50 px-2 py-2" data-consulta-item={c.id}>
-              <p className="text-[11px] font-black text-slate-800">{textoIndicadorConsulta(c)}</p>
-              <p className="text-[10px] font-bold text-indigo-700">{resumenConsultaDia(c)}</p>
-              {(c.respuestas || []).map((r) => (
-                <p key={`${c.id}-${r.nombre}`} className="text-[10px] font-semibold text-slate-600">
-                  {r.nombre.split(',')[0]} · {estadoRespuesta(r.estado, c.status === 'VENCIDA')}{r.hora ? ` ${r.hora}` : ''}
-                </p>
-              ))}
-              {c.status === 'ABIERTA' && (
-                <button
-                  type="button"
-                  data-consulta-cancelar={c.id}
-                  onClick={() => props.onCancelar(c.id)}
-                  className="mt-1 rounded-lg border border-rose-200 bg-white px-2 py-1 text-[10px] font-black text-rose-700"
-                >
-                  Cancelar consulta
-                </button>
-              )}
-              {c.status === 'VENCIDA' && (
-                <div className="mt-1 flex flex-wrap gap-1">
-                  <button
-                    type="button"
-                    data-consulta-otros={c.id}
-                    onClick={() => { descartar([c.id]); props.onConsultarOtros(c); }}
-                    className="rounded-lg bg-indigo-600 px-2 py-1 text-[10px] font-black text-white"
-                  >
-                    Consultar a otros
-                  </button>
-                  <button
-                    type="button"
-                    data-consulta-otra={c.id}
-                    onClick={() => { descartar([c.id]); props.onCubrirOtraForma(c); }}
-                    className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[10px] font-black text-slate-700"
-                  >
-                    Cubrir de otra forma
-                  </button>
-                  <button
-                    type="button"
-                    data-consulta-descartar={c.id}
-                    onClick={() => descartar([c.id])}
-                    className="rounded-lg px-2 py-1 text-[10px] font-black text-slate-500 hover:bg-slate-100"
-                  >
-                    Descartar
-                  </button>
-                </div>
-              )}
-            </div>
-          ))}
+          {lista}
         </div>
       )}
       <button

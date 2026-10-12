@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AlertTriangle, ClipboardPaste, Keyboard, Search, X } from 'lucide-react';
+import { ClipboardPaste, Keyboard, Search, X } from 'lucide-react';
 import { agruparAvisos, ATAJOS_MODO_RAPIDO, idAviso, idGrupoAviso, textoDiaE, textoResumenPegado, type AvisoRapido, type FilaPegadoExcel, type GuardiaPegado, type PreviewPegadoExcel, type TipoNovedadRapida } from '@/lib/planificacion/modoRapido';
 import { clasificarPegado, indicesAsignados, sinEncontrarVisibles, textoGruposPegado, textoPlataforma } from '@/lib/planificacion/pegarPersonas';
 import { equivalenciaDeDefinicion, proponerDefinicion, textoCeldasVacias } from '@/lib/planificacion/definirCodigo';
 import { cambiosHorarioServicio } from '@/lib/planificacion/codigosHorarioPegado';
+import { TEXTO_PIN_AVISOS, ubicarCierre12, type Caja } from '@/lib/planificacion/panelesPlanif';
 
 export function ModoRapidoAyuda({ onCerrar }: { onCerrar: () => void }) {
     useEffect(() => {
@@ -26,7 +27,7 @@ export function ModoRapidoAyuda({ onCerrar }: { onCerrar: () => void }) {
                     <p className="text-xs font-black uppercase text-slate-800">Modo rápido · atajos</p>
                     <button type="button" onClick={onCerrar} className="ml-auto rounded-lg p-1 text-slate-400 hover:bg-slate-50 hover:text-slate-600" aria-label="Cerrar"><X size={14} /></button>
                 </div>
-                <p className="mb-2 text-[11px] text-slate-500">Hacé clic en una celda y escribí. Nada frena mientras cargás: los avisos quedan marcados y el PIN se pide al guardar.</p>
+                <p className="mb-2 text-[11px] text-slate-500">Hacé clic en una celda y escribí. Nada frena mientras cargás: los avisos quedan marcados y el PIN se pide al publicar.</p>
                 <p className="mb-3 rounded-xl border border-indigo-100 bg-indigo-50 px-3 py-2 text-[11px] font-medium text-indigo-900" data-modo-rapido-ayuda-pegar>
                     Para pegar desde Excel: copiá desde la columna del nombre hasta el último día y apretá Ctrl+V en la grilla. Desde Excel se lee el color: M y N rojas pasan a D12 y N12 y la E amarilla es evento (se vincula a un evento cargado o queda «Afectado a evento»). Si el color no viaja, la E se pregunta en el resumen y las de 12 h se escriben D12 y N12, o con + si falta una banda.
                 </p>
@@ -65,8 +66,6 @@ const COLOR: Record<AvisoRapido['tipo'], string> = {
     COPIA: 'bg-indigo-500',
 };
 
-const AVISOS_ABIERTOS_KEY = 'cosp-planif-avisos-abierto';
-
 export function ModoRapidoAvisosPanel({
     avisos,
     sinServicio,
@@ -82,49 +81,10 @@ export function ModoRapidoAvisosPanel({
     onAsignarPuesto?: (a: AvisoRapido) => void;
 }) {
     const grupos = useMemo(() => agruparAvisos(avisos), [avisos]);
-    const [abierto, setAbierto] = useState(false);
     const [desplegado, setDesplegado] = useState<string | null>(null);
-    const listo = useRef(false);
-    useEffect(() => {
-        if (listo.current) return;
-        listo.current = true;
-        const guardado = typeof window !== 'undefined' ? window.localStorage.getItem(AVISOS_ABIERTOS_KEY) : null;
-        if (guardado === '1') setAbierto(true);
-        else if (guardado === '0') setAbierto(false);
-        else setAbierto(avisos.length <= 3);
-    }, [avisos.length]);
-    const toggle = () => {
-        setAbierto((v) => {
-            const next = !v;
-            if (typeof window !== 'undefined') window.localStorage.setItem(AVISOS_ABIERTOS_KEY, next ? '1' : '0');
-            return next;
-        });
-    };
-    if (!avisos.length && !sinServicio) return null;
-    if (typeof document === 'undefined') return null;
-    if (!abierto) {
-        return createPortal(
-            <button
-                type="button"
-                onClick={toggle}
-                className="fixed bottom-16 right-4 z-[80] flex items-center gap-1.5 rounded-full border border-amber-200 bg-white px-3 py-1.5 text-[11px] font-black text-amber-800 shadow-lg hover:bg-amber-50 no-print"
-                data-modo-rapido-avisos={avisos.length}
-                data-modo-rapido-avisos-pill
-            >
-                <AlertTriangle size={13} className="text-amber-500" />
-                {avisos.length} aviso{avisos.length === 1 ? '' : 's'}
-            </button>,
-            document.body,
-        );
-    }
-    return createPortal(
-        <div className="fixed bottom-16 right-4 z-[80] w-[320px] rounded-2xl border border-slate-200 bg-white shadow-lg no-print" data-modo-rapido-avisos={avisos.length}>
-            <button type="button" onClick={toggle} className="flex w-full items-center gap-2 px-3 py-2 text-left">
-                <AlertTriangle size={14} className={avisos.length ? 'text-amber-500' : 'text-slate-400'} />
-                <span className="text-[11px] font-black uppercase text-slate-700">{avisos.length} aviso{avisos.length === 1 ? '' : 's'}</span>
-                <span className="ml-auto text-[10px] font-bold text-slate-400">Ocultar</span>
-            </button>
-            <div className="max-h-[260px] overflow-auto border-t border-slate-100 px-2 py-1.5">
+    return (
+        <div data-modo-rapido-avisos={avisos.length}>
+            <div className="px-1 py-1">
                 {sinServicio && (
                     <p className="px-1 pb-1.5 text-[10px] font-bold text-slate-500">Sin servicio: no se valida cobertura.</p>
                 )}
@@ -133,7 +93,7 @@ export function ModoRapidoAvisosPanel({
                     const abiertoGrupo = desplegado === g.clave;
                     return (
                         <div key={g.clave}>
-                            <div className="flex items-start gap-1 rounded-lg hover:bg-slate-50">
+                            <div className="flex flex-wrap items-start gap-1 rounded-lg hover:bg-slate-50">
                                 <button
                                     type="button"
                                     onClick={() => {
@@ -144,7 +104,7 @@ export function ModoRapidoAvisosPanel({
                                     data-aviso-grupo={g.empId}
                                 >
                                     <span className={`mt-0.5 shrink-0 rounded px-1 text-[8px] font-black uppercase text-white ${COLOR[g.tipo]}`}>{ETIQUETA[g.tipo]}</span>
-                                    <span className="text-[11px] leading-snug text-slate-700">{g.texto}</span>
+                                    <span className="min-w-0 break-words text-[11px] leading-snug text-slate-700">{g.texto}</span>
                                 </button>
                                 {g.tipo === 'SIN_PUESTO' && g.items[0]?.puestoSugerido && onAsignarPuesto && (
                                     <button
@@ -160,7 +120,7 @@ export function ModoRapidoAvisosPanel({
                                     type="button"
                                     onClick={() => onVisto(g.items.map(idAviso))}
                                     className="mt-0.5 shrink-0 rounded-md p-1 text-slate-300 hover:bg-white hover:text-slate-600"
-                                    title="Visto: deja de mostrarse acá. La marca de la celda y el PIN al guardar siguen."
+                                    title="Visto: deja de mostrarse acá. La marca de la celda sigue. El PIN se pide al publicar."
                                     aria-label="Marcar como visto"
                                     data-aviso-visto={idGrupoAviso(g)}
                                 >
@@ -208,11 +168,10 @@ export function ModoRapidoAvisosPanel({
                     </button>
                 </div>
             )}
-            <p className="border-t border-slate-100 px-3 py-2 text-[10px] leading-snug text-slate-400" data-modo-rapido-avisos-ayuda>
-                Descanso de 8 a 12 h y tope piden un PIN al guardar; menos de 8 h no se guarda. Visto solo lo saca de esta lista.
+            <p className="mt-2 break-words border-t border-slate-100 px-1 py-2 text-[11px] leading-snug text-slate-500" data-modo-rapido-avisos-ayuda>
+                {TEXTO_PIN_AVISOS} Visto solo lo saca de esta lista.
             </p>
-        </div>,
-        document.body,
+        </div>
     );
 }
 
@@ -303,7 +262,7 @@ export function Cobertura12RangoBanner({
             {revisando ? (
                 <p className="mt-1 text-[11px] text-slate-500">Día {indice! + 1} de {dias.length}</p>
             ) : (
-                <p className="mt-1 text-[11px] text-slate-500">Es un cambio de turno a D12 y N12. Descanso de 8 a 12 h y el tope piden el PIN al guardar.</p>
+                <p className="mt-1 text-[11px] text-slate-500">Es un cambio de turno a D12 y N12. {TEXTO_PIN_AVISOS}</p>
             )}
             <div className="mt-2 flex flex-wrap justify-end gap-2">
                 <button type="button" onClick={onCerrar} className="rounded-xl border border-slate-200 px-3 py-1 text-[11px] font-bold text-slate-600 hover:bg-slate-50" data-cobertura-12h-no>No cubrir</button>
@@ -351,28 +310,43 @@ export function Cierre12Banner({
     ancla?: { left: number; top: number; width: number; height: number } | null;
 }) {
     const btnRef = useRef<HTMLButtonElement>(null);
-    const [medida, setMedida] = useState(ancla || null);
+    const cajaRef = useRef<HTMLDivElement>(null);
+    const [medida, setMedida] = useState<Caja | null>(ancla ? { ...ancla } : null);
+    const [alto, setAlto] = useState(240);
     useEffect(() => { btnRef.current?.focus(); }, [texto]);
     useEffect(() => {
-        if (ancla) { setMedida(ancla); return; }
+        if (ancla) { setMedida({ left: ancla.left, top: ancla.top, width: ancla.width, height: ancla.height }); return; }
         const el = document.querySelector('[data-modo-rapido-cursor]');
         if (!el) return;
         const r = el.getBoundingClientRect();
         setMedida({ left: r.left, top: r.top, width: r.width, height: r.height });
     }, [ancla, texto]);
+    useEffect(() => {
+        const h = cajaRef.current?.offsetHeight;
+        if (h && Math.abs(h - alto) > 12) setAlto(h);
+    }, [alto, texto, alternativas?.length, francos?.length]);
     if (typeof document === 'undefined') return null;
-    const ancho = 420;
-    const left = medida
-        ? Math.max(8, Math.min(medida.left, window.innerWidth - ancho - 8))
-        : Math.max(8, window.innerWidth - ancho - 16);
-    const top = medida
-        ? Math.max(8, Math.min(medida.top + medida.height + 6, window.innerHeight - 280))
-        : Math.max(8, window.innerHeight - 280);
+    const ancho = Math.min(420, window.innerWidth - 16);
+    const panelEl = document.querySelector('[data-paneles-planif]');
+    const pr = panelEl?.getBoundingClientRect();
+    const panel: Caja | null = pr && pr.width > 8 && pr.height > 8
+        ? { left: pr.left, top: pr.top, width: pr.width, height: pr.height }
+        : null;
+    const anclaCaja: Caja = medida || { left: 16, top: Math.max(8, window.innerHeight - alto - 16), width: 0, height: 0 };
+    const pos = ubicarCierre12({
+        ancla: anclaCaja,
+        panel,
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        ancho,
+        alto,
+    });
     return createPortal(
         <div
+            ref={cajaRef}
             className="fixed z-[90] rounded-2xl border border-indigo-200 bg-white px-4 py-3 shadow-lg no-print"
-            style={{ left, top, width: ancho, maxWidth: 'calc(100vw - 16px)' }}
+            style={{ left: pos.left, top: pos.top, width: ancho, maxWidth: 'calc(100vw - 16px)' }}
             data-cierre-12h
+            data-cierre-12h-lado={pos.lado}
         >
             <p className="whitespace-pre-line text-[15px] font-black leading-snug text-slate-900" data-cierre-12h-texto>{texto}</p>
             {!!alternativas?.length && (
