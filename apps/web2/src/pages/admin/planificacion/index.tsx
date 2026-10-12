@@ -17075,6 +17075,16 @@ function PlanificacionDesktop() {
                                 >
                                     Servicio
                                 </button>
+                                <button
+                                    type="button"
+                                    data-abrir-asistente
+                                    onClick={() => { if (typeof window !== 'undefined') window.dispatchEvent(new Event('cosp-assistant-open')); }}
+                                    title="Abrir el asistente (VIGI)"
+                                    aria-label="Abrir el asistente"
+                                    className="flex items-center justify-center w-8 h-8 bg-white text-slate-500 border border-slate-200 rounded-lg hover:bg-slate-50 hover:text-indigo-600 transition-colors shrink-0 shadow-sm"
+                                >
+                                    <ShieldCheck size={14}/>
+                                </button>
 
                             <div className="flex items-center flex-nowrap justify-end gap-1 min-w-0 ml-auto no-print shrink-0">
                                 {/* CRONOGRAMAS — solo expandido */}
@@ -18602,7 +18612,7 @@ function PlanificacionDesktop() {
                     </div>
                 )}
 
-                {modoRapido && selectedObjective && (
+                {modoRapido && selectedObjective && !(statsBarCollapsed && selectedObjective && !comparingSnapshot && Object.keys(empMonthlyHours).length > 0) && (
                     <LeyendaModoRapido
                         puestos={(positionStructure || []).map((p: any) => ({
                             name: String(p.positionName || p.name || 'Puesto'),
@@ -18619,7 +18629,22 @@ function PlanificacionDesktop() {
                 {selectedObjective && !comparingSnapshot && Object.keys(empMonthlyHours).length > 0 && (
                     statsBarCollapsed ? (
                         <div className="rounded-xl border shadow-sm shrink-0 no-print flex items-center justify-between px-3 py-1.5" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
-                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider flex items-center gap-1.5"><BarChart2 size={11}/> Estadísticas ocultas</span>
+                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider flex items-center gap-1.5 shrink-0"><BarChart2 size={11}/> Estadísticas ocultas</span>
+                            {modoRapido && (
+                                <div className="min-w-0 flex-1 px-3">
+                                    <LeyendaModoRapido
+                                        sinMarco
+                                        puestos={(positionStructure || []).map((p: any) => ({
+                                            name: String(p.positionName || p.name || 'Puesto'),
+                                            shifts: (p.shifts || []).map((sh: any) => ({ code: String(sh.code || ''), startTime: sh.startTime, endTime: sh.endTime, hours: Number(sh.hours) || 0, name: sh.name })),
+                                        }))}
+                                        usados={codigosUsadosLeyenda}
+                                        abierta={leyendaAbierta}
+                                        onToggle={() => setLeyendaAbierta((v) => !v)}
+                                        estilo={(code) => getDefaultStyle(code) || ''}
+                                    />
+                                </div>
+                            )}
                             <button onClick={() => { setStatsBarCollapsed(false); if (typeof window !== 'undefined') localStorage.setItem('planif_stats_collapsed', '0'); }} className="flex items-center gap-1 px-2 py-1 text-[9px] font-black text-indigo-600 hover:text-indigo-700 border border-indigo-200 hover:border-indigo-300 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors" title="Mostrar estadísticas"><ChevronUp size={10}/> Mostrar</button>
                         </div>
                     ) : (() => {

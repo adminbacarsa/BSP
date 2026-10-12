@@ -38,6 +38,8 @@ function AssistantWrapper() {
   }
   // En el escritorio del Centro de Control el globo tapaba los controles.
   if (router.pathname === '/admin/operaciones') return null;
+  // En Planificación el globo arranca oculto: se abre con el ícono de la barra (evento cosp-assistant-open).
+  if (router.pathname.startsWith('/admin/planificacion')) return <AssistantFloatingBubble sinGlobo />;
   if (empresa?.isTrainingEmpresa) {
     return <AssistantFloatingBubble />;
   }

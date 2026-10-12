@@ -10,19 +10,21 @@ export function LeyendaModoRapido({
   abierta,
   onToggle,
   estilo,
+  sinMarco = false,
 }: {
   puestos: readonly { name: string; shifts: readonly TurnoLeyenda[] }[];
   usados: ReadonlySet<string>;
   abierta: boolean;
   onToggle: () => void;
   estilo: (code: string) => string;
+  sinMarco?: boolean;
 }) {
   const grupos = armarLeyenda(puestos, usados);
   if (!grupos.length) return null;
   const total = grupos.reduce((n, g) => n + g.chips.length, 0);
   return (
     <div
-      className="flex items-start gap-2 rounded-xl border border-slate-200 bg-white px-2 py-1 shadow-sm"
+      className={sinMarco ? 'flex items-start gap-2' : 'flex items-start gap-2 rounded-xl border border-slate-200 bg-white px-2 py-1 shadow-sm'}
       data-leyenda-modo-rapido={abierta ? 'abierta' : 'linea'}
     >
       <button

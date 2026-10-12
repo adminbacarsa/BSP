@@ -216,7 +216,7 @@ function hideGloboRoute(pathname: string): boolean {
 
 const deployCtx: ClientDeployContext = getClientDeployContext();
 
-export function AssistantFloatingBubble(): React.ReactNode {
+export function AssistantFloatingBubble({ sinGlobo = false }: { sinGlobo?: boolean } = {}): React.ReactNode {
   const router = useRouter();
   const movil = useMovilMode();
   const { user, loading, canReadModule, isSuperAdmin } = useAuth();
@@ -457,7 +457,7 @@ export function AssistantFloatingBubble(): React.ReactNode {
 
   const overlay = (
     <>
-      {(!movil || open) && <button
+      {((!movil && !sinGlobo) || open) && <button
         type="button"
         style={{
           bottom: fabBottomCss,
