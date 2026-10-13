@@ -275,7 +275,7 @@ export function tipoDeCodigo(code: string): TipoCodigo {
     return 'TRABAJO';
 }
 
-export type OpcionCodigo = { code: string; horario?: string; detalle?: string };
+export type OpcionCodigo = { code: string; horario?: string; detalle?: string; /** Puesto del servicio de esta franja. */ puesto?: string };
 
 export function normalizarCodigo(texto: string): string {
     return String(texto || '').trim().toUpperCase().replace(/\s+/g, '');
@@ -300,8 +300,9 @@ export function codigoAlConfirmar(texto: string, opciones: OpcionCodigo[], elegi
 export function sugerirCodigos(prefijo: string, opciones: OpcionCodigo[], max = 8): OpcionCodigo[] {
     const p = normalizarCodigo(prefijo);
     const vistos = new Set<string>();
+    // Un mismo código en dos puestos con otro horario son dos opciones (N 22–06 · Puesto 1 y N 23–07 · Puesto 2).
     const unicas = opciones.filter((o) => {
-        const k = o.code.toUpperCase();
+        const k = `${o.code.toUpperCase()}|${o.horario || ''}`;
         if (vistos.has(k)) return false;
         vistos.add(k);
         return true;
@@ -395,8 +396,8 @@ export function resolverNovedad(texto: string, catalogo: readonly TipoNovedadRap
 export function opcionesDeCodigo(slaPuesto: TurnoSla[], slaTodos: TurnoSla[], ultimoUsado: Record<string, { startTime: string; endTime: string }> = {}, catalogo: readonly TipoNovedadRapida[] = []): OpcionCodigo[] {
     const fmt = (s: TurnoSla) => (s.startTime && s.endTime ? `${s.startTime}–${s.endTime}` : undefined);
     const out: OpcionCodigo[] = [];
-    for (const s of slaPuesto) out.push({ code: normalizarCodigo(s.code), horario: fmt(s), detalle: s.positionName ? `SLA · ${s.positionName}` : 'SLA' });
-    for (const s of slaTodos) out.push({ code: normalizarCodigo(s.code), horario: fmt(s), detalle: s.positionName ? `SLA · ${s.positionName}` : 'SLA' });
+    for (const s of slaPuesto) out.push({ code: normalizarCodigo(s.code), horario: fmt(s), detalle: s.positionName ? `SLA · ${s.positionName}` : 'SLA', ...(s.positionName ? { puesto: s.positionName } : {}) });
+    for (const s of slaTodos) out.push({ code: normalizarCodigo(s.code), horario: fmt(s), detalle: s.positionName ? `SLA · ${s.positionName}` : 'SLA', ...(s.positionName ? { puesto: s.positionName } : {}) });
     for (const [code, h] of Object.entries(HORARIO_ESTANDAR)) out.push({ code, horario: `${h.startTime}–${h.endTime}`, detalle: 'Estándar' });
     for (const [code, h] of Object.entries(ultimoUsado)) {
         if (normalizarCodigo(code) === 'EV') continue;

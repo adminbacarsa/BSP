@@ -30,10 +30,12 @@ type Props = {
     dims: Dimensiones;
     /** Se vuelve a medir cuando cambia (filas, días, cambios pendientes). */
     version: string | number;
-    opciones: (r: number, c: number) => OpcionCodigo[];
+    opciones: (r: number, c: number, puesto?: string) => OpcionCodigo[];
+    /** Puestos del servicio para elegir con ←/→ en la lista (Enter en celda vacía) y el del guardia. */
+    puestos?: (r: number, c: number) => { lista: string[]; actual: string };
     valorDe: (r: number, c: number) => string;
     marcas: MarcaAviso[];
-    onEscribir: (celdas: CeldaRC[], code: string) => void;
+    onEscribir: (celdas: CeldaRC[], code: string, puesto?: string) => void;
     /** Motivo cuando el texto no llega a escribirse (no se descarta en silencio). */
     onRechazo?: (motivo: string) => void;
     onBorrar: (celdas: CeldaRC[]) => void;
@@ -77,6 +79,11 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
     const [ancla, setAncla] = useState<CeldaRC | null>(null);
     const [texto, setTexto] = useState<string | null>(null);
     const [elegida, setElegida] = useState(-1);
+    /** Puesto elegido con ←/→ en la lista; null = el del guardia. */
+    const [puestoSel, setPuestoSel] = useState<string | null>(null);
+    const puestoSelRef = useRef<string | null>(null);
+    puestoSelRef.current = puestoSel;
+    useEffect(() => { if (texto == null) setPuestoSel(null); }, [texto]);
     const [serie, setSerie] = useState<CeldaRC | null>(null);
     const [extra, setExtra] = useState<CeldaRC[]>([]);
     const [sugLugar, setSugLugar] = useState<{ left: number; arriba: boolean; top: number; bottom: number } | null>(null);
@@ -98,8 +105,8 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
 
     const sugerencias = useMemo(() => {
         if (texto == null || !cursor) return [];
-        return sugerirCodigos(texto, propsRef.current.opciones(cursor.r, cursor.c), 8);
-    }, [texto, cursor]);
+        return sugerirCodigos(texto, propsRef.current.opciones(cursor.r, cursor.c, puestoSel ?? undefined), 8);
+    }, [texto, cursor, puestoSel]);
 
     const td = useCallback((r: number, c: number) => contenedorRef.current?.querySelector<HTMLElement>(`td[data-rc="${r}:${c}"]`) || null, [contenedorRef]);
 
@@ -324,11 +331,17 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
             if (!hayBanda) { setTexto(null); setElegida(-1); enfocarContenedor(); }
             return;
         }
-        const code = codigoAlConfirmar(t, propsRef.current.opciones(cur.r, cur.c), idx);
+        const opcionesCel = propsRef.current.opciones(cur.r, cur.c, puestoSelRef.current ?? undefined);
+        const code = codigoAlConfirmar(t, opcionesCel, idx);
+        // Si la opción elegida es de otro puesto (N de Puesto 1 para alguien de RO), se escribe en ese puesto.
+        const sugs = sugerirCodigos(t, opcionesCel, 8);
+        const opt = idx >= 0 ? sugs[idx] : sugs.find((x) => x.code.toUpperCase() === code.toUpperCase());
+        const actualPuesto = propsRef.current.puestos?.(cur.r, cur.c).actual;
+        const puesto = puestoSelRef.current ?? (opt?.puesto && opt.code.toUpperCase() === code.toUpperCase() && opt.puesto !== actualPuesto ? opt.puesto : undefined);
         setTexto(null);
         setElegida(-1);
         enfocarContenedor();
-        if (code) propsRef.current.onEscribir(celdasActuales(), code);
+        if (code) propsRef.current.onEscribir(celdasActuales(), code, puesto);
         const rg = rangoRef.current;
         if (rg && tamanoRango(rg) > 1) return;
         const next = moverCursor(cur, tecla, { shift }, propsRef.current.dims);
@@ -393,7 +406,17 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
 
             if (enEditor || t != null) {
                 if (e.key === 'Escape') { cortar(); setTexto(null); setElegida(-1); enfocarContenedor(); return; }
-                const sug = sugerirCodigos(t || '', p.opciones(cur.r, cur.c), 8);
+                const listaPuestos = !t && p.puestos ? p.puestos(cur.r, cur.c) : null;
+                if (listaPuestos && listaPuestos.lista.length > 1 && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+                    cortar();
+                    const actual = puestoSelRef.current ?? listaPuestos.actual;
+                    const i = Math.max(0, listaPuestos.lista.indexOf(actual));
+                    const n = listaPuestos.lista.length;
+                    setPuestoSel(listaPuestos.lista[(i + (e.key === 'ArrowRight' ? 1 : n - 1)) % n]);
+                    setElegida(-1);
+                    return;
+                }
+                const sug = sugerirCodigos(t || '', p.opciones(cur.r, cur.c, puestoSelRef.current ?? undefined), 8);
                 if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && sug.length > 1) {
                     cortar();
                     setElegida((i) => {
@@ -648,7 +671,7 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
                                 if (estado.current.texto == null) return;
                                 if (inputRef.current && document.activeElement === inputRef.current) return;
                                 const cur = estado.current.cursor;
-                                const opciones = cur ? propsRef.current.opciones(cur.r, cur.c) : [];
+                                const opciones = cur ? propsRef.current.opciones(cur.r, cur.c, puestoSelRef.current ?? undefined) : [];
                                 const code = codigoAlConfirmar(escrito, opciones, estado.current.elegida);
                                 const completo = code.toUpperCase() === escrito.trim().toUpperCase()
                                     && opciones.some((o) => o.code.toUpperCase() === code.toUpperCase());
@@ -673,6 +696,18 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
                             style={sugLugar.arriba ? { left: sugLugar.left, bottom: sugLugar.bottom } : { left: sugLugar.left, top: sugLugar.top }}
                             data-modo-rapido-sugerencias
                         >
+                            {!texto && cursor && props.puestos && (() => {
+                                const lp = props.puestos(cursor.r, cursor.c);
+                                if (lp.lista.length < 2) return null;
+                                const actual = puestoSel ?? lp.actual;
+                                return (
+                                    <li className="flex items-center justify-between gap-2 border-b border-slate-100 px-2.5 pb-1 text-[10px] font-black uppercase text-indigo-700" data-modo-rapido-puesto={actual}>
+                                        <span>◂</span>
+                                        <span className="truncate">{actual || 'Sin puesto'}{puestoSel && puestoSel !== lp.actual ? ' · otro puesto' : ''}</span>
+                                        <span>▸</span>
+                                    </li>
+                                );
+                            })()}
                             {sugerencias.map((s, i) => (
                                 <li
                                     key={`${s.code}-${i}`}

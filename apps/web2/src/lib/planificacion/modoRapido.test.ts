@@ -510,3 +510,19 @@ it('modo rápido: lo elegido en la lista manda y un texto a medias no es una nov
     assert.equal(resolverNovedad('XYZ'), null);
     assert.deepEqual(resolverNovedad('V')?.code, 'V');
 });
+
+it('modo rápido: el mismo código en dos puestos con otro horario sale dos veces, con su puesto', () => {
+    const ops = opcionesDeCodigo(
+        [{ code: 'M', startTime: '08:00', endTime: '18:00', positionName: 'RO' }],
+        [
+            { code: 'N', startTime: '22:00', endTime: '06:00', positionName: 'Puesto 1' },
+            { code: 'N', startTime: '23:00', endTime: '07:00', positionName: 'Puesto 2' },
+            { code: 'M', startTime: '08:00', endTime: '18:00', positionName: 'RO' },
+        ],
+        {},
+        [],
+    );
+    const n = sugerirCodigos('N', ops).filter((o) => o.code === 'N');
+    assert.deepEqual(n.map((o) => `${o.horario}·${o.puesto || ''}`), ['22:00–06:00·Puesto 1', '23:00–07:00·Puesto 2']);
+    assert.equal(sugerirCodigos('M', ops).filter((o) => o.code === 'M')[0].puesto, 'RO');
+});

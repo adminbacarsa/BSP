@@ -14227,9 +14227,15 @@ function PlanificacionDesktop() {
         return real(c?.p?.positionName) || real(c?.s?.positionName) || real(getEmpDefaultPos(empId))
             || real(dominantPosition?.positionName) || 'General';
     };
-    const opcionesRapido = (r: number, c: number) => {
+    const puestosRapido = (r: number, c: number) => {
         const { emp, ctx } = ctxRapido(r, c);
-        const pos = emp ? puestoFilaRapido(emp.id, ctx) : 'General';
+        const lista = (effectivePosStructure || []).map((p: any) => String(p.positionName || '')).filter((n: string) => n && n !== 'General' && n !== 'Retén');
+        const actual = emp ? puestoFilaRapido(emp.id, ctx) : '';
+        return { lista: [...new Set(lista)], actual: lista.includes(actual) ? actual : (lista[0] || '') };
+    };
+    const opcionesRapido = (r: number, c: number, puestoElegido?: string) => {
+        const { emp, ctx } = ctxRapido(r, c);
+        const pos = puestoElegido || (emp ? puestoFilaRapido(emp.id, ctx) : 'General');
         const objId = emp ? resolveObjectiveForEmp(emp.id) : selectedObjective;
         const base = opcionesDeCodigo(getShiftsForPosition(pos, objId) as TurnoSla[], slaTodosRapido, ultimoUsadoRapido, catalogoNovedad);
         const actual = ctx?.p && !ctx.p.isDeleted ? ctx.p : ctx?.s;
@@ -18432,7 +18438,14 @@ function PlanificacionDesktop() {
                                     opciones={opcionesRapido}
                                     valorDe={(r, c) => codigoCtxRapido(ctxRapido(r, c).ctx)}
                                     marcas={marcasRapido}
-                                    onEscribir={(celdas, code) => escribirRapido(celdas.map((x) => ({ ...x, code })))}
+                                    puestos={puestosRapido}
+                                    onEscribir={(celdas, code, puesto) => {
+                                        const st: any = puesto ? (getShiftsForPosition(puesto, selectedObjective) as any[]).find((x: any) => normalizarCodigo(String(x.code || '')) === normalizarCodigo(code)) : null;
+                                        const fuente: FuenteRapida | undefined = st?.startTime && st?.endTime
+                                            ? { code, name: String(st.name || code), startTime: String(st.startTime), endTime: String(st.endTime), hours: Number(st.hours) || 0, positionName: puesto, copiarPuesto: true }
+                                            : undefined;
+                                        escribirRapido(celdas.map((x) => ({ ...x, code, ...(fuente ? { fuente } : {}) })));
+                                    }}
                                     onRechazo={(motivo) => toast.message(motivo)}
                                     onBorrar={(celdas) => escribirRapido(celdas.map((x) => ({ ...x, borrar: true })))}
                                     onCopiar={copiarRapido}
