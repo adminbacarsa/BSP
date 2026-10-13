@@ -14808,6 +14808,7 @@ function PlanificacionDesktop() {
             startTime: String(st.startTime || ''),
             endTime: String(st.endTime || ''),
             days: Array.isArray(st.days) ? st.days.map((d: unknown) => String(d)) : [],
+            specificDates: Array.isArray(st.specificDates) ? st.specificDates.map((d: unknown) => String(d)) : [],
         })));
         const fuera = avisosFueraDeServicio({
             filas: displayedEmployees.map((e: any) => ({ id: e.id, nombre: String(e.name || e.id) })),

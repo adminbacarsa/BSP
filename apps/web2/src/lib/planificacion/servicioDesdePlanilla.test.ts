@@ -11,8 +11,11 @@ import {
   type DiaSemana,
   type FranjaServicioPlanilla,
   emparejarPuestos,
+  diasDeFechas,
   etiquetaDias,
+  etiquetaFechas,
   franjasDesdeVigente,
+  posicionesDesdeFranjas,
   letraDia,
   lineasConfirmacion,
   proponerServicioDesdePlanilla,
@@ -321,5 +324,22 @@ describe('servicio desde la planilla', () => {
     assert.equal(otroHorario.find((d) => d.code === 'P1M')?.estado, 'sobra');
     const lineas = lineasConfirmacion(diff, 'actualizar', 'octubre');
     assert.match(lineas.join(' '), /No hay diferencias/);
+  });
+});
+
+describe('servicio desde la planilla · fechas del mes', () => {
+  it('una franja que no se repite por día de la semana va por fechas y se guarda como specificDates', () => {
+    const dias = new Set([2, 3, 4, 30, 31]);
+    const celdas = Array.from({ length: 31 }, (_, i) => (dias.has(i + 1) ? { raw: 'M' } : { raw: 'F' }));
+    const [cuadro] = detectarCuadros(planilla([{ nombre: 'PEREZ JUAN', puesto: 'Puesto 1', celdas }]), 2026, 10);
+    const prop = proponerServicioDesdePlanilla(cuadro, 2026, 10);
+    const f = prop.franjas.find((x) => x.code === 'M');
+    assert.ok(f, 'la franja no se pierde');
+    assert.deepEqual(f?.fechas, ['2026-10-02', '2026-10-03', '2026-10-04', '2026-10-30', '2026-10-31']);
+    assert.equal(etiquetaFechas(f?.fechas || []), '2, 3, 4, 30 y 31');
+    assert.deepEqual(diasDeFechas(f?.fechas || []), ['V', 'S', 'D']);
+    const [pos] = posicionesDesdeFranjas(prop.franjas);
+    assert.deepEqual(pos.allowedShiftTypes[0].specificDates, f?.fechas);
+    assert.equal(pos.allowedShiftTypes[0].days, undefined);
   });
 });

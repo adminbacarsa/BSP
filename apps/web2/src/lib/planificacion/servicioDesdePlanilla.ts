@@ -33,6 +33,8 @@ export type FranjaServicioPlanilla = {
   cantidad: number;
   /** Vacío = todos los días. */
   dias: DiaSemana[];
+  /** Fechas puntuales del mes (YYYY-MM-DD). Si hay, mandan sobre `dias` (se guardan como `specificDates`). */
+  fechas?: string[];
   /** Código que traía la planilla, cuando se conservó el del servicio. */
   codigoPlanilla?: string;
 };
@@ -77,6 +79,24 @@ const EXCLUIDOS = new Set(['F', 'FF', 'FP', 'FRANCO', 'RET', 'RETEN', 'RT', 'REF
 export function letraDia(year: number, month: number, dia: number): DiaSemana {
   const dow = new Date(Date.UTC(year, month - 1, dia)).getUTCDay();
   return LETRA_UTC[dow];
+}
+
+/** «2, 3, 4, 30 y 31» para una franja con fechas puntuales. */
+export function etiquetaFechas(fechas: readonly string[]): string {
+  const ns = [...new Set(fechas.map((f) => Number(String(f).slice(8, 10))).filter((n) => n > 0))].sort((a, b) => a - b);
+  if (!ns.length) return 'Sin fechas';
+  if (ns.length === 1) return `el ${ns[0]}`;
+  return `${ns.slice(0, -1).join(', ')} y ${ns[ns.length - 1]}`;
+}
+
+export function fechaDelMes(year: number, month: number, dia: number): string {
+  return `${year}-${String(month).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
+}
+
+/** Días de la semana de las fechas, para comparar con un servicio por días. */
+export function diasDeFechas(fechas: readonly string[]): DiaSemana[] {
+  const set = new Set(fechas.map((f) => letraDia(Number(f.slice(0, 4)), Number(f.slice(5, 7)), Number(f.slice(8, 10)))));
+  return ORDEN_DIAS.filter((d) => set.has(d));
 }
 
 export function etiquetaDias(dias: readonly string[]): string {
@@ -366,6 +386,7 @@ export function proponerServicioDesdePlanilla(cuadro: CuadroPlanilla, year: numb
       porLetra.set(letra, list);
     }
     const grupos = new Map<number, DiaSemana[]>();
+    const parcialesKey: string[] = [];
     for (const letra of ORDEN_DIAS) {
       const xs = porLetra.get(letra) || [];
       if (!xs.length) continue;
@@ -377,9 +398,28 @@ export function proponerServicioDesdePlanilla(cuadro: CuadroPlanilla, year: numb
         list.push(letra);
         grupos.set(q, list);
       } else {
-        parciales.push(`${m.puesto} · ${m.code}: parcial (${conGente.length} de ${xs.length} ${NOMBRE_DIA[letra]})`);
+        parcialesKey.push(`${m.puesto} · ${m.code}: parcial (${conGente.length} de ${xs.length} ${NOMBRE_DIA[letra]})`);
       }
     }
+    if (!grupos.size) {
+      // Ningún día de la semana se repite: la franja va por fechas del mes («11 A 23» solo el 2, 3, 4, 30 y 31).
+      const conGente = [...porDia.entries()].filter(([, n]) => n > 0).sort((a, b) => a[0] - b[0]);
+      if (conGente.length) {
+        const fechas = conGente.map(([dia]) => fechaDelMes(year, month, dia));
+        franjas.push({
+          id: `${key}|fechas|${conGente.map(([d]) => d).join('-')}`,
+          puesto: m.puesto,
+          code: m.code,
+          startTime: m.startTime,
+          endTime: m.endTime,
+          cantidad: moda(conGente.map(([, n]) => n)),
+          dias: diasDeFechas(fechas),
+          fechas,
+        });
+        continue;
+      }
+    }
+    parciales.push(...parcialesKey);
     for (const [cantidad, diasOn] of grupos) {
       const lista = ordenarDias(diasOn);
       franjas.push({
@@ -576,7 +616,7 @@ export function compararConVigente(propuesta: FranjaServicioPlanilla[], vigente:
   for (const f of propuesta) {
     const hit = candidatos(f)[0] || porHorario(f)[0];
     if (!hit) {
-      out.push({ estado: 'falta', puesto: f.puesto, code: f.code, startTime: f.startTime, endTime: f.endTime, cantidad: f.cantidad, dias: f.dias, detalle: `${f.puesto} · ${f.code} ${f.startTime}–${f.endTime} ×${f.cantidad} · ${etiquetaDias(f.dias)}: está en la planilla y no en el servicio` });
+      out.push({ estado: 'falta', puesto: f.puesto, code: f.code, startTime: f.startTime, endTime: f.endTime, cantidad: f.cantidad, dias: f.dias, detalle: `${f.puesto} · ${f.code} ${f.startTime}–${f.endTime} ×${f.cantidad} · ${(f.fechas?.length ? `fechas ${etiquetaFechas(f.fechas)}` : etiquetaDias(f.dias))}: está en la planilla y no en el servicio` });
       continue;
     }
     usados.add(hit.i);
@@ -588,7 +628,7 @@ export function compararConVigente(propuesta: FranjaServicioPlanilla[], vigente:
     const cambios: string[] = [];
     if (Math.abs(minDe(v.startTime) - minDe(f.startTime)) > 0 || Math.abs(minDe(v.endTime) - minDe(f.endTime)) > 0) cambios.push(`horario ${v.startTime}–${v.endTime} → ${f.startTime}–${f.endTime}`);
     if ((v.cantidad || 0) !== f.cantidad) cambios.push(`cantidad ×${v.cantidad ?? 0} → ×${f.cantidad}`);
-    if (normDias(v.dias) !== normDias(f.dias)) cambios.push(`días ${etiquetaDias(v.dias)} → ${etiquetaDias(f.dias)}`);
+    if (normDias(v.dias) !== normDias(f.dias)) cambios.push(`días ${etiquetaDias(v.dias)} → ${(f.fechas?.length ? `fechas ${etiquetaFechas(f.fechas)}` : etiquetaDias(f.dias))}`);
     const nota = distintoCodigo ? `${f.puesto} · ${planilla} coincide (código ${servicio} en el servicio)` : '';
     out.push({
       estado: cambios.length ? 'distinto' : 'coincide',
@@ -600,7 +640,7 @@ export function compararConVigente(propuesta: FranjaServicioPlanilla[], vigente:
       dias: f.dias,
       detalle: cambios.length
         ? `${f.puesto} · ${codeOut}: ${cambios.join('; ')}${distintoCodigo ? ` (código ${servicio} en el servicio)` : ''}`
-        : (nota || `${f.puesto} · ${f.code} ${f.startTime}–${f.endTime} ×${f.cantidad} · ${etiquetaDias(f.dias)}`),
+        : (nota || `${f.puesto} · ${f.code} ${f.startTime}–${f.endTime} ×${f.cantidad} · ${(f.fechas?.length ? `fechas ${etiquetaFechas(f.fechas)}` : etiquetaDias(f.dias))}`),
     });
   }
   vigente.forEach((v, i) => {
@@ -638,6 +678,7 @@ export type TurnoServicioDoc = {
   hours: number;
   quantity: number;
   days?: DiaSemana[];
+  specificDates?: string[];
 };
 
 export type PosicionServicioDoc = {
@@ -673,9 +714,9 @@ export function posicionesDesdeFranjas(
       endTime: f.endTime,
       hours: horasEntre(f.startTime, f.endTime),
       quantity: Math.max(1, Math.round(f.cantidad) || 1),
-      ...(f.dias.length ? { days: f.dias } : {}),
+      ...(f.fechas?.length ? { specificDates: [...f.fechas].sort() } : f.dias.length ? { days: f.dias } : {}),
     }));
-    const dias = ordenarDias(list.flatMap((f) => (f.dias.length ? f.dias : ORDEN_DIAS)));
+    const dias = ordenarDias(list.flatMap((f) => (f.fechas?.length ? diasDeFechas(f.fechas) : f.dias.length ? f.dias : ORDEN_DIAS)));
     out.push({
       id: String(previa?.id || `planilla_${n}`),
       name: previa?.name || list[0].puesto,
@@ -716,6 +757,7 @@ export type FranjaAviso = {
   startTime?: string;
   endTime?: string;
   days?: string[];
+  specificDates?: string[];
 };
 
 /** Código que no está en el puesto, horario distinto o día no habilitado. La cantidad la marca la fila Cobertura. */
@@ -745,7 +787,9 @@ export function avisosFueraDeServicio(input: {
         continue;
       }
       const letra = letraDia(Number(dateStr.slice(0, 4)), Number(mes), Number(dia));
-      const habilitada = mismo.filter((f) => !f.days?.length || f.days.map((d) => d.toUpperCase()).includes(letra));
+      const habilitada = mismo.filter((f) => (f.specificDates?.length
+        ? f.specificDates.includes(dateStr)
+        : !f.days?.length || f.days.map((d) => d.toUpperCase()).includes(letra)));
       if (!habilitada.length) {
         out.push({ tipo: 'SERVICIO', empId: fila.id, nombre: fila.nombre, dateStr, code: 'DIA', texto: `${etiqueta}: ${t.code} no está habilitado el ${letra}` });
         continue;

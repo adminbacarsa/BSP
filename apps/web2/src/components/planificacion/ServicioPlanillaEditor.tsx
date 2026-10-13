@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Plus, Trash2 } from 'lucide-react';
+import { CalendarDays, Plus, Trash2 } from 'lucide-react';
 import type { EquivalenciaCodigo } from '@/lib/planificacion/equivalenciaCodigo';
 import { PlanillaIaPanel } from '@/components/planificacion/PlanillaIaPanel';
 import type { CuadroPlanilla } from '@/lib/planificacion/importarExcel';
@@ -8,7 +8,11 @@ import {
   alinearPuestos,
   compararConVigente,
   equivalenciasAlCodigoServicio,
+  diasDeFechas,
   etiquetaDias,
+  etiquetaFechas,
+  fechaDelMes,
+  letraDia,
   lineasConfirmacion,
   proponerServicioDesdePlanilla,
   type DiaSemana,
@@ -50,6 +54,8 @@ export function ServicioPlanillaEditor({ cuadro, semilla, year, month, mesLabel,
     : `${cuadro?.indice ?? 'x'}|${servicioId}`;
   const [baseId, setBaseId] = useState(baseKey);
   const [confirmando, setConfirmando] = useState<'crear' | 'actualizar' | null>(null);
+  const [calendarioDe, setCalendarioDe] = useState<string | null>(null);
+  const diasMes = new Date(Date.UTC(year, month, 0)).getUTCDate();
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState('');
   if (baseId !== baseKey) {
@@ -73,6 +79,31 @@ export function ServicioPlanillaEditor({ cuadro, semilla, year, month, mesLabel,
       const orden = DIAS.filter((d) => dias.includes(d));
       return { ...f, dias: orden.length === DIAS.length ? [] : orden };
     }));
+  };
+
+  /** Pasa la franja a fechas del mes, arrancando por los días de la semana que ya tenía. */
+  const abrirCalendario = (f: FranjaServicioPlanilla) => {
+    if (calendarioDe === f.id) { setCalendarioDe(null); return; }
+    if (!f.fechas?.length) {
+      const base = f.dias.length ? f.dias : DIAS;
+      const fechas: string[] = [];
+      for (let d = 1; d <= diasMes; d++) if (base.includes(letraDia(year, month, d))) fechas.push(fechaDelMes(year, month, d));
+      patch(f.id, { fechas, dias: diasDeFechas(fechas) });
+    }
+    setCalendarioDe(f.id);
+  };
+  const toggleFecha = (id: string, fecha: string) => {
+    setFranjas((prev) => prev.map((f) => {
+      if (f.id !== id) return f;
+      const set = new Set(f.fechas || []);
+      if (set.has(fecha)) set.delete(fecha); else set.add(fecha);
+      const fechas = [...set].sort();
+      return { ...f, fechas, dias: diasDeFechas(fechas) };
+    }));
+  };
+  const volverASemana = (f: FranjaServicioPlanilla) => {
+    patch(f.id, { fechas: undefined, dias: f.dias });
+    setCalendarioDe(null);
   };
 
   const confirmar = async () => {
@@ -144,16 +175,51 @@ export function ServicioPlanillaEditor({ cuadro, semilla, year, month, mesLabel,
                   <td><input value={f.startTime} onChange={(e) => patch(f.id, { startTime: e.target.value })} className="w-16 rounded-lg border border-slate-200 px-1 py-0.5" /></td>
                   <td><input value={f.endTime} onChange={(e) => patch(f.id, { endTime: e.target.value })} className="w-16 rounded-lg border border-slate-200 px-1 py-0.5" /></td>
                   <td><input type="number" min={1} value={f.cantidad} onChange={(e) => patch(f.id, { cantidad: Math.max(1, Number(e.target.value) || 1) })} className="w-12 rounded-lg border border-slate-200 px-1 py-0.5" /></td>
-                  <td className="whitespace-nowrap py-1" data-servicio-dias>
-                    <div className="flex gap-px">
-                      {DIAS.map((d) => {
-                        const on = !f.dias.length || f.dias.includes(d);
-                        return (
-                          <button key={d} type="button" onClick={() => toggleDia(f.id, d)} className={`h-5 w-5 rounded text-[9px] font-black ${on ? 'bg-slate-900 text-white' : 'border border-slate-200 text-slate-400'}`}>{d}</button>
-                        );
-                      })}
+                  <td className="py-1" data-servicio-dias>
+                    <div className="flex items-center gap-1">
+                      {f.fechas?.length ? (
+                        <span className="text-[11px] font-bold text-indigo-800" data-servicio-fechas>Fechas: {etiquetaFechas(f.fechas)}</span>
+                      ) : (
+                        <div className="flex gap-px">
+                          {DIAS.map((d) => {
+                            const on = !f.dias.length || f.dias.includes(d);
+                            return (
+                              <button key={d} type="button" onClick={() => toggleDia(f.id, d)} className={`h-5 w-5 rounded text-[9px] font-black ${on ? 'bg-slate-900 text-white' : 'border border-slate-200 text-slate-400'}`}>{d}</button>
+                            );
+                          })}
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        data-servicio-calendario={f.id}
+                        onClick={() => abrirCalendario(f)}
+                        title="Elegir fechas del mes"
+                        aria-label="Elegir fechas del mes"
+                        className={`flex h-5 w-5 items-center justify-center rounded ${calendarioDe === f.id || f.fechas?.length ? 'bg-indigo-600 text-white' : 'border border-slate-200 text-slate-500 hover:text-indigo-600'}`}
+                      >
+                        <CalendarDays size={11} aria-hidden />
+                      </button>
                     </div>
-                    <span className="text-[9px] text-slate-400">{etiquetaDias(f.dias)}</span>
+                    {!f.fechas?.length && <span className="text-[9px] text-slate-400">{etiquetaDias(f.dias)}</span>}
+                    {calendarioDe === f.id && (
+                      <div className="mt-1 w-[15.5rem] rounded-xl border border-indigo-200 bg-white p-2 shadow-sm" data-servicio-calendario-panel>
+                        <div className="grid grid-cols-7 gap-0.5">
+                          {DIAS.map((d) => <span key={d} className="text-center text-[9px] font-black text-slate-400">{d}</span>)}
+                          {Array.from({ length: (DIAS.indexOf(letraDia(year, month, 1)) + 7) % 7 }, (_, i) => <span key={`v${i}`} />)}
+                          {Array.from({ length: diasMes }, (_, i) => {
+                            const fecha = fechaDelMes(year, month, i + 1);
+                            const on = (f.fechas || []).includes(fecha);
+                            return (
+                              <button key={fecha} type="button" data-servicio-fecha={i + 1} onClick={() => toggleFecha(f.id, fecha)} className={`h-6 rounded text-[10px] font-black tabular-nums ${on ? 'bg-indigo-600 text-white' : 'border border-slate-200 text-slate-500 hover:bg-indigo-50'}`}>{i + 1}</button>
+                            );
+                          })}
+                        </div>
+                        <div className="mt-1.5 flex justify-between text-[10px]">
+                          <button type="button" className="font-bold text-slate-500 hover:underline" onClick={() => volverASemana(f)}>Volver a días de la semana</button>
+                          <button type="button" className="font-black text-indigo-700 hover:underline" onClick={() => setCalendarioDe(null)}>Listo</button>
+                        </div>
+                      </div>
+                    )}
                   </td>
                   <td>
                     <button type="button" aria-label="Quitar franja" onClick={() => setFranjas((prev) => prev.filter((x) => x.id !== f.id))} className="rounded-lg p-1 text-slate-400 hover:bg-slate-50 hover:text-rose-600"><Trash2 size={13} /></button>
