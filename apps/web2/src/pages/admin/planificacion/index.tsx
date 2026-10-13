@@ -280,6 +280,8 @@ import { mesLabelDe, resolverTurnoCopiado } from '@/lib/planificacion/copiarTurn
 import { avisoJornadaTura, HORAS_TURA, puestoAdmite12h, textoTura, tramoTura, type LadoTura } from '@/lib/planificacion/turaRapido';
 import { crearTuraPlanificacion } from '@/lib/refuerzo/crearTuraPlanificacion';
 import { crearRfzePlanificacion } from '@/lib/refuerzo/crearRfzePlanificacion';
+import { modifyRefuerzoPuntual } from '@/lib/refuerzo/modifyRefuerzoPuntual';
+import { cancelRefuerzoPuntual } from '@/lib/refuerzo/cancelRefuerzoPuntual';
 import { DIAS_SEMANA, fechasRfzf, horarioValido, letraDeFecha, normalizarHora, type DiaLetra } from '@/lib/planificacion/refuerzosRapido';
 import { catalogoObjetivos, lugarDeGuardia, turnosLugarDeMapa } from '@/lib/planificacion/pegarPersonas';
 import {
@@ -2115,6 +2117,8 @@ function PlanificacionDesktop() {
         tipo: 'RFZF' | 'RFZE';
         celdas: Array<{ r: number; c: number; empId: string; empName: string; ds: string }>;
         inicio: string; fin: string; dias: DiaLetra[]; pax: number; pidio: string; motivo: string; guardando: boolean;
+        /** RFZE ya cargado: se cambia su horario en vez de crear otro. */
+        editarSolicitudId?: string;
     } | null>(null);
     /** `+` sobre un turno de un puesto que no es de 24 h: horas agregadas (TURA) antes o después. */
     const [turaEditor, setTuraEditor] = useState<{
@@ -15169,6 +15173,22 @@ function PlanificacionDesktop() {
         const inicio = normalizarHora(e.inicio);
         const fin = normalizarHora(e.fin);
         if (!horarioValido(inicio) || !horarioValido(fin)) { toast.message('Poné el horario: desde y hasta (por ejemplo 12:00 y 22:00).'); return; }
+        if (e.editarSolicitudId) {
+            setRfzEditor({ ...e, inicio, fin, guardando: true });
+            try {
+                const snap = await getDoc(doc(db, 'solicitudes_refuerzo', e.editarSolicitudId));
+                if (!snap.exists()) throw new Error('No encontré el pedido del refuerzo');
+                const u = getAuth().currentUser;
+                await modifyRefuerzoPuntual({ id: snap.id, ...(snap.data() as any) }, { startTime: inicio, endTime: fin }, { uid: u?.uid, name: u?.displayName || u?.email || 'Planificación' });
+                toast.success(`RFZE ahora ${inicio}–${fin} (turno, pedido y trazabilidad actualizados)`);
+                setRfzEditor(null);
+                void refreshCronogramaView();
+            } catch (err: any) {
+                toast.error(err?.message || 'No se pudo cambiar el horario');
+                setRfzEditor((prev) => (prev ? { ...prev, guardando: false } : prev));
+            }
+            return;
+        }
         if (e.tipo === 'RFZE' && !e.pidio.trim()) { toast.message('Completá quién lo pidió.'); (document.querySelector('[data-rfz-pidio]') as HTMLInputElement | null)?.focus(); return; }
         if (e.tipo === 'RFZF' && !e.dias.length) { toast.message('Elegí los días del refuerzo fijo.'); return; }
         setRfzEditor({ ...e, inicio, fin, guardando: true });
@@ -15300,6 +15320,25 @@ function PlanificacionDesktop() {
         const { emp, ctx } = ctxRapido(r, c);
         if (!emp) return;
         if (ctx?.s?.id && turaMap[ctx.s.id]) { void quitarTura(ctx.s.id); return; }
+        const rfzCelda = rfzByEmpDate[`${emp.id}_${diasRapido[c]}`];
+        if (rfzCelda?.solicitudRefuerzoId && (rfzCelda.rfzTipo === 'EVENTUAL' || rfzCelda.shiftCode === 'RFZE')) {
+            const motivo = window.prompt(`Cancelar el RFZE de ${String(emp.name || '').split(',')[0]} del ${String(diasRapido[c]).slice(8, 10)}. Motivo:`);
+            if (!motivo || !motivo.trim()) return;
+            void (async () => {
+                try {
+                    const snap = await getDoc(doc(db, 'solicitudes_refuerzo', String(rfzCelda.solicitudRefuerzoId)));
+                    if (!snap.exists()) throw new Error('No encontré el pedido del refuerzo');
+                    const u = getAuth().currentUser;
+                    const quien = u?.displayName || u?.email || 'Planificación';
+                    await cancelRefuerzoPuntual({ id: snap.id, ...(snap.data() as any) }, motivo.trim(), { uid: u?.uid || '', name: quien, pinAuthorizerName: quien });
+                    toast.success('RFZE cancelado');
+                    void refreshCronogramaView();
+                } catch (err: any) {
+                    toast.error(err?.message || 'No se pudo cancelar el RFZE');
+                }
+            })();
+            return;
+        }
         const vuelta = volverA8(codigoCtxRapido(ctx));
         if (!vuelta) { toast.message('Solo D12 o N12 vuelven a 8 h.'); return; }
         const pos = puestoFilaRapido(emp.id, ctx);
@@ -18546,6 +18585,20 @@ function PlanificacionDesktop() {
                                                 abrirTura(y.emp, y.ds, y.ctx, puestoFilaRapido(y.emp.id, y.ctx));
                                                 return;
                                             }
+                                            if (cu === 'RFZE') {
+                                                const y = lista[0];
+                                                const previo = rfzByEmpDate[`${y.emp.id}_${y.ds}`];
+                                                if (previo?.solicitudRefuerzoId && (previo.rfzTipo === 'EVENTUAL' || previo.shiftCode === 'RFZE')) {
+                                                    setRfzEditor({
+                                                        tipo: 'RFZE',
+                                                        celdas: [{ r: y.x.r, c: y.x.c, empId: y.emp.id, empName: String(y.emp.name || ''), ds: y.ds }],
+                                                        inicio: String(previo.startTime || '').slice(11, 16), fin: String(previo.endTime || '').slice(11, 16),
+                                                        dias: [], pax: 1, pidio: '', motivo: '', guardando: false,
+                                                        editarSolicitudId: String(previo.solicitudRefuerzoId),
+                                                    });
+                                                    return;
+                                                }
+                                            }
                                             if (cu === 'RFZF' && !(activePlanningSlaRow as { id?: string } | null)?.id) {
                                                 toast.message('Sin servicio en este mes: el refuerzo fijo va en el servicio. Armalo con «Servicio del mes».');
                                                 return;
@@ -20856,7 +20909,7 @@ function PlanificacionDesktop() {
                 {rfzEditor && typeof document !== 'undefined' && createPortal(
                     <div className="fixed bottom-6 left-1/2 z-[12000] w-[min(36rem,calc(100vw-2rem))] -translate-x-1/2 rounded-2xl border border-slate-200 bg-white p-3 text-[12px] shadow-xl" data-rfz-editor={rfzEditor.tipo}>
                         <p className="font-black text-slate-800">
-                            RFZ<span className={rfzEditor.tipo === 'RFZF' ? 'text-emerald-600' : 'text-orange-500'}>{rfzEditor.tipo.slice(3)}</span> · {rfzEditor.tipo === 'RFZF' ? 'Refuerzo fijo (va en el servicio, puesto RFZF, todo el mes)' : 'Refuerzo eventual (fechas puntuales, aprobado, facturable)'}
+                            RFZ<span className={rfzEditor.tipo === 'RFZF' ? 'text-emerald-600' : 'text-orange-500'}>{rfzEditor.tipo.slice(3)}</span> · {rfzEditor.editarSolicitudId ? 'Cambiar el horario del refuerzo eventual' : rfzEditor.tipo === 'RFZF' ? 'Refuerzo fijo (va en el servicio, puesto RFZF, todo el mes)' : 'Refuerzo eventual (fechas puntuales, aprobado, facturable)'}
                         </p>
                         <p className="text-[11px] text-slate-500">
                             {[...new Set(rfzEditor.celdas.map((c) => c.empName.split(',')[0]))].join(', ')} · {rfzEditor.tipo === 'RFZE'
