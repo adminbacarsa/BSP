@@ -706,6 +706,14 @@ export function cubre24Horas(franjas: ReadonlyArray<Pick<FranjaServicioPlanilla,
 
 const PUESTO_FRANJA_PROPIA = /RONDIN|ENCARGAD|CORTINA|REFUERZO|RELEVANTE|VOLANTE/;
 
+/** Tipo con el que se va a crear el puesto y por qué, para mostrarlo antes de guardar. */
+export function tipoPuestoPropuesto(puesto: string, franjas: ReadonlyArray<Pick<FranjaServicioPlanilla, 'startTime' | 'endTime' | 'fechas' | 'code'>>): { tipo: '24hs' | 'custom'; motivo: string } {
+  if (PUESTO_FRANJA_PROPIA.test(normPlanilla(puesto))) return { tipo: 'custom', motivo: 'franja propia (no se le piden M+T+N)' };
+  const codigos = [...new Set(franjas.filter((f) => !f.fechas?.length).map((f) => f.code))].join('+');
+  if (cubre24Horas(franjas)) return { tipo: '24hs', motivo: `${codigos} cubren el día · admite D12/N12` };
+  return { tipo: 'custom', motivo: `${codigos || 'sus franjas'} no cubren las 24 h · las horas de más van como TURA` };
+}
+
 export function posicionesDesdeFranjas(
   franjas: FranjaServicioPlanilla[],
   actuales: Array<PosicionServicioDoc & Record<string, unknown>> = [],

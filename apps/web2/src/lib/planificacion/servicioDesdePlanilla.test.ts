@@ -16,6 +16,7 @@ import {
   etiquetaFechas,
   franjasDesdeVigente,
   cubre24Horas,
+  tipoPuestoPropuesto,
   posicionesDesdeFranjas,
   letraDia,
   lineasConfirmacion,
@@ -364,5 +365,14 @@ describe('servicio desde la planilla · puesto de 24 h', () => {
   it('al actualizar, un puesto existente conserva su tipo', () => {
     const docs = posicionesDesdeFranjas([f('Puesto 1', 'M', '07:00', '15:00')], [{ id: 'x', name: 'Puesto 1', coverageType: '24hs', quantity: 1, activeDays: [], allowedShiftTypes: [], status: 'ACTIVE' }]);
     assert.equal(docs[0].coverageType, '24hs');
+  });
+});
+
+describe('servicio desde la planilla · tipo de puesto visible', () => {
+  it('dice si el puesto es 24 HS o custom y por qué', () => {
+    const f = (code: string, startTime: string, endTime: string) => ({ code, startTime, endTime });
+    assert.deepEqual(tipoPuestoPropuesto('Puesto 1', [f('M', '06:00', '14:00'), f('T', '14:00', '22:00'), f('N', '22:00', '06:00')]), { tipo: '24hs', motivo: 'M+T+N cubren el día · admite D12/N12' });
+    assert.equal(tipoPuestoPropuesto('Puesto 2', [f('M', '10:00', '16:00')]).tipo, 'custom');
+    assert.equal(tipoPuestoPropuesto('Rondín', [f('M', '07:00', '15:00'), f('T', '15:00', '23:00'), f('N', '23:00', '07:00')]).tipo, 'custom');
   });
 });

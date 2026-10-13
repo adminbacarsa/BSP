@@ -15,6 +15,7 @@ import {
   letraDia,
   lineasConfirmacion,
   proponerServicioDesdePlanilla,
+  tipoPuestoPropuesto,
   type DiaSemana,
   type FranjaServicioPlanilla,
   type FranjaVigente,
@@ -152,6 +153,18 @@ export function ServicioPlanillaEditor({ cuadro, semilla, year, month, mesLabel,
             setFunciones(next.funciones);
           }}
         />
+      )}
+      {franjas.length > 0 && (
+        <div className="flex flex-wrap gap-1.5" data-servicio-tipos>
+          {[...new Set(franjas.map((f) => f.puesto.trim()).filter(Boolean))].map((puesto) => {
+            const t = tipoPuestoPropuesto(puesto, franjas.filter((f) => f.puesto.trim() === puesto));
+            return (
+              <span key={puesto} data-servicio-tipo={t.tipo} title={t.motivo} className={`rounded-xl border px-2 py-1 text-[11px] ${t.tipo === '24hs' ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+                <b>{puesto}</b> · {t.tipo === '24hs' ? '24 HS' : 'Custom'} <span className="text-slate-500">({t.motivo})</span>
+              </span>
+            );
+          })}
+        </div>
       )}
       <div className="grid gap-3 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <div className="overflow-auto rounded-2xl border border-slate-200 shadow-sm" data-servicio-propuesta>
