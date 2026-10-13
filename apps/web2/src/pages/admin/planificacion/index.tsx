@@ -17267,7 +17267,7 @@ function PlanificacionDesktop() {
                                         onClick={() => setShowCronogramasOverview(true)}
                                         title="Cronogramas — estado de todos los objetivos"
                                         aria-label="Cronogramas"
-                                        className="hidden 2xl:flex items-center justify-center w-8 h-8 rounded-xl transition-colors border bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100 shadow-sm shrink-0"
+                                        className="hidden items-center justify-center w-8 h-8 rounded-xl transition-colors border bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100 shadow-sm shrink-0"
                                     >
                                         <Database size={15}/>
                                     </button>
@@ -17277,7 +17277,7 @@ function PlanificacionDesktop() {
                                 {!toolbarCollapsed && (
                                     <button
                                         onClick={() => setShowLegend(!showLegend)}
-                                        className={`hidden 2xl:flex items-center justify-center w-8 h-8 rounded-xl transition-colors border shrink-0 ${showLegend ? 'bg-indigo-100 border-indigo-300 text-indigo-700' : 'bg-slate-100 border-transparent hover:bg-white text-slate-500'}`}
+                                        className={`hidden items-center justify-center w-8 h-8 rounded-xl transition-colors border shrink-0 ${showLegend ? 'bg-indigo-100 border-indigo-300 text-indigo-700' : 'bg-slate-100 border-transparent hover:bg-white text-slate-500'}`}
                                         title="Referencias de colores"
                                         aria-label="Referencias de colores"
                                     >
@@ -17532,7 +17532,7 @@ function PlanificacionDesktop() {
                                                 disabled={isRefreshingCrono}
                                                 title="Actualizar turnos y puestos sin recargar la página"
                                                 aria-label="Actualizar turnos y puestos"
-                                                className="hidden 2xl:flex items-center justify-center w-8 h-8 rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 shadow-sm disabled:opacity-60 shrink-0"
+                                                className="hidden items-center justify-center w-8 h-8 rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 shadow-sm disabled:opacity-60 shrink-0"
                                             >
                                                 <RefreshCw size={14} className={isRefreshingCrono ? 'animate-spin' : ''}/>
                                             </button>
@@ -17642,7 +17642,7 @@ function PlanificacionDesktop() {
                                 {/* === ACCIONES SECUNDARIAS — se ocultan al colapsar === */}
                                 {!toolbarCollapsed && (
                                     <>
-                                        <button onClick={loadHistory} className="hidden 2xl:flex items-center justify-center w-8 h-8 bg-slate-100 rounded-lg hover:bg-indigo-50 hover:text-indigo-600 transition-colors shrink-0" title="Historial de versiones" aria-label="Historial de versiones" disabled={!selectedObjective}><History size={16}/></button>
+                                        <button onClick={loadHistory} className="hidden items-center justify-center w-8 h-8 bg-slate-100 rounded-lg hover:bg-indigo-50 hover:text-indigo-600 transition-colors shrink-0" title="Historial de versiones" aria-label="Historial de versiones" disabled={!selectedObjective}><History size={16}/></button>
 
                                         {/* ⋯ MENÚ: Ventana externa + Ajustar + Equilibrar + Puestos */}
                                         <div onClick={e => e.stopPropagation()}>
@@ -17664,7 +17664,7 @@ function PlanificacionDesktop() {
                                                 menuKey="mas"
                                                 className="bg-white border border-slate-200 rounded-xl shadow-xl py-1.5 min-w-[210px]"
                                             >
-                                                        <div className="2xl:hidden" data-menu-barra-angosta>
+                                                        <div data-menu-barra-angosta>
                                                             <button
                                                                 onClick={() => { setShowCronogramasOverview(true); setToolbarMoreOpen(false); }}
                                                                 className="w-full px-4 py-2 text-left text-xs font-semibold text-slate-600 hover:bg-slate-50 flex items-center gap-2.5"
