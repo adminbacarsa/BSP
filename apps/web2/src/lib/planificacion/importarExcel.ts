@@ -134,9 +134,13 @@ export function claveCodigo(s: unknown): string {
   return normPlanilla(s).replace(/\s+/g, '');
 }
 
-export function claseDeEstilo(style: { patternType?: string; fgColor?: { rgb?: string; theme?: number } } | null | undefined): ColorCelda {
+/** Paleta clásica de Excel: los índices que son rojo puro. */
+const INDEXADOS_ROJOS: Record<number, string> = { 2: 'FF0000', 10: 'FF0000' };
+
+export function claseDeEstilo(style: { patternType?: string; fgColor?: { rgb?: string; theme?: number; indexed?: number } } | null | undefined): ColorCelda {
   if (!style || style.patternType === 'none' || !style.fgColor) return 'none';
-  const rgb = String(style.fgColor.rgb || '').toUpperCase();
+  const idx = style.fgColor.indexed;
+  const rgb = String(style.fgColor.rgb || (idx != null ? INDEXADOS_ROJOS[idx] || '' : '')).toUpperCase();
   const hex = rgb.length >= 6 ? rgb.slice(-6) : '';
   if (!hex || hex === 'FFFFFF' || hex === '000000') return 'none';
   const r = parseInt(hex.slice(0, 2), 16);

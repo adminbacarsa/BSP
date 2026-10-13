@@ -322,6 +322,7 @@ export function proponerServicioDesdePlanilla(cuadro: CuadroPlanilla, year: numb
       const regla = proponerRegla(c.raw, colorReal === 'red' ? 'red' : 'none', cuadro.referencias);
       if (!nota && (regla.accion === 'franco' || regla.accion === 'ret' || regla.accion === 'licencia' || regla.accion === 'ignorar')) continue;
       if (!nota && EXCLUIDOS.has(codigo) && codigo !== 'REF') continue;
+      if (!nota && regla.code === 'ESC') continue;
       if (regla.accion === 'doce' && !nota) {
         const base = claveCodigo(regla.code || codigo);
         if (!esquemas.has(`${normPlanilla(fila.puesto)}|${base}`)) {
