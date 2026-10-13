@@ -10,7 +10,6 @@ export type TurnoLeyenda = { code: string; startTime?: string; endTime?: string;
 const OTROS = [
   { code: 'F', horario: 'Franco', horas: 0 },
   { code: 'RET', horario: 'Retén', horas: 0 },
-  { code: 'REF', horario: 'Refuerzo', horas: 8 },
   { code: 'ESC', horario: 'Escuela', horas: 8 },
   { code: 'FT', horario: 'Franco trabajado', horas: 8 },
 ];

@@ -83,6 +83,16 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
     const [puestoSel, setPuestoSel] = useState<string | null>(null);
     const puestoSelRef = useRef<string | null>(null);
     puestoSelRef.current = puestoSel;
+    /** Con la lista vacía (Enter) se ven solo los turnos del puesto de arriba, más franco, RET y licencias. Tipeando, todos. */
+    const opcionesDe = (r: number, c: number, t: string | null): OpcionCodigo[] => {
+        const ops = propsRef.current.opciones(r, c, puestoSelRef.current ?? undefined);
+        if ((t || '').trim() || !propsRef.current.puestos) return ops;
+        const actual = puestoSelRef.current ?? propsRef.current.puestos(r, c).actual;
+        if (!actual) return ops;
+        const propias = ops.filter((o) => o.puesto === actual);
+        if (!propias.length) return ops;
+        return [...propias, ...ops.filter((o) => !o.puesto && !o.horario)];
+    };
     useEffect(() => { if (texto == null) setPuestoSel(null); }, [texto]);
     const [serie, setSerie] = useState<CeldaRC | null>(null);
     const [extra, setExtra] = useState<CeldaRC[]>([]);
@@ -105,7 +115,7 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
 
     const sugerencias = useMemo(() => {
         if (texto == null || !cursor) return [];
-        return sugerirCodigos(texto, propsRef.current.opciones(cursor.r, cursor.c, puestoSel ?? undefined), 8);
+        return sugerirCodigos(texto, opcionesDe(cursor.r, cursor.c, texto), texto.trim() ? 8 : 14);
     }, [texto, cursor, puestoSel]);
 
     const td = useCallback((r: number, c: number) => contenedorRef.current?.querySelector<HTMLElement>(`td[data-rc="${r}:${c}"]`) || null, [contenedorRef]);
@@ -331,10 +341,11 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
             if (!hayBanda) { setTexto(null); setElegida(-1); enfocarContenedor(); }
             return;
         }
-        const opcionesCel = propsRef.current.opciones(cur.r, cur.c, puestoSelRef.current ?? undefined);
-        const code = codigoAlConfirmar(t, opcionesCel, idx);
+        const opcionesCel = opcionesDe(cur.r, cur.c, t);
+        const maxSug = t.trim() ? 8 : 14;
+        const sugs = sugerirCodigos(t, opcionesCel, maxSug);
+        const code = idx >= 0 && sugs[idx] ? sugs[idx].code : codigoAlConfirmar(t, opcionesCel, idx);
         // Si la opción elegida es de otro puesto (N de Puesto 1 para alguien de RO), se escribe en ese puesto.
-        const sugs = sugerirCodigos(t, opcionesCel, 8);
         const opt = idx >= 0 ? sugs[idx] : sugs.find((x) => x.code.toUpperCase() === code.toUpperCase());
         const actualPuesto = propsRef.current.puestos?.(cur.r, cur.c).actual;
         const puesto = puestoSelRef.current ?? (opt?.puesto && opt.code.toUpperCase() === code.toUpperCase() && opt.puesto !== actualPuesto ? opt.puesto : undefined);
@@ -416,7 +427,7 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
                     setElegida(-1);
                     return;
                 }
-                const sug = sugerirCodigos(t || '', p.opciones(cur.r, cur.c, puestoSelRef.current ?? undefined), 8);
+                const sug = sugerirCodigos(t || '', opcionesDe(cur.r, cur.c, t), (t || '').trim() ? 8 : 14);
                 if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && sug.length > 1) {
                     cortar();
                     setElegida((i) => {
@@ -679,7 +690,7 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
                                 if (estado.current.texto == null) return;
                                 if (inputRef.current && document.activeElement === inputRef.current) return;
                                 const cur = estado.current.cursor;
-                                const opciones = cur ? propsRef.current.opciones(cur.r, cur.c, puestoSelRef.current ?? undefined) : [];
+                                const opciones = cur ? opcionesDe(cur.r, cur.c, escrito) : [];
                                 const code = codigoAlConfirmar(escrito, opciones, estado.current.elegida);
                                 const completo = code.toUpperCase() === escrito.trim().toUpperCase()
                                     && opciones.some((o) => o.code.toUpperCase() === code.toUpperCase());

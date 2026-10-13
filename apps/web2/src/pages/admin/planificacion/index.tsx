@@ -5917,7 +5917,6 @@ function PlanificacionDesktop() {
                 title: 'Operativos (no computan SLA)',
                 items: [
                     { code: 'RET', name: 'Retén (stand-by)',     sub: 'Disponible para cubrir ausencias' },
-                    { code: 'REF', name: 'Refuerzo',             sub: 'Cobertura extra programada · 8h' },
                     { code: 'ESC', name: 'Escuela / formación',  sub: 'Capacitación en puesto · 8h' },
                 ],
             },

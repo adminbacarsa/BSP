@@ -296,6 +296,12 @@ export function codigoAlConfirmar(texto: string, opciones: OpcionCodigo[], elegi
     return escrito;
 }
 
+/** Banda de un código de puesto: P5N → N, PLM → M, P1 T → T. Null si no es puesto+banda (EN, RO, C). */
+export function bandaDeCodigoPuesto(code: string): string | null {
+    const m = String(code || '').toUpperCase().replace(/\s+/g, '').match(/^(P\d+|PL|[A-Z]{2,3})(D12|N12|M|T|N)$/);
+    return m ? m[2] : null;
+}
+
 /** Lista para el autocompletar: primero el exacto, después los que empiezan igual, sin repetir. */
 export function sugerirCodigos(prefijo: string, opciones: OpcionCodigo[], max = 8): OpcionCodigo[] {
     const p = normalizarCodigo(prefijo);
@@ -309,8 +315,12 @@ export function sugerirCodigos(prefijo: string, opciones: OpcionCodigo[], max = 
     });
     if (!p) return unicas.slice(0, max);
     const exactas = unicas.filter((o) => o.code.toUpperCase() === p);
-    const prefijos = unicas.filter((o) => o.code.toUpperCase() !== p && o.code.toUpperCase().startsWith(p));
-    return [...exactas, ...prefijos].slice(0, max);
+    // «N» también trae los turnos de banda N de cada puesto (PLN, P5N), como en Tadicor.
+    const porBanda = ['M', 'T', 'N', 'D12', 'N12'].includes(p)
+        ? unicas.filter((o) => o.code.toUpperCase() !== p && bandaDeCodigoPuesto(o.code) === p)
+        : [];
+    const prefijos = unicas.filter((o) => o.code.toUpperCase() !== p && o.code.toUpperCase().startsWith(p) && !porBanda.includes(o));
+    return [...exactas, ...porBanda, ...prefijos].slice(0, max);
 }
 
 export type TurnoSla = { code: string; name?: string; hours?: number; startTime?: string; endTime?: string; positionName?: string };
@@ -404,7 +414,8 @@ export function opcionesDeCodigo(slaPuesto: TurnoSla[], slaTodos: TurnoSla[], ul
         out.push({ code, horario: `${h.startTime}–${h.endTime}`, detalle: 'Usado en el objetivo' });
     }
     out.push({ code: 'F', detalle: 'Franco' }, { code: 'FF', detalle: 'Franco feriado' }, { code: 'FP', detalle: 'Franco permuta' });
-    out.push({ code: 'RET', detalle: 'Retén (stand-by)' }, { code: 'REF', detalle: 'Refuerzo' }, { code: 'ESC', detalle: 'Escuela' });
+    // REF (sobreturno no facturable) ya no se ofrece: los refuerzos son RFZF / RFZE.
+    out.push({ code: 'RET', detalle: 'Retén (stand-by)' }, { code: 'ESC', detalle: 'Escuela' });
     for (const [code, name] of Object.entries(CODIGOS_LICENCIA_RAPIDA)) out.push({ code, detalle: name });
     for (const t of catalogo) {
         const code = normalizarCodigo(t.code);

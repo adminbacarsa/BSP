@@ -9,6 +9,7 @@ import {
     descansoEntre,
     deshacer,
     detectarCiclo,
+    bandaDeCodigoPuesto,
     codigoAlConfirmar,
     opcionesDeCodigo,
     horarioDeCodigo,
@@ -501,7 +502,7 @@ it('modo rápido: lo elegido en la lista manda y un texto a medias no es una nov
     const ops = opcionesDeCodigo([], [], {}, []);
     assert.equal(codigoAlConfirmar('R', ops, -1), 'RET');
     assert.equal(codigoAlConfirmar('R', ops, 0), 'RET');
-    assert.equal(codigoAlConfirmar('R', ops, 1), 'REF');
+    assert.equal(sugerirCodigos('R', ops).some((o) => o.code === 'REF'), false);
     assert.equal(codigoAlConfirmar('RE', ops, 0), 'RET');
     assert.equal(codigoAlConfirmar('ES', ops, 0), 'ESC');
     assert.equal(codigoAlConfirmar('E', ops, -1), 'E');
@@ -525,4 +526,19 @@ it('modo rápido: el mismo código en dos puestos con otro horario sale dos vece
     const n = sugerirCodigos('N', ops).filter((o) => o.code === 'N');
     assert.deepEqual(n.map((o) => `${o.horario}·${o.puesto || ''}`), ['22:00–06:00·Puesto 1', '23:00–07:00·Puesto 2']);
     assert.equal(sugerirCodigos('M', ops).filter((o) => o.code === 'M')[0].puesto, 'RO');
+});
+
+it('modo rápido: «N» trae también la banda N de cada puesto (PLN, P5N) y no confunde EN', () => {
+    assert.equal(bandaDeCodigoPuesto('P5N'), 'N');
+    assert.equal(bandaDeCodigoPuesto('PLM'), 'M');
+    assert.equal(bandaDeCodigoPuesto('P1 T'), 'T');
+    assert.equal(bandaDeCodigoPuesto('EN'), null);
+    const ops = opcionesDeCodigo([], [
+        { code: 'PLN', startTime: '23:00', endTime: '07:00', positionName: 'Playa' },
+        { code: 'P5N', startTime: '23:00', endTime: '07:00', positionName: 'Puesto 5' },
+        { code: 'EN', startTime: '08:00', endTime: '17:00', positionName: 'EN' },
+    ], {}, []);
+    const codes = sugerirCodigos('N', ops).map((o) => o.code);
+    assert.ok(codes.includes('PLN') && codes.includes('P5N'));
+    assert.ok(!codes.includes('EN'));
 });
