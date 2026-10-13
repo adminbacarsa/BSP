@@ -276,6 +276,8 @@ import { esCeldaFranco, etiquetaFt, opcionesBandaFt, payloadConsultaFt, resolver
 import { tablaCodigosPlanilla } from '@/lib/planificacion/codigosHorarioPegado';
 import { claveEquivalencia, type EquivalenciaCodigo } from '@/lib/planificacion/equivalenciaCodigo';
 import { mesLabelDe, resolverTurnoCopiado } from '@/lib/planificacion/copiarTurno';
+import { avisoJornadaTura, HORAS_TURA, puestoAdmite12h, textoTura, tramoTura, type LadoTura } from '@/lib/planificacion/turaRapido';
+import { crearTuraPlanificacion } from '@/lib/refuerzo/crearTuraPlanificacion';
 import { catalogoObjetivos, lugarDeGuardia, turnosLugarDeMapa } from '@/lib/planificacion/pegarPersonas';
 import {
     CANAL_PORTAPAPELES,
@@ -2103,6 +2105,11 @@ function PlanificacionDesktop() {
     const [pegarExcel, setPegarExcel] = useState<PegarExcelEstado | null>(null);
     const [catalogoNovedad, setCatalogoNovedad] = useState<TipoNovedadRapida[]>(() => NOVEDAD_TYPE_SEEDS.map((s) => ({ code: s.code, label: s.label })));
     const [propuesta12, setPropuesta12] = useState<Propuesta12h[] | null>(null);
+    /** `+` sobre un turno de un puesto que no es de 24 h: horas agregadas (TURA) antes o después. */
+    const [turaEditor, setTuraEditor] = useState<{
+        empId: string; empName: string; ds: string; parentId: string; code: string; inicio: string; fin: string; positionName: string;
+        lado: LadoTura; horas: number; guardando: boolean;
+    } | null>(null);
     const [motivoVista12, setMotivoVista12] = useState('');
     const propuesta12Ref = useRef<Propuesta12h[] | null>(null);
     propuesta12Ref.current = propuesta12;
@@ -15073,6 +15080,100 @@ function PlanificacionDesktop() {
         }
         if (hubo && diasUi.length) setRango12({ titulo: bloques.join('\n\n'), dias: diasUi });
     };
+    /** Puesto del servicio de la fila: si no es de 24 h, el `+` agrega horas (TURA) en vez de D12/N12. */
+    const puestoSinDoce = (pos: string) => {
+        if (!activePlanningSlaRow) return false;
+        const p = (effectivePosStructure || []).find((x: any) => x.positionName === pos);
+        if (!p) return false;
+        return !puestoAdmite12h({ coverageType: p.coverageType, shifts: (p.shifts || []).filter((st: any) => st.startTime && st.endTime) });
+    };
+    const abrirTura = (emp: any, ds: string, ctx: CtxCeldaGrilla | undefined, pos: string) => {
+        if (ctx?.p && !ctx.p.isDeleted) { toast.message('Guardá el cronograma y después agregá las horas: el TURA va atado al turno guardado.'); return; }
+        const s0 = ctx?.s;
+        const code = String(s0?.code || '').toUpperCase();
+        if (!s0?.id || !code || ['F', 'FF', 'FP', 'RET'].includes(code) || esCeldaLicencia({ code })) {
+            toast.message('El TURA va pegado a un turno de trabajo: ese día no tiene turno.');
+            return;
+        }
+        const inicio = hhmmRapido(s0.startTime);
+        const fin = hhmmRapido(s0.endTime);
+        if (!inicio || !fin) { toast.message('El turno no tiene horario: no se puede agregar el TURA.'); return; }
+        if (turaMap[s0.id]) { toast.message('Ese turno ya tiene un TURA. Con − lo quitás y lo volvés a cargar.'); return; }
+        setTuraEditor({ empId: emp.id, empName: String(emp.name || ''), ds, parentId: s0.id, code, inicio, fin, positionName: String(s0.positionName || pos), lado: 'despues', horas: 1, guardando: false });
+    };
+    const confirmarTura = async () => {
+        const t = turaEditor;
+        if (!t || t.guardando || !empresaId || !selectedObjective) return;
+        const tramo = tramoTura(t.inicio, t.fin, { lado: t.lado, horas: t.horas });
+        if (!tramo) return;
+        const diaInicio = t.lado === 'antes' && tramo.startTime > t.inicio ? (() => { const d = new Date(`${t.ds}T12:00:00`); d.setDate(d.getDate() - 1); return getDateKey(d); })() : t.ds;
+        const diaFin = (() => {
+            if (t.lado === 'antes') return t.ds;
+            const cruza = t.inicio >= t.fin || tramo.endTime <= tramo.startTime;
+            if (!cruza) return t.ds;
+            const d = new Date(`${t.ds}T12:00:00`); d.setDate(d.getDate() + 1); return getDateKey(d);
+        })();
+        const inicioDia = t.lado === 'despues' && t.inicio >= t.fin ? diaFin : diaInicio;
+        setTuraEditor({ ...t, guardando: true });
+        try {
+            await crearTuraPlanificacion({
+                empresaId,
+                clientId: selectedClient || '',
+                clientName: clients.find((c: any) => c.id === selectedClient)?.name || '',
+                objectiveId: selectedObjective,
+                objectiveName: getObjectiveName(selectedObjective),
+                employeeId: t.empId,
+                employeeName: t.empName,
+                parentShiftId: t.parentId,
+                positionName: t.positionName,
+                fecha: t.ds,
+                inicioIso: `${inicioDia}T${tramo.startTime}`,
+                finIso: `${diaFin}T${tramo.endTime}`,
+                draft: !planPublicadoGrilla,
+            });
+            toast.success(`${textoTura(t.code, t.inicio, t.fin, { lado: t.lado, horas: t.horas })} · ${t.empName.split(',')[0]}`);
+            setTuraEditor(null);
+            void refreshCronogramaView();
+        } catch (e: any) {
+            toast.error(e?.message || 'No se pudo agregar el TURA');
+            setTuraEditor((prev) => (prev ? { ...prev, guardando: false } : prev));
+        }
+    };
+    const confirmarTuraRef = useRef(confirmarTura);
+    confirmarTuraRef.current = confirmarTura;
+    useEffect(() => {
+        if (!turaEditor) return;
+        const onKey = (ev: KeyboardEvent) => {
+            const k = ev.key;
+            let hecho = true;
+            if (/^[1-8]$/.test(k)) setTuraEditor((prev) => (prev ? { ...prev, horas: Number(k) } : prev));
+            else if (k === 'ArrowLeft') setTuraEditor((prev) => (prev ? { ...prev, lado: 'antes' } : prev));
+            else if (k === 'ArrowRight') setTuraEditor((prev) => (prev ? { ...prev, lado: 'despues' } : prev));
+            else if (k === 'Tab') setTuraEditor((prev) => (prev ? { ...prev, lado: prev.lado === 'antes' ? 'despues' : 'antes' } : prev));
+            else if (k === 'ArrowUp') setTuraEditor((prev) => (prev ? { ...prev, horas: Math.min(8, prev.horas + 1) } : prev));
+            else if (k === 'ArrowDown') setTuraEditor((prev) => (prev ? { ...prev, horas: Math.max(1, prev.horas - 1) } : prev));
+            else if (k === 'Enter' || k === '+') void confirmarTuraRef.current();
+            else if (k === 'Escape') setTuraEditor(null);
+            else hecho = false;
+            if (hecho) { ev.preventDefault(); ev.stopImmediatePropagation(); }
+        };
+        window.addEventListener('keydown', onKey, true);
+        return () => window.removeEventListener('keydown', onKey, true);
+    }, [!!turaEditor]);
+    const quitarTura = async (parentId: string) => {
+        const tura = turaMap[parentId];
+        if (!tura?.id) return false;
+        if (!window.confirm(`Quitar el TURA de ${tura.employeeName || 'este guardia'}?`)) return true;
+        try {
+            await updateDoc(doc(db, 'turnos', tura.id), { isDeleted: true, deletedAt: serverTimestamp(), deletedVia: 'PLANIFICACION_RAPIDO' });
+            if (tura.solicitudRefuerzoId) await updateDoc(doc(db, 'solicitudes_refuerzo', tura.solicitudRefuerzoId), { estado: 'CANCELADA', cancelReason: 'Quitado en Planificación', cancelledAt: new Date().toISOString() });
+            setTuraMap((prev) => { const n = { ...prev }; delete n[parentId]; return n; });
+            toast.success('TURA quitado');
+        } catch (e: any) {
+            toast.error(e?.message || 'No se pudo quitar el TURA');
+        }
+        return true;
+    };
     const masRapido = (r: number, c: number, columna: boolean) => {
         const global = bloqueoGlobalRapido();
         if (global) { toast.message(global); return; }
@@ -15080,6 +15181,7 @@ function PlanificacionDesktop() {
         if (!emp || !ds) return;
         if (columna) { abrirPropuesta12(propuestas12De(ds)); return; }
         const pos = puestoFilaRapido(emp.id, ctx);
+        if (puestoSinDoce(pos)) { abrirTura(emp, ds, ctx, pos); return; }
         const delPuesto = propuestas12De(ds, pos, emp.id);
         if (delPuesto.length) { setPropuesta12(delPuesto); return; }
         const code = codigoCtxRapido(ctx);
@@ -15096,6 +15198,7 @@ function PlanificacionDesktop() {
         if (global) { toast.message(global); return; }
         const { emp, ctx } = ctxRapido(r, c);
         if (!emp) return;
+        if (ctx?.s?.id && turaMap[ctx.s.id]) { void quitarTura(ctx.s.id); return; }
         const vuelta = volverA8(codigoCtxRapido(ctx));
         if (!vuelta) { toast.message('Solo D12 o N12 vuelven a 8 h.'); return; }
         const pos = puestoFilaRapido(emp.id, ctx);
@@ -20616,6 +20719,36 @@ function PlanificacionDesktop() {
                             />
                         )}
                     />,
+                    document.body,
+                )}
+                {turaEditor && typeof document !== 'undefined' && createPortal(
+                    <div className="fixed bottom-6 left-1/2 z-[12000] w-[min(34rem,calc(100vw-2rem))] -translate-x-1/2 rounded-2xl border border-rose-200 bg-white p-3 text-[12px] shadow-xl" data-tura-editor>
+                        <p className="font-black text-slate-800">
+                            Agregar horas a {turaEditor.empName.split(',')[0]} · {turaEditor.code} {turaEditor.inicio}–{turaEditor.fin} · {turaEditor.ds.slice(8, 10)}/{turaEditor.ds.slice(5, 7)}
+                        </p>
+                        <p className="text-[11px] text-slate-500">Puesto que no es de 24 h: no pasa a D12/N12. Se agrega un TURA pegado al turno (facturable).</p>
+                        {(['antes', 'despues'] as const).map((lado) => (
+                            <div key={lado} className="mt-1.5 flex items-center gap-1" data-tura-lado={lado}>
+                                <button type="button" onClick={() => setTuraEditor((prev) => (prev ? { ...prev, lado } : prev))} className={`w-20 rounded-lg px-2 py-1 text-left text-[11px] font-black ${turaEditor.lado === lado ? 'bg-rose-700 text-white' : 'border border-slate-200 text-slate-600'}`}>
+                                    {lado === 'antes' ? 'Antes' : 'Después'}
+                                </button>
+                                {HORAS_TURA.map((h) => (
+                                    <button key={h} type="button" data-tura-horas={`${lado}-${h}`} onClick={() => setTuraEditor((prev) => (prev ? { ...prev, lado, horas: h } : prev))} className={`h-7 w-7 rounded-lg text-[11px] font-black tabular-nums ${turaEditor.lado === lado && turaEditor.horas === h ? 'bg-rose-700 text-white' : 'border border-slate-200 text-slate-600 hover:bg-rose-50'}`}>{h}</button>
+                                ))}
+                            </div>
+                        ))}
+                        <p className="mt-1.5 font-bold text-rose-800" data-tura-texto>{textoTura(turaEditor.code, turaEditor.inicio, turaEditor.fin, { lado: turaEditor.lado, horas: turaEditor.horas })}</p>
+                        {avisoJornadaTura(turaEditor.inicio, turaEditor.fin, turaEditor.horas) && (
+                            <p className="text-[11px] font-bold text-amber-700">{avisoJornadaTura(turaEditor.inicio, turaEditor.fin, turaEditor.horas)}</p>
+                        )}
+                        <div className="mt-2 flex items-center justify-between">
+                            <span className="text-[10px] text-slate-400">1–8 horas · ← antes · → después · Enter agrega · Esc cancela</span>
+                            <div className="flex gap-2">
+                                <button type="button" onClick={() => setTuraEditor(null)} className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-bold text-slate-600">Cancelar</button>
+                                <button type="button" disabled={turaEditor.guardando} onClick={() => { void confirmarTura(); }} className="rounded-lg bg-rose-700 px-2.5 py-1 text-[11px] font-black text-white disabled:opacity-40" data-tura-confirmar>{turaEditor.guardando ? 'Guardando…' : 'Agregar TURA'}</button>
+                            </div>
+                        </div>
+                    </div>,
                     document.body,
                 )}
                 {pedidoAlta && typeof document !== 'undefined' && createPortal(

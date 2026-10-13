@@ -7,7 +7,7 @@ import {
 export type SolicitudTipo   = 'REFUERZO_PUESTO' | 'AGREGADO_TURNO';
 export type SolicitudAlcance = 'PUNTUAL' | 'ESTRUCTURAL';
 export type SolicitudEstado = 'PENDIENTE' | 'APROBADA' | 'RECHAZADA' | 'ASIGNADA' | 'COMPLETADA' | 'CANCELADA';
-export type SolicitudOrigen = 'PORTAL_CLIENTE' | 'MANUAL' | 'SUPERVISOR_MANUAL';
+export type SolicitudOrigen = 'PORTAL_CLIENTE' | 'MANUAL' | 'SUPERVISOR_MANUAL' | 'PLANIFICACION';
 
 export interface SolicitudRefuerzo {
   id?: string;
