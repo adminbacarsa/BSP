@@ -1439,6 +1439,7 @@ function calcularCeldaGrilla(e: EntradaCeldaGrilla, emp: any, isGuest: boolean, 
     const swapStyle = swapPending ? SHIFT_STYLES['SWAP_PENDING'] : SHIFT_STYLES['SWAP'];
     if (isLockedDate && !p) { style = SHIFT_STYLES['PAST']; if (s) content = s.code; }
     else if (p) { if (p.isDeleted) { content = CELDA_BORRADA; style = "bg-rose-50 text-rose-300"; } else { if (isFT) { style = SHIFT_STYLES['FT']; content = etiquetaFt(p.code); } else if (isFF) { style = SHIFT_STYLES['FF']; content = "FF"; } else { content = p.code; const baseStyle = SHIFT_STYLES[p.code]; style = baseStyle ? `${baseStyle} ring-2 ring-amber-400 ${isSwap ? swapStyle : ''}` : `bg-amber-100 text-amber-700 font-black ring-2 ring-amber-400 ${isSwap ? swapStyle : ''}`; if (content === 'REF' || content === 'ESC') content = cellLabelForDeployment(String(content), p.deploymentBand); } } }
+    else if (s && rfzOnCell && (rfzOnCell.rfzTipo === 'EVENTUAL' || rfzOnCell.shiftCode === 'RFZE') && String(s.code || '').toUpperCase().startsWith('RFZF')) { content = 'RFZE'; style = SHIFT_STYLES['RFZE']; }
     else if (s) { if (!isLockedDate) { if (isFT) { style = SHIFT_STYLES['FT']; content = etiquetaFt(s.code); } else if (isFF) { style = SHIFT_STYLES['FF']; content = "FF"; } else { style = `${getDefaultStyle(s.code)} ${isSwap ? swapStyle : ''}`; content = s.code; } } }
     else if (rfzOnCell && !p) {
         content = rfzOnCell.rfzTipo === 'EVENTUAL' || rfzOnCell.shiftCode === 'RFZE' ? 'RFZE' : 'RFZ';
@@ -2120,6 +2121,8 @@ function PlanificacionDesktop() {
         /** RFZE ya cargado: se cambia su horario en vez de crear otro. */
         editarSolicitudId?: string;
     } | null>(null);
+    /** «EV» en la grilla: elegir un evento de ese día (de cualquier objetivo de la empresa) y asignar a los guardias. */
+    const [evEditor, setEvEditor] = useState<{ celdas: Array<{ empId: string; empName: string; ds: string }>; ds: string; elegida: number; guardando: boolean } | null>(null);
     /** `+` sobre un turno de un puesto que no es de 24 h: horas agregadas (TURA) antes o después. */
     const [turaEditor, setTuraEditor] = useState<{
         empId: string; empName: string; ds: string; parentId: string; code: string; inicio: string; fin: string; positionName: string;
@@ -15197,8 +15200,22 @@ function PlanificacionDesktop() {
         const clientName = clients.find((c: any) => c.id === selectedClient)?.name || '';
         try {
             if (e.tipo === 'RFZE') {
+                // Sobre un RFZF lo reemplaza (el RFZF se quita como cambio del cronograma); sobre otro turno de trabajo no se pisa.
+                const borrar: ItemRapido[] = [];
+                const salteados: string[] = [];
+                const celdasOk = e.celdas.filter((c) => {
+                    const cx = ctxDeCelda(`${c.empId}_${c.ds}`);
+                    const actual = cx?.p && !cx.p.isDeleted ? cx.p : cx?.s;
+                    const code = String(actual?.code || '').toUpperCase();
+                    if (!actual || !code || esCeldaFranco(actual)) return true;
+                    if (code.startsWith('RFZF')) { borrar.push({ r: c.r, c: c.c, borrar: true }); return true; }
+                    salteados.push(`${c.empName.split(',')[0]} ${c.ds.slice(8, 10)} (${code})`);
+                    return false;
+                });
+                if (!celdasOk.length) { toast.message(`No se cargó: esos días ya tienen turno (${salteados.join(', ')}).`); setRfzEditor((prev) => (prev ? { ...prev, guardando: false } : prev)); return; }
+                if (borrar.length) escribirRapido(borrar);
                 const porGuardia = new Map<string, { empName: string; fechas: string[] }>();
-                for (const c of e.celdas) {
+                for (const c of celdasOk) {
                     const g = porGuardia.get(c.empId) || { empName: c.empName, fechas: [] };
                     if (!g.fechas.includes(c.ds)) g.fechas.push(c.ds);
                     porGuardia.set(c.empId, g);
@@ -15212,7 +15229,7 @@ function PlanificacionDesktop() {
                         inicio, fin, pidio: e.pidio, motivo: e.motivo, draft: !planPublicadoGrilla,
                     });
                 }
-                toast.success(`RFZE ${inicio}–${fin}: ${n} día(s) cargados y aprobados (trazabilidad del servicio)`);
+                toast.success(`RFZE ${inicio}–${fin}: ${n} día(s) cargados y aprobados (trazabilidad del servicio)${borrar.length ? ` · ${borrar.length} RFZF reemplazado(s): guardá el cronograma` : ''}${salteados.length ? ` · salteados: ${salteados.join(', ')}` : ''}`);
                 void refreshCronogramaView();
             } else {
                 const id = String((activePlanningSlaRow as { id?: string } | null)?.id || '');
@@ -15246,6 +15263,37 @@ function PlanificacionDesktop() {
             setRfzEditor((prev) => (prev ? { ...prev, guardando: false } : prev));
         }
     };
+    const confirmarEv = async () => {
+        const e = evEditor;
+        if (!e || e.guardando) return;
+        const opcion = serviciosEventoPegado(e.ds)[e.elegida];
+        if (!opcion?.evento.id) return;
+        setEvEditor({ ...e, guardando: true });
+        const vinculo = `${opcion.evento.id}|${opcion.servicio.id}`;
+        const lista = e.celdas
+            .map((c) => ({ emp: displayedEmployees.find((x: any) => x.id === c.empId) || employees.find((x: any) => x.id === c.empId), ds: c.ds, vinculo }))
+            .filter((x) => x.emp);
+        await asignarPegadoAEventos(lista as Array<{ emp: any; ds: string; vinculo: string }>);
+        setEvEditor(null);
+        void refreshCronogramaView();
+    };
+    const confirmarEvRef = useRef(confirmarEv);
+    confirmarEvRef.current = confirmarEv;
+    useEffect(() => {
+        if (!evEditor) return;
+        const onKey = (ev: KeyboardEvent) => {
+            const n = serviciosEventoPegado(evEditor.ds).length || 1;
+            let hecho = true;
+            if (ev.key === 'Escape') setEvEditor(null);
+            else if (ev.key === 'ArrowDown') setEvEditor((prev) => (prev ? { ...prev, elegida: (prev.elegida + 1) % n } : prev));
+            else if (ev.key === 'ArrowUp') setEvEditor((prev) => (prev ? { ...prev, elegida: (prev.elegida - 1 + n) % n } : prev));
+            else if (ev.key === 'Enter') void confirmarEvRef.current();
+            else hecho = false;
+            if (hecho) { ev.preventDefault(); ev.stopImmediatePropagation(); }
+        };
+        window.addEventListener('keydown', onKey, true);
+        return () => window.removeEventListener('keydown', onKey, true);
+    }, [!!evEditor]);
     const confirmarRfzRef = useRef(confirmarRfz);
     confirmarRfzRef.current = confirmarRfz;
     useEffect(() => {
@@ -18577,6 +18625,17 @@ function PlanificacionDesktop() {
                                     puestos={puestosRapido}
                                     onEscribir={(celdas, code, puesto) => {
                                         const cu = normalizarCodigo(code);
+                                        if (cu === 'EV') {
+                                            const lista = celdas.map((x) => ctxRapido(x.r, x.c)).filter((y) => y.emp && y.ds);
+                                            if (!lista.length) return;
+                                            const ds = lista[0].ds;
+                                            if (!serviciosEventoPegado(ds).length) {
+                                                toast.message(`No hay eventos cargados el ${ds.slice(8, 10)}/${ds.slice(5, 7)}. Cargalo en Eventos y volvé a tipear EV.`);
+                                                return;
+                                            }
+                                            setEvEditor({ celdas: lista.filter((y) => y.ds === ds).map((y) => ({ empId: y.emp.id, empName: String(y.emp.name || ''), ds })), ds, elegida: 0, guardando: false });
+                                            return;
+                                        }
                                         if (cu === 'TURA' || cu === 'RFZF' || cu === 'RFZE') {
                                             const global = bloqueoGlobalRapido();
                                             if (global) { toast.message(global); return; }
@@ -20906,6 +20965,32 @@ function PlanificacionDesktop() {
                             />
                         )}
                     />,
+                    document.body,
+                )}
+                {evEditor && typeof document !== 'undefined' && createPortal(
+                    <div className="fixed bottom-6 left-1/2 z-[12000] w-[min(34rem,calc(100vw-2rem))] -translate-x-1/2 rounded-2xl border border-amber-300 bg-white p-3 text-[12px] shadow-xl" data-ev-editor>
+                        <p className="font-black text-slate-800">Asignar a un evento · {evEditor.ds.slice(8, 10)}/{evEditor.ds.slice(5, 7)}</p>
+                        <p className="text-[11px] text-slate-500">{evEditor.celdas.map((c) => c.empName.split(',')[0]).join(', ')} · eventos de ese día de toda la empresa</p>
+                        <ul className="mt-2 max-h-60 overflow-auto rounded-xl border border-slate-100">
+                            {serviciosEventoPegado(evEditor.ds).map(({ evento, servicio }, i) => (
+                                <li key={`${evento.id}|${servicio.id}`}>
+                                    <button type="button" data-ev-opcion={i} onClick={() => setEvEditor((prev) => (prev ? { ...prev, elegida: i } : prev))} onDoubleClick={() => { setEvEditor((prev) => (prev ? { ...prev, elegida: i } : prev)); void confirmarEv(); }}
+                                        className={`flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[11px] ${i === evEditor.elegida ? 'bg-amber-50 text-amber-950' : 'text-slate-700 hover:bg-slate-50'}`}>
+                                        <b className="truncate">{evento.nombre}</b>
+                                        <span className="text-slate-500">· {servicio.nombre}</span>
+                                        <span className="ml-auto shrink-0 font-mono text-[10px] text-slate-500">{servicio.horaInicio}–{servicio.horaFin}{servicio.cupo ? ` · cupo ${servicio.cupo}` : ''}</span>
+                                    </button>
+                                </li>
+                            ))}
+                        </ul>
+                        <div className="mt-2 flex items-center justify-between">
+                            <span className="text-[10px] text-slate-400">↑↓ elegir · Enter asigna · Esc cancela</span>
+                            <div className="flex gap-2">
+                                <button type="button" onClick={() => setEvEditor(null)} className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-bold text-slate-600">Cancelar</button>
+                                <button type="button" disabled={evEditor.guardando} onClick={() => { void confirmarEv(); }} className="rounded-lg bg-amber-500 px-2.5 py-1 text-[11px] font-black text-amber-950 disabled:opacity-40" data-ev-confirmar>{evEditor.guardando ? 'Asignando…' : 'Asignar al evento'}</button>
+                            </div>
+                        </div>
+                    </div>,
                     document.body,
                 )}
                 {rfzEditor && typeof document !== 'undefined' && createPortal(
