@@ -128,7 +128,7 @@ function CeldaGrillaBase({ vista: v, fila, col, seleccionada, colElegir, elegirA
                     <div className={`absolute -top-1 left-1/2 -translate-x-1/2 max-w-full truncate text-[6.5px] font-black text-white px-0.5 rounded z-10 ${v.menuRol === 'CUBRE' ? 'bg-indigo-600' : 'bg-emerald-600'}`} data-marca-menu={v.menuRol}>{v.menuMarca}</div>
                 ) : null}
                 {v.marca12 ? (
-                    <div className="absolute -bottom-0.5 right-0 text-[6.5px] font-black bg-red-700 text-white px-0.5 rounded z-10" data-marca-12h title={v.marca12Titulo}>{v.marca12}</div>
+                    <div className="absolute -bottom-2 right-0 text-[6.5px] leading-none font-black bg-red-700 text-white px-0.5 py-px rounded z-10" data-marca-12h title={v.marca12Titulo}>{v.marca12}</div>
                 ) : null}
                 {v.cubiertoTitulo != null && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-orange-500 text-white px-0.5 rounded" title={v.cubiertoTitulo}>✓</div>}
                 {v.estado && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${v.estado}`}></div>}
