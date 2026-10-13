@@ -7,7 +7,7 @@ export const crmService = {
   // CLIENTES
   getClients: async () => {
     const s = await getDocs(collection(db, 'clients'));
-    return s.docs.map(d => ({ id: d.id, ...d.data() } as Client));
+    return s.docs.map(d => ({ ...d.data(), id: d.id } as Client));
   },
   addClient: (data: any) => addDoc(collection(db, 'clients'), { 
     ...data, 

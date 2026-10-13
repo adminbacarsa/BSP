@@ -11,10 +11,10 @@ export const clientService = {
       const snapshot = await getDocs(colRef);
       // Mapeo seguro para evitar errores de TS
       return snapshot.docs.map(doc => ({
-        id: doc.id,
         name: doc.data().name || 'Sin Nombre',
         cuit: doc.data().cuit || '',
-        ...doc.data()
+        ...doc.data(),
+        id: doc.id,
       })) as Client[];
     } catch (error) {
       console.error("Error getClients:", error);

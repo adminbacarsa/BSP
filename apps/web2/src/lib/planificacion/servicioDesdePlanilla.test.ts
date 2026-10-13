@@ -15,6 +15,7 @@ import {
   etiquetaDias,
   etiquetaFechas,
   franjasDesdeVigente,
+  cubre24Horas,
   posicionesDesdeFranjas,
   letraDia,
   lineasConfirmacion,
@@ -341,5 +342,27 @@ describe('servicio desde la planilla · fechas del mes', () => {
     const [pos] = posicionesDesdeFranjas(prop.franjas);
     assert.deepEqual(pos.allowedShiftTypes[0].specificDates, f?.fechas);
     assert.equal(pos.allowedShiftTypes[0].days, undefined);
+  });
+});
+
+describe('servicio desde la planilla · puesto de 24 h', () => {
+  const f = (puesto: string, code: string, startTime: string, endTime: string) => ({ id: `${puesto}${code}`, puesto, code, startTime, endTime, cantidad: 1, dias: [] });
+  it('M+T+N, D12+N12 y P1M+P1T+P1N son 24 HS; Rondín y un puesto de 2 bandas no', () => {
+    assert.equal(cubre24Horas([f('Puesto 1', 'M', '07:00', '15:00'), f('Puesto 1', 'T', '15:00', '23:00'), f('Puesto 1', 'N', '23:00', '07:00')]), true);
+    assert.equal(cubre24Horas([f('B', 'D12', '07:00', '19:00'), f('B', 'N12', '19:00', '07:00')]), true);
+    assert.equal(cubre24Horas([f('P', 'M', '07:00', '15:00'), f('P', 'T', '15:00', '23:00')]), false);
+    const docs = posicionesDesdeFranjas([
+      f('Puesto 1', 'P1M', '08:00', '15:00'), f('Puesto 1', 'P1T', '15:00', '22:00'), f('Puesto 1', 'P1N', '22:00', '08:00'),
+      f('Rondín', 'M', '07:00', '15:00'), f('Rondín', 'T', '15:00', '23:00'), f('Rondín', 'N', '23:00', '07:00'),
+      f('Puesto 2', 'P2M', '10:00', '16:00'), f('Puesto 2', 'P2T', '16:00', '22:00'),
+    ]);
+    const tipo = (n: string) => docs.find((d) => d.name === n)?.coverageType;
+    assert.equal(tipo('Puesto 1'), '24hs');
+    assert.equal(tipo('Rondín'), 'custom');
+    assert.equal(tipo('Puesto 2'), 'custom');
+  });
+  it('al actualizar, un puesto existente conserva su tipo', () => {
+    const docs = posicionesDesdeFranjas([f('Puesto 1', 'M', '07:00', '15:00')], [{ id: 'x', name: 'Puesto 1', coverageType: '24hs', quantity: 1, activeDays: [], allowedShiftTypes: [], status: 'ACTIVE' }]);
+    assert.equal(docs[0].coverageType, '24hs');
   });
 });

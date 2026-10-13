@@ -6362,7 +6362,7 @@ function PlanificacionDesktop() {
         const unsubC = onSnapshot(clientsQ, snap => {
             dataSyncRef.current.clients = true;
             checkSynced();
-            const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            const rows = snap.docs.map(d => ({ ...d.data(), id: d.id }));
             setClients(dedupeClientsById(filterRowsByEmpresa(rows, empresaId, scopeEmpresa, migracionCompleta))
                 .filter((c) => isClientOperational((c as { status?: unknown }).status)));
         }, (e) => console.error('[plan] clients error:', e));

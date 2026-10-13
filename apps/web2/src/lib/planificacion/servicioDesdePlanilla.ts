@@ -684,12 +684,27 @@ export type TurnoServicioDoc = {
 export type PosicionServicioDoc = {
   id: string;
   name: string;
-  coverageType: 'custom';
+  coverageType: 'custom' | '24hs' | string;
   quantity: number;
   activeDays: string[];
   allowedShiftTypes: TurnoServicioDoc[];
   status: 'ACTIVE';
 };
+
+/** Las franjas regulares del puesto cubren las 24 h del día (M+T+N, D12+N12, P1M+P1T+P1N…). */
+export function cubre24Horas(franjas: ReadonlyArray<Pick<FranjaServicioPlanilla, 'startTime' | 'endTime' | 'fechas'>>): boolean {
+  const cubierto = new Array<boolean>(24 * 60).fill(false);
+  for (const f of franjas) {
+    if (f.fechas?.length) continue;
+    const ini = minDe(f.startTime);
+    let fin = minDe(f.endTime);
+    if (fin <= ini) fin += 24 * 60;
+    for (let m = ini; m < fin; m++) cubierto[m % (24 * 60)] = true;
+  }
+  return cubierto.every(Boolean);
+}
+
+const PUESTO_FRANJA_PROPIA = /RONDIN|ENCARGAD|CORTINA|REFUERZO|RELEVANTE|VOLANTE/;
 
 export function posicionesDesdeFranjas(
   franjas: FranjaServicioPlanilla[],
@@ -720,7 +735,9 @@ export function posicionesDesdeFranjas(
     out.push({
       id: String(previa?.id || `planilla_${n}`),
       name: previa?.name || list[0].puesto,
-      coverageType: 'custom',
+      // Un puesto cargado a mano en Servicios conserva su tipo; el que armó la planilla se recalcula.
+      coverageType: (previa?.coverageType && !String(previa.id || '').startsWith('planilla_') ? String(previa.coverageType) : '')
+        || (!PUESTO_FRANJA_PROPIA.test(normPlanilla(list[0].puesto)) && cubre24Horas(list) ? '24hs' : 'custom'),
       quantity: Math.max(...list.map((f) => f.cantidad), 1),
       activeDays: dias,
       allowedShiftTypes: shifts,
