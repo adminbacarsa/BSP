@@ -113,7 +113,7 @@ function CeldaGrillaBase({ vista: v, fila, col, seleccionada, colElegir, elegirA
                     />
                 ) : null}
                 {v.evBadge && (
-                    <div className="absolute -bottom-0.5 right-0 text-[6.5px] font-black bg-yellow-400 text-yellow-900 px-0.5 rounded z-10">EV</div>
+                    <div className="absolute -bottom-0.5 right-0 text-[6.5px] font-black bg-amber-500 text-amber-950 px-0.5 rounded z-10">EV</div>
                 )}
                 {v.lct ? (<span className="absolute top-0 left-0 w-1.5 h-1.5 rounded-full bg-amber-500 border border-white" title={v.evento ? undefined : v.lct} />) : null}
                 {v.borrado ? <X size={12} /> : v.contenido}

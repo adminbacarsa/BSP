@@ -701,7 +701,7 @@ const SHIFT_STYLES: any = {
     'TURA': 'bg-rose-900 text-white border-2 border-white font-black',
     'EXTENDED': 'bg-amber-600 text-white border-amber-800 font-black shadow-sm',
     'ESC': 'bg-sky-100 text-sky-800 border-sky-500 font-black',
-    'EV':  'bg-yellow-400 text-yellow-900 border-yellow-500 font-black',
+    'EV':  'bg-amber-500 text-amber-950 border-amber-700 font-black',
     'PG':  'bg-[#8064A2] text-black border-[#5F4A7A] font-black',
     'LOCKED': 'bg-slate-200 text-slate-500 border-slate-300 pattern-grid',
     'PAST':   'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed',
