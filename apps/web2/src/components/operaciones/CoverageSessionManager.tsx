@@ -706,7 +706,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
   const rejectedForStep = candidateView.rejected.filter((r) => {
     if (step.key === 'FT') return r.type === 'FT';
     if (step.key === 'RETENCION') return r.type === 'EXTEND' || r.type === 'ADVANCE';
-    return r.type === 'RET' || r.type === 'REF' || r.type === 'ESC';
+    return r.type === 'RET' || r.type === 'ESC';
   });
 
   const candidatesExt: any[] = applyDistanceTier(candidatesExtRaw as any[]);

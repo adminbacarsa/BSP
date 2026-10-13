@@ -8,9 +8,9 @@
  * Hueco de objetivo: RET, REF, ESC, Ext + Adel, eventuales y después FT.
  * Son constantes para poder invertirlas si Mauro confirma otro orden.
  */
-export const EVENT_COVERAGE_CASCADE_ORDER = ['EVENTUAL', 'REF', 'ESC', 'EXTEND', 'ADVANCE', 'FT'] as const;
+export const EVENT_COVERAGE_CASCADE_ORDER = ['EVENTUAL', 'ESC', 'EXTEND', 'ADVANCE', 'FT'] as const;
 
-export const OBJECTIVE_COVERAGE_WITH_EVENTUAL = ['RET', 'REF', 'ESC', 'EXTEND', 'ADVANCE', 'EVENTUAL', 'FT'] as const;
+export const OBJECTIVE_COVERAGE_WITH_EVENTUAL = ['RET', 'ESC', 'EXTEND', 'ADVANCE', 'EVENTUAL', 'FT'] as const;
 
 /** Por qué un eventual no es candidato. `null` = elegible. */
 export type EventualMotivoCodigo =

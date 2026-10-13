@@ -230,7 +230,7 @@ export function buildOpsCandidateView(args: {
     ext: set.byType.EXTEND.filter((r) => r.eligible).map(decorate),
     adv: set.byType.ADVANCE.filter((r) => r.eligible).map(decorate),
     ret: mapKind(set.byType.RET, 'RET'),
-    ref: mapKind(set.byType.REF, 'REF'),
+    ref: [] as ReturnType<typeof mapKind>,
     esc: mapKind(set.byType.ESC, 'ESC'),
     ft: set.byType.FT.filter((r) => r.eligible).map(decorate),
     rejected: set.rejected,

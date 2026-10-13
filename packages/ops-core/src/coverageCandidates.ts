@@ -8,7 +8,6 @@
 
 export const COVERAGE_CASCADE_ORDER = [
   'RET',
-  'REF',
   'ESC',
   'EXTEND',
   'ADVANCE',
@@ -274,7 +273,7 @@ function rangesOverlap(a0: number, a1: number, b0: number, b1: number): boolean 
 }
 
 function emptyByType(): Record<CoverageCascadeType, CoverageCandidateRow[]> {
-  return { RET: [], REF: [], ESC: [], EXTEND: [], ADVANCE: [], EVENTUAL: [], FT: [] };
+  return { RET: [], ESC: [], EXTEND: [], ADVANCE: [], EVENTUAL: [], FT: [] };
 }
 
 /**
@@ -542,6 +541,8 @@ function considerAdv(
   if (common) return common;
   if (shift.isFranco === true || FRANCO_CODES.has(norm(shift.code))) return 'NO_CONTIGUO';
   if (norm(shift.code) === 'RET' || norm(shift.code) === 'REF' || norm(shift.code) === 'ESC') return 'NO_CONTIGUO';
+  // Los refuerzos (RFZ, RFZF, RFZE) y el turno agregado (TURA) no entran en la cobertura.
+  if (norm(shift.code).startsWith('RFZ') || norm(shift.code) === 'TURA') return 'NO_CONTIGUO';
   const toleranceMs = input.toleranceMs ?? COVERAGE_JOIN_TOLERANCE_MS;
   const hardCapMs = input.hardCapMs ?? COVERAGE_HARD_CAP_MS;
   if (!accept && shift.isPresent === true && shift.startMs <= input.nowMs) return 'NO_CONTIGUO';
@@ -656,8 +657,8 @@ function plausible(type: CoverageCascadeType, shift: CoverageShiftView, gap: Cov
     return FRANCO_CODES.has(code) || code === 'FT';
   }
   if (!sameObj) return false;
+  if (code.startsWith('RFZ') || code === 'TURA') return false;
   if (type === 'RET') return code === 'RET';
-  if (type === 'REF') return code === 'REF';
   if (type === 'ESC') return code === 'ESC';
   if (type === 'EXTEND') {
     return shift.isPresent === true
