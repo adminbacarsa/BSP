@@ -35,6 +35,8 @@ export type FranjaServicioPlanilla = {
   dias: DiaSemana[];
   /** Fechas puntuales del mes (YYYY-MM-DD). Si hay, mandan sobre `dias` (se guardan como `specificDates`). */
   fechas?: string[];
+  /** Turnos de más sobre los puestos de 24 h: la planilla no dice su horario, hay que definirlo. */
+  definirHorario?: boolean;
   /** Código que traía la planilla, cuando se conservó el del servicio. */
   codigoPlanilla?: string;
 };
@@ -309,6 +311,8 @@ export function proponerServicioDesdePlanilla(cuadro: CuadroPlanilla, year: numb
     return out;
   };
 
+  /** Por puesto y día: M/N rojas que no son esquema de 12 h (se cuentan como 8 h y cubren media T). */
+  const doceSueltas = new Map<string, Map<number, number>>();
   for (const fila of cuadro.filas) {
     if (filaNota(fila)) continue;
     const funcion = tipoFuncion(fila.puesto);
@@ -346,6 +350,10 @@ export function proponerServicioDesdePlanilla(cuadro: CuadroPlanilla, year: numb
       if (regla.accion === 'doce' && !nota) {
         const base = claveCodigo(regla.code || codigo);
         if (!esquemas.has(`${normPlanilla(fila.puesto)}|${base}`)) {
+          const kp = normPlanilla(nombreVisible(puestoDestino));
+          const dd = doceSueltas.get(kp) || new Map<number, number>();
+          dd.set(c.dia, (dd.get(c.dia) || 0) + 1);
+          doceSueltas.set(kp, dd);
           const h8 = horarioDe(base, cuadro.referencias, 'none', puestoDestino);
           if (h8) sumar(puestoDestino, h8.code, h8.inicio, h8.fin, c.dia, codigosEq(fila.puesto, c.raw, codigo), 'none');
           continue;
@@ -431,6 +439,84 @@ export function proponerServicioDesdePlanilla(cuadro: CuadroPlanilla, year: numb
         cantidad,
         dias: lista,
       });
+    }
+  }
+  // Puestos de 24 h por conteo de bandas: por día, min(M, T, N) con cada 12 h cubriendo media T.
+  // Lo que sobra son turnos extra de una banda, con horario a definir (Obrador: 6 M · 4 T · 4 N → 4 × 24 h + 2 M).
+  {
+    const porPuesto = new Map<string, string[]>();
+    for (const key of cuenta.keys()) {
+      const p = normPlanilla(meta.get(key)!.puesto);
+      porPuesto.set(p, [...(porPuesto.get(p) || []), key]);
+    }
+    for (const [p, keys] of porPuesto) {
+      if (/RONDIN|ENCARGAD|CORTINA|REFUERZO|RELEVANTE|VOLANTE/.test(p)) continue;
+      const bandaDe = (code: string) => (['M', 'T', 'N', 'D12', 'N12'].includes(code) ? code : partidoBanda(code)?.banda || '');
+      const codes = keys.map((k) => bandaDe(meta.get(k)!.code));
+      if (codes.some((c) => !c)) continue;
+      if (!['M', 'T', 'N'].every((b) => codes.includes(b))) continue;
+      const visible = meta.get(keys[0])!.puesto;
+      const enDia = (dia: number, code: string) => keys
+        .filter((k) => bandaDe(meta.get(k)!.code) === code)
+        .reduce((a, k) => a + (cuenta.get(k)!.get(dia) || 0), 0);
+      const efectivo = (dia: number) => {
+        const d12 = enDia(dia, 'D12');
+        const n12 = enDia(dia, 'N12');
+        const sueltas = doceSueltas.get(p)?.get(dia) || 0;
+        return {
+          M: enDia(dia, 'M') + d12,
+          T: enDia(dia, 'T') + (d12 + n12 + sueltas) / 2,
+          N: enDia(dia, 'N') + n12,
+        };
+      };
+      const kDias: number[] = [];
+      for (let dia = 1; dia <= ultimo; dia++) {
+        const e = efectivo(dia);
+        if (e.M + e.T + e.N > 0) kDias.push(Math.floor(Math.min(e.M, e.T, e.N) + 1e-9));
+      }
+      const k = moda(kDias);
+      if (!(k >= 1)) continue;
+      const horarioBanda = (b: string) => {
+        const mejor = keys.filter((x) => bandaDe(meta.get(x)!.code) === b)
+          .sort((a, c) => [...cuenta.get(c)!.values()].reduce((s1, v) => s1 + v, 0) - [...cuenta.get(a)!.values()].reduce((s1, v) => s1 + v, 0))[0];
+        return meta.get(mejor)!;
+      };
+      for (let i = franjas.length - 1; i >= 0; i--) if (normPlanilla(franjas[i].puesto) === p) franjas.splice(i, 1);
+      for (let i = parciales.length - 1; i >= 0; i--) if (normPlanilla(parciales[i].split(' · ')[0]) === p) parciales.splice(i, 1);
+      for (const b of ['M', 'T', 'N'] as const) {
+        const h = horarioBanda(b);
+        franjas.push({ id: `24h|${p}|${b}`, puesto: visible, code: h.code, startTime: h.startTime, endTime: h.endTime, cantidad: k, dias: [] });
+      }
+      const generico = !visible.trim() || /^(PUESTO|P|PTO)\.?$/.test(p);
+      for (const b of ['M', 'T', 'N'] as const) {
+        const h = horarioBanda(b);
+        const porLetra = new Map<DiaSemana, number[]>();
+        for (let dia = 1; dia <= ultimo; dia++) {
+          const letra = letraDia(year, month, dia);
+          porLetra.set(letra, [...(porLetra.get(letra) || []), Math.max(0, Math.floor(efectivo(dia)[b] - k + 1e-9))]);
+        }
+        const gruposExtra = new Map<number, DiaSemana[]>();
+        for (const letra of ORDEN_DIAS) {
+          const xs = porLetra.get(letra) || [];
+          const con = xs.filter((n) => n > 0);
+          if (!con.length || con.length / xs.length < 0.5) continue;
+          const q = moda(con);
+          gruposExtra.set(q, [...(gruposExtra.get(q) || []), letra]);
+        }
+        for (const [q, letras] of gruposExtra) {
+          const lista = ordenarDias(letras);
+          franjas.push({
+            id: `extra|${p}|${b}|${lista.join('')}|${q}`,
+            puesto: generico ? `Extra ${b}` : `${visible} extra ${b}`,
+            code: h.code,
+            startTime: h.startTime,
+            endTime: h.endTime,
+            cantidad: q,
+            dias: lista.length === 7 ? [] : lista,
+            definirHorario: true,
+          });
+        }
+      }
     }
   }
   franjas.sort((a, b) => a.puesto.localeCompare(b.puesto, 'es') || a.startTime.localeCompare(b.startTime) || a.code.localeCompare(b.code));

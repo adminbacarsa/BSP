@@ -398,3 +398,16 @@ describe('servicio desde la planilla · separar, unir y renombrar puestos', () =
     assert.deepEqual(renombrarPuesto(r, 'Puesto 1', 'Bunker').map((x) => x.puesto), ['Bunker', 'Bunker']);
   });
 });
+
+describe('servicio desde la planilla · puestos de 24 h por conteo de bandas', () => {
+  it('6 M · 4 T · 4 N por día son 4 puestos de 24 h y 2 M extra de lunes a viernes', () => {
+    const banda = (i: number) => ['M', 'T', 'N', 'F'][i % 4];
+    const rot = (off: number) => Array.from({ length: 31 }, (_, d) => ({ raw: banda(d + off) }));
+    const lv = Array.from({ length: 31 }, (_, d) => ({ raw: ['S', 'D'].includes(letraDia(2026, 10, d + 1)) ? 'F' : 'M' }));
+    const filas = [0, 1, 2, 3, 0, 1, 2, 3].map((off, i) => ({ nombre: `G${i}`, puesto: 'Puesto', celdas: rot(off) }));
+    const [cuadro] = detectarCuadros(planilla([...filas, { nombre: 'E1', puesto: 'Puesto', celdas: lv }, { nombre: 'E2', puesto: 'Puesto', celdas: lv }]), 2026, 10);
+    const prop = proponerServicioDesdePlanilla(cuadro, 2026, 10);
+    const linea = (f: { puesto: string; code: string; cantidad: number; dias: string[]; definirHorario?: boolean }) => `${f.puesto}·${f.code}×${f.cantidad}·${etiquetaDias(f.dias)}${f.definirHorario ? '·definir' : ''}`;
+    assert.deepEqual(prop.franjas.map(linea).sort(), ['Extra M·M×2·L–V·definir', 'Puesto·M×2·Todos', 'Puesto·N×2·Todos', 'Puesto·T×2·Todos'].sort());
+  });
+});

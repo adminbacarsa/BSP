@@ -157,6 +157,11 @@ export function ServicioPlanillaEditor({ cuadro, semilla, year, month, mesLabel,
           }}
         />
       )}
+      {franjas.some((f) => f.definirHorario) && (
+        <p className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-900" data-servicio-aviso-extra>
+          Hay turnos de más sobre los puestos de 24 h ({franjas.filter((f) => f.definirHorario).map((f) => `${f.code} ×${f.cantidad} ${etiquetaDias(f.dias)}`).join(', ')}). La planilla no dice su horario: definilo en la fila marcada (y el nombre del puesto si querés, por ejemplo EN o RO).
+        </p>
+      )}
       {franjas.length > 0 && (
         <div className="flex flex-wrap gap-1.5" data-servicio-tipos>
           {[...new Set(franjas.map((f) => f.puesto))].filter((p) => p.trim()).map((puesto, _i, todos) => {
@@ -216,8 +221,8 @@ export function ServicioPlanillaEditor({ cuadro, semilla, year, month, mesLabel,
                 <tr key={f.id} className="border-t border-slate-100" data-servicio-franja={f.code}>
                   <td className="px-2 py-1"><input value={f.puesto} onChange={(e) => patch(f.id, { puesto: e.target.value })} className="w-24 rounded-lg border border-slate-200 px-1 py-0.5" /></td>
                   <td><input value={f.code} onChange={(e) => patch(f.id, { code: e.target.value.toUpperCase() })} className="w-14 rounded-lg border border-slate-200 px-1 py-0.5 font-black" /></td>
-                  <td><input value={f.startTime} onChange={(e) => patch(f.id, { startTime: e.target.value })} className="w-16 rounded-lg border border-slate-200 px-1 py-0.5" /></td>
-                  <td><input value={f.endTime} onChange={(e) => patch(f.id, { endTime: e.target.value })} className="w-16 rounded-lg border border-slate-200 px-1 py-0.5" /></td>
+                  <td><input value={f.startTime} onChange={(e) => patch(f.id, { startTime: e.target.value, definirHorario: false })} className={`w-16 rounded-lg border px-1 py-0.5 ${f.definirHorario ? 'border-amber-400 bg-amber-50' : 'border-slate-200'}`} title={f.definirHorario ? 'La planilla no dice el horario de este turno extra: definilo' : undefined} data-servicio-definir-horario={f.definirHorario ? '1' : undefined} /></td>
+                  <td><input value={f.endTime} onChange={(e) => patch(f.id, { endTime: e.target.value, definirHorario: false })} className={`w-16 rounded-lg border px-1 py-0.5 ${f.definirHorario ? 'border-amber-400 bg-amber-50' : 'border-slate-200'}`} title={f.definirHorario ? 'La planilla no dice el horario de este turno extra: definilo' : undefined} /></td>
                   <td><input type="number" min={1} value={f.cantidad} onChange={(e) => patch(f.id, { cantidad: Math.max(1, Number(e.target.value) || 1) })} className="w-12 rounded-lg border border-slate-200 px-1 py-0.5" /></td>
                   <td className="py-1" data-servicio-dias>
                     <div className="flex items-center gap-1">
