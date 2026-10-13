@@ -492,6 +492,13 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
                 setElegida(-1);
                 return;
             }
+            // Enter en una celda vacía abre la lista de turnos (con ←/→ se cambia de puesto); con turno, baja como en Excel.
+            if (e.key === 'Enter' && !mod && !e.altKey && !e.shiftKey && !p.valorDe(cur.r, cur.c) && extraRef.current.length <= 1 && (!rangoRef.current || tamanoRango(rangoRef.current) <= 1)) {
+                cortar();
+                setTexto('');
+                setElegida(-1);
+                return;
+            }
             const esMas = e.key === '+' || e.code === 'NumpadAdd' || (e.shiftKey && e.key === '=');
             const esMenos = (e.key === '-' || e.code === 'NumpadSubtract') && !e.shiftKey;
             if (!mod && !e.altKey && esMas) {
@@ -667,6 +674,7 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
                         onBlur={() => {
                             const escrito = estado.current.texto;
                             if (escrito == null) return;
+                            if (!escrito.trim()) { requestAnimationFrame(() => { if (inputRef.current && document.activeElement === inputRef.current) return; setTexto(null); setElegida(-1); }); return; }
                             requestAnimationFrame(() => {
                                 if (estado.current.texto == null) return;
                                 if (inputRef.current && document.activeElement === inputRef.current) return;
