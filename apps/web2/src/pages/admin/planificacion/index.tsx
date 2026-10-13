@@ -2108,7 +2108,7 @@ function PlanificacionDesktop() {
     /** `+` sobre un turno de un puesto que no es de 24 h: horas agregadas (TURA) antes o después. */
     const [turaEditor, setTuraEditor] = useState<{
         empId: string; empName: string; ds: string; parentId: string; code: string; inicio: string; fin: string; positionName: string;
-        lado: LadoTura; horas: number; guardando: boolean;
+        lado: LadoTura; horas: number; guardando: boolean; pidio: string; motivo: string;
     } | null>(null);
     const [motivoVista12, setMotivoVista12] = useState('');
     const propuesta12Ref = useRef<Propuesta12h[] | null>(null);
@@ -15104,13 +15104,18 @@ function PlanificacionDesktop() {
         const fin = hhmmRapido(s0.endTime);
         if (!inicio || !fin) { toast.message('El turno no tiene horario: no se puede agregar el TURA.'); return; }
         if (turaMap[s0.id]) { toast.message('Ese turno ya tiene un TURA. Con − lo quitás y lo volvés a cargar.'); return; }
-        setTuraEditor({ empId: emp.id, empName: String(emp.name || ''), ds, parentId: s0.id, code, inicio, fin, positionName: String(s0.positionName || pos), lado: 'despues', horas: 1, guardando: false });
+        setTuraEditor({ empId: emp.id, empName: String(emp.name || ''), ds, parentId: s0.id, code, inicio, fin, positionName: String(s0.positionName || pos), lado: 'despues', horas: 1, guardando: false, pidio: '', motivo: '' });
     };
     const confirmarTura = async () => {
         const t = turaEditor;
         if (!t || t.guardando || !empresaId || !selectedObjective) return;
         const tramo = tramoTura(t.inicio, t.fin, { lado: t.lado, horas: t.horas });
         if (!tramo) return;
+        if (!t.pidio.trim()) {
+            toast.message('Completá quién pidió el TURA (cliente, supervisor…).');
+            (document.querySelector('[data-tura-pidio]') as HTMLInputElement | null)?.focus();
+            return;
+        }
         const diaInicio = t.lado === 'antes' && tramo.startTime > t.inicio ? (() => { const d = new Date(`${t.ds}T12:00:00`); d.setDate(d.getDate() - 1); return getDateKey(d); })() : t.ds;
         const diaFin = (() => {
             if (t.lado === 'antes') return t.ds;
@@ -15121,7 +15126,7 @@ function PlanificacionDesktop() {
         const inicioDia = t.lado === 'despues' && t.inicio >= t.fin ? diaFin : diaInicio;
         setTuraEditor({ ...t, guardando: true });
         try {
-            await crearTuraPlanificacion({
+            const creado = await crearTuraPlanificacion({
                 empresaId,
                 clientId: selectedClient || '',
                 clientName: clients.find((c: any) => c.id === selectedClient)?.name || '',
@@ -15135,7 +15140,10 @@ function PlanificacionDesktop() {
                 inicioIso: `${inicioDia}T${tramo.startTime}`,
                 finIso: `${diaFin}T${tramo.endTime}`,
                 draft: !planPublicadoGrilla,
+                pidio: t.pidio,
+                motivo: t.motivo,
             });
+            setTuraMap((prev) => ({ ...prev, [t.parentId]: { id: creado.turnoId, solicitudRefuerzoId: creado.solicitudId, employeeName: t.empName, code: 'TURA', startTime: `${inicioDia}T${tramo.startTime}:00`, endTime: `${diaFin}T${tramo.endTime}:00`, parentShiftId: t.parentId, fecha: t.ds } }));
             toast.success(`${textoTura(t.code, t.inicio, t.fin, { lado: t.lado, horas: t.horas })} · ${t.empName.split(',')[0]}`);
             setTuraEditor(null);
             void refreshCronogramaView();
@@ -15150,6 +15158,8 @@ function PlanificacionDesktop() {
         if (!turaEditor) return;
         const onKey = (ev: KeyboardEvent) => {
             const k = ev.key;
+            const enCampo = (ev.target as HTMLElement | null)?.closest?.('[data-tura-editor] input');
+            if (enCampo && k !== 'Enter' && k !== 'Escape') return;
             let hecho = true;
             if (/^[1-8]$/.test(k)) setTuraEditor((prev) => (prev ? { ...prev, horas: Number(k) } : prev));
             else if (k === 'ArrowLeft') setTuraEditor((prev) => (prev ? { ...prev, lado: 'antes' } : prev));
@@ -20749,6 +20759,14 @@ function PlanificacionDesktop() {
                                 ))}
                             </div>
                         ))}
+                        <div className="mt-1.5 grid grid-cols-2 gap-2">
+                            <label className="text-[10px] font-bold text-slate-500">¿Quién lo pidió? *
+                                <input value={turaEditor.pidio} onChange={(e) => setTuraEditor((prev) => (prev ? { ...prev, pidio: e.target.value } : prev))} placeholder="Cliente · Juan Pérez" className="block w-full rounded-lg border border-slate-200 px-2 py-1 text-[11px] text-slate-800" data-tura-pidio />
+                            </label>
+                            <label className="text-[10px] font-bold text-slate-500">Motivo
+                                <input value={turaEditor.motivo} onChange={(e) => setTuraEditor((prev) => (prev ? { ...prev, motivo: e.target.value } : prev))} placeholder="Evento, apertura…" className="block w-full rounded-lg border border-slate-200 px-2 py-1 text-[11px] text-slate-800" data-tura-motivo />
+                            </label>
+                        </div>
                         <p className="mt-1.5 font-bold text-rose-800" data-tura-texto>{textoTura(turaEditor.code, turaEditor.inicio, turaEditor.fin, { lado: turaEditor.lado, horas: turaEditor.horas })}</p>
                         {avisoJornadaTura(turaEditor.inicio, turaEditor.fin, turaEditor.horas) && (
                             <p className="text-[11px] font-bold text-amber-700">{avisoJornadaTura(turaEditor.inicio, turaEditor.fin, turaEditor.horas)}</p>

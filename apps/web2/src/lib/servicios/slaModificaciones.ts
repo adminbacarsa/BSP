@@ -115,7 +115,7 @@ export function buildServiceModificaciones(
       detail: [
         fecha,
         horario,
-        sol.positionName || sol.parentEmpleadoName,
+        [sol.positionName, sol.parentEmpleadoName || (sol.empleadoNames || []).join(', ')].filter(Boolean).join(' · '),
         cancelled && sol.cancelReason ? `Motivo: ${sol.cancelReason}` : sol.motivo,
       ].filter(Boolean).join(' · '),
       hours: hrs,

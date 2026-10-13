@@ -1,4 +1,4 @@
-import { addDoc, collection, Timestamp, updateDoc, doc } from 'firebase/firestore';
+import { addDoc, collection, Timestamp, updateDoc, doc, getDocs, query, where } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
 import { db } from '@/lib/firebase';
 import { solicitudRefuerzoService } from '@/services/solicitudRefuerzoService';
@@ -25,9 +25,16 @@ export async function crearTuraPlanificacion(opts: {
   inicioIso: string;
   finIso: string;
   draft: boolean;
+  /** Quién lo pidió (cliente, supervisor…). Va como «Solicitó» en la trazabilidad. */
+  pidio: string;
+  motivo?: string;
 }): Promise<{ solicitudId: string; turnoId: string }> {
   const user = getAuth().currentUser;
   const quien = user?.displayName || user?.email || 'Planificación';
+  const previos = await getDocs(query(collection(db, 'turnos'), where('parentShiftId', '==', opts.parentShiftId)));
+  if (previos.docs.some((d) => String(d.data().code || '').toUpperCase() === 'TURA' && d.data().isDeleted !== true)) {
+    throw new Error('Ese turno ya tiene un TURA (uno por día). Quitalo con − y cargalo de nuevo.');
+  }
   const hhmm = (iso: string) => iso.slice(11, 16);
   const horas = calcRefuerzoPactadaHours(hhmm(opts.inicioIso), hhmm(opts.finIso));
   const solicitudId = await solicitudRefuerzoService.create({
@@ -45,12 +52,12 @@ export async function crearTuraPlanificacion(opts: {
     parentShiftId: opts.parentShiftId,
     parentEmpleadoId: opts.employeeId,
     parentEmpleadoName: opts.employeeName,
-    motivo: 'Cargado en Planificación',
+    motivo: (opts.motivo || '').trim() || 'Cargado en Planificación',
     origen: 'PLANIFICACION',
     estado: 'ASIGNADA',
     actionTarget: 'PLANIFICACION',
-    solicitadoPorUid: user?.uid || '',
-    solicitadoPorNombre: quien,
+    solicitadoPorUid: '',
+    solicitadoPorNombre: opts.pidio.trim(),
     solicitadoAt: Timestamp.now(),
     autorizadoPorUid: user?.uid || '',
     autorizadoPorNombre: quien,
