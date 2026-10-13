@@ -289,10 +289,9 @@ export function codigoAlConfirmar(texto: string, opciones: OpcionCodigo[], elegi
     const escrito = normalizarCodigo(texto);
     const sug = sugerirCodigos(escrito, opciones, 8);
     const novedad = resolverNovedad(escrito, catalogo);
-    if (elegida >= 0 && sug[elegida] && !novedad) return sug[elegida].code;
-    if (novedad && (elegida < 0 || sug[elegida]?.code.toUpperCase() === novedad.code)) return novedad.code;
-    if (sug.some((s) => s.code.toUpperCase() === escrito)) return escrito;
+    if (elegida >= 0 && sug[elegida]) return sug[elegida].code;
     if (novedad) return novedad.code;
+    if (sug.some((s) => s.code.toUpperCase() === escrito)) return escrito;
     if (sug[0]) return sug[0].code;
     return escrito;
 }
@@ -386,7 +385,7 @@ export function resolverNovedad(texto: string, catalogo: readonly TipoNovedadRap
     const porLabel = catalogo.filter((t) => normalizarCodigo(t.label) === c);
     if (porLabel.length === 1) return { code: normalizarCodigo(porLabel[0].code), label: porLabel[0].label };
     if (CODIGOS_LICENCIA_RAPIDA[c]) return { code: c, label: CODIGOS_LICENCIA_RAPIDA[c] };
-    if (esCeldaLicencia({ code: c, codigosCatalogo: [...codigos, ...labels, c] })) {
+    if (esCeldaLicencia({ code: c, codigosCatalogo: [...codigos, ...labels] })) {
         const hit = porCodigo[0] || porLabel[0];
         return { code: c, label: hit?.label || CODIGOS_LICENCIA_RAPIDA[c] || c };
     }

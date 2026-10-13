@@ -10,6 +10,7 @@ import {
     deshacer,
     detectarCiclo,
     codigoAlConfirmar,
+    opcionesDeCodigo,
     horarioDeCodigo,
     matrizATsv,
     moverCursor,
@@ -494,4 +495,18 @@ describe('modo rápido · novedades', () => {
         assert.equal(fusion[0].endDate, '2026-10-23');
         assert.equal(fusion[1].startDate, '2026-10-25');
     });
+});
+
+it('modo rápido: lo elegido en la lista manda y un texto a medias no es una novedad', () => {
+    const ops = opcionesDeCodigo([], [], {}, []);
+    assert.equal(codigoAlConfirmar('R', ops, -1), 'RET');
+    assert.equal(codigoAlConfirmar('R', ops, 0), 'RET');
+    assert.equal(codigoAlConfirmar('R', ops, 1), 'REF');
+    assert.equal(codigoAlConfirmar('RE', ops, 0), 'RET');
+    assert.equal(codigoAlConfirmar('ES', ops, 0), 'ESC');
+    assert.equal(codigoAlConfirmar('E', ops, -1), 'E');
+    assert.equal(codigoAlConfirmar('E', ops, sugerirCodigos('E', ops).findIndex((o) => o.code === 'ESC')), 'ESC');
+    assert.equal(resolverNovedad('R'), null);
+    assert.equal(resolverNovedad('XYZ'), null);
+    assert.deepEqual(resolverNovedad('V')?.code, 'V');
 });
