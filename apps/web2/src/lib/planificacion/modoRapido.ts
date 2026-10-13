@@ -415,7 +415,13 @@ export function opcionesDeCodigo(slaPuesto: TurnoSla[], slaTodos: TurnoSla[], ul
     }
     out.push({ code: 'F', detalle: 'Franco' }, { code: 'FF', detalle: 'Franco feriado' }, { code: 'FP', detalle: 'Franco permuta' });
     // REF (sobreturno no facturable) ya no se ofrece: los refuerzos son RFZF / RFZE.
-    out.push({ code: 'RET', detalle: 'Retén (stand-by)' }, { code: 'ESC', detalle: 'Escuela' });
+    out.push(
+        { code: 'RET', detalle: 'Retén (stand-by)' },
+        { code: 'RFZF', detalle: 'Refuerzo fijo · mensual' },
+        { code: 'RFZE', detalle: 'Refuerzo eventual · fechas' },
+        { code: 'TURA', detalle: 'Turno agregado · horas' },
+        { code: 'ESC', detalle: 'Escuela' },
+    );
     for (const [code, name] of Object.entries(CODIGOS_LICENCIA_RAPIDA)) out.push({ code, detalle: name });
     for (const t of catalogo) {
         const code = normalizarCodigo(t.code);

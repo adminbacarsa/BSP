@@ -8,6 +8,7 @@ import { db } from '@/lib/firebase';
 import { newSlaSeriesId, overlappingSegments, slaSegmentsForMode, validateSlaRange } from '@/lib/servicios/slaMonthSplit';
 import type { EquivalenciaCodigo } from '@/lib/planificacion/equivalenciaCodigo';
 import { agregarFranjasAPosiciones } from '@/lib/planificacion/definirCodigo';
+import { agregarRfzfAPosiciones, type DiaLetra } from '@/lib/planificacion/refuerzosRapido';
 import {
   horasMesDeFranjas,
   posicionesDesdeFranjas,
@@ -188,4 +189,37 @@ export async function agregarFranjasServicio(opts: {
     metadata: { platform: 'web_admin_crono', via: 'PEGADO_DEFINIR', servicioId: opts.servicioId },
   });
   return res.agregadas;
+}
+
+/** Refuerzo fijo desde Planificación: suma la franja al puesto RFZF del servicio del mes. */
+export async function agregarRfzfServicio(opts: {
+  servicioId: string;
+  empresaId: string;
+  migracionCompleta: boolean;
+  objectiveName: string;
+  inicio: string;
+  fin: string;
+  dias: DiaLetra[];
+  pax: number;
+}): Promise<{ code: string; texto: string }> {
+  const snap = await getDoc(doc(db, 'servicios_sla', opts.servicioId));
+  if (!snap.exists()) throw new Error('No encontré el servicio');
+  const actual = snap.data() as ServiceSLA & { closed?: boolean; positions?: PosicionServicioDoc[] };
+  if (actual.closed) throw new Error('Contrato cerrado: no se puede modificar');
+  const res = agregarRfzfAPosiciones((actual.positions || []) as unknown as Array<Record<string, unknown>>, opts);
+  await slaService.update(opts.servicioId, {
+    positions: JSON.parse(JSON.stringify(res.positions)),
+  }, { empresaId: opts.empresaId, migracionCompleta: opts.migracionCompleta });
+  const user = getAuth().currentUser;
+  await addDoc(collection(db, 'audit_logs'), {
+    timestamp: serverTimestamp(),
+    actorUid: user?.uid || 'SYSTEM',
+    actorName: user?.displayName || user?.email || 'Sistema',
+    action: 'UPDATE_CONTRACT',
+    module: 'SERVICIOS_SLA',
+    details: `Refuerzo fijo desde Planificación en ${opts.objectiveName}: ${res.texto}`,
+    ...(opts.empresaId ? { empresaId: opts.empresaId } : {}),
+    metadata: { platform: 'web_admin_crono', via: 'PLANIFICACION_RFZF', servicioId: opts.servicioId },
+  });
+  return { code: res.code, texto: res.texto };
 }

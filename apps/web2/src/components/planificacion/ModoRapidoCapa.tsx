@@ -733,7 +733,7 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
                                     onMouseDown={(e) => { e.preventDefault(); setElegida(i); requestAnimationFrame(() => confirmar('Enter', false)); }}
                                     className={`flex cursor-pointer items-center gap-2 px-2.5 py-1 text-[11px] ${i === elegida || (elegida < 0 && i === 0) ? 'bg-indigo-50 text-indigo-800' : 'text-slate-700 hover:bg-slate-50'}`}
                                 >
-                                    <span className="min-w-[2.5rem] max-w-[8rem] shrink-0 truncate font-black" title={s.code}>{s.code}</span>
+                                    <span className="min-w-[2.5rem] max-w-[8rem] shrink-0 truncate font-black" title={s.code}>{s.code === 'RFZF' || s.code === 'RFZE' ? <>RFZ<span className={s.code === 'RFZF' ? 'text-emerald-600' : 'text-orange-500'}>{s.code.slice(3)}</span></> : s.code}</span>
                                     {s.horario && <span className="shrink-0 font-mono text-[10px] text-slate-500">{s.horario}</span>}
                                     {s.detalle && s.detalle.replace(/\s+/g, '').toUpperCase() !== s.code.toUpperCase() && (
                                         <span className="ml-auto min-w-0 truncate text-[9px] font-bold uppercase text-slate-400" title={s.detalle}>{s.detalle}</span>
