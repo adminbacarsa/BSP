@@ -16,7 +16,8 @@ import {
     BadgePercent, ArrowLeftRight, CalendarSearch, CheckSquare, XCircle, Search as SearchIcon, RefreshCcw, UserCheck, Split, Ban,
     FastForward, Rewind, AlertOctagon, Siren, FileText, Fingerprint, CalendarCheck, HelpCircle, MousePointerClick, Check, Database, Activity,
     PowerOff, LockKeyhole, Ghost, Maximize2, Maximize, Minimize2, Copy, ClipboardPaste, Keyboard, Scissors, Wand2, BarChart3, BarChart2, PanelLeft, LayoutList,
-    ChevronsUp, ChevronsDown, MoreHorizontal, FlaskConical, Shuffle, Timer, Repeat, UnfoldHorizontal, FileSpreadsheet
+    ChevronsUp, ChevronsDown, MoreHorizontal, FlaskConical, Shuffle, Timer, Repeat, UnfoldHorizontal, FileSpreadsheet,
+    ClipboardList, ListFilter
 } from 'lucide-react';
 
 import { PlanificacionMovil } from '@/components/movil/PlanificacionMovil';
@@ -17140,9 +17141,9 @@ function PlanificacionDesktop() {
                         </div>
                     ) : (
                         <>
-                            <div className="flex items-center gap-2 min-w-0 overflow-x-auto overflow-y-visible custom-scrollbar no-print">
-                            <div className={`flex items-center gap-1.5 min-w-0 ${selectedGrupo ? 'max-w-[16rem]' : 'max-w-[min(100%,380px)]'} shrink overflow-x-auto overflow-y-visible`}>
-                            <div className="flex items-center gap-1.5 no-print min-w-0">
+                            <div className="flex items-center gap-1 2xl:gap-2 min-w-0 overflow-x-auto overflow-y-visible custom-scrollbar no-print">
+                            <div className={`flex items-center gap-1 2xl:gap-1.5 min-w-0 ${selectedGrupo ? 'max-w-[16rem]' : 'max-w-[min(100%,380px)]'} shrink overflow-x-auto overflow-y-visible`}>
+                            <div className="flex items-center gap-1 2xl:gap-1.5 no-print min-w-0">
                                 {selectedGrupo ? (
                                     <GrupoVistaDesplegable
                                         nombreGrupo={selectedGrupo.nombre}
@@ -17193,7 +17194,7 @@ function PlanificacionDesktop() {
                                     /* Cliente seleccionado: etiqueta fija + objetivo con dropdown custom + X */
                                     <>
                                         {/* Cliente: fijo, solo se cambia con X */}
-                                        <span className="flex items-center gap-1.5 bg-slate-800 text-white px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wide cursor-default select-none max-w-[140px] truncate shrink-0" title={clients.find(c => c.id === selectedClient)?.name || 'Cliente'}>
+                                        <span className="flex items-center gap-1.5 bg-slate-800 text-white px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wide cursor-default select-none max-w-[96px] 2xl:max-w-[140px] truncate shrink-0" title={clients.find(c => c.id === selectedClient)?.name || 'Cliente'}>
                                             {clients.find(c => c.id === selectedClient)?.name || 'Cliente'}
                                         </span>
                                         <ChevronRight size={12} className="text-slate-400"/>
@@ -17203,7 +17204,7 @@ function PlanificacionDesktop() {
                                                 ref={objectiveDropBtnRef}
                                                 type="button"
                                                 onClick={(e) => { e.stopPropagation(); setOpenDrop(d => d === 'objective' ? null : 'objective'); }}
-                                                className="flex items-center gap-1.5 bg-indigo-600 text-white px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wide hover:bg-indigo-500 transition-colors max-w-[160px] min-w-0"
+                                                className="flex items-center gap-1.5 bg-indigo-600 text-white px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wide hover:bg-indigo-500 transition-colors max-w-[112px] 2xl:max-w-[160px] min-w-0"
                                             >
                                                 <span className="truncate">{(clients.find(c => c.id === selectedClient)?.objetivos || []).find((o: any) => (o.id || o.name) === selectedObjective)?.name || 'Objetivo'}</span>
                                                 <ChevronDown size={12}/>
@@ -17211,13 +17212,12 @@ function PlanificacionDesktop() {
                                         </div>
                                         {/* Advertencia: objetivo sin coordenadas */}
                                         {selectedObjective && selectedObjectiveData && !Number(selectedObjectiveData?.lat ?? 0) && (
-                                            <a href="/admin/crm" title="El objetivo no tiene coordenadas. Las distancias no se pueden calcular. Ir a CRM → Objetivo → Geolocalizar." className="flex items-center gap-1 px-2 py-1.5 bg-amber-50 border border-amber-300 rounded-lg text-amber-700 text-xs font-bold hover:bg-amber-100 transition-colors">
-                                                <MapPin size={11} className="text-amber-500 shrink-0"/>
-                                                Sin coords
+                                            <a href="/admin/crm" data-sin-coords title="Objetivo sin coordenadas: las distancias no se pueden calcular. Ir a CRM → Objetivo → Geolocalizar." aria-label="Objetivo sin coordenadas" className="flex items-center justify-center w-8 h-8 bg-amber-50 border border-amber-300 rounded-xl text-amber-600 hover:bg-amber-100 transition-colors shrink-0">
+                                                <MapPin size={14} aria-hidden/>
                                             </a>
                                         )}
                                         {/* X: limpia cliente y objetivo */}
-                                        <button onClick={() => handleContextChange('', '')} className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition-colors" title="Limpiar selección"><X size={13}/></button>
+                                        <button onClick={() => handleContextChange('', '')} className="p-1 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition-colors shrink-0" title="Limpiar selección" aria-label="Limpiar selección"><X size={13}/></button>
                                     </>
                                 )}
                             </div>
@@ -17227,22 +17227,22 @@ function PlanificacionDesktop() {
                                     data-importar-excel-barra
                                     onClick={() => { void abrirImportarExcel(false); }}
                                     disabled={bloqueoMesCerrado || !empresaId}
-                                    title={bloqueoMesCerrado ? 'Mes cerrado' : 'Importar una planilla y elegir el objetivo'}
+                                    title={bloqueoMesCerrado ? 'Mes cerrado' : 'Importar planilla (elegir el objetivo)'}
                                     aria-label="Importar planilla"
-                                    className="flex items-center gap-1.5 bg-white text-indigo-700 border border-indigo-200 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wide hover:bg-indigo-50 transition-colors disabled:opacity-40 shrink-0 shadow-sm"
+                                    className="flex items-center justify-center w-8 h-8 bg-white text-indigo-700 border border-indigo-200 rounded-lg hover:bg-indigo-50 transition-colors disabled:opacity-40 shrink-0 shadow-sm"
                                 >
-                                    <FileSpreadsheet size={12}/> Importar
+                                    <FileSpreadsheet size={14} aria-hidden/>
                                 </button>
                                 <button
                                     type="button"
                                     data-servicio-planilla
                                     onClick={() => { void abrirServicioPlanilla(); }}
                                     disabled={bloqueoMesCerrado || !empresaId}
-                                    title={bloqueoMesCerrado ? 'Mes cerrado' : 'Armar o ajustar el servicio del mes desde una planilla'}
-                                    aria-label="Servicio desde la planilla"
-                                    className="flex items-center gap-1.5 bg-white text-slate-700 border border-slate-200 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wide hover:bg-slate-50 transition-colors disabled:opacity-40 shrink-0 shadow-sm"
+                                    title={bloqueoMesCerrado ? 'Mes cerrado' : 'Servicio del mes (armar o ajustar desde una planilla)'}
+                                    aria-label="Servicio del mes"
+                                    className="flex items-center justify-center w-8 h-8 bg-white text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 hover:text-indigo-600 transition-colors disabled:opacity-40 shrink-0 shadow-sm"
                                 >
-                                    Servicio
+                                    <ClipboardList size={14} aria-hidden/>
                                 </button>
                                 <button
                                     type="button"
@@ -17255,7 +17255,7 @@ function PlanificacionDesktop() {
                                     <ShieldCheck size={14}/>
                                 </button>
 
-                            <div className="flex items-center flex-nowrap justify-end gap-1 min-w-0 ml-auto no-print shrink-0">
+                            <div className="flex items-center flex-nowrap justify-end gap-0.5 2xl:gap-1 min-w-0 ml-auto no-print shrink-0">
                                 {/* CRONOGRAMAS — solo expandido */}
                                 {!toolbarCollapsed && (
                                     <button
@@ -17263,9 +17263,9 @@ function PlanificacionDesktop() {
                                         onClick={() => setShowCronogramasOverview(true)}
                                         title="Cronogramas — estado de todos los objetivos"
                                         aria-label="Cronogramas"
-                                        className="p-2 rounded-xl transition-colors border bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100 shadow-sm shrink-0"
+                                        className="hidden 2xl:flex items-center justify-center w-8 h-8 rounded-xl transition-colors border bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100 shadow-sm shrink-0"
                                     >
-                                        <Database size={16}/>
+                                        <Database size={15}/>
                                     </button>
                                 )}
 
@@ -17273,10 +17273,11 @@ function PlanificacionDesktop() {
                                 {!toolbarCollapsed && (
                                     <button
                                         onClick={() => setShowLegend(!showLegend)}
-                                        className={`p-2 rounded-xl transition-colors border ${showLegend ? 'bg-indigo-100 border-indigo-300 text-indigo-700' : 'bg-slate-100 border-transparent hover:bg-white text-slate-500'}`}
-                                        title="Ver Referencias de Colores"
+                                        className={`hidden 2xl:flex items-center justify-center w-8 h-8 rounded-xl transition-colors border shrink-0 ${showLegend ? 'bg-indigo-100 border-indigo-300 text-indigo-700' : 'bg-slate-100 border-transparent hover:bg-white text-slate-500'}`}
+                                        title="Referencias de colores"
+                                        aria-label="Referencias de colores"
                                     >
-                                        <Info size={18}/>
+                                        <Info size={16}/>
                                     </button>
                                 )}
                                 {showLegend && renderLegend()}
@@ -17297,9 +17298,11 @@ function PlanificacionDesktop() {
                                                     setHasUnread(false);
                                                 }
                                             }}
-                                            className="p-2 bg-slate-100 hover:bg-slate-200 rounded-xl relative"
+                                            title="Alertas"
+                                            aria-label="Alertas"
+                                            className="flex items-center justify-center w-8 h-8 bg-slate-100 hover:bg-slate-200 rounded-xl relative shrink-0"
                                         >
-                                            <Bell size={18}/>{(hasUnread || bellNotifications.length > 0) && <span className="absolute top-0 right-0 w-3 h-3 bg-rose-500 rounded-full border-2 border-white animate-pulse"></span>}
+                                            <Bell size={16}/>{(hasUnread || bellNotifications.length > 0) && <span className="absolute top-0 right-0 w-3 h-3 bg-rose-500 rounded-full border-2 border-white animate-pulse"></span>}
                                         </button>
                                     </div>
                                 )}
@@ -17463,11 +17466,10 @@ function PlanificacionDesktop() {
                                             }}
                                             title={estructuraTitle}
                                             aria-label={estructuraTitle}
-                                            className="flex p-2 bg-slate-50 dark:bg-slate-700/60 border border-slate-200 dark:border-slate-600 rounded-xl items-center gap-1 animate-in fade-in shadow-sm hover:border-indigo-300 dark:hover:border-indigo-500 transition-colors shrink-0"
+                                            data-diag-estructura
+                                            className={`flex items-center justify-center w-8 h-8 border rounded-xl animate-in fade-in shadow-sm hover:border-indigo-300 dark:hover:border-indigo-500 transition-colors shrink-0 ${showDiagnostic ? 'bg-indigo-50 border-indigo-300' : 'bg-slate-50 dark:bg-slate-700/60 border-slate-200 dark:border-slate-600'}`}
                                         >
-                                            <Activity size={14} className="text-emerald-500 animate-pulse shrink-0"/>
-                                            <span className="text-[9px] font-black text-slate-700 dark:text-slate-200 tabular-nums">{posCount}P</span>
-                                            <ChevronDown size={10} className={`text-slate-400 transition-transform shrink-0 ${showDiagnostic ? 'rotate-180' : ''}`}/>
+                                            <Activity size={15} className="text-emerald-500 animate-pulse shrink-0" aria-hidden/>
                                         </button>
                                     </div>
                                     );
@@ -17493,15 +17495,17 @@ function PlanificacionDesktop() {
                                                 }}
                                                 title={coberturaTitle}
                                                 aria-label={coberturaTitle}
-                                                className={`flex p-2 border rounded-xl items-center gap-1 animate-in fade-in shadow-sm transition-colors shrink-0 ${
+                                                data-diag-cobertura
+                                                className={`relative flex items-center justify-center w-8 h-8 border rounded-xl animate-in fade-in shadow-sm transition-colors shrink-0 ${
                                                     _ok ? 'bg-emerald-50 border-emerald-200 hover:border-emerald-300' : 'bg-rose-50 border-rose-200 hover:border-rose-300'
                                                 }`}
                                             >
-                                                <ShieldCheck size={14} className={_ok ? 'text-emerald-500 shrink-0' : 'text-rose-500 shrink-0'}/>
-                                                <span className={`text-[9px] font-black tabular-nums ${_ok ? 'text-emerald-700' : 'text-rose-700'}`}>
-                                                    {_rpt.daysFull}{gapCount > 0 ? `/${gapCount}` : ''}
-                                                </span>
-                                                <ChevronDown size={10} className={`text-slate-400 transition-transform shrink-0 ${showCoverageDiagnostic ? 'rotate-180' : ''}`}/>
+                                                <ShieldCheck size={15} className={_ok ? 'text-emerald-500 shrink-0' : 'text-rose-500 shrink-0'} aria-hidden/>
+                                                {gapCount > 0 && (
+                                                    <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-rose-600 text-white text-[9px] font-black leading-4 text-center tabular-nums" aria-hidden>
+                                                        {gapCount}
+                                                    </span>
+                                                )}
                                             </button>
                                         </div>
                                     );
@@ -17523,17 +17527,18 @@ function PlanificacionDesktop() {
                                                 onClick={() => void refreshCronogramaView()}
                                                 disabled={isRefreshingCrono}
                                                 title="Actualizar turnos y puestos sin recargar la página"
-                                                className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 shadow-sm disabled:opacity-60"
+                                                aria-label="Actualizar turnos y puestos"
+                                                className="hidden 2xl:flex items-center justify-center w-8 h-8 rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 shadow-sm disabled:opacity-60 shrink-0"
                                             >
-                                                <RefreshCw size={12} className={isRefreshingCrono ? 'animate-spin' : ''}/>
+                                                <RefreshCw size={14} className={isRefreshingCrono ? 'animate-spin' : ''}/>
                                             </button>
                                             {published ? (
-                                                <span className="flex items-center p-1.5 text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg shrink-0" title="Cronograma publicado">
-                                                    <CheckCircle size={14} aria-hidden/>
+                                                <span className="flex items-center justify-center w-8 h-8 text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg shrink-0" title="Cronograma publicado" aria-label="Cronograma publicado">
+                                                    <CheckCircle size={15} aria-hidden/>
                                                 </span>
                                             ) : (
-                                                <span className="flex items-center p-1.5 text-slate-500 bg-slate-100 border border-slate-200 rounded-lg shrink-0" title="Borrador (sin publicar)">
-                                                    <Ghost size={14} aria-hidden/>
+                                                <span className="flex items-center justify-center w-8 h-8 text-slate-500 bg-slate-100 border border-slate-200 rounded-lg shrink-0" title="Borrador (sin publicar)" aria-label="Borrador (sin publicar)">
+                                                    <Ghost size={15} aria-hidden/>
                                                 </span>
                                             )}
                                             {canPublishPlanning && !bloqueoMesCerrado && (!published || needsRepublish) && (
@@ -17544,18 +17549,21 @@ function PlanificacionDesktop() {
                                                     title={isSuperAdmin && (slaVendidas > 0 && Math.round(objectiveMonthSlaBaseHours) !== Math.round(slaVendidas) || (objectiveCoverageGapReport && objectiveCoverageGapReport.daysPartial + objectiveCoverageGapReport.daysEmpty > 0))
                                                         ? 'Super Admin: podés publicar aunque SLA o cobertura no coincidan'
                                                         : published ? 'Re-publicar cronograma' : 'Publicar cronograma'}
-                                                    className={`flex items-center justify-center disabled:opacity-60 text-white p-2 rounded-lg transition-colors shadow shrink-0 ${needsRepublish ? 'bg-amber-500 hover:bg-amber-600 animate-pulse' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+                                                    aria-label={published ? 'Re-publicar cronograma' : 'Publicar cronograma'}
+                                                    className={`flex items-center justify-center w-8 h-8 disabled:opacity-60 text-white rounded-lg transition-colors shadow shrink-0 ${needsRepublish ? 'bg-amber-500 hover:bg-amber-600 animate-pulse' : 'bg-indigo-600 hover:bg-indigo-700'}`}
                                                 >
-                                                    {isPublishing ? <Loader2 size={14} className="animate-spin"/> : <CalendarCheck size={14}/>}
+                                                    {isPublishing ? <Loader2 size={15} className="animate-spin"/> : <CalendarCheck size={15}/>}
                                                 </button>
                                             )}
                                             {published && (vistaMesCerrado ? isSuperAdmin : canCorrectPlanning) && (
                                                 <button
                                                     onClick={() => setCorrectionMode(v => !v)}
                                                     title="Modo Corrección: permite editar cronograma publicado sin FT/FF"
-                                                    className={`flex items-center justify-center p-2 rounded-lg transition-colors border shrink-0 ${correctionMode ? 'bg-rose-600 text-white border-rose-700 shadow-lg' : 'bg-white text-rose-600 border-rose-300 hover:bg-rose-50'}`}
+                                                    aria-label="Modo corrección"
+                                                    aria-pressed={correctionMode}
+                                                    className={`flex items-center justify-center w-8 h-8 rounded-lg transition-colors border shrink-0 ${correctionMode ? 'bg-rose-600 text-white border-rose-700 shadow-lg' : 'bg-white text-rose-600 border-rose-300 hover:bg-rose-50'}`}
                                                 >
-                                                    <ShieldAlert size={14}/>
+                                                    <ShieldAlert size={15}/>
                                                 </button>
                                             )}
                                             {published && isSuperAdmin && !bloqueoMesCerrado && (
@@ -17563,9 +17571,10 @@ function PlanificacionDesktop() {
                                                     onClick={handleUnpublish}
                                                     disabled={isUnpublishing}
                                                     title="SuperAdmin: despublica solo este objetivo y mes. No borra turnos."
-                                                    className="p-1.5 rounded-lg border bg-white text-slate-500 border-slate-300 hover:bg-slate-50 disabled:opacity-60"
+                                                    aria-label="Despublicar este mes"
+                                                    className="flex items-center justify-center w-8 h-8 rounded-lg border bg-white text-slate-500 border-slate-300 hover:bg-slate-50 disabled:opacity-60 shrink-0"
                                                 >
-                                                    {isUnpublishing ? <Loader2 size={10} className="animate-spin"/> : <CalendarX size={10}/>}
+                                                    {isUnpublishing ? <Loader2 size={14} className="animate-spin"/> : <CalendarX size={14}/>}
                                                 </button>
                                             )}
                                         </div>
@@ -17592,11 +17601,13 @@ function PlanificacionDesktop() {
                                     return (
                                         <span
                                             data-armado-chip
-                                            title={detalleArmado(vista)}
-                                            className="inline-flex items-center gap-1 px-2 py-1 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-800 text-[10px] font-black shadow-sm tabular-nums shrink-0 max-w-[16rem]"
+                                            role="img"
+                                            title={`${texto}\n${detalleArmado(vista)}`}
+                                            aria-label={texto}
+                                            className="inline-flex items-center justify-center w-8 h-8 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 shadow-sm shrink-0"
                                         >
-                                            <Timer size={11} className="shrink-0" />
-                                            <span className="truncate">{texto}</span>
+                                            <Timer size={15} className="shrink-0" aria-hidden />
+                                            <span className="sr-only">{texto}</span>
                                         </span>
                                     );
                                 })()}
@@ -17608,9 +17619,9 @@ function PlanificacionDesktop() {
                                     disabled={!selectedObjective || prevMonthLoading || (!!msgBloqueoEdicion && !sinServicioEnMes)}
                                     title={(msgBloqueoEdicion && !sinServicioEnMes ? msgBloqueoEdicion : null) || (sinServicioEnMes ? 'Continuar desde el mes anterior y activar el servicio del mes' : 'Continuar desde el mes anterior: sigue el ciclo de cada guardia desde donde quedó (vista previa antes de aplicar)')}
                                     aria-label="Continuar desde el mes anterior"
-                                    className="p-2 bg-slate-100 rounded-lg hover:bg-teal-50 hover:text-teal-600 transition-colors disabled:opacity-40"
+                                    className="flex items-center justify-center w-8 h-8 bg-slate-100 rounded-lg hover:bg-teal-50 hover:text-teal-600 transition-colors disabled:opacity-40 shrink-0"
                                 >
-                                    {prevMonthLoading ? <Loader2 size={18} className="animate-spin text-teal-600"/> : <Repeat size={18}/>}
+                                    {prevMonthLoading ? <Loader2 size={16} className="animate-spin text-teal-600"/> : <Repeat size={16}/>}
                                 </button>
                                 <button
                                     type="button"
@@ -17618,26 +17629,27 @@ function PlanificacionDesktop() {
                                     onClick={() => { void abrirImportarExcel(true); }}
                                     disabled={!selectedObjective || isServiceLocked || bloqueoMesCerrado}
                                     title={bloqueoMesCerrado ? 'Mes cerrado' : 'Importar la planilla Excel de este objetivo. Queda en borrador.'}
-                                    aria-label="Importar planilla"
-                                    className="p-2 bg-slate-100 rounded-lg hover:bg-indigo-50 hover:text-indigo-600 transition-colors disabled:opacity-40"
+                                    aria-label="Importar planilla de este objetivo"
+                                    className="flex items-center justify-center w-8 h-8 bg-slate-100 rounded-lg hover:bg-indigo-50 hover:text-indigo-600 transition-colors disabled:opacity-40 shrink-0"
                                 >
-                                    <FileSpreadsheet size={18}/>
+                                    <FileSpreadsheet size={16}/>
                                 </button>
 
                                 {/* === ACCIONES SECUNDARIAS — se ocultan al colapsar === */}
                                 {!toolbarCollapsed && (
                                     <>
-                                        <button onClick={loadHistory} className="p-2 bg-slate-100 rounded-lg hover:bg-indigo-50 hover:text-indigo-600 transition-colors" title="Ver Historial" disabled={!selectedObjective}><History size={18}/></button>
+                                        <button onClick={loadHistory} className="hidden 2xl:flex items-center justify-center w-8 h-8 bg-slate-100 rounded-lg hover:bg-indigo-50 hover:text-indigo-600 transition-colors shrink-0" title="Historial de versiones" aria-label="Historial de versiones" disabled={!selectedObjective}><History size={16}/></button>
 
                                         {/* ⋯ MENÚ: Ventana externa + Ajustar + Equilibrar + Puestos */}
                                         <div onClick={e => e.stopPropagation()}>
                                             <button
                                                 ref={toolbarMoreBtnRef}
                                                 onClick={() => setToolbarMoreOpen(v => !v)}
-                                                className={`p-2 rounded-xl transition-colors border ${toolbarMoreOpen ? 'bg-slate-200 border-slate-300 text-slate-700' : 'bg-slate-100 border-transparent hover:bg-slate-200 text-slate-500'}`}
+                                                className={`flex items-center justify-center w-8 h-8 rounded-xl transition-colors border shrink-0 ${toolbarMoreOpen ? 'bg-slate-200 border-slate-300 text-slate-700' : 'bg-slate-100 border-transparent hover:bg-slate-200 text-slate-500'}`}
                                                 title="Más acciones"
+                                                aria-label="Más acciones"
                                             >
-                                                <MoreHorizontal size={18}/>
+                                                <MoreHorizontal size={16}/>
                                             </button>
                                             <ToolbarFloatMenu
                                                 open={toolbarMoreOpen}
@@ -17648,6 +17660,37 @@ function PlanificacionDesktop() {
                                                 menuKey="mas"
                                                 className="bg-white border border-slate-200 rounded-xl shadow-xl py-1.5 min-w-[210px]"
                                             >
+                                                        <div className="2xl:hidden" data-menu-barra-angosta>
+                                                            <button
+                                                                onClick={() => { setShowCronogramasOverview(true); setToolbarMoreOpen(false); }}
+                                                                className="w-full px-4 py-2 text-left text-xs font-semibold text-slate-600 hover:bg-slate-50 flex items-center gap-2.5"
+                                                            >
+                                                                <Database size={14} className="text-violet-500"/> Cronogramas
+                                                            </button>
+                                                            <button
+                                                                onClick={() => { setShowLegend(true); setToolbarMoreOpen(false); }}
+                                                                className="w-full px-4 py-2 text-left text-xs font-semibold text-slate-600 hover:bg-slate-50 flex items-center gap-2.5"
+                                                            >
+                                                                <Info size={14} className="text-indigo-500"/> Referencias de colores
+                                                            </button>
+                                                            {selectedObjective && (
+                                                                <button
+                                                                    onClick={() => { void refreshCronogramaView(); setToolbarMoreOpen(false); }}
+                                                                    disabled={isRefreshingCrono}
+                                                                    className="w-full px-4 py-2 text-left text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40 flex items-center gap-2.5"
+                                                                >
+                                                                    <RefreshCw size={14} className={`text-slate-500 ${isRefreshingCrono ? 'animate-spin' : ''}`}/> Actualizar turnos
+                                                                </button>
+                                                            )}
+                                                            <button
+                                                                onClick={() => { void loadHistory(); setToolbarMoreOpen(false); }}
+                                                                disabled={!selectedObjective}
+                                                                className="w-full px-4 py-2 text-left text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40 flex items-center gap-2.5"
+                                                            >
+                                                                <History size={14} className="text-indigo-500"/> Historial de versiones
+                                                            </button>
+                                                            <div className="h-px bg-slate-100 mx-2 my-1"/>
+                                                        </div>
                                                         {canAutoLab && (
                                                             <a
                                                                 href="/admin/planificacion/auto-lab"
@@ -17731,11 +17774,11 @@ function PlanificacionDesktop() {
                                                                     setBandDropOpen(false);
                                                                     setSortDropOpen(p => !p);
                                                                 }}
-                                                                className="p-2 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 rounded-l-xl transition-colors border border-transparent hover:border-indigo-200 flex items-center gap-1"
-                                                                title={`Orden: ${activeSort.label}`}
+                                                                className={`flex items-center justify-center w-8 h-8 hover:bg-indigo-50 hover:text-indigo-600 rounded-l-xl transition-colors border hover:border-indigo-200 ${sortDropOpen ? 'bg-indigo-50 border-indigo-200 text-indigo-600' : 'bg-slate-100 border-transparent'}`}
+                                                                title={`Ordenar por: ${activeSort.label}`}
+                                                                aria-label={`Ordenar por: ${activeSort.label}`}
                                                             >
-                                                                <ActiveIcon size={18}/>
-                                                                <ChevronDown size={12} className={sortDropOpen ? 'rotate-180 transition-transform' : 'transition-transform'}/>
+                                                                <ActiveIcon size={16}/>
                                                             </button>
                                                             <ToolbarFloatMenu
                                                                 open={sortDropOpen}
@@ -17773,11 +17816,11 @@ function PlanificacionDesktop() {
                                                     );
                                                 })()}
                                             </div>
-                                            <button onClick={() => startFilterTransition(() => setSortDir(prev => prev === 'asc' ? 'desc' : 'asc'))} className="p-2 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 rounded-r-xl transition-colors border border-transparent hover:border-indigo-200" title={sortDir === 'asc' ? "Ascendente" : "Descendente"}>{sortDir === 'asc' ? <ChevronUp size={18}/> : <ChevronDown size={18}/>}</button>
+                                            <button onClick={() => startFilterTransition(() => setSortDir(prev => prev === 'asc' ? 'desc' : 'asc'))} className="flex items-center justify-center w-8 h-8 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 rounded-r-xl transition-colors border border-transparent hover:border-indigo-200" title={sortDir === 'asc' ? 'Orden ascendente' : 'Orden descendente'} aria-label={sortDir === 'asc' ? 'Orden ascendente' : 'Orden descendente'}>{sortDir === 'asc' ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}</button>
                                         </div>
 
                                         {/* BAND FILTER */}
-                                        <div className="relative" title="Ver el cronograma por banda">
+                                        <div className="relative shrink-0">
                                             {(() => {
                                                 const BAND_COLORS: Record<string, string> = {
                                                     M: 'text-blue-700 border-blue-400 bg-blue-50',
@@ -17792,10 +17835,17 @@ function PlanificacionDesktop() {
                                                     <button
                                                         ref={bandBtnRef}
                                                         onClick={() => { setSortDropOpen(false); setBandDropOpen(p => !p); }}
-                                                        className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase border transition-colors flex items-center gap-1 ${activeCls}`}
+                                                        data-filtro-banda={bandFilter ?? 'ALL'}
+                                                        title={bandFilter ? `Filtrar por banda: ${bandFilter}` : 'Filtrar por banda: todas'}
+                                                        aria-label={bandFilter ? `Filtrar por banda: ${bandFilter}` : 'Filtrar por banda: todas'}
+                                                        className={`relative flex items-center justify-center w-8 h-8 rounded-xl border transition-colors ${bandFilter ? activeCls : 'text-slate-500 border-transparent bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600'}`}
                                                     >
-                                                        {bandFilter ?? 'ALL'}
-                                                        <ChevronDown size={10}/>
+                                                        <ListFilter size={16} aria-hidden/>
+                                                        {bandFilter && (
+                                                            <span className={`absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 rounded-full border bg-white text-[8px] font-black leading-[14px] text-center ${activeCls}`} aria-hidden>
+                                                                {bandFilter}
+                                                            </span>
+                                                        )}
                                                     </button>
                                                     <ToolbarFloatMenu
                                                         open={bandDropOpen}
@@ -17824,7 +17874,7 @@ function PlanificacionDesktop() {
                                         </div>
 
                                         {customOrderMap[selectedObjective || '__all__'] && (
-                                            <button onClick={clearCustomOrder} className="p-2 bg-indigo-100 text-indigo-600 hover:bg-rose-100 hover:text-rose-600 rounded-xl transition-colors text-[9px] font-black uppercase flex items-center gap-1" title="Hay orden personalizado — click para restablecer orden automático"><Grip size={12}/><X size={10}/></button>
+                                            <button onClick={clearCustomOrder} className="flex items-center justify-center w-8 h-8 bg-indigo-100 text-indigo-600 hover:bg-rose-100 hover:text-rose-600 rounded-xl transition-colors shrink-0" title="Hay orden personalizado — click para restablecer orden automático" aria-label="Restablecer orden automático"><Grip size={12}/><X size={10}/></button>
                                         )}
                                     </>
                                 )}
@@ -17835,7 +17885,7 @@ function PlanificacionDesktop() {
                                     onClick={() => setForceShowAll(v => !v)}
                                     title={forceShowAll ? 'Cerrar buscador de dotación' : `Dotación — RET / franco / sin turno a ≤${nearbyKmRadius} km`}
                                     aria-label="Dotación extendida"
-                                    className={`p-2 rounded-xl flex items-center border transition-colors shrink-0 ${forceShowAll ? 'bg-amber-100 border-amber-300 text-amber-800' : 'bg-white border-slate-200 text-slate-500 hover:bg-amber-50 hover:border-amber-200 hover:text-amber-700'}`}
+                                    className={`flex items-center justify-center w-8 h-8 rounded-xl border transition-colors shrink-0 ${forceShowAll ? 'bg-amber-100 border-amber-300 text-amber-800' : 'bg-white border-slate-200 text-slate-500 hover:bg-amber-50 hover:border-amber-200 hover:text-amber-700'}`}
                                 >
                                     {forceShowAll ? <Eye size={16}/> : <EyeOff size={16}/>}
                                 </button>
@@ -17847,7 +17897,7 @@ function PlanificacionDesktop() {
                                         onClick={() => setShowVolantes(p => !p)}
                                         title={showVolantes ? 'Ocultar volantes sin turno' : 'Mostrar volantes disponibles para este objetivo'}
                                         aria-label="Volantes"
-                                        className={`p-2 rounded-xl border flex items-center transition-colors shrink-0 ${showVolantes ? 'bg-violet-100 border-violet-300 text-violet-700' : 'bg-white border-slate-200 text-slate-500 hover:bg-violet-50 hover:border-violet-200 hover:text-violet-600'}`}
+                                        className={`flex items-center justify-center w-8 h-8 rounded-xl border transition-colors shrink-0 ${showVolantes ? 'bg-violet-100 border-violet-300 text-violet-700' : 'bg-white border-slate-200 text-slate-500 hover:bg-violet-50 hover:border-violet-200 hover:text-violet-600'}`}
                                     >
                                         <Shuffle size={16}/>
                                     </button>
@@ -17865,14 +17915,15 @@ function PlanificacionDesktop() {
                                             }
                                         }}
                                         title="Buscar guardia en el cronograma o en toda la plantilla"
-                                        className={`p-2 rounded-xl border text-xs transition-colors ${showGuardiaSearch || pinnedExternalEmpIds.size > 0 ? 'bg-indigo-100 border-indigo-300 text-indigo-600' : 'bg-white border-slate-200 text-slate-500 hover:bg-indigo-50 hover:border-indigo-200 hover:text-indigo-600'}`}
+                                        aria-label="Buscar guardia"
+                                        className={`flex items-center justify-center w-8 h-8 rounded-xl border transition-colors shrink-0 ${showGuardiaSearch || pinnedExternalEmpIds.size > 0 ? 'bg-indigo-100 border-indigo-300 text-indigo-600' : 'bg-white border-slate-200 text-slate-500 hover:bg-indigo-50 hover:border-indigo-200 hover:text-indigo-600'}`}
                                     >
                                         <Search size={14}/>
                                     </button>
                                 )}
 
                                 {/* ASIGNAR — siempre visible */}
-                                <button onClick={() => { setAddSearchTerm(''); setShowAddModal(true); }} disabled={!selectedObjective || isServiceLocked} title="Asignar guardia al cronograma" aria-label="Asignar guardia" className="bg-slate-900 text-white p-2 rounded-xl flex items-center hover:bg-slate-800 disabled:opacity-50 shrink-0"><UserPlus size={16}/></button>
+                                <button onClick={() => { setAddSearchTerm(''); setShowAddModal(true); }} disabled={!selectedObjective || isServiceLocked} title="Asignar guardia al cronograma" aria-label="Asignar guardia" className="flex items-center justify-center w-8 h-8 bg-slate-900 text-white rounded-xl hover:bg-slate-800 disabled:opacity-50 shrink-0"><UserPlus size={16}/></button>
 
                                 {/* MODO RÁPIDO — la grilla como planilla */}
                                 {selectedObjective && (
@@ -17881,10 +17932,12 @@ function PlanificacionDesktop() {
                                             type="button"
                                             onClick={toggleModoRapido}
                                             data-modo-rapido-toggle={modoRapido ? '1' : '0'}
-                                            title={modoRapido ? 'Salir del modo rápido' : 'Modo rápido: cargar la grilla con el teclado, como una planilla'}
-                                            className={`flex items-center gap-1.5 rounded-xl border px-2.5 py-2 text-[10px] font-black uppercase transition-colors ${modoRapido ? 'border-indigo-700 bg-indigo-600 text-white shadow-sm' : 'border-slate-200 bg-white text-slate-600 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700'}`}
+                                            title={modoRapido ? 'Modo rápido (teclado): prendido · clic para salir' : 'Modo rápido (teclado): cargar la grilla como una planilla'}
+                                            aria-label="Modo rápido (teclado)"
+                                            aria-pressed={modoRapido}
+                                            className={`flex items-center justify-center w-8 h-8 rounded-xl border transition-colors shrink-0 ${modoRapido ? 'border-indigo-700 bg-indigo-600 text-white shadow-sm' : 'border-slate-200 bg-white text-slate-600 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700'}`}
                                         >
-                                            <Keyboard size={14}/> Modo rápido
+                                            <Keyboard size={16} aria-hidden/>
                                         </button>
                                         {modoRapido && (
                                             <>
@@ -17892,19 +17945,22 @@ function PlanificacionDesktop() {
                                                     type="button"
                                                     onClick={() => setPegarExcel({ paso: 'texto', borrador: '' })}
                                                     data-pegar-excel-abrir
-                                                    title="Pegar un bloque copiado de Excel, alineado por guardia"
-                                                    className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-2 py-2 text-[10px] font-black uppercase text-slate-600 hover:bg-slate-50"
+                                                    title="Pegar desde Excel (alineado por guardia)"
+                                                    aria-label="Pegar desde Excel"
+                                                    className="flex items-center justify-center w-8 h-8 rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-indigo-600 shrink-0"
                                                 >
-                                                    <ClipboardPaste size={13}/> Pegar
+                                                    <ClipboardPaste size={16} aria-hidden/>
                                                 </button>
                                                 <button
                                                     type="button"
                                                     onClick={(e) => { e.stopPropagation(); setAyudaRapidaOpen((v) => !v); }}
                                                     data-modo-rapido-ayuda-abrir
                                                     title="Atajos del modo rápido"
-                                                    className="flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200 bg-white text-xs font-black text-slate-600 hover:bg-slate-50"
+                                                    aria-label="Atajos del modo rápido"
+                                                    aria-expanded={ayudaRapidaOpen}
+                                                    className={`flex items-center justify-center w-8 h-8 rounded-xl border shrink-0 ${ayudaRapidaOpen ? 'border-indigo-200 bg-indigo-50 text-indigo-600' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-indigo-600'}`}
                                                 >
-                                                    ?
+                                                    <HelpCircle size={16} aria-hidden/>
                                                 </button>
                                                 {ayudaRapidaOpen && <ModoRapidoAyuda onCerrar={() => setAyudaRapidaOpen(false)} />}
                                             </>
@@ -17916,9 +17972,10 @@ function PlanificacionDesktop() {
                                 <button
                                     onClick={() => setCronoFullscreen(v => !v)}
                                     title={cronoFullscreen ? 'Salir de pantalla completa (Esc)' : 'Pantalla completa'}
-                                    className="p-2 bg-slate-100 rounded-lg hover:bg-indigo-50 hover:text-indigo-600 transition-colors"
+                                    aria-label={cronoFullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}
+                                    className="flex items-center justify-center w-8 h-8 bg-slate-100 rounded-lg hover:bg-indigo-50 hover:text-indigo-600 transition-colors shrink-0"
                                 >
-                                    {cronoFullscreen ? <Minimize2 size={18}/> : <Maximize size={18}/>}
+                                    {cronoFullscreen ? <Minimize2 size={16}/> : <Maximize size={16}/>}
                                 </button>
 
                                 {/* COLAPSAR BARRA — siempre visible */}
@@ -17929,7 +17986,8 @@ function PlanificacionDesktop() {
                                         return next;
                                     })}
                                     title={toolbarCollapsed ? 'Expandir barra de herramientas' : 'Colapsar barra de herramientas'}
-                                    className="p-2 bg-slate-100 rounded-lg hover:bg-slate-200 text-slate-400 hover:text-slate-600 transition-colors"
+                                    aria-label={toolbarCollapsed ? 'Expandir barra de herramientas' : 'Colapsar barra de herramientas'}
+                                    className="flex items-center justify-center w-8 h-8 bg-slate-100 rounded-lg hover:bg-slate-200 text-slate-400 hover:text-slate-600 transition-colors shrink-0"
                                 >
                                     {toolbarCollapsed ? <ChevronsDown size={14}/> : <ChevronsUp size={14}/>}
                                 </button>
