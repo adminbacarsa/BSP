@@ -44,9 +44,9 @@ const inputCls = 'w-full rounded-xl border border-slate-200 px-2.5 py-1.5 text-[
 
 export function AltaDesdePadronModal({ pedido, onCerrar, onCreado }: Props) {
   const ctx = { empresaId: pedido.empresaId, objectiveId: pedido.objectiveId, clientId: pedido.clientId };
-  const [padron, setPadron] = useState<FilaPadron[] | null>(() => padronEnSesion());
+  const [padron, setPadron] = useState<FilaPadron[] | null>(() => padronEnSesion(pedido.empresaId));
   const [fechaPadron, setFechaPadron] = useState('');
-  const [buscando, setBuscando] = useState(!padronEnSesion());
+  const [buscando, setBuscando] = useState(!padronEnSesion(pedido.empresaId));
   const [manual, setManual] = useState(false);
   const [form, setForm] = useState<AltaForm | null>(null);
   const [enPadron, setEnPadron] = useState(false);
@@ -55,13 +55,13 @@ export function AltaDesdePadronModal({ pedido, onCerrar, onCreado }: Props) {
   const [decision, setDecision] = useState<DecisionAlta | null>(null);
 
   useEffect(() => {
-    if (padronEnSesion() || !pedido.empresaId) { setBuscando(false); return; }
+    if (padronEnSesion(pedido.empresaId) || !pedido.empresaId) { setBuscando(false); return; }
     let vivo = true;
     Promise.all([leerEstadoPadron(pedido.empresaId), listarPadron(pedido.empresaId)])
       .then(([estado, filas]) => {
         if (!vivo) return;
         if (estado && filas.length) {
-          recordarPadron(filas);
+          recordarPadron(pedido.empresaId, filas);
           setPadron(filas);
           setFechaPadron(estado.fecha);
         }
@@ -101,7 +101,7 @@ export function AltaDesdePadronModal({ pedido, onCerrar, onCreado }: Props) {
     try {
       const filas = leerHoja(await file.arrayBuffer());
       if (!filas.length) { setError('El archivo no tiene filas en la hoja SP.'); return; }
-      recordarPadron(filas);
+      recordarPadron(pedido.empresaId, filas);
       setPadron(filas);
       setError('');
     } catch {

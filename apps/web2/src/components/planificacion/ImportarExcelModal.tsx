@@ -4,6 +4,7 @@ import { AlertTriangle, FileSpreadsheet, X } from 'lucide-react';
 import { aplicarServicioPlanilla } from '@/lib/servicios/aplicarServicioPlanilla';
 import { ServicioPlanillaEditor } from '@/components/planificacion/ServicioPlanillaEditor';
 import { AltaDesdePadronModal } from '@/components/planificacion/AltaDesdePadronModal';
+import { AltaMasivaBoton } from '@/components/planificacion/AltaMasivaBoton';
 import type { AltaHecha } from '@/lib/rrhh/altaLegajoClient';
 import { rangoMes } from '@/lib/planificacion/servicioDesdePlanilla';
 import type { EquivalenciaCodigo } from '@/lib/planificacion/equivalenciaCodigo';
@@ -202,6 +203,17 @@ export function ImportarExcelModal({ ctx, onCargar, onAplicar, onCancelar, puede
   const [serviciosEstado, setServiciosEstado] = useState(ctx.servicios);
   const [altas, setAltas] = useState<EmpleadoCruce[]>([]);
   const [altaFila, setAltaFila] = useState<CruceFila | null>(null);
+  const registrarAlta = (fila: number, empleado: AltaHecha, objectiveId: string) => {
+    setAltas((prev) => (prev.some((a) => a.id === empleado.id) ? prev : [...prev, {
+      id: empleado.id,
+      nombre: empleado.name,
+      legajo: empleado.fileNumber,
+      empresaId: ctx.empresaId,
+      objetivoPreferido: empleado.preferredObjectiveId || objectiveId,
+    }]));
+    setDecisiones((prev) => ({ ...prev, [fila]: empleado.id }));
+    onEmpleadoCreado?.(empleado);
+  };
   const ctxVivo = useMemo(() => ({ ...ctx, servicios: serviciosEstado }), [ctx, serviciosEstado]);
   const cargarRef = useRef(onCargar);
   cargarRef.current = onCargar;
@@ -607,6 +619,16 @@ export function ImportarExcelModal({ ctx, onCargar, onAplicar, onCancelar, puede
 
           {paso === 4 && (
             <div className="space-y-2">
+              {puedeAltaLegajo && grupo && cruce.some((c) => c.estado === 'no') && (
+                <AltaMasivaBoton
+                  pedidos={cruce.filter((c) => c.estado === 'no' && !decisiones[c.fila]).map((c) => ({ clave: c.fila, nombre: c.nombrePlanilla, legajo: c.legajo || '' }))}
+                  empresaId={ctx.empresaId}
+                  empresaNombre={empresaNombre}
+                  objectiveId={grupo.objectiveId}
+                  clientId={grupo.clienteId}
+                  onCreado={(fila, empleado) => registrarAlta(fila, empleado, grupo.objectiveId)}
+                />
+              )}
               {cruce.map((c) => (
                 <div key={c.fila} className="rounded-2xl border border-slate-200 px-3 py-2 text-[12px] shadow-sm" data-importar-guardia={c.estado}>
                   <div className="flex flex-wrap items-center gap-2">
@@ -790,15 +812,7 @@ export function ImportarExcelModal({ ctx, onCargar, onAplicar, onCancelar, puede
           }}
           onCerrar={() => setAltaFila(null)}
           onCreado={(empleado) => {
-            setAltas((prev) => (prev.some((a) => a.id === empleado.id) ? prev : [...prev, {
-              id: empleado.id,
-              nombre: empleado.name,
-              legajo: empleado.fileNumber,
-              empresaId: ctx.empresaId,
-              objetivoPreferido: empleado.preferredObjectiveId || grupo.objectiveId,
-            }]));
-            setDecisiones((prev) => ({ ...prev, [altaFila.fila]: empleado.id }));
-            onEmpleadoCreado?.(empleado);
+            registrarAlta(altaFila.fila, empleado, grupo.objectiveId);
             setAltaFila(null);
           }}
         />

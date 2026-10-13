@@ -539,6 +539,7 @@ import {
 } from '@/lib/planificacion/armadoCronograma';
 import { ContinuarMesModal, type ContinuarMesVista, type DiaCorto } from '@/components/planificacion/ContinuarMesModal';
 import { AltaDesdePadronModal, type PedidoAlta } from '@/components/planificacion/AltaDesdePadronModal';
+import { AltaMasivaBoton } from '@/components/planificacion/AltaMasivaBoton';
 import { decidirActivarServicio } from '@/lib/planificacion/activarServicioMes';
 import { ejecutarAgregarMeses, proponerAgregarMeses, vistaPreviaAgregarMeses, type SlaRow } from '@/lib/servicios/appendMonthsClient';
 import type { AppendMonthsPlan } from '@/lib/servicios/slaMonthSplit';
@@ -1544,9 +1545,7 @@ function calcularCeldaGrilla(e: EntradaCeldaGrilla, emp: any, isGuest: boolean, 
         ? undefined
         : isExclusionCol && !s && !p
                 ? excludedPositionsTooltip(excludedOnDay, cellDateStr)
-                : isOtherObjectiveShift && activeShift?.objectiveId
-                    ? `Turno en ${e.nombreObjetivo(activeShift.objectiveId)}`
-                    : undefined;
+                : undefined;
     const borrado = content === CELDA_BORRADA;
     const vista: VistaCelda = {
         key,
@@ -20519,6 +20518,19 @@ function PlanificacionDesktop() {
                             objectiveId: selectedObjective || '',
                             clientId: selectedClient || '',
                         })}
+                        renderAltaTodos={(filas) => (
+                            <AltaMasivaBoton
+                                pedidos={filas.map((f) => ({ clave: f.indice, nombre: f.nombre, legajo: f.legajo }))}
+                                empresaId={empresaId || ''}
+                                empresaNombre={empresa?.name || ''}
+                                objectiveId={selectedObjective || ''}
+                                clientId={selectedClient || ''}
+                                onCreado={(indice, empleado) => {
+                                    agregarPegadoRef.current = [...agregarPegadoRef.current, { indice, employeeId: empleado.id }];
+                                    incorporarEmpleadoAlta(empleado, selectedObjective || '');
+                                }}
+                            />
+                        )}
                     />,
                     document.body,
                 )}

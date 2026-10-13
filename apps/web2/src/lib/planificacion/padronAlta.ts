@@ -62,19 +62,20 @@ export type DecisionAlta =
 
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 
-let padronSesion: FilaPadron[] | null = null;
+const padronSesion = new Map<string, FilaPadron[]>();
 
-/** El padrón vive en memoria de la pestaña. No se guarda en disco ni se sube. */
-export function padronEnSesion(): FilaPadron[] | null {
-  return padronSesion;
+/** Copia del padrón en memoria de la pestaña, una por empresa: el de una empresa nunca sirve para otra. */
+export function padronEnSesion(empresaId: string): FilaPadron[] | null {
+  return padronSesion.get(empresaId) || null;
 }
 
-export function recordarPadron(filas: FilaPadron[]): void {
-  padronSesion = filas;
+export function recordarPadron(empresaId: string, filas: FilaPadron[]): void {
+  padronSesion.set(empresaId, filas);
 }
 
-export function olvidarPadron(): void {
-  padronSesion = null;
+export function olvidarPadron(empresaId?: string): void {
+  if (empresaId) padronSesion.delete(empresaId);
+  else padronSesion.clear();
 }
 
 function txt(v: unknown): string {

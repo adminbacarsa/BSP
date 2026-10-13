@@ -422,6 +422,7 @@ export function PegarExcelModal({
     onAplicar,
     puedeAlta,
     onDarDeAlta,
+    renderAltaTodos,
     plataforma,
     padron,
     fechaPadron,
@@ -448,6 +449,8 @@ export function PegarExcelModal({
     /** RRHH create o SuperAdmin. Sin permiso, la fila dice que hay que pedirle el alta a RRHH. */
     puedeAlta?: boolean;
     onDarDeAlta?: (fila: FilaPegadoExcel) => void;
+    /** «Dar de alta a todos» con el padrón de la empresa, sobre los que siguen sin asignar. */
+    renderAltaTodos?: (filas: FilaPegadoExcel[]) => React.ReactNode;
     plataforma?: import('@/lib/planificacion/pegarPersonas').PersonaPlataforma[];
     padron?: import('@/lib/planificacion/padronAlta').FilaPadron[] | null;
     fechaPadron?: string;
@@ -690,6 +693,7 @@ export function PegarExcelModal({
                                 </div>
                                 <div data-pegar-para-alta>
                                     <p>Para dar de alta ({grupos.paraAlta.length})</p>
+                                    {puedeAlta && renderAltaTodos && grupos.paraAlta.length > 0 && renderAltaTodos(grupos.paraAlta.filter((x) => estado.asignacion[x.fila.indice] == null).map((x) => x.fila))}
                                     <ul className="max-h-64 space-y-1 overflow-auto">
                                         {grupos.paraAlta.map((x) => (
                                             <FilaResumen key={x.fila.indice} fila={x.fila} guardias={guardias} ocupadas={ocupadas} asignada={estado.asignacion[x.fila.indice] ?? null} onAsignar={onAsignar} puedeAlta={puedeAlta} onDarDeAlta={onDarDeAlta} />
