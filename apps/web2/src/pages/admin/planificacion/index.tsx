@@ -2124,6 +2124,8 @@ function PlanificacionDesktop() {
     const [turaEditor, setTuraEditor] = useState<{
         empId: string; empName: string; ds: string; parentId: string; code: string; inicio: string; fin: string; positionName: string;
         lado: LadoTura; horas: number; guardando: boolean; pidio: string; motivo: string;
+        /** Objetivo donde se hace el TURA (vacío = el del turno). Ej. Bancor: guardia de Catedral que hace horas en Museo. */
+        destinoId: string;
     } | null>(null);
     const [motivoVista12, setMotivoVista12] = useState('');
     const propuesta12Ref = useRef<Propuesta12h[] | null>(null);
@@ -15119,7 +15121,7 @@ function PlanificacionDesktop() {
         const fin = hhmmRapido(s0.endTime);
         if (!inicio || !fin) { toast.message('El turno no tiene horario: no se puede agregar el TURA.'); return; }
         if (turaMap[s0.id]) { toast.message('Ese turno ya tiene un TURA. Con − lo quitás y lo volvés a cargar.'); return; }
-        setTuraEditor({ empId: emp.id, empName: String(emp.name || ''), ds, parentId: s0.id, code, inicio, fin, positionName: String(s0.positionName || pos), lado: 'despues', horas: 1, guardando: false, pidio: '', motivo: '' });
+        setTuraEditor({ empId: emp.id, empName: String(emp.name || ''), ds, parentId: s0.id, code, inicio, fin, positionName: String(s0.positionName || pos), lado: 'despues', horas: 1, guardando: false, pidio: '', motivo: '', destinoId: '' });
     };
     const confirmarTura = async () => {
         const t = turaEditor;
@@ -15145,12 +15147,12 @@ function PlanificacionDesktop() {
                 empresaId,
                 clientId: selectedClient || '',
                 clientName: clients.find((c: any) => c.id === selectedClient)?.name || '',
-                objectiveId: selectedObjective,
-                objectiveName: getObjectiveName(selectedObjective),
+                objectiveId: t.destinoId || selectedObjective,
+                objectiveName: getObjectiveName(t.destinoId || selectedObjective),
                 employeeId: t.empId,
                 employeeName: t.empName,
                 parentShiftId: t.parentId,
-                positionName: t.positionName,
+                positionName: t.destinoId && t.destinoId !== selectedObjective ? 'Turno agregado' : t.positionName,
                 fecha: t.ds,
                 inicioIso: `${inicioDia}T${tramo.startTime}`,
                 finIso: `${diaFin}T${tramo.endTime}`,
@@ -15264,7 +15266,7 @@ function PlanificacionDesktop() {
         if (!turaEditor) return;
         const onKey = (ev: KeyboardEvent) => {
             const k = ev.key;
-            const enCampo = (ev.target as HTMLElement | null)?.closest?.('[data-tura-editor] input');
+            const enCampo = (ev.target as HTMLElement | null)?.closest?.('[data-tura-editor] input, [data-tura-editor] select');
             if (enCampo && k !== 'Enter' && k !== 'Escape') return;
             let hecho = true;
             if (/^[1-8]$/.test(k)) setTuraEditor((prev) => (prev ? { ...prev, horas: Number(k) } : prev));
@@ -20968,6 +20970,20 @@ function PlanificacionDesktop() {
                                 ))}
                             </div>
                         ))}
+                        {(() => {
+                            const objs = ((clients.find((c: any) => c.id === selectedClient)?.objetivos || []) as any[])
+                                .filter((o) => String(o.status || 'ACTIVE').toUpperCase() !== 'INACTIVE')
+                                .map((o) => ({ id: String(o.id || ''), nombre: String(o.name || o.id || '') }))
+                                .filter((o) => o.id);
+                            if (objs.length < 2) return null;
+                            return (
+                                <label className="mt-1.5 block text-[10px] font-bold text-slate-500">Dónde
+                                    <select value={turaEditor.destinoId || selectedObjective} onChange={(e) => setTuraEditor((prev) => (prev ? { ...prev, destinoId: e.target.value === selectedObjective ? '' : e.target.value } : prev))} className="block w-full rounded-lg border border-slate-200 px-2 py-1 text-[11px] text-slate-800" data-tura-destino>
+                                        {objs.map((o) => <option key={o.id} value={o.id}>{o.nombre}{o.id === selectedObjective ? ' (el de su turno)' : ''}</option>)}
+                                    </select>
+                                </label>
+                            );
+                        })()}
                         <div className="mt-1.5 grid grid-cols-2 gap-2">
                             <label className="text-[10px] font-bold text-slate-500">¿Quién lo pidió? *
                                 <input value={turaEditor.pidio} onChange={(e) => setTuraEditor((prev) => (prev ? { ...prev, pidio: e.target.value } : prev))} placeholder="Cliente · Juan Pérez" className="block w-full rounded-lg border border-slate-200 px-2 py-1 text-[11px] text-slate-800" data-tura-pidio />
