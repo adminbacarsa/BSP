@@ -16,6 +16,9 @@ import {
   lineasConfirmacion,
   proponerServicioDesdePlanilla,
   tipoPuestoPropuesto,
+  separarPuesto,
+  unirPuestos,
+  renombrarPuesto,
   type DiaSemana,
   type FranjaServicioPlanilla,
   type FranjaVigente,
@@ -156,11 +159,39 @@ export function ServicioPlanillaEditor({ cuadro, semilla, year, month, mesLabel,
       )}
       {franjas.length > 0 && (
         <div className="flex flex-wrap gap-1.5" data-servicio-tipos>
-          {[...new Set(franjas.map((f) => f.puesto.trim()).filter(Boolean))].map((puesto) => {
-            const t = tipoPuestoPropuesto(puesto, franjas.filter((f) => f.puesto.trim() === puesto));
+          {[...new Set(franjas.map((f) => f.puesto))].filter((p) => p.trim()).map((puesto, _i, todos) => {
+            const propias = franjas.filter((f) => f.puesto === puesto);
+            const t = tipoPuestoPropuesto(puesto, propias);
+            const pax = Math.max(1, ...propias.map((f) => Math.round(f.cantidad) || 1));
             return (
-              <span key={puesto} data-servicio-tipo={t.tipo} title={t.motivo} className={`rounded-xl border px-2 py-1 text-[11px] ${t.tipo === '24hs' ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
-                <b>{puesto}</b> · {t.tipo === '24hs' ? '24 HS' : 'Custom'} <span className="text-slate-500">({t.motivo})</span>
+              <span key={puesto} data-servicio-tipo={t.tipo} title={t.motivo} className={`flex flex-wrap items-center gap-1 rounded-xl border px-2 py-1 text-[11px] ${t.tipo === '24hs' ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+                <input
+                  key={`n-${puesto}`}
+                  defaultValue={puesto}
+                  aria-label={`Nombre de ${puesto}`}
+                  data-servicio-puesto-nombre={puesto}
+                  onBlur={(e) => setFranjas((prev) => renombrarPuesto(prev, puesto, e.target.value))}
+                  onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                  className="w-24 rounded border border-transparent bg-transparent px-0.5 font-black hover:border-slate-300 focus:border-indigo-400 focus:bg-white"
+                />
+                <span>· ×{pax} pax · {t.tipo === '24hs' ? '24 HS' : 'Custom'}</span>
+                <span className="text-slate-500">({t.motivo})</span>
+                {pax > 1 && (
+                  <button type="button" data-servicio-separar={puesto} onClick={() => setFranjas((prev) => separarPuesto(prev, puesto))} className="rounded-lg border border-slate-300 bg-white px-1.5 py-0.5 font-bold text-slate-700 hover:bg-slate-50">
+                    Separar en {pax} puestos ×1
+                  </button>
+                )}
+                {todos.length > 1 && (
+                  <select
+                    value=""
+                    data-servicio-unir={puesto}
+                    onChange={(e) => { const otro = e.target.value; if (otro) setFranjas((prev) => unirPuestos(prev, puesto, otro)); }}
+                    className="rounded-lg border border-slate-300 bg-white px-1 py-0.5 font-bold text-slate-700"
+                  >
+                    <option value="">Unir con…</option>
+                    {todos.filter((x) => x !== puesto).map((x) => <option key={x} value={x}>{x}</option>)}
+                  </select>
+                )}
               </span>
             );
           })}

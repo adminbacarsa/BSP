@@ -919,3 +919,56 @@ export function franjasDesdeVigente(vigente: readonly FranjaVigente[]): FranjaSe
     dias: ORDEN_DIAS.filter((d) => (f.dias || []).map((x) => x.toUpperCase()).includes(d)),
   }));
 }
+
+function claveFranja(f: Pick<FranjaServicioPlanilla, 'code' | 'startTime' | 'endTime' | 'dias' | 'fechas'>): string {
+  return `${claveCodigo(f.code)}|${f.startTime}|${f.endTime}|${normDias(f.dias)}|${(f.fechas || []).slice().sort().join(',')}`;
+}
+
+/** «Puesto 1 ×4» → «Puesto 1», «Puesto 2», «Puesto 3», «Puesto 4» ×1, con las mismas franjas. Salta nombres que ya usa otro puesto. */
+export function separarPuesto(franjas: FranjaServicioPlanilla[], puesto: string): FranjaServicioPlanilla[] {
+  const propias = franjas.filter((f) => f.puesto === puesto);
+  const n = Math.max(1, ...propias.map((f) => Math.round(f.cantidad) || 1));
+  if (n < 2) return franjas;
+  const otros = new Set(franjas.filter((f) => f.puesto !== puesto).map((f) => normPlanilla(f.puesto)));
+  const m = puesto.trim().match(/^(.*?)(\d+)\s*$/);
+  const base = m ? m[1] : `${puesto.trim()} `;
+  let num = m ? Number(m[2]) : 1;
+  const nombres: string[] = [];
+  while (nombres.length < n) {
+    const nombre = `${base}${num}`.replace(/\s+/g, ' ').trim();
+    if (!otros.has(normPlanilla(nombre))) nombres.push(nombre);
+    num += 1;
+  }
+  const nuevas: FranjaServicioPlanilla[] = [];
+  nombres.forEach((nombre, i) => {
+    for (const f of propias) {
+      if (i < (Math.round(f.cantidad) || 1)) nuevas.push({ ...f, id: `${f.id}|sep${i + 1}`, puesto: nombre, cantidad: 1 });
+    }
+  });
+  const primero = franjas.findIndex((f) => f.puesto === puesto);
+  const resto = franjas.filter((f) => f.puesto !== puesto);
+  return [...resto.slice(0, primero), ...nuevas, ...resto.slice(primero)];
+}
+
+/** Junta `otro` dentro de `destino`: las franjas iguales suman cantidad. */
+export function unirPuestos(franjas: FranjaServicioPlanilla[], destino: string, otro: string): FranjaServicioPlanilla[] {
+  if (destino === otro) return franjas;
+  const out: FranjaServicioPlanilla[] = [];
+  const porClave = new Map<string, FranjaServicioPlanilla>();
+  for (const f of franjas) {
+    if (f.puesto !== destino && f.puesto !== otro) { out.push(f); continue; }
+    const g = { ...f, puesto: destino };
+    const k = claveFranja(g);
+    const prev = porClave.get(k);
+    if (prev) { prev.cantidad += g.cantidad; continue; }
+    porClave.set(k, g);
+    out.push(g);
+  }
+  return out;
+}
+
+export function renombrarPuesto(franjas: FranjaServicioPlanilla[], viejo: string, nuevo: string): FranjaServicioPlanilla[] {
+  const n = nuevo.trim();
+  if (!n || n === viejo) return franjas;
+  return franjas.map((f) => (f.puesto === viejo ? { ...f, puesto: n } : f));
+}

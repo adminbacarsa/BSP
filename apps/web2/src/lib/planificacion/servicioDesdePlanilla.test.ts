@@ -17,6 +17,9 @@ import {
   franjasDesdeVigente,
   cubre24Horas,
   tipoPuestoPropuesto,
+  separarPuesto,
+  unirPuestos,
+  renombrarPuesto,
   posicionesDesdeFranjas,
   letraDia,
   lineasConfirmacion,
@@ -374,5 +377,24 @@ describe('servicio desde la planilla · tipo de puesto visible', () => {
     assert.deepEqual(tipoPuestoPropuesto('Puesto 1', [f('M', '06:00', '14:00'), f('T', '14:00', '22:00'), f('N', '22:00', '06:00')]), { tipo: '24hs', motivo: 'M+T+N cubren el día · admite D12/N12' });
     assert.equal(tipoPuestoPropuesto('Puesto 2', [f('M', '10:00', '16:00')]).tipo, 'custom');
     assert.equal(tipoPuestoPropuesto('Rondín', [f('M', '07:00', '15:00'), f('T', '15:00', '23:00'), f('N', '23:00', '07:00')]).tipo, 'custom');
+  });
+});
+
+describe('servicio desde la planilla · separar, unir y renombrar puestos', () => {
+  const f = (puesto: string, code: string, cantidad: number, dias: Array<'L' | 'M' | 'X' | 'J' | 'V' | 'S' | 'D'> = []) => ({ id: `${puesto}${code}${dias.join('')}`, puesto, code, startTime: code === 'M' ? '06:00' : code === 'T' ? '14:00' : '22:00', endTime: code === 'M' ? '14:00' : code === 'T' ? '22:00' : '06:00', cantidad, dias });
+  it('Puesto 1 ×4 se separa en Puesto 1..4 ×1', () => {
+    const r = separarPuesto([f('Puesto 1', 'M', 4), f('Puesto 1', 'N', 4)], 'Puesto 1');
+    assert.deepEqual([...new Set(r.map((x) => x.puesto))], ['Puesto 1', 'Puesto 2', 'Puesto 3', 'Puesto 4']);
+    assert.ok(r.every((x) => x.cantidad === 1));
+    assert.equal(r.length, 8);
+  });
+  it('separar respeta la cantidad de cada franja y salta nombres usados', () => {
+    const r = separarPuesto([f('Puesto 1', 'M', 2), f('Puesto 1', 'N', 1), f('Puesto 2', 'M', 1)], 'Puesto 1');
+    assert.deepEqual(r.filter((x) => x.puesto !== 'Puesto 2').map((x) => `${x.puesto}:${x.code}`), ['Puesto 1:M', 'Puesto 1:N', 'Puesto 3:M']);
+  });
+  it('unir suma las franjas iguales y renombrar cambia todas', () => {
+    const r = unirPuestos([f('Puesto 1', 'M', 1), f('Puesto 2', 'M', 1), f('Puesto 2', 'T', 1)], 'Puesto 1', 'Puesto 2');
+    assert.deepEqual(r.map((x) => `${x.puesto}:${x.code}×${x.cantidad}`), ['Puesto 1:M×2', 'Puesto 1:T×1']);
+    assert.deepEqual(renombrarPuesto(r, 'Puesto 1', 'Bunker').map((x) => x.puesto), ['Bunker', 'Bunker']);
   });
 });
