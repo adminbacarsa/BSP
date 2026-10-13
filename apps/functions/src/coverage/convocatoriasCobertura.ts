@@ -418,7 +418,7 @@ export async function findBestCandidate(
   conv: ConvocatoriaCoberturaDoc,
   type: CandidateType,
 ): Promise<CandidateResult | null> {
-  if (type === 'VOLANTE' || type === 'SIN_TURNO' || type === 'SIN_TURNO_CON_EXP' || type === 'EVENTUAL') return null;
+  if (type === 'VOLANTE' || type === 'SIN_TURNO' || type === 'SIN_TURNO_CON_EXP' || type === 'EVENTUAL' || type === 'REF') return null;
   const { findBestCoverageCandidate } = await import('./coverageCandidatesServer');
   const found = await findBestCoverageCandidate(db, conv, type);
   if (!found) return null;
@@ -559,7 +559,7 @@ async function offerRemainderAfterPartial(
   };
   const createdBy = conv.createdBy === 'MODO_DEMO' ? 'MODO_DEMO' : 'AUTO';
 
-  for (const type of ['RET', 'REF', 'ESC'] as const) {
+  for (const type of ['RET', 'ESC'] as const) {
     if (type === skip) continue;
     if (await hasActiveConvocatoriaForType(db, conv.shiftId, type)) return true;
     const candidate = await findBestCandidate(db, {
