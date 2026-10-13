@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { clasificarPegado, indicesAsignados, lugarDeGuardia, sinEncontrarVisibles, textoGruposPegado, textoPlataforma, type ObjetivoCatalogo } from './pegarPersonas';
-import { equivalenciaDeDefinicion, proponerDefinicion, textoCeldasVacias, yaDefinido } from './definirCodigo';
+import { agregarFranjasAPosiciones, equivalenciaDeDefinicion, equivalenciaManual, equivalenciaOtroObjetivo, proponerDefinicion, proponerPuestoYBanda, textoCeldasVacias, yaDefinido } from './definirCodigo';
 import { diagonal, alternarCelda, pegarForma } from './seleccionLibre';
 import { cambiosHorarioServicio, tablaCodigosPlanilla, textoFueraDeServicio } from './codigosHorarioPegado';
 import { puesto24Cerrado } from './lecturaBandas';
@@ -173,5 +173,38 @@ describe('horarios del pegado', () => {
     assert.equal(r.porHoras, true);
     const sinNoche = puesto24Cerrado(turnos.slice(0, 2));
     assert.equal(sinNoche.cerrado, false);
+  });
+});
+
+describe('definir a mano un código del pegado', () => {
+  const puestos = [
+    { positionName: 'Puesto 1', shifts: [{ code: 'M', startTime: '08:00', endTime: '15:00' }] },
+    { positionName: 'Puesto 2', shifts: [{ code: 'M', startTime: '10:00', endTime: '16:00' }] },
+  ];
+  it('propone puesto, turno y horario', () => {
+    assert.deepEqual(proponerPuestoYBanda('P2 M', puestos), { puesto: 'Puesto 2', code: 'M', inicio: '10:00', fin: '16:00', faltaEnServicio: false });
+    assert.deepEqual(proponerPuestoYBanda('P2 T', puestos), { puesto: 'Puesto 2', code: 'T', inicio: '15:00', fin: '23:00', faltaEnServicio: true });
+    assert.deepEqual(proponerPuestoYBanda('P5T', puestos), { puesto: 'Puesto 5', code: 'T', inicio: '15:00', fin: '23:00', faltaEnServicio: true });
+    assert.deepEqual(proponerPuestoYBanda('C', puestos), { puesto: 'Cortina', code: 'C', inicio: '07:00', fin: '15:00', faltaEnServicio: true });
+  });
+  it('suma al servicio solo lo que falta', () => {
+    const res = agregarFranjasAPosiciones(
+      [{ id: 'p1', name: 'Puesto 1', allowedShiftTypes: [{ code: 'M', startTime: '08:00', endTime: '15:00' }] }],
+      [
+        { puesto: 'Puesto 1', code: 'M', inicio: '08:00', fin: '15:00' },
+        { puesto: 'Puesto 1', code: 'T', inicio: '15:00', fin: '22:00' },
+        { puesto: 'Cortina', code: 'C', inicio: '07:00', fin: '15:00' },
+      ],
+    );
+    assert.deepEqual(res?.agregadas, ['Puesto 1 · T 15:00–22:00', 'Cortina · C 07:00–15:00']);
+    assert.equal(res?.positions.length, 2);
+    assert.equal(res?.positions[0].allowedShiftTypes?.length, 2);
+    assert.equal(agregarFranjasAPosiciones([{ name: 'Puesto 1', allowedShiftTypes: [{ code: 'M' }] }], [{ puesto: 'Puesto 1', code: 'M', inicio: '08:00', fin: '15:00' }]), null);
+  });
+  it('la equivalencia guarda el puesto', () => {
+    const eq = equivalenciaManual('P2 T', { puesto: 'Puesto 2', code: 'T', inicio: '16:00', fin: '22:00' });
+    assert.equal(eq.clave, 'P2T|none');
+    assert.equal(eq.positionName, 'Puesto 2');
+    assert.equal(equivalenciaOtroObjetivo('VF').otroObjetivo, 'Vifood');
   });
 });

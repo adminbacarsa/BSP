@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { ClipboardPaste, Keyboard, Search, X } from 'lucide-react';
 import { agruparAvisos, ATAJOS_MODO_RAPIDO, idAviso, idGrupoAviso, textoDiaE, textoResumenPegado, type AvisoRapido, type FilaPegadoExcel, type GuardiaPegado, type PreviewPegadoExcel, type TipoNovedadRapida } from '@/lib/planificacion/modoRapido';
 import { clasificarPegado, indicesAsignados, sinEncontrarVisibles, textoGruposPegado, textoPlataforma } from '@/lib/planificacion/pegarPersonas';
-import { equivalenciaDeDefinicion, proponerDefinicion, textoCeldasVacias } from '@/lib/planificacion/definirCodigo';
+import { equivalenciaDeDefinicion, equivalenciaManual, equivalenciaOtroObjetivo, proponerDefinicion, proponerPuestoYBanda, textoCeldasVacias, type DefinicionManual, type PuestoConFranjas } from '@/lib/planificacion/definirCodigo';
 import { cambiosHorarioServicio } from '@/lib/planificacion/codigosHorarioPegado';
 import { TEXTO_PIN_AVISOS, ubicarCierre12, type Caja } from '@/lib/planificacion/panelesPlanif';
 
@@ -429,6 +429,9 @@ export function PegarExcelModal({
     onAgregar,
     onAgregarTodos,
     onDefinir,
+    puestosServicio,
+    mesServicio,
+    onAgregarServicio,
     tabla,
     onHorario,
     onActualizarServicio,
@@ -457,6 +460,11 @@ export function PegarExcelModal({
     onAgregar?: (fila: FilaPegadoExcel, personaId: string) => void;
     onAgregarTodos?: (items: Array<{ fila: FilaPegadoExcel; personaId: string }>) => void;
     onDefinir?: (codigo: string, eq: import('@/lib/planificacion/definirCodigo').EquivalenciaGuardada) => void;
+    /** Puestos y turnos del servicio del mes, para proponer «P2 T» → Puesto 2 · T. */
+    puestosServicio?: PuestoConFranjas[];
+    /** «noviembre» si hay servicio del mes; null sin servicio. */
+    mesServicio?: string | null;
+    onAgregarServicio?: (franja: { puesto: string; code: string; inicio: string; fin: string }) => Promise<void>;
     tabla?: import('@/lib/planificacion/codigosHorarioPegado').FilaCodigoPlanilla[];
     onHorario?: (sigla: string, inicio: string, fin: string) => void;
     onActualizarServicio?: (cambios: import('@/lib/planificacion/codigosHorarioPegado').CambioHorarioServicio[]) => void;
@@ -476,6 +484,8 @@ export function PegarExcelModal({
     }, [onCerrar]);
     const [borrador, setBorrador] = useState(estado.paso === 'texto' ? estado.borrador : '');
     const [definiendo, setDefiniendo] = useState<string | null>(null);
+    const [definidos, setDefinidos] = useState<Record<string, string>>({});
+    const [abiertoDefinir, setAbiertoDefinir] = useState<string | null>(null);
     const [horarios, setHorarios] = useState(tabla || []);
     useEffect(() => { if (tabla) setHorarios(tabla); }, [tabla]);
     const grupos = estado.paso === 'resumen' ? clasificarPegado(estado.preview.filas, plataforma || [], padron || null) : null;
@@ -737,7 +747,32 @@ export function PegarExcelModal({
                                     return (
                                         <div key={cod} className="flex flex-wrap items-center gap-2" data-pegar-definir-fila={cod}>
                                             <span>{prop.vaciar ? textoCeldasVacias(cod, n, prop.partes.find((p) => p.tipo === 'otro_objetivo' && 'etiqueta' in p) ? (prop.partes.find((p) => p.tipo === 'otro_objetivo') as { etiqueta: string }).etiqueta : cod) : `${cod} no se reconoce (${n} celdas). ${prop.nota}`}</span>
-                                            <button type="button" className="rounded-lg border border-slate-300 px-2 py-0.5 font-bold" data-pegar-definir={cod} onClick={() => { setDefiniendo(cod); onDefinir?.(cod, equivalenciaDeDefinicion(cod, prop)); }}>{definiendo === cod ? 'Definido' : 'Definir'}</button>
+                                            {prop.vaciar || prop.partes.length ? (
+                                                <button type="button" className="rounded-lg border border-slate-300 px-2 py-0.5 font-bold" data-pegar-definir={cod} onClick={() => { setDefiniendo(cod); onDefinir?.(cod, equivalenciaDeDefinicion(cod, prop)); }}>{definiendo === cod ? 'Definido' : 'Definir'}</button>
+                                            ) : definidos[cod] ? (
+                                                <span className="font-bold text-emerald-700" data-pegar-definido={cod}>→ {definidos[cod]} <button type="button" className="ml-1 font-bold text-indigo-700 hover:underline" onClick={() => setAbiertoDefinir(cod)}>Cambiar</button></span>
+                                            ) : (
+                                                <button type="button" className="rounded-lg border border-slate-300 px-2 py-0.5 font-bold" data-pegar-definir={cod} onClick={() => setAbiertoDefinir((v) => (v === cod ? null : cod))}>Definir</button>
+                                            )}
+                                            {abiertoDefinir === cod && (
+                                                <DefinirCodigoForm
+                                                    codigo={cod}
+                                                    puestos={puestosServicio || []}
+                                                    mesServicio={mesServicio ?? null}
+                                                    onCancelar={() => setAbiertoDefinir(null)}
+                                                    onOtroObjetivo={() => {
+                                                        onDefinir?.(cod, equivalenciaOtroObjetivo(cod));
+                                                        setDefinidos((prev) => ({ ...prev, [cod]: 'otro objetivo (vacía)' }));
+                                                        setAbiertoDefinir(null);
+                                                    }}
+                                                    onGuardar={async (d, agregar) => {
+                                                        onDefinir?.(cod, equivalenciaManual(cod, d));
+                                                        if (agregar) await onAgregarServicio?.({ puesto: d.puesto, code: d.code, inicio: d.inicio, fin: d.fin });
+                                                        setDefinidos((prev) => ({ ...prev, [cod]: `${d.puesto} · ${d.code} ${d.inicio}–${d.fin}` }));
+                                                        setAbiertoDefinir(null);
+                                                    }}
+                                                />
+                                            )}
                                         </div>
                                     );
                                 })}
@@ -807,5 +842,59 @@ function FilaResumen({
                 <span className="shrink-0 text-[10px] font-bold text-slate-500" data-pegar-alta-rrhh={fila.indice}>Pedile a RRHH el alta de {fila.nombre.split(',')[0].split(' ')[0]}</span>
             )}
         </li>
+    );
+}
+
+function DefinirCodigoForm({ codigo, puestos, mesServicio, onGuardar, onOtroObjetivo, onCancelar }: {
+    codigo: string;
+    puestos: PuestoConFranjas[];
+    mesServicio: string | null;
+    onGuardar: (d: DefinicionManual, agregarAlServicio: boolean) => Promise<void>;
+    onOtroObjetivo: () => void;
+    onCancelar: () => void;
+}) {
+    const [d, setD] = useState<DefinicionManual>(() => proponerPuestoYBanda(codigo, puestos));
+    const [agregar, setAgregar] = useState(true);
+    const [guardando, setGuardando] = useState(false);
+    const p = puestos.find((x) => x.positionName.trim().toUpperCase() === d.puesto.trim().toUpperCase());
+    const existe = !!p?.shifts.some((s) => s.code.toUpperCase() === d.code.trim().toUpperCase());
+    const valido = !!d.puesto.trim() && !!d.code.trim() && /^\d{1,2}:\d{2}$/.test(d.inicio) && /^\d{1,2}:\d{2}$/.test(d.fin);
+    const input = 'rounded border border-slate-200 px-1 py-0.5 text-[11px]';
+    return (
+        <div className="mt-1 w-full rounded-xl border border-indigo-200 bg-indigo-50/60 p-2" data-pegar-definir-form={codigo}>
+            <div className="flex flex-wrap items-end gap-2">
+                <label className="text-[10px] font-bold text-slate-500">Puesto
+                    <input list={`puestos-${codigo}`} className={`${input} block w-28`} value={d.puesto} onChange={(e) => setD({ ...d, puesto: e.target.value })} data-definir-puesto />
+                    <datalist id={`puestos-${codigo}`}>{puestos.map((x) => <option key={x.positionName} value={x.positionName} />)}</datalist>
+                </label>
+                <label className="text-[10px] font-bold text-slate-500">Turno
+                    <input className={`${input} block w-14 font-black`} value={d.code} onChange={(e) => setD({ ...d, code: e.target.value.toUpperCase() })} data-definir-code />
+                </label>
+                <label className="text-[10px] font-bold text-slate-500">Desde
+                    <input className={`${input} block w-14 font-mono`} value={d.inicio} placeholder="07:00" onChange={(e) => setD({ ...d, inicio: e.target.value })} data-definir-inicio />
+                </label>
+                <label className="text-[10px] font-bold text-slate-500">Hasta
+                    <input className={`${input} block w-14 font-mono`} value={d.fin} placeholder="15:00" onChange={(e) => setD({ ...d, fin: e.target.value })} data-definir-fin />
+                </label>
+            </div>
+            {!existe && (
+                mesServicio ? (
+                    <label className="mt-1 flex items-center gap-1 text-[11px] text-slate-700">
+                        <input type="checkbox" checked={agregar} onChange={(e) => setAgregar(e.target.checked)} data-definir-agregar />
+                        Agregar {d.puesto || 'el puesto'} · {d.code || 'el turno'} al servicio de {mesServicio}
+                    </label>
+                ) : (
+                    <p className="mt-1 text-[11px] text-amber-800">Sin servicio en este mes: se escribe con este puesto y horario. El servicio se arma con «Servicio del mes».</p>
+                )
+            )}
+            <div className="mt-1.5 flex flex-wrap gap-2">
+                <button type="button" disabled={!valido || guardando} className="rounded-lg bg-indigo-600 px-2 py-0.5 text-[11px] font-black text-white disabled:opacity-40" data-definir-guardar
+                    onClick={async () => { setGuardando(true); try { await onGuardar(d, !existe && !!mesServicio && agregar); } finally { setGuardando(false); } }}>
+                    {guardando ? 'Guardando…' : 'Guardar'}
+                </button>
+                <button type="button" className="rounded-lg border border-slate-300 bg-white px-2 py-0.5 text-[11px] font-bold text-slate-600" onClick={onOtroObjetivo} data-definir-otro>Otro objetivo (dejar vacía)</button>
+                <button type="button" className="text-[11px] font-bold text-slate-500" onClick={onCancelar}>Cancelar</button>
+            </div>
+        </div>
     );
 }

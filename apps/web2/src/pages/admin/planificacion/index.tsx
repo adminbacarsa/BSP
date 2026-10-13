@@ -285,7 +285,7 @@ import {
     publicarOrdenCrono,
     type PortapapelesCrono,
 } from '@/lib/planificacion/cronoVentana';
-import { actualizarHorariosServicio } from '@/lib/servicios/aplicarServicioPlanilla';
+import { actualizarHorariosServicio, agregarFranjasServicio } from '@/lib/servicios/aplicarServicioPlanilla';
 import { NOVEDAD_TYPE_SEEDS } from '@/lib/rrhh/novedadTypes';
 import { absenceService } from '@/services/absenceService';
 import {
@@ -14726,7 +14726,10 @@ function PlanificacionDesktop() {
             for (const cr of f.crudos || []) {
                 const def = definicionesPegadoRef.current[cr.raw.replace(/\s/g, '').toUpperCase()];
                 if (!def || def.otroObjetivo || !def.code) continue;
-                items.push({ r, c: cr.col, code: def.code, ...(def.startTime ? { startTime: def.startTime, endTime: def.endTime } : {}) });
+                const fuenteDef: FuenteRapida | undefined = def.startTime && def.endTime
+                    ? { code: def.code, name: def.code, startTime: def.startTime, endTime: def.endTime, ...(def.positionName ? { positionName: def.positionName, copiarPuesto: true } : {}) }
+                    : undefined;
+                items.push({ r, c: cr.col, code: def.code, ...(def.startTime ? { startTime: def.startTime, endTime: def.endTime } : {}), ...(fuenteDef ? { fuente: fuenteDef } : {}) });
             }
         }
         setPegarExcel(null);
@@ -20532,6 +20535,27 @@ function PlanificacionDesktop() {
                         onAgregarTodos={(items) => {
                             setPinnedExternalEmpIds((prev) => new Set([...prev, ...items.map((i) => i.personaId)]));
                             agregarPegadoRef.current = [...agregarPegadoRef.current, ...items.map((i) => ({ indice: i.fila.indice, employeeId: i.personaId }))];
+                        }}
+                        puestosServicio={(effectivePosStructure || []).map((p: any) => ({
+                            positionName: String(p.positionName || ''),
+                            shifts: (p.shifts || []).map((st: any) => ({ code: String(st.code || ''), startTime: String(st.startTime || ''), endTime: String(st.endTime || '') })),
+                        })).filter((p: { positionName: string }) => p.positionName && p.positionName !== 'General')}
+                        mesServicio={(activePlanningSlaRow as { id?: string } | null)?.id ? mesLabelDe(currentDate) : null}
+                        onAgregarServicio={async (franja) => {
+                            const id = String((activePlanningSlaRow as { id?: string } | null)?.id || '');
+                            if (!id || !empresaId) return;
+                            try {
+                                const agregadas = await agregarFranjasServicio({
+                                    servicioId: id,
+                                    empresaId,
+                                    migracionCompleta,
+                                    objectiveName: getObjectiveName(selectedObjective),
+                                    franjas: [franja],
+                                });
+                                if (agregadas.length) toast.success(`Servicio de ${mesLabelDe(currentDate)}: se agregó ${agregadas.join(', ')}`);
+                            } catch (e: any) {
+                                toast.error(e?.message || 'No se pudo agregar al servicio');
+                            }
                         }}
                         onDefinir={(codigo, eq) => {
                             definicionesPegadoRef.current[codigo.replace(/\s/g, '').toUpperCase()] = eq;

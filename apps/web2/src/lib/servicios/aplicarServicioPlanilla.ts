@@ -7,6 +7,7 @@ import { addDoc, collection, doc, getDoc, serverTimestamp, setDoc } from 'fireba
 import { db } from '@/lib/firebase';
 import { newSlaSeriesId, overlappingSegments, slaSegmentsForMode, validateSlaRange } from '@/lib/servicios/slaMonthSplit';
 import type { EquivalenciaCodigo } from '@/lib/planificacion/equivalenciaCodigo';
+import { agregarFranjasAPosiciones } from '@/lib/planificacion/definirCodigo';
 import {
   horasMesDeFranjas,
   posicionesDesdeFranjas,
@@ -156,4 +157,35 @@ export async function actualizarHorariosServicio(opts: {
     ...(opts.empresaId ? { empresaId: opts.empresaId } : {}),
     metadata: { platform: 'web_admin_crono', via: 'PEGADO_HORARIOS', servicioId: opts.servicioId },
   });
+}
+
+/** Puestos y turnos definidos en el pegado («P2 T», «C») que el servicio del mes no tenía. */
+export async function agregarFranjasServicio(opts: {
+  servicioId: string;
+  empresaId: string;
+  migracionCompleta: boolean;
+  objectiveName: string;
+  franjas: ReadonlyArray<{ puesto: string; code: string; inicio: string; fin: string }>;
+}): Promise<string[]> {
+  const snap = await getDoc(doc(db, 'servicios_sla', opts.servicioId));
+  if (!snap.exists()) throw new Error('No encontré el servicio');
+  const actual = snap.data() as ServiceSLA & { closed?: boolean; positions?: PosicionServicioDoc[] };
+  if (actual.closed) throw new Error('Contrato cerrado: no se puede modificar');
+  const res = agregarFranjasAPosiciones((actual.positions || []) as unknown as Array<Record<string, unknown>>, opts.franjas);
+  if (!res) return [];
+  await slaService.update(opts.servicioId, {
+    positions: JSON.parse(JSON.stringify(res.positions)),
+  }, { empresaId: opts.empresaId, migracionCompleta: opts.migracionCompleta });
+  const user = getAuth().currentUser;
+  await addDoc(collection(db, 'audit_logs'), {
+    timestamp: serverTimestamp(),
+    actorUid: user?.uid || 'SYSTEM',
+    actorName: user?.displayName || user?.email || 'Sistema',
+    action: 'UPDATE_CONTRACT',
+    module: 'SERVICIOS_SLA',
+    details: `Agregó desde el pegado en ${opts.objectiveName}: ${res.agregadas.join(', ')}`,
+    ...(opts.empresaId ? { empresaId: opts.empresaId } : {}),
+    metadata: { platform: 'web_admin_crono', via: 'PEGADO_DEFINIR', servicioId: opts.servicioId },
+  });
+  return res.agregadas;
 }
