@@ -18,6 +18,8 @@ export interface GrupoObjetivos {
   clientName: string;
   objectiveIds: string[];
   objectiveNames: string[];
+  /** Cliente de cada objetivo: un grupo puede juntar objetivos de distintos clientes. */
+  miembros?: Array<{ clientId: string; clientName: string; objectiveId: string; objectiveName: string }>;
 }
 
 export const gruposService = {
