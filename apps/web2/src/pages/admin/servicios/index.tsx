@@ -5883,8 +5883,8 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                     </div>
 
                                     {customShiftDateMode === 'weekdays' ? (
-                                        <div className="flex gap-1 justify-between items-center">
-                                            <div className="flex gap-1">
+                                        <div className="flex flex-wrap gap-1 justify-between items-center">
+                                            <div className="flex flex-wrap gap-1">
                                                 {['L','M','X','J','V','S','D'].map(day => (
                                                     <button key={day} onClick={() => toggleNewShiftDay(day)} className={`w-7 h-7 rounded text-[9px] font-black transition-colors ${newCustomShift.days.includes(day) ? 'bg-slate-900 text-white' : 'bg-white border text-slate-400'}`}>{day}</button>
                                                 ))}
@@ -5988,6 +5988,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                                 : <p className="text-[9px] text-slate-400 font-mono">{v.startTime} – {v.endTime} · {v.hours}h</p>
                                             }
                                             {v.days && v.days.length > 0 && <p className="text-[9px] font-black text-slate-500 bg-slate-100 dark:bg-slate-700 px-1.5 rounded">{v.days.join('')}</p>}
+                                            {v.feriados && <p className="text-[9px] font-black text-white bg-rose-600 px-1.5 rounded" title="Además corre los feriados nacionales">+F</p>}
                                             {v.specificDates && v.specificDates.length > 0 && <p className="text-[9px] font-black text-indigo-600 bg-indigo-50 dark:bg-indigo-900/30 px-1.5 rounded">{v.specificDates.length} fecha{v.specificDates.length !== 1 ? 's' : ''}</p>}
                                         </div>
                                     </div>

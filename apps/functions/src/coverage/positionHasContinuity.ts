@@ -3,6 +3,7 @@ import { normalizarSlaDeFirestore } from '../cerebro/types';
 import { leerSlaYDerivarCobertura } from '../cerebro/inteligencia-servicio/s1-leer-sla';
 import { NON_RELIEF_EXTRA_CODES } from '../common/reliefEligibility';
 import { seriesHandoffKind } from '../common/shiftSeries';
+import { bandaCorreFeriado } from '../common/feriadosAr';
 
 const TZ = 'America/Argentina/Cordoba';
 const CONTINUITY_WINDOW_MS = 30 * 60 * 1000;
@@ -142,7 +143,12 @@ export function nextBandSlotsFromSlaDoc(
       && seriesHandoffKind(outgoingCode, need.banda) === 'REJECT'
     ) continue;
     if (need.excludedDates?.includes(dateStr)) continue;
-    if (!need.diasSemana.includes(dayLetter)) continue;
+    if (!need.diasSemana.includes(dayLetter)) {
+      // «+ feriados»: la franja también corre los feriados nacionales.
+      const types = (rawPos?.allowedShiftTypes ?? rawPos?.shifts) as Record<string, unknown>[] | undefined;
+      const band = (types || []).find((t) => String(t.code || '').toUpperCase() === String(need.banda || '').toUpperCase());
+      if (!bandaCorreFeriado(band, dateStr)) continue;
+    }
     if (isBandExcludedOnDate(rawPos, dateStr, need.banda)) continue;
     const startMs = hmToMsOnDay(shiftEndTime, need.horaInicio);
     const diff = Math.abs(startMs - endMs);

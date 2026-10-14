@@ -4,6 +4,7 @@ import { ObjectiveOperationCache, slaDayCoverage } from '../common/simulableShif
 import { loadObjectiveIdsExcluidos } from '../common/excluirDeOperacion';
 import { seriesCodeOf } from '../common/shiftSeries';
 import { buildSlaUnplannedGapDocId } from './slaGapId';
+import { bandaCorreFeriado } from '../common/feriadosAr';
 
 /** Misma ventana que plannedShiftCoversSlaBand (ops-core): ±30 min, misma serie. */
 const SLA_BAND_COVER_ALIGN_MS = 30 * 60 * 1000;
@@ -113,9 +114,12 @@ export async function detectPublishedSlaGapsForEmpresa(
         });
         if (verdict === 'OUT') continue;
         if (verdict !== 'IN' && !(await isPlanPublished(db, eid, objectiveId, dayDate))) continue;
-        if (!activeDays.includes(weekdayLetter(dayDate))) continue;
+        const diaHabil = activeDays.includes(weekdayLetter(dayDate));
+        if (!diaHabil && !bands.some((b: unknown) => bandaCorreFeriado(b, dayStr))) continue;
 
         for (const band of bands) {
+          // Un feriado fuera de los días del puesto solo cuenta las franjas con «+ feriados».
+          if (!diaHabil && !bandaCorreFeriado(band, dayStr)) continue;
           const code = String(band.code || '').toUpperCase();
           if (!code || ['F', 'FF', 'FP', 'FT'].includes(code)) continue;
           const hm = String(band.startTime || '07:00').slice(0, 5);
