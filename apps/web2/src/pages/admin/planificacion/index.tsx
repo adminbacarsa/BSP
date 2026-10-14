@@ -11749,10 +11749,27 @@ function PlanificacionDesktop() {
     };
 
     // «Continuar desde el mes anterior»: sigue el ciclo de cada guardia (no copia día por número).
+    /** Borrador de una celda propuesta por Continuar; en el grupo, «Vifood · Puesto 1» vuelve a su objetivo y puesto. */
+    const cambioContinuar = (c: Parameters<typeof cambioPendienteDe>[0]) => {
+        const g = enGrupoRapido ? puestoDeEtiqueta(String(c.positionName || '')) : null;
+        if (g) return cambioPendienteDe({ ...c, positionName: g.pos }, g.objId);
+        return cambioPendienteDe(c, enGrupoRapido ? (resolveObjectiveForEmp(c.employeeId) || selectedObjective) : selectedObjective);
+    };
+
     const abrirContinuarMesAnterior = async () => {
         if (!selectedObjective) return;
         if (msgBloqueoEdicion && !sinServicioEnMes) { toast.error(msgBloqueoEdicion); return; }
-        if (selectedGrupo && grupoUnifiedMode) { toast.message('Elegí un objetivo del grupo para continuar su mes anterior.'); return; }
+        // Vista agrupada: el grupo se continúa como un solo cronograma con puestos «Objetivo · Puesto»
+        // (un guardia de Peaje que hace VF en Vifood sigue su ciclo en los dos) y cada turno vuelve a su objetivo.
+        const enGrupo = enGrupoRapido && !!selectedGrupo;
+        if (selectedGrupo && grupoUnifiedMode && !enGrupo) { toast.message('Esperá a que cargue el servicio de los objetivos del grupo.'); return; }
+        const objsGrupo = enGrupo ? selectedGrupo!.objectiveIds : [selectedObjective];
+        const OBJ_GRUPO = '__grupo__';
+        const objContinuar = enGrupo ? OBJ_GRUPO : selectedObjective;
+        const etiquetar = (objId: unknown, pos: unknown) => {
+            const p = String(pos || '');
+            return enGrupo && p && p !== 'General' ? etiquetaPuestoGrupo(String(objId || ''), p) : p;
+        };
         setPrevMonthLoading(true);
         try {
             const y = currentDate.getFullYear();
@@ -11760,12 +11777,13 @@ function PlanificacionDesktop() {
             // Hasta 3 meses atrás: el ciclo de 24 días necesita varias vueltas y a veces falta un mes cargado.
             const desde = new Date(y, m - 3, 1);
             const hasta = new Date(y, m, 0, 23, 59, 59);
-            const snap = await getDocs(query(
+            const snaps = await Promise.all(objsGrupo.map((oid) => getDocs(query(
                 collection(db, 'turnos'),
-                where('objectiveId', '==', selectedObjective),
+                where('objectiveId', '==', oid),
                 where('startTime', '>=', Timestamp.fromDate(desde)),
                 where('startTime', '<=', Timestamp.fromDate(hasta)),
-            ));
+            ))));
+            const snap = { docs: snaps.flatMap((x) => x.docs) };
             const guardiasBase = dotacionBaseEmployees;
             const ids = new Set(guardiasBase.map((e: any) => e.id));
             const previosPorEmp = new Map<string, TurnoPrevioContinuar[]>();
@@ -11776,6 +11794,11 @@ function PlanificacionDesktop() {
             for (const d of snap.docs) {
                 const t = { id: d.id, ...(d.data() as any) };
                 if (!t.employeeId || t.isDeleted) continue;
+                if (enGrupo) {
+                    t.positionName = etiquetar(t.objectiveId, t.positionName);
+                    if (t.originalPositionName) t.originalPositionName = etiquetar(t.objectiveId, t.originalPositionName);
+                    t.objectiveId = OBJ_GRUPO;
+                }
                 const start = t.startTime?.toDate ? t.startTime.toDate() : null;
                 if (!start) continue;
                 const dateStr = getDateKey(start);
@@ -11794,10 +11817,12 @@ function PlanificacionDesktop() {
                     ultimosPrevios.push({ employeeId: t.employeeId, code: t.code, startTime: t.startTime, endTime: t.endTime, realEndTime: t.realEndTime, hours: t.hours, objectiveId: t.objectiveId, origin: t.origin });
                 }
             }
-            let estructuraContinuar = (positionStructure || []) as PuestoSlaContinuar[];
+            let estructuraContinuar = (enGrupo
+                ? objsGrupo.flatMap((oid) => ((grupoSlaMap[oid] || []) as any[]).map((p: any) => ({ ...p, positionName: etiquetar(oid, p.positionName) })))
+                : (positionStructure || [])) as PuestoSlaContinuar[];
             let activarVista: ContinuarMesVista['activar'];
             activarServicioRef.current = null;
-            try {
+            if (!enGrupo) try {
                 const snapSla = await getDocs(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa));
                 const allSla = filterSlasForPlanningTenant(
                     snapSla.docs.map((d) => ({ id: d.id, ...(d.data() as any) })),
@@ -11890,30 +11915,30 @@ function PlanificacionDesktop() {
                 const key = `${empId}_${dateStr}`;
                 const pend = pendingChanges[key];
                 const sh = pend ? (pend.isDeleted ? null : pend) : shiftsMap[key];
-                if (!sh || absencesMap[key] || (sh.objectiveId && String(sh.objectiveId) !== String(selectedObjective))) return null;
+                if (!sh || absencesMap[key] || (sh.objectiveId && !objsGrupo.includes(String(sh.objectiveId)))) return null;
                 const code = String(sh.code || '').toUpperCase();
                 return code && !esCeldaLicencia({ code, tieneAusencia: false }) ? code : null;
             };
             const extenderServicio = !!activarServicioRef.current;
-            const estadoPrevio = await fetchPlanificacionEstadoDoc(empresaId, selectedObjective, m === 0 ? y - 1 : y, m === 0 ? 12 : m).catch(() => null);
+            const estadoPrevio = enGrupo ? null : await fetchPlanificacionEstadoDoc(empresaId, selectedObjective, m === 0 ? y - 1 : y, m === 0 ? 12 : m).catch(() => null);
             const punteroGuardado = estadoPrevio?.data?.continuarPuntero;
             const resultados = proponerContinuacion({
-                objectiveId: selectedObjective,
+                objectiveId: objContinuar,
                 dias,
-                guardias: guardiasBase.map((e: any) => ({ id: e.id, nombre: e.name || e.id, previos: previosPorEmp.get(e.id) || [], puestoPreferido: getEmpDefaultPos(e.id) || '' })),
+                guardias: guardiasBase.map((e: any) => ({ id: e.id, nombre: e.name || e.id, previos: previosPorEmp.get(e.id) || [], puestoPreferido: etiquetar(resolveObjectiveForEmp(e.id), getEmpDefaultPos(e.id) || '') })),
                 salientes: [...salientesPorEmp].map(([id, s]) => ({ id, nombre: s.nombre, previos: s.previos })),
                 estructura: estructuraContinuar,
                 estadoCelda,
-                diaBloqueado: (ds) => isPlanningDateLocked(ds) || (!extenderServicio && isOutsideServiceRange(ds)),
+                diaBloqueado: (ds) => isPlanningDateLocked(ds) || (!enGrupo && !extenderServicio && isOutsideServiceRange(ds)),
                 turnoHabilitado,
-                cupoDia: (ds) => (!extenderServicio && isOutsideServiceRange(ds) ? null : cupoDelServicio(estructuraContinuar, ds, turnoHabilitado)),
+                cupoDia: (ds) => (!enGrupo && !extenderServicio && isOutsideServiceRange(ds) ? null : cupoDelServicio(estructuraContinuar, ds, turnoHabilitado)),
                 punteroPrevio: Array.isArray(punteroGuardado) ? punteroGuardado.map(String) : null,
                 cargado,
             });
             const cambios: Record<string, any> = {};
             for (const r of resultados) {
                 if (r.estimado) continue;
-                for (const c of r.propuestas) cambios[`${c.employeeId}_${c.dateStr}`] = cambioPendienteDe(c, selectedObjective);
+                for (const c of r.propuestas) cambios[`${c.employeeId}_${c.dateStr}`] = cambioContinuar(c);
             }
             const merged = { ...pendingChanges, ...cambios };
             const cyclesForCoverage = autoSelectedCyclesRef.current?.length ? autoSelectedCyclesRef.current : autoCycles;
@@ -11921,17 +11946,28 @@ function PlanificacionDesktop() {
             const puestosCortos: { dateStr: string; positionName: string }[] = [];
             const celdas: { dateStr: string; positionName: string; code: string; nombre?: string }[] = [];
             const diasConPropuesta = new Set(Object.keys(cambios).map((k) => k.slice(-10)));
+            // En el grupo la cobertura se cuenta por objetivo, con sus puestos y sus turnos.
+            const delObjetivo = (src: Record<string, any>, oid: string) => {
+                if (!enGrupo) return src;
+                const out: Record<string, any> = {};
+                for (const [k, v] of Object.entries(src)) if (!v?.objectiveId || String(v.objectiveId) === oid) out[k] = v;
+                return out;
+            };
+            const porObjetivo = (enGrupo
+                ? objsGrupo.map((oid) => ({ oid, puestos: (grupoSlaMap[oid] || []) as any[] }))
+                : [{ oid: selectedObjective, puestos: estructuraContinuar as any[] }])
+                .map((e) => ({ ...e, merged: delObjetivo(merged, e.oid), shifts: delObjetivo(shiftsMap, e.oid) }));
             for (const dateStr of dias) {
-                if (!extenderServicio && isOutsideServiceRange(dateStr)) continue;
+                if (!enGrupo && !extenderServicio && isOutsideServiceRange(dateStr)) continue;
                 const dayLetter = getDayLetter(dateStr);
                 let requeridos = 0;
                 let cerrados = 0;
-                estructuraContinuar.forEach((pos: any) => {
-                    const units = countPositionClosedUnits(dateStr, pos, dayLetter, guardiasBase, merged, shiftsMap, cyclesForCoverage);
+                for (const o of porObjetivo) o.puestos.forEach((pos: any) => {
+                    const units = countPositionClosedUnits(dateStr, pos, dayLetter, guardiasBase, o.merged, o.shifts, cyclesForCoverage);
                     requeridos += units.required;
                     cerrados += units.closed;
                     if (units.required > 0 && units.closed < units.required) {
-                        puestosCortos.push({ dateStr, positionName: pos.positionName });
+                        puestosCortos.push({ dateStr, positionName: etiquetar(o.oid, pos.positionName) });
                     }
                 });
                 if (requeridos > 0 && cerrados < requeridos) cortos.push({ dateStr, cerrados, requeridos });
@@ -11939,8 +11975,8 @@ function PlanificacionDesktop() {
                 for (const e of guardiasBase) {
                     const key = `${e.id}_${dateStr}`;
                     const sh = merged[key] ? (merged[key].isDeleted ? null : merged[key]) : shiftsMap[key];
-                    if (!sh || (sh.objectiveId && String(sh.objectiveId) !== String(selectedObjective))) continue;
-                    celdas.push({ dateStr, positionName: sh.positionName || '', code: String(sh.code || ''), nombre: e.name || e.id });
+                    if (!sh || (sh.objectiveId && !objsGrupo.includes(String(sh.objectiveId)))) continue;
+                    celdas.push({ dateStr, positionName: etiquetar(sh.objectiveId, sh.positionName), code: String(sh.code || ''), nombre: e.name || e.id });
                 }
             }
             const sobrados = sobrantesPorDia(estructuraContinuar, celdas);
@@ -12037,7 +12073,7 @@ function PlanificacionDesktop() {
             for (const c of r.propuestas) {
                 const key = `${c.employeeId}_${c.dateStr}`;
                 if (next[key] && !next[key].isDeleted) continue;
-                next[key] = cambioPendienteDe(c, selectedObjective);
+                next[key] = cambioContinuar(c);
                 escritas.add(key);
                 if (c.isFranco) francos += 1; else turnos += 1;
             }
@@ -12047,7 +12083,7 @@ function PlanificacionDesktop() {
             const key = `${s.celda.employeeId}_${s.dateStr}`;
             return escritas.has(key) || s.tipo === 'relevante';
         });
-        for (const s of aceptadas) next[`${s.celda.employeeId}_${s.dateStr}`] = cambioPendienteDe(s.celda, selectedObjective);
+        for (const s of aceptadas) next[`${s.celda.employeeId}_${s.dateStr}`] = cambioContinuar(s.celda);
         if (turnos + francos > 0 && !origenArranqueRef.current && !armadoGuardado?.iniciadoAt) {
             origenArranqueRef.current = ORIGEN_CONTINUAR_MES;
         }
