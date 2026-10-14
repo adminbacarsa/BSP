@@ -729,6 +729,8 @@ const SHIFT_STYLES: any = {
 };
 
 const GRUPO_COLOR_HEX = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
+/** Colores por puesto en la vista de un objetivo (8 bien distinguibles). */
+const COLOR_PUESTO_HEX = ['#0ea5e9', '#16a34a', '#d97706', '#db2777', '#7c3aed', '#0d9488', '#dc2626', '#4b5563'];
 
 /** Mantiene tooltips/modales del pie de cobertura dentro del viewport. */
 function clampPlanifFloatingPos(clientX: number, clientY: number, panelW = 320, panelH = 220): { left: number; top: number } {
@@ -1313,6 +1315,8 @@ const rfzDocToShiftView = (rfz: any) => ({
 const CELDA_BORRADA = { borrada: true } as const;
 
 type EntradaCeldaGrilla = {
+    /** Un color y una sigla por puesto del servicio, para distinguirlos en la celda (vista de un objetivo). */
+    colorPuesto?: Record<string, { color: string; sigla: string }>;
     selectedObjective: any;
     selectedGrupo: any;
     grupoUnifiedMode: boolean;
@@ -1558,6 +1562,10 @@ function calcularCeldaGrilla(e: EntradaCeldaGrilla, emp: any, isGuest: boolean, 
         const _oi = selectedGrupo.objectiveIds.indexOf(activeShift.objectiveId!);
         grupoColor = GRUPO_COLOR_HEX[_oi % GRUPO_COLOR_HEX.length];
         grupoNombre = (selectedGrupo.objectiveNames[_oi] || '').trim().split(/\s+/).filter((w: string) => w.length > 1).pop()?.slice(0, 6).toUpperCase() || (selectedGrupo.objectiveNames[_oi] || '').slice(0, 5).toUpperCase();
+    } else if (!(selectedGrupo && grupoUnifiedMode) && content && !isOtherObjectiveShift && cellPosName && e.colorPuesto?.[cellPosName]
+        && !isLeaveCell && !['F', 'FF', 'FP', 'RET'].includes(String(cellCode || '').toUpperCase())) {
+        grupoColor = e.colorPuesto[cellPosName].color;
+        grupoNombre = e.colorPuesto[cellPosName].sigla;
     }
     const titulo = isOpsCoverageCell || evOverlay
         ? undefined
@@ -14262,7 +14270,21 @@ function PlanificacionDesktop() {
         return keys;
     }, [modoRapido, coverageTooltip?.dateStr, lecturaMes]);
     const sobraFirma = [...sobraKeys].sort().join('|');
+    const colorPuestoGrilla = useMemo(() => {
+        const out: Record<string, { color: string; sigla: string }> = {};
+        const nombres = ((effectivePosStructure || []) as any[])
+            .map((p: any) => String(p.positionName || ''))
+            .filter((n) => n && n !== 'General' && n !== 'Retén');
+        if (nombres.length < 2) return out;
+        nombres.forEach((n, i) => {
+            const num = n.match(/^puesto\s*(\d+)$/i);
+            const sigla = num ? `P${num[1]}` : n.replace(/[^A-Za-zÁÉÍÓÚÑáéíóúñ0-9 ]/g, '').trim().split(/\s+/)[0].slice(0, 6).toUpperCase();
+            out[n] = { color: COLOR_PUESTO_HEX[i % COLOR_PUESTO_HEX.length], sigla };
+        });
+        return out;
+    }, [effectivePosStructure]);
     const entradaCeldas: EntradaCeldaGrilla = {
+        colorPuesto: colorPuestoGrilla,
         selectedObjective,
         selectedGrupo,
         grupoUnifiedMode,
@@ -14304,7 +14326,7 @@ function PlanificacionDesktop() {
         filasCeldas, daysInMonth, selectedObjective, selectedGrupo, grupoUnifiedMode, slaIdToObjId,
         pendingChanges, shiftsMap, rfzByEmpDate, absencesMap, planPublicadoGrilla, cellTurnosMap, turaMap,
         lctRestByCell, cruceTopePorEmp, excludedPositionsByDate, vacancyConsultas, isServiceLocked, fechaBloqueadaGrilla, clients,
-        sobraFirma, focoSobra,
+        sobraFirma, focoSobra, colorPuestoGrilla,
     ]);
     const ctxCeldasExtraRef = useRef<Record<string, CtxCeldaGrilla>>({});
     const celdaDeGrilla = (emp: any, isGuest: boolean, day: Date, dayIndex: number) => {
