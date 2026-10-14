@@ -11751,9 +11751,36 @@ function PlanificacionDesktop() {
     // «Continuar desde el mes anterior»: sigue el ciclo de cada guardia (no copia día por número).
     /** Borrador de una celda propuesta por Continuar; en el grupo, «Vifood · Puesto 1» vuelve a su objetivo y puesto. */
     const cambioContinuar = (c: Parameters<typeof cambioPendienteDe>[0]) => {
-        const g = enGrupoRapido ? puestoDeEtiqueta(String(c.positionName || '')) : null;
+        let g = enGrupoRapido ? puestoDeEtiqueta(String(c.positionName || '')) : null;
+        if (enGrupoRapido && selectedGrupo && !c.isFranco) {
+            // El código manda: VF solo existe en Vifood, aunque el mes anterior haya quedado guardado en Peaje.
+            const code = String(c.code || '').toUpperCase();
+            const tiene = (objId: string, pos: string) => ((grupoSlaMap[objId] || []) as any[]).some((p: any) =>
+                p.positionName === pos && ((p.shifts || []) as any[]).some((s: any) => String(s.code || '').toUpperCase() === code));
+            if (!g || !tiene(g.objId, g.pos)) {
+                const duenos = selectedGrupo.objectiveIds.flatMap((objId) => ((grupoSlaMap[objId] || []) as any[])
+                    .filter((p: any) => tiene(objId, p.positionName)).map((p: any) => ({ objId, pos: String(p.positionName) })));
+                if (duenos.length && new Set(duenos.map((d) => d.objId)).size === 1) g = duenos.find((d) => d.pos === g?.pos) || duenos[0];
+            }
+        }
         if (g) return cambioPendienteDe({ ...c, positionName: g.pos }, g.objId);
-        return cambioPendienteDe(c, enGrupoRapido ? (resolveObjectiveForEmp(c.employeeId) || selectedObjective) : selectedObjective);
+        return cambioPendienteDe(c, enGrupoRapido ? (francoObjRef.current[c.employeeId] || resolveObjectiveForEmp(c.employeeId) || selectedObjective) : selectedObjective);
+    };
+    /** En el grupo el franco va al objetivo donde el guardia trabaja la mayor parte del mes (ALBANI: Vifood). */
+    const francoObjRef = useRef<Record<string, string>>({});
+    const calcularFrancoObj = (resultados: Array<{ employeeId: string; propuestas: Array<Parameters<typeof cambioPendienteDe>[0]> }>) => {
+        francoObjRef.current = {};
+        if (!enGrupoRapido) return;
+        for (const r of resultados) {
+            const cuenta: Record<string, number> = {};
+            for (const c of r.propuestas) {
+                if (c.isFranco) continue;
+                const oid = String(cambioContinuar(c).objectiveId || '');
+                if (oid) cuenta[oid] = (cuenta[oid] || 0) + 1;
+            }
+            const top = Object.entries(cuenta).sort((a, b) => b[1] - a[1])[0];
+            if (top) francoObjRef.current[r.employeeId] = top[0];
+        }
     };
 
     const abrirContinuarMesAnterior = async () => {
@@ -11935,6 +11962,7 @@ function PlanificacionDesktop() {
                 punteroPrevio: Array.isArray(punteroGuardado) ? punteroGuardado.map(String) : null,
                 cargado,
             });
+            calcularFrancoObj(resultados);
             const cambios: Record<string, any> = {};
             for (const r of resultados) {
                 if (r.estimado) continue;
