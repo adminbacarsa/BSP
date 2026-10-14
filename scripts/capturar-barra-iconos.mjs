@@ -29,7 +29,7 @@ try {
   const medida = await p.evaluate(`(() => {
     const desborda = [];
     const vistos = new Set();
-    for (const s of ['[data-modo-rapido-toggle]', '[data-importar-excel-barra]', '[data-continuar-mes]']) {
+    for (const s of ['[data-modo-rapido-toggle]', '[data-servicio-planilla]', '[data-continuar-mes]']) {
       let el = document.querySelector(s);
       while (el && el.tagName !== 'MAIN' && el !== document.body) {
         if (!vistos.has(el) && el.scrollWidth > el.clientWidth + 1) desborda.push({ tag: el.tagName, cls: String(el.className).slice(0, 80), scroll: el.scrollWidth, client: el.clientWidth });
@@ -37,14 +37,14 @@ try {
         el = el.parentElement;
       }
     }
-    const sel = ['[data-importar-excel-barra]', '[data-servicio-planilla]', '[data-modo-rapido-toggle]', '[data-pegar-excel-abrir]', '[data-modo-rapido-ayuda-abrir]', '[data-continuar-mes]', '[data-importar-excel]'];
+    const sel = ['[data-servicio-planilla]', '[data-modo-rapido-toggle]', '[data-pegar-excel-abrir]', '[data-modo-rapido-ayuda-abrir]', '[data-continuar-mes]', '[data-importar-excel]'];
     const botones = sel.map((s) => { const b = document.querySelector(s); if (!b) return { s, falta: true }; const r = b.getBoundingClientRect(); return { s, w: Math.round(r.width), h: Math.round(r.height), derecha: Math.round(r.right), texto: (b.innerText || '').trim() }; });
-    const fila = document.querySelector('[data-importar-excel-barra]')?.parentElement;
+    const fila = document.querySelector('[data-servicio-planilla]')?.parentElement;
     const hijos = fila ? [...fila.children].map((h) => ({ w: Math.round(h.getBoundingClientRect().width), sw: h.scrollWidth, cls: String(h.className).slice(0, 50) })) : [];
     return { fila: fila && { w: fila.clientWidth, sw: fila.scrollWidth }, hijos, desborda, docScroll: document.documentElement.scrollWidth, ancho: window.innerWidth, botones };
   })()`);
   console.log(JSON.stringify(medida, null, 2));
-  await p.evaluate(`(() => { for (const s of ['[data-importar-excel-barra]', '[data-modo-rapido-toggle]']) { let el = document.querySelector(s); while (el && el.tagName !== 'MAIN' && el !== document.body) { if (el.scrollLeft) el.scrollLeft = 0; el = el.parentElement; } } window.scrollTo(0, 0); })()`);
+  await p.evaluate(`(() => { for (const s of ['[data-servicio-planilla]', '[data-modo-rapido-toggle]']) { let el = document.querySelector(s); while (el && el.tagName !== 'MAIN' && el !== document.body) { if (el.scrollLeft) el.scrollLeft = 0; el = el.parentElement; } } window.scrollTo(0, 0); })()`);
   await p.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 900, y: 740, button: 'none' });
   await sleep(500);
 

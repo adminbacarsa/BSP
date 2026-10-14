@@ -17922,17 +17922,6 @@ function PlanificacionDesktop() {
                             </div>
                                 <button
                                     type="button"
-                                    data-importar-excel-barra
-                                    onClick={() => { void abrirImportarExcel(false); }}
-                                    disabled={bloqueoMesCerrado || !empresaId}
-                                    title={bloqueoMesCerrado ? 'Mes cerrado' : 'Importar planilla (elegir el objetivo)'}
-                                    aria-label="Importar planilla"
-                                    className="flex items-center justify-center w-8 h-8 bg-white text-indigo-700 border border-indigo-200 rounded-lg hover:bg-indigo-50 transition-colors disabled:opacity-40 shrink-0 shadow-sm"
-                                >
-                                    <FileSpreadsheet size={14} aria-hidden/>
-                                </button>
-                                <button
-                                    type="button"
                                     data-servicio-planilla
                                     onClick={() => { void abrirServicioPlanilla(); }}
                                     disabled={bloqueoMesCerrado || !empresaId}
