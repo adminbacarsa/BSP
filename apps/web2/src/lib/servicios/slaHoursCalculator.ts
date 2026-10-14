@@ -220,7 +220,7 @@ export function computePositionDayComposition(
         return;
       }
       if (shift.days?.length) {
-        if (shift.days.includes(dayCode)) addVariant(shift);
+        if (shift.days.includes(dayCode) || ((shift as { feriados?: boolean }).feriados === true && !!dateStr && isArgentineHoliday(dateStr))) addVariant(shift);
       } else {
         addVariant(shift);
       }

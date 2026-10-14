@@ -22,3 +22,13 @@ describe('TURA en el modo rápido', () => {
     assert.equal(textoTura('M', '07:00', '15:00', { lado: 'despues', horas: 2 }), 'TURA 15:00–17:00 (2 h, después del M)');
   });
 });
+
+describe('«+ feriados» en un turno del servicio', () => {
+  it('VFM domingos + feriados corre el lunes 12/10/2026 (feriado) y no el lunes 5/10', async () => {
+    const { correFeriado } = await import('../servicios/turnoFeriados');
+    const vfm = { code: 'VFM', days: ['D'], feriados: true };
+    assert.equal(correFeriado(vfm, '2026-10-12'), true);
+    assert.equal(correFeriado(vfm, '2026-10-05'), false);
+    assert.equal(correFeriado({ code: 'VFM', days: ['D'] }, '2026-10-12'), false);
+  });
+});

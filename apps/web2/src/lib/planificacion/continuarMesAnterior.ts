@@ -20,6 +20,7 @@ import {
   type ViaC2,
 } from './continuarC2';
 import { findLctRestGaps, type LctShiftInput } from './lctRestGap';
+import { correFeriado } from '@/lib/servicios/turnoFeriados';
 
 export type { CupoDia } from './continuarC2';
 
@@ -867,7 +868,7 @@ export function turnoHabilitadoPorEstructura(estructura: PuestoSla[], positionNa
   const sh = turnoDelPuesto(pos, code);
   if (!sh) return false;
   if (Array.isArray(sh.specificDates) && sh.specificDates.length > 0 && !sh.specificDates.includes(dateStr)) return false;
-  if (Array.isArray(sh.days) && sh.days.length > 0 && !sh.days.includes(letraDia(dateStr))) return false;
+  if (Array.isArray(sh.days) && sh.days.length > 0 && !sh.days.includes(letraDia(dateStr)) && !correFeriado(sh, dateStr)) return false;
   return true;
 }
 

@@ -14,6 +14,8 @@ export interface ShiftVariant {
   isCustom?: boolean;
   days?: string[];
   specificDates?: string[]; // YYYY-MM-DD: fechas puntuales (refuerzos), no recurrentes
+  /** «+ feriados»: además de sus días de la semana, corre los feriados nacionales (VFM domingos y feriados). */
+  feriados?: boolean;
   // Turno cortado: dos bloques separados en el día (ej. 09–13 y 18–22).
   // Si está presente, startTime/endTime corresponden al bloque 1 y se generan dos turnos en Firestore.
   blocks?: Array<{ startTime: string; endTime: string }>;

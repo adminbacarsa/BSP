@@ -33,6 +33,7 @@ import { httpsCallable } from 'firebase/functions';
 import { eventoService, eventosParaFecha, serviciosParaFecha, calcHorasEvento, type Evento, type ServicioEvento } from '@/services/eventoService';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { collection, onSnapshot, addDoc, deleteDoc, doc, query, orderBy, limit, serverTimestamp, Timestamp, where, getDocs, getDoc, updateDoc, writeBatch, setDoc, deleteField } from 'firebase/firestore';
+import { correFeriado } from '@/lib/servicios/turnoFeriados';
 
 type PlanificacionDotacionEntry = { positionName: string; shiftCode?: string };
 type PlanificacionDotacionMap = Record<string, PlanificacionDotacionEntry>;
@@ -5356,7 +5357,7 @@ function PlanificacionDesktop() {
                         .filter((st) => st.startTime && st.endTime)
                         .filter((st) => (Array.isArray(st.specificDates) && st.specificDates.length
                             ? st.specificDates.includes(dateStr)
-                            : !Array.isArray(st.days) || !st.days.length || st.days.includes(letraHoras)))
+                            : !Array.isArray(st.days) || !st.days.length || st.days.includes(letraHoras) || correFeriado(st, dateStr)))
                         .map((st) => ({ code: String(st.code || ''), startTime: String(st.startTime), endTime: String(st.endTime), qty: Number(st.quantity) || Number(p.qty) || 1 })),
                 }));
             const horasDia = exigeCoberturaGrilla ? coberturaPorHoras(puestosHoras, tramosHoras) : null;
@@ -14242,7 +14243,7 @@ function PlanificacionDesktop() {
         const out: TurnoSla[] = [];
         for (const p of (effectivePosStructure || []) as any[]) {
             for (const s of (p.shifts || []) as any[]) {
-                out.push({ code: s.code, name: s.name, hours: s.hours, startTime: s.startTime, endTime: s.endTime, positionName: p.positionName, ...(s.days ? { days: s.days } : {}), ...(s.specificDates ? { specificDates: s.specificDates } : {}) } as TurnoSla);
+                out.push({ code: s.code, name: s.name, hours: s.hours, startTime: s.startTime, endTime: s.endTime, positionName: p.positionName, ...(s.days ? { days: s.days } : {}), ...(s.specificDates ? { specificDates: s.specificDates } : {}), ...(s.feriados ? { feriados: true } : {}) } as TurnoSla);
             }
         }
         return out;
@@ -14309,7 +14310,7 @@ function PlanificacionDesktop() {
     const turnoValeEnFecha = (st: any, ds: string) => {
         if (!ds) return true;
         if (Array.isArray(st?.specificDates) && st.specificDates.length) return st.specificDates.includes(ds);
-        if (Array.isArray(st?.days) && st.days.length) return st.days.includes(getDayLetter(ds));
+        if (Array.isArray(st?.days) && st.days.length) return st.days.includes(getDayLetter(ds)) || correFeriado(st, ds);
         return true;
     };
     const opcionesRapido = (r: number, c: number, puestoElegido?: string) => {

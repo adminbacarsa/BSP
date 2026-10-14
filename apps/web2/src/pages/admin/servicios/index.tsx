@@ -306,7 +306,7 @@ export default function ServiciosSLAPage() {
 
   const [newCustomShift, setNewCustomShift] = useState<{
       name: string; start: string; end: string; code: string; days: string[]; specificDates: string[];
-      hasBlock2: boolean; block2Start: string; block2End: string;
+      hasBlock2: boolean; block2Start: string; block2End: string; feriados?: boolean;
   }>({
       name: '', start: '20:00', end: '05:00', code: '', days: ['V', 'S'], specificDates: [],
       hasBlock2: false, block2Start: '18:00', block2End: '22:00',
@@ -800,7 +800,7 @@ export default function ServiciosSLAPage() {
           ] } : {}),
           ...(customShiftDateMode === 'dates'
               ? { specificDates: newCustomShift.specificDates }
-              : { days: newCustomShift.days }),
+              : { days: newCustomShift.days, ...(newCustomShift.feriados ? { feriados: true } : {}) }),
       };
 
       if (editingShiftCode !== null) {
@@ -828,6 +828,7 @@ export default function ServiciosSLAPage() {
           days: v.days || [], specificDates: v.specificDates || [],
           hasBlock2, block2Start: hasBlock2 ? v.blocks![1].startTime : '18:00',
           block2End: hasBlock2 ? v.blocks![1].endTime : '22:00',
+          feriados: v.feriados === true,
       });
       setEditingShiftCode(v.code);
   };
@@ -5887,6 +5888,13 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                                 {['L','M','X','J','V','S','D'].map(day => (
                                                     <button key={day} onClick={() => toggleNewShiftDay(day)} className={`w-7 h-7 rounded text-[9px] font-black transition-colors ${newCustomShift.days.includes(day) ? 'bg-slate-900 text-white' : 'bg-white border text-slate-400'}`}>{day}</button>
                                                 ))}
+                                                <button
+                                                    type="button"
+                                                    data-turno-feriados
+                                                    title="Además de esos días, corre los feriados nacionales (ej. domingos y feriados)"
+                                                    onClick={() => setNewCustomShift(p => ({ ...p, feriados: !p.feriados }))}
+                                                    className={`h-7 rounded px-2 text-[9px] font-black transition-colors ${newCustomShift.feriados ? 'bg-rose-600 text-white' : 'bg-white border text-slate-400'}`}
+                                                >+ feriados</button>
                                             </div>
                                             <div className="flex gap-1">
                                                 {editingShiftCode && <button onClick={cancelEditShift} className="bg-slate-200 text-slate-600 px-3 py-1.5 rounded-lg font-bold text-xs hover:bg-slate-300 flex items-center gap-1"><X size={12}/> Cancelar</button>}

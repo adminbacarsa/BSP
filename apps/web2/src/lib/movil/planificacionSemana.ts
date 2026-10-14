@@ -20,6 +20,7 @@ import { hoursBetweenClockTimes } from '@/lib/planificacion/planningScheduledHou
 import { buscarClientes, clientesParaFiltro, type OpsClienteMovil } from '@/lib/movil/operacionFiltros';
 import { bandaDe, sumarDias, type FranjaMovil, type TurnoMovil } from '@/lib/movil/planificacionBasica';
 import { AVISO_MES_CERRADO, mesCerrado, mesDeFecha } from '@/lib/planificacion/mesCerradoPlanif';
+import { correFeriado } from '@/lib/servicios/turnoFeriados';
 
 export { buscarClientes, type OpsClienteMovil };
 
@@ -236,7 +237,7 @@ export function turnoHabilitadoEnFecha(pos: PlanningPositionRow, shift: Planning
   if (isPlanningShiftExcludedOnDate(pos, fecha, code)) return false;
   if (Array.isArray(shift.specificDates) && shift.specificDates.length > 0) return shift.specificDates.includes(fecha);
   const letra = DIA_LETRA[diaSemanaUtc(fecha)];
-  if (Array.isArray(shift.days) && shift.days.length > 0) return shift.days.includes(letra);
+  if (Array.isArray(shift.days) && shift.days.length > 0) return shift.days.includes(letra) || correFeriado(shift, fecha);
   return !pos.activeDays?.length || pos.activeDays.includes(letra);
 }
 

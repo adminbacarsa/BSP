@@ -141,6 +141,7 @@ export function normalizePlanningShifts(shiftList: unknown): PlanningPositionShi
     if (Array.isArray(s.specificDates) && s.specificDates.length > 0) {
       row.specificDates = s.specificDates.map((d) => String(d));
     }
+    if (s.feriados === true) (row as { feriados?: boolean }).feriados = true;
     if (s.quantity != null && !isNaN(Number(s.quantity)) && Number(s.quantity) > 0) {
       row.quantity = Math.floor(Number(s.quantity));
     }

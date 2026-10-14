@@ -78,6 +78,7 @@ import { fillCustomConcurrentMtnBands, isCustomConcurrentMtnPosition, countCusto
 import { buildFixedBandPlan, assignFixedBandOffsets, computeFixedBandGlobalStagger, enforceFixedBandFrancoRetCap, isFixedBandIntensiveMode } from './fixedBandScheduleEngine';
 import { enforceFrancoStreakRules } from './francoStreakGuard';
 import { isApretarCronoDay, isApretarScheduleActive, isContingencyApretarDay, isModo12Day, getModo12Days, usesExpandedRetPool } from './objectiveCoverageDemand';
+import { correFeriado } from '@/lib/servicios/turnoFeriados';
 import { assignmentBreaksBandTransition, nextAssignmentBreaksBandTransition, normBand } from './rotativeBandGuard';
 import { computeModo12AbsenceOfferCredit } from './planningCoveragePolicy';
 import {
@@ -893,6 +894,8 @@ export function positionIsActiveOn(pos: V2PositionDef, dayLetter: string, dateSt
         return true;
     }
 
+    if (dateStr && weekdayShifts.some((s) => correFeriado(s, dateStr))) return true;
+
     if (specificDateShifts.length > 0 && weekdayShifts.length === 0) {
         return false;
     }
@@ -914,7 +917,7 @@ function shiftsActiveOnDay(pos: V2PositionDef, dayLetter: string, dateStr?: stri
         if (Array.isArray(s.specificDates) && s.specificDates.length > 0) {
             return dateStr ? s.specificDates.includes(dateStr) : false;
         }
-        if (Array.isArray(s.days) && s.days.length > 0 && !s.days.includes(dayLetter)) return false;
+        if (Array.isArray(s.days) && s.days.length > 0 && !s.days.includes(dayLetter) && !correFeriado(s, dateStr)) return false;
         return true;
     });
 }
