@@ -71,7 +71,8 @@ export type CoverageRejectReason =
   | 'RESTRICCION'
   | 'EN_OTRA_SESION'
   | 'DESCANSO'
-  | 'DESCANSO_AUTORIZAR';
+  | 'DESCANSO_AUTORIZAR'
+  | 'HUECO_NOCHE';
 
 export const COVERAGE_REJECT_LABEL: Record<CoverageRejectReason, string> = {
   ES_EL_AUSENTE: 'Es el ausente de esta vacante',
@@ -94,6 +95,7 @@ export const COVERAGE_REJECT_LABEL: Record<CoverageRejectReason, string> = {
   EN_OTRA_SESION: 'Ya está propuesto en otra vacante del CC',
   DESCANSO: 'Menos de 8 h de descanso (bloqueado)',
   DESCANSO_AUTORIZAR: 'Requiere autorización (descanso entre 8 y 12 h)',
+  HUECO_NOCHE: 'Una N no se cubre con extensión ni adelanto: RET o franco (FT)',
 };
 
 export function coverageRejectMessage(reason: CoverageRejectReason): string {
@@ -511,6 +513,18 @@ function baseReject(
   return null;
 }
 
+/**
+ * Hueco de noche (banda N/N12, P5N, o empieza entre las 20 y las 2 en hora AR). Se cubre con RET o franco:
+ * extender a la T o adelantar a la M deja a alguien saliendo o entrando de madrugada.
+ */
+export function esHuecoNoche(gap: CoverageGapView): boolean {
+  const band = norm(gap.band);
+  if (band === 'N' || band === 'N12' || /^(P\d+|PL)N$/.test(band) || /^(P\d+|PL)N12$/.test(band)) return true;
+  if (!gap.startMs) return false;
+  const hora = Math.floor((gap.startMs - arMidnight(gap.startMs)) / 3_600_000);
+  return hora >= 20 || hora < 2;
+}
+
 function considerExt(
   shift: CoverageShiftView,
   input: BuildCoverageCandidatesInput,
@@ -518,6 +532,7 @@ function considerExt(
 ): CoverageRejectReason | null {
   const common = baseReject(shift, input, accept);
   if (common) return common;
+  if (esHuecoNoche(input.gap)) return 'HUECO_NOCHE';
   const toleranceMs = input.toleranceMs ?? COVERAGE_JOIN_TOLERANCE_MS;
   const hardCapMs = input.hardCapMs ?? COVERAGE_HARD_CAP_MS;
   if (!accept && shift.isPresent !== true) return 'NO_PRESENTE';
@@ -539,6 +554,7 @@ function considerAdv(
 ): CoverageRejectReason | null {
   const common = baseReject(shift, input, accept);
   if (common) return common;
+  if (esHuecoNoche(input.gap)) return 'HUECO_NOCHE';
   if (shift.isFranco === true || FRANCO_CODES.has(norm(shift.code))) return 'NO_CONTIGUO';
   if (norm(shift.code) === 'RET' || norm(shift.code) === 'REF' || norm(shift.code) === 'ESC') return 'NO_CONTIGUO';
   // Los refuerzos (RFZ, RFZF, RFZE) y el turno agregado (TURA) no entran en la cobertura.
