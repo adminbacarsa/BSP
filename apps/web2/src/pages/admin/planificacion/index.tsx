@@ -14618,8 +14618,26 @@ function PlanificacionDesktop() {
         fuente?: FuenteRapida | null,
     ): { change: Record<string, any>; novedad?: Record<string, any> } | { error: string } => {
         const tipo = tipoDeCodigo(code);
-        const objectiveId = fuente?.objectiveId || resolveObjectiveForEmp(emp.id);
-        const pos = puestoFilaRapido(emp.id, c);
+        let objectiveId = fuente?.objectiveId || resolveObjectiveForEmp(emp.id);
+        let pos = puestoFilaRapido(emp.id, c);
+        if (enGrupoRapido && selectedGrupo && !fuente?.objectiveId) {
+            // En el grupo el código manda: VFM va al puesto de Vifood que lo tiene, aunque el guardia sea de Peaje.
+            const puestosGrupo = selectedGrupo.objectiveIds.flatMap((objId) => ((grupoSlaMap[objId] || []) as any[]).map((p: any) => ({ objId, p })));
+            const posValido = puestosGrupo.some((x) => x.p.positionName === pos);
+            if (tipo === 'FRANCO') {
+                if (!posValido) pos = 'General';
+            } else {
+                const n = normalizarCodigo(code);
+                const duenos = puestosGrupo.filter((x) => ((x.p.shifts || []) as any[]).some((s: any) => normalizarCodigo(String(s.code || '')) === n));
+                const elegido = duenos.find((x) => x.objId === objectiveId && x.p.positionName === pos)
+                    || duenos.find((x) => x.objId === objectiveId)
+                    || duenos[0];
+                if (elegido) {
+                    objectiveId = elegido.objId;
+                    pos = String(elegido.p.positionName);
+                }
+            }
+        }
         const base = {
             isTemp: true,
             _isAutoRotation: undefined,
