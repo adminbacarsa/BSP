@@ -147,6 +147,8 @@ export type SugerenciaNivelacion = {
   tipo?: 'nivelacion' | 'relevante' | 'suelto';
   /** `suelto` sobre su franco: se escribe como franco trabajado. */
   francoTrabajado?: boolean;
+  /** `suelto` que trabaja su franco: el franco pasa a este día (sigue 6+2, sin FT). */
+  francoA?: string;
 };
 
 export type ResultadoGuardia = {

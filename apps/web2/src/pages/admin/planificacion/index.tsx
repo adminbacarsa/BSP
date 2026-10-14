@@ -12214,6 +12214,9 @@ function PlanificacionDesktop() {
         for (const s of aceptadas) {
             const ch = cambioContinuar(s.celda);
             next[`${s.celda.employeeId}_${s.dateStr}`] = s.francoTrabajado ? { ...ch, isFranco: false, isFrancoTrabajado: true, coveredFromFranco: true } : ch;
+            if (s.francoA) {
+                next[`${s.celda.employeeId}_${s.francoA}`] = cambioContinuar({ ...s.celda, dateStr: s.francoA, code: 'F', name: 'Franco', positionName: 'General', isFranco: true, hours: 0 });
+            }
         }
         if (turnos + francos > 0 && !origenArranqueRef.current && !armadoGuardado?.iniciadoAt) {
             origenArranqueRef.current = ORIGEN_CONTINUAR_MES;
