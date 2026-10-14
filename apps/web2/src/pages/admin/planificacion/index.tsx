@@ -280,6 +280,7 @@ import { claveEquivalencia, type EquivalenciaCodigo } from '@/lib/planificacion/
 import { mesLabelDe, resolverTurnoCopiado } from '@/lib/planificacion/copiarTurno';
 import { avisoJornadaTura, HORAS_TURA, puestoAdmite12h, textoTura, tramoTura, type LadoTura } from '@/lib/planificacion/turaRapido';
 import { crearTuraPlanificacion } from '@/lib/refuerzo/crearTuraPlanificacion';
+import { coberturaPorHoras, textoHoras, type PuestoHoras, type TramoHoras } from '@/lib/planificacion/coberturaHoras';
 import { crearRfzePlanificacion } from '@/lib/refuerzo/crearRfzePlanificacion';
 import { modifyRefuerzoPuntual } from '@/lib/refuerzo/modifyRefuerzoPuntual';
 import { cancelRefuerzoPuntual } from '@/lib/refuerzo/cancelRefuerzoPuntual';
@@ -5280,7 +5281,7 @@ function PlanificacionDesktop() {
     }, [selectedObjective, positionStructure, daysInMonth, dotacionBaseEmployees, pendingChanges, shiftsMap, coverageCyclesForObjective, dominantPosition]);
 
     const lecturaMes = useMemo(() => {
-        const porDia: Record<string, ReturnType<typeof leerDia>> = {};
+        const porDia: Record<string, ReturnType<typeof leerDia> & { cerradoPorHoras?: boolean; textoHoras?: string }> = {};
         const sobraPorDia: Record<string, ReturnType<typeof lineasDeSobra>> = {};
         const faltantes: FaltanteBanda[] = [];
         const avisos: ReturnType<typeof avisosDesdeLectura> = [];
@@ -5295,6 +5296,7 @@ function PlanificacionDesktop() {
         for (const day of daysInMonth) {
             const dateStr = getDateKey(day);
             const turnos: TurnoDia[] = [];
+            const tramosHoras: TramoHoras[] = [];
             const turnos12: TurnoPuesto12[] = [];
             const francos: Array<{ empId: string; nombre: string; delObjetivo: boolean }> = [];
             for (const emp of dotacionBaseEmployees) {
@@ -5315,6 +5317,26 @@ function PlanificacionDesktop() {
                     positionName,
                     hours: Number(raw.hours) || undefined,
                 });
+                {
+                    const aus0 = absencesMap[key];
+                    const noTrabaja = code === 'F' || code === 'FF' || code === 'FP' || code === 'RET' || code === 'EV' || raw.isFranco || raw.isNovedad || raw.isAbsent
+                        || code.startsWith('RFZ') || code === 'TURA' || esCeldaLicencia({ code, tieneAusencia: !!(aus0 && isActiveAbsence(aus0)) });
+                    const ini = hhmmRapido(raw.startTime);
+                    const fin = hhmmRapido(raw.endTime);
+                    if (!noTrabaja && ini && fin) {
+                        const cubre = String(raw.coversPositionName || '').trim();
+                        const segDesde = typeof raw.segmentFromTime === 'string' ? raw.segmentFromTime : '';
+                        const segHasta = typeof raw.segmentToTime === 'string' ? raw.segmentToTime : '';
+                        const extFin = (raw.isExtended && typeof raw.extensionEndTime === 'string') ? raw.extensionEndTime : '';
+                        if (cubre && cubre !== positionName && segDesde && segHasta) {
+                            // El tramo de cobertura se acredita al puesto cubierto; el resto, al propio.
+                            tramosHoras.push({ positionName: positionName || cubre, startTime: ini, endTime: fin });
+                            tramosHoras.push({ positionName: cubre, startTime: segDesde, endTime: segHasta });
+                        } else {
+                            tramosHoras.push({ positionName: cubre || positionName, startTime: ini, endTime: extFin || fin });
+                        }
+                    }
+                }
                 if (code === 'F' || code === 'FF' || code === 'FP' || raw.isFranco) {
                     francos.push({ empId: emp.id, nombre, delObjetivo: String(emp.preferredObjectiveId || '') === String(selectedObjective) });
                 }
@@ -5324,12 +5346,27 @@ function PlanificacionDesktop() {
                 turnos12.push({ empId: emp.id, nombre, dateStr, code, positionName, bloqueado });
             }
             const lectura = leerDia({ turnos, puestos });
-            porDia[dateStr] = lectura;
+            // Doble control: si las franjas no cierran por código, se valida por horas de reloj.
+            const letraHoras = getDayLetter(dateStr);
+            const puestosHoras: PuestoHoras[] = (positionStructure || [])
+                .filter((p: any) => p.exigeCobertura !== false && isPosActiveOnDay(p, letraHoras, dateStr))
+                .map((p: any) => ({
+                    positionName: String(p.positionName || ''),
+                    franjas: ((p.shifts || []) as any[])
+                        .filter((st) => st.startTime && st.endTime)
+                        .filter((st) => (Array.isArray(st.specificDates) && st.specificDates.length
+                            ? st.specificDates.includes(dateStr)
+                            : !Array.isArray(st.days) || !st.days.length || st.days.includes(letraHoras)))
+                        .map((st) => ({ code: String(st.code || ''), startTime: String(st.startTime), endTime: String(st.endTime), qty: Number(st.quantity) || Number(p.qty) || 1 })),
+                }));
+            const horasDia = exigeCoberturaGrilla ? coberturaPorHoras(puestosHoras, tramosHoras) : null;
+            const cerradoPorHoras = !!horasDia?.cerrado;
+            porDia[dateStr] = { ...lectura, ...(cerradoPorHoras ? { reconcilia: true } : {}), cerradoPorHoras, textoHoras: horasDia ? textoHoras(horasDia) : '' };
             sobraPorDia[dateStr] = lineasDeSobra(puestos, turnos);
             avisos.push(...avisosDesdeLectura(dateStr, lectura, turnos, puestos));
             const horasMes: Record<string, number> = {};
             for (const emp of dotacionBaseEmployees) horasMes[emp.id] = Number(empMonthlyHours[emp.id]) || 0;
-            faltantes.push(...faltantesDelDia({
+            if (!cerradoPorHoras) faltantes.push(...faltantesDelDia({
                 dateStr,
                 puestos,
                 turnos,
@@ -5340,7 +5377,19 @@ function PlanificacionDesktop() {
             }));
         }
         return { porDia, sobraPorDia, faltantes, avisos };
-    }, [selectedObjective, positionStructure, daysInMonth, dotacionBaseEmployees, pendingChanges, shiftsMap, slaIdToObjId, absencesMap, empMonthlyHours]);
+    }, [selectedObjective, positionStructure, daysInMonth, dotacionBaseEmployees, pendingChanges, shiftsMap, slaIdToObjId, absencesMap, empMonthlyHours, exigeCoberturaGrilla]);
+
+    /** Días con huecos para publicar y el resumen: un día cerrado por horas (doble control) no cuenta. */
+    const diasConHuecos = useMemo(() => {
+        if (!objectiveCoverageGapReport) return 0;
+        let n = 0;
+        for (const [dateStr, d] of Object.entries(objectiveCoverageGapReport.byDay)) {
+            if (!d.required || d.isFull) continue;
+            if (lecturaMes.porDia[dateStr]?.cerradoPorHoras) continue;
+            n++;
+        }
+        return n;
+    }, [objectiveCoverageGapReport, lecturaMes]);
 
     /**
      * Cobertura de un objetivo dentro del grupo unificado.
@@ -8816,7 +8865,7 @@ function PlanificacionDesktop() {
         const slaRounded = Math.round(slaVendidas);
         const slaHoursMismatch = slaVendidas > 0 && plannedRounded !== slaRounded;
         const coverageGapDays = objectiveCoverageGapReport
-            ? objectiveCoverageGapReport.daysPartial + objectiveCoverageGapReport.daysEmpty
+            ? diasConHuecos
             : 0;
         const hasCoverageGaps = coverageGapDays > 0;
 
@@ -8883,7 +8932,7 @@ function PlanificacionDesktop() {
         const slaClosePlanned = objectiveMonthSlaBaseHours;
         const slaHoursMismatch = slaVendidas > 0 && Math.round(slaClosePlanned) !== Math.round(slaVendidas);
         const coverageGapDays = objectiveCoverageGapReport
-            ? objectiveCoverageGapReport.daysPartial + objectiveCoverageGapReport.daysEmpty
+            ? diasConHuecos
             : 0;
         const hasCoverageGaps = coverageGapDays > 0;
         setPublishConfirmModal(null);
@@ -15016,6 +15065,7 @@ function PlanificacionDesktop() {
     };
     const propuestas12De = (dateStr: string, soloPos?: string, preferido?: string): Propuesta12h[] => {
         if (!exigeCoberturaGrilla) return [];
+        if (lecturaMes.porDia[dateStr]?.cerradoPorHoras) return [];
         const report = buildDayCoverageReport(dateStr);
         if (!report) return [];
         const turnos = turnos12(dateStr);
@@ -16842,11 +16892,17 @@ function PlanificacionDesktop() {
                         const cls = bloqueoMesCerrado
                             ? 'bg-slate-100 text-slate-400'
                             : (requiredPax === 0 ? 'bg-slate-50 text-slate-400' : (extra > 0 ? 'bg-amber-50 text-amber-700 cursor-pointer' : (isCovered ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-600 cursor-pointer')));
-                        const tituloLectura = lecturaDia?.mostrar ? lecturaDia.texto : '';
+                        const porHoras = !!lecturaDia?.cerradoPorHoras && closedPax < requiredPax;
+                        const tituloLectura = [
+                            porHoras ? `Franjas ${closedPax}/${requiredPax} · cerrado por horas (otro código, extensión o puesto)` : '',
+                            lecturaDia?.textoHoras || '',
+                            lecturaDia?.mostrar ? lecturaDia.texto : '',
+                        ].filter(Boolean).join(' · ');
                         return (
                             <td
                                 key={dateStr}
                                 data-cobertura-dia={dateStr}
+                                data-cobertura-horas={porHoras ? '1' : undefined}
                                 data-cobertura-extra={extra || undefined}
                                 tabIndex={modoRapido ? 0 : undefined}
                                 className={`text-center border-r border-b text-[10px] font-black ${cls}`}
@@ -16897,7 +16953,7 @@ function PlanificacionDesktop() {
                             >
                                 {requiredPax > 0 ? (
                                     <span className="inline-flex flex-col items-center leading-none">
-                                        <span>{cerradoMostrar}/{requiredPax}</span>
+                                        <span>{cerradoMostrar}/{requiredPax}{porHoras && <sup className="ml-px text-[7px] font-black text-emerald-800">h</sup>}</span>
                                         {extra > 0 && <span className="mt-0.5 text-[8px] font-black text-amber-600" title={`${extra} turnos de más`}>+{extra}</span>}
                                     </span>
                                 ) : (extra > 0 ? <span className="text-[9px] text-amber-600">+{extra}</span> : '-')}
@@ -17904,7 +17960,7 @@ function PlanificacionDesktop() {
                                                     data-action="publicar-cronograma"
                                                     onClick={openPublishConfirm}
                                                     disabled={isPublishing}
-                                                    title={isSuperAdmin && (slaVendidas > 0 && Math.round(objectiveMonthSlaBaseHours) !== Math.round(slaVendidas) || (objectiveCoverageGapReport && objectiveCoverageGapReport.daysPartial + objectiveCoverageGapReport.daysEmpty > 0))
+                                                    title={isSuperAdmin && (slaVendidas > 0 && Math.round(objectiveMonthSlaBaseHours) !== Math.round(slaVendidas) || (objectiveCoverageGapReport && diasConHuecos > 0))
                                                         ? 'Super Admin: podés publicar aunque SLA o cobertura no coincidan'
                                                         : published ? 'Re-publicar cronograma' : 'Publicar cronograma'}
                                                     aria-label={published ? 'Re-publicar cronograma' : 'Publicar cronograma'}
@@ -18451,9 +18507,9 @@ function PlanificacionDesktop() {
                                     <span className="flex items-center gap-1.5 text-emerald-300">
                                         <ShieldCheck size={12}/> Cierres: {objectiveCoverageGapReport.daysFull} días OK
                                     </span>
-                                    {(objectiveCoverageGapReport.daysPartial + objectiveCoverageGapReport.daysEmpty) > 0 && (
+                                    {diasConHuecos > 0 && (
                                         <span className="text-rose-300">
-                                            · {objectiveCoverageGapReport.daysPartial + objectiveCoverageGapReport.daysEmpty} con huecos
+                                            · {diasConHuecos} con huecos
                                         </span>
                                     )}
                                     {objectiveCoverageGapReport.worstDays.slice(0, 4).map(wd => (
