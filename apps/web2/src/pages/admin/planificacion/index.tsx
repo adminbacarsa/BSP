@@ -271,6 +271,7 @@ import {
     resolverNovedad,
     tipoDeCodigo,
     horasEntre,
+    bandaDeCodigoPuesto,
     type TipoNovedadRapida,
 } from '@/lib/planificacion/modoRapido';
 import { esCeldaFranco, etiquetaFt, opcionesBandaFt, payloadConsultaFt, resolverEscrituraFt } from '@/lib/planificacion/francoTrabajadoRapido';
@@ -2129,6 +2130,9 @@ function PlanificacionDesktop() {
         lado: LadoTura; horas: number; guardando: boolean; pidio: string; motivo: string;
         /** Objetivo donde se hace el TURA (vacío = el del turno). Ej. Bancor: guardia de Catedral que hace horas en Museo. */
         destinoId: string;
+        /** Franja pegada del mismo puesto sin nadie ese día: se puede cubrir extendiendo (no es TURA). */
+        cubrir?: { code: string; desde: string; hasta: string; lado: 'antes' | 'despues' } | null;
+        modo: 'cubrir' | 'tura';
     } | null>(null);
     const [motivoVista12, setMotivoVista12] = useState('');
     const propuesta12Ref = useRef<Propuesta12h[] | null>(null);
@@ -14997,7 +15001,8 @@ function PlanificacionDesktop() {
                     empId: emp.id,
                     nombre: String(emp.name || emp.id),
                     dateStr: ds,
-                    code,
+                    // P5M / PLN / P1 T cuentan como su banda (M, N, T) para el par de 12 h.
+                    code: bandaDeCodigoPuesto(code) || code,
                     positionName: pos,
                     objectiveId: String(t.objectiveId || selectedObjective || ''),
                     hours: Number(t.hours) || undefined,
@@ -15112,7 +15117,31 @@ function PlanificacionDesktop() {
         if (!p) return false;
         return !puestoAdmite12h({ coverageType: p.coverageType, shifts: (p.shifts || []).filter((st: any) => st.startTime && st.endTime) });
     };
+    /** Franja del mismo puesto pegada al turno (P2M 10–16 → P2T 16–22) que ese día no tiene a nadie. */
+    const franjaPegadaLibre = (pos: string, ds: string, code: string, inicio: string, fin: string) => {
+        const franjas = ((getShiftsForPosition(pos, selectedObjective) as any[]) || []).filter((x) => x.startTime && x.endTime && normalizarCodigo(String(x.code || '')) !== code);
+        const cand = franjas.find((x) => String(x.startTime) === fin) ? { f: franjas.find((x) => String(x.startTime) === fin), lado: 'despues' as const }
+            : franjas.find((x) => String(x.endTime) === inicio) ? { f: franjas.find((x) => String(x.endTime) === inicio), lado: 'antes' as const } : null;
+        if (!cand?.f) return null;
+        const fc = normalizarCodigo(String(cand.f.code || ''));
+        const ocupada = (displayedEmployees as any[]).some((e: any) => {
+            const cx = ctxDeCelda(`${e.id}_${ds}`);
+            const a = cx?.p && !cx.p.isDeleted ? cx.p : cx?.s;
+            return a && normalizarCodigo(String(a.code || '')) === fc && String(a.positionName || pos) === pos;
+        });
+        if (ocupada) return null;
+        return { code: fc, desde: String(cand.f.startTime), hasta: String(cand.f.endTime), lado: cand.lado };
+    };
     const abrirTura = (emp: any, ds: string, ctx: CtxCeldaGrilla | undefined, pos: string) => {
+        const actual0 = ctx?.p && !ctx.p.isDeleted ? ctx.p : ctx?.s;
+        const code0 = String(actual0?.code || '').toUpperCase();
+        const ini0 = hhmmRapido(actual0?.startTime);
+        const fin0 = hhmmRapido(actual0?.endTime);
+        const cubrir = actual0 && code0 && ini0 && fin0 && !esCeldaFranco(actual0) ? franjaPegadaLibre(String(actual0.positionName || pos), ds, code0, ini0, fin0) : null;
+        if (cubrir) {
+            setTuraEditor({ empId: emp.id, empName: String(emp.name || ''), ds, parentId: String(actual0.id || ''), code: code0, inicio: ini0!, fin: fin0!, positionName: String(actual0.positionName || pos), lado: cubrir.lado, horas: 1, guardando: false, pidio: '', motivo: '', destinoId: '', cubrir, modo: 'cubrir' });
+            return;
+        }
         if (ctx?.p && !ctx.p.isDeleted) { toast.message('Guardá el cronograma y después agregá las horas: el TURA va atado al turno guardado.'); return; }
         const s0 = ctx?.s;
         const code = String(s0?.code || '').toUpperCase();
@@ -15124,10 +15153,35 @@ function PlanificacionDesktop() {
         const fin = hhmmRapido(s0.endTime);
         if (!inicio || !fin) { toast.message('El turno no tiene horario: no se puede agregar el TURA.'); return; }
         if (turaMap[s0.id]) { toast.message('Ese turno ya tiene un TURA. Con − lo quitás y lo volvés a cargar.'); return; }
-        setTuraEditor({ empId: emp.id, empName: String(emp.name || ''), ds, parentId: s0.id, code, inicio, fin, positionName: String(s0.positionName || pos), lado: 'despues', horas: 1, guardando: false, pidio: '', motivo: '', destinoId: '' });
+        setTuraEditor({ empId: emp.id, empName: String(emp.name || ''), ds, parentId: s0.id, code, inicio, fin, positionName: String(s0.positionName || pos), lado: 'despues', horas: 1, guardando: false, pidio: '', motivo: '', destinoId: '', cubrir: null, modo: 'tura' });
+    };
+    const confirmarCubrirExtendiendo = () => {
+        const t = turaEditor;
+        if (!t?.cubrir) return;
+        const byId: Record<string, any> = {};
+        employees.forEach((e: any) => { byId[e.id] = e; });
+        try {
+            const next = applySingleWorkerFullGapCloseToChanges({ ...pendingChanges }, {
+                objectiveId: selectedObjective || '',
+                clientId: selectedClient || undefined,
+                dateStr: t.ds,
+                gapPosition: t.positionName,
+                gapBand: t.cubrir.code,
+                employeeId: t.empId,
+                applyDateStr: t.ds,
+                positionStructure: effectivePosStructure as import('@/lib/planificacion/vacancySplitBands').VacancyPositionSla[],
+            }, { shiftsMap, employeesById: byId });
+            commitPendingChanges(next);
+            toast.success(`${t.empName.split(',')[0]} cubre ${t.cubrir.code} extendiendo: ${t.cubrir.lado === 'despues' ? `${t.inicio}–${t.cubrir.hasta}` : `${t.cubrir.desde}–${t.fin}`}. Guardá el cronograma.`);
+            setTuraEditor(null);
+        } catch (err) {
+            toast.message(err instanceof Error ? err.message : 'No se pudo extender para cubrir la franja.');
+        }
     };
     const confirmarTura = async () => {
         const t = turaEditor;
+        if (t?.modo === 'cubrir' && t.cubrir) { confirmarCubrirExtendiendo(); return; }
+        if (t && !t.parentId) { toast.message('Guardá el cronograma y después agregá el TURA: va atado al turno guardado.'); return; }
         if (!t || t.guardando || !empresaId || !selectedObjective) return;
         const tramo = tramoTura(t.inicio, t.fin, { lado: t.lado, horas: t.horas });
         if (!tramo) return;
@@ -15355,7 +15409,7 @@ function PlanificacionDesktop() {
         if (puestoSinDoce(pos)) { abrirTura(emp, ds, ctx, pos); return; }
         const delPuesto = propuestas12De(ds, pos, emp.id);
         if (delPuesto.length) { setPropuesta12(delPuesto); return; }
-        const code = codigoCtxRapido(ctx);
+        const code = bandaDeCodigoPuesto(codigoCtxRapido(ctx)) || codigoCtxRapido(ctx);
         if (code === 'T') { toast.message('La T pasa a 12 h solo si falta una banda de un lado.'); return; }
         if (code !== 'M' && code !== 'N') { toast.message('Solo M o N pasan a 12 h.'); return; }
         const doce = horarioDoce(code === 'M' ? 'D12' : 'N12', getShiftsForPosition(pos, resolveObjectiveForEmp(emp.id)) as TurnoSla[]);
@@ -21044,7 +21098,18 @@ function PlanificacionDesktop() {
                         <p className="font-black text-slate-800">
                             Agregar horas a {turaEditor.empName.split(',')[0]} · {turaEditor.code} {turaEditor.inicio}–{turaEditor.fin} · {turaEditor.ds.slice(8, 10)}/{turaEditor.ds.slice(5, 7)}
                         </p>
-                        <p className="text-[11px] text-slate-500">Puesto que no es de 24 h: no pasa a D12/N12. Se agrega un TURA pegado al turno (facturable).</p>
+                        <p className="text-[11px] text-slate-500">Puesto que no es de 24 h: no pasa a D12/N12.</p>
+                        {turaEditor.cubrir && (
+                            <div className="mt-1.5 flex flex-col gap-1" data-tura-modos>
+                                <button type="button" data-tura-modo="cubrir" onClick={() => setTuraEditor((prev) => (prev ? { ...prev, modo: 'cubrir' } : prev))} className={`rounded-lg px-2 py-1 text-left text-[11px] font-bold ${turaEditor.modo === 'cubrir' ? 'bg-indigo-600 text-white' : 'border border-slate-200 text-slate-700'}`}>
+                                    Cubrir {turaEditor.cubrir.code} {turaEditor.cubrir.desde}–{turaEditor.cubrir.hasta} extendiendo la jornada: {turaEditor.cubrir.lado === 'despues' ? `${turaEditor.inicio}–${turaEditor.cubrir.hasta}` : `${turaEditor.cubrir.desde}–${turaEditor.fin}`} (cierra la franja, no es TURA)
+                                </button>
+                                <button type="button" data-tura-modo="tura" onClick={() => setTuraEditor((prev) => (prev ? { ...prev, modo: 'tura' } : prev))} className={`rounded-lg px-2 py-1 text-left text-[11px] font-bold ${turaEditor.modo === 'tura' ? 'bg-rose-700 text-white' : 'border border-slate-200 text-slate-700'}`}>
+                                    TURA: horas agregadas a pedido del cliente (facturable)
+                                </button>
+                            </div>
+                        )}
+                        {turaEditor.modo === 'tura' && (<>
                         {(['antes', 'despues'] as const).map((lado) => (
                             <div key={lado} className="mt-1.5 flex items-center gap-1" data-tura-lado={lado}>
                                 <button type="button" onClick={() => setTuraEditor((prev) => (prev ? { ...prev, lado } : prev))} className={`w-20 rounded-lg px-2 py-1 text-left text-[11px] font-black ${turaEditor.lado === lado ? 'bg-rose-700 text-white' : 'border border-slate-200 text-slate-600'}`}>
@@ -21078,6 +21143,7 @@ function PlanificacionDesktop() {
                             </label>
                         </div>
                         <p className="mt-1.5 font-bold text-rose-800" data-tura-texto>{textoTura(turaEditor.code, turaEditor.inicio, turaEditor.fin, { lado: turaEditor.lado, horas: turaEditor.horas })}</p>
+                        </>)}
                         {avisoJornadaTura(turaEditor.inicio, turaEditor.fin, turaEditor.horas) && (
                             <p className="text-[11px] font-bold text-amber-700">{avisoJornadaTura(turaEditor.inicio, turaEditor.fin, turaEditor.horas)}</p>
                         )}
@@ -21085,7 +21151,7 @@ function PlanificacionDesktop() {
                             <span className="text-[10px] text-slate-400">1–8 horas · ← antes · → después · Enter agrega · Esc cancela</span>
                             <div className="flex gap-2">
                                 <button type="button" onClick={() => setTuraEditor(null)} className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-bold text-slate-600">Cancelar</button>
-                                <button type="button" disabled={turaEditor.guardando} onClick={() => { void confirmarTura(); }} className="rounded-lg bg-rose-700 px-2.5 py-1 text-[11px] font-black text-white disabled:opacity-40" data-tura-confirmar>{turaEditor.guardando ? 'Guardando…' : 'Agregar TURA'}</button>
+                                <button type="button" disabled={turaEditor.guardando} onClick={() => { void confirmarTura(); }} className={`rounded-lg px-2.5 py-1 text-[11px] font-black text-white disabled:opacity-40 ${turaEditor.modo === 'cubrir' ? 'bg-indigo-600' : 'bg-rose-700'}`} data-tura-confirmar>{turaEditor.guardando ? 'Guardando…' : turaEditor.modo === 'cubrir' ? 'Extender y cubrir' : 'Agregar TURA'}</button>
                             </div>
                         </div>
                     </div>,
