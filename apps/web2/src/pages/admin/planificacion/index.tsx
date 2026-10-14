@@ -14413,6 +14413,17 @@ function PlanificacionDesktop() {
         if (tipo === 'RET') {
             return { change: { ...base, code: 'RET', name: 'Retén', hours: 0, startTime: '00:00', positionName: 'Retén', isFranco: false } };
         }
+        {
+            // Un turno del servicio que no corre ese día (VFM solo domingos) no se escribe.
+            const delServicio = slaTodosRapido.filter((st: any) => normalizarCodigo(String(st.code || '')) === code);
+            if (delServicio.length && !delServicio.some((st: any) => turnoValeEnFecha(st, ds))) {
+                const NOMBRES: Record<string, string> = { L: 'lunes', M: 'martes', X: 'miércoles', J: 'jueves', V: 'viernes', S: 'sábados', D: 'domingos' };
+                const dias = [...new Set(delServicio.flatMap((st: any) => (Array.isArray(st.days) ? st.days : [])))].map((d) => NOMBRES[String(d)] || d);
+                const conFechas = delServicio.some((st: any) => Array.isArray(st.specificDates) && st.specificDates.length);
+                const cuando = conFechas ? 'en fechas puntuales' : dias.join(', ');
+                return { error: `${code} no corre el ${ds.slice(8, 10)}/${ds.slice(5, 7)} (servicio: ${cuando || 'otros días'}).` };
+            }
+        }
         if ((tipo === 'TRABAJO' || tipo === 'DESPLIEGUE') && fuente?.copiarPuesto) {
             const defecto = (() => {
                 const n = getEmpDefaultPos(emp.id);
