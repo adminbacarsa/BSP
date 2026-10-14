@@ -12164,7 +12164,7 @@ function PlanificacionDesktop() {
                         startTime: hm(st.startTime),
                         endTime: hm(st.endTime),
                         quantity: st.quantity ?? p.qty ?? null,
-                        dias: Array.isArray(st.days) ? st.days.map((d) => String(d)) : [],
+                        dias: Array.isArray(st.days) ? st.days.map((d) => String(d)) : [], ...(Array.isArray((st as any).specificDates) && (st as any).specificDates.length ? { fechas: (st as any).specificDates.map((d: unknown) => String(d)) } : {}), ...((st as any).feriados === true ? { feriados: true } : {}),
                     }))),
                 };
                 if (cubreActual) servicios.push(fila);

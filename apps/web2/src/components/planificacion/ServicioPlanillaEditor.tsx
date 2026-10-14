@@ -238,6 +238,15 @@ export function ServicioPlanillaEditor({ cuadro, semilla, year, month, mesLabel,
                           })}
                         </div>
                       )}
+                      {!f.fechas?.length && (
+                        <button
+                          type="button"
+                          data-servicio-feriados={f.id}
+                          onClick={() => patch(f.id, { feriados: !f.feriados })}
+                          title="Además de esos días, corre los feriados nacionales"
+                          className={`h-5 rounded px-1 text-[9px] font-black ${f.feriados ? 'bg-rose-600 text-white' : 'border border-slate-200 text-slate-400'}`}
+                        >+F</button>
+                      )}
                       <button
                         type="button"
                         data-servicio-calendario={f.id}

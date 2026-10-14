@@ -411,3 +411,22 @@ describe('servicio desde la planilla · puestos de 24 h por conteo de bandas', (
     assert.deepEqual(prop.franjas.map(linea).sort(), ['Extra M·M×2·L–V·definir', 'Puesto·M×2·Todos', 'Puesto·N×2·Todos', 'Puesto·T×2·Todos'].sort());
   });
 });
+
+describe('editar el servicio vigente desde Planificación', () => {
+  it('conserva lo que el editor no muestra y aplica lo editado', () => {
+    const previa = {
+      id: 'p1', name: 'Puesto 1', coverageType: 'custom', quantity: 1, activeDays: ['S', 'D'], status: 'ACTIVE',
+      excludedDates: ['2026-10-25'],
+      allowedShiftTypes: [{ code: 'VFM', name: 'Vifood mañana', startTime: '07:00', endTime: '19:00', hours: 12, quantity: 1, days: ['D'], blocks: [{ startTime: '07:00', endTime: '11:00' }, { startTime: '13:00', endTime: '19:00' }] }],
+    };
+    const franjas = franjasDesdeVigente([{ puesto: 'Puesto 1', code: 'VFM', startTime: '07:00', endTime: '19:00', cantidad: 1, dias: ['D'] }]);
+    franjas[0].feriados = true;
+    const [pos] = posicionesDesdeFranjas(franjas, [previa as any]);
+    assert.deepEqual((pos as any).excludedDates, ['2026-10-25']);
+    const st = pos.allowedShiftTypes[0] as any;
+    assert.equal(st.name, 'Vifood mañana');
+    assert.equal(st.blocks.length, 2);
+    assert.equal(st.feriados, true);
+    assert.deepEqual(st.days, ['D']);
+  });
+});

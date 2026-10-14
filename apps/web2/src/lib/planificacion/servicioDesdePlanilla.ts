@@ -37,6 +37,8 @@ export type FranjaServicioPlanilla = {
   fechas?: string[];
   /** Turnos de más sobre los puestos de 24 h: la planilla no dice su horario, hay que definirlo. */
   definirHorario?: boolean;
+  /** «+ feriados»: además de sus días, corre los feriados nacionales. */
+  feriados?: boolean;
   /** Código que traía la planilla, cuando se conservó el del servicio. */
   codigoPlanilla?: string;
 };
@@ -48,6 +50,8 @@ export type FranjaVigente = {
   endTime: string;
   cantidad: number;
   dias: string[];
+  fechas?: string[];
+  feriados?: boolean;
 };
 
 export type EstadoDiff = 'coincide' | 'distinto' | 'falta' | 'sobra';
@@ -765,6 +769,7 @@ export type TurnoServicioDoc = {
   quantity: number;
   days?: DiaSemana[];
   specificDates?: string[];
+  feriados?: boolean;
 };
 
 export type PosicionServicioDoc = {
@@ -816,17 +821,27 @@ export function posicionesDesdeFranjas(
   for (const [k, list] of porPuesto) {
     n += 1;
     const previa = actuales.find((p) => normPlanilla(p.name) === k);
-    const shifts: TurnoServicioDoc[] = list.map((f) => ({
-      code: f.code,
-      name: f.code,
-      startTime: f.startTime,
-      endTime: f.endTime,
-      hours: horasEntre(f.startTime, f.endTime),
-      quantity: Math.max(1, Math.round(f.cantidad) || 1),
-      ...(f.fechas?.length ? { specificDates: [...f.fechas].sort() } : f.dias.length ? { days: f.dias } : {}),
-    }));
+    const previasTurnos = ((previa?.allowedShiftTypes || []) as unknown as Array<Record<string, unknown>>);
+    const shifts: TurnoServicioDoc[] = list.map((f) => {
+      // Conserva lo que el editor no muestra del turno (turno cortado, nombre, etc.) y pisa lo editado.
+      const prevTurno = previasTurnos.find((t) => normPlanilla(String(t.code || '')) === normPlanilla(f.code)) || {};
+      const { days: _d, specificDates: _sd, feriados: _fe, ...resto } = prevTurno as Record<string, unknown>;
+      return {
+        ...(resto as object),
+        code: f.code,
+        name: String((prevTurno as { name?: unknown }).name || f.code),
+        startTime: f.startTime,
+        endTime: f.endTime,
+        hours: horasEntre(f.startTime, f.endTime),
+        quantity: Math.max(1, Math.round(f.cantidad) || 1),
+        ...(f.fechas?.length ? { specificDates: [...f.fechas].sort() } : f.dias.length ? { days: f.dias } : {}),
+        ...(f.feriados && !f.fechas?.length ? { feriados: true } : {}),
+      } as TurnoServicioDoc;
+    });
     const dias = ordenarDias(list.flatMap((f) => (f.fechas?.length ? diasDeFechas(f.fechas) : f.dias.length ? f.dias : ORDEN_DIAS)));
     out.push({
+      // El puesto que ya existía conserva sus otros datos (días excluidos, bajas, exigeCobertura…).
+      ...((previa || {}) as object),
       id: String(previa?.id || `planilla_${n}`),
       name: previa?.name || list[0].puesto,
       // Un puesto cargado a mano en Servicios conserva su tipo; el que armó la planilla se recalcula.
@@ -835,6 +850,7 @@ export function posicionesDesdeFranjas(
       quantity: Math.max(...list.map((f) => f.cantidad), 1),
       activeDays: dias,
       allowedShiftTypes: shifts,
+      ...((previa as { shifts?: unknown } | undefined)?.shifts ? { shifts } : {}),
       status: 'ACTIVE',
     });
   }
@@ -1003,6 +1019,8 @@ export function franjasDesdeVigente(vigente: readonly FranjaVigente[]): FranjaSe
     endTime: f.endTime,
     cantidad: f.cantidad || 1,
     dias: ORDEN_DIAS.filter((d) => (f.dias || []).map((x) => x.toUpperCase()).includes(d)),
+    ...(f.fechas?.length ? { fechas: [...f.fechas] } : {}),
+    ...(f.feriados ? { feriados: true } : {}),
   }));
 }
 

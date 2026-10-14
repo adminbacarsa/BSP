@@ -83,6 +83,17 @@ export function ServicioPlanillaModal(props: Props) {
     setSemilla(proponerServicioDesdeTurnos(lista, props.year, props.month));
   };
 
+  const editarVigente = () => {
+    if (!obj || !vigente.length) return;
+    setError('');
+    setCuadros([]);
+    setSemilla({
+      franjas: franjasDesdeVigente(vigente),
+      equivalencias: [],
+      lectura: 'Editando el servicio vigente: agregá, quitá o cambiá puestos y franjas y aplicá los cambios.',
+    });
+  };
+
   const copiarAnterior = () => {
     if (!obj) return;
     const lista = props.anteriorPorObjetivo?.[objectiveId] || [];
@@ -167,6 +178,12 @@ export function ServicioPlanillaModal(props: Props) {
                 </table>
               )}
               <div className="flex flex-wrap gap-2 text-[11px]">
+                {vigente.length > 0 && (
+                  <button type="button" data-servicio-editar onClick={editarVigente} className="rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2 text-left text-slate-700 shadow-sm hover:bg-emerald-100">
+                    <span className="block font-black text-emerald-800">Editar este servicio</span>
+                    Puestos, franjas, horarios, cantidad y días, sin salir de Planificación.
+                  </button>
+                )}
                 <button type="button" data-servicio-desde-turnos onClick={desdeTurnos} className="rounded-xl border border-indigo-200 bg-white px-3 py-2 text-left text-slate-700 shadow-sm hover:bg-indigo-50">
                   <span className="block font-black text-indigo-800">Desde los turnos de este mes</span>
                   Lee las bandas del cronograma (customs aparte, puestos de 24 h) y arma la propuesta.
