@@ -14242,7 +14242,7 @@ function PlanificacionDesktop() {
         const out: TurnoSla[] = [];
         for (const p of (effectivePosStructure || []) as any[]) {
             for (const s of (p.shifts || []) as any[]) {
-                out.push({ code: s.code, name: s.name, hours: s.hours, startTime: s.startTime, endTime: s.endTime, positionName: p.positionName });
+                out.push({ code: s.code, name: s.name, hours: s.hours, startTime: s.startTime, endTime: s.endTime, positionName: p.positionName, ...(s.days ? { days: s.days } : {}), ...(s.specificDates ? { specificDates: s.specificDates } : {}) } as TurnoSla);
             }
         }
         return out;
@@ -14305,11 +14305,20 @@ function PlanificacionDesktop() {
         const actual = emp ? puestoFilaRapido(emp.id, ctx) : '';
         return { lista: [...new Set(lista)], actual: lista.includes(actual) ? actual : (lista[0] || '') };
     };
+    /** El turno del servicio corre ese día: fechas puntuales (domingos y feriados) o días de la semana. */
+    const turnoValeEnFecha = (st: any, ds: string) => {
+        if (!ds) return true;
+        if (Array.isArray(st?.specificDates) && st.specificDates.length) return st.specificDates.includes(ds);
+        if (Array.isArray(st?.days) && st.days.length) return st.days.includes(getDayLetter(ds));
+        return true;
+    };
     const opcionesRapido = (r: number, c: number, puestoElegido?: string) => {
-        const { emp, ctx } = ctxRapido(r, c);
+        const { emp, ctx, ds } = ctxRapido(r, c);
         const pos = puestoElegido || (emp ? puestoFilaRapido(emp.id, ctx) : 'General');
         const objId = emp ? resolveObjectiveForEmp(emp.id) : selectedObjective;
-        const base = opcionesDeCodigo(getShiftsForPosition(pos, objId) as TurnoSla[], slaTodosRapido, ultimoUsadoRapido, catalogoNovedad);
+        const delPuesto = ((getShiftsForPosition(pos, objId) as any[]) || []).filter((st) => turnoValeEnFecha(st, ds));
+        const deTodos = slaTodosRapido.filter((st) => turnoValeEnFecha(st, ds));
+        const base = opcionesDeCodigo(delPuesto as TurnoSla[], deTodos, ultimoUsadoRapido, catalogoNovedad);
         const actual = ctx?.p && !ctx.p.isDeleted ? ctx.p : ctx?.s;
         if (!esCeldaFranco(actual)) return base;
         return [...base, ...opcionesBandaFt(getShiftsForPosition(pos, objId) as TurnoSla[])];
