@@ -14786,10 +14786,11 @@ function PlanificacionDesktop() {
         const convocadoPor = authUser?.uid || '';
         let ok = 0;
         const errores: string[] = [];
-        for (const it of lista) {
+        // En paralelo: cada asignación es una llamada al servidor (reserva el cupo en transacción).
+        await Promise.all(lista.map(async (it) => {
             const [eventoId, servicioId] = it.vinculo.split('|');
             const par = serviciosEventoPegado(it.ds).find(({ evento, servicio }) => evento.id === eventoId && servicio.id === servicioId);
-            if (!par) { errores.push(`${it.emp.name}: el evento ya no está`); continue; }
+            if (!par) { errores.push(`${it.emp.name}: el evento ya no está`); return; }
             try {
                 await asignarNominaAServicioEvento({
                     empresaId,
@@ -14816,7 +14817,7 @@ function PlanificacionDesktop() {
             } catch (e: any) {
                 errores.push(`${it.emp.name}: ${e?.message || 'no se pudo asignar'}`);
             }
-        }
+        }));
         if (ok) toast.success(`${ok} guardia(s) asignado(s) al evento`);
         if (errores.length) toast.error(`${errores.length} sin asignar: ${errores.slice(0, 3).join(' · ')}${errores.length > 3 ? '…' : ''}`);
     };
@@ -15322,13 +15323,18 @@ function PlanificacionDesktop() {
         if (!e || e.guardando) return;
         const opcion = serviciosEventoPegado(e.ds)[e.elegida];
         if (!opcion?.evento.id) return;
-        setEvEditor({ ...e, guardando: true });
         const vinculo = `${opcion.evento.id}|${opcion.servicio.id}`;
         const lista = e.celdas
             .map((c) => ({ emp: displayedEmployees.find((x: any) => x.id === c.empId) || employees.find((x: any) => x.id === c.empId), ds: c.ds, vinculo }))
             .filter((x) => x.emp);
-        await asignarPegadoAEventos(lista as Array<{ emp: any; ds: string; vinculo: string }>);
+        // El cartel se cierra al toque; la asignación sigue en segundo plano.
         setEvEditor(null);
+        const tid = toast.loading(`Asignando ${lista.length} guardia(s) a ${opcion.evento.nombre}…`);
+        try {
+            await asignarPegadoAEventos(lista as Array<{ emp: any; ds: string; vinculo: string }>);
+        } finally {
+            toast.dismiss(tid);
+        }
         void refreshCronogramaView();
     };
     const confirmarEvRef = useRef(confirmarEv);

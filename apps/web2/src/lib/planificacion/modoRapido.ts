@@ -420,6 +420,7 @@ export function opcionesDeCodigo(slaPuesto: TurnoSla[], slaTodos: TurnoSla[], ul
         { code: 'RFZF', detalle: 'Refuerzo fijo · mensual' },
         { code: 'RFZE', detalle: 'Refuerzo eventual · fechas' },
         { code: 'TURA', detalle: 'Turno agregado · horas' },
+        { code: 'EV', detalle: 'Evento · elegir del día' },
         { code: 'ESC', detalle: 'Escuela' },
     );
     for (const [code, name] of Object.entries(CODIGOS_LICENCIA_RAPIDA)) out.push({ code, detalle: name });
