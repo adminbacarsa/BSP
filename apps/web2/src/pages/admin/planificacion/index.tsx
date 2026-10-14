@@ -3640,8 +3640,9 @@ function PlanificacionDesktop() {
             objectiveIds,
             groupMode,
             employeeIds: displayedEmployees.map((emp: any) => String(emp.id)),
+            mes: `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`,
         });
-    }, [cellTurnosMap, shiftsMap, pendingChanges, displayedEmployees, selectedObjective, selectedGrupo, grupoUnifiedMode]);
+    }, [cellTurnosMap, shiftsMap, pendingChanges, displayedEmployees, selectedObjective, selectedGrupo, grupoUnifiedMode, currentDate]);
 
     const empMonthlyHours = plannerColumn.byEmployee;
     const cruceTopePorEmp = useMemo(() => {
@@ -3656,6 +3657,7 @@ function PlanificacionDesktop() {
             objectiveIds,
             groupMode,
             employeeIds: displayedEmployees.map((emp: any) => String(emp.id)),
+            mes: `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`,
         });
         return cruceTopeDeTurnos(visible, (t) => {
             if (typeof t?.dateStr === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(t.dateStr)) return t.dateStr;
@@ -3664,7 +3666,7 @@ function PlanificacionDesktop() {
             if (typeof raw === 'string' && /^\d{1,2}:\d{2}/.test(raw.trim())) return '';
             try { return getDateKey(raw); } catch { return ''; }
         }, planningLimits.monthly);
-    }, [cellTurnosMap, shiftsMap, pendingChanges, displayedEmployees, selectedObjective, selectedGrupo, grupoUnifiedMode, planningLimits.monthly]);
+    }, [cellTurnosMap, shiftsMap, pendingChanges, displayedEmployees, selectedObjective, selectedGrupo, grupoUnifiedMode, planningLimits.monthly, currentDate]);
     const publishedPlanMesh = plannerColumn.published;
     const plannerWorkingHours = plannerColumn.working.hours;
 
@@ -14463,9 +14465,24 @@ function PlanificacionDesktop() {
 
     /** Vista agrupada: «Vifood · Puesto 1» ↔ { objetivo, puesto }. Fuera del grupo, el nombre del puesto. */
     const enGrupoRapido = !!(selectedGrupo && grupoUnifiedMode && Object.keys(grupoSlaMap).length > 1);
+    /** Nombre del objetivo para «Objetivo · Puesto»: el corto si es único en el grupo; si no («Sucursal» en varios bancos), el completo. */
+    const nombreObjetivoGrupo = useMemo(() => {
+        const out: Record<string, string> = {};
+        if (!selectedGrupo) return out;
+        const cortos = selectedGrupo.objectiveIds.map((_, i) => partesObjetivo(String(selectedGrupo.objectiveNames[i] || '')).corto);
+        selectedGrupo.objectiveIds.forEach((oid, i) => {
+            const completo = String(selectedGrupo.objectiveNames[i] || oid);
+            const repetido = cortos.filter((c) => c === cortos[i]).length > 1;
+            out[oid] = repetido || !cortos[i] ? completo : cortos[i];
+        });
+        // Si aun completos se repiten, el id los separa.
+        const vistos = new Map<string, number>();
+        for (const oid of selectedGrupo.objectiveIds) vistos.set(out[oid], (vistos.get(out[oid]) || 0) + 1);
+        for (const oid of selectedGrupo.objectiveIds) if ((vistos.get(out[oid]) || 0) > 1) out[oid] = `${out[oid]} (${oid.slice(0, 4)})`;
+        return out;
+    }, [selectedGrupo]);
     const etiquetaPuestoGrupo = (objId: string, pos: string) => {
-        const i = selectedGrupo ? selectedGrupo.objectiveIds.indexOf(objId) : -1;
-        const nombre = i >= 0 ? partesObjetivo(String(selectedGrupo!.objectiveNames[i] || '')).corto : getObjectiveName(objId);
+        const nombre = nombreObjetivoGrupo[objId] || getObjectiveName(objId);
         return `${nombre} · ${pos}`;
     };
     const puestoDeEtiqueta = (label: string): { objId: string; pos: string } | null => {

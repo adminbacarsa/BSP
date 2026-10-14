@@ -14,6 +14,8 @@ export type PlannerColumnInput = {
   /** true = solo entran turnos de objectiveIds (un objetivo vacío no cuenta). */
   groupMode: boolean;
   employeeIds: string[];
+  /** YYYY-MM del mes que se ve: los borradores de otro mes no suman. */
+  mes?: string;
 };
 
 export type PlannerColumnHours = {
@@ -76,7 +78,13 @@ export function collectPlannerColumnShifts(input: PlannerColumnInput): { saved: 
 
   const saved: any[] = [];
   const visible: any[] = [];
-  const keys = new Set<string>([...buckets.keys(), ...Object.keys(pendingChanges || {})]);
+  // Los borradores de otro mes (Continuar noviembre mirando octubre) no suman a este.
+  const delMes = (key: string) => {
+    if (!input.mes) return true;
+    const m = String(key).match(/_(\d{4}-\d{2})-\d{2}(?:_B2)?$/);
+    return !m || m[1] === input.mes;
+  };
+  const keys = new Set<string>([...buckets.keys(), ...Object.keys(pendingChanges || {}).filter(delMes)]);
   for (const key of keys) {
     const cell = buckets.get(key) || [];
     cell.forEach((t) => pushUnique(saved, t));
