@@ -107,7 +107,8 @@ export function ContinuarMesModal({ vista, onAplicar, onCancelar }: Props) {
     [conCiclo],
   );
   const sugerenciasVisibles = useMemo(() => sugerencias.filter((s) => elegidos.has(s.celda.employeeId)), [sugerencias, elegidos]);
-  const sugerenciasNivel = useMemo(() => sugerenciasVisibles.filter((s) => s.tipo !== 'relevante'), [sugerenciasVisibles]);
+  const sugerenciasNivel = useMemo(() => sugerenciasVisibles.filter((s) => s.tipo !== 'relevante' && s.tipo !== 'suelto'), [sugerenciasVisibles]);
+  const sugerenciasSuelto = useMemo(() => sugerenciasVisibles.filter((s) => s.tipo === 'suelto'), [sugerenciasVisibles]);
   const sugerenciasRelevante = useMemo(() => sugerenciasVisibles.filter((s) => s.tipo === 'relevante'), [sugerenciasVisibles]);
 
   const totales = useMemo(() => {
@@ -322,6 +323,37 @@ export function ContinuarMesModal({ vista, onAplicar, onCancelar }: Props) {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-0.5">
                 {sugerenciasRelevante.map((s) => {
+                  const k = claveSugerencia(s);
+                  return (
+                    <label key={k} className="flex items-center gap-2 text-[11px] text-slate-800 cursor-pointer hover:bg-white/70 rounded-lg px-1 py-0.5" data-continuar-sugerencia={k}>
+                      <input type="checkbox" checked={nivelar.has(k)} onChange={() => toggleNivelar(k)} />
+                      <span className="font-medium">{s.texto}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {sugerenciasSuelto.length > 0 && (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50/70 px-3 py-2.5 shadow-sm" data-continuar-sueltos>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wide text-amber-950">
+                  <Repeat size={12} /> Lo que el mes anterior se cubrió suelto · {sugerenciasSuelto.length}
+                </div>
+                <div className="flex gap-2 text-[11px] font-bold">
+                  <button type="button" className="text-amber-800 hover:underline" onClick={() => setNivelar((prev) => new Set([...prev, ...sugerenciasSuelto.map(claveSugerencia)]))}>Tildar todas</button>
+                  <button type="button" className="text-slate-500 hover:underline" onClick={() => setNivelar((prev) => {
+                    const next = new Set(prev);
+                    for (const s of sugerenciasSuelto) next.delete(claveSugerencia(s));
+                    return next;
+                  })}>Ninguna</button>
+                </div>
+              </div>
+              <div className="text-[11px] text-amber-950/80 mt-0.5 mb-1.5">
+                Turnos que no son el ciclo de nadie y el mes anterior cubrió alguien. Tildá para repetir con la misma persona; si no, el hueco queda en Faltantes para asignar a otro. Arranca destildado.
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-0.5">
+                {sugerenciasSuelto.map((s) => {
                   const k = claveSugerencia(s);
                   return (
                     <label key={k} className="flex items-center gap-2 text-[11px] text-slate-800 cursor-pointer hover:bg-white/70 rounded-lg px-1 py-0.5" data-continuar-sugerencia={k}>

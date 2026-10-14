@@ -144,7 +144,9 @@ export type SugerenciaNivelacion = {
   texto: string;
   celda: CeldaPropuesta;
   /** `relevante` = seguir los francos de los puestos que cubre. Arranca destildada, igual que la nivelación. */
-  tipo?: 'nivelacion' | 'relevante';
+  tipo?: 'nivelacion' | 'relevante' | 'suelto';
+  /** `suelto` sobre su franco: se escribe como franco trabajado. */
+  francoTrabajado?: boolean;
 };
 
 export type ResultadoGuardia = {

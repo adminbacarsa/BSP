@@ -549,6 +549,7 @@ import {
     type OrigenArmado,
 } from '@/lib/planificacion/armadoCronograma';
 import { ContinuarMesModal, type ContinuarMesVista, type DiaCorto } from '@/components/planificacion/ContinuarMesModal';
+import { sugerenciasSueltas } from '@/lib/planificacion/continuarSueltos';
 import { AltaDesdePadronModal, type PedidoAlta } from '@/components/planificacion/AltaDesdePadronModal';
 import { AltaMasivaBoton } from '@/components/planificacion/AltaMasivaBoton';
 import { decidirActivarServicio } from '@/lib/planificacion/activarServicioMes';
@@ -2315,6 +2316,8 @@ function PlanificacionDesktop() {
     const [prevMonthLoading, setPrevMonthLoading] = useState(false);
     const [continuarVista, setContinuarVista] = useState<ContinuarMesVista | null>(null);
     const activarServicioRef = useRef<{ services: SlaRow[]; last: SlaRow; plan: AppendMonthsPlan; newEndDate: string } | null>(null);
+    /** Continuar en el grupo: un plan de «agregar el mes» por cada objetivo que no tiene servicio en el mes nuevo. */
+    const activarGrupoRef = useRef<Array<{ nombre: string; services: SlaRow[]; last: SlaRow; plan: AppendMonthsPlan; newEndDate: string }>>([]);
     const altasLocalesRef = useRef<Map<string, any>>(new Map());
     const altaPegadoRef = useRef<{ indice: number; employeeId: string } | null>(null);
     const agregarPegadoRef = useRef<Array<{ indice: number; employeeId: string }>>([]);
@@ -11844,11 +11847,67 @@ function PlanificacionDesktop() {
                     ultimosPrevios.push({ employeeId: t.employeeId, code: t.code, startTime: t.startTime, endTime: t.endTime, realEndTime: t.realEndTime, hours: t.hours, objectiveId: t.objectiveId, origin: t.origin });
                 }
             }
-            let estructuraContinuar = (enGrupo
-                ? objsGrupo.flatMap((oid) => ((grupoSlaMap[oid] || []) as any[]).map((p: any) => ({ ...p, positionName: etiquetar(oid, p.positionName) })))
-                : (positionStructure || [])) as PuestoSlaContinuar[];
             let activarVista: ContinuarMesVista['activar'];
             activarServicioRef.current = null;
+            activarGrupoRef.current = [];
+            // Grupo: el objetivo sin servicio en el mes nuevo (Peaje en noviembre) se puede activar desde acá, como uno solo.
+            const estructuraPorObj: Record<string, any[]> = {};
+            for (const oid of objsGrupo) estructuraPorObj[oid] = (grupoSlaMap[oid] || []) as any[];
+            if (enGrupo) {
+                try {
+                    const snapSla = await getDocs(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa));
+                    const allSla = filterSlasForPlanningTenant(snapSla.docs.map((d) => ({ id: d.id, ...(d.data() as any) })), empresaId, scopeEmpresa, tenantClientIds);
+                    const permisoServicio = isSuperAdmin || (rolePermissions['SERVICES'] || []).includes('update');
+                    const activables: string[] = [];
+                    const noSe: string[] = [];
+                    let mesTxt = '';
+                    for (const oid of objsGrupo) {
+                        const cid = String(clienteDeObjetivo(oid)?.id || selectedClient);
+                        const nombreObj = etiquetaPuestoGrupo(oid, '').replace(/ · $/, '');
+                        const matching = filterSlasForPlanningContext(allSla, cid, oid, clients, slaIdToObjId) as SlaRow[];
+                        const cliente = clients.find((c: { id: string; status?: unknown }) => c.id === cid);
+                        const decision = decidirActivarServicio({
+                            slas: matching.map((x) => ({
+                                id: x.id,
+                                startDate: toYyyyMmDd(x.startDate),
+                                endDate: toYyyyMmDd(x.endDate),
+                                closed: (x as { closed?: boolean }).closed === true,
+                                status: String((x as { status?: string }).status || ''),
+                            })),
+                            year: y,
+                            month: m + 1,
+                            clienteActivo: !!cliente && isClientOperational(cliente.status),
+                        });
+                        if (!decision.mostrar) continue;
+                        mesTxt = decision.mes;
+                        const seed = decision.puede && decision.lastId ? matching.find((x) => x.id === decision.lastId) : null;
+                        if (!seed) { noSe.push(`${nombreObj}: ${decision.motivo || 'no se puede activar'}`); continue; }
+                        const propuesta = proponerAgregarMeses(matching, seed);
+                        const preview = vistaPreviaAgregarMeses({ services: matching, last: propuesta.last, mode: propuesta.mode, newEndDate: decision.newEndDate });
+                        if (propuesta.error || preview.error) { noSe.push(`${nombreObj}: ${propuesta.error || preview.error}`); continue; }
+                        activarGrupoRef.current.push({ nombre: nombreObj, services: matching, last: propuesta.last, plan: preview.plan, newEndDate: decision.newEndDate });
+                        activables.push(nombreObj);
+                        if (!estructuraPorObj[oid].length) {
+                            const built = buildPlanningPositionStructure(propuesta.last as any, { monthHasSla: true, hasExactMatch: true });
+                            estructuraPorObj[oid] = built.structure as any[];
+                        }
+                    }
+                    if (activables.length || noSe.length) {
+                        activarVista = {
+                            mes: activables.length ? `${mesTxt} en ${activables.join(' y ')}` : mesTxt,
+                            marcado: activables.length > 0,
+                            puede: activables.length > 0,
+                            motivo: noSe.join(' · '),
+                            permiso: permisoServicio,
+                        };
+                    }
+                } catch (err) {
+                    console.error('[continuar activar servicio grupo]', err);
+                }
+            }
+            let estructuraContinuar = (enGrupo
+                ? objsGrupo.flatMap((oid) => estructuraPorObj[oid].map((p: any) => ({ ...p, positionName: etiquetar(oid, p.positionName) })))
+                : (positionStructure || [])) as PuestoSlaContinuar[];
             if (!enGrupo) try {
                 const snapSla = await getDocs(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa));
                 const allSla = filterSlasForPlanningTenant(
@@ -11963,6 +12022,30 @@ function PlanificacionDesktop() {
                 cargado,
             });
             calcularFrancoObj(resultados);
+            // Lo que el mes anterior se cubrió suelto (VFM de domingo por alguien de Peaje): sugerir repetirlo, destildado.
+            const sueltas = sugerenciasSueltas({
+                dias,
+                estructura: estructuraContinuar,
+                turnoHabilitado,
+                historia: guardiasBase.map((e: any) => ({ employeeId: e.id, nombre: e.name || e.id, previos: previosPorEmp.get(e.id) || [] })),
+                resultados,
+                cargado: (empId, dateStr) => {
+                    const key = `${empId}_${dateStr}`;
+                    const pend = pendingChanges[key];
+                    const sh = pend ? (pend.isDeleted ? null : pend) : shiftsMap[key];
+                    if (!sh || absencesMap[key] || sh.isFranco || (sh.objectiveId && !objsGrupo.includes(String(sh.objectiveId)))) return null;
+                    const code = String(sh.code || '').toUpperCase();
+                    if (!code || esCeldaLicencia({ code, tieneAusencia: false }) || ['F', 'FF', 'FP'].includes(code)) return null;
+                    return { code, positionName: etiquetar(sh.objectiveId, sh.positionName) };
+                },
+                libre: (empId, dateStr) => estadoCelda(empId, dateStr) === null,
+                diaBloqueado: (ds) => isPlanningDateLocked(ds) || (!enGrupo && !extenderServicio && isOutsideServiceRange(ds)),
+                mesAnteriorLabel: new Date(y, m - 1, 1).toLocaleDateString('es-AR', { month: 'long' }),
+            });
+            for (const sg of sueltas) {
+                const r = resultados.find((x) => x.employeeId === sg.celda.employeeId);
+                if (r) r.sugerencias = [...(r.sugerencias || []), sg];
+            }
             const cambios: Record<string, any> = {};
             for (const r of resultados) {
                 if (r.estimado) continue;
@@ -11982,7 +12065,7 @@ function PlanificacionDesktop() {
                 return out;
             };
             const porObjetivo = (enGrupo
-                ? objsGrupo.map((oid) => ({ oid, puestos: (grupoSlaMap[oid] || []) as any[] }))
+                ? objsGrupo.map((oid) => ({ oid, puestos: estructuraPorObj[oid] }))
                 : [{ oid: selectedObjective, puestos: estructuraContinuar as any[] }])
                 .map((e) => ({ ...e, merged: delObjetivo(merged, e.oid), shifts: delObjetivo(shiftsMap, e.oid) }));
             for (const dateStr of dias) {
@@ -12072,6 +12155,18 @@ function PlanificacionDesktop() {
     const aplicarContinuarMesAnterior = async (employeeIds: string[], sugerencias: SugerenciaNivelacion[], activarServicio = false) => {
         if (!continuarVista || !selectedObjective) return;
         const planActivar = activarServicio ? activarServicioRef.current : null;
+        if (activarServicio && activarGrupoRef.current.length && empresaId) {
+            for (const g of activarGrupoRef.current) {
+                try {
+                    await ejecutarAgregarMeses({ services: g.services, last: g.last, plan: g.plan, newEndDate: g.newEndDate, empresaId, migracionCompleta, scopeEmpresa, via: 'CONTINUAR_MES' });
+                    toast.success(`Servicio de ${g.nombre} activado`);
+                } catch (e) {
+                    console.error('[continuar activar servicio grupo]', e);
+                    toast.error(`No se pudo activar el servicio de ${g.nombre}. La copia queda en borrador.`);
+                }
+            }
+            setDataRefreshNonce((n) => n + 1);
+        }
         if (planActivar && empresaId) {
             try {
                 await ejecutarAgregarMeses({
@@ -12109,9 +12204,12 @@ function PlanificacionDesktop() {
         const aceptadas = sugerencias.filter((s) => {
             if (!elegidos.has(s.celda.employeeId)) return false;
             const key = `${s.celda.employeeId}_${s.dateStr}`;
-            return escritas.has(key) || s.tipo === 'relevante';
+            return escritas.has(key) || s.tipo === 'relevante' || s.tipo === 'suelto';
         });
-        for (const s of aceptadas) next[`${s.celda.employeeId}_${s.dateStr}`] = cambioContinuar(s.celda);
+        for (const s of aceptadas) {
+            const ch = cambioContinuar(s.celda);
+            next[`${s.celda.employeeId}_${s.dateStr}`] = s.francoTrabajado ? { ...ch, isFranco: false, isFrancoTrabajado: true, coveredFromFranco: true } : ch;
+        }
         if (turnos + francos > 0 && !origenArranqueRef.current && !armadoGuardado?.iniciadoAt) {
             origenArranqueRef.current = ORIGEN_CONTINUAR_MES;
         }
@@ -14323,6 +14421,11 @@ function PlanificacionDesktop() {
             for (const p of (grupoSlaMap[objId] || []) as any[]) {
                 if (etiquetaPuestoGrupo(objId, String(p.positionName || '')) === label) return { objId, pos: String(p.positionName || '') };
             }
+        }
+        // Objetivo cuyo servicio del mes todavía no está cargado (se activa desde Continuar): por el prefijo.
+        for (const objId of selectedGrupo.objectiveIds) {
+            const pre = etiquetaPuestoGrupo(objId, '');
+            if (label.startsWith(pre) && label.length > pre.length) return { objId, pos: label.slice(pre.length) };
         }
         return null;
     };
