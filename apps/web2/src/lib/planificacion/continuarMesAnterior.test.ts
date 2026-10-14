@@ -164,7 +164,12 @@ test('ignora coberturas, REF/ESC, un RET suelto, extensiones y turnos de otro ob
   assert.equal(codigoDeCiclo({ dateStr: '2026-09-01', code: 'RET', origin: 'OPERATIONS_COVERAGE' }, OBJ), null);
   assert.equal(codigoDeCiclo({ dateStr: '2026-09-01', code: 'RET', coverageForShiftId: 'titular' }, OBJ), null);
   assert.equal(codigoDeCiclo({ dateStr: '2026-09-01', code: 'RET', coverageUsed: true }, OBJ), null);
-  assert.equal(codigoDeCiclo({ dateStr: '2026-09-01', code: 'M', isExtended: true }, OBJ), null);
+  // La M extendida sigue siendo M (el tramo extra no se copia); el par 12 h o el RET que cubren a otro no son su ciclo.
+  assert.equal(codigoDeCiclo({ dateStr: '2026-09-01', code: 'M', isExtended: true }, OBJ), 'M');
+  assert.equal(codigoDeCiclo({ dateStr: '2026-09-01', code: 'T', isEarlyStart: true, coversEmployeeId: 'x' }, OBJ), 'T');
+  assert.equal(codigoDeCiclo({ dateStr: '2026-09-01', code: 'D12', coverageMode: '12H', coversEmployeeId: 'x' }, OBJ), null);
+  assert.equal(codigoDeCiclo({ dateStr: '2026-09-01', code: 'M', coversEmployeeId: 'x' }, OBJ), null);
+  assert.equal(codigoDeCiclo({ dateStr: '2026-09-01', code: 'RFZE' }, OBJ), null);
   assert.equal(codigoDeCiclo({ dateStr: '2026-09-01', code: 'M', objectiveId: 'otro' }, OBJ), null);
   assert.equal(codigoDeCiclo({ dateStr: '2026-09-01', code: 'FF' }, OBJ), 'F');
   assert.equal(codigoDeCiclo({ dateStr: '2026-09-01', code: 'M2' }, OBJ), 'M2');

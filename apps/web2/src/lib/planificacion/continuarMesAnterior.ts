@@ -29,7 +29,7 @@ export const TOPE_HORAS_MES = 200;
 
 /** Lo que no es parte del ciclo del guardia (puntual o cobertura). El RET planificado se evalúa aparte. */
 const NO_CICLO = new Set([
-  'REF', 'ESC', 'FT', 'RFZ', 'TURA', 'EV', 'AVISO', 'AUS', 'VAC', 'SUP', 'COB', 'EXT', 'ADV', 'ADEL',
+  'REF', 'ESC', 'FT', 'RFZ', 'RFZE', 'TURA', 'EV', 'AVISO', 'AUS', 'VAC', 'SUP', 'COB', 'EXT', 'ADV', 'ADEL',
 ]);
 const FRANCOS = new Set(['F', 'FF', 'FP']);
 const ORIGENES_PUNTUALES = new Set(['OPERATIONS_COVERAGE', 'SLA_VIRTUAL', 'RETEN', 'EVENTO']);
@@ -57,6 +57,9 @@ export type TurnoPrevio = {
   coverageForShiftId?: unknown;
   /** El turno de origen quedó anulado porque se usó para cubrir. No es el ciclo. */
   coverageUsed?: unknown;
+  /** Turno cargado para cubrir a otro (par 12 h de una licencia, RET asignado): no es su ciclo. */
+  coversEmployeeId?: unknown;
+  coverageMode?: unknown;
   eventoId?: unknown;
   startTime?: unknown;
   endTime?: unknown;
@@ -237,8 +240,11 @@ export function codigoDeCiclo(t: TurnoPrevio, objectiveId?: string): string | nu
   if (ORIGENES_PUNTUALES.has(up(t.origin))) return null;
   if (t.isVirtual === true || t.coverageHoursOnSource === true || t.eventoId || t.coverageForShiftId) return null;
   if (t.coverageUsed === true) return null;
-  if (t.isExtended === true || t.isEarlyStart === true || t.isFrancoTrabajado === true) return null;
+  if (t.isFrancoTrabajado === true) return null;
   const code = up(t.code);
+  // Extensión o adelanto: el turno sigue siendo su banda de siempre; el tramo extra no se copia.
+  if (t.isExtended === true || t.isEarlyStart === true) return esCodigoPuesto(code) ? code : null;
+  if (up(t.coverageMode) === '12H' || t.coversEmployeeId) return null;
   if (LICENCIA_CODES.has(code) || code === 'AVISO') {
     const orig = up(t.originalCode);
     if (FRANCOS.has(orig)) return 'F';

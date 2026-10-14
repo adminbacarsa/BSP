@@ -188,13 +188,14 @@ export function sugerenciasSueltas(input: SueltoInput): SugerenciaNivelacion[] {
           falta -= 1;
           const veces = cand.mismoDia > 0 ? `${cand.mismoDia} ${PLURAL[letra]}` : `${cand.total} vez/veces`;
           const extra = modo === 'mover' ? ` · su franco pasa al ${fechaCorta(otro!)} (sin FT)`
-            : modo === 'ft' ? ' · es su franco y no hay día para moverlo: queda como franco trabajado' : '';
+            : modo === 'ft' ? ' · lo hace en su franco, como el mes anterior' : '';
           out.push({
             dateStr,
             de: modo === 'libre' ? '' : 'F',
             a: code,
             tipo: 'suelto',
-            francoTrabajado: modo === 'ft',
+            // Como en el mes anterior: el turno se escribe común, sin la marca de FT.
+            francoTrabajado: false,
             ...(otro ? { francoA: otro } : {}),
             texto: `${fechaCorta(dateStr)} · ${String(s.code)} (${pos.positionName}): en ${input.mesAnteriorLabel} lo hizo ${cand.nombre} ${veces}${extra}`,
             celda: {

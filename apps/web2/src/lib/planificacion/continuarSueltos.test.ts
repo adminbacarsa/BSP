@@ -46,7 +46,7 @@ describe('Continuar: turnos sueltos del mes anterior', () => {
     assert.match(out[0].texto, /dom 01\/11 · VFM .* ENSABELLA 2 domingos · su franco pasa al lun 02\/11 \(sin FT\)/);
   });
 
-  it('si su turno del otro día hace falta, queda como franco trabajado', () => {
+  it('si su turno del otro día hace falta, lo hace en su franco (turno común, como el mes anterior)', () => {
     const out = sugerenciasSueltas({
       ...base,
       estructura: [...vifood, peaje],
@@ -54,8 +54,9 @@ describe('Continuar: turnos sueltos del mes anterior', () => {
     });
     const vfm = out.filter((s) => s.celda.code === 'VFM');
     assert.equal(vfm.length, 1);
-    assert.equal(vfm[0].francoTrabajado, true);
+    assert.equal(vfm[0].francoTrabajado, false);
     assert.equal(vfm[0].francoA, undefined);
+    assert.match(vfm[0].texto, /lo hace en su franco, como el mes anterior/);
   });
 
   it('alguien libre ese día va antes que mover un franco', () => {
