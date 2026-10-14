@@ -14620,12 +14620,14 @@ function PlanificacionDesktop() {
         const tipo = tipoDeCodigo(code);
         let objectiveId = fuente?.objectiveId || resolveObjectiveForEmp(emp.id);
         let pos = puestoFilaRapido(emp.id, c);
-        if (enGrupoRapido && selectedGrupo && !fuente?.objectiveId) {
-            // En el grupo el código manda: VFM va al puesto de Vifood que lo tiene, aunque el guardia sea de Peaje.
+        // En el grupo el código manda: VFM va al puesto de Vifood que lo tiene, aunque el guardia sea de Peaje.
+        // Vale también mirando un solo objetivo del grupo (Peaje Ruta 5 → el VFM se escribe en Vifood).
+        const grupoCargado = !!selectedGrupo && Object.keys(grupoSlaMap).length > 1;
+        if (grupoCargado && selectedGrupo && !fuente?.objectiveId) {
             const puestosGrupo = selectedGrupo.objectiveIds.flatMap((objId) => ((grupoSlaMap[objId] || []) as any[]).map((p: any) => ({ objId, p })));
             const posValido = puestosGrupo.some((x) => x.p.positionName === pos);
             if (tipo === 'FRANCO') {
-                if (!posValido) pos = 'General';
+                if (!posValido && enGrupoRapido) pos = 'General';
             } else {
                 const n = normalizarCodigo(code);
                 const duenos = puestosGrupo.filter((x) => ((x.p.shifts || []) as any[]).some((s: any) => normalizarCodigo(String(s.code || '')) === n));
