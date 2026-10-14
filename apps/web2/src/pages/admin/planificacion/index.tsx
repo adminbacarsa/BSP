@@ -16,7 +16,7 @@ import {
     BadgePercent, ArrowLeftRight, CalendarSearch, CheckSquare, XCircle, Search as SearchIcon, RefreshCcw, UserCheck, Split, Ban,
     FastForward, Rewind, AlertOctagon, Siren, FileText, Fingerprint, CalendarCheck, HelpCircle, MousePointerClick, Check, Database, Activity,
     PowerOff, LockKeyhole, Ghost, Maximize2, Maximize, Minimize2, Copy, ClipboardPaste, Keyboard, Scissors, Wand2, BarChart3, BarChart2, PanelLeft, LayoutList,
-    ChevronsUp, ChevronsDown, MoreHorizontal, FlaskConical, Shuffle, Timer, Repeat, UnfoldHorizontal, FileSpreadsheet,
+    ChevronsUp, ChevronsDown, MoreHorizontal, FlaskConical, Shuffle, Timer, Repeat, UnfoldHorizontal, FileSpreadsheet, Share2,
     ClipboardList, ListFilter
 } from 'lucide-react';
 
@@ -550,6 +550,8 @@ import {
 } from '@/lib/planificacion/armadoCronograma';
 import { ContinuarMesModal, type ContinuarMesVista, type DiaCorto } from '@/components/planificacion/ContinuarMesModal';
 import { sugerenciasSueltas } from '@/lib/planificacion/continuarSueltos';
+import { CompartirCronogramaModal } from '@/components/planificacion/CompartirCronogramaModal';
+import type { DatosImagen } from '@/lib/planificacion/imagenCronograma';
 import { AltaDesdePadronModal, type PedidoAlta } from '@/components/planificacion/AltaDesdePadronModal';
 import { AltaMasivaBoton } from '@/components/planificacion/AltaMasivaBoton';
 import { decidirActivarServicio } from '@/lib/planificacion/activarServicioMes';
@@ -2315,6 +2317,7 @@ function PlanificacionDesktop() {
 
     const [prevMonthLoading, setPrevMonthLoading] = useState(false);
     const [continuarVista, setContinuarVista] = useState<ContinuarMesVista | null>(null);
+    const [imagenCrono, setImagenCrono] = useState<DatosImagen | null>(null);
     const activarServicioRef = useRef<{ services: SlaRow[]; last: SlaRow; plan: AppendMonthsPlan; newEndDate: string } | null>(null);
     /** Continuar en el grupo: un plan de «agregar el mes» por cada objetivo que no tiene servicio en el mes nuevo. */
     const activarGrupoRef = useRef<Array<{ nombre: string; services: SlaRow[]; last: SlaRow; plan: AppendMonthsPlan; newEndDate: string }>>([]);
@@ -14186,6 +14189,51 @@ function PlanificacionDesktop() {
     }, [comparingSnapshot, compareShowOnlyDiffs, planningCompareDiff, displayedEmployees]);
 
     const planPublicadoGrilla = isPlanificacionPublished(publishStatusMap[planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1)]);
+
+    /** Imagen para WhatsApp: lo que muestra la grilla (borrador incluido), con horario por código. */
+    const abrirImagenCronograma = () => {
+        const hhmm = (v: any): string => {
+            if (!v) return '';
+            if (typeof v === 'string' && /^\d{1,2}:\d{2}$/.test(v)) return v.padStart(5, '0');
+            const d = v?.toDate ? v.toDate() : v instanceof Date ? v : typeof v === 'string' ? new Date(v) : null;
+            if (!d || isNaN(d.getTime())) return '';
+            return d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Argentina/Buenos_Aires' });
+        };
+        const LETRA = ['D', 'L', 'M', 'X', 'J', 'V', 'S'];
+        const dias = daysInMonth.map((d) => ({ dateStr: getDateKey(d), num: d.getDate(), letra: LETRA[d.getDay()], finde: d.getDay() === 0 || d.getDay() === 6 }));
+        const filas = (displayedEmployees as any[]).map((e: any) => {
+            const celdas: Record<string, { code: string; horario?: string }> = {};
+            for (const d of dias) {
+                const key = `${e.id}_${d.dateStr}`;
+                const aus = absencesMap[key];
+                if (aus) { celdas[d.dateStr] = { code: absenceGridDisplayCode(aus) }; continue; }
+                const pend = pendingChanges[key];
+                const sh = pend ? (pend.isDeleted ? null : pend) : shiftsMap[key];
+                if (!sh || sh.isDeleted || sh.coverageUsed) continue;
+                const code = String(sh.code || sh.shiftCode || '').toUpperCase();
+                if (!code) continue;
+                const franco = sh.isFranco || ['F', 'FF', 'FP'].includes(code);
+                const ini = hhmm(sh.startTime);
+                const fin = hhmm(sh.endTime);
+                celdas[d.dateStr] = {
+                    code: sh.isFrancoTrabajado ? `FT·${code}` : code,
+                    ...(!franco && ini && fin && ini !== fin ? { horario: `${ini}–${fin}` } : {}),
+                };
+            }
+            return { nombre: String(e.name || e.id), celdas };
+        });
+        const mes = currentDate.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
+        const cliente = (clients as any[]).find((c: any) => c.id === selectedClient)?.name || '';
+        const titulo = selectedGrupo && grupoUnifiedMode ? selectedGrupo.nombre : getObjectiveName(selectedObjective);
+        setImagenCrono({
+            titulo,
+            subtitulo: `${selectedGrupo && grupoUnifiedMode ? '' : cliente ? `${cliente} · ` : ''}${mes.charAt(0).toUpperCase()}${mes.slice(1)}`,
+            aviso: planPublicadoGrilla && Object.keys(pendingChanges).length === 0 ? undefined : 'Cronograma sin publicar o con cambios sin guardar: puede cambiar.',
+            dias,
+            filas,
+            pie: `${empresa?.name || 'COSP'} · generado ${new Date().toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`,
+        });
+    };
     const fechaBloqueadaGrilla = useCallback(
         (dateStr: string) => isPlanningDateLocked(dateStr) || isOutsideServiceRange(dateStr),
         [isPlanningDateLocked, isOutsideServiceRange],
@@ -18283,6 +18331,17 @@ function PlanificacionDesktop() {
                                     className="flex items-center justify-center w-8 h-8 bg-slate-100 rounded-lg hover:bg-indigo-50 hover:text-indigo-600 transition-colors disabled:opacity-40 shrink-0"
                                 >
                                     <FileSpreadsheet size={16}/>
+                                </button>
+                                <button
+                                    type="button"
+                                    data-imagen-cronograma
+                                    onClick={abrirImagenCronograma}
+                                    disabled={!selectedObjective || displayedEmployees.length === 0}
+                                    title="Imagen del cronograma para mandar por WhatsApp"
+                                    aria-label="Imagen del cronograma para WhatsApp"
+                                    className="flex items-center justify-center w-8 h-8 bg-slate-100 rounded-lg hover:bg-emerald-50 hover:text-emerald-600 transition-colors disabled:opacity-40 shrink-0"
+                                >
+                                    <Share2 size={16}/>
                                 </button>
 
                                 {/* === ACCIONES SECUNDARIAS — se ocultan al colapsar === */}
@@ -23618,6 +23677,15 @@ function PlanificacionDesktop() {
                             }))
                         ).filter((o: any) => o.id)}
                         allEmployees={employees}
+                    />,
+                    document.body,
+                )}
+
+                {imagenCrono && typeof document !== 'undefined' && createPortal(
+                    <CompartirCronogramaModal
+                        datos={imagenCrono}
+                        mesLabel={currentDate.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })}
+                        onCerrar={() => setImagenCrono(null)}
                     />,
                     document.body,
                 )}
