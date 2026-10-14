@@ -139,3 +139,15 @@ test('la lista de auditoría marca el puesto que está en el otro objetivo del g
   assert.equal(filas.length, 1);
   assert.deepEqual(filas[0].fechas, ['2026-10-05', '2026-10-06']);
 });
+
+test('Retén (RET) no es un puesto del SLA: no frena el guardado y conserva su objetivo', () => {
+  const aplicado = aplicarObjetivosDePuesto({
+    'emp_2026-10-17': { positionName: 'Retén', objectiveId: CASA },
+  }, {
+    objetivos: grupo,
+    preferidoDe: () => NINOS,
+    objetivosDelMesDe: () => [],
+  });
+  assert.equal(aplicado.fuera.length, 0);
+  assert.equal(aplicado.changes['emp_2026-10-17'].objectiveId, CASA);
+});

@@ -18,7 +18,8 @@ export type DecisionObjetivoPuesto =
   | { ok: false; motivo: 'ambiguo'; candidatos: CandidatoObjetivo[]; puesto: string }
   | { ok: false; motivo: 'fuera'; puesto: string };
 
-const SIN_PUESTO = new Set(['', 'general']);
+// «Retén» (RET) tampoco es un puesto del SLA: queda en el objetivo que ya tiene.
+const SIN_PUESTO = new Set(['', 'general', 'reten']);
 
 export function esPuestoReal(name: unknown): boolean {
   const n = normalizePlanningPositionName(name);
