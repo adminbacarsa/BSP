@@ -5780,7 +5780,7 @@ function PlanificacionDesktop() {
         setSelectedGrupo(grupo);
         setGrupoUnifiedMode(true);
         if (grupo && grupo.objectiveIds.length > 0) {
-            setSelectedClient(grupo.clientId);
+            setSelectedClient(String(clienteDeObjetivo(grupo.objectiveIds[0])?.id || grupo.clientId));
             setSelectedObjective(grupo.objectiveIds[0]);
         } else {
             setSelectedClient('');
@@ -17643,8 +17643,8 @@ function PlanificacionDesktop() {
                                             vistaAgrupada: grupoUnifiedMode,
                                             objectiveIdActivo: selectedObjective,
                                         })}
-                                        onTodos={() => { setGrupoUnifiedMode(true); setSelectedObjective(selectedGrupo.objectiveIds[0]); }}
-                                        onObjetivo={(id) => { setGrupoUnifiedMode(false); setSelectedObjective(id); }}
+                                        onTodos={() => { setGrupoUnifiedMode(true); setSelectedClient(String(clienteDeObjetivo(selectedGrupo.objectiveIds[0])?.id || selectedGrupo.clientId)); setSelectedObjective(selectedGrupo.objectiveIds[0]); }}
+                                        onObjetivo={(id) => { setGrupoUnifiedMode(false); setSelectedClient(String(clienteDeObjetivo(id)?.id || selectedGrupo.clientId)); setSelectedObjective(id); }}
                                         onSalir={() => handleGrupoChange(null)}
                                     />
                                 ) : !selectedClient ? (
