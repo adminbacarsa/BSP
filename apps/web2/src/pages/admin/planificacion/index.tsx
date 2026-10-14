@@ -2885,10 +2885,12 @@ function PlanificacionDesktop() {
             }
         }
         for (const [key, change] of Object.entries(pendingChanges) as [string, any][]) {
-            if (matchesObjective(change?.objectiveId) && change?.employeeId && !change?.isDeleted) {
+            // Los borradores de Continuar no traen employeeId: sale de la clave `${empId}_${yyyy-mm-dd}`.
+            const empId = change?.employeeId || key.slice(0, -11);
+            if (matchesObjective(change?.objectiveId) && empId && !change?.isDeleted) {
                 const [cy, cm] = key.slice(-10).split('-').map(Number);
                 if (cy === planYear && cm - 1 === planMonth) {
-                    ids.add(change.employeeId);
+                    ids.add(empId);
                 }
             }
         }
