@@ -14718,13 +14718,17 @@ function PlanificacionDesktop() {
                 const n = getEmpDefaultPos(emp.id);
                 return n && n !== 'General' && n !== 'Retén' ? String(n) : '';
             })();
+            // Turno dirigido a otro objetivo del grupo (VFM de Vifood): se valida con los puestos de ese objetivo.
+            const estructuraDestino = fuente.objectiveId && grupoSlaMap[fuente.objectiveId]?.length
+                ? grupoSlaMap[fuente.objectiveId]
+                : effectivePosStructure;
             const copiado = resolverTurnoCopiado({
                 fuente,
-                puestoDestino: defecto || pos,
-                puestoDefecto: defecto,
+                puestoDestino: fuente.objectiveId ? String(fuente.positionName || pos) : (defecto || pos),
+                puestoDefecto: fuente.objectiveId ? '' : defecto,
                 nombreDestino: String(emp?.name || ''),
                 mesLabel: mesLabelDe(currentDate),
-                puestos: (effectivePosStructure || []).map((p: any) => ({
+                puestos: ((estructuraDestino || []) as any[]).map((p: any) => ({
                     positionName: String(p.positionName || ''),
                     shifts: (p.shifts || []).map((s: any) => ({
                         code: s.code, name: s.name, startTime: s.startTime, endTime: s.endTime, hours: s.hours,
