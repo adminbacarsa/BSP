@@ -1183,15 +1183,15 @@ function anclarPorPuesto(input: ContinuarInput, resultados: ResultadoGuardia[]) 
         nuevas.push(celdaDeTrabajo(r.employeeId, c.dateStr, casa.pos, c.code));
         continue;
       }
+      // Su puesto está lleno ese día y otro tiene la banda libre: el turno se queda en la fila, en ese puesto
+      // (misma banda y horas). Antes quedaba como sugerencia destildada y el día salía vacío.
       const kk = clave(c.dateStr, otro.positionName, c.code);
       ocupado.set(kk, (ocupado.get(kk) || 0) + 1);
-      r.sugerencias.push({
-        dateStr: c.dateStr,
-        de: c.code,
-        a: c.code,
-        texto: `${chip} lleno el ${c.dateStr.slice(8, 10)}/${c.dateStr.slice(5, 7)}: ${c.code} en ${otro.positionName}`,
-        celda: celdaDeTrabajo(r.employeeId, c.dateStr, otro, c.code),
-      });
+      nuevas.push(celdaDeTrabajo(r.employeeId, c.dateStr, otro, c.code));
+      const motivo = `${chip} lleno: ${c.code} en ${otro.positionName}`;
+      const item = r.revisar.find((x) => x.positionName === otro.positionName && x.code === c.code && x.motivo === motivo);
+      if (item) item.dias.push(c.dateStr);
+      else r.revisar.push({ positionName: otro.positionName, code: c.code, dias: [c.dateStr], motivo });
     }
     r.propuestas = nuevas;
     r.horasPropuestas = nuevas.reduce((s, x) => s + (x.isFranco ? 0 : x.hours), 0);

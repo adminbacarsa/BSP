@@ -537,7 +537,7 @@ test('cada turno queda en el puesto del guardia, con la franja de ese puesto', (
   assert.equal(m1.startTime, '06:00');
 });
 
-test('si el puesto del guardia está lleno, el turno pasa al otro como sugerencia', () => {
+test('si el puesto del guardia está lleno, el turno se queda en la fila en el otro puesto (no deja el día vacío)', () => {
   const est: PuestoSla[] = [
     { positionName: 'Puesto 1', qty: 1, shifts: [{ code: 'M', hours: 8, startTime: '07:00', endTime: '15:00' }] },
     { positionName: 'Puesto 2', qty: 1, shifts: [{ code: 'M', hours: 8, startTime: '08:00', endTime: '16:00' }] },
@@ -549,9 +549,10 @@ test('si el puesto del guardia está lleno, el turno pasa al otro como sugerenci
     { id: 'b', nombre: 'B', previos, puestoPreferido: 'Puesto 1' },
   ], ['2026-10-01'], { estructura: est }));
   assert.equal(primero.propuestas.find((c) => c.code === 'M')?.positionName, 'Puesto 1');
-  assert.equal(segundo.propuestas.some((c) => c.code === 'M'), false);
-  assert.equal(segundo.sugerencias[0]?.celda.positionName, 'Puesto 2');
-  assert.equal(segundo.sugerencias[0]?.celda.startTime, '08:00');
+  const movida = segundo.propuestas.find((c) => c.code === 'M');
+  assert.equal(movida?.positionName, 'Puesto 2');
+  assert.equal(movida?.startTime, '08:00');
+  assert.equal(segundo.revisar[0]?.motivo, 'Puesto 1 lleno: M en Puesto 2');
 });
 
 test('el relevante se reacomoda, destildado, cuando se mueven los francos de Puesto 1 y 2', () => {
