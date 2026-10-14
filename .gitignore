@@ -122,3 +122,6 @@ apps/mobile-guardia/npx
 
 # Continuar mes anterior: manifiestos locales de la copia al emulador
 scripts/continuar-mes/.*.json
+
+# Volcado de contexto con secretos: nunca al repo
+contexto_limpio.txt
