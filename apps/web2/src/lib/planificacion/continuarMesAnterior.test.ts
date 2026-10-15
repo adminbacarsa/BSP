@@ -626,3 +626,23 @@ test('nunca más de 6 turnos de 8 h seguidos: el 7.º de un ciclo M×7 queda de 
   assert.ok(max <= 6, `racha máxima ${max}`);
   assert.ok(r.revisar.some((x) => /^racha /.test(x.motivo)));
 });
+
+test('el que sobra no pasa a un puesto que después se llena con su propia gente (dos pasadas)', () => {
+  const est: PuestoSla[] = [
+    { positionName: 'Puesto 5', qty: 1, shifts: [{ code: 'M', hours: 8, startTime: '07:00', endTime: '15:00' }] },
+    { positionName: 'Puesto 2', qty: 1, shifts: [{ code: 'M', hours: 8, startTime: '10:00', endTime: '16:00' }] },
+  ];
+  const patron = ['M', 'M', 'M', 'M', 'F', 'F'];
+  const p5 = armar(patron, '2026-08-01', '2026-09-30', 0, 'Puesto 5');
+  const p2 = armar(patron, '2026-08-01', '2026-09-30', 0, 'Puesto 2');
+  const res = proponerContinuacion(input([
+    { id: 'a', nombre: 'A', previos: p5, puestoPreferido: 'Puesto 5' },
+    { id: 'b', nombre: 'B', previos: p5, puestoPreferido: 'Puesto 5' },
+    { id: 'c', nombre: 'C', previos: p2, puestoPreferido: 'Puesto 2' },
+  ], ['2026-10-01'], { estructura: est }));
+  const puestoDe = (id: string) => res.find((r) => r.employeeId === id)?.propuestas.find((c) => c.code === 'M')?.positionName;
+  assert.equal(puestoDe('c'), 'Puesto 2');
+  // A y B no entran los dos en Puesto 5, pero Puesto 2 ya es de C: el que sobra se queda en Puesto 5.
+  assert.equal(puestoDe('a'), 'Puesto 5');
+  assert.equal(puestoDe('b'), 'Puesto 5');
+});

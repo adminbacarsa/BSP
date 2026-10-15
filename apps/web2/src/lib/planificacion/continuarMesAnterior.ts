@@ -1156,46 +1156,44 @@ function anclarPorPuesto(input: ContinuarInput, resultados: ResultadoGuardia[]) 
       ocupado.set(k, (ocupado.get(k) || 0) + 1);
     }
   }
+  // Pasada 1: cada uno en su puesto. Los que no entran quedan anotados para la pasada 2.
+  const sobrantes: Array<{ r: ResultadoGuardia; i: number; casa: PuestoSla; chip: string }> = [];
   for (const r of resultados) {
     const chip = String(porId.get(r.employeeId)?.puestoPreferido || '').trim();
     if (!chip) continue;
-    const nuevas: CeldaPropuesta[] = [];
-    for (const c of r.propuestas) {
-      if (c.isFranco || c.code === 'F' || c.code === 'RET') { nuevas.push(c); continue; }
+    r.propuestas = r.propuestas.map((c, i) => {
+      if (c.isFranco || c.code === 'F' || c.code === 'RET') return c;
       const casa = resolverPuesto(input.estructura, chip, c.code);
-      if ('motivo' in casa) { nuevas.push(c); continue; }
-      const q = cupo(casa.pos, c.dateStr, c.code);
+      if ('motivo' in casa) return c;
       const k = clave(c.dateStr, casa.pos.positionName, c.code);
       const n = ocupado.get(k) || 0;
-      if (n < q) {
-        ocupado.set(k, n + 1);
-        nuevas.push(celdaDeTrabajo(r.employeeId, c.dateStr, casa.pos, c.code));
-        continue;
-      }
-      const otro = input.estructura.find((p) => {
-        if (puestoNorm(p.positionName) === puestoNorm(casa.pos.positionName)) return false;
-        const rr = resolverPuesto(input.estructura, p.positionName, c.code);
-        if ('motivo' in rr) return false;
-        return (ocupado.get(clave(c.dateStr, p.positionName, c.code)) || 0) < cupo(p, c.dateStr, c.code);
-      });
-      if (!otro) {
-        ocupado.set(k, n + 1);
-        nuevas.push(celdaDeTrabajo(r.employeeId, c.dateStr, casa.pos, c.code));
-        continue;
-      }
-      // Su puesto está lleno ese día y otro tiene la banda libre: el turno se queda en la fila, en ese puesto
-      // (misma banda y horas). Antes quedaba como sugerencia destildada y el día salía vacío.
-      const kk = clave(c.dateStr, otro.positionName, c.code);
-      ocupado.set(kk, (ocupado.get(kk) || 0) + 1);
-      nuevas.push(celdaDeTrabajo(r.employeeId, c.dateStr, otro, c.code));
-      const motivo = `${chip} lleno: ${c.code} en ${otro.positionName}`;
-      const item = r.revisar.find((x) => x.positionName === otro.positionName && x.code === c.code && x.motivo === motivo);
-      if (item) item.dias.push(c.dateStr);
-      else r.revisar.push({ positionName: otro.positionName, code: c.code, dias: [c.dateStr], motivo });
-    }
-    r.propuestas = nuevas;
-    r.horasPropuestas = nuevas.reduce((s, x) => s + (x.isFranco ? 0 : x.hours), 0);
+      ocupado.set(k, n + 1);
+      if (n >= cupo(casa.pos, c.dateStr, c.code)) sobrantes.push({ r, i, casa: casa.pos, chip });
+      return celdaDeTrabajo(r.employeeId, c.dateStr, casa.pos, c.code);
+    });
   }
+  // Pasada 2: el que sobra pasa a otro puesto solo si esa banda quedó libre con todos ya ubicados.
+  // Si no hay lugar, queda en su puesto (sobrecobertura a la vista).
+  for (const s of sobrantes) {
+    const c = s.r.propuestas[s.i];
+    const otro = input.estructura.find((p) => {
+      if (puestoNorm(p.positionName) === puestoNorm(s.casa.positionName)) return false;
+      const rr = resolverPuesto(input.estructura, p.positionName, c.code);
+      if ('motivo' in rr) return false;
+      return (ocupado.get(clave(c.dateStr, p.positionName, c.code)) || 0) < cupo(p, c.dateStr, c.code);
+    });
+    if (!otro) continue;
+    const kCasa = clave(c.dateStr, s.casa.positionName, c.code);
+    ocupado.set(kCasa, (ocupado.get(kCasa) || 1) - 1);
+    const kk = clave(c.dateStr, otro.positionName, c.code);
+    ocupado.set(kk, (ocupado.get(kk) || 0) + 1);
+    s.r.propuestas[s.i] = celdaDeTrabajo(s.r.employeeId, c.dateStr, otro, c.code);
+    const motivo = `${s.chip} lleno: ${c.code} en ${otro.positionName}`;
+    const item = s.r.revisar.find((x) => x.positionName === otro.positionName && x.code === c.code && x.motivo === motivo);
+    if (item) item.dias.push(c.dateStr);
+    else s.r.revisar.push({ positionName: otro.positionName, code: c.code, dias: [c.dateStr], motivo });
+  }
+  for (const r of resultados) r.horasPropuestas = r.propuestas.reduce((acc, x) => acc + (x.isFranco ? 0 : x.hours), 0);
 }
 
 const COMPUESTO_PUESTO = /^(P\d+|PL)(D12|N12|M|T|N)$/;
