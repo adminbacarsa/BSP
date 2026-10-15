@@ -12059,7 +12059,10 @@ function PlanificacionDesktop() {
             });
             for (const sg of sueltas) {
                 const r = resultados.find((x) => x.employeeId === sg.celda.employeeId);
-                if (r) r.sugerencias = [...(r.sugerencias || []), sg];
+                // Si ese día la rotación ordenada del puesto ya lo ubica, el suelto no va (dejaría su banda vacía).
+                if (r && !(r.sugerencias || []).some((x) => x.tipo === 'rotacion' && x.dateStr === sg.dateStr)) {
+                    r.sugerencias = [...(r.sugerencias || []), sg];
+                }
             }
             const cambios: Record<string, any> = {};
             for (const r of resultados) {

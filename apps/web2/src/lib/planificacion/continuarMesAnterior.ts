@@ -1494,6 +1494,8 @@ function sugerirRotacionPuesto(input: ContinuarInput, resultados: ResultadoGuard
       if (n) cambian.push(r.nombre.split(',')[0].trim());
     });
     const grupoTexto = `${pos.positionName}: ordenar la rotación (24 días, cada guardia corrido 6). Todos los días queda M, T y N. Cambian ${cambian.join(', ')}.`;
+    // La nivelación se calculó sobre la copia sin ordenar: con la rotación aplicada ya no tiene sentido y la desarma.
+    for (const r of gs) r.sugerencias = r.sugerencias.filter((x) => x.tipo && x.tipo !== 'nivelacion');
     for (const sg of nuevas) {
       sg.grupoTexto = grupoTexto;
       gs.find((r) => r.employeeId === sg.celda.employeeId)?.sugerencias.push(sg);
