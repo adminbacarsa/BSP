@@ -15290,7 +15290,22 @@ function PlanificacionDesktop() {
     const avisosRapido = useMemo<AvisoRapido[]>(() => {
         if (!modoRapido || !selectedObjective || comparingSnapshot) return [];
         const claves = new Set(Object.keys(pendingChanges).filter((k) => !k.endsWith('_B2') && !pendingChanges[k]?._isAutoRotation && !pendingChanges[k]?._isAutoCondition));
-        const deLectura = lecturaMes.avisos as AvisoRapido[];
+        // Sin exigencia de cobertura no se proponen coberturas, pero se avisa si un día queda por debajo del mínimo del servicio.
+        const minimos: AvisoRapido[] = [];
+        if (!exigeCoberturaGrilla) {
+            for (const ds of diasRapido) {
+                if (bloqueoMesCerrado) break;
+                const rep = buildDayCoverageReport(ds);
+                if (!rep) continue;
+                for (const g of flattenDayGapsForUi(rep)) {
+                    if (!g.positionName) continue;
+                    const banda = String(g.gapBand || g.code || '').trim();
+                    if (!banda) continue;
+                    minimos.push({ tipo: 'MINIMO', empId: '', nombre: '', dateStr: ds, code: `${g.positionName}|${banda}`, texto: `${g.positionName}: falta ${banda} (mínimo del servicio)` });
+                }
+            }
+        }
+        const deLectura = [...minimos, ...(lecturaMes.avisos as AvisoRapido[])];
         if (!claves.size) return deLectura;
         const permitidos = idsObjetivosDelCrono(selectedObjective, selectedGrupo?.objectiveIds, !!(selectedGrupo && grupoUnifiedMode));
         const franjasServicio = (effectivePosStructure || []).flatMap((p: any) => (p.shifts || []).filter((st: any) => st.startTime && st.endTime).map((st: any) => ({

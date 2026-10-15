@@ -439,7 +439,7 @@ export function opcionesDeCodigo(slaPuesto: TurnoSla[], slaTodos: TurnoSla[], ul
 export type TurnoAviso = { code: string; startTime?: string; endTime?: string; hours?: number; trabajo: boolean };
 
 export type AvisoRapido = {
-    tipo: 'DESCANSO' | 'TOPE' | 'LICENCIA' | 'SOLAPE' | 'SERVICIO' | 'SOBRECOBERTURA' | 'SIN_PUESTO' | 'COPIA';
+    tipo: 'DESCANSO' | 'TOPE' | 'LICENCIA' | 'SOLAPE' | 'SERVICIO' | 'SOBRECOBERTURA' | 'SIN_PUESTO' | 'COPIA' | 'MINIMO';
     puestoSugerido?: string;
     empId: string;
     nombre: string;
@@ -560,7 +560,7 @@ export function agruparAvisos(avisos: AvisoRapido[]): GrupoAviso[] {
     const map = new Map<string, AvisoRapido[]>();
     for (const a of avisos) {
         const horas = a.tipo === 'DESCANSO' ? String(a.restHours ?? '') : '';
-        const clave = a.tipo === 'COPIA' || a.tipo === 'SOBRECOBERTURA' ? `${a.empId}|${a.tipo}|${a.texto}` : `${a.empId}|${a.tipo}|${horas}`;
+        const clave = a.tipo === 'COPIA' || a.tipo === 'SOBRECOBERTURA' ? `${a.empId}|${a.tipo}|${a.texto}` : a.tipo === 'MINIMO' ? `MINIMO|${a.code}` : `${a.empId}|${a.tipo}|${horas}`;
         const list = map.get(clave) || [];
         list.push(a);
         map.set(clave, list);
@@ -585,6 +585,9 @@ export function agruparAvisos(avisos: AvisoRapido[]): GrupoAviso[] {
             texto = items.length > 1 ? `${ap} · sin puesto (${dias})` : a.texto;
         } else if (a.tipo === 'SOBRECOBERTURA' || a.tipo === 'COPIA') {
             texto = a.texto;
+        } else if (a.tipo === 'MINIMO') {
+            // «Guardia: falta N (mínimo del servicio) · 03, 10, 17…»
+            texto = `${a.texto} · ${items.length > 1 ? `${items.length} días: ` : ''}${dias}`;
         } else if (items.length > 1) {
             const etiq = a.tipo === 'LICENCIA' ? 'licencias' : 'solapes';
             texto = `${ap} · ${items.length} ${etiq} (${dias})`;
@@ -604,6 +607,7 @@ function horasDeAviso(a: AvisoRapido): string {
 /** Identidad de un aviso para «Visto»: tipo, guardia, día y horas. Si cambia algo, es otro aviso. */
 export function idAviso(a: AvisoRapido): string {
     if (a.tipo === 'COPIA' || a.tipo === 'SOBRECOBERTURA') return `${a.tipo}|${a.empId}|${a.texto}`;
+    if (a.tipo === 'MINIMO') return `MINIMO|${a.code}|${a.dateStr}`;
     return `${a.tipo}|${a.empId}|${a.dateStr}|${horasDeAviso(a)}`;
 }
 

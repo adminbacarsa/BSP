@@ -54,6 +54,7 @@ const ETIQUETA: Record<AvisoRapido['tipo'], string> = {
     SOBRECOBERTURA: 'Sobrecobertura',
     SIN_PUESTO: 'Sin puesto',
     COPIA: 'Puesto',
+    MINIMO: 'Mínimo del servicio',
 };
 const COLOR: Record<AvisoRapido['tipo'], string> = {
     DESCANSO: 'bg-amber-500',
@@ -64,6 +65,7 @@ const COLOR: Record<AvisoRapido['tipo'], string> = {
     SOBRECOBERTURA: 'bg-amber-600',
     SIN_PUESTO: 'bg-slate-500',
     COPIA: 'bg-indigo-500',
+    MINIMO: 'bg-rose-600',
 };
 
 export function ModoRapidoAvisosPanel({
