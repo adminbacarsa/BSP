@@ -174,6 +174,11 @@ describe('cierre a 12 h', () => {
         ]);
         assert.equal(horarioDoce('D12', [{ code: 'D12', startTime: '08:00', endTime: '20:00' }]).startTime, '08:00');
         assert.equal(horarioDoce('N12', [{ code: 'N12', startTime: '20:00', endTime: '08:00' }]).startTime, '20:00');
+        // Obrador noviembre: Puesto 1 sin D12/N12 propios y M 06–14 → el par arranca a las 06 (no queda 1 h sin cubrir).
+        const p1 = [{ code: 'M', startTime: '06:00', endTime: '14:00' }, { code: 'T', startTime: '14:00', endTime: '22:00' }, { code: 'N', startTime: '22:00', endTime: '06:00' }];
+        assert.deepEqual([horarioDoce('D12', p1).startTime, horarioDoce('D12', p1).endTime], ['06:00', '18:00']);
+        assert.deepEqual([horarioDoce('N12', p1).startTime, horarioDoce('N12', p1).endTime], ['18:00', '06:00']);
+        assert.deepEqual([horarioDoce('D12', [{ code: 'P5M', startTime: '07:00', endTime: '15:00' }]).startTime], ['07:00']);
     });
 
     it('con un solo lado propone ese guardia', () => {

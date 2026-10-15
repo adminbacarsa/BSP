@@ -97,6 +97,15 @@ export function horarioDoce(
             hours: Number(hit.hours) || DOCE[code].hours,
         };
     }
+    // Sin D12/N12 en el puesto, el par sale de su mañana: Puesto 1 con M 06–14 → D12 06–18 / N12 18–06
+    // (con el estándar 07–19 quedaba una hora sin cubrir entre la N 22–06 y el D12).
+    const man = (sla || []).find((s) => /^(?:P\d+|PL)?M\d*$/.test(up(s.code).replace(/\s+/g, '')) && /^\d{2}:\d{2}/.test(String(s.startTime || '')));
+    if (man) {
+        const ini = String(man.startTime).slice(0, 5);
+        const [h, m] = ini.split(':').map(Number);
+        const doce = `${String((h + 12) % 24).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+        return code === 'D12' ? { code, startTime: ini, endTime: doce, hours: 12 } : { code, startTime: doce, endTime: ini, hours: 12 };
+    }
     return { code, ...DOCE[code] };
 }
 
@@ -123,7 +132,7 @@ export function resolverHorarioPar(opts: {
 }): { a: Horario12 & { code: 'D12' | 'N12' }; b?: Horario12 & { code: 'D12' | 'N12' } } {
     const propio = (lado: 'D12' | 'N12', sla?: readonly Sla12[]) => (tieneDoce(sla, lado) ? horarioDoce(lado, sla) : null);
     const cubierto = (lado: 'D12' | 'N12') => propio(lado, opts.slaCubierto);
-    const elegir = (lado: 'D12' | 'N12', sla?: readonly Sla12[]) => propio(lado, sla) || cubierto(lado) || horarioDoce(lado);
+    const elegir = (lado: 'D12' | 'N12', sla?: readonly Sla12[]) => propio(lado, sla) || cubierto(lado) || horarioDoce(lado, sla || opts.slaCubierto);
     const a = elegir(opts.ladoA, opts.slaA);
     if (!opts.ladoB) return { a };
     const b = elegir(opts.ladoB, opts.slaB);
