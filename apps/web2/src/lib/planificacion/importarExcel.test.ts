@@ -11,6 +11,7 @@ import {
   proponerDestinos,
   proponerRegla,
   proponerReglas,
+  ajustarReglasAlServicio,
   puestoDeTexto,
   resolverDestino,
   resumenPreview,
@@ -254,5 +255,44 @@ describe('importar planilla', () => {
       filas: [{ fila: 1, nombre: 'PEREZ JUAN', legajo: '', puesto: '', celdas: Array.from({ length: n }, (_, i) => ({ dia: i + 1, raw: 'M', color: 'none' as const })) }],
     });
     assert.deepEqual(sugerirCuadros([conDias(31), conDias(5)]), [0]);
+  });
+
+  it('Casino: «* REFERENCIAS *» con el horario abajo, MG/TG/NG van al turno del servicio con ese horario y puesto', () => {
+    const celdas: CeldaPlano[] = [];
+    const put = (fila: number, col: number, valor: string | number, color = 'none') => celdas.push({ fila, col, valor, color } as CeldaPlano);
+    for (let d = 1; d <= 31; d++) put(1, 2 + d, d);
+    const fila = (f: number, nombre: string, codigos: string[]) => {
+      put(f, 1, nombre);
+      codigos.forEach((c, i) => put(f, 3 + i, c, c === 'Mr' ? 'red' : 'none'));
+    };
+    fila(2, 'BAEZ AUGUSTO', Array.from({ length: 31 }, (_, i) => ['MG', 'TG', 'NG', 'N', 'MD', 'F', 'F'][i % 7]));
+    fila(3, 'LEON FELISA', Array.from({ length: 31 }, (_, i) => ['N', 'N', 'MD', 'MD', 'F', 'F', 'MG'][i % 7]));
+    put(4, 1, '* REFERENCIAS *');
+    [['MG', 'MAÑANA GUARDIA', '7 A 15'], ['MD', 'MEDIODIA', '13 A 21'], ['TG', 'TARDE GUARDIA', '15 A 23'], ['N', 'NOCHE', '21 A 05'], ['NG', 'NOCHE GUARDIA', '23 A 7']]
+      .forEach(([c, d, h], i) => { put(4, 3 + i * 4, c); put(4, 4 + i * 4, d); put(5, 4 + i * 4, h); });
+    const [cuadro] = detectarCuadros(celdas, 2026, 10);
+    assert.deepEqual(cuadro.filas.map((f) => f.nombre), ['BAEZ AUGUSTO', 'LEON FELISA']);
+    assert.ok(cuadro.referencias.some((r) => r.codigo === 'MG' && r.inicio === '07:00' && r.fin === '15:00'));
+    const turnos: TurnoServicio[] = [
+      { positionName: 'Guardia', code: 'M', startTime: '07:00', endTime: '15:00' },
+      { positionName: 'Guardia', code: 'T', startTime: '15:00', endTime: '23:00' },
+      { positionName: 'Guardia', code: 'N', startTime: '23:00', endTime: '07:00' },
+      { positionName: 'Mediodia', code: 'MD', startTime: '13:00', endTime: '21:00' },
+      { positionName: 'Noche', code: 'N', startTime: '21:00', endTime: '05:00' },
+    ];
+    const reglas = ajustarReglasAlServicio(proponerReglas(cuadro), cuadro.referencias, turnos);
+    const de = (c: string) => reglas.find((r) => r.codigo === c)!;
+    assert.deepEqual([de('MG').code, de('MG').puesto], ['M', 'Guardia']);
+    assert.deepEqual([de('TG').code, de('TG').puesto], ['T', 'Guardia']);
+    assert.deepEqual([de('NG').code, de('NG').puesto], ['N', 'Guardia']);
+    assert.deepEqual([de('N').code, de('N').puesto], ['N', 'Noche']);
+    assert.deepEqual([de('MD').code, de('MD').puesto], ['MD', 'Mediodia']);
+    const d = resolverDestino(de('N'), 'Guardia', turnos, cuadro.referencias);
+    assert.deepEqual([d.positionName, d.startTime, d.endTime], ['Noche', '21:00', '05:00']);
+  });
+
+  it('licencias escritas en la planilla: médica → E, «LICENCIA X 14 DIAS» → V', () => {
+    assert.equal(proponerRegla('LICENCIA MEDICA', 'none', []).code, 'E');
+    assert.equal(proponerRegla('LICENCIA X 14 DIAS 2026', 'none', []).code, 'V');
   });
 });

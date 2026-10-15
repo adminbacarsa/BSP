@@ -17,6 +17,7 @@ import {
   normPlanilla,
   proponerDestino,
   proponerReglas,
+  ajustarReglasAlServicio,
   resumenPreview,
   sugerirCuadros,
   vistaPrevia,
@@ -101,10 +102,14 @@ type GrupoImport = {
 const LICENCIAS = ['V', 'E', 'A', 'L', 'AA', 'PG', 'SUS'];
 const FRANCOS = ['F', 'FF', 'FP'];
 
+/** Un turno del servicio en la lista «Pasa a»: código y puesto («M@Guardia»). */
+const SEP_PUESTO = '@';
+
 function valorRegla(r: ReglaMapeo): string {
   if (r.accion === 'ignorar') return 'ignorar';
   if (r.accion === 'doce') return 'doce';
   if (r.accion === 'ret') return 'RET';
+  if (r.accion === 'turno' && r.puesto) return `${r.code}${SEP_PUESTO}${r.puesto}`;
   return r.code || 'ignorar';
 }
 
@@ -114,7 +119,13 @@ function reglaDesdeValor(r: ReglaMapeo, valor: string): ReglaMapeo {
   if (valor === 'RET') return { ...r, accion: 'ret', code: 'RET', nota: 'Retén' };
   if (FRANCOS.includes(valor)) return { ...r, accion: 'franco', code: valor, nota: 'Franco' };
   if (LICENCIAS.includes(valor)) return { ...r, accion: 'licencia', code: valor, nota: 'Licencia' };
-  return { ...r, accion: 'turno', code: valor, nota: 'Turno del servicio' };
+  const i = valor.indexOf(SEP_PUESTO);
+  if (i > 0) {
+    const code = valor.slice(0, i);
+    const puesto = valor.slice(i + 1);
+    return { ...r, accion: 'turno', code, puesto, nota: `${r.codigo} → ${code} · ${puesto}` };
+  }
+  return { ...r, accion: 'turno', code: valor, puesto: undefined, nota: 'Turno del servicio' };
 }
 
 function cruceResuelto(cruce: CruceFila[], decisiones: Record<number, string>): CruceFila[] {
@@ -300,7 +311,7 @@ export function ImportarExcelModal({ ctx, onCargar, onAplicar, onCancelar, puede
 
   useEffect(() => {
     if (!cuadro || !grupo || !cargado || cargado.clave !== grupo.clave) return;
-    setReglasPorClave((prev) => (prev[grupo.clave] ? prev : { ...prev, [grupo.clave]: proponerReglas(cuadro, cargado.reglas) }));
+    setReglasPorClave((prev) => (prev[grupo.clave] ? prev : { ...prev, [grupo.clave]: ajustarReglasAlServicio(proponerReglas(cuadro, cargado.reglas), cuadro.referencias, grupo.turnos || []) }));
   }, [cuadro, grupo, cargado]);
 
   const leer = async (file: File) => {
@@ -345,7 +356,7 @@ export function ImportarExcelModal({ ctx, onCargar, onAplicar, onCancelar, puede
 
   const irACodigos = () => {
     if (!cuadro || !grupo) return;
-    setReglasPorClave((prev) => (prev[grupo.clave] ? prev : { ...prev, [grupo.clave]: proponerReglas(cuadro, cargado?.reglas || []) }));
+    setReglasPorClave((prev) => (prev[grupo.clave] ? prev : { ...prev, [grupo.clave]: ajustarReglasAlServicio(proponerReglas(cuadro, cargado?.reglas || []), cuadro.referencias, grupo.turnos || []) }));
     setPaso(5);
   };
 
@@ -368,8 +379,15 @@ export function ImportarExcelModal({ ctx, onCargar, onAplicar, onCancelar, puede
     }
   };
 
-  const opciones = ['ignorar', 'doce', 'RET', ...FRANCOS, ...LICENCIAS, ...codigosSla, 'M', 'T', 'N', 'D12', 'N12', 'ESC', 'REF'];
+  const turnosGrupo = grupo?.turnos || [];
+  const opcionesTurno = turnosGrupo
+    .filter((t) => t.code && t.positionName)
+    .map((t) => ({ valor: `${t.code}${SEP_PUESTO}${t.positionName}`, texto: `${t.code} · ${t.positionName} ${t.startTime}–${t.endTime}` }))
+    .filter((o, i, arr) => arr.findIndex((x) => x.valor === o.valor) === i);
+  const sueltos = [...codigosSla, 'M', 'T', 'N', 'D12', 'N12', 'ESC', 'REF'].filter((c) => !opcionesTurno.length || !codigosSla.includes(c));
+  const opciones = ['ignorar', 'doce', 'RET', ...FRANCOS, ...LICENCIAS, ...sueltos];
   const opcionesUnicas = [...new Set(opciones)];
+  const textoOpcion = (o: string) => (o === 'ignorar' ? 'Ignorar' : o === 'doce' ? 'Jornada de 12 h (D12/N12 o la del puesto)' : o);
   const tituloPaso = grupo && paso >= 3
     ? `${grupo.clienteNombre ? `${grupo.clienteNombre} · ` : ''}${grupo.nombre}${grupos.length > 1 ? ` · objetivo ${grupoIdx + 1} de ${grupos.length}` : ''}`
     : paso === 2 ? 'Elegir destino' : 'Planificación';
@@ -723,11 +741,17 @@ export function ImportarExcelModal({ ctx, onCargar, onAplicar, onCancelar, puede
                           }));
                         }}
                       >
-                        {opcionesUnicas.map((o) => (
-                          <option key={o} value={o}>
-                            {o === 'ignorar' ? 'Ignorar' : o === 'doce' ? 'Jornada de 12 h (D12/N12 o la del puesto)' : o}
-                          </option>
-                        ))}
+                        {opcionesTurno.length > 0 && (
+                          <optgroup label="Turnos del servicio">
+                            {opcionesTurno.map((o) => <option key={o.valor} value={o.valor}>{o.texto}</option>)}
+                          </optgroup>
+                        )}
+                        <optgroup label="Otros">
+                          {opcionesUnicas.map((o) => <option key={o} value={o}>{textoOpcion(o)}</option>)}
+                          {![...opcionesUnicas, ...opcionesTurno.map((x) => x.valor)].includes(valorRegla(r)) && (
+                            <option value={valorRegla(r)}>{valorRegla(r)} (no está en el servicio)</option>
+                          )}
+                        </optgroup>
                       </select>
                     </td>
                     <td className="text-slate-500">

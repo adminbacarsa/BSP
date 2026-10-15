@@ -70,6 +70,8 @@ export type ReglaMapeo = {
   /** Código COSP. En `doce`, la banda de origen (M/N/T). */
   code: string;
   nota: string;
+  /** Puesto del servicio elegido para este código («MG → M · Guardia»). Manda sobre el puesto de la fila. */
+  puesto?: string;
 };
 
 export type CruceFila = {
@@ -177,6 +179,9 @@ function parseHorario(txt: string): { inicio: string; fin: string; horas: number
   return { inicio, fin, horas: horasEntre(inicio, fin) };
 }
 
+/** «REFERENCIAS», «* REFERENCIAS *», «- Referencias:»: el rótulo de la leyenda de códigos. */
+const RE_REFERENCIAS = /^[*\-–:.\s]*REFERENCIA/;
+
 function esCodigoCorto(nv: string): boolean {
   return /^[A-Z0-9][A-Z0-9 ./\-]{0,7}$/.test(nv) && nv.length <= 8 && !parseHorario(nv);
 }
@@ -236,12 +241,12 @@ function parseRefs(grid: Map<string, CeldaPlano>, desde: number, hasta: number):
   const refs: Referencia[] = [];
   const vistos = new Set<string>();
   for (let i = 0; i < filas.length; i++) {
-    const vals = filas[i].filter((c) => !/^REFERENCIA/.test(normPlanilla(texto(c))) || texto(c).length < 14);
+    const vals = filas[i].filter((c) => !RE_REFERENCIAS.test(normPlanilla(texto(c))) || texto(c).length < 14);
     const siguiente = filas[i + 1] || [];
     const siguienteEsHora = siguiente.filter((c) => parseHorario(texto(c))).length >= Math.max(1, Math.floor(siguiente.length * 0.4));
     for (let j = 0; j < vals.length; j++) {
       const nv = normPlanilla(texto(vals[j]));
-      if (!nv || /^REFERENCIA/.test(nv)) continue;
+      if (!nv || RE_REFERENCIAS.test(nv)) continue;
       if (nv === 'RETEN' || nv.startsWith('RETEN')) {
         refs.push({ codigo: 'R', desc: 'RETEN', inicio: '', fin: '', horas: 0, color: vals[j].color });
         continue;
@@ -318,7 +323,7 @@ export function detectarCuadros(celdas: CeldaPlano[], year: number, month: numbe
     const guardFilas: number[] = [];
     for (let f = day.fila + 1; f < limite; f++) {
       const vals = filaVals(grid, f);
-      if (vals.some((c) => /^REFERENCIA/.test(normPlanilla(texto(c))))) { refFila = f; break; }
+      if (vals.some((c) => RE_REFERENCIAS.test(normPlanilla(texto(c))))) { refFila = f; break; }
       if (vals.length) guardFilas.push(f);
     }
     const avisos: string[] = [];
@@ -357,7 +362,7 @@ export function detectarCuadros(celdas: CeldaPlano[], year: number, month: numbe
     const filas: FilaPlanilla[] = [];
     for (const f of guardFilas) {
       const nombre = nameCol ? texto(grid.get(`${f},${nameCol}`)) : '';
-      if (/^REFERENCIA/.test(normPlanilla(nombre))) continue;
+      if (RE_REFERENCIAS.test(normPlanilla(nombre))) continue;
       const legajo = legCol ? texto(grid.get(`${f},${legCol}`)) : '';
       const puesto = puestoCols.map((col) => texto(grid.get(`${f},${col}`))).filter((t) => t && normPlanilla(t) !== normPlanilla(nombre)).join(' / ');
       const celdas: CeldaFila[] = [];
@@ -752,10 +757,13 @@ export function proponerRegla(raw: string, color: ColorCelda, refs: Referencia[]
   if (codigo === 'VAC' || codigo.startsWith('VACACION') || codigo === 'LICANUAL' || normPlanilla(raw).startsWith('LIC ANUAL')) {
     return { ...base, accion: 'licencia', code: 'V', nota: 'Vacaciones' };
   }
+  if (codigo.startsWith('LICENCIAMEDICA') || codigo.startsWith('LICMEDICA')) return { ...base, accion: 'licencia', code: 'E', nota: 'Licencia médica → enfermedad' };
+  if (/^LIC(ENCIA)?X\d+DIAS/.test(codigo)) return { ...base, accion: 'licencia', code: 'V', nota: 'Licencia anual → vacaciones' };
   if (codigo.startsWith('SUSPEN') || codigo === 'SUSP' || codigo === 'SUS') return { ...base, accion: 'licencia', code: 'SUS', nota: 'Suspensión' };
   if (['E', 'V', 'L', 'A', 'AA', 'PG', 'SGS'].includes(codigo) && !refs.some((r) => r.codigo === codigo && r.inicio)) {
     return { ...base, accion: 'licencia', code: codigo, nota: LICENCIAS[codigo] || codigo };
   }
+  if (codigo === 'EV' || codigo.startsWith('EVEN')) return { ...base, accion: 'ignorar', code: '', nota: 'Evento: se asigna desde Eventos, no se importa como turno' };
   if (codigo.startsWith('ESC')) return { ...base, accion: 'turno', code: 'ESC', nota: 'Escuela' };
   if (codigo === 'FT' || codigo.startsWith('F/T')) return { ...base, accion: 'ignorar', code: '', nota: 'Parece franco trabajado: elegí el código o ignoralo' };
   if (esOtroObjetivo(raw, refs)) return { ...base, accion: 'ignorar', code: '', nota: 'Parece el nombre de otro objetivo. Se ignora; podés pasarlo a RET.' };
@@ -767,6 +775,41 @@ export function proponerRegla(raw: string, color: ColorCelda, refs: Referencia[]
   if (['M', 'T', 'N', 'D12', 'N12'].includes(codigo)) return { ...base, accion: 'turno', code: codigo, nota: 'Banda del puesto' };
   if (horarioBanda(codigo) || ref) return { ...base, accion: 'turno', code: codigo, nota: ref?.desc || 'Turno del servicio' };
   return { ...base, accion: 'ignorar', code: '', nota: 'Sin referencia. Elegí un turno, una licencia o ignoralo.' };
+}
+
+function mismoHorario(t: TurnoServicio, inicio: string, fin: string): boolean {
+  return Math.abs(minutos(t.startTime) - minutos(inicio)) <= 15 && Math.abs(minutos(t.endTime) - minutos(fin)) <= 15;
+}
+
+/**
+ * Lleva cada código de la planilla al turno del servicio con el mismo horario de la referencia
+ * (MG 7 a 15 → M · Guardia 07:00–15:00; la N 21 a 05 → N · Noche, no la N de Guardia).
+ * No toca lo que el planificador ya eligió (`puesto` guardado) ni las licencias, francos y RET.
+ */
+export function ajustarReglasAlServicio(reglas: ReglaMapeo[], refs: Referencia[], turnos: TurnoServicio[]): ReglaMapeo[] {
+  if (!turnos.length) return reglas;
+  return reglas.map((r) => {
+    if (r.puesto || (r.accion !== 'turno' && r.accion !== 'doce')) return r;
+    const refAny = refDe(refs, r.codigo, r.color);
+    // La M común no toma la referencia de la M roja (07 a 19): esa es la jornada de 12 h.
+    const ref = refAny && (r.color === 'red' || refAny.color !== 'red') ? refAny : null;
+    if (!ref?.inicio) {
+      if (r.accion !== 'turno') return r;
+      const mismos = turnos.filter((t) => claveCodigo(t.code) === claveCodigo(r.code));
+      const puestos = [...new Set(mismos.map((t) => t.positionName))];
+      if (puestos.length !== 1) return r;
+      const t = mismos[0];
+      return { ...r, puesto: puestos[0], nota: `${r.codigo} → ${t.code} · ${t.positionName} ${t.startTime}–${t.endTime}` };
+    }
+    const cands = turnos.filter((t) => mismoHorario(t, ref.inicio, ref.fin));
+    if (!cands.length) return r;
+    const letra = claveCodigo(r.codigo).charAt(0);
+    const elegido = cands.find((t) => claveCodigo(t.code) === claveCodigo(r.code))
+      || cands.find((t) => claveCodigo(t.code).charAt(0) === letra)
+      || cands[0];
+    const desc = `${r.codigo} ${ref.inicio}–${ref.fin} → ${elegido.code} · ${elegido.positionName}`;
+    return { ...r, accion: 'turno', code: elegido.code, puesto: elegido.positionName, nota: desc };
+  });
 }
 
 export function proponerReglas(cuadro: CuadroPlanilla, guardadas: ReglaMapeo[] = []): ReglaMapeo[] {
@@ -838,7 +881,8 @@ function minutos(hm: string): number {
   return (h || 0) * 60 + (m || 0);
 }
 
-export function resolverDestino(regla: ReglaMapeo, puesto: string, turnos: TurnoServicio[], refs: Referencia[]): DestinoCelda {
+export function resolverDestino(regla: ReglaMapeo, puestoFila: string, turnos: TurnoServicio[], refs: Referencia[]): DestinoCelda {
+  const puesto = regla.puesto && turnos.some((t) => t.positionName === regla.puesto) ? regla.puesto : puestoFila;
   const vacio = { positionName: puesto, startTime: '', endTime: '', hours: 0, nombre: '' };
   if (regla.accion === 'ignorar') return { accion: 'ignorar', code: '', ...vacio };
   if (regla.accion === 'ret') return { accion: 'ret', code: 'RET', ...vacio, nombre: 'Retén', positionName: 'Retén' };
