@@ -709,3 +709,13 @@ test('5 días de 10 h (RO de lunes a viernes) no se cortan: el tope es 6 turnos 
   for (const v of viernes) assert.equal(codigos(r)[v], 'RO', `viernes ${v}`);
   assert.ok(!r.revisar.some((x) => /^racha /.test(x.motivo)));
 });
+
+test('servicio de lunes a lunes: 5 días de 10 h (50 h) se cortan, el tope es 48 h', () => {
+  const est: PuestoSla[] = [{ positionName: 'X', qty: 1, shifts: [{ code: 'X10', hours: 10, startTime: '08:00', endTime: '18:00' }] }];
+  const previos = armar(['X10', 'X10', 'X10', 'X10', 'X10', 'F', 'F'], '2026-08-01', '2026-09-30', 0, 'X').map((t) => ({ ...t, hours: t.code === 'F' ? 0 : 10 }));
+  const dias = Array.from({ length: 31 }, (_, i) => `2026-10-${String(i + 1).padStart(2, '0')}`);
+  const [r] = proponerContinuacion(input([{ id: 'g', nombre: 'G', previos, puestoPreferido: 'X' }], dias, { estructura: est }));
+  let racha = 0; let max = 0;
+  for (const d of dias) { const c = codigos(r)[d]; racha = c && c !== 'F' ? racha + 10 : 0; max = Math.max(max, racha); }
+  assert.ok(max <= 48, `racha máxima ${max} h`);
+});

@@ -1573,10 +1573,20 @@ function sugerirAlternos(input: ContinuarInput, resultados: ResultadoGuardia[]) 
 }
 
 /**
- * Tope de racha: nunca más de 6 turnos seguidos y hasta 56 h (6 de 8 h, 5 de 10 h —el RO de lunes a viernes—,
- * 4 de 12 h; el 5.º de 12 h daría 60 h), contando el final del mes anterior.
+ * Tope de racha, contando el final del mes anterior. Nunca más de 6 turnos seguidos.
+ * Servicio de lunes a lunes: 48 h (6 de 8 h o 4 de 12 h). Franja de lunes a viernes (sin sábado ni domingo):
+ * hasta 56 h (lo normal son 50, el RO de 5 × 10 h).
  */
-export const MAX_HORAS_SEGUIDAS = 56;
+export const MAX_HORAS_SEGUIDAS = 48;
+export const MAX_HORAS_SEGUIDAS_LUN_VIE = 56;
+
+function topeHorasDe(input: ContinuarInput, c: CeldaPropuesta): number {
+  const pos = input.estructura.find((p) => puestoNorm(p.positionName) === puestoNorm(c.positionName));
+  const sh = (pos?.shifts || []).find((x) => up(x.code) === up(c.code));
+  const dias = (sh?.days || []).map((d) => up(d));
+  const sinFinde = dias.length > 0 && !dias.includes('S') && !dias.includes('D');
+  return sinFinde ? MAX_HORAS_SEGUIDAS_LUN_VIE : MAX_HORAS_SEGUIDAS;
+}
 
 function horasDeCodigo(code: string, hours?: unknown): number {
   const h = Number(hours);
@@ -1610,9 +1620,9 @@ function cortarRachas(input: ContinuarInput, resultados: ResultadoGuardia[]) {
         const c = i == null ? null : r.propuestas[i];
         if (c && !c.isFranco && c.code !== 'RET') {
           h = horasDeCodigo(up(c.code), c.hours);
-          if (horas + h > MAX_HORAS_SEGUIDAS || turnos + 1 > 6) {
+          if (horas + h > topeHorasDe(input, c) || turnos + 1 > 6) {
             r.propuestas[i!] = { ...c, code: 'F', name: 'Franco', positionName: 'General', isFranco: true, hours: 0, startTime: '00:00', endTime: '' };
-            const motivo = `racha de más de ${MAX_HORAS_SEGUIDAS} h seguidas: queda de franco`;
+            const motivo = `racha de más de ${topeHorasDe(input, c)} h seguidas: queda de franco`;
             const item = r.revisar.find((x) => x.motivo === motivo && x.code === c.code);
             if (item) item.dias.push(dateStr);
             else r.revisar.push({ positionName: c.positionName, code: c.code, dias: [dateStr], motivo });

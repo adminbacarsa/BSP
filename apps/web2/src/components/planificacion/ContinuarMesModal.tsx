@@ -85,7 +85,7 @@ function gruposRevisar(resultados: ResultadoGuardia[]): GrupoRevisar[] {
     }
   }
   const out: GrupoRevisar[] = [];
-  if (rachas.length) out.push({ titulo: `Rachas cortadas por el tope (6 turnos o 56 h seguidas) (${rachas.length})`, items: rachas });
+  if (rachas.length) out.push({ titulo: `Rachas cortadas por el tope (6 turnos o 48 h; 56 h si es de lunes a viernes) (${rachas.length})`, items: rachas });
   if (puesto.length) out.push({ titulo: `Pasan a otro puesto porque el suyo estaba lleno (${puesto.length})`, items: puesto });
   if (otros.length) out.push({ titulo: `Sin proponer (${otros.length})`, items: otros });
   return out;
@@ -104,7 +104,7 @@ function agruparRevisar(resultados: ResultadoGuardia[]): Array<{ texto: string; 
         g.codes.add(x.code);
         reasignados.set(k, g);
       } else if (/^racha /.test(x.motivo)) {
-        sinProponer.push({ texto: `${r.nombre}: ${x.code} los días ${textoDias(x.dias)} pasaba el tope de racha (6 turnos o 56 h seguidas): queda de franco.`, propuesto: true });
+        sinProponer.push({ texto: `${r.nombre}: ${x.code} los días ${textoDias(x.dias)} pasaba el tope de racha: queda de franco.`, propuesto: true });
       } else if (/ lleno: /.test(x.motivo)) {
         // Su puesto estaba lleno ese día: el turno se propone en el puesto que tenía la banda libre.
         sinProponer.push({ texto: `${r.nombre}: ${x.motivo} (días ${textoDias(x.dias)}). Se propone ahí.`, propuesto: true });
