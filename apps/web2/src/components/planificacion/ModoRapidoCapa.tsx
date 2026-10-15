@@ -96,7 +96,7 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
     useEffect(() => { if (texto == null) setPuestoSel(null); }, [texto]);
     const [serie, setSerie] = useState<CeldaRC | null>(null);
     const [extra, setExtra] = useState<CeldaRC[]>([]);
-    const [sugLugar, setSugLugar] = useState<{ left: number; arriba: boolean; top: number; bottom: number } | null>(null);
+    const [sugLugar, setSugLugar] = useState<{ left: number; right: number | null; arriba: boolean; top: number; bottom: number } | null>(null);
     const [cajas, setCajas] = useState<{ cursor: Caja | null; rango: Caja | null; serie: Caja | null; marcas: Array<Caja & MarcaAviso>; fantasmas: Array<Caja & { code: string }> }>({ cursor: null, rango: null, serie: null, marcas: [], fantasmas: [] });
     const editorCajaRef = useRef<Caja | null>(null);
     const inputRef = useRef<HTMLInputElement>(null);
@@ -174,7 +174,9 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
             if (!t) { setSugLugar(null); return; }
             const r = t.getBoundingClientRect();
             const abajo = window.innerHeight - r.bottom;
-            setSugLugar({ left: Math.max(8, r.left), arriba: abajo < 220 && r.top > abajo, top: r.bottom + 4, bottom: window.innerHeight - r.top + 4 });
+            // Cerca del borde derecho la lista se abre hacia la izquierda de la celda (si no, queda cortada).
+            const hacia_izq = r.left + 340 > window.innerWidth - 8;
+            setSugLugar({ left: Math.max(8, r.left), right: hacia_izq ? Math.max(8, window.innerWidth - r.right) : null, arriba: abajo < 220 && r.top > abajo, top: r.bottom + 4, bottom: window.innerHeight - r.top + 4 });
         };
         medirSug();
         const cont = contenedorRef.current;
@@ -712,7 +714,7 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
                     {sugLugar && sugerencias.length > 0 && createPortal(
                         <ul
                             className="fixed z-[12000] min-w-[220px] max-w-[340px] overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-lg"
-                            style={sugLugar.arriba ? { left: sugLugar.left, bottom: sugLugar.bottom } : { left: sugLugar.left, top: sugLugar.top }}
+                            style={{ ...(sugLugar.right != null ? { right: sugLugar.right } : { left: sugLugar.left }), ...(sugLugar.arriba ? { bottom: sugLugar.bottom } : { top: sugLugar.top }) }}
                             data-modo-rapido-sugerencias
                         >
                             {!texto && cursor && props.puestos && (() => {
