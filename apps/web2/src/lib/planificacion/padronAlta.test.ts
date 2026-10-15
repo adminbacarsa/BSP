@@ -117,4 +117,10 @@ test('activar el mes: octubre que termina el 31 queda tildado para noviembre; ce
   const adentro = decidirActivarServicio({ slas: [{ ...oct, endDate: '2026-11-15' }], year: 2026, month: 11, clienteActivo: true });
   assert.equal(adentro.puede, true);
   assert.equal(adentro.marcado, false);
+  // Obrador: octubre y diciembre cargados, noviembre vacío → se activa desde octubre.
+  const dic = { ...oct, id: 'dic', startDate: '2026-12-01', endDate: '2026-12-31' };
+  const medio = decidirActivarServicio({ slas: [oct, dic], year: 2026, month: 11, clienteActivo: true });
+  assert.equal(medio.puede, true);
+  assert.equal(medio.marcado, true);
+  assert.equal(medio.lastId, oct.id);
 });

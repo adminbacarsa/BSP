@@ -63,7 +63,11 @@ export function decidirActivarServicio(input: {
   const pool = input.slas.filter(abierto);
   const cubre = pool.some((s) => !s.closed && dia(s.startDate) <= desde && dia(s.endDate) >= hasta);
   if (cubre) return base;
-  const last = pool.filter((s) => dia(s.endDate)).sort((a, b) => dia(b.endDate).localeCompare(dia(a.endDate)))[0];
+  // El de base es el último que arranca antes del mes y termina antes de su fin. Un servicio posterior
+  // (diciembre cargado con noviembre vacío) no cuenta: si no, se pedía «agregá los meses desde Servicios».
+  const porFin = (a: SlaParaActivar, b: SlaParaActivar) => dia(b.endDate).localeCompare(dia(a.endDate));
+  const conFin = pool.filter((s) => dia(s.endDate));
+  const last = conFin.filter((s) => dia(s.startDate) <= hasta && dia(s.endDate) < hasta).sort(porFin)[0] || conFin.sort(porFin)[0];
   if (!last) {
     return { ...base, mostrar: true, motivo: 'Este objetivo no tiene servicio. Crearlo desde Servicios.' };
   }
