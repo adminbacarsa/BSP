@@ -150,6 +150,7 @@ import {
     isDateOutsideSlaRanges,
     isDateInClosedSlaOnly,
     type SlaDateRange,
+    getEffectiveShiftQuantityOnDate,
 } from '@/lib/slaPlanningMatch';
 import { buildSlaExclusionContext, isTurnoOnSlaExcludedSlot } from '@/lib/crm/slaExclusionForPlanned';
 import { resolveTurnoScheduleDateKey } from '@/lib/crm/crmDateUtils';
@@ -12224,13 +12225,48 @@ function PlanificacionDesktop() {
             const key = `${s.celda.employeeId}_${s.dateStr}`;
             return escritas.has(key) || s.tipo === 'relevante' || s.tipo === 'suelto' || s.tipo === 'rotacion';
         });
-        for (const s of aceptadas) {
-            const ch = cambioContinuar(s.celda);
-            next[`${s.celda.employeeId}_${s.dateStr}`] = s.francoTrabajado ? { ...ch, isFranco: false, isFrancoTrabajado: true, coveredFromFranco: true } : ch;
+        // Regla de no repetir: ninguna sugerencia deja una franja de un puesto con más gente que la que pide el servicio ese día.
+        const estructuraDe = (objId: string): any[] => ((enGrupoRapido && grupoSlaMap[objId]?.length ? grupoSlaMap[objId] : effectivePosStructure) || []) as any[];
+        const claveFranja = (ch: any, ds: string) => `${String(ch.objectiveId || selectedObjective)}|${String(ch.positionName || '')}|${String(ch.code || '').toUpperCase()}|${ds}`;
+        const ocupacion = new Map<string, number>();
+        const sumar = (ch: any, ds: string, d: number) => {
+            if (!ch || ch.isDeleted || ch.isFranco || ch.isNovedad) return;
+            const k = claveFranja(ch, ds);
+            ocupacion.set(k, (ocupacion.get(k) || 0) + d);
+        };
+        for (const key of new Set([...Object.keys(next), ...Object.keys(shiftsMap)])) {
+            const m = key.match(/_(\d{4}-\d{2}-\d{2})$/);
+            if (m) sumar(next[key] ?? shiftsMap[key], m[1], 1);
+        }
+        const cupoFranja = (ch: any, ds: string): number => {
+            const pos = estructuraDe(String(ch.objectiveId || selectedObjective)).find((p: any) => p.positionName === ch.positionName);
+            const sh = (pos?.shifts || []).find((x: any) => String(x.code || '').toUpperCase() === String(ch.code || '').toUpperCase());
+            if (!pos || !sh) return Infinity;
+            return getEffectiveShiftQuantityOnDate(pos, ds, sh.code, pos.qty) || pos.qty || 1;
+        };
+        const escribir = (key: string, ds: string, ch: any) => {
+            sumar(next[key] ?? shiftsMap[key], ds, -1);
+            next[key] = ch;
+            sumar(ch, ds, 1);
+        };
+        let salteadas = 0;
+        // La rotación ordenada se aplica entera (es consistente dentro del puesto); el resto, de a una y con la regla.
+        const ordenadas = [...aceptadas.filter((x) => x.tipo === 'rotacion'), ...aceptadas.filter((x) => x.tipo !== 'rotacion')];
+        for (const s of ordenadas) {
+            const base = cambioContinuar(s.celda);
+            const ch = s.francoTrabajado ? { ...base, isFranco: false, isFrancoTrabajado: true, coveredFromFranco: true } : base;
+            const key = `${s.celda.employeeId}_${s.dateStr}`;
+            if (s.tipo !== 'rotacion' && !ch.isFranco) {
+                const actual = next[key] ?? shiftsMap[key];
+                const mismaFranja = actual && !actual.isFranco && claveFranja(actual, s.dateStr) === claveFranja(ch, s.dateStr);
+                if (!mismaFranja && (ocupacion.get(claveFranja(ch, s.dateStr)) || 0) >= cupoFranja(ch, s.dateStr)) { salteadas += 1; continue; }
+            }
+            escribir(key, s.dateStr, ch);
             if (s.francoA) {
-                next[`${s.celda.employeeId}_${s.francoA}`] = cambioContinuar({ ...s.celda, dateStr: s.francoA, code: 'F', name: 'Franco', positionName: 'General', isFranco: true, hours: 0 });
+                escribir(`${s.celda.employeeId}_${s.francoA}`, s.francoA, cambioContinuar({ ...s.celda, dateStr: s.francoA, code: 'F', name: 'Franco', positionName: 'General', isFranco: true, hours: 0 }));
             }
         }
+        if (salteadas) toast.message(`${salteadas} sugerencia(s) no se aplicaron: habrían repetido un puesto y una franja el mismo día.`);
         if (turnos + francos > 0 && !origenArranqueRef.current && !armadoGuardado?.iniciadoAt) {
             origenArranqueRef.current = ORIGEN_CONTINUAR_MES;
         }

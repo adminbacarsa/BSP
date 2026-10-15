@@ -1177,9 +1177,20 @@ function anclarPorPuesto(input: ContinuarInput, resultados: ResultadoGuardia[]) 
   }
   // Pasada 2: el que sobra pasa a otro puesto solo si esa banda quedó libre con todos ya ubicados.
   // Si no hay lugar, queda en su puesto (sobrecobertura a la vista).
+  // El que sobra va primero a un puesto donde ya trabajó el mes anterior (BONILLA: Puesto 1 antes que Playa).
+  const historial = (empId: string) => {
+    const m = new Map<string, number>();
+    for (const t of porId.get(empId)?.previos || []) {
+      const p = puestoNorm(String(t.positionName || ''));
+      if (p) m.set(p, (m.get(p) || 0) + 1);
+    }
+    return m;
+  };
   for (const s of sobrantes) {
     const c = s.r.propuestas[s.i];
-    const otro = input.estructura.find((p) => {
+    const hist = historial(s.r.employeeId);
+    const candidatos = [...input.estructura].sort((a, b) => (hist.get(puestoNorm(b.positionName)) || 0) - (hist.get(puestoNorm(a.positionName)) || 0));
+    const otro = candidatos.find((p) => {
       if (puestoNorm(p.positionName) === puestoNorm(s.casa.positionName)) return false;
       const rr = resolverPuesto(input.estructura, p.positionName, c.code);
       if ('motivo' in rr) return false;
