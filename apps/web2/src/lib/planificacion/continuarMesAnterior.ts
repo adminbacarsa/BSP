@@ -950,11 +950,14 @@ function celdaDeTrabajo(employeeId: string, dateStr: string, pos: PuestoSla, cod
   const sh = turnoDelPuesto(pos, code)!;
   const win = ventanaTrabajo(sh.startTime, sh.endTime) || CCT[code] || { start: '07:00', end: '15:00', hours: 8 };
   const hours = Number(sh.hours) > 0 ? Number(sh.hours) : win.hours;
+  // Si la franja se encontró por la banda (M → P5M), el código queda como en el mes que se copia (M):
+  // noviembre igual a octubre, con el puesto y el horario del servicio.
+  const porBanda = up(sh.code) !== code;
   return {
     employeeId,
     dateStr,
-    code: String(sh.code || code),
-    name: String(sh.name || sh.code || code),
+    code: porBanda ? code : String(sh.code || code),
+    name: porBanda ? code : String(sh.name || sh.code || code),
     positionName: pos.positionName,
     startTime: win.start,
     endTime: win.end,
