@@ -567,6 +567,31 @@ export default function ServiciosSLAPage() {
     ];
   };
 
+  /** Banda de una franja de 24 h por su código: PLM/P5M → M, PLN → N, D12/N12 tal cual. */
+  const bandaFranja24 = (code: string): 'M' | 'T' | 'N' | 'D12' | 'N12' | null => {
+    const c = String(code || '').toUpperCase().replace(/\s+/g, '');
+    if (/D12$/.test(c)) return 'D12';
+    if (/N12$/.test(c)) return 'N12';
+    const m = c.match(/^(?:P\d+|PL)?([MTN])\d*$/);
+    return m ? (m[1] as 'M' | 'T' | 'N') : null;
+  };
+  const inicioBanda24 = (shifts: ShiftVariant[], banda: 'M' | 'D12'): string =>
+    shifts.find((x) => bandaFranja24(x.code) === banda)?.startTime?.slice(0, 5) || '07:00';
+  /**
+   * Reancla las franjas de 24 h a otro inicio. Si son las estándar (M/T/N/D12/N12) las rearma; si tienen
+   * nombre propio (PLM, P5T…) les cambia solo el horario según su banda y conserva el código.
+   */
+  const reanclar24hs = (prev: ShiftVariant[], anchorM: string, anchorD12: string): ShiftVariant[] => {
+    const base = rebuild24hsVariants(anchorM, anchorD12);
+    const estandar = prev.length === 0 || prev.every((x) => ['M', 'T', 'N', 'D12', 'N12'].includes(String(x.code).toUpperCase()));
+    if (estandar) return base;
+    return prev.map((x) => {
+      const b = bandaFranja24(x.code);
+      const ref = b ? base.find((y) => y.code === b) : null;
+      return ref ? { ...x, startTime: ref.startTime, endTime: ref.endTime, hours: ref.hours } : x;
+    });
+  };
+
   const formatPositionPaxLabel = (pos: ServicePosition): string => {
     if (isEventosPosition(pos)) return 'EXTRAS';
     const shiftQtys = pos.allowedShiftTypes
@@ -4243,13 +4268,8 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                              <button onClick={() => {
                                setEditingShiftCode(null);
                                const clones = pos.allowedShiftTypes.map((s) => ({ ...s }));
-                               const nextAllowed =
-                                 pos.coverageType === '24hs'
-                                   ? rebuild24hsVariants(
-                                       clones.find((s) => s.code === 'M')?.startTime?.slice(0, 5) || '07:00',
-                                       clones.find((s) => s.code === 'D12')?.startTime?.slice(0, 5) || '07:00'
-                                     )
-                                   : clones;
+                               // Abrir no cambia nada: un 24 h con nombres propios (PLM, P5T…) queda como está.
+                               const nextAllowed = clones;
                                setPositionForm({ ...pos, allowedShiftTypes: nextAllowed });
                                setShowPositionModal(true);
                              }} className="p-2 bg-slate-100 dark:bg-slate-700 rounded-lg text-indigo-500 hover:bg-indigo-100 transition-colors"><Edit2 size={14}/></button>
@@ -5786,14 +5806,14 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                     <input
                                         type="time"
                                         className="w-full p-2.5 bg-white dark:bg-slate-900 border border-sky-200 dark:border-sky-800 rounded-xl font-bold text-sm text-slate-800 dark:text-white"
-                                        value={positionForm.allowedShiftTypes.find((s) => s.code === 'M')?.startTime?.slice(0, 5) || '07:00'}
+                                        value={inicioBanda24(positionForm.allowedShiftTypes, 'M')}
                                         onChange={(e) => {
                                             const v = e.target.value;
                                             if (!v) return;
                                             setPositionForm((prev) => {
                                                 if (prev.coverageType !== '24hs') return prev;
-                                                const d12 = prev.allowedShiftTypes.find((s) => s.code === 'D12')?.startTime?.slice(0, 5) || '07:00';
-                                                return { ...prev, allowedShiftTypes: rebuild24hsVariants(v, d12) };
+                                                const d12 = inicioBanda24(prev.allowedShiftTypes, 'D12');
+                                                return { ...prev, allowedShiftTypes: reanclar24hs(prev.allowedShiftTypes, v, d12) };
                                             });
                                         }}
                                     />
@@ -5803,14 +5823,14 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                     <input
                                         type="time"
                                         className="w-full p-2.5 bg-white dark:bg-slate-900 border border-sky-200 dark:border-sky-800 rounded-xl font-bold text-sm text-slate-800 dark:text-white"
-                                        value={positionForm.allowedShiftTypes.find((s) => s.code === 'D12')?.startTime?.slice(0, 5) || '07:00'}
+                                        value={inicioBanda24(positionForm.allowedShiftTypes, 'D12')}
                                         onChange={(e) => {
                                             const v = e.target.value;
                                             if (!v) return;
                                             setPositionForm((prev) => {
                                                 if (prev.coverageType !== '24hs') return prev;
-                                                const mStart = prev.allowedShiftTypes.find((s) => s.code === 'M')?.startTime?.slice(0, 5) || '07:00';
-                                                return { ...prev, allowedShiftTypes: rebuild24hsVariants(mStart, v) };
+                                                const mStart = inicioBanda24(prev.allowedShiftTypes, 'M');
+                                                return { ...prev, allowedShiftTypes: reanclar24hs(prev.allowedShiftTypes, mStart, v) };
                                             });
                                         }}
                                     />
