@@ -1186,10 +1186,16 @@ function anclarPorPuesto(input: ContinuarInput, resultados: ResultadoGuardia[]) 
     }
     return m;
   };
-  for (const s of sobrantes) {
+  // Dos rondas: primero el que ya trabajó en el puesto libre (BONILLA a Puesto 1); recién después cualquiera.
+  // Si no, el que sobra en Puesto 5 (VERGARA) le ganaba el lugar de Puesto 1 a BONILLA y P2 quedaba repetido.
+  const movidos = new Set<number>();
+  for (const ronda of [1, 2] as const) for (const [idx, s] of sobrantes.entries()) {
+    if (movidos.has(idx)) continue;
     const c = s.r.propuestas[s.i];
     const hist = historial(s.r.employeeId);
-    const candidatos = [...input.estructura].sort((a, b) => (hist.get(puestoNorm(b.positionName)) || 0) - (hist.get(puestoNorm(a.positionName)) || 0));
+    const candidatos = [...input.estructura]
+      .filter((p) => ronda === 2 || (hist.get(puestoNorm(p.positionName)) || 0) > 0)
+      .sort((a, b) => (hist.get(puestoNorm(b.positionName)) || 0) - (hist.get(puestoNorm(a.positionName)) || 0));
     const otro = candidatos.find((p) => {
       if (puestoNorm(p.positionName) === puestoNorm(s.casa.positionName)) return false;
       const rr = resolverPuesto(input.estructura, p.positionName, c.code);
@@ -1197,6 +1203,7 @@ function anclarPorPuesto(input: ContinuarInput, resultados: ResultadoGuardia[]) 
       return (ocupado.get(clave(c.dateStr, p.positionName, c.code)) || 0) < cupo(p, c.dateStr, c.code);
     });
     if (!otro) continue;
+    movidos.add(idx);
     const kCasa = clave(c.dateStr, s.casa.positionName, c.code);
     ocupado.set(kCasa, (ocupado.get(kCasa) || 1) - 1);
     const kk = clave(c.dateStr, otro.positionName, c.code);
