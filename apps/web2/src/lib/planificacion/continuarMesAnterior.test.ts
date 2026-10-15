@@ -719,3 +719,20 @@ test('servicio de lunes a lunes: 5 días de 10 h (50 h) se cortan, el tope es 48
   for (const d of dias) { const c = codigos(r)[d]; racha = c && c !== 'F' ? racha + 10 : 0; max = Math.max(max, racha); }
   assert.ok(max <= 48, `racha máxima ${max} h`);
 });
+
+test('el ciclo en M/T/N cae en la franja del puesto aunque el servicio la llame P5M/P5T/P5N (Tadicor)', () => {
+  const est: PuestoSla[] = [
+    { positionName: 'Puesto 5', qty: 1, shifts: [
+      { code: 'P5M', hours: 8, startTime: '07:00', endTime: '15:00' },
+      { code: 'P5T', hours: 8, startTime: '15:00', endTime: '23:00' },
+      { code: 'P5N', hours: 8, startTime: '23:00', endTime: '07:00' },
+    ] },
+  ];
+  const previos = armar(['M', 'M', 'M', 'M', 'F', 'F'], '2026-08-01', '2026-09-30', 0, 'Puesto 5');
+  const [r] = proponerContinuacion(input([{ id: 'a', nombre: 'A', previos, puestoPreferido: 'Puesto 5' }], ['2026-10-01', '2026-10-02', '2026-10-03', '2026-10-04', '2026-10-05', '2026-10-06'], { estructura: est }));
+  const trabajo = r.propuestas.filter((c) => !c.isFranco);
+  assert.ok(trabajo.length >= 3, JSON.stringify(r.propuestas.map((c) => c.code)));
+  assert.ok(trabajo.every((c) => c.code === 'P5M' && c.positionName === 'Puesto 5' && c.startTime === '07:00'));
+  assert.equal(r.revisar.length, 0);
+});
+

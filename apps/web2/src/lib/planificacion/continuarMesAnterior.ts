@@ -806,8 +806,19 @@ function letraDia(dateStr: string): string {
   return LETRAS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
 }
 
+/**
+ * La franja del puesto para ese código. Si el ciclo dice M/T/N y el puesto llama a su franja de otra
+ * forma (Tadicor: P5M, PLN, P2T), es la única franja de esa banda del puesto.
+ */
 function turnoDelPuesto(pos: PuestoSla | undefined, code: string) {
-  return (pos?.shifts || []).find((s) => up(s.code) === code) || null;
+  const shifts = pos?.shifts || [];
+  const exacto = shifts.find((s) => up(s.code) === code);
+  if (exacto || !['M', 'T', 'N'].includes(code)) return exacto || null;
+  const deBanda = shifts.filter((s) => {
+    const c = up(s.code).replace(/\s+/g, '');
+    return !/D12$|N12$/.test(c) && bandaDe(c) === code;
+  });
+  return deBanda.length === 1 ? deBanda[0] : null;
 }
 
 /** 'HH:MM' de un string o de un Timestamp/Date, en hora Argentina. */
