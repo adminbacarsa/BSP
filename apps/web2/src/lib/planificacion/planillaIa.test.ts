@@ -52,10 +52,23 @@ const lecturaOk = {
 };
 
 describe('planilla IA', () => {
-  it('rechaza un JSON que no respeta el contrato', () => {
-    assert.throws(() => validarLecturaIa({ puestos: [{ nombre: 'Puesto 1', filas: [1], tipo: 'OTRO', confianza: 1 }] }), /tipo inválido/);
-    assert.throws(() => validarLecturaIa({ leyenda: [{ codigo: 'M', inicio: '', fin: '15:00', tipo: 'TURNO', confianza: 1 }] }), /horario/);
-    assert.throws(() => validarLecturaIa({ excepcionesPorDia: [{ dia: 2, codigo: 'REF', inicio: '11:00', fin: '23:00', fuente: 'margen', confianza: 1 }] }), /fuente/);
+  it('rechaza lo que no es un objeto', () => {
+    assert.throws(() => validarLecturaIa([]), /objeto/);
+  });
+
+  it('un ítem mal armado se saltea y queda en dudas; el resto se usa', () => {
+    const lectura = validarLecturaIa({
+      ...lecturaOk,
+      puestos: [...lecturaOk.puestos, { nombre: 'Puesto 9', filas: [1], tipo: 'OTRO', confianza: 1 }],
+      leyenda: [...lecturaOk.leyenda, { codigo: 'M', inicio: '', fin: '15:00', tipo: 'TURNO', confianza: 1 }],
+      excepcionesPorDia: [...lecturaOk.excepcionesPorDia, { dia: 2, codigo: 'REF', inicio: '11:00', fin: '23:00', fuente: 'margen', confianza: 1 }],
+    });
+    assert.equal(lectura.puestos.length, lecturaOk.puestos.length);
+    assert.equal(lectura.leyenda.length, lecturaOk.leyenda.length);
+    assert.equal(lectura.excepcionesPorDia.length, lecturaOk.excepcionesPorDia.length);
+    const aviso = lectura.dudas.find((d) => /3 dato\(s\) incompleto/.test(d));
+    assert.ok(aviso, lectura.dudas.join(' | '));
+    assert.match(aviso!, /horario/);
   });
 
   it('saca un nombre si la respuesta lo trae y valida el resto', () => {
@@ -65,7 +78,7 @@ describe('planilla IA', () => {
     });
     assert.equal(lectura.puestos[0].nombre, 'fila');
     assert.equal(contieneNombrePersona(lectura), false);
-    assert.throws(() => validarLecturaIa({ ...lecturaOk, puestos: [{ nombre: 'Puesto 1', filas: [1], tipo: 'PUESTO', confianza: 2 }] }), /confianza/);
+    assert.equal(validarLecturaIa({ ...lecturaOk, puestos: [{ nombre: 'Puesto 1', filas: [1], tipo: 'PUESTO', confianza: 2 }] }).puestos.length, 0);
   });
 
   it('la grilla que viaja no lleva nombres y sí el legajo', () => {

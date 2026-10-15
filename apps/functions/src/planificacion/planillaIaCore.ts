@@ -135,11 +135,17 @@ export function validarLecturaIa(raw: unknown): LecturaPlanillaIa {
   const funcionesRaw = Array.isArray(doc.funciones) ? doc.funciones : [];
   const excepcionesRaw = Array.isArray(doc.excepcionesPorDia) ? doc.excepcionesPorDia : [];
   const dudasRaw = Array.isArray(doc.dudas) ? doc.dudas : [];
-  if (puestosRaw.length > 40 || leyendaRaw.length > 80 || funcionesRaw.length > 20 || excepcionesRaw.length > 62 || dudasRaw.length > 20) {
-    throw new Error('La lectura trae demasiados ítems');
-  }
+  // Un ítem mal armado por el modelo (una referencia sin horario) no tira la lectura entera: se saltea y queda en dudas.
+  const salteados: string[] = [];
+  const cadaUno = <T,>(lista: unknown[], max: number, fn: (item: unknown, i: number) => T): T[] => {
+    const out: T[] = [];
+    lista.slice(0, max).forEach((item, i) => {
+      try { out.push(fn(item, i)); } catch (e) { salteados.push((e as Error).message); }
+    });
+    return out;
+  };
 
-  const puestos: PuestoIa[] = puestosRaw.map((item, i) => {
+  const puestos: PuestoIa[] = cadaUno(puestosRaw, 40, (item, i) => {
     const o = objeto(item, `puestos[${i}]`);
     const tipo = String(o.tipo || '').toUpperCase();
     if (!TIPOS_PUESTO_IA.includes(tipo as TipoPuestoIa)) throw new Error(`puestos[${i}].tipo inválido`);
@@ -148,7 +154,7 @@ export function validarLecturaIa(raw: unknown): LecturaPlanillaIa {
     return { nombre, filas: enteros(o.filas, `puestos[${i}].filas`, 40), tipo: tipo as TipoPuestoIa, confianza: confianzaDe(o.confianza, `puestos[${i}]`) };
   });
 
-  const leyenda: LeyendaIa[] = leyendaRaw.map((item, i) => {
+  const leyenda: LeyendaIa[] = cadaUno(leyendaRaw, 80, (item, i) => {
     const o = objeto(item, `leyenda[${i}]`);
     const tipo = String(o.tipo || '').toUpperCase();
     if (!TIPOS_LEYENDA_IA.includes(tipo as TipoLeyendaIa)) throw new Error(`leyenda[${i}].tipo inválido`);
@@ -167,7 +173,7 @@ export function validarLecturaIa(raw: unknown): LecturaPlanillaIa {
     return out;
   });
 
-  const funciones: FuncionIa[] = funcionesRaw.map((item, i) => {
+  const funciones: FuncionIa[] = cadaUno(funcionesRaw, 20, (item, i) => {
     const o = objeto(item, `funciones[${i}]`);
     const nombre = textoCorto(o.nombre, `funciones[${i}].nombre`);
     if (!nombre) throw new Error(`funciones[${i}].nombre vacío`);
@@ -180,7 +186,7 @@ export function validarLecturaIa(raw: unknown): LecturaPlanillaIa {
     };
   });
 
-  const excepcionesPorDia: ExcepcionDiaIa[] = excepcionesRaw.map((item, i) => {
+  const excepcionesPorDia: ExcepcionDiaIa[] = cadaUno(excepcionesRaw, 62, (item, i) => {
     const o = objeto(item, `excepcionesPorDia[${i}]`);
     const dia = Number(o.dia);
     if (!Number.isInteger(dia) || dia < 1 || dia > 31) throw new Error(`excepcionesPorDia[${i}].dia inválido`);
@@ -197,7 +203,10 @@ export function validarLecturaIa(raw: unknown): LecturaPlanillaIa {
     return out;
   });
 
-  const dudas = dudasRaw.map((d, i) => textoCorto(d, `dudas[${i}]`, 200)).filter(Boolean);
+  const dudas = cadaUno(dudasRaw, 20, (d, i) => textoCorto(d, `dudas[${i}]`, 200)).filter(Boolean);
+  if (salteados.length) {
+    dudas.push(`La IA devolvió ${salteados.length} dato(s) incompleto(s) que no se usaron (${salteados.slice(0, 3).join('; ')}${salteados.length > 3 ? '…' : ''}).`.slice(0, 200));
+  }
   return { puestos, leyenda, funciones, excepcionesPorDia, dudas };
 }
 
