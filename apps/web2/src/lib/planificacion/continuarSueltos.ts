@@ -176,7 +176,11 @@ export function sugerenciasSueltas(input: SueltoInput): SugerenciaNivelacion[] {
               }
             } else if (a.franco && a.propuesto) {
               const otro = buscarCambioDeFranco(cand.id, dateStr, code, pos.positionName);
-              opcion = otro ? { cand, modo: 'mover', otro } : { cand, modo: 'ft' };
+              // Sobre su franco solo en el borde del bloque (pegado a un día de trabajo), nunca entre dos francos (F R1 F).
+              const antes = asignado(cand.id, sumarDias(dateStr, -1));
+              const despues = asignado(cand.id, sumarDias(dateStr, 1));
+              const entreFrancos = !!antes?.franco && !!despues?.franco;
+              opcion = otro ? { cand, modo: 'mover', otro } : entreFrancos ? null : { cand, modo: 'ft' };
             }
             if (opcion && (!mejor || rango[opcion.modo] < rango[mejor.modo])) mejor = opcion;
             if (mejor?.modo === 'libre') break;

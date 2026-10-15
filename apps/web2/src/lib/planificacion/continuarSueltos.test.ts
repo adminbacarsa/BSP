@@ -89,3 +89,19 @@ describe('Continuar: turnos sueltos del mes anterior', () => {
     assert.equal(out.length, 0);
   });
 });
+
+describe('Continuar: el turno suelto no parte un bloque de francos', () => {
+  it('no se pone entre dos francos (F R1 F)', () => {
+    const out = sugerenciasSueltas({
+      dias: ['2026-11-01', '2026-11-02', '2026-11-03'],
+      estructura: [{ positionName: 'Vifood · Puesto 1', qty: 1, shifts: [{ code: 'VFM', name: 'VFM', startTime: '07:00', endTime: '15:00', hours: 8 }] }],
+      turnoHabilitado: (_p: string, _c: string, d: string) => d === '2026-11-02',
+      historia: [{ employeeId: 'ens', nombre: 'ENSABELLA', previos: [{ dateStr: '2026-10-26', code: 'VFM', positionName: 'Vifood · Puesto 1' }] }],
+      resultados: [{ employeeId: 'ens', nombre: 'ENSABELLA', propuestas: [celda('ens', '2026-11-01', 'F'), celda('ens', '2026-11-02', 'F'), celda('ens', '2026-11-03', 'F')] }],
+      cargado: () => null,
+      libre: () => true,
+      mesAnteriorLabel: 'octubre',
+    });
+    assert.equal(out.length, 0);
+  });
+});
