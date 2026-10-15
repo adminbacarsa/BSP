@@ -1604,7 +1604,10 @@ export function avisosCoberturaPuesto(
       .filter((code) => turnoHabilitadoPorEstructura([pos], positionName, code, dateStr));
     const sobras: Array<{ code: string; n: number; nombres: string[] }> = [];
     const faltas: string[] = [];
+    const tieneOcho = codes.some((c) => c === 'M' || c === 'T' || c === 'N');
     for (const code of codes) {
+      // D12/N12 son la alternativa de 12 h: no faltan si el puesto se cubre con M, T y N.
+      if (tieneOcho && (code === 'D12' || code === 'N12')) continue;
       const g = porBanda.get(`${dateStr}|${positionName}|${code}`) || { nombres: [], n: 0 };
       const cupo = cupoDe(pos, code);
       if (g.n > cupo) sobras.push({ code, n: g.n, nombres: g.nombres });

@@ -12063,7 +12063,7 @@ function PlanificacionDesktop() {
             }
             const cambios: Record<string, any> = {};
             for (const r of resultados) {
-                if (r.estimado) continue;
+                // Los estimados arrancan tildados: cuentan para la cobertura de la vista previa.
                 for (const c of r.propuestas) cambios[`${c.employeeId}_${c.dateStr}`] = cambioContinuar(c);
             }
             const merged = { ...pendingChanges, ...cambios };

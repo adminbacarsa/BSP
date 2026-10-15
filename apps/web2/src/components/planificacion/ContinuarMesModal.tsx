@@ -73,6 +73,9 @@ function agruparRevisar(resultados: ResultadoGuardia[]): Array<{ texto: string; 
         g.guardias.add(apellido(r.nombre));
         g.codes.add(x.code);
         reasignados.set(k, g);
+      } else if (/ lleno: /.test(x.motivo)) {
+        // Su puesto estaba lleno ese día: el turno se propone en el puesto que tenía la banda libre.
+        sinProponer.push({ texto: `${r.nombre}: ${x.motivo} (días ${textoDias(x.dias)}). Se propone ahí.`, propuesto: true });
       } else {
         sinProponer.push({ texto: `${r.nombre}: ${x.motivo} (${x.code}, días ${textoDias(x.dias)}). No se propone.`, propuesto: false });
       }
@@ -98,7 +101,8 @@ export function ContinuarMesModal({ vista, onAplicar, onCancelar }: Props) {
   const conCiclo = useMemo(() => vista.resultados.filter((r) => r.ciclo && r.propuestas.length > 0), [vista.resultados]);
   const sinCiclo = useMemo(() => vista.resultados.filter((r) => !r.ciclo), [vista.resultados]);
   const sinNada = useMemo(() => vista.resultados.filter((r) => r.ciclo && r.propuestas.length === 0), [vista.resultados]);
-  const [elegidos, setElegidos] = useState<Set<string>>(() => new Set(conCiclo.filter((r) => !r.estimado).map((r) => r.employeeId)));
+  // Los estimados también arrancan tildados (siguen en amarillo para revisar): destildados dejaban la fila vacía.
+  const [elegidos, setElegidos] = useState<Set<string>>(() => new Set(conCiclo.map((r) => r.employeeId)));
   const [nivelar, setNivelar] = useState<Set<string>>(() => new Set());
   const [activarMes, setActivarMes] = useState(() => !!(vista.activar?.marcado && vista.activar.puede && vista.activar.permiso));
 
