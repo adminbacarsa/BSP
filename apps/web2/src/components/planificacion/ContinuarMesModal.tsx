@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { AlertTriangle, CalendarClock, Clock, Moon, Repeat, Scale, ShieldAlert, X } from 'lucide-react';
+import { AlertTriangle, CalendarClock, ChevronDown, Clock, Moon, Repeat, Scale, ShieldAlert, X } from 'lucide-react';
 import {
   textoDias,
   type AlertaCupo,
@@ -39,17 +39,22 @@ type Props = {
   onCancelar: () => void;
 };
 
-function Seccion({ icon, titulo, tono, children }: { icon: React.ReactNode; titulo: string; tono: 'rojo' | 'ambar' | 'gris'; children: React.ReactNode }) {
+/** Un renglón con título y resumen; el detalle se abre con un clic. */
+function Seccion({ icon, titulo, tono, resumen, abierta = false, children }: { icon: React.ReactNode; titulo: string; tono: 'rojo' | 'ambar' | 'gris'; resumen?: string; abierta?: boolean; children: React.ReactNode }) {
   const cls = tono === 'rojo'
     ? 'border-rose-200 bg-rose-50 text-rose-800'
     : tono === 'ambar'
       ? 'border-amber-200 bg-amber-50 text-amber-900'
       : 'border-slate-200 bg-slate-50 text-slate-700';
   return (
-    <div className={`rounded-lg border px-3 py-2 text-[11px] ${cls}`}>
-      <div className="flex items-center gap-1.5 font-black uppercase tracking-wide text-[10px] mb-1">{icon}{titulo}</div>
-      <div className="space-y-0.5 font-medium leading-snug">{children}</div>
-    </div>
+    <details open={abierta} className={`group rounded-lg border px-3 py-1.5 text-[11px] ${cls}`}>
+      <summary className="flex cursor-pointer list-none items-center gap-1.5 [&::-webkit-details-marker]:hidden">
+        <span className="flex items-center gap-1.5 font-black uppercase tracking-wide text-[10px]">{icon}{titulo}</span>
+        {resumen && <span className="font-semibold opacity-80">· {resumen}</span>}
+        <ChevronDown size={13} className="ml-auto shrink-0 transition-transform group-open:rotate-180" />
+      </summary>
+      <div className="mt-1.5 space-y-0.5 font-medium leading-snug">{children}</div>
+    </details>
   );
 }
 
@@ -59,6 +64,31 @@ function apellido(nombre: string): string {
 
 function claveSugerencia(s: SugerenciaNivelacion): string {
   return `${s.tipo || 'nivelacion'}|${s.celda.employeeId}|${s.dateStr}`;
+}
+
+type GrupoRevisar = { titulo: string; items: string[] };
+
+/** «Para revisar» agrupado por tipo, con textos cortos: rachas cortadas, cambios de puesto y lo que no se propone. */
+function gruposRevisar(resultados: ResultadoGuardia[]): GrupoRevisar[] {
+  const rachas: string[] = [];
+  const puesto: string[] = [];
+  const otros: string[] = [];
+  const dd = (dias: string[]) => dias.map((d) => d.slice(8)).join(', ');
+  for (const r of resultados) {
+    for (const x of r.revisar) {
+      if (/^racha /.test(x.motivo)) rachas.push(`${apellido(r.nombre)}: ${x.code} del ${dd(x.dias)} → franco`);
+      else if (/ lleno: /.test(x.motivo)) {
+        const m = x.motivo.match(/^(.*) lleno: (\S+) en (.*)$/);
+        puesto.push(m ? `${apellido(r.nombre)}: ${m[2]} del ${dd(x.dias)} pasa de ${m[1]} a ${m[3]}` : `${apellido(r.nombre)}: ${x.motivo} (${dd(x.dias)})`);
+      } else if (x.propuestoEn) puesto.push(`${apellido(r.nombre)}: «${x.positionName}» ya no está; ${x.code} en «${x.propuestoEn}»`);
+      else otros.push(`${apellido(r.nombre)}: ${x.motivo} (${x.code}, ${dd(x.dias)}). No se propone.`);
+    }
+  }
+  const out: GrupoRevisar[] = [];
+  if (rachas.length) out.push({ titulo: `Rachas cortadas en 6 seguidos (${rachas.length})`, items: rachas });
+  if (puesto.length) out.push({ titulo: `Pasan a otro puesto porque el suyo estaba lleno (${puesto.length})`, items: puesto });
+  if (otros.length) out.push({ titulo: `Sin proponer (${otros.length})`, items: otros });
+  return out;
 }
 
 /** Un renglón por cambio de puesto (todos los guardias juntos) y uno por guardia cuando no se propone. */
@@ -137,6 +167,7 @@ export function ContinuarMesModal({ vista, onAplicar, onCancelar }: Props) {
   }, [conCiclo, elegidos]);
 
   const revisar = useMemo(() => agruparRevisar(vista.resultados), [vista.resultados]);
+  const revisarGrupos = useMemo(() => gruposRevisar(vista.resultados), [vista.resultados]);
   const ultimoLeido = useMemo(() => {
     const dias = vista.resultados.map((r) => r.ciclo?.ultimoDia).filter((d): d is string => !!d).sort();
     return dias.length ? dias[dias.length - 1] : null;
@@ -193,9 +224,14 @@ export function ContinuarMesModal({ vista, onAplicar, onCancelar }: Props) {
               )}
             </div>
           )}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-2 items-start" data-continuar-alertas>
+          <div className="space-y-1.5" data-continuar-alertas>
             {avisos.lineas.length > 0 ? (
-              <Seccion icon={<ShieldAlert size={12} />} titulo="Cobertura del puesto" tono={hayFalta ? 'rojo' : 'ambar'}>
+              <Seccion
+                icon={<ShieldAlert size={12} />}
+                titulo="Cobertura"
+                tono={hayFalta ? 'rojo' : 'ambar'}
+                resumen={`${avisos.lineas.length + avisos.resto} día(s)-puesto con algo para mirar${gruposRotacion.length ? ' · varios se arreglan con «Ordenar la rotación» (abajo)' : ''}`}
+              >
                 <div data-continuar-avisos>
                   {avisos.lineas.map((linea, i) => <div key={i}>{linea}</div>)}
                   {avisos.resto > 0 && <div>y {avisos.resto} más</div>}
@@ -203,26 +239,35 @@ export function ContinuarMesModal({ vista, onAplicar, onCancelar }: Props) {
                 </div>
               </Seccion>
             ) : (
-              <Seccion icon={<ShieldAlert size={12} />} titulo="Cobertura" tono="gris"><div>Todos los días quedan con el servicio cubierto.</div></Seccion>
+              <Seccion icon={<ShieldAlert size={12} />} titulo="Cobertura" tono="gris" resumen="todos los días quedan cubiertos"><div>Todos los días quedan con el servicio cubierto.</div></Seccion>
             )}
             {vista.descanso.length > 0 && (
-              <Seccion icon={<Moon size={12} />} titulo="Descanso < 12 h en el cambio de mes" tono="rojo">
+              <Seccion icon={<Moon size={12} />} titulo="Descanso < 12 h en el cambio de mes" tono="rojo" resumen={`${vista.descanso.length} guardia(s)`} abierta>
                 {vista.descanso.map((d, i) => <div key={i}><b>{d.nombre}</b>: {d.texto}</div>)}
               </Seccion>
             )}
             {vista.tope.length > 0 && (
-              <Seccion icon={<Clock size={12} />} titulo="Más de 200 h en el mes" tono="ambar">
+              <Seccion icon={<Clock size={12} />} titulo="Más de 200 h en el mes" tono="ambar" resumen={`${vista.tope.length} guardia(s)`}>
                 {vista.tope.map((t) => <div key={t.employeeId}><b>{t.nombre}</b>: {t.horas} h</div>)}
               </Seccion>
             )}
             {revisar.length > 0 && (
-              <Seccion icon={<AlertTriangle size={12} />} titulo="Puestos para revisar" tono="ambar">
-                {revisar.slice(0, 6).map((r, i) => <div key={i}>{r.texto}</div>)}
-                {revisar.length > 6 && <div>y {revisar.length - 6} más</div>}
+              <Seccion
+                icon={<AlertTriangle size={12} />}
+                titulo="Para revisar"
+                tono="ambar"
+                resumen={revisarGrupos.map((g) => g.titulo.replace(/ \((\d+)\)$/, ': $1')).join(' · ')}
+              >
+                {revisarGrupos.map((g) => (
+                  <div key={g.titulo} className="mb-1">
+                    <div className="font-black">{g.titulo}</div>
+                    {g.items.map((t, i) => <div key={i} className="pl-2">{t}</div>)}
+                  </div>
+                ))}
               </Seccion>
             )}
             {sinCiclo.length > 0 && (
-              <Seccion icon={<CalendarClock size={12} />} titulo={`Sin ciclo para leer (${sinCiclo.length})`} tono="gris">
+              <Seccion icon={<CalendarClock size={12} />} titulo={`Sin ciclo para leer (${sinCiclo.length})`} tono="gris" resumen="quedan para hacer a mano">
                 <div>Quedan sin proponer, para hacer a mano:</div>
                 {sinCiclo.map((r) => <div key={r.employeeId}><b>{r.nombre}</b>: {r.motivoSinCiclo}</div>)}
               </Seccion>

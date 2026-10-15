@@ -12039,12 +12039,18 @@ function PlanificacionDesktop() {
             });
             calcularFrancoObj(resultados);
             // Lo que el mes anterior se cubrió suelto (VFM de domingo por alguien de Peaje): sugerir repetirlo, destildado.
+            // Los sueltos se miden sobre la copia con la rotación ordenada ya puesta: si no, un R1 «en el borde»
+            // queda entre dos francos cuando la rotación mueve el franco (PERALTA F R1 F).
+            const conRotacion = resultados.map((r) => {
+                const rot = new Map((r.sugerencias || []).filter((x) => x.tipo === 'rotacion').map((x) => [x.dateStr, x.celda]));
+                return rot.size ? { ...r, propuestas: r.propuestas.map((c) => rot.get(c.dateStr) || c) } : r;
+            });
             const sueltas = sugerenciasSueltas({
                 dias,
                 estructura: estructuraContinuar,
                 turnoHabilitado,
                 historia: guardiasBase.map((e: any) => ({ employeeId: e.id, nombre: e.name || e.id, previos: previosPorEmp.get(e.id) || [] })),
-                resultados,
+                resultados: conRotacion,
                 cargado: (empId, dateStr) => {
                     const key = `${empId}_${dateStr}`;
                     const pend = pendingChanges[key];
