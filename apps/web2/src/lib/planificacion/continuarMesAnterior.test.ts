@@ -646,3 +646,50 @@ test('el que sobra no pasa a un puesto que después se llena con su propia gente
   assert.equal(puestoDe('a'), 'Puesto 5');
   assert.equal(puestoDe('b'), 'Puesto 5');
 });
+
+test('puesto de 24 h con 4 guardias que se pisan: la rotación sugerida deja M, T y N todos los días', () => {
+  const est: PuestoSla[] = [{ positionName: 'Puesto 5', qty: 1, shifts: [
+    { code: 'M', hours: 8, startTime: '07:00', endTime: '15:00' },
+    { code: 'T', hours: 8, startTime: '15:00', endTime: '23:00' },
+    { code: 'N', hours: 8, startTime: '23:00', endTime: '07:00' },
+  ] }];
+  const ROT = [...Array(6).fill('M'), 'F', 'F', ...Array(6).fill('T'), 'F', 'F', ...Array(6).fill('N'), 'F', 'F'];
+  // Dos guardias con la misma fase (se pisan) y dos bien escalonados.
+  const fases = [0, 0, 12, 18];
+  const guardias = fases.map((f, i) => ({ id: `g${i}`, nombre: `G${i}`, previos: armar(ROT, '2026-08-01', '2026-09-30', f, 'Puesto 5'), puestoPreferido: 'Puesto 5' }));
+  const dias = Array.from({ length: 31 }, (_, i) => `2026-10-${String(i + 1).padStart(2, '0')}`);
+  const res = proponerContinuacion(input(guardias, dias, { estructura: est }));
+  const rot = res.flatMap((r) => r.sugerencias.filter((s) => s.tipo === 'rotacion'));
+  assert.ok(rot.length > 0, 'debería sugerir ordenar la rotación');
+  assert.match(rot[0].grupoTexto || '', /Puesto 5: ordenar la rotación/);
+  const final = new Map<string, string>();
+  for (const r of res) for (const c of r.propuestas) final.set(`${r.employeeId}_${c.dateStr}`, c.isFranco ? 'F' : c.code);
+  for (const s of rot) final.set(`${s.celda.employeeId}_${s.dateStr}`, s.celda.isFranco ? 'F' : s.celda.code);
+  for (const d of dias) {
+    const hoy = res.map((r) => final.get(`${r.employeeId}_${d}`)).filter((c) => c && c !== 'F').sort().join('');
+    assert.equal(hoy, 'MNT', `día ${d}: ${hoy}`);
+  }
+});
+
+test('guardia que alternaba entre dos puestos: pasa al puesto donde falta su banda si en el suyo sobra', () => {
+  const est: PuestoSla[] = [
+    { positionName: 'Puesto 1', qty: 1, shifts: [{ code: 'M', hours: 8, startTime: '08:00', endTime: '15:00' }] },
+    { positionName: 'Puesto 2', qty: 1, shifts: [{ code: 'M', hours: 8, startTime: '10:00', endTime: '16:00' }] },
+  ];
+  // B (relevante) repartió septiembre entre Puesto 1 y Puesto 2; A es fijo de Puesto 2 y trabaja todos los días.
+  const pat = ['M', 'M', 'M', 'M', 'F', 'F'];
+  const prevB = [
+    ...armar(pat, '2026-08-01', '2026-09-15', 0, 'Puesto 1'),
+    ...armar(pat, '2026-09-16', '2026-09-30', (diaIndex('2026-09-16') - diaIndex('2026-08-01')) % 6, 'Puesto 2'),
+  ];
+  const prevA = armar(pat, '2026-08-01', '2026-09-30', 0, 'Puesto 2');
+  const res = proponerContinuacion(input([
+    { id: 'a', nombre: 'A', previos: prevA, puestoPreferido: 'Puesto 2' },
+    { id: 'b', nombre: 'B', previos: prevB, puestoPreferido: 'Puesto 2' },
+  ], ['2026-10-01'], { estructura: est }));
+  const b = res.find((r) => r.employeeId === 'b')!;
+  const m = b.propuestas.find((c) => c.code === 'M');
+  // O la copia ya lo ubicó en Puesto 1 (tenía lugar), o lo sugiere.
+  const sug = b.sugerencias.find((s) => s.tipo === 'relevante');
+  assert.ok(m?.positionName === 'Puesto 1' || sug?.celda.positionName === 'Puesto 1');
+});

@@ -147,7 +147,10 @@ export type SugerenciaNivelacion = {
   texto: string;
   celda: CeldaPropuesta;
   /** `relevante` = seguir los francos de los puestos que cubre. Arranca destildada, igual que la nivelación. */
-  tipo?: 'nivelacion' | 'relevante' | 'suelto';
+  tipo?: 'nivelacion' | 'relevante' | 'suelto' | 'rotacion';
+  /** `rotacion`: puesto al que pertenece el cambio y la frase del grupo (se tilda todo junto). */
+  grupo?: string;
+  grupoTexto?: string;
   /** `suelto` sobre su franco: se escribe como franco trabajado. */
   francoTrabajado?: boolean;
   /** `suelto` que trabaja su franco: el franco pasa a este día (sigue 6+2, sin FT). */
@@ -1355,6 +1358,199 @@ function aplicarReacomodoRelevante(input: ContinuarInput, resultados: ResultadoG
   }
 }
 
+type BandaR = 'M' | 'T' | 'N';
+
+function bandaCelda(c: CeldaPropuesta | undefined): BandaR | 'F' | null {
+  if (!c) return null;
+  const code = up(c.code).replace(/\s+/g, '');
+  if (c.isFranco || code === 'F' || code === 'FF' || code === 'FP') return 'F';
+  if (/D12$|N12$/.test(code)) return null;
+  return bandaDe(code);
+}
+
+function contarBanda(resultados: ResultadoGuardia[], dateStr: string, positionName: string, banda: BandaR): number {
+  let n = 0;
+  for (const r of resultados) {
+    const c = r.propuestas.find((x) => x.dateStr === dateStr);
+    if (c && puestoNorm(c.positionName) === puestoNorm(positionName) && bandaCelda(c) === banda) n += 1;
+  }
+  return n;
+}
+
+function cupoBanda(pos: PuestoSla, dateStr: string, banda: BandaR): number {
+  const code = codigoParaBanda(pos, '', banda);
+  if (!code || !turnoHabilitadoPorEstructura([pos], pos.positionName, code, dateStr)) return 0;
+  return getEffectiveShiftQuantityOnDate(pos, dateStr, code, pos.qty) || pos.qty || 1;
+}
+
+/** Último día del mes anterior y cuántos días seguidos venía trabajando. */
+function colaPrevia(input: ContinuarInput, employeeId: string): { ultima: BandaR | 'F' | null; racha: number } {
+  const g = input.guardias.find((x) => x.id === employeeId);
+  const primero = diaIndex(input.dias[0]);
+  const porDia = new Map<number, BandaR | 'F'>();
+  for (const t of g?.previos || []) {
+    const idx = diaIndex(String(t.dateStr || ''));
+    if (idx >= primero || idx < primero - 10) continue;
+    const code = codigoDeCiclo(t, input.objectiveId);
+    if (!code) continue;
+    const b: BandaR | 'F' | null = code === 'F' ? 'F' : bandaDe(code);
+    if (!b) continue;
+    if (b !== 'F' || !porDia.has(idx)) porDia.set(idx, b);
+  }
+  const ultima = porDia.get(primero - 1) ?? null;
+  let racha = 0;
+  for (let idx = primero - 1; porDia.has(idx) && porDia.get(idx) !== 'F'; idx--) racha += 1;
+  return { ultima, racha };
+}
+
+function permutaciones(xs: number[]): number[][] {
+  if (xs.length <= 1) return [xs];
+  return xs.flatMap((x, i) => permutaciones([...xs.slice(0, i), ...xs.slice(i + 1)]).map((p) => [x, ...p]));
+}
+
+/**
+ * Puesto de 24 h (M, T y N de a uno) con 4 guardias que se pisan: rotación de 24 días
+ * (6 + F F por banda) con cada guardia corrido 6 días. Así todos los días hay M, T y N.
+ * Se elige la fase que menos cambia lo propuesto y respeta el borde con el mes anterior.
+ */
+function sugerirRotacionPuesto(input: ContinuarInput, resultados: ResultadoGuardia[]) {
+  const chipDe = new Map(input.guardias.map((g) => [g.id, String(g.puestoPreferido || '').trim()]));
+  const dias = input.dias;
+  const L = 24;
+  for (const pos of input.estructura) {
+    const bandas = bandasDelPuesto(pos);
+    if (bandas.length !== 3) continue;
+    const codes = bandas.map((b) => codigoParaBanda(pos, '', b));
+    if (codes.some((c) => !c)) continue;
+    const gs = resultados.filter((r) => puestoNorm(chipDe.get(r.employeeId) || '') === puestoNorm(pos.positionName) && r.propuestas.length);
+    if (gs.length !== 4) continue;
+    let choques = 0;
+    for (const d of dias) {
+      for (const b of bandas) {
+        const q = cupoBanda(pos, d, b);
+        if (q && contarBanda(gs, d, pos.positionName, b) !== q) choques += 1;
+      }
+    }
+    if (!choques) continue;
+    const trans = new Map<string, number>();
+    for (const r of gs) {
+      let prev: string | null = null;
+      for (const d of dias) {
+        const b = bandaCelda(r.propuestas.find((c) => c.dateStr === d));
+        if (!b || b === 'F') continue;
+        if (prev && prev !== b) trans.set(prev + b, (trans.get(prev + b) || 0) + 1);
+        prev = b;
+      }
+    }
+    const puntaje = (o: string[]) => (trans.get(o[0] + o[1]) || 0) + (trans.get(o[1] + o[2]) || 0) + (trans.get(o[2] + o[0]) || 0);
+    const orden = puntaje(['M', 'N', 'T']) > puntaje(['M', 'T', 'N']) ? ['M', 'N', 'T'] : ['M', 'T', 'N'];
+    const C: string[] = [];
+    for (const b of orden) C.push(b, b, b, b, b, b, 'F', 'F');
+    const prop = gs.map((r) => dias.map((d) => bandaCelda(r.propuestas.find((c) => c.dateStr === d))));
+    const costo = gs.map((r, gi) => {
+      const f = colaPrevia(input, r.employeeId);
+      return Array.from({ length: L }, (_, ph) => {
+        let lead = 0;
+        while (lead < L && C[(ph + lead) % L] !== 'F') lead += 1;
+        const primero = C[ph];
+        if (f.ultima && f.ultima !== 'F' && primero !== 'F' && primero !== f.ultima) return Infinity;
+        if (primero !== 'F' && f.racha + lead > 6) return Infinity;
+        let m = 0;
+        prop[gi].forEach((b, i) => { if (b !== null && C[(ph + i) % L] !== b) m += 1; });
+        return m;
+      });
+    });
+    let mejor = { c: Infinity, a: 0, perm: [0, 1, 2, 3] };
+    for (let a = 0; a < L; a++) {
+      for (const perm of permutaciones([0, 1, 2, 3])) {
+        let c = 0;
+        for (let gi = 0; gi < 4 && c < mejor.c; gi++) c += costo[gi][(a + 6 * perm[gi]) % L];
+        if (c < mejor.c) mejor = { c, a, perm };
+      }
+    }
+    if (!Number.isFinite(mejor.c) || mejor.c === 0) continue;
+    const nuevas: SugerenciaNivelacion[] = [];
+    const cambian: string[] = [];
+    gs.forEach((r, gi) => {
+      const ph = (mejor.a + 6 * mejor.perm[gi]) % L;
+      let n = 0;
+      dias.forEach((d, i) => {
+        const actual = r.propuestas.find((c) => c.dateStr === d);
+        const b = bandaCelda(actual);
+        if (!actual || b === null || input.diaBloqueado?.(d)) return;
+        const want = C[(ph + i) % L];
+        if (b === want) return;
+        let celda: CeldaPropuesta;
+        if (want === 'F') {
+          celda = { employeeId: r.employeeId, dateStr: d, code: 'F', name: 'Franco', positionName: 'General', startTime: '00:00', endTime: '00:00', hours: 0, isFranco: true };
+        } else {
+          const code = codes[bandas.indexOf(want as BandaR)]!;
+          if (!turnoHabilitadoPorEstructura([pos], pos.positionName, code, d)) return;
+          celda = celdaDeTrabajo(r.employeeId, d, pos, code);
+        }
+        nuevas.push({ dateStr: d, de: actual.code, a: celda.code, tipo: 'rotacion', grupo: pos.positionName, texto: `${ddmm(d)} · ${r.nombre.split(',')[0].trim()}: ${actual.code} → ${celda.code}`, celda });
+        n += 1;
+      });
+      if (n) cambian.push(r.nombre.split(',')[0].trim());
+    });
+    const grupoTexto = `${pos.positionName}: ordenar la rotación (24 días, cada guardia corrido 6). Todos los días queda M, T y N. Cambian ${cambian.join(', ')}.`;
+    for (const sg of nuevas) {
+      sg.grupoTexto = grupoTexto;
+      gs.find((r) => r.employeeId === sg.celda.employeeId)?.sugerencias.push(sg);
+    }
+  }
+}
+
+/**
+ * Guardia que el mes anterior repartió sus días entre dos puestos (BONILLA entre Puesto 1 y 2):
+ * el día que en un puesto falta su banda y en el otro sobra, se sugiere pasarlo.
+ */
+function sugerirAlternos(input: ContinuarInput, resultados: ResultadoGuardia[]) {
+  if (!input.dias.length) return;
+  const primero = diaIndex(input.dias[0]);
+  for (const g of input.guardias) {
+    const r = resultados.find((x) => x.employeeId === g.id);
+    if (!r) continue;
+    const cuenta = new Map<string, number>();
+    for (const t of g.previos || []) {
+      const idx = diaIndex(String(t.dateStr || ''));
+      if (idx >= primero || idx < primero - 31) continue;
+      const code = codigoDeCiclo(t, input.objectiveId);
+      if (!code || code === 'F' || code === 'RET') continue;
+      const pos = input.estructura.find((x) => puestoNorm(x.positionName) === puestoNorm(String(t.positionName || '')));
+      if (!pos) continue;
+      cuenta.set(pos.positionName, (cuenta.get(pos.positionName) || 0) + 1);
+    }
+    const total = [...cuenta.values()].reduce((a, b) => a + b, 0);
+    const puestos = [...cuenta.entries()].filter(([, n]) => n >= Math.max(3, total * 0.2)).map(([p]) => p);
+    if (puestos.length < 2) continue;
+    for (const c of r.propuestas) {
+      const b = bandaCelda(c);
+      if (!b || b === 'F') continue;
+      const A = input.estructura.find((p) => puestoNorm(p.positionName) === puestoNorm(c.positionName));
+      if (!A || !puestos.includes(A.positionName)) continue;
+      for (const nombreB of puestos) {
+        if (nombreB === A.positionName) continue;
+        const B = input.estructura.find((p) => p.positionName === nombreB)!;
+        const codeB = codigoParaBanda(B, '', b);
+        if (!codeB || !turnoHabilitadoPorEstructura([B], nombreB, codeB, c.dateStr)) continue;
+        const faltaEnB = contarBanda(resultados, c.dateStr, nombreB, b) < cupoBanda(B, c.dateStr, b);
+        const sobraEnA = contarBanda(resultados, c.dateStr, A.positionName, b) - 1 >= cupoBanda(A, c.dateStr, b);
+        if (!faltaEnB || !sobraEnA) continue;
+        r.sugerencias.push({
+          dateStr: c.dateStr,
+          de: c.code,
+          a: codeB,
+          tipo: 'relevante',
+          texto: `${ddmm(c.dateStr)} · ${r.nombre.split(',')[0].trim()}: ${c.code} pasa a ${nombreB} (falta ${b}; ${A.positionName} queda cubierto)`,
+          celda: celdaDeTrabajo(r.employeeId, c.dateStr, B, codeB),
+        });
+        break;
+      }
+    }
+  }
+}
+
 /** Tope de jornada seguida: 48 h (6 turnos de 8 h o 4 de 12 h), contando el final del mes anterior. */
 export const MAX_HORAS_SEGUIDAS = 48;
 
@@ -1447,6 +1643,8 @@ export function proponerContinuacion(input: ContinuarInput): ResultadoGuardia[] 
     const nivel = nivelarResultados(input, resultados, historias);
     for (const r of resultados) r.sugerencias = [...r.sugerencias, ...sugerenciasDe(input, r, nivel.get(r.employeeId) || [])];
   }
+  sugerirRotacionPuesto(input, resultados);
+  sugerirAlternos(input, resultados);
   aplicarReacomodoRelevante(input, resultados);
   return resultados;
 }

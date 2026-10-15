@@ -113,7 +113,17 @@ export function ContinuarMesModal({ vista, onAplicar, onCancelar }: Props) {
     [conCiclo],
   );
   const sugerenciasVisibles = useMemo(() => sugerencias.filter((s) => elegidos.has(s.celda.employeeId)), [sugerencias, elegidos]);
-  const sugerenciasNivel = useMemo(() => sugerenciasVisibles.filter((s) => s.tipo !== 'relevante' && s.tipo !== 'suelto'), [sugerenciasVisibles]);
+  const sugerenciasNivel = useMemo(() => sugerenciasVisibles.filter((s) => s.tipo !== 'relevante' && s.tipo !== 'suelto' && s.tipo !== 'rotacion'), [sugerenciasVisibles]);
+  /** Rotación ordenada por puesto: un grupo = un puesto, se tilda todo junto. */
+  const gruposRotacion = useMemo(() => {
+    const m = new Map<string, { texto: string; claves: string[] }>();
+    for (const s of sugerencias.filter((x) => x.tipo === 'rotacion')) {
+      const g = m.get(s.grupo || '') || { texto: s.grupoTexto || s.grupo || '', claves: [] };
+      g.claves.push(claveSugerencia(s));
+      m.set(s.grupo || '', g);
+    }
+    return [...m.entries()].map(([grupo, g]) => ({ grupo, ...g }));
+  }, [sugerencias]);
   const sugerenciasSuelto = useMemo(() => sugerenciasVisibles.filter((s) => s.tipo === 'suelto'), [sugerenciasVisibles]);
   const sugerenciasRelevante = useMemo(() => sugerenciasVisibles.filter((s) => s.tipo === 'relevante'), [sugerenciasVisibles]);
 
@@ -273,6 +283,34 @@ export function ContinuarMesModal({ vista, onAplicar, onCancelar }: Props) {
             </tbody>
           </table>
 
+          {gruposRotacion.length > 0 && (
+            <div className="rounded-2xl border border-violet-200 bg-violet-50/70 px-3 py-2.5 shadow-sm" data-continuar-rotacion>
+              <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wide text-violet-950">
+                <Repeat size={12} /> Ordenar la rotación del puesto
+              </div>
+              <div className="text-[11px] text-violet-950/80 mt-0.5 mb-1.5">
+                Los guardias de este puesto quedaron pisándose (dos en la misma banda y otra vacía). Tildá para acomodar sus fases y que cada día tenga M, T y N. Arranca destildado.
+              </div>
+              {gruposRotacion.map((g) => {
+                const todas = g.claves.every((k) => nivelar.has(k));
+                return (
+                  <label key={g.grupo} className="flex items-start gap-2 text-[12px] text-slate-800 cursor-pointer hover:bg-white/70 rounded-lg px-1 py-1" data-continuar-rotacion-grupo={g.grupo}>
+                    <input
+                      type="checkbox"
+                      className="mt-0.5"
+                      checked={todas}
+                      onChange={() => setNivelar((prev) => {
+                        const next = new Set(prev);
+                        for (const k of g.claves) { if (todas) next.delete(k); else next.add(k); }
+                        return next;
+                      })}
+                    />
+                    <span className="font-semibold">{g.texto} <span className="font-normal text-slate-500">({g.claves.length} celdas)</span></span>
+                  </label>
+                );
+              })}
+            </div>
+          )}
           {sugerenciasNivel.length > 0 && (
             <div className="rounded-2xl border border-indigo-200 bg-indigo-50/60 px-3 py-2.5 shadow-sm" data-continuar-nivelacion>
               <div className="flex items-center justify-between gap-2">
@@ -320,7 +358,7 @@ export function ContinuarMesModal({ vista, onAplicar, onCancelar }: Props) {
                 </div>
               </div>
               <div className="text-[11px] text-teal-950/80 mt-0.5 mb-1.5">
-                Opcional. Cuando se mueven los francos de Puesto 1 y Puesto 2, el relevante puede seguir la banda que queda libre. Arranca destildado.
+                Opcional. El guardia que cubre dos puestos (como el mes anterior) pasa al puesto donde falta su banda, o sigue la banda que queda libre. Arranca destildado.
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-0.5">
                 {sugerenciasRelevante.map((s) => {

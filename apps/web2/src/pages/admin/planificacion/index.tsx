@@ -12219,7 +12219,7 @@ function PlanificacionDesktop() {
         const aceptadas = sugerencias.filter((s) => {
             if (!elegidos.has(s.celda.employeeId)) return false;
             const key = `${s.celda.employeeId}_${s.dateStr}`;
-            return escritas.has(key) || s.tipo === 'relevante' || s.tipo === 'suelto';
+            return escritas.has(key) || s.tipo === 'relevante' || s.tipo === 'suelto' || s.tipo === 'rotacion';
         });
         for (const s of aceptadas) {
             const ch = cambioContinuar(s.celda);
