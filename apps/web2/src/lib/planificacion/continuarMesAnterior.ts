@@ -1572,8 +1572,11 @@ function sugerirAlternos(input: ContinuarInput, resultados: ResultadoGuardia[]) 
   }
 }
 
-/** Tope de jornada seguida: 48 h (6 turnos de 8 h o 4 de 12 h), contando el final del mes anterior. */
-export const MAX_HORAS_SEGUIDAS = 48;
+/**
+ * Tope de racha: nunca más de 6 turnos seguidos y hasta 56 h (6 de 8 h, 5 de 10 h —el RO de lunes a viernes—,
+ * 4 de 12 h; el 5.º de 12 h daría 60 h), contando el final del mes anterior.
+ */
+export const MAX_HORAS_SEGUIDAS = 56;
 
 function horasDeCodigo(code: string, hours?: unknown): number {
   const h = Number(hours);

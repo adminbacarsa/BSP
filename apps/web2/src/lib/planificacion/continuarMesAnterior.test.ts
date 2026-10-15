@@ -693,3 +693,19 @@ test('guardia que alternaba entre dos puestos: pasa al puesto donde falta su ban
   const sug = b.sugerencias.find((s) => s.tipo === 'relevante');
   assert.ok(m?.positionName === 'Puesto 1' || sug?.celda.positionName === 'Puesto 1');
 });
+
+test('5 días de 10 h (RO de lunes a viernes) no se cortan: el tope es 6 turnos o 56 h', () => {
+  const est: PuestoSla[] = [{ positionName: 'RO', qty: 1, shifts: [{ code: 'RO', hours: 10, startTime: '08:00', endTime: '18:00', days: ['L', 'M', 'X', 'J', 'V'] }] }];
+  const letra = (d: string) => ['D', 'L', 'M', 'X', 'J', 'V', 'S'][new Date(`${d}T12:00`).getDay()];
+  const previos: TurnoPrevio[] = [];
+  for (let i = diaIndex('2026-08-01'); i <= diaIndex('2026-09-30'); i++) {
+    const d = ymdDeIndex(i);
+    const fin = ['S', 'D'].includes(letra(d));
+    previos.push({ dateStr: d, code: fin ? 'F' : 'RO', positionName: fin ? 'General' : 'RO', objectiveId: OBJ, hours: fin ? 0 : 10 });
+  }
+  const dias = Array.from({ length: 31 }, (_, i) => `2026-10-${String(i + 1).padStart(2, '0')}`);
+  const [r] = proponerContinuacion(input([{ id: 'g', nombre: 'G', previos, puestoPreferido: 'RO' }], dias, { estructura: est }));
+  const viernes = dias.filter((d) => letra(d) === 'V');
+  for (const v of viernes) assert.equal(codigos(r)[v], 'RO', `viernes ${v}`);
+  assert.ok(!r.revisar.some((x) => /^racha /.test(x.motivo)));
+});
