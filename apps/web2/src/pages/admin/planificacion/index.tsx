@@ -1559,6 +1559,7 @@ function calcularCeldaGrilla(e: EntradaCeldaGrilla, emp: any, isGuest: boolean, 
     const cubierto = (((covRole === 'TARGET' || isLeaveCell) && coveredByCell) || (p?.menuRapidoTexto && !p?.menuRapidoRol) || (s?.menuRapidoTexto && !s?.menuRapidoRol));
     let grupoColor: string | undefined;
     let grupoNombre: string | undefined;
+    let colorPorPuesto = false;
     if (selectedGrupo && grupoUnifiedMode && content && !isOtherObjectiveShift && activeShift?.objectiveId && selectedGrupo.objectiveIds.includes(activeShift.objectiveId)) {
         const _oi = selectedGrupo.objectiveIds.indexOf(activeShift.objectiveId!);
         grupoColor = GRUPO_COLOR_HEX[_oi % GRUPO_COLOR_HEX.length];
@@ -1567,6 +1568,8 @@ function calcularCeldaGrilla(e: EntradaCeldaGrilla, emp: any, isGuest: boolean, 
         && !isLeaveCell && !['F', 'FF', 'FP', 'RET'].includes(String(cellCode || '').toUpperCase())) {
         grupoColor = e.colorPuesto[cellPosName].color;
         grupoNombre = e.colorPuesto[cellPosName].sigla;
+        // Las jornadas de 12 h conservan su fondo rojo; el resto se pinta solo por puesto.
+        colorPorPuesto = !/D12|N12/.test(String(cellCode || '').toUpperCase()) && !(Number((p && !p.isDeleted ? p.hours : s?.hours) || 0) >= 11.5);
     }
     const titulo = isOpsCoverageCell || evOverlay
         ? undefined
@@ -1613,6 +1616,7 @@ function calcularCeldaGrilla(e: EntradaCeldaGrilla, emp: any, isGuest: boolean, 
         otroObjetivo: isOtherObjectiveShift,
         grupoColor,
         grupoNombre,
+        colorPorPuesto,
         rfzOverlay: hasRfzOverlay,
         rfzSinPublicar: !!(rfzOnCell && !s && !p && !absence && rfzOnCell.draft),
     };
