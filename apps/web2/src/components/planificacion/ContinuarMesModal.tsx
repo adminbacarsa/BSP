@@ -25,6 +25,10 @@ export type ContinuarMesVista = {
   lectura?: string;
   /** El contrato no cubre el mes que se está armando. */
   activar?: {
+    /** crear (el mes no tiene servicio) o actualizar (lo tiene y es distinto al del mes que se copia). */
+    accion?: 'crear' | 'actualizar';
+    mesBase?: string;
+    cambios?: string[];
     mes: string;
     marcado: boolean;
     puede: boolean;
@@ -208,11 +212,32 @@ export function ContinuarMesModal({ vista, onAplicar, onCancelar }: Props) {
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
           {vista.activar && (
             <div className="rounded-2xl border border-teal-200 bg-teal-50 px-3 py-2.5 text-[12px] text-teal-950 shadow-sm" data-continuar-activar>
-              {vista.activar.puede && vista.activar.permiso ? (
+              {vista.activar.accion === 'actualizar' ? (
+                vista.activar.puede && vista.activar.permiso ? (
+                  <div className="space-y-1">
+                    <label className="flex flex-wrap items-center gap-2 cursor-pointer">
+                      <b>El servicio de {vista.activar.mes} es distinto al de {vista.activar.mesBase}.</b>
+                      <input type="checkbox" checked={activarMes} onChange={(e) => setActivarMes(e.target.checked)} data-continuar-actualizar-check />
+                      <span>Actualizar el servicio de {vista.activar.mes} con el de {vista.activar.mesBase}</span>
+                    </label>
+                    <ul className="list-disc pl-5 text-[11px] text-teal-900" data-continuar-actualizar-cambios>
+                      {(vista.activar.cambios || []).slice(0, 8).map((c) => <li key={c}>{c}</li>)}
+                      {(vista.activar.cambios || []).length > 8 && <li>y {(vista.activar.cambios || []).length - 8} más</li>}
+                    </ul>
+                  </div>
+                ) : (
+                  <p>
+                    <b>El servicio de {vista.activar.mes} es distinto al del mes anterior.</b>{' '}
+                    {vista.activar.puede && !vista.activar.permiso
+                      ? 'Pedile a quien administra Servicios que lo actualice. La copia igual se arma en borrador.'
+                      : vista.activar.motivo}
+                  </p>
+                )
+              ) : vista.activar.puede && vista.activar.permiso ? (
                 <label className="flex flex-wrap items-center gap-2 cursor-pointer">
                   <b>El servicio de {vista.activar.mes} no está activo.</b>
                   <input type="checkbox" checked={activarMes} onChange={(e) => setActivarMes(e.target.checked)} data-continuar-activar-check />
-                  <span>Activar el servicio de {vista.activar.mes} (agregar el mes al contrato)</span>
+                  <span>Activar el servicio de {vista.activar.mes} (copia el del mes anterior)</span>
                 </label>
               ) : (
                 <p>

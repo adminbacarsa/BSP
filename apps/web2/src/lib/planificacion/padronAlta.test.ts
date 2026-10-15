@@ -10,7 +10,7 @@ import {
   type AltaForm,
   type LegajoConocido,
 } from '@/lib/planificacion/padronAlta';
-import { decidirActivarServicio } from '@/lib/planificacion/activarServicioMes';
+import { decidirActivarServicio, decidirActualizarServicio } from '@/lib/planificacion/activarServicioMes';
 
 function cuil(base10: string): string {
   return base10 + cuilCheckDigit(base10);
@@ -124,3 +124,23 @@ test('activar el mes: octubre que termina el 31 queda tildado para noviembre; ce
   assert.equal(medio.marcado, true);
   assert.equal(medio.lastId, oct.id);
 });
+
+test('Continuar actualiza el servicio del mes con el del mes que se copia (Obrador: noviembre P1 ×4 + P2 ×1, octubre P1 ×4)', () => {
+  const p1 = { name: 'Puesto 1', quantity: 4, allowedShiftTypes: [{ code: 'M', startTime: '06:00', endTime: '14:00', quantity: 4 }] };
+  const oct = { id: 'oct', startDate: '2026-10-01', endDate: '2026-10-31', positions: [p1] };
+  const nov = { id: 'nov', startDate: '2026-11-01', endDate: '2026-11-30', positions: [p1, { name: 'Puesto 2', quantity: 1, allowedShiftTypes: [{ code: 'M', startTime: '07:00', endTime: '15:00' }] }] };
+  const d = decidirActualizarServicio({ slas: [oct, nov], year: 2026, month: 11 });
+  assert.equal(d.accion, 'actualizar');
+  if (d.accion === 'actualizar') {
+    assert.equal(d.baseId, 'oct');
+    assert.equal(d.targetId, 'nov');
+    assert.deepEqual(d.cambios, ['Puesto 2: se quita']);
+  }
+  assert.equal(decidirActualizarServicio({ slas: [oct, { ...nov, positions: [p1] }], year: 2026, month: 11 }).accion, 'nada');
+  const agrupado = decidirActualizarServicio({ slas: [oct, { ...nov, endDate: '2026-12-31' }], year: 2026, month: 11 });
+  assert.equal(agrupado.accion, 'no_se_puede');
+  const hor = decidirActualizarServicio({ slas: [oct, { ...nov, positions: [{ ...p1, allowedShiftTypes: [{ code: 'M', startTime: '07:00', endTime: '15:00', quantity: 2 }] }] }], year: 2026, month: 11 });
+  assert.equal(hor.accion, 'actualizar');
+  if (hor.accion === 'actualizar') assert.deepEqual(hor.cambios, ['Puesto 1 · M: 07:00–15:00 → 06:00–14:00', 'Puesto 1 · M: 2 → 4 por banda']);
+});
+

@@ -555,8 +555,8 @@ import { CompartirCronogramaModal } from '@/components/planificacion/CompartirCr
 import type { DatosImagen } from '@/lib/planificacion/imagenCronograma';
 import { AltaDesdePadronModal, type PedidoAlta } from '@/components/planificacion/AltaDesdePadronModal';
 import { AltaMasivaBoton } from '@/components/planificacion/AltaMasivaBoton';
-import { decidirActivarServicio } from '@/lib/planificacion/activarServicioMes';
-import { ejecutarAgregarMeses, proponerAgregarMeses, vistaPreviaAgregarMeses, type SlaRow } from '@/lib/servicios/appendMonthsClient';
+import { decidirActivarServicio, decidirActualizarServicio } from '@/lib/planificacion/activarServicioMes';
+import { actualizarServicioDesdeBase, ejecutarAgregarMeses, proponerAgregarMeses, vistaPreviaAgregarMeses, type SlaRow } from '@/lib/servicios/appendMonthsClient';
 import type { AppendMonthsPlan } from '@/lib/servicios/slaMonthSplit';
 import type { AltaHecha } from '@/lib/rrhh/altaLegajoClient';
 import { ImportarExcelModal, type AplicarImportPayload, type ImportarExcelContexto, type ServicioDestino } from '@/components/planificacion/ImportarExcelModal';
@@ -2332,6 +2332,8 @@ function PlanificacionDesktop() {
     const [continuarVista, setContinuarVista] = useState<ContinuarMesVista | null>(null);
     const [imagenCrono, setImagenCrono] = useState<DatosImagen | null>(null);
     const activarServicioRef = useRef<{ services: SlaRow[]; last: SlaRow; plan: AppendMonthsPlan; newEndDate: string } | null>(null);
+    /** «Continuar» con servicio ya cargado en el mes: se actualiza con el del mes que se copia. */
+    const actualizarServicioRef = useRef<{ target: SlaRow; base: SlaRow; cambios: string[] } | null>(null);
     /** Continuar en el grupo: un plan de «agregar el mes» por cada objetivo que no tiene servicio en el mes nuevo. */
     const activarGrupoRef = useRef<Array<{ nombre: string; services: SlaRow[]; last: SlaRow; plan: AppendMonthsPlan; newEndDate: string }>>([]);
     const altasLocalesRef = useRef<Map<string, any>>(new Map());
@@ -11903,6 +11905,7 @@ function PlanificacionDesktop() {
             }
             let activarVista: ContinuarMesVista['activar'];
             activarServicioRef.current = null;
+            actualizarServicioRef.current = null;
             activarGrupoRef.current = [];
             // Grupo: el objetivo sin servicio en el mes nuevo (Peaje en noviembre) se puede activar desde acá, como uno solo.
             const estructuraPorObj: Record<string, any[]> = {};
@@ -11936,7 +11939,7 @@ function PlanificacionDesktop() {
                         mesTxt = decision.mes;
                         const seed = decision.puede && decision.lastId ? matching.find((x) => x.id === decision.lastId) : null;
                         if (!seed) { noSe.push(`${nombreObj}: ${decision.motivo || 'no se puede activar'}`); continue; }
-                        const propuesta = proponerAgregarMeses(matching, seed);
+                        const propuesta = { ...proponerAgregarMeses([seed], seed), last: seed };
                         const preview = vistaPreviaAgregarMeses({ services: matching, last: propuesta.last, mode: propuesta.mode, newEndDate: decision.newEndDate });
                         if (propuesta.error || preview.error) { noSe.push(`${nombreObj}: ${propuesta.error || preview.error}`); continue; }
                         activarGrupoRef.current.push({ nombre: nombreObj, services: matching, last: propuesta.last, plan: preview.plan, newEndDate: decision.newEndDate });
@@ -12000,10 +12003,38 @@ function PlanificacionDesktop() {
                         permiso: permisoServicio,
                     };
                 }
+                if (!decision.mostrar) {
+                    const act = decidirActualizarServicio({
+                        slas: matching.map((s) => ({
+                            id: s.id,
+                            startDate: toYyyyMmDd(s.startDate),
+                            endDate: toYyyyMmDd(s.endDate),
+                            closed: (s as { closed?: boolean }).closed === true,
+                            status: String((s as { status?: string }).status || ''),
+                            positions: (s.positions || []) as any[],
+                            exigeCobertura: (s as { exigeCobertura?: boolean | null }).exigeCobertura,
+                        })),
+                        year: y,
+                        month: m + 1,
+                    });
+                    if (act.accion === 'actualizar') {
+                        const target = matching.find((s) => s.id === act.targetId);
+                        const base = matching.find((s) => s.id === act.baseId);
+                        if (target && base) {
+                            actualizarServicioRef.current = { target, base, cambios: act.cambios };
+                            activarVista = { accion: 'actualizar', mes: act.mes, mesBase: act.mesBase, cambios: act.cambios, marcado: permisoServicio, puede: true, motivo: '', permiso: permisoServicio };
+                            const built = buildPlanningPositionStructure(base as any, { monthHasSla: true, hasExactMatch: true });
+                            if (built.structure.length) estructuraContinuar = built.structure as PuestoSlaContinuar[];
+                        }
+                    } else if (act.accion === 'no_se_puede') {
+                        activarVista = { accion: 'actualizar', mes: act.mes, marcado: false, puede: false, motivo: act.motivo, permiso: permisoServicio };
+                    }
+                }
                 if (decision.puede && decision.lastId) {
                     const seed = matching.find((s) => s.id === decision.lastId);
                     if (seed) {
-                        const propuesta = proponerAgregarMeses(matching, seed);
+                        // El mes nuevo sale del servicio del mes anterior (no del último de la cadena: diciembre ya cargado lo frenaba).
+                        const propuesta = { ...proponerAgregarMeses([seed], seed), last: seed };
                         const preview = vistaPreviaAgregarMeses({
                             services: matching,
                             last: propuesta.last,
@@ -12229,6 +12260,17 @@ function PlanificacionDesktop() {
                 }
             }
             setDataRefreshNonce((n) => n + 1);
+        }
+        const planActualizar = activarServicio ? actualizarServicioRef.current : null;
+        if (planActualizar && empresaId) {
+            try {
+                await actualizarServicioDesdeBase({ ...planActualizar, empresaId, migracionCompleta, scopeEmpresa, via: 'CONTINUAR_MES' });
+                setDataRefreshNonce((n) => n + 1);
+                toast.success(`Servicio de ${continuarVista.activar?.mes || 'este mes'} actualizado con el de ${continuarVista.activar?.mesBase || 'el mes anterior'}`);
+            } catch (e) {
+                console.error('[continuar actualizar servicio]', e);
+                toast.error('No se pudo actualizar el servicio. La copia queda en borrador.');
+            }
         }
         if (planActivar && empresaId) {
             try {

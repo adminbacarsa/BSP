@@ -177,3 +177,36 @@ export async function ejecutarAgregarMeses(input: {
   await registrarAuditoria('CREATE_CONTRACT', `Agregó meses (${plan.segments.map((s) => s.label).join(', ')}): ${last.clientName} - ${last.objectiveName}`, empresaId, scopeEmpresa, input.via);
   return { summary: plan.summary, patches, created };
 }
+
+/**
+ * «Continuar» con el servicio del mes ya cargado: le copia puestos, franjas, cantidades y
+ * «exige cobertura» del servicio del mes que se copia. No toca fechas, facturación ni el cierre.
+ */
+export async function actualizarServicioDesdeBase(input: {
+  target: SlaRow;
+  base: SlaRow;
+  empresaId: string;
+  migracionCompleta: boolean;
+  scopeEmpresa: boolean;
+  cambios: string[];
+  via?: string;
+}): Promise<Record<string, unknown>> {
+  const { target, base, empresaId, migracionCompleta, scopeEmpresa } = input;
+  const positions = JSON.parse(JSON.stringify(base.positions || [])) as ServiceSLA['positions'];
+  const totalMonthlyHours = Math.round(
+    calculateMonthlyBreakdown(positions, String(target.startDate || ''), String(target.endDate || ''), target.excludedDates)
+      .reduce((acc, m) => acc + m.totalHours, 0),
+  );
+  const patch: Record<string, unknown> = { positions, totalMonthlyHours };
+  const exige = (base as { exigeCobertura?: boolean | null }).exigeCobertura;
+  if (exige === false || exige === true) patch.exigeCobertura = exige;
+  await slaService.update(target.id, patch as Partial<ServiceSLA>, { empresaId, migracionCompleta });
+  await registrarAuditoria(
+    'UPDATE_CONTRACT',
+    `Actualizó el servicio con el del mes anterior (${input.cambios.slice(0, 6).join('; ')}${input.cambios.length > 6 ? '…' : ''}): ${target.clientName} - ${target.objectiveName}`,
+    empresaId,
+    scopeEmpresa,
+    input.via,
+  );
+  return patch;
+}

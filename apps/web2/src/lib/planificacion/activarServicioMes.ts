@@ -89,3 +89,83 @@ export function decidirActivarServicio(input: {
   }
   return { ...base, mostrar, puede: true, marcado: esElAnterior, lastId: last.id };
 }
+
+type FranjaCmp = { code?: string; name?: string; startTime?: string; endTime?: string; quantity?: number | null; days?: string[] | null };
+type PuestoCmp = { name?: string; positionName?: string; quantity?: number | null; allowedShiftTypes?: FranjaCmp[] };
+
+export type SlaConPuestos = SlaParaActivar & { positions?: PuestoCmp[]; exigeCobertura?: boolean | null };
+
+export type DecisionActualizarServicio =
+  | { accion: 'nada' }
+  | { accion: 'no_se_puede'; mes: string; motivo: string }
+  | { accion: 'actualizar'; mes: string; mesBase: string; baseId: string; targetId: string; cambios: string[] };
+
+const nombrePuesto = (p: PuestoCmp) => String(p.name || p.positionName || '').trim();
+const normP = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().replace(/\s+/g, ' ').trim();
+const textoDias = (d?: string[] | null) => (d && d.length && d.length < 7 ? ` (${d.join('')})` : '');
+
+function franjasDe(p: PuestoCmp): Map<string, FranjaCmp> {
+  const m = new Map<string, FranjaCmp>();
+  for (const f of p.allowedShiftTypes || []) m.set(normP(String(f.code || f.name || '')), f);
+  return m;
+}
+
+/** Diferencias de estructura (puestos, franjas, horario, cantidad, días) entre el servicio base y el del mes. */
+export function cambiosDeServicio(base: PuestoCmp[], destino: PuestoCmp[]): string[] {
+  const out: string[] = [];
+  const dest = new Map(destino.map((p) => [normP(nombrePuesto(p)), p]));
+  const bas = new Map(base.map((p) => [normP(nombrePuesto(p)), p]));
+  for (const [k, p] of dest) if (!bas.has(k)) out.push(`${nombrePuesto(p)}: se quita`);
+  for (const [k, b] of bas) {
+    const d = dest.get(k);
+    const nom = nombrePuesto(b);
+    if (!d) { out.push(`${nom}: se agrega`); continue; }
+    const qb = Number(b.quantity ?? 1);
+    const qd = Number(d.quantity ?? 1);
+    if (qb !== qd) out.push(`${nom}: cantidad ${qd} → ${qb}`);
+    const fb = franjasDe(b);
+    const fd = franjasDe(d);
+    for (const [c, f] of fd) if (!fb.has(c)) out.push(`${nom} · ${f.code || f.name}: se quita`);
+    for (const [c, f] of fb) {
+      const g = fd.get(c);
+      const cod = f.code || f.name;
+      if (!g) { out.push(`${nom} · ${cod}: se agrega ${f.startTime}–${f.endTime}`); continue; }
+      if (g.startTime !== f.startTime || g.endTime !== f.endTime) out.push(`${nom} · ${cod}: ${g.startTime}–${g.endTime} → ${f.startTime}–${f.endTime}`);
+      const q1 = g.quantity ?? qd;
+      const q2 = f.quantity ?? qb;
+      if (Number(q1) !== Number(q2)) out.push(`${nom} · ${cod}: ${q1} → ${q2} por banda`);
+      if (textoDias(g.days) !== textoDias(f.days)) out.push(`${nom} · ${cod}: días${textoDias(g.days) || ' todos'} →${textoDias(f.days) || ' todos'}`);
+    }
+  }
+  return out;
+}
+
+/**
+ * «Continuar» con el servicio del mes ya cargado: se actualiza con el del mes que se copia
+ * (Obrador noviembre con Puesto 2 ×1 y octubre con Puesto 1 ×4). Solo si ese doc es del mes
+ * (no un agrupado que cubre otros meses) y no está cerrado.
+ */
+export function decidirActualizarServicio(input: { slas: SlaConPuestos[]; year: number; month: number }): DecisionActualizarServicio {
+  const mes = nombreMes(input.month - 1);
+  const desde = ymd(input.year, input.month, 1);
+  const hasta = ultimoDia(input.year, input.month);
+  const prev = mesPrevio(input.year, input.month);
+  const prevDesde = ymd(prev.y, prev.m, 1);
+  const prevHasta = ultimoDia(prev.y, prev.m);
+  const pool = input.slas.filter(abierto);
+  const target = pool.find((s) => dia(s.startDate) <= desde && dia(s.endDate) >= hasta);
+  if (!target) return { accion: 'nada' };
+  const base = pool.filter((s) => s.id !== target.id && dia(s.startDate) <= prevHasta && dia(s.endDate) >= prevDesde)
+    .sort((a, b) => dia(b.endDate).localeCompare(dia(a.endDate)))[0];
+  if (!base) return { accion: 'nada' };
+  const cambios = cambiosDeServicio(base.positions || [], target.positions || []);
+  if ((base.exigeCobertura !== false) !== (target.exigeCobertura !== false)) {
+    cambios.push(`Exige cobertura: ${target.exigeCobertura !== false ? 'sí' : 'no'} → ${base.exigeCobertura !== false ? 'sí' : 'no'}`);
+  }
+  if (!cambios.length) return { accion: 'nada' };
+  if (target.closed) return { accion: 'no_se_puede', mes, motivo: `El servicio de ${mes} está cerrado.` };
+  if (dia(target.startDate) < desde || dia(target.endDate) > hasta) {
+    return { accion: 'no_se_puede', mes, motivo: `El servicio de ${mes} también cubre otros meses: editalo desde Servicios.` };
+  }
+  return { accion: 'actualizar', mes, mesBase: nombreMes(prev.m - 1), baseId: base.id, targetId: target.id, cambios };
+}
