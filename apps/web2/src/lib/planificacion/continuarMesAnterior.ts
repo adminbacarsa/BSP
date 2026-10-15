@@ -1497,7 +1497,8 @@ function sugerirRotacionPuesto(input: ContinuarInput, resultados: ResultadoGuard
         const b = bandaCelda(actual);
         if (!actual || b === null || input.diaBloqueado?.(d)) return;
         const want = C[(ph + i) % L];
-        if (b === want) return;
+        // Misma banda pero en otro puesto (lo movió la pasada de «puesto lleno»): vuelve a este puesto.
+        if (b === want && (want === 'F' || puestoNorm(actual.positionName) === puestoNorm(pos.positionName))) return;
         let celda: CeldaPropuesta;
         if (want === 'F') {
           celda = { employeeId: r.employeeId, dateStr: d, code: 'F', name: 'Franco', positionName: 'General', startTime: '00:00', endTime: '00:00', hours: 0, isFranco: true };
