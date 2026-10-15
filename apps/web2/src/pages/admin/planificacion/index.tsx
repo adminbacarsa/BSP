@@ -2834,6 +2834,40 @@ function PlanificacionDesktop() {
         return () => window.removeEventListener('keydown', onKey);
     }, [cronoFullscreen, toolbarMoreOpen]);
 
+    // La pantalla completa va con z 1100 (encima del encabezado sticky de 1000): los modales y menús
+    // que se montan con portal en <body> (compartir, importar…) tienen z menor y quedaban detrás.
+    useEffect(() => {
+        if (!cronoFullscreen || typeof document === 'undefined') return;
+        const PISO = 1101;
+        const subir = (el: Element) => {
+            for (const cand of [el, ...Array.from(el.children)]) {
+                if (!(cand instanceof HTMLElement)) continue;
+                const cs = getComputedStyle(cand);
+                if (cs.position !== 'fixed') continue;
+                const z = Number.parseInt(cs.zIndex, 10);
+                if (Number.isFinite(z) && z >= PISO) continue;
+                if (cand.dataset.cronoFsZ === undefined) cand.dataset.cronoFsZ = cand.style.zIndex || '';
+                cand.style.zIndex = String(PISO + (Number.isFinite(z) ? Math.max(0, z) : 0));
+            }
+        };
+        const revisar = () => {
+            for (const hijo of Array.from(document.body.children)) {
+                if (hijo.id === '__next') continue;
+                subir(hijo);
+            }
+        };
+        revisar();
+        const obs = new MutationObserver(revisar);
+        obs.observe(document.body, { childList: true });
+        return () => {
+            obs.disconnect();
+            document.querySelectorAll<HTMLElement>('[data-crono-fs-z]').forEach((el) => {
+                el.style.zIndex = el.dataset.cronoFsZ || '';
+                delete el.dataset.cronoFsZ;
+            });
+        };
+    }, [cronoFullscreen]);
+
     // Cargar eventos de la empresa para el mes visible
     useEffect(() => {
         if (!empresaId) return;
