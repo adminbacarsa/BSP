@@ -1357,9 +1357,64 @@ function aplicarReacomodoRelevante(input: ContinuarInput, resultados: ResultadoG
   }
 }
 
+/** Tope de jornada seguida: 48 h (6 turnos de 8 h o 4 de 12 h), contando el final del mes anterior. */
+export const MAX_HORAS_SEGUIDAS = 48;
+
+function horasDeCodigo(code: string, hours?: unknown): number {
+  const h = Number(hours);
+  if (h > 0) return h;
+  return code === 'D12' || code === 'N12' ? 12 : 8;
+}
+
+/** El día que pasaría el tope queda de franco (y se anota para revisar). */
+function cortarRachas(input: ContinuarInput, resultados: ResultadoGuardia[]) {
+  if (!input.dias.length) return;
+  const primero = diaIndex(input.dias[0]);
+  for (const r of resultados) {
+    const g = input.guardias.find((x) => x.id === r.employeeId);
+    const antes = new Map<number, number>();
+    for (const t of g?.previos || []) {
+      const idx = diaIndex(String(t.dateStr || ''));
+      if (!(idx < primero && idx >= primero - 8)) continue;
+      const code = codigoDeCiclo(t, input.objectiveId);
+      if (!code || code === 'F' || code === 'RET') { if (!antes.has(idx)) antes.set(idx, 0); continue; }
+      antes.set(idx, Math.max(antes.get(idx) || 0, horasDeCodigo(code, t.hours)));
+    }
+    const porDia = new Map(r.propuestas.map((c, i) => [c.dateStr, i]));
+    let horas = 0;
+    let turnos = 0;
+    for (let idx = primero - 8; idx < primero + input.dias.length; idx++) {
+      let h = 0;
+      if (idx < primero) h = antes.get(idx) || 0;
+      else {
+        const dateStr = input.dias[idx - primero];
+        const i = porDia.get(dateStr);
+        const c = i == null ? null : r.propuestas[i];
+        if (c && !c.isFranco && c.code !== 'RET') {
+          h = horasDeCodigo(up(c.code), c.hours);
+          if (horas + h > MAX_HORAS_SEGUIDAS || turnos + 1 > 6) {
+            r.propuestas[i!] = { ...c, code: 'F', name: 'Franco', positionName: 'General', isFranco: true, hours: 0, startTime: '00:00', endTime: '' };
+            const motivo = `racha de más de ${MAX_HORAS_SEGUIDAS} h seguidas: queda de franco`;
+            const item = r.revisar.find((x) => x.motivo === motivo && x.code === c.code);
+            if (item) item.dias.push(dateStr);
+            else r.revisar.push({ positionName: c.positionName, code: c.code, dias: [dateStr], motivo });
+            h = 0;
+          }
+        } else if (!c) {
+          const cargado = input.cargado?.(r.employeeId, dateStr);
+          h = cargado && cargado !== 'F' && cargado !== 'RET' ? horasDeCodigo(up(cargado)) : 0;
+        }
+      }
+      if (h > 0) { horas += h; turnos += 1; } else { horas = 0; turnos = 0; }
+    }
+    r.horasPropuestas = r.propuestas.reduce((acc, x) => acc + (x.isFranco ? 0 : x.hours), 0);
+  }
+}
+
 export function proponerContinuacion(input: ContinuarInput): ResultadoGuardia[] {
   if (input.regla === 'anterior') {
     const resultados = input.guardias.map((g) => proponerGuardia(input, g));
+    cortarRachas(input, resultados);
     anclarPorPuesto(input, resultados);
     aplicarReacomodoRelevante(input, resultados);
     return resultados;
@@ -1388,6 +1443,7 @@ export function proponerContinuacion(input: ContinuarInput): ResultadoGuardia[] 
     }
     return res;
   });
+  cortarRachas(input, resultados);
   anclarPorPuesto(input, resultados);
   if (input.cupoDia) {
     const nivel = nivelarResultados(input, resultados, historias);

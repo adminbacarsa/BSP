@@ -73,6 +73,8 @@ function agruparRevisar(resultados: ResultadoGuardia[]): Array<{ texto: string; 
         g.guardias.add(apellido(r.nombre));
         g.codes.add(x.code);
         reasignados.set(k, g);
+      } else if (/^racha /.test(x.motivo)) {
+        sinProponer.push({ texto: `${r.nombre}: ${x.code} los días ${textoDias(x.dias)} pasaba el tope de 6 turnos de 8 h o 4 de 12 h seguidos: queda de franco.`, propuesto: true });
       } else if (/ lleno: /.test(x.motivo)) {
         // Su puesto estaba lleno ese día: el turno se propone en el puesto que tenía la banda libre.
         sinProponer.push({ texto: `${r.nombre}: ${x.motivo} (días ${textoDias(x.dias)}). Se propone ahí.`, propuesto: true });

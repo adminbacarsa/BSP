@@ -610,3 +610,19 @@ test('el relevante se reacomoda, destildado, cuando se mueven los francos de Pue
   assert.equal(del(d4)?.celda.isFranco, true);
   assert.equal(del(d5), undefined);
 });
+
+test('nunca más de 6 turnos de 8 h seguidos: el 7.º de un ciclo M×7 queda de franco', () => {
+  const ROTA_7_2 = [...Array(7).fill('M'), 'F', 'F'];
+  const previos = armar(ROTA_7_2, '2026-08-01', '2026-09-30');
+  const dias = Array.from({ length: 30 }, (_, i) => `2026-10-${String(i + 1).padStart(2, '0')}`);
+  const [r] = proponerContinuacion(input([{ id: 'a', nombre: 'A', previos }], dias));
+  let racha = 0;
+  let max = 0;
+  for (const d of dias) {
+    const c = codigos(r)[d];
+    racha = c && c !== 'F' ? racha + 1 : 0;
+    max = Math.max(max, racha);
+  }
+  assert.ok(max <= 6, `racha máxima ${max}`);
+  assert.ok(r.revisar.some((x) => /^racha /.test(x.motivo)));
+});
