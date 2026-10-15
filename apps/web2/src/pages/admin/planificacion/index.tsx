@@ -2334,8 +2334,14 @@ function PlanificacionDesktop() {
     const activarServicioRef = useRef<{ services: SlaRow[]; last: SlaRow; plan: AppendMonthsPlan; newEndDate: string } | null>(null);
     /** «Continuar» con servicio ya cargado en el mes: se actualiza con el del mes que se copia. */
     const actualizarServicioRef = useRef<{ target: SlaRow; base: SlaRow; cambios: string[] } | null>(null);
+    /**
+     * Servicio del mes que dejó «Continuar» (crear o actualizar). No se escribe hasta «Guardar cronograma»:
+     * si se descartan los cambios, no queda nada. Mientras tanto la grilla lo muestra como si ya estuviera.
+     */
+    type ServicioPendiente = { objectiveId: string; mesKey: string; tipo: 'crear' | 'actualizar'; texto: string; virtual: any; run: () => Promise<unknown> };
+    const [serviciosPendientes, setServiciosPendientes] = useState<ServicioPendiente[]>([]);
     /** Continuar en el grupo: un plan de «agregar el mes» por cada objetivo que no tiene servicio en el mes nuevo. */
-    const activarGrupoRef = useRef<Array<{ nombre: string; services: SlaRow[]; last: SlaRow; plan: AppendMonthsPlan; newEndDate: string }>>([]);
+    const activarGrupoRef = useRef<Array<{ objectiveId: string; nombre: string; services: SlaRow[]; last: SlaRow; plan: AppendMonthsPlan; newEndDate: string }>>([]);
     const altasLocalesRef = useRef<Map<string, any>>(new Map());
     const altaPegadoRef = useRef<{ indice: number; employeeId: string } | null>(null);
     const agregarPegadoRef = useRef<Array<{ indice: number; employeeId: string }>>([]);
@@ -6220,8 +6226,17 @@ function PlanificacionDesktop() {
         const fetchSLA = async () => {
             try {
                 const snap = await getDocs(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa));
+                const mesVista = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
+                const pendientesAca = serviciosPendientes.filter((p) => p.objectiveId === selectedObjective && p.mesKey === mesVista);
                 const allDocs = filterSlasForPlanningTenant(
-                    snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })),
+                    [
+                        ...snap.docs.map((d) => {
+                            const row = { id: d.id, ...(d.data() as any) };
+                            const upd = pendientesAca.find((p) => p.tipo === 'actualizar' && p.virtual?.id === d.id);
+                            return upd ? { ...row, ...upd.virtual } : row;
+                        }),
+                        ...pendientesAca.filter((p) => p.tipo === 'crear').map((p) => p.virtual),
+                    ],
                     empresaId,
                     scopeEmpresa,
                     tenantClientIds,
@@ -6311,7 +6326,12 @@ function PlanificacionDesktop() {
             }
         };
         fetchSLA();
-    }, [selectedClient, selectedObjective, currentDate, empresaId, migracionCompleta, scopeEmpresa, clients, tenantClientIds, slaIdToObjId, dataRefreshNonce]);
+    }, [selectedClient, selectedObjective, currentDate, empresaId, migracionCompleta, scopeEmpresa, clients, tenantClientIds, slaIdToObjId, dataRefreshNonce, serviciosPendientes]);
+
+    // Sin cambios pendientes (descartados, cambio de objetivo o ya guardados) no queda servicio por escribir.
+    useEffect(() => {
+        if (serviciosPendientes.length && Object.keys(pendingChanges).length === 0) setServiciosPendientes([]);
+    }, [pendingChanges, serviciosPendientes.length]);
 
     const periodoPlan = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
 
@@ -8096,7 +8116,7 @@ function PlanificacionDesktop() {
             }
         });
 
-        const doSave = () => {
+        const doSave = async () => {
             const jobPending = { ...pendingParaGuardar };
             const motivoTope = authReasonRef.current.trim();
             if (overCap.length && motivoTope) {
@@ -8152,6 +8172,21 @@ function PlanificacionDesktop() {
             const jobPackages = [...pendingRecompositionPackages];
             const jobCount = jobKeys.length;
 
+            if (serviciosPendientes.length) {
+                const ops = serviciosPendientes;
+                for (const op of ops) {
+                    try {
+                        await op.run();
+                    } catch (e) {
+                        console.error('[guardar servicio pendiente]', e);
+                        toast.error(`No se pudo guardar el ${op.texto}. El cronograma no se guardó: probá de nuevo.`);
+                        return;
+                    }
+                }
+                setServiciosPendientes([]);
+                setDataRefreshNonce((n) => n + 1);
+                toast.success(ops.length === 1 ? `Se guardó el ${ops[0].texto}` : `Se guardaron: ${ops.map((o) => o.texto).join(', ')}`);
+            }
             const marcasArmado = marcasAccionRef.current.length
                 ? [...marcasAccionRef.current, Date.now()]
                 : [Date.now()];
@@ -8918,7 +8953,7 @@ function PlanificacionDesktop() {
             return;
         }
 
-        doSave();
+        void doSave();
     };
 
     const openPublishConfirm = () => {
@@ -11942,7 +11977,7 @@ function PlanificacionDesktop() {
                         const propuesta = { ...proponerAgregarMeses([seed], seed), last: seed };
                         const preview = vistaPreviaAgregarMeses({ services: matching, last: propuesta.last, mode: propuesta.mode, newEndDate: decision.newEndDate });
                         if (propuesta.error || preview.error) { noSe.push(`${nombreObj}: ${propuesta.error || preview.error}`); continue; }
-                        activarGrupoRef.current.push({ nombre: nombreObj, services: matching, last: propuesta.last, plan: preview.plan, newEndDate: decision.newEndDate });
+                        activarGrupoRef.current.push({ objectiveId: oid, nombre: nombreObj, services: matching, last: propuesta.last, plan: preview.plan, newEndDate: decision.newEndDate });
                         activables.push(nombreObj);
                         if (!estructuraPorObj[oid].length) {
                             const built = buildPlanningPositionStructure(propuesta.last as any, { monthHasSla: true, hasExactMatch: true });
@@ -12249,32 +12284,48 @@ function PlanificacionDesktop() {
     const aplicarContinuarMesAnterior = async (employeeIds: string[], sugerencias: SugerenciaNivelacion[], activarServicio = false) => {
         if (!continuarVista || !selectedObjective) return;
         const planActivar = activarServicio ? activarServicioRef.current : null;
-        if (activarServicio && activarGrupoRef.current.length && empresaId) {
-            for (const g of activarGrupoRef.current) {
-                try {
-                    await ejecutarAgregarMeses({ services: g.services, last: g.last, plan: g.plan, newEndDate: g.newEndDate, empresaId, migracionCompleta, scopeEmpresa, via: 'CONTINUAR_MES' });
-                    toast.success(`Servicio de ${g.nombre} activado`);
-                } catch (e) {
-                    console.error('[continuar activar servicio grupo]', e);
-                    toast.error(`No se pudo activar el servicio de ${g.nombre}. La copia queda en borrador.`);
-                }
-            }
-            setDataRefreshNonce((n) => n + 1);
-        }
         const planActualizar = activarServicio ? actualizarServicioRef.current : null;
-        if (planActualizar && empresaId) {
-            try {
-                await actualizarServicioDesdeBase({ ...planActualizar, empresaId, migracionCompleta, scopeEmpresa, via: 'CONTINUAR_MES' });
-                setDataRefreshNonce((n) => n + 1);
-                toast.success(`Servicio de ${continuarVista.activar?.mes || 'este mes'} actualizado con el de ${continuarVista.activar?.mesBase || 'el mes anterior'}`);
-            } catch (e) {
-                console.error('[continuar actualizar servicio]', e);
-                toast.error('No se pudo actualizar el servicio. La copia queda en borrador.');
+        const mesKeyCont = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
+        const mesTxtCont = continuarVista.activar?.mes || 'este mes';
+        const ops: ServicioPendiente[] = [];
+        const virtualCrear = (last: SlaRow, oid: string, newEndDate: string) => ({
+            ...last,
+            id: `pendiente_${oid}_${mesKeyCont}`,
+            startDate: `${mesKeyCont}-01`,
+            endDate: newEndDate,
+            closed: false,
+            status: 'active',
+        });
+        if (activarServicio && empresaId) {
+            for (const g of activarGrupoRef.current) {
+                ops.push({
+                    objectiveId: g.objectiveId,
+                    mesKey: mesKeyCont,
+                    tipo: 'crear',
+                    texto: `servicio de ${mesTxtCont} en ${g.nombre}`,
+                    virtual: virtualCrear(g.last, g.objectiveId, g.newEndDate),
+                    run: () => ejecutarAgregarMeses({ services: g.services, last: g.last, plan: g.plan, newEndDate: g.newEndDate, empresaId, migracionCompleta, scopeEmpresa, via: 'CONTINUAR_MES' }),
+                });
             }
+        }
+        if (planActualizar && empresaId) {
+            ops.push({
+                objectiveId: selectedObjective,
+                mesKey: mesKeyCont,
+                tipo: 'actualizar',
+                texto: `servicio de ${mesTxtCont} actualizado con el de ${continuarVista.activar?.mesBase || 'el mes anterior'}`,
+                virtual: { ...planActualizar.target, positions: JSON.parse(JSON.stringify(planActualizar.base.positions || [])), exigeCobertura: (planActualizar.base as any).exigeCobertura ?? (planActualizar.target as any).exigeCobertura },
+                run: () => actualizarServicioDesdeBase({ ...planActualizar, empresaId, migracionCompleta, scopeEmpresa, via: 'CONTINUAR_MES' }),
+            });
         }
         if (planActivar && empresaId) {
-            try {
-                await ejecutarAgregarMeses({
+            ops.push({
+                objectiveId: selectedObjective,
+                mesKey: mesKeyCont,
+                tipo: 'crear',
+                texto: `servicio de ${mesTxtCont}`,
+                virtual: virtualCrear(planActivar.last, selectedObjective, planActivar.newEndDate),
+                run: () => ejecutarAgregarMeses({
                     services: planActivar.services,
                     last: planActivar.last,
                     plan: planActivar.plan,
@@ -12283,13 +12334,12 @@ function PlanificacionDesktop() {
                     migracionCompleta,
                     scopeEmpresa,
                     via: 'CONTINUAR_MES',
-                });
-                setDataRefreshNonce((n) => n + 1);
-                toast.success(`Servicio de ${continuarVista.activar?.mes || 'este mes'} activado`);
-            } catch (e) {
-                console.error('[continuar activar servicio]', e);
-                toast.error('No se pudo activar el servicio. La copia queda en borrador.');
-            }
+                }),
+            });
+        }
+        if (ops.length) {
+            setServiciosPendientes((prev) => [...prev.filter((p) => !ops.some((o) => o.objectiveId === p.objectiveId && o.mesKey === p.mesKey)), ...ops]);
+            toast.message(`El ${ops.map((o) => o.texto).join(' y el ')} se guarda con «Guardar cronograma». Si descartás los cambios, no se crea.`);
         }
         const elegidos = new Set(employeeIds);
         const next = { ...pendingChangesRef.current };
@@ -18943,6 +18993,9 @@ function PlanificacionDesktop() {
                                         <div className="flex items-center gap-1.5 bg-amber-50 p-1.5 rounded-xl border border-amber-200 shadow-sm shrink-0">
                                             <span className="text-[10px] font-bold text-amber-700 uppercase tracking-wide hidden lg:inline whitespace-nowrap">{activeActorName}</span>
                                             <span className="text-xs font-black text-amber-700 px-1 whitespace-nowrap" data-cambios-pendientes>{Object.values(pendingChanges).filter((v: any) => !v?._isAutoRotation && !v?._isAutoCondition).length || Object.keys(pendingChanges).length} camb.</span>
+                                            {serviciosPendientes.length > 0 && (
+                                                <span className="text-[10px] font-bold text-teal-700 whitespace-nowrap" data-servicio-pendiente title={serviciosPendientes.map((o) => `Se guarda con el cronograma: ${o.texto}`).join('\n')}>+ servicio</span>
+                                            )}
                                             <button type="button" onClick={() => undoLastPending()} title="Deshacer último cambio (Ctrl+Z)" className="p-1.5 hover:bg-amber-100 rounded-lg text-amber-600"><Undo size={16}/></button>
                                             <button type="button" onClick={() => { if (confirm('¿Descartar todos los cambios pendientes?')) { setPendingChanges({}); clearUndoStack(); } }} title="Descartar todos los cambios" className="p-1.5 hover:bg-rose-100 rounded-lg text-rose-500"><X size={16}/></button>
                                             <button onClick={() => handleSaveAll()} title="Guardar cambios pendientes (Ctrl+S)" className="bg-amber-500 hover:bg-amber-600 text-white p-2 rounded-lg text-xs font-black flex items-center shadow">
