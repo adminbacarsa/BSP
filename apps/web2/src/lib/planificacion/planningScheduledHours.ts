@@ -150,6 +150,15 @@ function instantFromShiftClock(val: unknown): Date | null {
   return null;
 }
 
+/** HH:MM en hora Argentina de un Timestamp/Date/ISO; '' si no se puede leer. */
+function horaArDe(v: unknown): string {
+  if (typeof v === 'string' && /^\d{1,2}:\d{2}$/.test(v.trim())) return v.trim().padStart(5, '0');
+  const at = instantFromShiftClock(v);
+  if (!at) return '';
+  const x = new Date(at.getTime() - 3 * 3600000);
+  return `${String(x.getUTCHours()).padStart(2, '0')}:${String(x.getUTCMinutes()).padStart(2, '0')}`;
+}
+
 function durationHoursFromShiftTimestamps(shift: any): number {
   const startAt = instantFromShiftClock(shift.startTime);
   const endAt = instantFromShiftClock(shift.endTime);
@@ -233,7 +242,12 @@ export function calcPlanningBillableShiftHours(
     Math.round((base + ext) * 100) / 100;
 
   if (extensionBillable && bandHint != null && bandHint > 0) {
-    const baseBand = codeBase >= bandHint - 0.5 ? codeBase : bandHint;
+    // La extensión arranca donde termina el turno guardado (M 10–16 de Puesto 2 + 16–22): la base es
+    // ese turno (6 h), no la M estándar de 8 h. Si no, Tadicor contaba 14 h por 12 y el cierre no daba.
+    const finTurno = horaArDe(shift.endTime);
+    const desde = String(shift.segmentFromTime || '').slice(0, 5);
+    const baseEsElTurno = !!shift.isExtended && !shift.isEarlyStart && intrinsic >= 0.5 && !!finTurno && finTurno === desde;
+    const baseBand = baseEsElTurno || codeBase >= bandHint - 0.5 ? codeBase : bandHint;
     const extraPart = Math.max(
       extra,
       Number.isFinite(explicitExt) && explicitExt > 0 ? explicitExt : 0,
