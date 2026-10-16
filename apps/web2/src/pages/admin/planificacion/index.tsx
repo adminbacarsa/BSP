@@ -17614,6 +17614,9 @@ function PlanificacionDesktop() {
                         // Puestos cerrados: 1 pax = esquema SLA completo (M+T+N, D12+N12, M+T, etc.).
                         let requiredPax = 0;
                         let closedPax = 0;
+                        // Lo que cuenta la lectura por horas (solo del objetivo seleccionado; en el grupo, su parte).
+                        let reqLectura = 0;
+                        let closedLectura = 0;
                         const cyclesForCoverage = autoSelectedCyclesRef.current?.length
                             ? autoSelectedCyclesRef.current
                             : autoCycles;
@@ -17624,6 +17627,10 @@ function PlanificacionDesktop() {
                                 const units = sumGrupoObjectiveCoverageForDay(objId, dateStr, dayLetter, undefined);
                                 requiredPax += units.required;
                                 closedPax += units.closed;
+                                if (String(objId) === String(selectedObjective)) {
+                                    reqLectura += units.required;
+                                    closedLectura += units.closed;
+                                }
                             });
                         } else {
                         (positionStructure || []).forEach((pos: any) => {
@@ -17635,11 +17642,14 @@ function PlanificacionDesktop() {
                             requiredPax += units.required;
                             closedPax += units.closed;
                         });
+                        reqLectura = requiredPax;
+                        closedLectura = closedPax;
                         }
 
                         const lecturaDia = lecturaMes.porDia[dateStr];
                         const objetivoCubierto = !!lecturaDia?.reconcilia;
-                        const cerradoMostrar = objetivoCubierto ? requiredPax : closedPax;
+                        // «Cubierto entre puestos» vale para el objetivo leído: en el grupo no tapa lo que falta en otro (Vifood).
+                        const cerradoMostrar = objetivoCubierto ? closedPax + Math.max(0, reqLectura - closedLectura) : closedPax;
                         const isCovered = requiredPax > 0 && cerradoMostrar >= requiredPax;
                         const extra = lecturaDia?.mostrar && lecturaDia.turnosFuera > 0 ? lecturaDia.turnosFuera : 0;
                         const bandasGrupo = selectedGrupo && grupoUnifiedMode && !isCovered && requiredPax > 0
@@ -17648,7 +17658,7 @@ function PlanificacionDesktop() {
                         const cls = bloqueoMesCerrado
                             ? 'bg-slate-100 text-slate-400'
                             : (requiredPax === 0 ? 'bg-slate-50 text-slate-400' : (extra > 0 ? 'bg-amber-50 text-amber-700 cursor-pointer' : (isCovered ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-600 cursor-pointer')));
-                        const porHoras = !!lecturaDia?.cerradoPorHoras && closedPax < requiredPax;
+                        const porHoras = !!lecturaDia?.cerradoPorHoras && closedLectura < reqLectura;
                         const tituloLectura = [
                             porHoras ? `Franjas ${closedPax}/${requiredPax} · cerrado por horas (otro código, extensión o puesto)` : '',
                             lecturaDia?.textoHoras || '',
