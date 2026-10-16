@@ -197,6 +197,15 @@ export function ServicioPlanillaEditor({ cuadro, semilla, year, month, mesLabel,
                     {todos.filter((x) => x !== puesto).map((x) => <option key={x} value={x}>{x}</option>)}
                   </select>
                 )}
+                <button
+                  type="button"
+                  data-servicio-quitar-puesto={puesto}
+                  title={`Quitar ${puesto} y sus franjas del servicio`}
+                  onClick={() => { if (window.confirm(`¿Quitar ${puesto} del servicio? Se borran sus ${propias.length} franja(s) al aplicar.`)) setFranjas((prev) => prev.filter((x) => x.puesto !== puesto)); }}
+                  className="rounded-lg border border-rose-200 bg-white px-1.5 py-0.5 font-bold text-rose-600 hover:bg-rose-50"
+                >
+                  Quitar
+                </button>
               </span>
             );
           })}
@@ -292,6 +301,26 @@ export function ServicioPlanillaEditor({ cuadro, semilla, year, month, mesLabel,
             className="m-2 inline-flex items-center gap-1 rounded-xl border border-slate-200 px-2 py-1 text-[11px] font-bold text-slate-600 hover:bg-slate-50"
           >
             <Plus size={12} /> Franja
+          </button>
+          <button
+            type="button"
+            data-servicio-agregar-puesto
+            title="Puesto nuevo de 24 h (M, T y N; el D12/N12 se agrega solo al aplicar)"
+            onClick={() => setFranjas((prev) => {
+              const usados = new Set(prev.map((f) => f.puesto));
+              let n = 1;
+              while (usados.has(`Puesto ${n}`)) n += 1;
+              const puesto = `Puesto ${n}`;
+              const t = Date.now();
+              return [...prev,
+                { id: `nueva_${t}_m`, puesto, code: 'M', startTime: '07:00', endTime: '15:00', cantidad: 1, dias: [] },
+                { id: `nueva_${t}_t`, puesto, code: 'T', startTime: '15:00', endTime: '23:00', cantidad: 1, dias: [] },
+                { id: `nueva_${t}_n`, puesto, code: 'N', startTime: '23:00', endTime: '07:00', cantidad: 1, dias: [] },
+              ];
+            })}
+            className="m-2 ml-0 inline-flex items-center gap-1 rounded-xl border border-slate-200 px-2 py-1 text-[11px] font-bold text-slate-600 hover:bg-slate-50"
+          >
+            <Plus size={12} /> Puesto de 24 h
           </button>
         </div>
         <div className="space-y-1 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-[12px] shadow-sm" data-servicio-diff>

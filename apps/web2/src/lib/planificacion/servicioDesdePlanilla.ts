@@ -861,7 +861,8 @@ export function posicionesDesdeFranjas(
       // Un puesto cargado a mano en Servicios conserva su tipo; el que armó la planilla se recalcula.
       coverageType,
       quantity: Math.max(...list.map((f) => f.cantidad), 1),
-      activeDays: dias,
+      // Los 7 días van escritos: Servicios lee la lista vacía como «0 días/semana».
+      activeDays: dias.length ? dias : [...ORDEN_DIAS],
       allowedShiftTypes: shifts,
       ...((previa as { shifts?: unknown } | undefined)?.shifts ? { shifts } : {}),
       status: 'ACTIVE',
@@ -876,8 +877,12 @@ export function horasMesDeFranjas(franjas: FranjaServicioPlanilla[], year: numbe
   for (const f of franjas) {
     const horas = horasEntre(f.startTime, f.endTime);
     const set = new Set(f.dias);
+    const mm = `${year}-${String(month).padStart(2, '0')}-`;
+    const fechas = new Set((f.fechas || []).filter((x) => x.startsWith(mm)));
     let dias = 0;
     for (let d = 1; d <= ultimo; d++) {
+      // Con fechas específicas (PP del 10 al 31) cuentan solo esas; si no, los días de la semana.
+      if (f.fechas?.length) { if (fechas.has(`${mm}${String(d).padStart(2, '0')}`)) dias += 1; continue; }
       if (!f.dias.length || set.has(letraDia(year, month, d))) dias += 1;
     }
     total += horas * f.cantidad * dias;
