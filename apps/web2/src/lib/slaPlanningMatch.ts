@@ -363,8 +363,12 @@ export function buildPlanningPositionStructure(
       // Para puestos 24hs, D12 y N12 siempre deben estar disponibles en el modal aunque no figuren en el SLA
       if (posCoverageType === '24hs') {
         const existingCodes = new Set(normalizedShifts.map((s) => s.code));
-        if (!existingCodes.has('D12')) normalizedShifts.push({ code: 'D12', hours: 12 });
-        if (!existingCodes.has('N12')) normalizedShifts.push({ code: 'N12', hours: 12 });
+        // Horario del par: desde el inicio de la mañana del puesto (M 06–14 → D12 06–18 / N12 18–06).
+        const man = normalizedShifts.find((s) => /^(?:P\d+|PL)?M\d*$/.test(String(s.code || '').toUpperCase()) && /^\d{2}:\d{2}/.test(String((s as { startTime?: string }).startTime || '')));
+        const ini = man ? String((man as { startTime?: string }).startTime).slice(0, 5) : '';
+        const doce = ini ? `${String((Number(ini.slice(0, 2)) + 12) % 24).padStart(2, '0')}${ini.slice(2)}` : '';
+        if (!existingCodes.has('D12')) normalizedShifts.push(ini ? { code: 'D12', hours: 12, startTime: ini, endTime: doce } as any : { code: 'D12', hours: 12 });
+        if (!existingCodes.has('N12')) normalizedShifts.push(ini ? { code: 'N12', hours: 12, startTime: doce, endTime: ini } as any : { code: 'N12', hours: 12 });
       }
       // Días excluidos: SLA-nivel aplica a todos; posición-nivel solo a este puesto
       const slaExcluded: string[] = Array.isArray((srv as any).excludedDates) ? (srv as any).excludedDates : [];
