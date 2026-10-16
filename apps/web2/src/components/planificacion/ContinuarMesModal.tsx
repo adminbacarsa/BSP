@@ -130,6 +130,7 @@ function textoOrigen(r: ResultadoGuardia): string {
   if (p?.via === 'compañero' && p.copiaDe) return `copia de ${apellido(p.copiaDe)}`;
   if (p?.via === 'herencia' && p.copiaDe) return `hereda la fila de ${apellido(p.copiaDe)}`;
   if (p?.via === 'plantilla') return `plantilla del objetivo${p.periodo ? ` (${p.periodo} días)` : ''}${p.grupo ? ` · grupo ${p.grupo}` : ''}`;
+  if (r.origenCiclo === 'semana') return r.ciclo?.etiqueta || 'igual que el mes anterior, por día de la semana';
   return 'su propio ciclo';
 }
 

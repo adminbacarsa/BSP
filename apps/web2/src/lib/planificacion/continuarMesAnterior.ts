@@ -130,7 +130,7 @@ export type RevisarPuesto = {
  * `plantilla` = ciclo del objetivo (c2) en la fase del guardia. `fijo` = el período de todo su historial.
  * `corte` y `bloques` son estimados: el modal los deja destildados.
  */
-export type OrigenCiclo = 'plantilla' | 'fijo' | 'corte' | 'bloques';
+export type OrigenCiclo = 'plantilla' | 'fijo' | 'corte' | 'bloques' | 'semana';
 
 export type PlantillaGuardia = {
   periodo: number | null;
@@ -1654,6 +1654,140 @@ function cortarRachas(input: ContinuarInput, resultados: ResultadoGuardia[]) {
   }
 }
 
+/** Un día del mes copiado: el turno de puesto (con su puesto y horario), el franco o, en último caso, la cobertura. */
+type DiaCopiado = { code: string; pos: string; start?: unknown; end?: unknown; cobertura: boolean };
+
+function diasCopiables(previos: TurnoPrevio[], objectiveId: string): Map<number, DiaCopiado> {
+  const out = new Map<number, DiaCopiado>();
+  for (const o of observacionesDelGuardia(previos, objectiveId)) out.set(o.idx, { code: o.code, pos: o.pos, start: o.start, end: o.end, cobertura: false });
+  for (const t of previos || []) {
+    if (!t || t.isDeleted === true || !/^\d{4}-\d{2}-\d{2}$/.test(String(t.dateStr || ''))) continue;
+    if (t.objectiveId && String(t.objectiveId) !== String(objectiveId)) continue;
+    const idx = diaIndex(String(t.dateStr));
+    if (out.has(idx)) continue;
+    const code = up(t.code);
+    // Franco trabajado: su día era franco.
+    if (t.isFrancoTrabajado === true) { out.set(idx, { code: 'F', pos: '', cobertura: false }); continue; }
+    // Cubría a otro (par 12 h): en el mes nuevo no hay a quién cubrir; si no hay otra semana, su banda de 8 h.
+    if ((up(t.coverageMode) === '12H' || t.coversEmployeeId) && esCodigoPuesto(code)) {
+      out.set(idx, { code: FAMILIA[code] || code, pos: String(t.positionName || '').trim(), cobertura: true });
+    }
+  }
+  return out;
+}
+
+/** Cuántas veces se vio el ciclo del guardia entero en su historia. Menos de 2 = el «ciclo» es el mes copiado. */
+function vueltasDelCiclo(r: ResultadoGuardia, obs: Obs[]): number {
+  if (!r.ciclo || !obs.length) return 0;
+  return (obs[obs.length - 1].idx - obs[0].idx + 1) / Math.max(1, r.ciclo.periodo);
+}
+
+/**
+ * Objetivo sin rotación fija (Casino: cada guardia cambia de puesto y de banda semana a semana, armado a mano):
+ * la mayoría no tiene un ciclo visto al menos dos veces. Ahí el mes nuevo se copia por día de la semana.
+ */
+function objetivoSinRotacion(resultados: ResultadoGuardia[], obsPor: Map<string, Obs[]>): boolean {
+  let considerados = 0;
+  let regulares = 0;
+  for (const r of resultados) {
+    const obs = obsPor.get(r.employeeId) || [];
+    if (obs.length < 8) continue;
+    considerados += 1;
+    if (r.ciclo && r.propuestas.length && vueltasDelCiclo(r, obs) >= 2 && r.ciclo.consistencia >= 0.9) regulares += 1;
+  }
+  return considerados >= 3 && regulares * 2 < considerados;
+}
+
+/**
+ * Copia por día de la semana: cada día del mes nuevo toma el de 4 semanas antes (si ese día no hay dato, 3, 5, 2, 6
+ * o 1 semanas antes). Mismo código (D12/N12 incluidos), mismo puesto y el horario del servicio del mes nuevo.
+ */
+export function copiarPorSemana(input: ContinuarInput, g: ContinuarInput['guardias'][number], mes: string): ResultadoGuardia {
+  const res: ResultadoGuardia = {
+    employeeId: g.id, nombre: g.nombre, ciclo: null, origenCiclo: null, estimado: false, notaEstimado: null,
+    continuaEn: '', motivoSinCiclo: null, propuestas: [],
+    omitidas: { licencia: 0, ocupada: 0, bloqueada: 0, sinDato: 0, excluida: 0 },
+    revisar: [], horasPropuestas: 0, plantilla: null, sugerencias: [],
+  };
+  if (!input.dias.length) return res;
+  const fuente = diasCopiables(g.previos, input.objectiveId);
+  if (!fuente.size) {
+    res.motivoSinCiclo = 'No trabajó en este objetivo en las últimas semanas';
+    return res;
+  }
+  const primero = diaIndex(input.dias[0]);
+  const fases: Array<DiaCiclo | null> = Array.from({ length: 28 }, () => null);
+  const habilitado = input.turnoHabilitado
+    || ((pos: string, code: string, ds: string) => turnoHabilitadoPorEstructura(input.estructura, pos, code, ds));
+  const elegir = (idx: number): DiaCopiado | null => {
+    let cobertura: DiaCopiado | null = null;
+    for (const k of [4, 3, 5, 2, 6, 1]) {
+      const src = idx - 7 * k;
+      if (src >= primero) continue;
+      const d = fuente.get(src);
+      if (d && !d.cobertura) return d;
+      if (d && !cobertura) cobertura = d;
+    }
+    return cobertura;
+  };
+  for (const dateStr of input.dias) {
+    if (input.diaBloqueado?.(dateStr)) { res.omitidas.bloqueada += 1; continue; }
+    const estado = input.estadoCelda(g.id, dateStr);
+    if (estado === 'licencia') { res.omitidas.licencia += 1; continue; }
+    if (estado === 'ocupada') { res.omitidas.ocupada += 1; continue; }
+    const idx = diaIndex(dateStr);
+    const dia = elegir(idx);
+    if (!dia) { res.omitidas.sinDato += 1; continue; }
+    fases[mod(idx, 28)] = { code: dia.code, positionName: dia.pos };
+    if (dia.code === 'F') {
+      res.propuestas.push({
+        employeeId: g.id, dateStr, code: 'F', name: 'Franco', positionName: 'General',
+        startTime: '00:00', endTime: '00:00', hours: 0, isFranco: true,
+      });
+      continue;
+    }
+    const sla = resolverPuesto(input.estructura, dia.pos, dia.code);
+    if (!('motivo' in sla)) {
+      if (!habilitado(sla.pos.positionName, dia.code, dateStr)) { res.omitidas.excluida += 1; continue; }
+      const celda = celdaDeTrabajo(g.id, dateStr, sla.pos, dia.code);
+      if (sla.reasignadoDe) celda.puestoReasignadoDe = sla.reasignadoDe;
+      res.propuestas.push(celda);
+      res.horasPropuestas += celda.hours;
+      continue;
+    }
+    // El servicio del mes nuevo no tiene ese turno en ese puesto: se copia con el horario que tenía.
+    const w = ventanaTrabajo(dia.start, dia.end) || CCT[dia.code];
+    if (!w || !dia.pos) {
+      const k = `${dia.pos}|${dia.code}`;
+      const item = res.revisar.find((x) => `${x.positionName}|${x.code}` === k);
+      if (item) item.dias.push(dateStr);
+      else res.revisar.push({ positionName: dia.pos, code: dia.code, dias: [dateStr], motivo: sla.motivo });
+      continue;
+    }
+    const hours = dia.code === 'RET' ? 0 : w.hours;
+    res.propuestas.push({
+      employeeId: g.id, dateStr, code: dia.code, name: dia.code === 'RET' ? 'Retén' : dia.code, positionName: dia.pos,
+      startTime: w.start, endTime: w.end, hours, isFranco: false,
+    });
+    res.horasPropuestas += hours;
+  }
+  const vistos = fuente.size;
+  res.ciclo = {
+    periodo: 28,
+    fases,
+    consistencia: 1,
+    muestras: vistos,
+    ultimoDia: ymdDeIndex(Math.max(...fuente.keys())),
+    etiqueta: `igual que ${mes}, por día de la semana`,
+  };
+  res.origenCiclo = 'semana';
+  res.continuaEn = `el ${Number(input.dias[0].slice(8, 10))} como el ${Number(ymdDeIndex(primero - 28).slice(8, 10))} de ${mes}`;
+  if (!res.propuestas.length) res.motivoSinCiclo = 'No tiene días en este objetivo para copiar';
+  return res;
+}
+
+const MESES_TXT = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+
 export function proponerContinuacion(input: ContinuarInput): ResultadoGuardia[] {
   if (input.regla === 'anterior') {
     const resultados = input.guardias.map((g) => proponerGuardia(input, g));
@@ -1686,6 +1820,27 @@ export function proponerContinuacion(input: ContinuarInput): ResultadoGuardia[] 
     }
     return res;
   });
+  if (input.dias.length) {
+    const mesCopiado = MESES_TXT[Number(ymdDeIndex(diaIndex(input.dias[0]) - 1).slice(5, 7)) - 1];
+    if (objetivoSinRotacion(resultados, obsPor)) {
+      // Sin rotación fija el mes nuevo es el anterior por día de la semana: puestos, códigos y 12 h como estaban.
+      // No se nivela ni se reacomoda: la cobertura del mes copiado ya cerraba.
+      const copia = input.guardias.map((g) => copiarPorSemana(input, g, mesCopiado));
+      codigosComoElMesCopiado(input, copia);
+      return copia;
+    }
+    // Con rotación, quien no tiene ciclo se copia igual por día de la semana (para revisar) en vez de quedar vacío.
+    resultados.forEach((r, i) => {
+      const obs = obsPor.get(r.employeeId) || [];
+      // Sin francos no es un esquema para copiar (M,T,N seguidos sin descanso).
+      if (r.propuestas.length || obs.length < 4 || !obs.some((o) => o.code === 'F')) return;
+      const copia = copiarPorSemana(input, input.guardias[i], mesCopiado);
+      if (!copia.propuestas.length) return;
+      copia.estimado = true;
+      copia.notaEstimado = `sin ciclo: igual que ${mesCopiado} por día de la semana`;
+      resultados[i] = copia;
+    });
+  }
   cortarRachas(input, resultados);
   anclarPorPuesto(input, resultados);
   if (input.cupoDia) {

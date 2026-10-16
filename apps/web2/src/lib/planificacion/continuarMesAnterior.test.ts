@@ -742,3 +742,34 @@ test('el ciclo en M/T/N cae en la franja del puesto aunque el servicio la llame 
   assert.equal(r.revisar.length, 0);
 });
 
+
+test('objetivo sin rotación fija (Casino): el mes nuevo es el anterior por día de la semana, con puesto y D12/N12', () => {
+  // Un solo mes armado a mano: cada guardia cambia de banda y de puesto sin repetir un ciclo.
+  const azar = (seed: number) => () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
+  const guardias = [0, 1, 2, 3].map((g) => {
+    const rnd = azar(g + 7);
+    const previos: TurnoPrevio[] = diasDelMes(2026, 10).map((d) => {
+      const r = rnd();
+      const code = r < 0.25 ? 'F' : r < 0.45 ? 'M' : r < 0.65 ? 'T' : r < 0.85 ? 'N' : r < 0.93 ? 'D12' : 'N12';
+      return { dateStr: d, code, positionName: code === 'F' ? 'General' : (r < 0.55 ? P1 : 'Puesto 2'), objectiveId: OBJ };
+    });
+    return { id: `g${g}`, nombre: `G${g}`, previos };
+  });
+  const est = [
+    { positionName: P1, qty: 1, shifts: [{ code: 'M', startTime: '07:00', endTime: '15:00', hours: 8 }, { code: 'T', startTime: '15:00', endTime: '23:00', hours: 8 }, { code: 'N', startTime: '23:00', endTime: '07:00', hours: 8 }, { code: 'D12', startTime: '07:00', endTime: '19:00', hours: 12 }, { code: 'N12', startTime: '19:00', endTime: '07:00', hours: 12 }] },
+    { positionName: 'Puesto 2', qty: 1, shifts: [{ code: 'M', startTime: '07:00', endTime: '15:00', hours: 8 }, { code: 'T', startTime: '15:00', endTime: '23:00', hours: 8 }, { code: 'N', startTime: '23:00', endTime: '07:00', hours: 8 }, { code: 'D12', startTime: '07:00', endTime: '19:00', hours: 12 }, { code: 'N12', startTime: '19:00', endTime: '07:00', hours: 12 }] },
+  ];
+  const res = proponerContinuacion(input(guardias, diasDelMes(2026, 11), { estructura: est }));
+  for (const r of res) {
+    const g = guardias.find((x) => x.id === r.employeeId)!;
+    assert.equal(r.origenCiclo, 'semana');
+    for (const c of r.propuestas) {
+      // 4 semanas antes (o 5 para el 29 y 30 de noviembre): mismo día de la semana.
+      const fuenteIdx = diaIndex(c.dateStr) - 28 >= diaIndex('2026-11-01') ? diaIndex(c.dateStr) - 35 : diaIndex(c.dateStr) - 28;
+      const t = g.previos.find((p) => p.dateStr === ymdDeIndex(fuenteIdx))!;
+      assert.equal(c.isFranco ? 'F' : c.code, t.code, c.dateStr);
+      if (!c.isFranco) assert.equal(c.positionName, t.positionName, c.dateStr);
+    }
+    assert.equal(r.propuestas.length, 30);
+  }
+});
