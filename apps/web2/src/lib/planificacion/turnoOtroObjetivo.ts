@@ -9,7 +9,26 @@ export type TurnoGuardadoMin = {
   objectiveId?: string | null;
   isSecondBlock?: boolean;
   isDeleted?: boolean;
+  code?: string;
+  isFrancoTrabajado?: boolean;
 };
+
+const FRANCOS = new Set(['F', 'FF', 'FP']);
+
+function codigoDe(d: { code?: string } | null | undefined): string {
+  return String(d?.code || '').trim().toUpperCase();
+}
+
+/**
+ * Franco o RET de otro objetivo (el que trabaja de lunes a viernes en otro lado y está de franco el finde):
+ * desde este cronograma se puede pasar F ↔ RET (no es franco trabajado) y al RET asignarle un turno de acá.
+ * Sus turnos de trabajo siguen sin tocarse.
+ */
+export function esAjenoFlexible(d: { code?: string; isFrancoTrabajado?: boolean } | null | undefined): boolean {
+  if (!d || d.isFrancoTrabajado) return false;
+  const c = codigoDe(d);
+  return FRANCOS.has(c) || c === 'RET';
+}
 
 export function idsObjetivosDelCrono(
   objetivoActual: string | null | undefined,
@@ -38,6 +57,7 @@ export function celdaOtroObjetivoBloqueada(
   permitidos: readonly string[],
 ): boolean {
   if (!shift || shift.isDeleted || shift.isSecondBlock) return false;
+  if (esAjenoFlexible(shift as { code?: string; isFrancoTrabajado?: boolean })) return false;
   return esTurnoAjenoAlCrono(shift.objectiveId, permitidos);
 }
 
@@ -49,6 +69,12 @@ export function saltearEscrituraTurnoAjeno(
   return celdaOtroObjetivoBloqueada(existente, permitidos);
 }
 
+export function textoAvisoFrancoAjeno(nombre: string, objetivo: string): string {
+  const n = (nombre || 'El guardia').trim() || 'El guardia';
+  const o = (objetivo || 'otro objetivo').trim() || 'otro objetivo';
+  return `${n} está de franco en ${o}: pasalo a RET y después asignale el turno`;
+}
+
 export function textoAvisoTurnoAjeno(nombre: string, objetivo: string): string {
   const n = (nombre || 'El guardia').trim() || 'El guardia';
   const o = (objetivo || 'otro objetivo').trim() || 'otro objetivo';
@@ -57,9 +83,15 @@ export function textoAvisoTurnoAjeno(nombre: string, objetivo: string): string {
 
 export type DecisionGuardadoAjeno = {
   escribir: boolean;
-  /** Docs de ESTE cronograma que se pueden borrar antes de reescribir. Los ajenos no entran. */
+  /** Docs que se borran antes de reescribir: los de este cronograma y, si corresponde, el F/RET ajeno. */
   borrarIds: string[];
   rechazado: boolean;
+  /** F ↔ RET de otro objetivo: el turno se reescribe en ese objetivo, no en este. */
+  objetivoAjeno?: string;
+  /** El doc ajeno que se reemplaza (para conservar su borrador/publicado). */
+  ajeno?: TurnoGuardadoMin;
+  /** Rechazo por turno de trabajo sobre un franco ajeno: primero RET. */
+  motivo?: 'franco';
 };
 
 /**
@@ -67,7 +99,7 @@ export type DecisionGuardadoAjeno = {
  * Un segundo bloque válido crea un doc nuevo y deja el ajeno. Si no, se rechaza.
  */
 export function decisionGuardadoTurnoAjeno(input: {
-  cambio: { isDeleted?: boolean; isSecondBlock?: boolean } | null | undefined;
+  cambio: { isDeleted?: boolean; isSecondBlock?: boolean; code?: string; isFrancoTrabajado?: boolean } | null | undefined;
   docs: readonly TurnoGuardadoMin[];
   permitidos: readonly string[];
 }): DecisionGuardadoAjeno {
@@ -79,6 +111,20 @@ export function decisionGuardadoTurnoAjeno(input: {
 
   if (!ajenosPrimarios.length) {
     return { escribir: true, borrarIds: ids(propios), rechazado: false };
+  }
+
+  // F/RET de otro objetivo: F ↔ RET queda en su objetivo; un turno de trabajo reemplaza al RET (no al F).
+  if (ajenosPrimarios.every((d) => esAjenoFlexible(d)) && input.cambio?.isDeleted !== true && input.cambio?.isSecondBlock !== true) {
+    const ajeno = ajenosPrimarios[0];
+    const nuevo = codigoDe(input.cambio);
+    const borrar = ids([...ajenosPrimarios, ...propios]);
+    if ((FRANCOS.has(nuevo) || nuevo === 'RET') && !input.cambio?.isFrancoTrabajado) {
+      return { escribir: true, borrarIds: borrar, rechazado: false, objetivoAjeno: String(ajeno.objectiveId || ''), ajeno };
+    }
+    if (ajenosPrimarios.some((d) => FRANCOS.has(codigoDe(d)))) {
+      return { escribir: false, borrarIds: [], rechazado: true, motivo: 'franco' };
+    }
+    return { escribir: true, borrarIds: borrar, rechazado: false, ajeno };
   }
 
   const segundo = input.cambio?.isSecondBlock === true && input.cambio?.isDeleted !== true;
@@ -102,10 +148,10 @@ export function sanearPendientesTurnoAjeno(input: {
   next: Record<string, any>;
   docsPorClave: Record<string, readonly TurnoGuardadoMin[]>;
   permitidos: readonly string[];
-}): { changes: Record<string, any>; rechazadas: { key: string; objectiveId: string }[] } {
+}): { changes: Record<string, any>; rechazadas: { key: string; objectiveId: string; motivo?: 'franco' }[] } {
   const prev = input.prev || {};
   const next = input.next || {};
-  const rechazadas: { key: string; objectiveId: string }[] = [];
+  const rechazadas: { key: string; objectiveId: string; motivo?: 'franco' }[] = [];
   let changes: Record<string, any> = next;
   for (const key of Object.keys(next)) {
     if (prev[key] === next[key]) continue;
@@ -117,6 +163,8 @@ export function sanearPendientesTurnoAjeno(input: {
       cambio: {
         isDeleted: cambio.isDeleted === true,
         isSecondBlock: cambio.isSecondBlock === true || key.endsWith('_B2'),
+        code: cambio.code,
+        isFrancoTrabajado: cambio.isFrancoTrabajado === true,
       },
       docs,
       permitidos: input.permitidos,
@@ -126,7 +174,7 @@ export function sanearPendientesTurnoAjeno(input: {
       if (prev[key] !== undefined) changes[key] = prev[key];
       else delete changes[key];
       const ajeno = docs.find((d) => esTurnoAjenoAlCrono(d.objectiveId, input.permitidos) && !d.isSecondBlock);
-      rechazadas.push({ key, objectiveId: String(ajeno?.objectiveId || '') });
+      rechazadas.push({ key, objectiveId: String(ajeno?.objectiveId || ''), ...(decision.motivo ? { motivo: decision.motivo } : {}) });
     }
   }
   return { changes, rechazadas };

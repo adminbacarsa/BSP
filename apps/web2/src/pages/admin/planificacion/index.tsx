@@ -220,7 +220,9 @@ import {
     idsObjetivosDelCrono,
     saltearEscrituraTurnoAjeno,
     sanearPendientesTurnoAjeno,
+    textoAvisoFrancoAjeno,
     textoAvisoTurnoAjeno,
+    esAjenoFlexible,
 } from '@/lib/planificacion/turnoOtroObjetivo';
 import {
     decidirAsignacionOtroObjetivo,
@@ -1502,18 +1504,19 @@ function calcularCeldaGrilla(e: EntradaCeldaGrilla, emp: any, isGuest: boolean, 
     const hasRfzOverlay = !!(rfzOnCell && (s || (p && !p.isDeleted)) && !absence);
     const _rawOtherObj = isShiftAtOtherObjective(s, p, selectedObjective);
     const _activeShiftObjId = ((p && !p.isDeleted) ? p : s)?.objectiveId;
-    const _cellIsRetAtOtherObj = _rawOtherObj && shiftPlanningCodeUpper(activeShift) === 'RET';
+    // F y RET de otro objetivo se editan desde acá (F ↔ RET, y al RET un turno de este objetivo).
+    const _cellIsRetAtOtherObj = _rawOtherObj && esAjenoFlexible(activeShift as any);
     const _ajenoAlGrupo = !(selectedGrupo && grupoUnifiedMode && _activeShiftObjId && selectedGrupo.objectiveIds.includes(_activeShiftObjId));
     const isOtherObjectiveShift = !!(_rawOtherObj
         && !_cellIsRetAtOtherObj
         && _ajenoAlGrupo);
-    const soloLecturaAjena = !!(_rawOtherObj && _ajenoAlGrupo);
+    const soloLecturaAjena = !!(_rawOtherObj && _ajenoAlGrupo && !_cellIsRetAtOtherObj);
     if (absence) { const absCode = absence.inferredCode || inferAbsenceCode(absence); const displayCode = absenceGridDisplayCode(absence); content = displayCode; style = SHIFT_STYLES[displayCode] || SHIFT_STYLES[absCode] || 'bg-rose-50 text-rose-700 font-bold border-rose-200'; }
     if (isOtherObjectiveShift && content != null) {
         style = OTHER_OBJECTIVE_CELL_STYLE;
     }
     if (_cellIsRetAtOtherObj && content != null) {
-        style = `${SHIFT_STYLES['RET']} ring-1 ring-amber-400/80`;
+        style = `${SHIFT_STYLES[shiftPlanningCodeUpper(activeShift)] || SHIFT_STYLES['RET']} ring-1 ring-amber-400/80`;
     }
     const evOverlay = absence ? null : eventoCellOverlay(e.cellTurnosMap[key], (p && !p.isDeleted) ? p : s);
     if (evOverlay?.mode === 'EV') {
@@ -2262,7 +2265,7 @@ function PlanificacionDesktop() {
                     const found = client.objetivos?.find((o: any) => (o.id || o.name) === r.objectiveId);
                     if (found?.name) { objetivo = found.name; break; }
                 }
-                return textoAvisoTurnoAjeno(nombre, objetivo);
+                return r.motivo === 'franco' ? textoAvisoFrancoAjeno(nombre, objetivo) : textoAvisoTurnoAjeno(nombre, objetivo);
             }))];
             queueMicrotask(() => toast.message(textos.length === 1 ? textos[0] : `${textos[0]} · y ${textos.length - 1} más`));
         }
@@ -8432,13 +8435,17 @@ function PlanificacionDesktop() {
                         cambio: {
                             isDeleted: change?.isDeleted === true,
                             isSecondBlock: change?.isSecondBlock === true || key.endsWith('_B2'),
+                            code: change?.code,
+                            isFrancoTrabajado: change?.isFrancoTrabajado === true,
                         },
                         docs: docsGuard,
                         permitidos: permitidosGuard,
                     });
                     if (!decisionAjeno.escribir) {
                         const ajeno = docsGuard.find((d: any) => esTurnoAjenoAlCrono(d?.objectiveId, permitidosGuard) && !d?.isSecondBlock);
-                        avisosTurnoAjeno.push(textoAvisoTurnoAjeno(empName, getObjectiveName(ajeno?.objectiveId)));
+                        avisosTurnoAjeno.push(decisionAjeno.motivo === 'franco'
+                            ? textoAvisoFrancoAjeno(empName, getObjectiveName(ajeno?.objectiveId))
+                            : textoAvisoTurnoAjeno(empName, getObjectiveName(ajeno?.objectiveId)));
                         continue;
                     }
                     if (existing && esTurnoAjenoAlCrono(existing.objectiveId, permitidosGuard)) {
@@ -8579,8 +8586,11 @@ function PlanificacionDesktop() {
                         const turnoPayload: Record<string, unknown> = {
                             employeeId: empId,
                             employeeName: empName,
-                            clientId: change.clientId || String(clienteDeObjetivo(String(change.objectiveId || resolveObjectiveForEmp(empId) || ''))?.id || '') || selectedClient,
-                            objectiveId: change.objectiveId || resolveObjectiveForEmp(empId),
+                            clientId: decisionAjeno.objetivoAjeno
+                                ? String(clienteDeObjetivo(decisionAjeno.objetivoAjeno)?.id || (decisionAjeno.ajeno as any)?.clientId || '')
+                                : change.clientId || String(clienteDeObjetivo(String(change.objectiveId || resolveObjectiveForEmp(empId) || ''))?.id || '') || selectedClient,
+                            // F ↔ RET de otro objetivo queda en su objetivo; el turno sobre su RET es de este.
+                            objectiveId: decisionAjeno.objetivoAjeno || change.objectiveId || resolveObjectiveForEmp(empId),
                             code: change.isFrancoCompensatorio ? 'FF' : change.code,
                             type: change.name||change.code,
                             startTime: Timestamp.fromDate(start),
@@ -8611,7 +8621,9 @@ function PlanificacionDesktop() {
                             coveredBy: change.coveredBy || null,
                             ...(change.menuRapidoTexto ? { menuRapidoTexto: change.menuRapidoTexto, menuRapidoVia: change.menuRapidoVia || 'MENU_RAPIDO' } : {}),
                             ...(change.menuRapidoRol ? { menuRapidoRol: change.menuRapidoRol, ...(change.menuRapidoCubreA ? { menuRapidoCubreA: change.menuRapidoCubreA } : {}) } : {}),
-                            draft: change.menuRapidoVia === 'OTRO_OBJETIVO' ? change.draft !== false : (correctionMode ? false : !isPublished),
+                            draft: decisionAjeno.objetivoAjeno
+                                ? (decisionAjeno.ajeno as any)?.draft === true
+                                : change.menuRapidoVia === 'OTRO_OBJETIVO' ? change.draft !== false : (correctionMode ? false : !isPublished),
                             actorName: realActorName,
                             ...deploymentFieldsForFirestore(change),
                         };
