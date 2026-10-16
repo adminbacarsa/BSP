@@ -559,6 +559,7 @@ import { AltaDesdePadronModal, type PedidoAlta } from '@/components/planificacio
 import { AltaMasivaBoton } from '@/components/planificacion/AltaMasivaBoton';
 import { decidirActivarServicio, decidirActualizarServicio } from '@/lib/planificacion/activarServicioMes';
 import { actualizarServicioDesdeBase, ejecutarAgregarMeses, proponerAgregarMeses, vistaPreviaAgregarMeses, type SlaRow } from '@/lib/servicios/appendMonthsClient';
+import { excluirDiaServicio, type AlcanceDiaNoTrabaja } from '@/lib/servicios/aplicarServicioPlanilla';
 import type { AppendMonthsPlan } from '@/lib/servicios/slaMonthSplit';
 import type { AltaHecha } from '@/lib/rrhh/altaLegajoClient';
 import { ImportarExcelModal, type AplicarImportPayload, type ImportarExcelContexto, type ServicioDestino } from '@/components/planificacion/ImportarExcelModal';
@@ -2151,6 +2152,8 @@ function PlanificacionDesktop() {
         /** RFZE ya cargado: se cambia su horario en vez de crear otro. */
         editarSolicitudId?: string;
     } | null>(null);
+    /** Clic derecho en el día: «No se trabaja» (todo, un puesto o una franja); sus turnos pasan a RET. */
+    const [diaNoTrabaja, setDiaNoTrabaja] = useState<{ ds: string; x: number; y: number; alcance: string; motivo: string; guardando: boolean } | null>(null);
     /** «EV» en la grilla: elegir un evento de ese día (de cualquier objetivo de la empresa) y asignar a los guardias. */
     const [evEditor, setEvEditor] = useState<{ celdas: Array<{ empId: string; empName: string; ds: string }>; ds: string; elegida: number; guardando: boolean } | null>(null);
     /** `+` sobre un turno de un puesto que no es de 24 h: horas agregadas (TURA) antes o después. */
@@ -15847,6 +15850,48 @@ function PlanificacionDesktop() {
             setTuraEditor((prev) => (prev ? { ...prev, guardando: false } : prev));
         }
     };
+    const aplicarDiaNoTrabaja = async () => {
+        const e = diaNoTrabaja;
+        if (!e || e.guardando || !empresaId || !selectedObjective) return;
+        const servicioId = String((activePlanningSlaRow as { id?: string } | null)?.id || '');
+        if (!servicioId) { toast.message('Sin servicio en este mes: no hay nada que excluir.'); return; }
+        if (!e.motivo.trim()) { toast.message('Poné el motivo (feriado, fecha especial…).'); (document.querySelector('[data-dia-motivo]') as HTMLInputElement | null)?.focus(); return; }
+        const [tipo, resto = ''] = e.alcance.split(':');
+        const [puesto, code] = resto.split('|');
+        const alcance: AlcanceDiaNoTrabaja = tipo === 'p' ? { tipo: 'puesto', puesto } : tipo === 'f' ? { tipo: 'franja', puesto, code } : { tipo: 'todo' };
+        setDiaNoTrabaja({ ...e, guardando: true });
+        try {
+            const texto = await excluirDiaServicio({ servicioId, empresaId, migracionCompleta, objectiveName: getObjectiveName(selectedObjective), ds: e.ds, alcance, motivo: e.motivo });
+            // Los que tenían turno ese día quedan en RET: disponibles para asignarlos en otro objetivo.
+            const col = diasRapido.indexOf(e.ds);
+            const hhmm = (v: any): string => {
+                if (typeof v === 'string') return (v.match(/(\d{2}):(\d{2})/) || [''])[0];
+                const d = v?.toDate ? v.toDate() : v instanceof Date ? v : null;
+                return d ? `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` : '';
+            };
+            const items: ItemRapido[] = [];
+            if (col >= 0) displayedEmployees.forEach((emp: any, r: number) => {
+                const key = `${emp.id}_${e.ds}`;
+                const cx = ctxDeCelda(key);
+                const actual: any = cx?.p && !cx.p.isDeleted ? cx.p : cx?.s;
+                if (!actual || absencesMap[key]) return;
+                const cod = String(actual.code || '').toUpperCase();
+                if (!cod || cod === 'RET' || esCeldaFranco(actual) || esCeldaLicencia({ code: cod, tieneAusencia: false })) return;
+                if (actual.objectiveId && String(actual.objectiveId) !== String(selectedObjective)) return;
+                if (alcance.tipo !== 'todo' && String(actual.positionName || '') !== alcance.puesto) return;
+                if (alcance.tipo === 'franja' && cod !== String(alcance.code).toUpperCase()) return;
+                items.push({ r, c: col, code: 'RET', fuente: { code: 'RET', name: 'Retén', startTime: hhmm(actual.startTime), endTime: hhmm(actual.endTime), hours: 0, positionName: String(actual.positionName || '') } });
+            });
+            if (items.length) escribirRapido(items);
+            toast.success(`No se trabaja el ${e.ds.slice(8, 10)}/${e.ds.slice(5, 7)} (${texto})${items.length ? ` · ${items.length} turno(s) pasan a RET: guardá el cronograma` : ''}`);
+            setDiaNoTrabaja(null);
+            setDataRefreshNonce((n) => n + 1);
+        } catch (err: any) {
+            toast.error(err?.message || 'No se pudo excluir el día');
+            setDiaNoTrabaja((prev) => (prev ? { ...prev, guardando: false } : prev));
+        }
+    };
+
     const confirmarRfz = async () => {
         const e = rfzEditor;
         if (!e || e.guardando || !empresaId || !selectedObjective) return;
@@ -16992,7 +17037,13 @@ function PlanificacionDesktop() {
                         return (
                             <th
                                 key={d.toISOString()}
-                                onMouseDown={() => !isSnapshotView && handleDayHeaderMouseDown(dayIndex)}
+                                onMouseDown={(ev) => { if (ev.button === 0 && !isSnapshotView) handleDayHeaderMouseDown(dayIndex); }}
+                                onContextMenu={(ev) => {
+                                    if (isSnapshotView || !selectedObjective) return;
+                                    ev.preventDefault();
+                                    if (msgBloqueoEdicion) { toast.message(msgBloqueoEdicion); return; }
+                                    setDiaNoTrabaja({ ds: dateStr, x: ev.clientX, y: ev.clientY, alcance: 'todo', motivo: '', guardando: false });
+                                }}
                                 onMouseEnter={() => !isSnapshotView && handleDayHeaderMouseEnter(dayIndex)}
                                 onMouseUp={handleDayHeaderMouseUpOrLeave}
                                 onMouseLeave={handleDayHeaderMouseUpOrLeave}
@@ -21690,6 +21741,41 @@ function PlanificacionDesktop() {
                             <div className="flex gap-2">
                                 <button type="button" onClick={() => setEvEditor(null)} className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-bold text-slate-600">Cancelar</button>
                                 <button type="button" disabled={evEditor.guardando} onClick={() => { void confirmarEv(); }} className="rounded-lg bg-amber-500 px-2.5 py-1 text-[11px] font-black text-amber-950 disabled:opacity-40" data-ev-confirmar>{evEditor.guardando ? 'Asignando…' : 'Asignar al evento'}</button>
+                            </div>
+                        </div>
+                    </div>,
+                    document.body,
+                )}
+                {diaNoTrabaja && typeof document !== 'undefined' && createPortal(
+                    <div className="fixed inset-0 z-[12000]" onMouseDown={() => !diaNoTrabaja.guardando && setDiaNoTrabaja(null)}>
+                        <div
+                            className="absolute w-72 rounded-2xl border border-rose-200 bg-white p-3 text-[12px] shadow-xl"
+                            style={{ left: Math.min(diaNoTrabaja.x, (typeof window !== 'undefined' ? window.innerWidth : 1200) - 300), top: Math.min(diaNoTrabaja.y, (typeof window !== 'undefined' ? window.innerHeight : 800) - 320) }}
+                            onMouseDown={(ev) => ev.stopPropagation()}
+                            onKeyDown={(ev) => { if (ev.key === 'Escape') setDiaNoTrabaja(null); if (ev.key === 'Enter') { ev.preventDefault(); void aplicarDiaNoTrabaja(); } }}
+                            data-dia-no-trabaja={diaNoTrabaja.ds}
+                        >
+                            <p className="font-black text-slate-800">No se trabaja el {diaNoTrabaja.ds.slice(8, 10)}/{diaNoTrabaja.ds.slice(5, 7)}</p>
+                            <p className="text-[11px] text-slate-500">Queda en el servicio: no pide cobertura ni se factura. Los turnos de ese día pasan a RET.</p>
+                            <div className="mt-2 max-h-40 space-y-0.5 overflow-y-auto" data-dia-alcances>
+                                {[{ v: 'todo', t: 'Todo el objetivo' },
+                                    ...((positionStructure || []) as any[]).filter((p: any) => p.positionName && p.positionName !== 'General').flatMap((p: any) => [
+                                        { v: `p:${p.positionName}`, t: `Puesto ${p.positionName}` },
+                                        ...((p.shifts || []) as any[]).filter((st: any) => st.code && !['D12', 'N12'].includes(String(st.code).toUpperCase()))
+                                            .map((st: any) => ({ v: `f:${p.positionName}|${st.code}`, t: `  ${p.positionName} · ${st.code}${st.startTime ? ` ${String(st.startTime).slice(0, 5)}–${String(st.endTime || '').slice(0, 5)}` : ''}` })),
+                                    ])].map((o) => (
+                                    <label key={o.v} className={`flex cursor-pointer items-center gap-2 rounded-lg px-1.5 py-0.5 ${diaNoTrabaja.alcance === o.v ? 'bg-rose-50 font-bold text-rose-800' : 'text-slate-700 hover:bg-slate-50'}`}>
+                                        <input type="radio" name="dia-alcance" checked={diaNoTrabaja.alcance === o.v} onChange={() => setDiaNoTrabaja((prev) => (prev ? { ...prev, alcance: o.v } : prev))} />
+                                        <span className={o.v.startsWith('f:') ? 'pl-3 text-[11px]' : ''}>{o.t.trim()}</span>
+                                    </label>
+                                ))}
+                            </div>
+                            <label className="mt-2 block text-[10px] font-bold text-slate-500">Motivo *
+                                <input data-dia-motivo autoFocus value={diaNoTrabaja.motivo} onChange={(ev) => setDiaNoTrabaja((prev) => (prev ? { ...prev, motivo: ev.target.value } : prev))} placeholder="Feriado, fecha especial, evento…" className="block w-full rounded-lg border border-slate-200 px-2 py-1 text-[11px]" />
+                            </label>
+                            <div className="mt-2 flex justify-end gap-2">
+                                <button type="button" onClick={() => setDiaNoTrabaja(null)} className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-bold text-slate-600">Cancelar</button>
+                                <button type="button" disabled={diaNoTrabaja.guardando} onClick={() => { void aplicarDiaNoTrabaja(); }} data-dia-confirmar className="rounded-lg bg-rose-600 px-2.5 py-1 text-[11px] font-black text-white disabled:opacity-40">{diaNoTrabaja.guardando ? 'Guardando…' : 'No se trabaja'}</button>
                             </div>
                         </div>
                     </div>,

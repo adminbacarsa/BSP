@@ -233,3 +233,61 @@ export async function agregarRfzfServicio(opts: {
   });
   return { code: res.code, puesto: res.puesto, texto: res.texto };
 }
+
+export type AlcanceDiaNoTrabaja =
+  | { tipo: 'todo' }
+  | { tipo: 'puesto'; puesto: string }
+  | { tipo: 'franja'; puesto: string; code: string };
+
+/**
+ * «No se trabaja este día» desde Planificación (feriado, fecha especial: Banco Cosquín el 7/10).
+ * Mismo dato que «Días excluidos» de Servicios: todo el servicio, un puesto o una franja. Ese día no pide
+ * cobertura, no cuenta como hora vendida ni se factura. El motivo queda en el servicio y en audit_logs.
+ */
+export async function excluirDiaServicio(opts: {
+  servicioId: string;
+  empresaId: string;
+  migracionCompleta: boolean;
+  objectiveName: string;
+  ds: string;
+  alcance: AlcanceDiaNoTrabaja;
+  motivo: string;
+}): Promise<string> {
+  const snap = await getDoc(doc(db, 'servicios_sla', opts.servicioId));
+  if (!snap.exists()) throw new Error('No encontré el servicio');
+  const actual = snap.data() as ServiceSLA & { closed?: boolean; exclusionesMotivo?: Record<string, string> };
+  if (actual.closed) throw new Error('Contrato cerrado: no se puede modificar');
+  const sumar = (lista: unknown, v: string) => [...new Set([...(Array.isArray(lista) ? (lista as string[]) : []), v])].sort();
+  const a = opts.alcance;
+  const patch: Record<string, unknown> = {};
+  let texto = '';
+  if (a.tipo === 'todo') {
+    patch.excludedDates = sumar((actual as { excludedDates?: string[] }).excludedDates, opts.ds);
+    texto = 'todo el servicio';
+  } else {
+    const positions = ((actual.positions || []) as unknown as Array<Record<string, any>>).map((p) => {
+      if (String(p.name || p.positionName || '').trim().toUpperCase() !== a.puesto.trim().toUpperCase()) return p;
+      if (a.tipo === 'puesto') return { ...p, excludedDates: sumar(p.excludedDates, opts.ds) };
+      const porFecha = { ...(p.excludedShiftDates || {}) } as Record<string, string[]>;
+      porFecha[opts.ds] = sumar(porFecha[opts.ds], a.code);
+      return { ...p, excludedShiftDates: porFecha };
+    });
+    patch.positions = JSON.parse(JSON.stringify(positions));
+    texto = a.tipo === 'puesto' ? a.puesto : `${a.puesto} · ${a.code}`;
+  }
+  const clave = a.tipo === 'todo' ? `${opts.ds}|*` : a.tipo === 'puesto' ? `${opts.ds}|${a.puesto}` : `${opts.ds}|${a.puesto}|${a.code}`;
+  patch.exclusionesMotivo = { ...(actual.exclusionesMotivo || {}), [clave]: opts.motivo.trim() };
+  await slaService.update(opts.servicioId, patch as Partial<ServiceSLA>, { empresaId: opts.empresaId, migracionCompleta: opts.migracionCompleta });
+  const user = getAuth().currentUser;
+  await addDoc(collection(db, 'audit_logs'), {
+    timestamp: serverTimestamp(),
+    actorUid: user?.uid || 'SYSTEM',
+    actorName: user?.displayName || user?.email || 'Sistema',
+    action: 'UPDATE_CONTRACT',
+    module: 'SERVICIOS_SLA',
+    details: `No se trabaja el ${opts.ds.slice(8, 10)}/${opts.ds.slice(5, 7)} en ${opts.objectiveName} (${texto}): ${opts.motivo.trim()}`,
+    ...(opts.empresaId ? { empresaId: opts.empresaId } : {}),
+    metadata: { platform: 'web_admin_crono', via: 'PLANIFICACION_DIA_NO_TRABAJA', servicioId: opts.servicioId, fecha: opts.ds },
+  });
+  return texto;
+}
