@@ -47,6 +47,8 @@ export async function aplicarServicioPlanilla(opts: {
   franjas: FranjaServicioPlanilla[];
   equivalencias: EquivalenciaCodigo[];
   otros: SlaRango[];
+  /** «Exige cobertura» del servicio; sin valor no se toca (en el alta queda sí). */
+  exigeCobertura?: boolean;
 }): Promise<{ id: string }> {
   if (!opts.clientId || !opts.objectiveId) throw new Error('Falta el cliente o el objetivo');
   if (!opts.franjas.length) throw new Error('Agregá al menos una franja');
@@ -76,6 +78,7 @@ export async function aplicarServicioPlanilla(opts: {
       status: 'active' as const,
       empresaId: opts.empresaId,
       slaSeriesId: newSlaSeriesId(),
+      exigeCobertura: opts.exigeCobertura !== false,
     };
     const ref = await slaService.add(data as ServiceSLA, opts.empresaId);
     id = ref.id;
@@ -90,7 +93,8 @@ export async function aplicarServicioPlanilla(opts: {
     await slaService.update(opts.servicioId, {
       positions: JSON.parse(JSON.stringify(positions)),
       totalMonthlyHours: horas,
-    }, { empresaId: opts.empresaId, migracionCompleta: opts.migracionCompleta });
+      ...(typeof opts.exigeCobertura === 'boolean' ? { exigeCobertura: opts.exigeCobertura } : {}),
+    } as Partial<ServiceSLA>, { empresaId: opts.empresaId, migracionCompleta: opts.migracionCompleta });
     id = opts.servicioId;
   }
 

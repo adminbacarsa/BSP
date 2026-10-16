@@ -12516,6 +12516,7 @@ function PlanificacionDesktop() {
                     clientId: obj?.clienteId || String(d.clientId || ''),
                     desde: toYyyyMmDd(d.startDate),
                     hasta: toYyyyMmDd(d.endDate),
+                    exigeCobertura: (d as { exigeCobertura?: boolean }).exigeCobertura !== false,
                     puestos: structure.map((p) => ({
                         nombre: String(p.positionName || 'Puesto'),
                         franjas: (p.shifts || []).flatMap((st) => {
@@ -12627,6 +12628,7 @@ function PlanificacionDesktop() {
                     endDate: s.hasta,
                     desde: s.desde,
                     hasta: s.hasta,
+                    exigeCobertura: s.exigeCobertura,
                     turnos: s.turnos.filter((t) => t.startTime && t.endTime).map((t) => ({
                         puesto: t.positionName,
                         code: t.code,

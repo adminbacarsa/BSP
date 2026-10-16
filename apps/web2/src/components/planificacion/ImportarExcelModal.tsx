@@ -41,6 +41,7 @@ export type ServicioDestino = {
   hasta: string;
   puestos: Array<{ nombre: string; franjas: string }>;
   turnos: TurnoServicio[];
+  exigeCobertura?: boolean;
 };
 
 export type ImportarExcelContexto = {
@@ -572,8 +573,10 @@ export function ImportarExcelModal({ ctx, onCargar, onAplicar, onCancelar, puede
                   cantidad: t.quantity || 1,
                   dias: t.dias || [],
                 }))}
-                onGuardar={async (accion, franjas, equivalencias) => {
+                exigeCoberturaInicial={serviciosEstado.find((s) => s.id === grupo.servicioId)?.exigeCobertura !== false}
+                onGuardar={async (accion, franjas, equivalencias, opciones) => {
                   const res = await aplicarServicioPlanilla({
+                    exigeCobertura: opciones.exigeCobertura,
                     accion,
                     servicioId: grupo.servicioId,
                     clientId: grupo.clienteId,

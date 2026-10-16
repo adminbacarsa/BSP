@@ -20,6 +20,7 @@ export type ServicioMesPlanilla = SlaRango & {
   desde: string;
   hasta: string;
   turnos: FranjaVigente[];
+  exigeCobertura?: boolean;
 };
 
 type Props = {
@@ -213,7 +214,8 @@ export function ServicioPlanillaModal(props: Props) {
               puedeCrear={props.puedeCrear}
               puedeActualizar={props.puedeActualizar}
               hayOtroServicio={delMes.length > 0 && !servicioId}
-              onGuardar={async (accion, franjas, equivalencias) => {
+              exigeCoberturaInicial={delMes.find((s) => s.id === servicioId)?.exigeCobertura !== false}
+              onGuardar={async (accion, franjas, equivalencias, opciones) => {
                 await aplicarServicioPlanilla({
                   accion,
                   servicioId,
@@ -228,6 +230,7 @@ export function ServicioPlanillaModal(props: Props) {
                   franjas,
                   equivalencias,
                   otros: props.servicios,
+                  exigeCobertura: opciones.exigeCobertura,
                 });
                 props.onGuardado();
               }}

@@ -40,10 +40,13 @@ type Props = {
   hayOtroServicio?: boolean;
   empresaId?: string;
   objectiveId?: string;
-  onGuardar: (accion: 'crear' | 'actualizar', franjas: FranjaServicioPlanilla[], equivalencias: EquivalenciaCodigo[]) => Promise<void>;
+  /** Valor actual de «Exige cobertura» del servicio (si falta, sí). */
+  exigeCoberturaInicial?: boolean;
+  onGuardar: (accion: 'crear' | 'actualizar', franjas: FranjaServicioPlanilla[], equivalencias: EquivalenciaCodigo[], opciones: { exigeCobertura: boolean }) => Promise<void>;
 };
 
-export function ServicioPlanillaEditor({ cuadro, semilla, year, month, mesLabel, vigente, servicioId, puedeCrear, puedeActualizar, hayOtroServicio, empresaId, objectiveId, onGuardar }: Props) {
+export function ServicioPlanillaEditor({ cuadro, semilla, year, month, mesLabel, vigente, servicioId, puedeCrear, puedeActualizar, hayOtroServicio, empresaId, objectiveId, exigeCoberturaInicial, onGuardar }: Props) {
+  const [exigeCobertura, setExigeCobertura] = useState(exigeCoberturaInicial !== false);
   const propuesta = useMemo(() => {
     const base = semilla || (cuadro ? proponerServicioDesdePlanilla(cuadro, year, month) : { franjas: [], equivalencias: [], lectura: '' });
     const alineadas = alinearPuestos(base.franjas, vigente);
@@ -115,7 +118,7 @@ export function ServicioPlanillaEditor({ cuadro, semilla, year, month, mesLabel,
     setGuardando(true);
     setError('');
     try {
-      await onGuardar(confirmando, franjas, equivalencias);
+      await onGuardar(confirmando, franjas, equivalencias, { exigeCobertura });
       setConfirmando(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo guardar el servicio');
@@ -361,6 +364,13 @@ export function ServicioPlanillaEditor({ cuadro, semilla, year, month, mesLabel,
         </div>
       )}
 
+      <label className="flex items-start gap-2 rounded-2xl border border-rose-100 bg-rose-50/60 px-3 py-2 text-[12px] text-slate-700" data-servicio-exige-cobertura>
+        <input type="checkbox" className="mt-0.5" checked={exigeCobertura} onChange={(e) => setExigeCobertura(e.target.checked)} />
+        <span>
+          <b>Exige cobertura</b>
+          <span className="block text-[11px] text-slate-500">Si está apagado, la grilla muestra solo los turnos que se usan: no hay huecos, fila Cobertura ni propuestas. Las horas se siguen contando.</span>
+        </span>
+      </label>
       {!confirmando && (
         <div className="flex flex-wrap gap-2">
           {!servicioId && !hayOtroServicio && (
