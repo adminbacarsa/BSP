@@ -1719,24 +1719,50 @@ export function copiarPorSemana(input: ContinuarInput, g: ContinuarInput['guardi
   const fases: Array<DiaCiclo | null> = Array.from({ length: 28 }, () => null);
   const habilitado = input.turnoHabilitado
     || ((pos: string, code: string, ds: string) => turnoHabilitadoPorEstructura(input.estructura, pos, code, ds));
+  // La misma semana manda (aunque ese día cubría a otro: queda su banda de 8 h). Traer el día de otra semana
+  // rompe el ritmo (un franco de otra semana dejaba tres francos seguidos). Solo sin dato se mira otra semana.
   const elegir = (idx: number): DiaCopiado | null => {
-    let cobertura: DiaCopiado | null = null;
-    for (const k of [4, 3, 5, 2, 6, 1]) {
+    const propia = idx - 28 < primero ? idx - 28 : idx - 35;
+    const d0 = fuente.get(propia);
+    if (d0) return d0;
+    // Sin dato (licencia, otro objetivo): ese día trabajaba; el franco de otra semana es lo último.
+    let franco: DiaCopiado | null = null;
+    for (const k of [3, 5, 2, 6, 1]) {
       const src = idx - 7 * k;
       if (src >= primero) continue;
       const d = fuente.get(src);
-      if (d && !d.cobertura) return d;
-      if (d && !cobertura) cobertura = d;
+      if (d && d.code !== 'F') return d;
+      if (d && !franco) franco = d;
     }
-    return cobertura;
+    return franco;
+  };
+  // Francos seguidos con los que cerró el mes copiado.
+  let seguidosF = 0;
+  for (let i = primero - 1; fuente.get(i)?.code === 'F'; i--) seguidosF += 1;
+  const trabajoDeOtraSemana = (idx: number): DiaCopiado | null => {
+    for (const k of [3, 5, 2, 6, 1]) {
+      const src = idx - 7 * k;
+      if (src >= primero) continue;
+      const d = fuente.get(src);
+      if (d && d.code !== 'F') return d;
+    }
+    return null;
   };
   for (const dateStr of input.dias) {
-    if (input.diaBloqueado?.(dateStr)) { res.omitidas.bloqueada += 1; continue; }
+    if (input.diaBloqueado?.(dateStr)) { res.omitidas.bloqueada += 1; seguidosF = 0; continue; }
     const estado = input.estadoCelda(g.id, dateStr);
-    if (estado === 'licencia') { res.omitidas.licencia += 1; continue; }
-    if (estado === 'ocupada') { res.omitidas.ocupada += 1; continue; }
+    if (estado === 'licencia') { res.omitidas.licencia += 1; seguidosF = 0; continue; }
+    if (estado === 'ocupada') { res.omitidas.ocupada += 1; seguidosF = 0; continue; }
     const idx = diaIndex(dateStr);
-    const dia = elegir(idx);
+    let dia = elegir(idx);
+    // Tres francos seguidos que el mes copiado no tenía (costura de fin de mes, día sacado de otra semana):
+    // el tercero toma el turno de otra semana.
+    if (dia?.code === 'F' && seguidosF >= 2) {
+      const propia = idx - 28 < primero ? idx - 28 : idx - 35;
+      const enOrigen = fuente.get(propia - 1)?.code === 'F' && fuente.get(propia - 2)?.code === 'F';
+      if (!enOrigen) dia = trabajoDeOtraSemana(idx) || dia;
+    }
+    seguidosF = dia?.code === 'F' ? seguidosF + 1 : 0;
     if (!dia) { res.omitidas.sinDato += 1; continue; }
     fases[mod(idx, 28)] = { code: dia.code, positionName: dia.pos };
     if (dia.code === 'F') {
@@ -1747,6 +1773,15 @@ export function copiarPorSemana(input: ContinuarInput, g: ContinuarInput['guardi
       continue;
     }
     const sla = resolverPuesto(input.estructura, dia.pos, dia.code);
+    if ('motivo' in sla && dia.code === 'RET') {
+      // RET de guardia (sin franja en el servicio): como lo tenía.
+      const w = ventanaTrabajo(dia.start, dia.end);
+      res.propuestas.push({
+        employeeId: g.id, dateStr, code: 'RET', name: 'Retén', positionName: dia.pos || 'Retén',
+        startTime: w?.start || '00:00', endTime: w?.end || '00:00', hours: 0, isFranco: false,
+      });
+      continue;
+    }
     if (!('motivo' in sla)) {
       if (!habilitado(sla.pos.positionName, dia.code, dateStr)) { res.omitidas.excluida += 1; continue; }
       const celda = celdaDeTrabajo(g.id, dateStr, sla.pos, dia.code);
