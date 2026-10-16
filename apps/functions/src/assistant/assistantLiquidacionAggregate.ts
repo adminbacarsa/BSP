@@ -129,6 +129,7 @@ export async function aggregateLiquidacionEmpresaPeriodo(
   const holidays = new Set<string>();
   const holSnap = await db.collection('feriados').limit(400).get();
   holSnap.forEach((d) => {
+    if (/no\s*laborable/i.test(String(d.data()?.type || ''))) return;
     const v = d.data()?.date;
     if (typeof v === 'string') holidays.add(v);
   });

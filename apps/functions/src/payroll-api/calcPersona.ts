@@ -78,6 +78,8 @@ export async function buildLiquidacionSnapshotPersona(
     const holidaysSnap = await db.collection('feriados').get();
     const holidays: Record<string, boolean> = {};
     holidaysSnap.forEach((d) => {
+        // El día no laborable (puente turístico) no paga plus feriado.
+        if (/no\s*laborable/i.test(String(d.data()?.type || ''))) return;
         const v = d.data()?.date;
         if (typeof v === 'string') holidays[v.slice(0, 10)] = true;
     });

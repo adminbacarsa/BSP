@@ -1427,6 +1427,8 @@ export const useReportes = (forcedClientId?: string | null) => {
                     const data = d.data();
                     const emp = String(data.empresaId ?? '').trim();
                     if (emp && emp !== empresaId) return;
+                    // Plus feriado: solo feriados (inamovibles y trasladables); el día no laborable (puente) no paga plus.
+                    if (/no\s*laborable/i.test(String(data.type || ''))) return;
                     if (data.date) holidays[data.date] = true;
                 });
                 setHolidaysData(holidays);
