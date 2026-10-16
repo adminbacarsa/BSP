@@ -819,8 +819,21 @@ export function sumDayCoverageFromCodeCounts(
 }
 
 /** Conteos M/T/N… por positionName para un día (desde grilla o asignaciones). */
+/**
+ * Turno M/T/N en un puesto cuyo servicio llama a esa franja con otro código (Tadicor: PLM, P5N, P2T):
+ * cuenta como esa franja si es la única de la banda en el puesto. Si no, queda el código del turno.
+ */
+export function codigoFranjaDelPuesto(pos: { shifts?: Array<{ code?: string }> } | undefined, code: string): string {
+    const c = String(code || '').toUpperCase();
+    if (!pos?.shifts?.length || !['M', 'T', 'N'].includes(c)) return c;
+    const codigos = pos.shifts.map((s) => String(s.code || '').toUpperCase().replace(/\s+/g, ''));
+    if (codigos.includes(c)) return c;
+    const deBanda = codigos.filter((x) => !/D12$|N12$/.test(x) && (x.match(/^(?:P\d+|PL)?([MTN])\d*$/) || [])[1] === c);
+    return deBanda.length === 1 ? deBanda[0] : c;
+}
+
 export function buildCodeCountsByPositionForDay(
-    positions: Array<{ positionName?: string }>,
+    positions: Array<{ positionName?: string; shifts?: Array<{ code?: string }> }>,
     dateStr: string,
     employeesList: Array<{ id: string }>,
     resolveShift: (empId: string, dateStr: string) => {
@@ -851,9 +864,10 @@ export function buildCodeCountsByPositionForDay(
         const raw = resolveShift(emp.id, dateStr);
         if (!raw || raw.isDeleted) return;
         if (!shiftBelongsToObjective(raw, options.selectedObjective, options.isPendingChange(emp.id, dateStr))) return;
-        const code = String(raw.code || '').toUpperCase();
-        if (PLANNING_NON_BILLABLE_CODES.has(code)) return;
+        const codeRaw = String(raw.code || '').toUpperCase();
+        if (PLANNING_NON_BILLABLE_CODES.has(codeRaw)) return;
         const shiftPos = String(raw.positionName || '').trim() || 'sin puesto';
+        const code = codigoFranjaDelPuesto(positions.find((p) => String(p.positionName || 'General') === shiftPos), codeRaw);
         if (!byPos[shiftPos]) byPos[shiftPos] = {};
         byPos[shiftPos][code] = (byPos[shiftPos][code] || 0) + 1;
     });
