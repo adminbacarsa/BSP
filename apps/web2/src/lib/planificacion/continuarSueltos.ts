@@ -142,8 +142,9 @@ export function sugerenciasSueltas(input: SueltoInput): SugerenciaNivelacion[] {
       for (const s of pos.shifts || []) {
         const code = up(s.code);
         if (!code || !s.startTime || !s.endTime) continue;
-        // Las jornadas de 12 h (D12/N12) son coberturas puntuales: las agrega el planificador, no se copian como suelto.
-        if (/D12$|N12$/.test(code) || (Number(s.hours) || horas(String(s.startTime), String(s.endTime))) >= 11.5) continue;
+        // D12/N12 son coberturas puntuales: las agrega el planificador, no se copian como suelto.
+        // Un turno propio de 12 h del servicio (VFM de Vifood, 07–19) sí se copia.
+        if (/D12$|N12$/.test(code)) continue;
         const need = cupo(dateStr, pos.positionName, code);
         let falta = need - hay(dateStr, pos.positionName, code);
         if (falta <= 0) continue;

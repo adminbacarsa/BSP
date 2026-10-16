@@ -31,6 +31,21 @@ const base = {
 const albani = { employeeId: 'alb', nombre: 'ALBANI', propuestas: [celda('alb', '2026-11-01', 'VF', 'Vifood · Puesto 2'), celda('alb', '2026-11-02', 'VF', 'Vifood · Puesto 2')] };
 
 describe('Continuar: turnos sueltos del mes anterior', () => {
+  it('el VFM de 12 h (07–19, turno propio del servicio) también se repite; D12/N12 no', () => {
+    const vifood12 = [
+      { positionName: 'Vifood · Puesto 1', qty: 1, shifts: [{ code: 'VFM', name: 'VFM', startTime: '07:00', endTime: '19:00', hours: 12, days: ['D'] }] },
+      vifood[1],
+    ];
+    const out = sugerenciasSueltas({
+      ...base,
+      estructura: vifood12,
+      resultados: [{ employeeId: 'ens', nombre: 'ENSABELLA', propuestas: [celda('ens', '2026-11-01', 'F'), celda('ens', '2026-11-02', 'M', 'Peaje · Puesto')] }, albani],
+    });
+    assert.equal(out.length, 1);
+    assert.equal(out[0].celda.code, 'VFM');
+    assert.equal(out[0].celda.endTime, '19:00');
+  });
+
   it('si es su franco y al día siguiente su M sobra, mueve el franco (sin FT)', () => {
     const out = sugerenciasSueltas({
       ...base,
