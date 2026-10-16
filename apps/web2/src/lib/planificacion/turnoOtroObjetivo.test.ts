@@ -109,6 +109,8 @@ it('F y RET de otro objetivo: F ↔ RET queda en su objetivo; al RET se le asign
   assert.deepEqual([turno.escribir, turno.objetivoAjeno, turno.borrarIds], [true, undefined, ['r1']]);
   const sobreF = decisionGuardadoTurnoAjeno({ cambio: { code: 'M' }, docs: [franco], permitidos });
   assert.deepEqual([sobreF.escribir, sobreF.motivo], [false, 'franco']);
+  const ft = decisionGuardadoTurnoAjeno({ cambio: { code: 'M', isFrancoTrabajado: true }, docs: [franco], permitidos });
+  assert.deepEqual([ft.escribir, ft.objetivoAjeno, ft.borrarIds], [true, undefined, ['f1']]);
   const borrar = decisionGuardadoTurnoAjeno({ cambio: { isDeleted: true }, docs: [ret], permitidos });
   assert.equal(borrar.escribir, false);
   const trabajo = decisionGuardadoTurnoAjeno({ cambio: { code: 'RET' }, docs: [{ id: 'm1', objectiveId: 'banco', code: 'M' }], permitidos });

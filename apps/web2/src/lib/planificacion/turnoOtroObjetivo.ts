@@ -72,7 +72,7 @@ export function saltearEscrituraTurnoAjeno(
 export function textoAvisoFrancoAjeno(nombre: string, objetivo: string): string {
   const n = (nombre || 'El guardia').trim() || 'El guardia';
   const o = (objetivo || 'otro objetivo').trim() || 'otro objetivo';
-  return `${n} está de franco en ${o}: pasalo a RET y después asignale el turno`;
+  return `${n} está de franco en ${o}: pasalo a RET y asignale el turno, o cargalo como franco trabajado (FT)`;
 }
 
 export function textoAvisoTurnoAjeno(nombre: string, objetivo: string): string {
@@ -121,7 +121,8 @@ export function decisionGuardadoTurnoAjeno(input: {
     if ((FRANCOS.has(nuevo) || nuevo === 'RET') && !input.cambio?.isFrancoTrabajado) {
       return { escribir: true, borrarIds: borrar, rechazado: false, objetivoAjeno: String(ajeno.objectiveId || ''), ajeno };
     }
-    if (ajenosPrimarios.some((d) => FRANCOS.has(codigoDe(d)))) {
+    // Turno directo sobre su F: vale solo como franco trabajado (FT, horas extra); si no, primero RET.
+    if (ajenosPrimarios.some((d) => FRANCOS.has(codigoDe(d))) && !input.cambio?.isFrancoTrabajado) {
       return { escribir: false, borrarIds: [], rechazado: true, motivo: 'franco' };
     }
     return { escribir: true, borrarIds: borrar, rechazado: false, ajeno };
