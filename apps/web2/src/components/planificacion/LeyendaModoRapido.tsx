@@ -11,6 +11,7 @@ export function LeyendaModoRapido({
   onToggle,
   estilo,
   sinMarco = false,
+  colorPuesto,
 }: {
   puestos: readonly { name: string; shifts: readonly TurnoLeyenda[] }[];
   usados: ReadonlySet<string>;
@@ -18,7 +19,14 @@ export function LeyendaModoRapido({
   onToggle: () => void;
   estilo: (code: string) => string;
   sinMarco?: boolean;
+  /** Color de cada puesto en la grilla (borde de la celda): la referencia lo repite. */
+  colorPuesto?: Record<string, { color: string; sigla?: string }>;
 }) {
+  const colorDe = (titulo: string) => {
+    if (!colorPuesto) return undefined;
+    const k = Object.keys(colorPuesto).find((n) => n.trim().toUpperCase() === titulo.trim().toUpperCase());
+    return k ? colorPuesto[k].color : undefined;
+  };
   const grupos = armarLeyenda(puestos, usados);
   if (!grupos.length) return null;
   const total = grupos.reduce((n, g) => n + g.chips.length, 0);
@@ -39,13 +47,22 @@ export function LeyendaModoRapido({
       </button>
       {abierta && (
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
-          {grupos.map((g) => (
+          {grupos.map((g) => {
+            const color = colorDe(g.titulo);
+            return (
             <div key={g.titulo} className="inline-flex flex-wrap items-center gap-1" data-leyenda-grupo={g.titulo}>
-              <span className="text-[9px] font-black uppercase text-slate-400">{g.titulo}</span>
+              <span
+                className={`text-[9px] font-black uppercase ${color ? 'rounded px-1 py-px text-white' : 'text-slate-400'}`}
+                style={color ? { backgroundColor: color } : undefined}
+                data-leyenda-puesto-color={color || undefined}
+              >
+                {g.titulo}
+              </span>
               {g.chips.map((c) => (
                 <span
                   key={`${g.titulo}-${c.code}`}
-                  className={`inline-flex items-center gap-1 rounded px-1 py-px text-[9px] font-black ${ROJO.has(c.code) ? 'bg-red-600 text-white' : estilo(c.code) || 'bg-slate-100 text-slate-700'}`}
+                  style={color && !ROJO.has(c.code) ? { backgroundColor: '#fff', color: '#0f172a', borderColor: color, borderWidth: 2, borderStyle: 'solid' } : undefined}
+                  className={`inline-flex items-center gap-1 rounded px-1 py-px text-[9px] font-black ${ROJO.has(c.code) ? 'bg-red-600 text-white' : color ? '' : estilo(c.code) || 'bg-slate-100 text-slate-700'}`}
                   title={[c.code, c.detalle, c.horario, c.horas ? `${c.horas} h` : ''].filter(Boolean).join(' · ')}
                   data-leyenda-chip={c.code}
                 >
@@ -54,7 +71,8 @@ export function LeyendaModoRapido({
                 </span>
               ))}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

@@ -19905,6 +19905,7 @@ function PlanificacionDesktop() {
 
                 {modoRapido && selectedObjective && !(statsBarCollapsed && selectedObjective && !comparingSnapshot && Object.keys(empMonthlyHours).length > 0) && (
                     <LeyendaModoRapido
+                        colorPuesto={colorPuestoGrilla}
                         puestos={(positionStructure || []).map((p: any) => ({
                             name: String(p.positionName || p.name || 'Puesto'),
                             shifts: (p.shifts || []).map((s: any) => ({ code: String(s.code || ''), startTime: s.startTime, endTime: s.endTime, hours: Number(s.hours) || 0, name: s.name })),
@@ -19925,6 +19926,7 @@ function PlanificacionDesktop() {
                                 <div className="min-w-0 flex-1 px-3">
                                     <LeyendaModoRapido
                                         sinMarco
+                                        colorPuesto={colorPuestoGrilla}
                                         puestos={(positionStructure || []).map((p: any) => ({
                                             name: String(p.positionName || p.name || 'Puesto'),
                                             shifts: (p.shifts || []).map((sh: any) => ({ code: String(sh.code || ''), startTime: sh.startTime, endTime: sh.endTime, hours: Number(sh.hours) || 0, name: sh.name })),
