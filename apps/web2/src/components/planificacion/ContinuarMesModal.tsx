@@ -140,7 +140,11 @@ export function ContinuarMesModal({ vista, onAplicar, onCancelar }: Props) {
   const sinNada = useMemo(() => vista.resultados.filter((r) => r.ciclo && r.propuestas.length === 0), [vista.resultados]);
   // Los estimados también arrancan tildados (siguen en amarillo para revisar): destildados dejaban la fila vacía.
   const [elegidos, setElegidos] = useState<Set<string>>(() => new Set(conCiclo.map((r) => r.employeeId)));
-  const [nivelar, setNivelar] = useState<Set<string>>(() => new Set());
+  // Lo que el mes anterior se cubrió suelto (VFM de domingo por alguien de Peaje) arranca tildado: así el mes nuevo
+  // queda igual al copiado. Nivelación, rotación y relevante siguen destildados.
+  const [nivelar, setNivelar] = useState<Set<string>>(() => new Set(
+    conCiclo.flatMap((r) => r.sugerencias || []).filter((sg) => sg.tipo === 'suelto').map(claveSugerencia),
+  ));
   const [activarMes, setActivarMes] = useState(() => !!(vista.activar?.marcado && vista.activar.puede && vista.activar.permiso));
 
   const sugerencias = useMemo(
@@ -460,7 +464,7 @@ export function ContinuarMesModal({ vista, onAplicar, onCancelar }: Props) {
                 </div>
               </div>
               <div className="text-[11px] text-amber-950/80 mt-0.5 mb-1.5">
-                Turnos que no son el ciclo de nadie y el mes anterior cubrió alguien. Tildá para repetir con la misma persona; si no, el hueco queda en Faltantes para asignar a otro. Arranca destildado.
+                Turnos que no son el ciclo de nadie y el mes anterior cubrió alguien. Se repite con la misma persona; destildá si lo cubre otro y el hueco queda en Faltantes.
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-0.5">
                 {sugerenciasSuelto.map((s) => {

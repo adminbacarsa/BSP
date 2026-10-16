@@ -1567,10 +1567,12 @@ function calcularCeldaGrilla(e: EntradaCeldaGrilla, emp: any, isGuest: boolean, 
     const cubierto = (((covRole === 'TARGET' || isLeaveCell) && coveredByCell) || (p?.menuRapidoTexto && !p?.menuRapidoRol) || (s?.menuRapidoTexto && !s?.menuRapidoRol));
     let grupoColor: string | undefined;
     let grupoNombre: string | undefined;
+    let filtroObjetivo: string | undefined;
     let colorPorPuesto = false;
     if (selectedGrupo && grupoUnifiedMode && content && !isOtherObjectiveShift && activeShift?.objectiveId && selectedGrupo.objectiveIds.includes(activeShift.objectiveId)) {
         const _oi = selectedGrupo.objectiveIds.indexOf(activeShift.objectiveId!);
         grupoColor = GRUPO_COLOR_HEX[_oi % GRUPO_COLOR_HEX.length];
+        filtroObjetivo = String(selectedGrupo.objectiveNames[_oi] || '').trim().toUpperCase();
         grupoNombre = (selectedGrupo.objectiveNames[_oi] || '').trim().split(/\s+/).filter((w: string) => w.length > 1).pop()?.slice(0, 6).toUpperCase() || (selectedGrupo.objectiveNames[_oi] || '').slice(0, 5).toUpperCase();
     } else if (!(selectedGrupo && grupoUnifiedMode) && content && !isOtherObjectiveShift && cellPosName && e.colorPuesto?.[cellPosName]
         && !isLeaveCell && !['F', 'FF', 'FP', 'RET'].includes(String(cellCode || '').toUpperCase())) {
@@ -1626,9 +1628,9 @@ function calcularCeldaGrilla(e: EntradaCeldaGrilla, emp: any, isGuest: boolean, 
         grupoNombre,
         colorPorPuesto,
         rfzOverlay: hasRfzOverlay,
-        filtroPuesto: content && !isOtherObjectiveShift && cellPosName && !isLeaveCell && !['F', 'FF', 'FP'].includes(String(cellCode || '').toUpperCase())
+        filtroPuesto: filtroObjetivo || (content && !isOtherObjectiveShift && cellPosName && !isLeaveCell && !['F', 'FF', 'FP'].includes(String(cellCode || '').toUpperCase())
             ? String(cellPosName).trim().toUpperCase()
-            : undefined,
+            : undefined),
         filtroCodigo: content
             ? (isLeaveCell ? leaveCellCode : isFT ? 'FT' : String(cellCode || content || '').toUpperCase())
             : undefined,
@@ -2134,6 +2136,27 @@ function PlanificacionDesktop() {
     /** Clic en la leyenda: solo los turnos de ese puesto (o de ese turno del puesto). */
     const [filtroLeyenda, setFiltroLeyenda] = useState<{ puesto: string; code?: string } | null>(null);
     useEffect(() => { setFiltroLeyenda(null); }, [selectedObjective]);
+    const leyendaGrupo = useMemo(() => {
+        if (!(selectedGrupo && grupoUnifiedMode)) return null;
+        const puestos: Array<{ name: string; shifts: any[] }> = [];
+        const colores: Record<string, { color: string; sigla?: string }> = {};
+        (selectedGrupo.objectiveIds as string[]).forEach((objId, i) => {
+            const nombre = String(selectedGrupo.objectiveNames?.[i] || objId).trim();
+            const vistos = new Set<string>();
+            const shifts: any[] = [];
+            for (const pos of (grupoSlaMap[objId] || []) as any[]) {
+                for (const sh of (pos.shifts || []) as any[]) {
+                    const k = `${String(sh.code || '').toUpperCase()}|${sh.startTime}|${sh.endTime}`;
+                    if (!sh.code || vistos.has(k)) continue;
+                    vistos.add(k);
+                    shifts.push({ code: String(sh.code), startTime: sh.startTime, endTime: sh.endTime, hours: Number(sh.hours) || 0, name: sh.name });
+                }
+            }
+            puestos.push({ name: nombre, shifts });
+            colores[nombre] = { color: GRUPO_COLOR_HEX[i % GRUPO_COLOR_HEX.length] };
+        });
+        return { puestos, colores };
+    }, [selectedGrupo, grupoUnifiedMode, grupoSlaMap]);
     const codigosUsadosLeyenda = useMemo(() => {
         const s = new Set<string>();
         for (const sh of Object.values(shiftsMap)) {
@@ -20102,8 +20125,8 @@ function PlanificacionDesktop() {
 
                 {modoRapido && selectedObjective && !(statsBarCollapsed && selectedObjective && !comparingSnapshot && Object.keys(empMonthlyHours).length > 0) && (
                     <LeyendaModoRapido
-                        colorPuesto={colorPuestoGrilla}
-                        puestos={(positionStructure || []).map((p: any) => ({
+                        colorPuesto={leyendaGrupo?.colores || colorPuestoGrilla}
+                        puestos={leyendaGrupo?.puestos || (positionStructure || []).map((p: any) => ({
                             name: String(p.positionName || p.name || 'Puesto'),
                             shifts: (p.shifts || []).map((s: any) => ({ code: String(s.code || ''), startTime: s.startTime, endTime: s.endTime, hours: Number(s.hours) || 0, name: s.name })),
                         }))}
@@ -20138,8 +20161,8 @@ function PlanificacionDesktop() {
                                 <div className="min-w-0 flex-1 px-3">
                                     <LeyendaModoRapido
                                         sinMarco
-                                        colorPuesto={colorPuestoGrilla}
-                                        puestos={(positionStructure || []).map((p: any) => ({
+                                        colorPuesto={leyendaGrupo?.colores || colorPuestoGrilla}
+                                        puestos={leyendaGrupo?.puestos || (positionStructure || []).map((p: any) => ({
                                             name: String(p.positionName || p.name || 'Puesto'),
                                             shifts: (p.shifts || []).map((sh: any) => ({ code: String(sh.code || ''), startTime: sh.startTime, endTime: sh.endTime, hours: Number(sh.hours) || 0, name: sh.name })),
                                         }))}
