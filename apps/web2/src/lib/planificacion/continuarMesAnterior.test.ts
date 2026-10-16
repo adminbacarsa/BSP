@@ -537,22 +537,28 @@ test('cada turno queda en el puesto del guardia, con la franja de ese puesto', (
   assert.equal(m1.startTime, '06:00');
 });
 
-test('si el puesto del guardia está lleno, el turno se queda en la fila en el otro puesto (no deja el día vacío)', () => {
+test('si el puesto del guardia está lleno, pasa al otro puesto solo si ya trabajó ahí; si no, queda en el suyo (Obrador)', () => {
   const est: PuestoSla[] = [
     { positionName: 'Puesto 1', qty: 1, shifts: [{ code: 'M', hours: 8, startTime: '07:00', endTime: '15:00' }] },
     { positionName: 'Puesto 2', qty: 1, shifts: [{ code: 'M', hours: 8, startTime: '08:00', endTime: '16:00' }] },
   ];
   const patron = ['M', 'M', 'M', 'M', 'F', 'F'];
   const previos = armar(patron, '2026-08-01', '2026-09-30', 0, 'Puesto 1');
+  const conHistoria = [...armar(patron, '2026-08-01', '2026-09-19', 0, 'Puesto 1'), ...armar(patron, '2026-09-20', '2026-09-30', 50 % patron.length, 'Puesto 2')];
   const [primero, segundo] = proponerContinuacion(input([
     { id: 'a', nombre: 'A', previos, puestoPreferido: 'Puesto 1' },
-    { id: 'b', nombre: 'B', previos, puestoPreferido: 'Puesto 1' },
+    { id: 'b', nombre: 'B', previos: conHistoria, puestoPreferido: 'Puesto 1' },
   ], ['2026-10-01'], { estructura: est }));
   assert.equal(primero.propuestas.find((c) => c.code === 'M')?.positionName, 'Puesto 1');
   const movida = segundo.propuestas.find((c) => c.code === 'M');
   assert.equal(movida?.positionName, 'Puesto 2');
   assert.equal(movida?.startTime, '08:00');
   assert.equal(segundo.revisar[0]?.motivo, 'Puesto 1 lleno: M en Puesto 2');
+  const [, sinHistoria] = proponerContinuacion(input([
+    { id: 'a', nombre: 'A', previos, puestoPreferido: 'Puesto 1' },
+    { id: 'b', nombre: 'B', previos, puestoPreferido: 'Puesto 1' },
+  ], ['2026-10-01'], { estructura: est }));
+  assert.equal(sinHistoria.propuestas.find((c) => c.code === 'M')?.positionName, 'Puesto 1');
 });
 
 test('el relevante se reacomoda, destildado, cuando se mueven los francos de Puesto 1 y 2', () => {

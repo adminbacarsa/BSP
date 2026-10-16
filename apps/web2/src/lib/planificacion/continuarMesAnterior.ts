@@ -1200,15 +1200,16 @@ function anclarPorPuesto(input: ContinuarInput, resultados: ResultadoGuardia[]) 
     }
     return m;
   };
-  // Dos rondas: primero el que ya trabajó en el puesto libre (BONILLA a Puesto 1); recién después cualquiera.
-  // Si no, el que sobra en Puesto 5 (VERGARA) le ganaba el lugar de Puesto 1 a BONILLA y P2 quedaba repetido.
+  // El que sobra solo pasa a un puesto donde ya trabajó el mes anterior (BONILLA entre Puesto 1 y 2).
+  // A un puesto ajeno no (Obrador: los de Puesto 2 iban a Puesto 1 con otro horario): queda en el suyo,
+  // la sobrecobertura se ve en la fila COBERTURA y lo decide el planificador.
   const movidos = new Set<number>();
-  for (const ronda of [1, 2] as const) for (const [idx, s] of sobrantes.entries()) {
+  for (const [idx, s] of sobrantes.entries()) {
     if (movidos.has(idx)) continue;
     const c = s.r.propuestas[s.i];
     const hist = historial(s.r.employeeId);
     const candidatos = [...input.estructura]
-      .filter((p) => ronda === 2 || (hist.get(puestoNorm(p.positionName)) || 0) > 0)
+      .filter((p) => (hist.get(puestoNorm(p.positionName)) || 0) > 0)
       .sort((a, b) => (hist.get(puestoNorm(b.positionName)) || 0) - (hist.get(puestoNorm(a.positionName)) || 0));
     const otro = candidatos.find((p) => {
       if (puestoNorm(p.positionName) === puestoNorm(s.casa.positionName)) return false;
