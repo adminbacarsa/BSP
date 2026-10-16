@@ -777,6 +777,26 @@ export function proponerRegla(raw: string, color: ColorCelda, refs: Referencia[]
   return { ...base, accion: 'ignorar', code: '', nota: 'Sin referencia. Elegí un turno, una licencia o ignoralo.' };
 }
 
+/**
+ * Un puesto con M, T y N es de 24 h y admite D12/N12 aunque el servicio no los liste: salen de su mañana
+ * (Casino Guardia M 07–15 → D12 07–19 / N12 19–07, la M y la T rojas de la planilla).
+ */
+export function conDoceEn24h(turnos: TurnoServicio[]): TurnoServicio[] {
+  const out = [...turnos];
+  for (const puesto of new Set(turnos.map((t) => t.positionName))) {
+    const del = turnos.filter((t) => t.positionName === puesto);
+    const banda = (c: string) => (claveCodigo(c).match(/^(?:P\d+|PL)?([MTN])\d*$/) || [])[1] || '';
+    const m = del.find((t) => banda(t.code) === 'M');
+    if (!m || !del.some((t) => banda(t.code) === 'T') || !del.some((t) => banda(t.code) === 'N')) continue;
+    if (del.some((t) => ['D12', 'N12'].includes(claveCodigo(t.code)))) continue;
+    const ini = m.startTime.slice(0, 5);
+    const doce = `${String((Number(ini.slice(0, 2)) + 12) % 24).padStart(2, '0')}${ini.slice(2)}`;
+    out.push({ positionName: puesto, code: 'D12', startTime: ini, endTime: doce, quantity: m.quantity });
+    out.push({ positionName: puesto, code: 'N12', startTime: doce, endTime: ini, quantity: m.quantity });
+  }
+  return out;
+}
+
 function mismoHorario(t: TurnoServicio, inicio: string, fin: string): boolean {
   return Math.abs(minutos(t.startTime) - minutos(inicio)) <= 15 && Math.abs(minutos(t.endTime) - minutos(fin)) <= 15;
 }
@@ -786,8 +806,9 @@ function mismoHorario(t: TurnoServicio, inicio: string, fin: string): boolean {
  * (MG 7 a 15 → M · Guardia 07:00–15:00; la N 21 a 05 → N · Noche, no la N de Guardia).
  * No toca lo que el planificador ya eligió (`puesto` guardado) ni las licencias, francos y RET.
  */
-export function ajustarReglasAlServicio(reglas: ReglaMapeo[], refs: Referencia[], turnos: TurnoServicio[]): ReglaMapeo[] {
-  if (!turnos.length) return reglas;
+export function ajustarReglasAlServicio(reglas: ReglaMapeo[], refs: Referencia[], turnosServicio: TurnoServicio[]): ReglaMapeo[] {
+  if (!turnosServicio.length) return reglas;
+  const turnos = conDoceEn24h(turnosServicio);
   return reglas.map((r) => {
     if (r.puesto || (r.accion !== 'turno' && r.accion !== 'doce')) return r;
     const refAny = refDe(refs, r.codigo, r.color);
@@ -872,8 +893,9 @@ function doceDelPuesto(turnos: TurnoServicio[], puesto: string, base: string, re
     const propio = cerca.find((x) => !['D12', 'N12', 'M', 'T', 'N'].includes(claveCodigo(x.t.code)));
     return (propio || cerca[0]).t;
   }
-  const fijo = base === 'N' ? 'N12' : 'D12';
-  return turnoDe(turnos, puesto, fijo);
+  // La T roja de 19 a 07 es la noche de 12 h (N12), no un D12.
+  const noche = base === 'N' || (!!ref?.inicio && (Number(ref.inicio.slice(0, 2)) >= 17 || Number(ref.inicio.slice(0, 2)) < 5));
+  return turnoDe(turnos, puesto, noche ? 'N12' : 'D12');
 }
 
 function minutos(hm: string): number {
@@ -881,7 +903,8 @@ function minutos(hm: string): number {
   return (h || 0) * 60 + (m || 0);
 }
 
-export function resolverDestino(regla: ReglaMapeo, puestoFila: string, turnos: TurnoServicio[], refs: Referencia[]): DestinoCelda {
+export function resolverDestino(regla: ReglaMapeo, puestoFila: string, turnosServicio: TurnoServicio[], refs: Referencia[]): DestinoCelda {
+  const turnos = conDoceEn24h(turnosServicio);
   const puesto = regla.puesto && turnos.some((t) => t.positionName === regla.puesto) ? regla.puesto : puestoFila;
   const vacio = { positionName: puesto, startTime: '', endTime: '', hours: 0, nombre: '' };
   if (regla.accion === 'ignorar') return { accion: 'ignorar', code: '', ...vacio };

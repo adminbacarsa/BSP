@@ -12,6 +12,7 @@ import {
   proponerRegla,
   proponerReglas,
   ajustarReglasAlServicio,
+  conDoceEn24h,
   puestoDeTexto,
   resolverDestino,
   resumenPreview,
@@ -295,4 +296,27 @@ describe('importar planilla', () => {
     assert.equal(proponerRegla('LICENCIA MEDICA', 'none', []).code, 'E');
     assert.equal(proponerRegla('LICENCIA X 14 DIAS 2026', 'none', []).code, 'V');
   });
+
+  it('Casino: Guardia de 24 h sin D12/N12 en el servicio → la M roja (07 a 19) es D12 y la T roja (19 a 07) es N12 de Guardia', () => {
+    const turnos: TurnoServicio[] = [
+      { positionName: 'Guardia', code: 'M', startTime: '07:00', endTime: '15:00' },
+      { positionName: 'Guardia', code: 'T', startTime: '15:00', endTime: '23:00' },
+      { positionName: 'Guardia', code: 'N', startTime: '23:00', endTime: '07:00' },
+      { positionName: 'MM', code: 'M', startTime: '13:00', endTime: '21:00' },
+    ];
+    assert.deepEqual(conDoceEn24h(turnos).filter((t) => t.positionName === 'Guardia' && t.code.endsWith('12')).map((t) => `${t.code} ${t.startTime}-${t.endTime}`), ['D12 07:00-19:00', 'N12 19:00-07:00']);
+    assert.equal(conDoceEn24h(turnos).filter((t) => t.positionName === 'MM').length, 1);
+    const refs = [
+      { codigo: 'M', desc: '07 A 19', inicio: '07:00', fin: '19:00', horas: 12, color: 'red' as const },
+      { codigo: 'T', desc: '19 A 07', inicio: '19:00', fin: '07:00', horas: 12, color: 'red' as const },
+    ];
+    const reglas = ajustarReglasAlServicio([
+      { clave: 'M|red', codigo: 'M', color: 'red', muestras: 3, ...proponerRegla('M', 'red', refs) } as any,
+      { clave: 'T|red', codigo: 'T', color: 'red', muestras: 3, ...proponerRegla('T', 'red', refs) } as any,
+    ], refs, turnos);
+    assert.deepEqual(reglas.map((r) => `${r.code} · ${r.puesto}`), ['D12 · Guardia', 'N12 · Guardia']);
+    const d = resolverDestino(reglas[1], 'MM', turnos, refs);
+    assert.deepEqual([d.code, d.positionName, d.startTime, d.endTime], ['N12', 'Guardia', '19:00', '07:00']);
+  });
 });
+

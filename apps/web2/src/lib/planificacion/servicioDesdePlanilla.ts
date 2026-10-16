@@ -839,14 +839,27 @@ export function posicionesDesdeFranjas(
       } as TurnoServicioDoc;
     });
     const dias = ordenarDias(list.flatMap((f) => (f.fechas?.length ? diasDeFechas(f.fechas) : f.dias.length ? f.dias : ORDEN_DIAS)));
+    const coverageType = (previa?.coverageType && !String(previa.id || '').startsWith('planilla_') ? String(previa.coverageType) : '')
+      || (!PUESTO_FRANJA_PROPIA.test(normPlanilla(list[0].puesto)) && cubre24Horas(list) ? '24hs' : 'custom');
+    // Todo puesto de 24 h admite D12/N12: si la planilla no los trae, salen de la mañana del puesto
+    // (Casino: M 07–15 → D12 07–19 / N12 19–07, la M y la T rojas de la referencia).
+    if (coverageType === '24hs') {
+      const codigos = new Set(shifts.map((x) => String(x.code || '').toUpperCase()));
+      const man = shifts.find((x) => /^(?:P\d+|PL)?M\d*$/.test(String(x.code || '').toUpperCase()) && x.startTime);
+      if (man && !codigos.has('D12') && !codigos.has('N12')) {
+        const ini = String(man.startTime).slice(0, 5);
+        const doce = `${String((Number(ini.slice(0, 2)) + 12) % 24).padStart(2, '0')}${ini.slice(2)}`;
+        shifts.push({ code: 'D12', name: 'D12', startTime: ini, endTime: doce, hours: 12 } as TurnoServicioDoc);
+        shifts.push({ code: 'N12', name: 'N12', startTime: doce, endTime: ini, hours: 12 } as TurnoServicioDoc);
+      }
+    }
     out.push({
       // El puesto que ya existía conserva sus otros datos (días excluidos, bajas, exigeCobertura…).
       ...((previa || {}) as object),
       id: String(previa?.id || `planilla_${n}`),
       name: previa?.name || list[0].puesto,
       // Un puesto cargado a mano en Servicios conserva su tipo; el que armó la planilla se recalcula.
-      coverageType: (previa?.coverageType && !String(previa.id || '').startsWith('planilla_') ? String(previa.coverageType) : '')
-        || (!PUESTO_FRANJA_PROPIA.test(normPlanilla(list[0].puesto)) && cubre24Horas(list) ? '24hs' : 'custom'),
+      coverageType,
       quantity: Math.max(...list.map((f) => f.cantidad), 1),
       activeDays: dias,
       allowedShiftTypes: shifts,
