@@ -1626,6 +1626,12 @@ function calcularCeldaGrilla(e: EntradaCeldaGrilla, emp: any, isGuest: boolean, 
         grupoNombre,
         colorPorPuesto,
         rfzOverlay: hasRfzOverlay,
+        filtroPuesto: content && !isOtherObjectiveShift && cellPosName && !isLeaveCell && !['F', 'FF', 'FP'].includes(String(cellCode || '').toUpperCase())
+            ? String(cellPosName).trim().toUpperCase()
+            : undefined,
+        filtroCodigo: content
+            ? (isLeaveCell ? leaveCellCode : isFT ? 'FT' : String(cellCode || content || '').toUpperCase())
+            : undefined,
         rfzSinPublicar: !!(rfzOnCell && !s && !p && !absence && rfzOnCell.draft),
     };
     const ctx: CtxCeldaGrilla = {
@@ -2125,6 +2131,9 @@ function PlanificacionDesktop() {
     const redoStackRef = useRef<Record<string, any>[]>([]);
     const [modoRapido, setModoRapido] = useState(false);
     const [leyendaAbierta, setLeyendaAbierta] = useState(true);
+    /** Clic en la leyenda: solo los turnos de ese puesto (o de ese turno del puesto). */
+    const [filtroLeyenda, setFiltroLeyenda] = useState<{ puesto: string; code?: string } | null>(null);
+    useEffect(() => { setFiltroLeyenda(null); }, [selectedObjective]);
     const codigosUsadosLeyenda = useMemo(() => {
         const s = new Set<string>();
         for (const sh of Object.values(shiftsMap)) {
@@ -20101,9 +20110,24 @@ function PlanificacionDesktop() {
                         usados={codigosUsadosLeyenda}
                         abierta={leyendaAbierta}
                         onToggle={() => setLeyendaAbierta((v) => !v)}
+                        filtro={filtroLeyenda}
+                        onFiltro={setFiltroLeyenda}
                         estilo={(code) => getDefaultStyle(code) || ''}
                     />
                 )}
+
+                {filtroLeyenda && (() => {
+                    const q = (v: string) => v.replace(/["\\]/g, '');
+                    const m = `${filtroLeyenda.puesto ? `[data-fpuesto="${q(filtroLeyenda.puesto.trim().toUpperCase())}"]` : ''}${filtroLeyenda.code ? `[data-fcodigo="${q(filtroLeyenda.code.toUpperCase())}"]` : ''}`;
+                    if (!m) return null;
+                    // Solo CSS: la grilla no se vuelve a dibujar. Las demás celdas quedan tenues y las filas sin ese turno se ocultan.
+                    return (
+                        <style data-filtro-leyenda>{`
+                            [data-plan-grilla] td[data-testid="grilla-celda"]:not(${m}) > div { opacity: .12; }
+                            [data-plan-grilla] tbody tr:has(td[data-testid="grilla-celda"]):not(:has(td${m})) { display: none; }
+                        `}</style>
+                    );
+                })()}
 
                 {/* RESUMEN DE HORAS PLANIFICADAS */}
                 {selectedObjective && !comparingSnapshot && Object.keys(empMonthlyHours).length > 0 && (
@@ -20122,6 +20146,8 @@ function PlanificacionDesktop() {
                                         usados={codigosUsadosLeyenda}
                                         abierta={leyendaAbierta}
                                         onToggle={() => setLeyendaAbierta((v) => !v)}
+                                        filtro={filtroLeyenda}
+                                        onFiltro={setFiltroLeyenda}
                                         estilo={(code) => getDefaultStyle(code) || ''}
                                     />
                                 </div>

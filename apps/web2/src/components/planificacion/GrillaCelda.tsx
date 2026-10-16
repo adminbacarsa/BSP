@@ -54,6 +54,9 @@ export type VistaCelda = {
     colorPorPuesto?: boolean;
     rfzOverlay: boolean;
     rfzSinPublicar: boolean;
+    /** Filtro de la leyenda: puesto (mayúsculas) y código de la celda. */
+    filtroPuesto?: string;
+    filtroCodigo?: string;
 };
 
 /** Devuelve la vista anterior si no cambió nada: así la celda no se vuelve a renderizar. */
@@ -104,6 +107,8 @@ function CeldaGrillaBase({ vista: v, fila, col, seleccionada, colElegir, elegirA
             data-marca-tope={v.marcaTope ? '1' : undefined}
             className={`border-b border-r p-0.5 ${elegirActivo || v.editable ? 'cursor-pointer' : 'cursor-default'} text-center relative ${colElegir ? 'bg-indigo-100 dark:bg-indigo-900/40' : seleccionada ? 'bg-indigo-200 dark:bg-indigo-800/50' : v.fondo}`}
             data-evento={v.evento}
+            data-fpuesto={v.filtroPuesto || undefined}
+            data-fcodigo={v.filtroCodigo || undefined}
             title={v.titulo}
         >
             <div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${v.estilo}${comparada ? ' ring-2 ring-violet-600 ring-offset-1 z-20' : ''}${v.sufijoUsado} ${v.ringExtra}${v.marcaTope ? ' border-b-2 border-rose-600' : ''}${v.descansoReducido ? ' border-t-2 border-amber-500' : ''}${v.marcaSobra ? ' border-2 border-amber-500' : ''}${v.focoSobra ? ' ring-2 ring-amber-600 ring-offset-1 z-20' : ''}`} data-sobra={v.marcaSobra ? '1' : undefined} style={v.colorPorPuesto && v.grupoColor ? { backgroundColor: '#ffffff', color: '#0f172a', borderColor: v.grupoColor, borderWidth: 2, borderStyle: 'solid' } : undefined}>
