@@ -14465,6 +14465,7 @@ function PlanificacionDesktop() {
         };
         const LETRA = ['D', 'L', 'M', 'X', 'J', 'V', 'S'];
         const dias = daysInMonth.map((d) => ({ dateStr: getDateKey(d), num: d.getDate(), letra: LETRA[d.getDay()], finde: d.getDay() === 0 || d.getDay() === 6 }));
+        const enGrupo = !!(selectedGrupo && grupoUnifiedMode);
         const filas = (displayedEmployees as any[]).map((e: any) => {
             const celdas: Record<string, { code: string; horario?: string }> = {};
             for (const d of dias) {
@@ -14479,7 +14480,11 @@ function PlanificacionDesktop() {
                 const franco = sh.isFranco || ['F', 'FF', 'FP'].includes(code);
                 const ini = hhmm(sh.startTime);
                 const fin = hhmm(sh.endTime);
-                const colorPos = colorPuestoGrilla[String(sh.positionName || '')]?.color;
+                // Vista agrupada: el color es el del objetivo (como en la grilla); si no, el del puesto.
+                const iObj = enGrupo ? (selectedGrupo!.objectiveIds as string[]).indexOf(String(sh.objectiveId || '')) : -1;
+                const colorPos = enGrupo
+                    ? (iObj >= 0 ? GRUPO_COLOR_HEX[iObj % GRUPO_COLOR_HEX.length] : undefined)
+                    : colorPuestoGrilla[String(sh.positionName || '')]?.color;
                 celdas[d.dateStr] = {
                     code: sh.isFrancoTrabajado ? `FT·${code}` : code,
                     ...(!franco && ini && fin && ini !== fin ? { horario: `${ini}–${fin}` } : {}),
@@ -14492,7 +14497,14 @@ function PlanificacionDesktop() {
         const cliente = (clients as any[]).find((c: any) => c.id === selectedClient)?.name || '';
         const titulo = selectedGrupo && grupoUnifiedMode ? selectedGrupo.nombre : getObjectiveName(selectedObjective);
         // Referencia por puesto (como la de abajo de la grilla): todos sus turnos con horario.
-        const puestos = ((positionStructure || []) as any[])
+        // En la vista agrupada, la referencia es por objetivo: su color y todos sus turnos.
+        const puestos = leyendaGrupo ? leyendaGrupo.puestos.map((o) => ({
+            nombre: o.name,
+            color: leyendaGrupo.colores[o.name]?.color,
+            franjas: o.shifts
+                .filter((st: any) => st.code && st.startTime && st.endTime)
+                .map((st: any) => ({ code: String(st.code).toUpperCase(), horario: `${hhmm(st.startTime)}–${hhmm(st.endTime)}` })),
+        })) : ((positionStructure || []) as any[])
             .filter((p: any) => p.positionName && p.positionName !== 'General')
             .map((p: any) => ({
                 nombre: String(p.positionName),
