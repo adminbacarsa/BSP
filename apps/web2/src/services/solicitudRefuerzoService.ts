@@ -43,6 +43,8 @@ export interface SolicitudRefuerzo {
   positionId?: string;
   positionName?: string;
   shiftCode?: string;
+  /** RFZ puntual = refuerzo eventual: sigla en la grilla (RM, EV…). */
+  rfzSigla?: string;
   cantidadPax?: number;
 
   // Solo AGREGADO_TURNO

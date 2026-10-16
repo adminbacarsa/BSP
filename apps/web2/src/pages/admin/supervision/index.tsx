@@ -19,7 +19,7 @@ import { absenceService, Absence } from '@/services/absenceService';
 import { Timestamp } from 'firebase/firestore';
 import { buildRefuerzoNovedadPayload, calcRefuerzoPactadaHours } from '@/lib/refuerzo/refuerzoDisplay';
 import { isTuraContiguousToParent } from '@/lib/refuerzo/turaContiguity';
-import { applySlaRefuerzoPax, revertSlaRefuerzoPax } from '@/lib/servicios/applySlaRefuerzoPax';
+import { revertSlaRefuerzoPax } from '@/lib/servicios/applySlaRefuerzoPax';
 import { isEventosPosition } from '@/lib/servicios/eventosPosition';
 import {
   filterAbsencesByObjectives, filterSolicitudesByObjectives,
@@ -425,6 +425,8 @@ export default function SupervisionPage() {
   const [mSolicitante, setMSolicitante] = useState('');
   const [mCanal, setMCanal] = useState<'TELEFONO' | 'WHATSAPP' | 'EMAIL' | 'PRESENCIAL'>('TELEFONO');
   const [mPax, setMPax]     = useState(1);
+  /** RFZ puntual = refuerzo eventual: sigla con la que se ve en la grilla (RM = Día de la Madre). */
+  const [mSigla, setMSigla] = useState('');
   const [mAlcance, setMAlcance] = useState<'PUNTUAL' | 'ESTRUCTURAL'>('PUNTUAL');
   const [mPosicionNombre, setMPosicionNombre] = useState('');
   const [mGuardiasTura, setMGuardiasTura] = useState<Array<{ shiftId: string; empleadoId: string; nombre: string }>>([]);
@@ -737,6 +739,9 @@ export default function SupervisionPage() {
           positionId:   sol.positionId   ?? null,
           positionName: sol.positionName ?? null,
           shiftCode:    sol.shiftCode     ?? null,
+          // Refuerzo puntual = eventual: se ve con su sigla y el color de RFZE en la grilla.
+          rfzTipo:      'EVENTUAL',
+          ...(sol.rfzSigla ? { rfzSigla: sol.rfzSigla } : {}),
         });
         ids.push(ref.id);
       }
@@ -765,18 +770,10 @@ export default function SupervisionPage() {
         slaAppliedShiftCode?: string;
         slaAppliedPositionId?: string;
       } = {};
+      // +pax al puesto: lo aplica Planificación desde el aviso (RFZF desde la fecha). Acá no se toca el servicio.
+      if (esEstructural) slaPatch = { slaApplied: false };
       if (esEstructural) {
-        const applied = await applySlaRefuerzoPax(sol, actor);
-        slaPatch = {
-          slaApplied: true,
-          slaIdAplicado: applied.slaId,
-          slaAppliedPax: applied.addedPax,
-          slaAppliedShiftCode: applied.shiftCode,
-          slaAppliedPositionId: applied.positionId,
-        };
-      }
-      if (esEstructural) {
-        toast.loading('Aprobando — sumando pax al SLA…', { id: 'aprobar' });
+        toast.loading('Aprobando — enviando a Planificación…', { id: 'aprobar' });
         await solicitudRefuerzoService.update(sol.id, {
           estado:              'APROBADA',
           autorizadoPorUid:    user.uid,
@@ -797,7 +794,7 @@ export default function SupervisionPage() {
           autorizadoPorNombre: user.displayName || user.email || '',
           createdAt: Timestamp.now(),
         });
-        toast.success('Aprobada — +pax en el SLA. Planificación cubre la demanda extra (sin RFZ de ese día).', { id: 'aprobar' });
+        toast.success('Aprobada — Planificación suma el pax al servicio desde el aviso.', { id: 'aprobar' });
       } else if (vaAPlanificacion) {
         toast.loading('Aprobando — enviando a Planificación…', { id: 'aprobar' });
         const turnoIds = await crearTurnosParaSolicitud(sol, { draft: true });
@@ -864,7 +861,7 @@ export default function SupervisionPage() {
   const resetManualForm = () => {
     setMTipo('REFUERZO_PUESTO'); setMClienteId(''); setMObjetivoId('');
     setMFechaDesde(''); setMFechaHasta(''); setMFechaModo('DIA'); setMStart(''); setMEnd(''); setMMotivo('');
-    setMSolicitante(''); setMCanal('TELEFONO'); setMPax(1); setMAlcance('PUNTUAL');
+    setMSolicitante(''); setMCanal('TELEFONO'); setMPax(1); setMSigla(''); setMAlcance('PUNTUAL');
     setMPosicionNombre(''); setMGuardiasTura([]); setMGuardiaManualNombre('');
     setSlaPositions([]); setMSelPosId(''); setMSelShiftCode('');
     setGuardias(undefined);
@@ -985,7 +982,8 @@ export default function SupervisionPage() {
           cantidadPax: mPax,
           positionName: positionName || undefined,
           positionId,
-          ...(esEstructural ? {} : { shiftCode }),
+          ...(shiftCode ? { shiftCode } : {}),
+          ...(!esEstructural && mSigla.trim() ? { rfzSigla: mSigla.trim().toUpperCase().replace(/\s+/g, '').slice(0, 8) } : {}),
         } : {}),
         ...(isAgregado && guard ? {
           parentEmpleadoName: guard.nombre || undefined,
@@ -999,7 +997,8 @@ export default function SupervisionPage() {
       const solicitudBase = buildSolicitudBase(mFechaDesde, isAgregado ? turaTargets[0] : undefined);
 
       if (esEstructural) {
-        const solicitudId = await solicitudRefuerzoService.create({ ...solicitudBase, turnoIds: [], actionTarget: 'PLANIFICACION' });
+        // + Pax al puesto: Supervisión lo pide y Planificación lo aplica (RFZF desde la fecha). No toca el servicio acá.
+        const solicitudId = await solicitudRefuerzoService.create({ ...solicitudBase, slaApplied: false, turnoIds: [], actionTarget: 'PLANIFICACION' });
         const manualSol: SolicitudRefuerzo = {
           ...solicitudBase,
           id: solicitudId,
@@ -1008,14 +1007,6 @@ export default function SupervisionPage() {
           positionId,
           ...(estructuralUsaRango && mFechaHasta ? { fechaHasta: mFechaHasta } : {}),
         };
-        const applied = await applySlaRefuerzoPax(manualSol, actor);
-        await solicitudRefuerzoService.update(solicitudId, {
-          slaApplied: true,
-          slaIdAplicado: applied.slaId,
-          slaAppliedPax: applied.addedPax,
-          slaAppliedShiftCode: applied.shiftCode,
-          slaAppliedPositionId: applied.positionId,
-        });
         await addDoc(collection(db, 'novedades'), {
           ...buildRefuerzoNovedadPayload({ ...manualSol, alcance: 'ESTRUCTURAL' }, {
             reportedBy: 'SUPERVISION',
@@ -1030,8 +1021,8 @@ export default function SupervisionPage() {
         });
         toast.success(
           estructuralUsaRango
-            ? `+${mPax} pax temporal en ${manualSol.positionName || 'puesto'} (${formatYmdAr(mFechaDesde)} → ${formatYmdAr(mFechaHasta)}) — planificá la dotación extra en ese período`
-            : `+${mPax} pax permanente en ${manualSol.positionName || 'puesto'}. Planificación cubre la demanda extra.`,
+            ? `Pedido enviado: +${mPax} pax en ${manualSol.positionName || 'puesto'} (${formatYmdAr(mFechaDesde)} → ${formatYmdAr(mFechaHasta)}). Lo aplica Planificación.`
+            : `Pedido enviado: +${mPax} pax en ${manualSol.positionName || 'puesto'} desde el ${formatYmdAr(mFechaDesde)}. Lo aplica Planificación.`,
         );
         resetManualForm();
         return;
@@ -1144,7 +1135,7 @@ export default function SupervisionPage() {
 
   const handleCancelarEstructural = useCallback(async (sol: SolicitudRefuerzo) => {
     if (!sol.id || !user) return;
-    if (sol.alcance !== 'ESTRUCTURAL' || (sol.estado !== 'APROBADA' && sol.estado !== 'ASIGNADA')) return;
+    if (sol.alcance !== 'ESTRUCTURAL' || (sol.estado !== 'APROBADA' && sol.estado !== 'ASIGNADA' && sol.estado !== 'PENDIENTE')) return;
     const reason = window.prompt('Motivo de cancelación del refuerzo estructural:')?.trim();
     if (!reason) return;
     const actor = { uid: user.uid, name: user.displayName || user.email || '' };
@@ -1937,6 +1928,14 @@ export default function SupervisionPage() {
                     </div>
                   );
                 })()}
+              </div>
+            )}
+
+            {mTipo === 'REFUERZO_PUESTO' && mAlcance === 'PUNTUAL' && (
+              <div>
+                <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Sigla en el cronograma</label>
+                <input type="text" placeholder="RM, EV… (refuerzo eventual)" value={mSigla} onChange={e => setMSigla(e.target.value.toUpperCase().replace(/\s+/g, '').slice(0, 8))}
+                  className="w-40 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black uppercase focus:outline-none focus:border-red-400" data-sup-rfz-sigla/>
               </div>
             )}
 

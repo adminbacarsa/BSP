@@ -135,6 +135,15 @@ function PedidoAcciones({
               <Ban size={10}/> Revertir
             </button>
           )}
+          {s.alcance === 'ESTRUCTURAL' && !s.slaApplied && (
+            <>
+              <span className="text-[10px] font-bold text-amber-600" data-pedido-pax-pendiente>Esperando a Planificación</span>
+              <button type="button" onClick={() => onRevertirEstructural(s)}
+                className={`${btn} bg-rose-50 hover:bg-rose-100 text-rose-600 flex items-center gap-1`}>
+                <Ban size={10}/> Cancelar
+              </button>
+            </>
+          )}
         </div>
       </div>
     );

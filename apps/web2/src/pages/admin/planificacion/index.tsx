@@ -299,6 +299,8 @@ import {
     type PortapapelesCrono,
 } from '@/lib/planificacion/cronoVentana';
 import { actualizarHorariosServicio, agregarFranjasServicio, agregarRfzfServicio } from '@/lib/servicios/aplicarServicioPlanilla';
+import { applySlaRefuerzoPax } from '@/lib/servicios/applySlaRefuerzoPax';
+import type { SolicitudRefuerzo } from '@/services/solicitudRefuerzoService';
 import { NOVEDAD_TYPE_SEEDS } from '@/lib/rrhh/novedadTypes';
 import { absenceService } from '@/services/absenceService';
 import {
@@ -2151,6 +2153,8 @@ function PlanificacionDesktop() {
         fechasExtra?: string;
         /** RFZE ya cargado: se cambia su horario en vez de crear otro. */
         editarSolicitudId?: string;
+        /** Pedido de Supervisión (+ pax al puesto): sin celdas, desde esa fecha y con esa cantidad. */
+        pedido?: { solicitudId: string; desde: string; pax: number };
     } | null>(null);
     /** Clic derecho en el día: «No se trabaja» (todo, un puesto o una franja); sus turnos pasan a RET. */
     const [diaNoTrabaja, setDiaNoTrabaja] = useState<{ ds: string; x: number; y: number; alcance: string; motivo: string; guardando: boolean } | null>(null);
@@ -7091,6 +7095,11 @@ function PlanificacionDesktop() {
 
         // Refuerzo / agregado solicitado por cliente (portal → planificación)
         const isRefuerzoCliente = notif.type === 'REFUERZO_CLIENTE_PENDIENTE';
+        // + Pax al puesto pedido por Supervisión: lo aplica Planificación (RFZF desde la fecha, o el rango).
+        if (notif.type === 'REFUERZO_ESTRUCTURAL' && notif.solicitudRefuerzoId) {
+            void abrirPedidoPax(String(notif.solicitudRefuerzoId), didNavigate);
+            return;
+        }
 
         // Vacante generada porque un guardia fue asignado a un evento
         const isVacantePorEvento = notif.type === 'VACANTE_POR_EVENTO';
@@ -15961,6 +15970,48 @@ function PlanificacionDesktop() {
         const st = (pos?.shifts || []).find((x: any) => String(x.code || '').toUpperCase() === String(next.sigla || '').toUpperCase());
         return st?.startTime && st?.endTime ? { ...next, inicio: String(st.startTime).slice(0, 5), fin: String(st.endTime).slice(0, 5) } : next;
     };
+    /** Pedido «+ pax al puesto» de Supervisión: con rango se suma en esas fechas; sin rango abre la «R» como RFZF desde la fecha. */
+    const abrirPedidoPax = async (solicitudId: string, navego: boolean) => {
+        try {
+            const snap = await getDoc(doc(db, 'solicitudes_refuerzo', solicitudId));
+            if (!snap.exists()) { toast.error('No encontré el pedido de refuerzo'); return; }
+            const sol = { id: snap.id, ...(snap.data() as any) } as SolicitudRefuerzo;
+            if (sol.slaApplied) { toast.message(`Ese pedido ya está aplicado en el servicio (${sol.positionName || 'puesto'} +${sol.cantidadPax || 1}).`); return; }
+            if (sol.estado === 'CANCELADA' || sol.estado === 'RECHAZADA') { toast.message('Ese pedido fue cancelado en Supervisión.'); return; }
+            const [y, m] = String(sol.fecha || '').split('-').map(Number);
+            if (y && m) setCurrentDate(new Date(y, m - 1, 1));
+            const pax = Math.max(1, Number(sol.cantidadPax) || 1);
+            const fmt = (ds: string) => `${ds.slice(8, 10)}/${ds.slice(5, 7)}`;
+            if (sol.fechaHasta) {
+                if (!confirm(`Pedido de Supervisión: +${pax} pax en ${sol.positionName || 'el puesto'} del ${fmt(sol.fecha)} al ${fmt(sol.fechaHasta)} (${sol.startTime}–${sol.endTime}).\n\n¿Lo sumo al servicio en esas fechas?`)) return;
+                const u = getAuth().currentUser;
+                const applied = await applySlaRefuerzoPax(sol, { uid: u?.uid || '', name: u?.displayName || u?.email || 'Planificación' });
+                await updateDoc(doc(db, 'solicitudes_refuerzo', solicitudId), {
+                    slaApplied: true, slaIdAplicado: applied.slaId, slaAppliedPax: applied.addedPax,
+                    slaAppliedShiftCode: applied.shiftCode, slaAppliedPositionId: applied.positionId,
+                    aplicadoPor: 'PLANIFICACION', aplicadoAt: Timestamp.now(),
+                });
+                toast.success(`+${pax} pax en ${sol.positionName || 'el puesto'} del ${fmt(sol.fecha)} al ${fmt(sol.fechaHasta)}: ya está en el servicio. Asigná los guardias en la grilla.`);
+                void refreshCronogramaView();
+                return;
+            }
+            window.setTimeout(() => {
+                setRfzEditor({
+                    tipo: 'RFZF', celdas: [],
+                    inicio: String(sol.startTime || ''), fin: String(sol.endTime || ''),
+                    dias: [...DIAS_SEMANA], pax, pidio: String(sol.solicitadoPorNombre || 'Supervisión'), motivo: String(sol.motivo || ''),
+                    guardando: false,
+                    puesto: sol.positionName || undefined,
+                    sigla: sol.shiftCode ? String(sol.shiftCode).toUpperCase() : undefined,
+                    pedido: { solicitudId, desde: String(sol.fecha), pax },
+                });
+            }, navego ? 700 : 150);
+        } catch (err: any) {
+            console.error('[pedido pax]', err);
+            toast.error(err?.message || 'No se pudo abrir el pedido');
+        }
+    };
+
     const confirmarRfz = async () => {
         const e = rfzEditor;
         if (!e || e.guardando || !empresaId || !selectedObjective) return;
@@ -16031,10 +16082,16 @@ function PlanificacionDesktop() {
                 const res = await agregarRfzfServicio({
                     servicioId: id, empresaId, migracionCompleta,
                     objectiveName: getObjectiveName(selectedObjective),
-                    inicio, fin, dias: e.dias, pax: new Set(e.celdas.map((c) => c.empId)).size || 1,
+                    inicio, fin, dias: e.dias, pax: e.pedido?.pax || new Set(e.celdas.map((c) => c.empId)).size || 1,
                     puesto: e.puesto, sigla: e.sigla,
-                    desde: e.celdas.map((c) => c.ds).sort()[0],
+                    desde: e.celdas.map((c) => c.ds).sort()[0] || e.pedido?.desde,
                 });
+                if (e.pedido) {
+                    await updateDoc(doc(db, 'solicitudes_refuerzo', e.pedido.solicitudId), {
+                        slaApplied: true, slaIdAplicado: id, slaAppliedPax: e.pedido.pax, slaAppliedShiftCode: res.code,
+                        positionName: res.puesto, aplicadoPor: 'PLANIFICACION', aplicadoAt: Timestamp.now(),
+                    });
+                }
                 const items: ItemRapido[] = [];
                 let salteados = 0;
                 const vistos = new Set<string>();
@@ -16052,7 +16109,8 @@ function PlanificacionDesktop() {
                     }
                 }
                 if (items.length) escribirRapido(items);
-                toast.success(`${res.texto} · ${items.length} turno(s) en borrador${salteados ? ` · ${salteados} día(s) salteados porque ya tienen turno` : ''}. Guardá el cronograma.`);
+                if (e.pedido) toast.success(`${res.texto} · pedido de Supervisión aplicado. Asigná los guardias en la grilla.`);
+                else toast.success(`${res.texto} · ${items.length} turno(s) en borrador${salteados ? ` · ${salteados} día(s) salteados porque ya tienen turno` : ''}. Guardá el cronograma.`);
             }
             setRfzEditor(null);
         } catch (err: any) {
@@ -21887,9 +21945,11 @@ function PlanificacionDesktop() {
                             RFZ<span className={rfzEditor.tipo === 'RFZF' ? 'text-emerald-600' : 'text-orange-500'}>{rfzEditor.tipo.slice(3)}</span> · {rfzEditor.editarSolicitudId ? 'Cambiar el horario del refuerzo eventual' : rfzEditor.tipo === 'RFZF' ? 'Refuerzo fijo: queda en el servicio desde este día, con su patrón' : 'Refuerzo eventual: solo esas fechas, aprobado, facturable'}
                         </p>
                         <p className="text-[11px] text-slate-500">
-                            {[...new Set(rfzEditor.celdas.map((c) => c.empName.split(',')[0]))].join(', ')} · {rfzEditor.tipo === 'RFZE'
+                            {rfzEditor.pedido && !rfzEditor.celdas.length
+                                ? `Pedido de Supervisión: +${rfzEditor.pedido.pax} pax desde el ${rfzEditor.pedido.desde.slice(8, 10)}/${rfzEditor.pedido.desde.slice(5, 7)} y sigue los meses siguientes`
+                                : <>{[...new Set(rfzEditor.celdas.map((c) => c.empName.split(',')[0]))].join(', ')} · {rfzEditor.tipo === 'RFZE'
                                 ? `${rfzEditor.celdas.length} día(s): ${[...new Set(rfzEditor.celdas.map((c) => c.ds.slice(8, 10)))].join(', ')}`
-                                : `desde el ${rfzEditor.celdas.map((c) => c.ds).sort()[0].slice(8, 10)}/${rfzEditor.celdas.map((c) => c.ds).sort()[0].slice(5, 7)} y sigue los meses siguientes`}
+                                : `desde el ${rfzEditor.celdas.map((c) => c.ds).sort()[0].slice(8, 10)}/${rfzEditor.celdas.map((c) => c.ds).sort()[0].slice(5, 7)} y sigue los meses siguientes`}</>}
                         </p>
                         <div className="mt-2 flex flex-wrap items-end gap-2">
                             {!rfzEditor.editarSolicitudId && (
