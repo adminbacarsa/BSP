@@ -15,6 +15,19 @@ function turaImputacionLegajo(positionName: string): string {
   return compact.slice(0, 4) || 'TUR';
 }
 
+/** Refuerzo eventual: una línea por sigla y horario («RFZE · RM · 08:00–16:00»), con las horas de cada día. */
+function esRefuerzoEventual(sol: SolicitudRefuerzo): boolean {
+  const s = sol as SolicitudRefuerzo & { shiftCode?: string; rfzTipo?: string };
+  return String(s.shiftCode || '').toUpperCase() === 'RFZE' || s.rfzTipo === 'EVENTUAL';
+}
+
+function etiquetaRefuerzoEventual(sol: SolicitudRefuerzo): string {
+  const s = sol as SolicitudRefuerzo & { rfzSigla?: string };
+  const sigla = String(s.rfzSigla || '').trim() || 'Refuerzo eventual';
+  const horario = sol.startTime && sol.endTime ? ` · ${String(sol.startTime).slice(0, 5)}–${String(sol.endTime).slice(0, 5)}` : '';
+  return `RFZE · ${sigla}${horario}`;
+}
+
 export function calcRefuerzoHorasVendidas(sol: SolicitudRefuerzo): number {
   const hs = calcRefuerzoPactadaHours(sol.startTime, sol.endTime);
   const code = refuerzoTipoCode(sol);
@@ -69,7 +82,7 @@ export function applyRefuerzoHorasVendidasToBreakdown(
     const billedPos = String(sol.positionName || '').trim();
     const posName = sol.tipo === 'AGREGADO_TURNO'
       ? (billedPos || `TURA · ${sol.parentEmpleadoName || 'Agregado'}`)
-      : `RFZ · ${billedPos || 'Refuerzo cliente'}`;
+      : esRefuerzoEventual(sol) ? etiquetaRefuerzoEventual(sol) : `RFZ · ${billedPos || 'Refuerzo cliente'}`;
     const fecha = String(sol.fecha).slice(0, 10);
 
     const oKey = normalize(objName);
@@ -182,6 +195,7 @@ function refuerzoPositionGridLabel(sol: SolicitudRefuerzo): string | null {
   const code = refuerzoTipoCode(sol);
   const billedPos = String(sol.positionName || '').trim();
   if (code === 'TURA') return billedPos || null;
+  if (esRefuerzoEventual(sol)) return etiquetaRefuerzoEventual(sol);
   return billedPos ? `RFZ · ${billedPos}` : 'RFZ · Refuerzo';
 }
 
