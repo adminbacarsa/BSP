@@ -3,8 +3,11 @@
  * Se dibuja desde los datos, no es una captura: nombre, días y código de cada celda, con la leyenda de horarios.
  */
 
-export type CeldaImagen = { code: string; horario?: string };
+export type CeldaImagen = { code: string; horario?: string; /** Color del puesto (el borde de la grilla). */ color?: string };
+/** Referencia por puesto, como la de abajo de la grilla: nombre en su color y sus turnos con horario. */
+export type PuestoImagen = { nombre: string; color?: string; franjas: Array<{ code: string; horario: string }> };
 export type DatosImagen = {
+  puestos?: PuestoImagen[];
   titulo: string;
   subtitulo: string;
   aviso?: string;
@@ -65,6 +68,24 @@ export function leyendaHorarios(datos: DatosImagen): Array<{ code: string; horar
     .map(([code, hs]) => ({ code, horario: [...hs].join(' / ') }));
 }
 
+/** Lo que no es turno de un puesto (F, RET, licencias) y aparece en el mes. */
+export function otrosCodigos(datos: DatosImagen): string[] {
+  const propios = new Set((datos.puestos || []).flatMap((p) => p.franjas.map((f) => f.code.toUpperCase())));
+  const vistos = new Set<string>();
+  for (const f of datos.filas) for (const c of Object.values(f.celdas)) {
+    const code = String(c.code || '').toUpperCase();
+    if (code && !c.horario && !propios.has(code)) vistos.add(code.startsWith('FT') ? 'FT' : code);
+  }
+  return [...vistos].sort();
+}
+
+/** Celda del color del puesto: fondo blanco, borde del puesto. D12/N12, francos y licencias quedan con su color. */
+function coloresCelda(c: CeldaImagen): Colores {
+  const code = String(c.code || '').toUpperCase();
+  if (c.color && c.horario && !['D12', 'N12'].includes(code) && !code.startsWith('FT')) return { bg: '#ffffff', fg: '#0f172a', borde: c.color };
+  return coloresDe(code);
+}
+
 const NOMBRE_W = 230;
 const COL_W = 42;
 const FILA_H = 34;
@@ -73,9 +94,13 @@ const DIAS_H = 44;
 
 /** Dibuja en un canvas nuevo (escala 2 para que se lea nítido en el celular). */
 export function dibujarCronograma(datos: DatosImagen, escala = 2): HTMLCanvasElement {
-  const leyenda = leyendaHorarios(datos);
+  const puestos = (datos.puestos || []).filter((p) => p.franjas.length);
+  const otros = puestos.length ? otrosCodigos(datos) : [];
+  const leyenda = puestos.length ? [] : leyendaHorarios(datos);
   const porLinea = 4;
-  const leyendaH = leyenda.length ? 30 + Math.ceil(leyenda.length / porLinea) * 24 : 0;
+  const leyendaH = puestos.length
+    ? 30 + (puestos.length + (otros.length ? 1 : 0)) * 26
+    : leyenda.length ? 30 + Math.ceil(leyenda.length / porLinea) * 24 : 0;
   const ancho = NOMBRE_W + COL_W * datos.dias.length + 24;
   const alto = CAB_H + DIAS_H + FILA_H * datos.filas.length + leyendaH + 44;
   const canvas = document.createElement('canvas');
@@ -139,14 +164,14 @@ export function dibujarCronograma(datos: DatosImagen, escala = 2): HTMLCanvasEle
       const c = f.celdas[d.dateStr];
       if (!c?.code) return;
       const x = x0 + NOMBRE_W + i * COL_W;
-      const col = coloresDe(c.code);
+      const col = coloresCelda(c);
       const bx = x + 3;
       const by = y + 4;
       const bw = COL_W - 6;
       const bh = FILA_H - 8;
       ctx.fillStyle = col.bg;
       ctx.strokeStyle = col.borde;
-      ctx.lineWidth = 1.5;
+      ctx.lineWidth = c.color && col.borde === c.color ? 2.5 : 1.5;
       ctx.beginPath();
       ctx.roundRect(bx, by, bw, bh, 5);
       ctx.fill();
@@ -166,7 +191,53 @@ export function dibujarCronograma(datos: DatosImagen, escala = 2): HTMLCanvasEle
   ctx.stroke();
 
   ctx.textAlign = 'left';
-  if (leyenda.length) {
+  if (puestos.length) {
+    ctx.fillStyle = '#0f172a';
+    ctx.font = fuente(800, 12);
+    ctx.fillText('HORARIOS', x0 + 4, yFin + 22);
+    const fila = (y: number, titulo: string, colorTitulo: string | undefined, chips: Array<{ code: string; horario?: string; col: Colores }>) => {
+      ctx.font = fuente(800, 11);
+      const tw = Math.max(60, ctx.measureText(titulo).width + 12);
+      ctx.fillStyle = colorTitulo || '#e2e8f0';
+      ctx.beginPath();
+      ctx.roundRect(x0 + 4, y, tw, 18, 4);
+      ctx.fill();
+      ctx.fillStyle = colorTitulo ? '#ffffff' : '#334155';
+      ctx.textAlign = 'center';
+      ctx.fillText(titulo, x0 + 4 + tw / 2, y + 13);
+      let x = x0 + 4 + tw + 10;
+      for (const ch of chips) {
+        ctx.fillStyle = ch.col.bg;
+        ctx.strokeStyle = ch.col.borde;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.roundRect(x, y, 40, 18, 4);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = ch.col.fg;
+        ctx.textAlign = 'center';
+        ctx.font = fuente(800, 10);
+        ctx.fillText(ch.code, x + 20, y + 13);
+        x += 44;
+        if (ch.horario) {
+          ctx.textAlign = 'left';
+          ctx.fillStyle = '#334155';
+          ctx.font = fuente(600, 11);
+          ctx.fillText(ch.horario, x, y + 13);
+          x += ctx.measureText(ch.horario).width + 14;
+        }
+      }
+      ctx.textAlign = 'left';
+    };
+    puestos.forEach((p, i) => {
+      fila(yFin + 30 + i * 26, p.nombre.toUpperCase(), p.color, p.franjas.map((f) => {
+        const code = f.code.toUpperCase();
+        const col = p.color && !['D12', 'N12'].includes(code) ? { bg: '#ffffff', fg: '#0f172a', borde: p.color } : coloresDe(code);
+        return { code, horario: f.horario, col };
+      }));
+    });
+    if (otros.length) fila(yFin + 30 + puestos.length * 26, 'OTROS', undefined, otros.map((code) => ({ code, col: coloresDe(code) })));
+  } else if (leyenda.length) {
     ctx.fillStyle = '#0f172a';
     ctx.font = fuente(800, 12);
     ctx.fillText('HORARIOS', x0 + 4, yFin + 22);

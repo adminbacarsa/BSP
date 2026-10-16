@@ -14436,9 +14436,11 @@ function PlanificacionDesktop() {
                 const franco = sh.isFranco || ['F', 'FF', 'FP'].includes(code);
                 const ini = hhmm(sh.startTime);
                 const fin = hhmm(sh.endTime);
+                const colorPos = colorPuestoGrilla[String(sh.positionName || '')]?.color;
                 celdas[d.dateStr] = {
                     code: sh.isFrancoTrabajado ? `FT·${code}` : code,
                     ...(!franco && ini && fin && ini !== fin ? { horario: `${ini}–${fin}` } : {}),
+                    ...(!franco && colorPos ? { color: colorPos } : {}),
                 };
             }
             return { nombre: String(e.name || e.id), celdas };
@@ -14446,7 +14448,18 @@ function PlanificacionDesktop() {
         const mes = currentDate.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
         const cliente = (clients as any[]).find((c: any) => c.id === selectedClient)?.name || '';
         const titulo = selectedGrupo && grupoUnifiedMode ? selectedGrupo.nombre : getObjectiveName(selectedObjective);
+        // Referencia por puesto (como la de abajo de la grilla): todos sus turnos con horario.
+        const puestos = ((positionStructure || []) as any[])
+            .filter((p: any) => p.positionName && p.positionName !== 'General')
+            .map((p: any) => ({
+                nombre: String(p.positionName),
+                color: colorPuestoGrilla[String(p.positionName)]?.color,
+                franjas: ((p.shifts || []) as any[])
+                    .filter((st: any) => st.code && st.startTime && st.endTime)
+                    .map((st: any) => ({ code: String(st.code).toUpperCase(), horario: `${hhmm(st.startTime)}–${hhmm(st.endTime)}` })),
+            }));
         setImagenCrono({
+            puestos,
             titulo,
             subtitulo: `${selectedGrupo && grupoUnifiedMode ? '' : cliente ? `${cliente} · ` : ''}${mes.charAt(0).toUpperCase()}${mes.slice(1)}`,
             aviso: planPublicadoGrilla && Object.keys(pendingChanges).length === 0 ? undefined : 'Cronograma sin publicar o con cambios sin guardar: puede cambiar.',
