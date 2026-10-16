@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { agregarRfzfAPosiciones, fechasRfzf, normalizarHora } from './refuerzosRapido';
+import { agregarRfzfAPosiciones, fechasDeTexto, fechasRfzf, franjasParaMesSiguiente, normalizarHora } from './refuerzosRapido';
 
 describe('refuerzos desde el modo rápido', () => {
   it('RFZF V·S·D desde el 10 hasta fin de octubre', () => {
@@ -26,4 +26,36 @@ describe('refuerzos desde el modo rápido', () => {
     assert.equal(normalizarHora('630'), '06:30');
     assert.equal(normalizarHora('22:00'), '22:00');
   });
+
+  it('RFZF PP de Casino: puesto nuevo con sigla desde el 10/10; en noviembre todos los días', () => {
+    const todos = ['L', 'M', 'X', 'J', 'V', 'S', 'D'] as const;
+    const t = agregarRfzfAPosiciones([{ name: 'Guardia', allowedShiftTypes: [{ code: 'M' }] }], { inicio: '15:00', fin: '22:00', dias: [...todos], pax: 1, puesto: 'PP', sigla: 'T', desde: '2026-10-10' });
+    const n = agregarRfzfAPosiciones(t.positions, { inicio: '22:00', fin: '05:00', dias: [...todos], pax: 1, puesto: 'PP', sigla: 'N', desde: '2026-10-10' });
+    const pp = n.positions.find((p) => p.name === 'PP')!;
+    assert.deepEqual(pp.allowedShiftTypes!.map((x) => x.code), ['T', 'N']);
+    assert.equal((pp.allowedShiftTypes![0].specificDates as string[]).length, 22);
+    assert.equal((pp.allowedShiftTypes![0].specificDates as string[])[0], '2026-10-10');
+    const nov = franjasParaMesSiguiente(n.positions, '2026-11').find((p) => p.name === 'PP')!;
+    assert.deepEqual(nov.allowedShiftTypes!.map((x) => [x.code, x.specificDates, x.days, x.refuerzoFijo]), [['T', undefined, undefined, undefined], ['N', undefined, undefined, undefined]]);
+  });
+
+  it('RFZF solo martes y jueves desde el 10: en noviembre queda M·J', () => {
+    const r = agregarRfzfAPosiciones([], { inicio: '08:00', fin: '16:00', dias: ['M', 'J'], pax: 1, puesto: 'Playa', sigla: 'RF', desde: '2026-10-10' });
+    const nov = franjasParaMesSiguiente(r.positions, '2026-11')[0];
+    assert.deepEqual(nov.allowedShiftTypes![0].days, ['M', 'J']);
+  });
+
+  it('franja con fechas sin marca: hasta fin de mes seguidas pasa entera; si no, se saca; las del mes nuevo quedan', () => {
+    const fechas = Array.from({ length: 22 }, (_, i) => `2026-10-${String(10 + i).padStart(2, '0')}`);
+    const pos = [{ name: 'PP', allowedShiftTypes: [{ code: 'T', specificDates: fechas }, { code: 'RM', specificDates: ['2026-10-20', '2026-10-21'] }, { code: 'X', specificDates: ['2026-10-31', '2026-11-02'] }] }];
+    const nov = franjasParaMesSiguiente(pos, '2026-11')[0];
+    assert.deepEqual(nov.allowedShiftTypes!.map((x) => [x.code, x.specificDates]), [['T', undefined], ['X', ['2026-11-02']]]);
+  });
+
+  it('fechas del eventual: sueltas y rango que cruza de mes', () => {
+    assert.deepEqual(fechasDeTexto('20/10, 21/10', 2026), ['2026-10-20', '2026-10-21']);
+    assert.deepEqual(fechasDeTexto('28/10-2/11', 2026), ['2026-10-28', '2026-10-29', '2026-10-30', '2026-10-31', '2026-11-01', '2026-11-02']);
+    assert.deepEqual(fechasDeTexto('30/12-2/1', 2026), ['2026-12-30', '2026-12-31', '2027-01-01', '2027-01-02']);
+  });
 });
+

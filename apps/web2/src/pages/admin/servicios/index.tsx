@@ -1,4 +1,5 @@
 ﻿import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
+import { franjasParaMesSiguiente } from '@/lib/planificacion/refuerzosRapido';
 import Link from 'next/link';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { PageShell, PageHeader, ModuleShell } from '@/components/ui';
@@ -1548,7 +1549,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
           seriesId,
         ).map((d) => {
           const bornClosed = newSlaBornClosed(d.endDate, today);
-          return { ...d, closed: bornClosed, ...(bornClosed ? { closedReason: 'VENCIDO' } : {}) };
+          return { ...d, positions: franjasParaMesSiguiente(((d as any).positions || []) as any[], String(d.startDate || '').slice(0, 7)) as any, closed: bornClosed, ...(bornClosed ? { closedReason: 'VENCIDO' } : {}) };
         });
         if (!source.slaSeriesId) {
           savedSelfRef.current = true;
@@ -1721,7 +1722,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
           const seriesId = newSlaSeriesId();
           const drafts = buildSlaDraftsForSegments(dataToSave, segments, seriesId).map((d: any) => {
             const bornClosed = newSlaBornClosed(String(d.endDate || ''), today);
-            return { ...d, closed: bornClosed, ...(bornClosed ? { closedReason: 'VENCIDO' } : {}) };
+            return { ...d, positions: franjasParaMesSiguiente(((d as any).positions || []) as any[], String(d.startDate || '').slice(0, 7)) as any, closed: bornClosed, ...(bornClosed ? { closedReason: 'VENCIDO' } : {}) };
           });
           const created: Array<ServiceSLA & { id: string }> = [];
           let keptId: string | null = null;
@@ -1973,7 +1974,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
           seriesId,
         ).map((d) => {
           const bornClosed = newSlaBornClosed(String(d.endDate || ''), today);
-          return { ...d, slaSeriesId: seriesId, closed: bornClosed, ...(bornClosed ? { closedReason: 'VENCIDO' } : {}) };
+          return { ...d, positions: franjasParaMesSiguiente(((d as any).positions || []) as any[], String(d.startDate || '').slice(0, 7)) as any, slaSeriesId: seriesId, closed: bornClosed, ...(bornClosed ? { closedReason: 'VENCIDO' } : {}) };
         });
         for (const draft of drafts) {
           const row = { ...draft } as ServiceSLA & { id?: string };

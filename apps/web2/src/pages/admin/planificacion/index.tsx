@@ -288,7 +288,7 @@ import { coberturaPorHoras, textoHoras, type PuestoHoras, type TramoHoras } from
 import { crearRfzePlanificacion } from '@/lib/refuerzo/crearRfzePlanificacion';
 import { modifyRefuerzoPuntual } from '@/lib/refuerzo/modifyRefuerzoPuntual';
 import { cancelRefuerzoPuntual } from '@/lib/refuerzo/cancelRefuerzoPuntual';
-import { DIAS_SEMANA, fechasRfzf, horarioValido, letraDeFecha, normalizarHora, type DiaLetra } from '@/lib/planificacion/refuerzosRapido';
+import { DIAS_SEMANA, fechasDeTexto, fechasRfzf, franjasParaMesSiguiente, horarioValido, letraDeFecha, normalizarHora, type DiaLetra } from '@/lib/planificacion/refuerzosRapido';
 import { catalogoObjetivos, lugarDeGuardia, turnosLugarDeMapa } from '@/lib/planificacion/pegarPersonas';
 import {
     CANAL_PORTAPAPELES,
@@ -1452,11 +1452,13 @@ function calcularCeldaGrilla(e: EntradaCeldaGrilla, emp: any, isGuest: boolean, 
     const swapStyle = swapPending ? SHIFT_STYLES['SWAP_PENDING'] : SHIFT_STYLES['SWAP'];
     if (isLockedDate && !p) { style = SHIFT_STYLES['PAST']; if (s) content = s.code; }
     else if (p) { if (p.isDeleted) { content = CELDA_BORRADA; style = "bg-rose-50 text-rose-300"; } else { if (isFT) { style = SHIFT_STYLES['FT']; content = etiquetaFt(p.code); } else if (isFF) { style = SHIFT_STYLES['FF']; content = "FF"; } else { content = p.code; const baseStyle = SHIFT_STYLES[p.code]; style = baseStyle ? `${baseStyle} ring-2 ring-amber-400 ${isSwap ? swapStyle : ''}` : `bg-amber-100 text-amber-700 font-black ring-2 ring-amber-400 ${isSwap ? swapStyle : ''}`; if (content === 'REF' || content === 'ESC') content = cellLabelForDeployment(String(content), p.deploymentBand); } } }
-    else if (s && rfzOnCell && (rfzOnCell.rfzTipo === 'EVENTUAL' || rfzOnCell.shiftCode === 'RFZE') && String(s.code || '').toUpperCase().startsWith('RFZF')) { content = 'RFZE'; style = SHIFT_STYLES['RFZE']; }
+    else if (s && rfzOnCell && (rfzOnCell.rfzTipo === 'EVENTUAL' || rfzOnCell.shiftCode === 'RFZE') && String(s.code || '').toUpperCase().startsWith('RFZF')) { content = String(rfzOnCell.rfzSigla || 'RFZE'); style = SHIFT_STYLES['RFZE']; }
     else if (s) { if (!isLockedDate) { if (isFT) { style = SHIFT_STYLES['FT']; content = etiquetaFt(s.code); } else if (isFF) { style = SHIFT_STYLES['FF']; content = "FF"; } else { style = `${getDefaultStyle(s.code)} ${isSwap ? swapStyle : ''}`; content = s.code; } } }
     else if (rfzOnCell && !p) {
-        content = rfzOnCell.rfzTipo === 'EVENTUAL' || rfzOnCell.shiftCode === 'RFZE' ? 'RFZE' : 'RFZ';
-        style = `${SHIFT_STYLES[content as string] || SHIFT_STYLES['RFZ']}${rfzOnCell.draft ? ' ring-2 ring-amber-400' : ''}`;
+        const eventual = rfzOnCell.rfzTipo === 'EVENTUAL' || rfzOnCell.shiftCode === 'RFZE';
+        // El refuerzo eventual se ve con su sigla (RM) y el color de RFZE.
+        content = eventual ? String(rfzOnCell.rfzSigla || 'RFZE') : 'RFZ';
+        style = `${SHIFT_STYLES[eventual ? 'RFZE' : 'RFZ']}${rfzOnCell.draft ? ' ring-2 ring-amber-400' : ''}`;
     }
     const _deployBand = (p && !p.isDeleted ? p.deploymentBand : s?.deploymentBand);
     if (content === 'REF' || content === 'ESC') {
@@ -2140,6 +2142,12 @@ function PlanificacionDesktop() {
         tipo: 'RFZF' | 'RFZE';
         celdas: Array<{ r: number; c: number; empId: string; empName: string; ds: string }>;
         inicio: string; fin: string; dias: DiaLetra[]; pax: number; pidio: string; motivo: string; guardando: boolean;
+        /** Sigla que se ve en la grilla (RM, PP…). */
+        sigla?: string;
+        /** RFZF: puesto del servicio donde va (nuevo o existente). */
+        puesto?: string;
+        /** RFZE: más fechas, también del mes siguiente («1/11, 3/11» o «28/10-5/11»). */
+        fechasExtra?: string;
         /** RFZE ya cargado: se cambia su horario en vez de crear otro. */
         editarSolicitudId?: string;
     } | null>(null);
@@ -11992,7 +12000,7 @@ function PlanificacionDesktop() {
                         activarGrupoRef.current.push({ objectiveId: oid, nombre: nombreObj, services: matching, last: propuesta.last, plan: preview.plan, newEndDate: decision.newEndDate });
                         activables.push(nombreObj);
                         if (!estructuraPorObj[oid].length) {
-                            const built = buildPlanningPositionStructure(propuesta.last as any, { monthHasSla: true, hasExactMatch: true });
+                            const built = buildPlanningPositionStructure({ ...(propuesta.last as any), positions: franjasParaMesSiguiente(((propuesta.last as any).positions || []) as any[], `${y}-${String(m + 1).padStart(2, '0')}`) } as any, { monthHasSla: true, hasExactMatch: true });
                             estructuraPorObj[oid] = built.structure as any[];
                         }
                     }
@@ -12070,7 +12078,7 @@ function PlanificacionDesktop() {
                         if (target && base) {
                             actualizarServicioRef.current = { target, base, cambios: act.cambios };
                             activarVista = { accion: 'actualizar', mes: act.mes, mesBase: act.mesBase, cambios: act.cambios, marcado: permisoServicio, puede: true, motivo: '', permiso: permisoServicio };
-                            const built = buildPlanningPositionStructure(base as any, { monthHasSla: true, hasExactMatch: true });
+                            const built = buildPlanningPositionStructure({ ...(base as any), positions: franjasParaMesSiguiente(((base as any).positions || []) as any[], `${y}-${String(m + 1).padStart(2, '0')}`) } as any, { monthHasSla: true, hasExactMatch: true });
                             if (built.structure.length) estructuraContinuar = built.structure as PuestoSlaContinuar[];
                         }
                     } else if (act.accion === 'no_se_puede') {
@@ -12103,7 +12111,7 @@ function PlanificacionDesktop() {
                                 plan: preview.plan,
                                 newEndDate: decision.newEndDate,
                             };
-                            const built = buildPlanningPositionStructure(propuesta.last, { monthHasSla: true, hasExactMatch: true });
+                            const built = buildPlanningPositionStructure({ ...(propuesta.last as any), positions: franjasParaMesSiguiente(((propuesta.last as any).positions || []) as any[], `${y}-${String(m + 1).padStart(2, '0')}`) } as any, { monthHasSla: true, hasExactMatch: true });
                             if (built.structure.length) estructuraContinuar = built.structure as PuestoSlaContinuar[];
                         }
                     }
@@ -12302,6 +12310,7 @@ function PlanificacionDesktop() {
         const ops: ServicioPendiente[] = [];
         const virtualCrear = (last: SlaRow, oid: string, newEndDate: string) => ({
             ...last,
+            positions: franjasParaMesSiguiente(((last as any).positions || []) as any[], mesKeyCont) as any,
             id: `pendiente_${oid}_${mesKeyCont}`,
             startDate: `${mesKeyCont}-01`,
             endDate: newEndDate,
@@ -12326,7 +12335,7 @@ function PlanificacionDesktop() {
                 mesKey: mesKeyCont,
                 tipo: 'actualizar',
                 texto: `servicio de ${mesTxtCont} actualizado con el de ${continuarVista.activar?.mesBase || 'el mes anterior'}`,
-                virtual: { ...planActualizar.target, positions: JSON.parse(JSON.stringify(planActualizar.base.positions || [])), exigeCobertura: (planActualizar.base as any).exigeCobertura ?? (planActualizar.target as any).exigeCobertura },
+                virtual: { ...planActualizar.target, positions: franjasParaMesSiguiente(JSON.parse(JSON.stringify(planActualizar.base.positions || [])), mesKeyCont), exigeCobertura: (planActualizar.base as any).exigeCobertura ?? (planActualizar.target as any).exigeCobertura },
                 run: () => actualizarServicioDesdeBase({ ...planActualizar, empresaId, migracionCompleta, scopeEmpresa, via: 'CONTINUAR_MES' }),
             });
         }
@@ -15881,11 +15890,14 @@ function PlanificacionDesktop() {
                 if (!celdasOk.length) { toast.message(`No se cargó: esos días ya tienen turno (${salteados.join(', ')}).`); setRfzEditor((prev) => (prev ? { ...prev, guardando: false } : prev)); return; }
                 if (borrar.length) escribirRapido(borrar);
                 const porGuardia = new Map<string, { empName: string; fechas: string[] }>();
+                const extra = fechasDeTexto(e.fechasExtra || '', currentDate.getFullYear());
                 for (const c of celdasOk) {
                     const g = porGuardia.get(c.empId) || { empName: c.empName, fechas: [] };
                     if (!g.fechas.includes(c.ds)) g.fechas.push(c.ds);
+                    for (const f of extra) if (!g.fechas.includes(f)) g.fechas.push(f);
                     porGuardia.set(c.empId, g);
                 }
+                const mesVisto = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
                 let n = 0;
                 for (const [empId, g] of porGuardia) {
                     n += await crearRfzePlanificacion({
@@ -15893,9 +15905,12 @@ function PlanificacionDesktop() {
                         objectiveId: selectedObjective, objectiveName: getObjectiveName(selectedObjective),
                         employeeId: empId, employeeName: g.empName, fechas: g.fechas.sort(),
                         inicio, fin, pidio: e.pidio, motivo: e.motivo, draft: !planPublicadoGrilla,
+                        sigla: e.sigla,
+                        // Fechas de otro mes (28/10 → 5/11): en borrador hasta que se publique ese mes.
+                        draftDe: (f) => (f.startsWith(mesVisto) ? !planPublicadoGrilla : true),
                     });
                 }
-                toast.success(`RFZE ${inicio}–${fin}: ${n} día(s) cargados y aprobados (trazabilidad del servicio)${borrar.length ? ` · ${borrar.length} RFZF reemplazado(s): guardá el cronograma` : ''}${salteados.length ? ` · salteados: ${salteados.join(', ')}` : ''}`);
+                toast.success(`${(e.sigla || 'RFZE').toUpperCase()} ${inicio}–${fin}: ${n} día(s) cargados y aprobados (trazabilidad del servicio)${borrar.length ? ` · ${borrar.length} RFZF reemplazado(s): guardá el cronograma` : ''}${salteados.length ? ` · salteados: ${salteados.join(', ')}` : ''}`);
                 void refreshCronogramaView();
             } else {
                 const id = String((activePlanningSlaRow as { id?: string } | null)?.id || '');
@@ -15903,6 +15918,8 @@ function PlanificacionDesktop() {
                     servicioId: id, empresaId, migracionCompleta,
                     objectiveName: getObjectiveName(selectedObjective),
                     inicio, fin, dias: e.dias, pax: new Set(e.celdas.map((c) => c.empId)).size || 1,
+                    puesto: e.puesto, sigla: e.sigla,
+                    desde: e.celdas.map((c) => c.ds).sort()[0],
                 });
                 const items: ItemRapido[] = [];
                 let salteados = 0;
@@ -15917,7 +15934,7 @@ function PlanificacionDesktop() {
                         const cx = ctxDeCelda(`${c.empId}_${ds}`);
                         const actual = cx?.p && !cx.p.isDeleted ? cx.p : cx?.s;
                         if (actual && !esCeldaFranco(actual)) { salteados++; continue; }
-                        items.push({ r: c.r, c: col, code: res.code, fuente: { code: res.code, name: 'Refuerzo fijo', startTime: inicio, endTime: fin, hours: horasEntre(inicio, fin), positionName: 'RFZF', forzarPuesto: true } });
+                        items.push({ r: c.r, c: col, code: res.code, fuente: { code: res.code, name: res.code, startTime: inicio, endTime: fin, hours: horasEntre(inicio, fin), positionName: res.puesto, forzarPuesto: true } });
                     }
                 }
                 if (items.length) escribirRapido(items);
@@ -15976,7 +15993,7 @@ function PlanificacionDesktop() {
             if (!enCampo) { ev.stopImmediatePropagation(); }
         };
         window.addEventListener('keydown', onKey, true);
-        const t = window.setTimeout(() => (document.querySelector('[data-rfz-inicio]') as HTMLInputElement | null)?.focus(), 30);
+        const t = window.setTimeout(() => ((document.querySelector('[data-rfz-sigla]') || document.querySelector('[data-rfz-inicio]')) as HTMLInputElement | null)?.focus(), 30);
         return () => { window.removeEventListener('keydown', onKey, true); window.clearTimeout(t); };
     }, [!!rfzEditor]);
     const confirmarTuraRef = useRef(confirmarTura);
@@ -19348,8 +19365,9 @@ function PlanificacionDesktop() {
                                                 tipo: cu,
                                                 celdas: lista.map((y) => ({ r: y.x.r, c: y.x.c, empId: y.emp.id, empName: String(y.emp.name || ''), ds: y.ds })),
                                                 inicio: '', fin: '',
-                                                dias: cu === 'RFZF' ? [...new Set(lista.map((y) => letraDeFecha(y.ds)))] : [],
-                                                pax: 1, pidio: '', motivo: '', guardando: false,
+                                                // Fijo desde una celda: todos los días; con varias celdas, los días elegidos.
+                                                dias: cu === 'RFZF' ? (new Set(lista.map((y) => y.ds)).size > 1 ? [...new Set(lista.map((y) => letraDeFecha(y.ds)))] : [...DIAS_SEMANA]) : [],
+                                                pax: 1, pidio: '', motivo: '', guardando: false, sigla: '', puesto: '', fechasExtra: '',
                                             });
                                             return;
                                         }
@@ -21678,14 +21696,25 @@ function PlanificacionDesktop() {
                 {rfzEditor && typeof document !== 'undefined' && createPortal(
                     <div className="fixed bottom-6 left-1/2 z-[12000] w-[min(36rem,calc(100vw-2rem))] -translate-x-1/2 rounded-2xl border border-slate-200 bg-white p-3 text-[12px] shadow-xl" data-rfz-editor={rfzEditor.tipo}>
                         <p className="font-black text-slate-800">
-                            RFZ<span className={rfzEditor.tipo === 'RFZF' ? 'text-emerald-600' : 'text-orange-500'}>{rfzEditor.tipo.slice(3)}</span> · {rfzEditor.editarSolicitudId ? 'Cambiar el horario del refuerzo eventual' : rfzEditor.tipo === 'RFZF' ? 'Refuerzo fijo (va en el servicio, puesto RFZF, todo el mes)' : 'Refuerzo eventual (fechas puntuales, aprobado, facturable)'}
+                            RFZ<span className={rfzEditor.tipo === 'RFZF' ? 'text-emerald-600' : 'text-orange-500'}>{rfzEditor.tipo.slice(3)}</span> · {rfzEditor.editarSolicitudId ? 'Cambiar el horario del refuerzo eventual' : rfzEditor.tipo === 'RFZF' ? 'Refuerzo fijo: queda en el servicio desde este día, con su patrón' : 'Refuerzo eventual: solo esas fechas, aprobado, facturable'}
                         </p>
                         <p className="text-[11px] text-slate-500">
                             {[...new Set(rfzEditor.celdas.map((c) => c.empName.split(',')[0]))].join(', ')} · {rfzEditor.tipo === 'RFZE'
                                 ? `${rfzEditor.celdas.length} día(s): ${[...new Set(rfzEditor.celdas.map((c) => c.ds.slice(8, 10)))].join(', ')}`
-                                : `desde el ${rfzEditor.celdas.map((c) => c.ds).sort()[0].slice(8, 10)} hasta fin de mes`}
+                                : `desde el ${rfzEditor.celdas.map((c) => c.ds).sort()[0].slice(8, 10)}/${rfzEditor.celdas.map((c) => c.ds).sort()[0].slice(5, 7)} y sigue los meses siguientes`}
                         </p>
                         <div className="mt-2 flex flex-wrap items-end gap-2">
+                            {!rfzEditor.editarSolicitudId && (
+                                <label className="text-[10px] font-bold text-slate-500">Sigla
+                                    <input data-rfz-sigla value={rfzEditor.sigla || ''} onChange={(ev) => setRfzEditor((prev) => (prev ? { ...prev, sigla: ev.target.value.toUpperCase().replace(/\s+/g, '').slice(0, 8) } : prev))} placeholder={rfzEditor.tipo === 'RFZF' ? 'T, N, RF…' : 'RM…'} className="block w-16 rounded-lg border border-slate-200 px-1 py-1 font-mono text-[11px] uppercase" />
+                                </label>
+                            )}
+                            {rfzEditor.tipo === 'RFZF' && !rfzEditor.editarSolicitudId && (
+                                <label className="text-[10px] font-bold text-slate-500">Puesto
+                                    <input data-rfz-puesto list="rfz-puestos" value={rfzEditor.puesto || ''} onChange={(ev) => setRfzEditor((prev) => (prev ? { ...prev, puesto: ev.target.value } : prev))} placeholder="PP, Guardia…" className="block w-28 rounded-lg border border-slate-200 px-1 py-1 text-[11px]" />
+                                    <datalist id="rfz-puestos">{(positionStructure || []).map((p: any) => <option key={String(p.positionName)} value={String(p.positionName)} />)}</datalist>
+                                </label>
+                            )}
                             <label className="text-[10px] font-bold text-slate-500">Desde
                                 <input data-rfz-inicio value={rfzEditor.inicio} onChange={(ev) => setRfzEditor((prev) => (prev ? { ...prev, inicio: ev.target.value } : prev))} onBlur={(ev) => setRfzEditor((prev) => (prev ? { ...prev, inicio: normalizarHora(ev.target.value) } : prev))} placeholder="12:00" className="block w-16 rounded-lg border border-slate-200 px-1 py-1 font-mono text-[11px]" />
                             </label>
@@ -21703,6 +21732,11 @@ function PlanificacionDesktop() {
                                         })}
                                     </div>
                                 </div>
+                            )}
+                            {rfzEditor.tipo === 'RFZE' && !rfzEditor.editarSolicitudId && (
+                                <label className="text-[10px] font-bold text-slate-500">Más fechas
+                                    <input data-rfz-fechas value={rfzEditor.fechasExtra || ''} onChange={(ev) => setRfzEditor((prev) => (prev ? { ...prev, fechasExtra: ev.target.value } : prev))} placeholder="1/11, 3/11 o 28/10-5/11" className="block w-36 rounded-lg border border-slate-200 px-1 py-1 text-[11px]" />
+                                </label>
                             )}
                             <label className="text-[10px] font-bold text-slate-500">¿Quién lo pidió?{rfzEditor.tipo === 'RFZE' ? ' *' : ''}
                                 <input data-rfz-pidio value={rfzEditor.pidio} onChange={(ev) => setRfzEditor((prev) => (prev ? { ...prev, pidio: ev.target.value } : prev))} placeholder="Cliente · Juan Pérez" className="block w-40 rounded-lg border border-slate-200 px-2 py-1 text-[11px]" />

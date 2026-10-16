@@ -2,6 +2,7 @@ import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
 import { db } from '@/lib/firebase';
 import { slaService, type ServiceSLA } from '@/services/slaService';
+import { franjasParaMesSiguiente } from '@/lib/planificacion/refuerzosRapido';
 import { calculateMonthlyBreakdown } from '@/lib/servicios/slaHoursCalculator';
 import { findEncargadoPosition } from '@/lib/servicios/encargadoPosition';
 import { localTodayYmd, newSlaBornClosed, stripSlaLifecycle } from '@/lib/servicios/newSlaDraft';
@@ -160,7 +161,8 @@ export async function ejecutarAgregarMeses(input: {
     seriesId,
   ).map((d) => {
     const bornClosed = newSlaBornClosed(d.endDate, today);
-    return { ...d, closed: bornClosed, ...(bornClosed ? { closedReason: 'VENCIDO' } : {}) };
+    // Cada mes con sus franjas: el refuerzo fijo pasa con su patrón; las fechas de otro mes no se arrastran.
+    return { ...d, positions: franjasParaMesSiguiente(((d as any).positions || []) as any[], String(d.startDate || '').slice(0, 7)) as any, closed: bornClosed, ...(bornClosed ? { closedReason: 'VENCIDO' } : {}) };
   });
   const patches: AppendMonthsResultado['patches'] = [];
   if (!last.slaSeriesId) {
@@ -192,7 +194,8 @@ export async function actualizarServicioDesdeBase(input: {
   via?: string;
 }): Promise<Record<string, unknown>> {
   const { target, base, empresaId, migracionCompleta, scopeEmpresa } = input;
-  const positions = JSON.parse(JSON.stringify(base.positions || [])) as ServiceSLA['positions'];
+  const mesTarget = String(target.startDate || '').slice(0, 7);
+  const positions = franjasParaMesSiguiente(JSON.parse(JSON.stringify(base.positions || [])), mesTarget) as unknown as ServiceSLA['positions'];
   const totalMonthlyHours = Math.round(
     calculateMonthlyBreakdown(positions, String(target.startDate || ''), String(target.endDate || ''), target.excludedDates)
       .reduce((acc, m) => acc + m.totalHours, 0),

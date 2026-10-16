@@ -3,6 +3,7 @@
  * crea el doc del mes siguiente (y le pone slaSeriesId al origen si no tenía).
  * Despublicar no borra. Idempotente.
  */
+import { franjasParaMesSiguiente } from './franjasMesSiguiente';
 import * as admin from 'firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { onDocumentWritten } from 'firebase-functions/v2/firestore';
@@ -143,7 +144,8 @@ export async function renovarSlaAlPublicar(
     objectiveId,
     objectiveName: data.objectiveName || '',
     empresaId: data.empresaId || empresaId || undefined,
-    positions: data.positions || [],
+    // El refuerzo fijo pasa con su patrón; las fechas del mes anterior no se arrastran.
+    positions: franjasParaMesSiguiente((data.positions || []) as any[], String(next.start).slice(0, 7)),
     billingMode: data.billingMode ?? null,
     billingFixedMonthlyHours: data.billingFixedMonthlyHours,
     billingFixedMonthlyAmount: data.billingFixedMonthlyAmount,

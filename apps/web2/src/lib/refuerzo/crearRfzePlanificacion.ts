@@ -29,7 +29,12 @@ export async function crearRfzePlanificacion(opts: {
   pidio: string;
   motivo?: string;
   draft: boolean;
+  /** Sigla del refuerzo en la grilla (RM = refuerzo Día de la Madre). Vacía: RFZE. */
+  sigla?: string;
+  /** Borrador por fecha (el mes siguiente puede estar sin publicar). Si falta, `draft`. */
+  draftDe?: (fecha: string) => boolean;
 }): Promise<number> {
+  const sigla = String(opts.sigla || '').trim().toUpperCase().replace(/\s+/g, '').slice(0, 8);
   const user = getAuth().currentUser;
   const quien = user?.displayName || user?.email || 'Planificación';
   const horas = calcRefuerzoPactadaHours(opts.inicio, opts.fin);
@@ -49,6 +54,7 @@ export async function crearRfzePlanificacion(opts: {
       endTime: opts.fin,
       positionName: 'Refuerzo eventual',
       shiftCode: 'RFZE',
+      ...(sigla ? { rfzSigla: sigla } : {}),
       cantidadPax: 1,
       motivo: (opts.motivo || '').trim() || 'Refuerzo eventual cargado en Planificación',
       origen: 'PLANIFICACION',
@@ -81,11 +87,12 @@ export async function crearRfzePlanificacion(opts: {
       isPresent: false,
       isAbsent: false,
       isCompleted: false,
-      draft: opts.draft,
+      draft: opts.draftDe ? opts.draftDe(fecha) : opts.draft,
       employeeId: opts.employeeId,
       employeeName: opts.employeeName,
       positionName: 'Refuerzo eventual',
       shiftCode: 'RFZE',
+      ...(sigla ? { rfzSigla: sigla } : {}),
       autorizadoPorUid: user?.uid ?? null,
       autorizadoPorNombre: quien,
       autorizadoAt: Timestamp.now(),
@@ -100,7 +107,7 @@ export async function crearRfzePlanificacion(opts: {
     actorName: quien,
     action: 'CREATE_RFZE',
     module: 'PLANIFICACION',
-    details: `RFZE ${opts.inicio}–${opts.fin} a ${opts.employeeName} en ${opts.objectiveName}: ${opts.fechas.join(', ')} · pidió ${opts.pidio}`,
+    details: `RFZE${sigla ? ` ${sigla}` : ''} ${opts.inicio}–${opts.fin} a ${opts.employeeName} en ${opts.objectiveName}: ${opts.fechas.join(', ')} · pidió ${opts.pidio}`,
     empresaId: opts.empresaId,
     metadata: { platform: 'web_admin_crono', via: 'PLANIFICACION_RAPIDO' },
   });

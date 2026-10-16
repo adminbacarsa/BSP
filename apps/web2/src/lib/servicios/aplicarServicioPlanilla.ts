@@ -205,7 +205,13 @@ export async function agregarRfzfServicio(opts: {
   fin: string;
   dias: DiaLetra[];
   pax: number;
-}): Promise<{ code: string; texto: string }> {
+  /** Puesto donde va (PP, Guardia…). Vacío: RFZF. */
+  puesto?: string;
+  /** Sigla de la franja (T, N, RF…). Vacía: RFZF, RFZF2… */
+  sigla?: string;
+  /** Día en que arranca: ese mes corre desde acá; desde el mes siguiente con su patrón. */
+  desde?: string;
+}): Promise<{ code: string; puesto: string; texto: string }> {
   const snap = await getDoc(doc(db, 'servicios_sla', opts.servicioId));
   if (!snap.exists()) throw new Error('No encontré el servicio');
   const actual = snap.data() as ServiceSLA & { closed?: boolean; positions?: PosicionServicioDoc[] };
@@ -225,5 +231,5 @@ export async function agregarRfzfServicio(opts: {
     ...(opts.empresaId ? { empresaId: opts.empresaId } : {}),
     metadata: { platform: 'web_admin_crono', via: 'PLANIFICACION_RFZF', servicioId: opts.servicioId },
   });
-  return { code: res.code, texto: res.texto };
+  return { code: res.code, puesto: res.puesto, texto: res.texto };
 }
