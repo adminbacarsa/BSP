@@ -1416,6 +1416,85 @@ function cupoBanda(pos: PuestoSla, dateStr: string, banda: BandaR): number {
   return getEffectiveShiftQuantityOnDate(pos, dateStr, code, pos.qty) || pos.qty || 1;
 }
 
+/**
+ * Quien no tiene nada que copiar (todo el mes anterior de licencia, como CASTILLO en Casino) y está libre en el mes
+ * nuevo: cubre lo que el servicio deja sin gente, banda por banda. Máx. 6 turnos seguidos y después 2 francos;
+ * no vuelve a una banda anterior al día siguiente (N → M sin descanso); tope de 200 h.
+ */
+function cubrirConLibres(input: ContinuarInput, resultados: ResultadoGuardia[]) {
+  if (!input.dias.length) return;
+  const sinHistoria = (id: string) => {
+    const g = input.guardias.find((x) => x.id === id);
+    return !!g && observacionesDelGuardia(g.previos, input.objectiveId).length === 0;
+  };
+  const libres = resultados.filter((r) => !r.propuestas.length && sinHistoria(r.employeeId)
+    && input.dias.some((d) => !input.diaBloqueado?.(d) && input.estadoCelda(r.employeeId, d) === null));
+  if (!libres.length) return;
+  const ORDEN: BandaR[] = ['M', 'T', 'N'];
+  const cuenta = (ds: string, pos: PuestoSla, b: BandaR): number => {
+    let n = 0; let d12 = 0; let n12 = 0;
+    for (const r of resultados) {
+      const c = r.propuestas.find((x) => x.dateStr === ds);
+      if (!c || c.isFranco || puestoNorm(c.positionName) !== puestoNorm(pos.positionName)) continue;
+      const code = up(c.code).replace(/\s+/g, '');
+      if (/D12$/.test(code)) d12 += 1;
+      else if (/N12$/.test(code)) n12 += 1;
+      else if (bandaDe(code) === b) n += 1;
+    }
+    if (b === 'M') n += d12;
+    if (b === 'N') n += n12;
+    if (b === 'T') n += Math.min(d12, n12);
+    return n;
+  };
+  for (const r of libres) {
+    const prop: CeldaPropuesta[] = [];
+    let racha = 0;
+    let francos = 0;
+    let ultima: BandaR | null = null;
+    let horas = 0;
+    let trabajos = 0;
+    for (const ds of input.dias) {
+      if (input.diaBloqueado?.(ds) || input.estadoCelda(r.employeeId, ds) !== null) { racha = 0; ultima = null; continue; }
+      if (racha >= 6) francos = 2;
+      const franco = () => {
+        prop.push({ employeeId: r.employeeId, dateStr: ds, code: 'F', name: 'Franco', positionName: 'General', startTime: '00:00', endTime: '00:00', hours: 0, isFranco: true });
+        racha = 0; ultima = null;
+      };
+      if (francos > 0) { francos -= 1; franco(); continue; }
+      const permitidas = ultima ? ORDEN.slice(ORDEN.indexOf(ultima)) : ORDEN;
+      let elegida: { pos: PuestoSla; b: BandaR; code: string } | null = null;
+      for (const b of permitidas) {
+        for (const pos of input.estructura) {
+          const cupo = cupoBanda(pos, ds, b);
+          if (cupo > 0 && cuenta(ds, pos, b) < cupo) {
+            const code = codigoParaBanda(pos, '', b);
+            if (code) { elegida = { pos, b, code }; break; }
+          }
+        }
+        if (elegida) break;
+      }
+      if (!elegida) { franco(); continue; }
+      const celda = celdaDeTrabajo(r.employeeId, ds, elegida.pos, elegida.code);
+      if (horas + celda.hours > TOPE_HORAS_MES) { franco(); continue; }
+      prop.push(celda);
+      r.propuestas = prop;
+      horas += celda.hours; racha += 1; trabajos += 1; ultima = elegida.b;
+    }
+    if (!trabajos) {
+      r.propuestas = [];
+      r.motivoSinCiclo = 'No tiene días para copiar y al servicio no le falta nada';
+      continue;
+    }
+    r.propuestas = prop;
+    r.horasPropuestas = horas;
+    r.motivoSinCiclo = null;
+    r.estimado = true;
+    r.notaEstimado = 'sin días para copiar: cubre lo que falta del servicio';
+    r.origenCiclo = 'semana';
+    r.ciclo = { periodo: 7, fases: [], consistencia: 0, muestras: 0, ultimoDia: '', etiqueta: 'cubre lo que falta del servicio' };
+  }
+}
+
 /** Último día del mes anterior y cuántos días seguidos venía trabajando. */
 function colaPrevia(input: ContinuarInput, employeeId: string): { ultima: BandaR | 'F' | null; racha: number } {
   const g = input.guardias.find((x) => x.id === employeeId);
@@ -1861,6 +1940,9 @@ export function proponerContinuacion(input: ContinuarInput): ResultadoGuardia[] 
       // Sin rotación fija el mes nuevo es el anterior por día de la semana: puestos, códigos y 12 h como estaban.
       // No se nivela ni se reacomoda: la cobertura del mes copiado ya cerraba.
       const copia = input.guardias.map((g) => copiarPorSemana(input, g, mesCopiado));
+      // La racha manda igual: máx. 6 turnos de 8 h / 4 de 12 h seguidos (48 h; 56 h lun–vie), contando el fin del mes copiado.
+      cortarRachas(input, copia);
+      cubrirConLibres(input, copia);
       codigosComoElMesCopiado(input, copia);
       return copia;
     }
@@ -1878,6 +1960,7 @@ export function proponerContinuacion(input: ContinuarInput): ResultadoGuardia[] 
   }
   cortarRachas(input, resultados);
   anclarPorPuesto(input, resultados);
+  cubrirConLibres(input, resultados);
   if (input.cupoDia) {
     const nivel = nivelarResultados(input, resultados, historias);
     for (const r of resultados) r.sugerencias = [...r.sugerencias, ...sugerenciasDe(input, r, nivel.get(r.employeeId) || [])];

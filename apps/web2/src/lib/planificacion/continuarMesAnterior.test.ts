@@ -763,7 +763,9 @@ test('objetivo sin rotación fija (Casino): el mes nuevo es el anterior por día
   for (const r of res) {
     const g = guardias.find((x) => x.id === r.employeeId)!;
     assert.equal(r.origenCiclo, 'semana');
+    const cortados = new Set(r.revisar.filter((x) => /racha/.test(x.motivo)).flatMap((x) => x.dias));
     for (const c of r.propuestas) {
+      if (cortados.has(c.dateStr)) { assert.equal(c.isFranco, true); continue; }
       // 4 semanas antes (o 5 para el 29 y 30 de noviembre): mismo día de la semana.
       const fuenteIdx = diaIndex(c.dateStr) - 28 >= diaIndex('2026-11-01') ? diaIndex(c.dateStr) - 35 : diaIndex(c.dateStr) - 28;
       const t = g.previos.find((p) => p.dateStr === ymdDeIndex(fuenteIdx))!;
@@ -772,4 +774,41 @@ test('objetivo sin rotación fija (Casino): el mes nuevo es el anterior por día
     }
     assert.equal(r.propuestas.length, 30);
   }
+});
+
+test('copia por semana: nunca más de 6 turnos seguidos (cortarRachas)', () => {
+  // Octubre armado a mano con rachas largas en distintas semanas: la copia no puede juntar 9 seguidos.
+  const guardias = [0, 1, 2, 3].map((g) => {
+    const codes = diasDelMes(2026, 10).map((d, i) => ((i + g * 3) % 11 < 9 ? (g % 2 ? 'N' : 'M') : 'F'));
+    const irregular = codes.map((c, i) => (i % 13 === g ? 'T' : c));
+    return { id: `g${g}`, nombre: `G${g}`, previos: diasDelMes(2026, 10).map((d, i) => ({ dateStr: d, code: irregular[i], positionName: irregular[i] === 'F' ? 'General' : P1, objectiveId: OBJ })) };
+  });
+  const res = proponerContinuacion(input(guardias, diasDelMes(2026, 11)));
+  for (const r of res) {
+    let seguidos = 0;
+    for (const d of diasDelMes(2026, 11)) {
+      const c = r.propuestas.find((x) => x.dateStr === d);
+      seguidos = c && !c.isFranco && c.code !== 'RET' ? seguidos + 1 : 0;
+      assert.ok(seguidos <= 6, `${r.employeeId} ${d}: ${seguidos} seguidos`);
+    }
+  }
+});
+
+test('quien estuvo de licencia todo el mes anterior cubre lo que falta, con máx. 6 seguidos', () => {
+  // Uno hace M todos los días con 6+2; el otro estuvo de V todo el mes: cubre la M cuando el primero está de franco.
+  const fijo = armar(['M', 'M', 'M', 'M', 'M', 'M', 'F', 'F'], '2026-08-01', '2026-09-30', 0);
+  const licencia = diasDelMes(2026, 9).map((d) => ({ dateStr: d, code: 'V', positionName: P1, objectiveId: OBJ }));
+  const res = proponerContinuacion(input([
+    { id: 'a', nombre: 'A', previos: fijo },
+    { id: 'lic', nombre: 'LIC', previos: licencia },
+  ], diasDelMes(2026, 10), { estructura: [estructura[0]] }));
+  const lic = res.find((r) => r.employeeId === 'lic')!;
+  assert.ok(lic.propuestas.some((c) => !c.isFranco), 'se lo usa');
+  let seguidos = 0;
+  for (const d of diasDelMes(2026, 10)) {
+    const c = lic.propuestas.find((x) => x.dateStr === d);
+    seguidos = c && !c.isFranco ? seguidos + 1 : 0;
+    assert.ok(seguidos <= 6);
+  }
+  assert.equal(lic.estimado, true);
 });
