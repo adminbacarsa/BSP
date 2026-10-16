@@ -2154,6 +2154,8 @@ function PlanificacionDesktop() {
     } | null>(null);
     /** Clic derecho en el día: «No se trabaja» (todo, un puesto o una franja); sus turnos pasan a RET. */
     const [diaNoTrabaja, setDiaNoTrabaja] = useState<{ ds: string; x: number; y: number; alcance: string; motivo: string; guardando: boolean } | null>(null);
+    /** RET de la empresa en un día (todos los objetivos), para traerlos a este cronograma y asignarles turno. */
+    const [retDelDia, setRetDelDia] = useState<{ ds: string; cargando: boolean; lista: Array<{ empId: string; nombre: string; objetivo: string; objectiveId: string; horario: string }> } | null>(null);
     /** «EV» en la grilla: elegir un evento de ese día (de cualquier objetivo de la empresa) y asignar a los guardias. */
     const [evEditor, setEvEditor] = useState<{ celdas: Array<{ empId: string; empName: string; ds: string }>; ds: string; elegida: number; guardando: boolean } | null>(null);
     /** `+` sobre un turno de un puesto que no es de 24 h: horas agregadas (TURA) antes o después. */
@@ -15863,6 +15865,52 @@ function PlanificacionDesktop() {
             setTuraEditor((prev) => (prev ? { ...prev, guardando: false } : prev));
         }
     };
+    const abrirRetDelDia = async (ds: string) => {
+        if (!empresaId) return;
+        setDiaNoTrabaja(null);
+        setRetDelDia({ ds, cargando: true, lista: [] });
+        try {
+            const [y, m, d] = ds.split('-').map(Number);
+            const snap = await getDocs(query(
+                collection(db, 'turnos'),
+                where('empresaId', '==', empresaId),
+                where('startTime', '>=', Timestamp.fromDate(new Date(y, m - 1, d, 0, 0, 0))),
+                where('startTime', '<=', Timestamp.fromDate(new Date(y, m - 1, d, 23, 59, 59))),
+            ));
+            const hh = (v: any) => {
+                const t = v?.toDate ? v.toDate() : null;
+                return t ? `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}` : '';
+            };
+            const vistos = new Set<string>();
+            const lista = snap.docs.flatMap((doc0) => {
+                const t = doc0.data() as any;
+                if (t.isDeleted) return [];
+                if (String(t.code || '').toUpperCase() !== 'RET' || !t.employeeId || vistos.has(String(t.employeeId))) return [];
+                vistos.add(String(t.employeeId));
+                const emp = (employees as any[]).find((e: any) => e.id === t.employeeId);
+                const ini = hh(t.startTime);
+                const fin = hh(t.endTime);
+                return [{
+                    empId: String(t.employeeId),
+                    nombre: String(emp?.name || t.employeeName || t.employeeId),
+                    objetivo: getObjectiveName(String(t.objectiveId || '')) || 'sin objetivo',
+                    objectiveId: String(t.objectiveId || ''),
+                    horario: ini && fin && ini !== fin ? `${ini}–${fin}` : '',
+                }];
+            }).sort((a, b) => a.nombre.localeCompare(b.nombre));
+            setRetDelDia({ ds, cargando: false, lista });
+        } catch (err: any) {
+            console.error('[RET del día]', err);
+            toast.error('No se pudieron leer los RET de ese día');
+            setRetDelDia(null);
+        }
+    };
+    const traerRetAlCrono = (empId: string) => {
+        setPinnedExternalEmpIds((prev) => new Set([...prev, empId]));
+        window.setTimeout(() => scrollToEmployeeRow(empId), 150);
+        toast.message('Ya está en la grilla: escribile el turno sobre su RET y guardá el cronograma.');
+    };
+
     const aplicarDiaNoTrabaja = async () => {
         const e = diaNoTrabaja;
         if (!e || e.guardando || !empresaId || !selectedObjective) return;
@@ -21795,8 +21843,39 @@ function PlanificacionDesktop() {
                                 <input data-dia-motivo autoFocus value={diaNoTrabaja.motivo} onChange={(ev) => setDiaNoTrabaja((prev) => (prev ? { ...prev, motivo: ev.target.value } : prev))} placeholder="Feriado, fecha especial, evento…" className="block w-full rounded-lg border border-slate-200 px-2 py-1 text-[11px]" />
                             </label>
                             <div className="mt-2 flex justify-end gap-2">
+                                <button type="button" onClick={() => { void abrirRetDelDia(diaNoTrabaja.ds); }} data-ret-del-dia className="mr-auto rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-bold text-slate-700 hover:bg-slate-50">Ver RET del día</button>
                                 <button type="button" onClick={() => setDiaNoTrabaja(null)} className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-bold text-slate-600">Cancelar</button>
                                 <button type="button" disabled={diaNoTrabaja.guardando} onClick={() => { void aplicarDiaNoTrabaja(); }} data-dia-confirmar className="rounded-lg bg-rose-600 px-2.5 py-1 text-[11px] font-black text-white disabled:opacity-40">{diaNoTrabaja.guardando ? 'Guardando…' : 'No se trabaja'}</button>
+                            </div>
+                        </div>
+                    </div>,
+                    document.body,
+                )}
+                {retDelDia && typeof document !== 'undefined' && createPortal(
+                    <div className="fixed inset-0 z-[12000] flex items-start justify-end bg-black/20 p-4" onMouseDown={() => setRetDelDia(null)}>
+                        <div className="mt-16 w-96 max-h-[75vh] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-3 text-[12px] shadow-xl" onMouseDown={(ev) => ev.stopPropagation()} data-ret-dia-lista={retDelDia.ds}>
+                            <div className="flex items-center justify-between">
+                                <p className="font-black text-slate-800">RET del {retDelDia.ds.slice(8, 10)}/{retDelDia.ds.slice(5, 7)} · toda la empresa</p>
+                                <button type="button" onClick={() => setRetDelDia(null)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100"><X size={14} /></button>
+                            </div>
+                            <p className="text-[11px] text-slate-500">Están disponibles ese día. «Traer» lo suma a esta grilla; después le escribís el turno sobre su RET.</p>
+                            {retDelDia.cargando && <p className="mt-2 text-slate-500">Buscando…</p>}
+                            {!retDelDia.cargando && !retDelDia.lista.length && <p className="mt-2 text-slate-500">Nadie está en RET ese día.</p>}
+                            <div className="mt-2 space-y-1">
+                                {retDelDia.lista.map((r) => {
+                                    const enGrilla = (displayedEmployees as any[]).some((e: any) => e.id === r.empId);
+                                    return (
+                                        <div key={r.empId} className="flex items-center gap-2 rounded-lg border border-slate-100 px-2 py-1" data-ret-dia-emp={r.empId}>
+                                            <div className="min-w-0 flex-1">
+                                                <p className="truncate font-bold text-slate-800">{r.nombre}</p>
+                                                <p className="truncate text-[10px] text-slate-500">{r.objetivo}{r.horario ? ` · ${r.horario}` : ''}</p>
+                                            </div>
+                                            {enGrilla
+                                                ? <button type="button" onClick={() => scrollToEmployeeRow(r.empId)} className="rounded-lg border border-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-600">Ir a la fila</button>
+                                                : <button type="button" onClick={() => traerRetAlCrono(r.empId)} className="rounded-lg bg-indigo-600 px-2 py-0.5 text-[10px] font-black text-white">Traer</button>}
+                                        </div>
+                                    );
+                                })}
                             </div>
                         </div>
                     </div>,
