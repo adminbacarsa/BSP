@@ -12376,7 +12376,12 @@ function PlanificacionDesktop() {
         }
         const cupoFranja = (ch: any, ds: string): number => {
             const pos = estructuraDe(String(ch.objectiveId || selectedObjective)).find((p: any) => p.positionName === ch.positionName);
-            const sh = (pos?.shifts || []).find((x: any) => String(x.code || '').toUpperCase() === String(ch.code || '').toUpperCase());
+            const cod = String(ch.code || '').toUpperCase();
+            const banda = (c: string) => (c.replace(/\s+/g, '').match(/^(?:P\d+|PL)?([MTN])\d*$/) || [])[1] || '';
+            const shifts = (pos?.shifts || []) as any[];
+            // M de la copia contra la franja P5M del servicio: es la misma (una sola franja de esa banda en el puesto).
+            const porBanda = ['M', 'T', 'N'].includes(cod) ? shifts.filter((x: any) => banda(String(x.code || '').toUpperCase()) === cod) : [];
+            const sh = shifts.find((x: any) => String(x.code || '').toUpperCase() === cod) || (porBanda.length === 1 ? porBanda[0] : null);
             if (!pos || !sh) return Infinity;
             return getEffectiveShiftQuantityOnDate(pos, ds, sh.code, pos.qty) || pos.qty || 1;
         };

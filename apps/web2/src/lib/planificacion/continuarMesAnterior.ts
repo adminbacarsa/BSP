@@ -1694,7 +1694,44 @@ export function proponerContinuacion(input: ContinuarInput): ResultadoGuardia[] 
   sugerirRotacionPuesto(input, resultados);
   sugerirAlternos(input, resultados);
   aplicarReacomodoRelevante(input, resultados);
+  codigosComoElMesCopiado(input, resultados);
   return resultados;
+}
+
+/**
+ * Una sola convención de códigos: la del mes que se copia. Si en un puesto se cargaba M/T/N y el servicio
+ * llama a la franja P5M/PLN, todo lo propuesto (ciclo, rotación, nivelación, sueltos) queda en M/T/N.
+ */
+function codigosComoElMesCopiado(input: ContinuarInput, resultados: ResultadoGuardia[]) {
+  const usoLetra = new Map<string, number>();
+  const usoFranja = new Map<string, number>();
+  for (const g of [...input.guardias, ...(input.salientes || [])]) {
+    for (const t of g.previos || []) {
+      const pos = puestoNorm(String((t as { positionName?: string }).positionName || ''));
+      const c = up(String((t as { code?: string }).code || '')).replace(/\s+/g, '');
+      if (!pos || !bandaDe(c) || /D12$|N12$/.test(c)) continue;
+      if (['M', 'T', 'N'].includes(c)) usoLetra.set(pos, (usoLetra.get(pos) || 0) + 1);
+      else usoFranja.set(pos, (usoFranja.get(pos) || 0) + 1);
+    }
+  }
+  const aLetra = (c: CeldaPropuesta): CeldaPropuesta => {
+    const pos = puestoNorm(c.positionName);
+    const code = up(c.code).replace(/\s+/g, '');
+    if (c.isFranco || ['M', 'T', 'N'].includes(code) || /D12$|N12$/.test(code)) return c;
+    const b = bandaDe(code);
+    if (!b || (usoLetra.get(pos) || 0) <= (usoFranja.get(pos) || 0)) return c;
+    return { ...c, code: b, name: b };
+  };
+  for (const r of resultados) {
+    r.propuestas = r.propuestas.map(aLetra);
+    r.sugerencias = r.sugerencias.map((sg) => {
+      const celda = aLetra(sg.celda);
+      if (celda === sg.celda) return sg;
+      const antes = sg.celda.code;
+      const cambiar = (x: string) => String(x || '').split(antes).join(celda.code);
+      return { ...sg, celda, a: cambiar(sg.a), texto: cambiar(sg.texto) };
+    });
+  }
 }
 
 /** `continuarPuntero` del mes nuevo: quién cierra con un cambio de nivelación aceptado en su último bloque. */
