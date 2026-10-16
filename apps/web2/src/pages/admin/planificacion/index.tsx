@@ -15905,6 +15905,14 @@ function PlanificacionDesktop() {
         }
     };
 
+    /** RFZF: puesto + sigla que ya existen (Guardia · M) → completa el horario: es un pax más en esa franja. */
+    const completarHorarioRfz = (prev: any, cambios: { puesto?: string; sigla?: string }) => {
+        const next = { ...prev, ...cambios };
+        if (next.tipo !== 'RFZF' || (next.inicio && next.fin)) return next;
+        const pos = ((positionStructure || []) as any[]).find((p: any) => String(p.positionName || '').toUpperCase() === String(next.puesto || '').trim().toUpperCase());
+        const st = (pos?.shifts || []).find((x: any) => String(x.code || '').toUpperCase() === String(next.sigla || '').toUpperCase());
+        return st?.startTime && st?.endTime ? { ...next, inicio: String(st.startTime).slice(0, 5), fin: String(st.endTime).slice(0, 5) } : next;
+    };
     const confirmarRfz = async () => {
         const e = rfzEditor;
         if (!e || e.guardando || !empresaId || !selectedObjective) return;
@@ -21807,12 +21815,12 @@ function PlanificacionDesktop() {
                         <div className="mt-2 flex flex-wrap items-end gap-2">
                             {!rfzEditor.editarSolicitudId && (
                                 <label className="text-[10px] font-bold text-slate-500">Sigla
-                                    <input data-rfz-sigla value={rfzEditor.sigla || ''} onChange={(ev) => setRfzEditor((prev) => (prev ? { ...prev, sigla: ev.target.value.toUpperCase().replace(/\s+/g, '').slice(0, 8) } : prev))} placeholder={rfzEditor.tipo === 'RFZF' ? 'T, N, RF…' : 'RM…'} className="block w-16 rounded-lg border border-slate-200 px-1 py-1 font-mono text-[11px] uppercase" />
+                                    <input data-rfz-sigla value={rfzEditor.sigla || ''} onChange={(ev) => setRfzEditor((prev) => (prev ? completarHorarioRfz(prev, { sigla: ev.target.value.toUpperCase().replace(/\s+/g, '').slice(0, 8) }) : prev))} placeholder={rfzEditor.tipo === 'RFZF' ? 'T, N, RF…' : 'RM…'} className="block w-16 rounded-lg border border-slate-200 px-1 py-1 font-mono text-[11px] uppercase" />
                                 </label>
                             )}
                             {rfzEditor.tipo === 'RFZF' && !rfzEditor.editarSolicitudId && (
                                 <label className="text-[10px] font-bold text-slate-500">Puesto
-                                    <input data-rfz-puesto list="rfz-puestos" value={rfzEditor.puesto || ''} onChange={(ev) => setRfzEditor((prev) => (prev ? { ...prev, puesto: ev.target.value } : prev))} placeholder="PP, Guardia…" className="block w-28 rounded-lg border border-slate-200 px-1 py-1 text-[11px]" />
+                                    <input data-rfz-puesto list="rfz-puestos" value={rfzEditor.puesto || ''} onChange={(ev) => setRfzEditor((prev) => (prev ? completarHorarioRfz(prev, { puesto: ev.target.value }) : prev))} placeholder="PP, Guardia…" className="block w-28 rounded-lg border border-slate-200 px-1 py-1 text-[11px]" />
                                     <datalist id="rfz-puestos">{(positionStructure || []).map((p: any) => <option key={String(p.positionName)} value={String(p.positionName)} />)}</datalist>
                                 </label>
                             )}

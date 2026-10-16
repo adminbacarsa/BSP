@@ -73,10 +73,23 @@ export function agregarRfzfAPosiciones(
   if (igual >= 0) {
     const s0 = lista[igual];
     const union = DIAS_SEMANA.filter((d) => dias.includes(d) || (s0.days || []).includes(d));
-    const nuevo = { ...s0, quantity: (Number(s0.quantity) || 1) + pax, days: union };
+    const nuevo = { ...s0, quantity: (Number(s0.quantity ?? pos.quantity) || 1) + pax, ...(union.length && union.length < 7 ? { days: union } : {}) };
+    if (!(union.length && union.length < 7)) delete (nuevo as { days?: unknown }).days;
     pos.allowedShiftTypes = lista.map((x, i) => (i === igual ? nuevo : x));
     if (pos.shifts) pos.shifts = pos.shifts.map((x) => (x.code === s0.code ? nuevo : x));
-    return { positions: out, code: String(s0.code), puesto: String(pos.name || nombrePuesto), texto: `${s0.code} ${r.inicio}–${r.fin}: ×${nuevo.quantity} pax` };
+    // Un pax más desde el día X: la franja sube y en los días anteriores a X se resta ese pax (mismo dato que
+    // «quitar pax un día» del servicio). Desde el mes siguiente queda con la cantidad nueva todo el mes.
+    if (arrancaEnElMes) {
+      const cortes = { ...((pos.excludedShiftPaxDates as Record<string, Record<string, number>>) || {}) };
+      const [y, m, d0] = desde.split('-').map(Number);
+      const codeUp = String(s0.code).toUpperCase();
+      for (let d = 1; d < d0; d++) {
+        const ds = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+        cortes[ds] = { ...(cortes[ds] || {}), [codeUp]: ((cortes[ds] || {})[codeUp] || 0) + pax };
+      }
+      pos.excludedShiftPaxDates = cortes;
+    }
+    return { positions: out, code: String(s0.code), puesto: String(pos.name || nombrePuesto), texto: `${pos.name} · ${s0.code} ${r.inicio}–${r.fin}: ×${nuevo.quantity} pax${arrancaEnElMes ? ` desde ${desde.slice(8, 10)}/${desde.slice(5, 7)}` : ''}` };
   }
   const usados = new Set(lista.map((x) => String(x.code || '').toUpperCase()));
   let code = sigla;
@@ -147,7 +160,14 @@ export function franjasParaMesSiguiente<P extends PosDoc>(positions: readonly P[
     const lista = (p.allowedShiftTypes || []).map(ajustar).filter((x): x is ShiftDoc => !!x);
     const shifts = p.shifts ? p.shifts.map(ajustar).filter((x): x is ShiftDoc => !!x) : undefined;
     if ((p.allowedShiftTypes || []).length && !lista.length) continue;
-    out.push({ ...p, allowedShiftTypes: lista, ...(shifts ? { shifts } : {}) });
+    // Restas de pax, franjas y días excluidos de otro mes no viajan al mes nuevo.
+    const soloDelMes = (m: unknown) => (m && typeof m === 'object' && !Array.isArray(m)
+      ? Object.fromEntries(Object.entries(m as Record<string, unknown>).filter(([k]) => k.startsWith(mesNuevo)))
+      : m);
+    const limpio: Record<string, unknown> = { ...p };
+    for (const k of ['excludedShiftPaxDates', 'excludedShiftDates']) if (limpio[k]) limpio[k] = soloDelMes(limpio[k]);
+    if (Array.isArray(limpio.excludedDates)) limpio.excludedDates = (limpio.excludedDates as string[]).filter((f) => String(f).startsWith(mesNuevo));
+    out.push({ ...(limpio as typeof p), allowedShiftTypes: lista, ...(shifts ? { shifts } : {}) });
   }
   return out;
 }

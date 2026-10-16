@@ -57,5 +57,19 @@ describe('refuerzos desde el modo rápido', () => {
     assert.deepEqual(fechasDeTexto('28/10-2/11', 2026), ['2026-10-28', '2026-10-29', '2026-10-30', '2026-10-31', '2026-11-01', '2026-11-02']);
     assert.deepEqual(fechasDeTexto('30/12-2/1', 2026), ['2026-12-30', '2026-12-31', '2027-01-01', '2027-01-02']);
   });
+
+  it('un pax más en una franja que ya existe desde el 15: ese mes resta el pax del 1 al 14; el mes siguiente queda ×3', () => {
+    const r = agregarRfzfAPosiciones([{ name: 'Guardia', quantity: 2, allowedShiftTypes: [{ code: 'M', startTime: '07:00', endTime: '15:00', quantity: 2 }] }],
+      { inicio: '07:00', fin: '15:00', dias: ['L', 'M', 'X', 'J', 'V', 'S', 'D'], pax: 1, puesto: 'Guardia', sigla: 'M', desde: '2026-10-15' });
+    const g = r.positions[0];
+    assert.equal(g.allowedShiftTypes![0].quantity, 3);
+    const cortes = g.excludedShiftPaxDates as Record<string, Record<string, number>>;
+    assert.equal(Object.keys(cortes).length, 14);
+    assert.deepEqual(cortes['2026-10-01'], { M: 1 });
+    assert.equal(cortes['2026-10-15'], undefined);
+    const nov = franjasParaMesSiguiente(r.positions, '2026-11')[0];
+    assert.equal(nov.allowedShiftTypes![0].quantity, 3);
+    assert.deepEqual(nov.excludedShiftPaxDates, {});
+  });
 });
 

@@ -40,7 +40,14 @@ export function franjasParaMesSiguiente(positions: readonly Puesto[], mesNuevo: 
     const lista = (p.allowedShiftTypes || []).map(ajustar).filter((x): x is Franja => !!x);
     const shifts = p.shifts ? p.shifts.map(ajustar).filter((x): x is Franja => !!x) : undefined;
     if ((p.allowedShiftTypes || []).length && !lista.length) continue;
-    out.push({ ...p, allowedShiftTypes: lista, ...(shifts ? { shifts } : {}) });
+    // Restas de pax, franjas y días excluidos de otro mes no viajan al mes nuevo.
+    const soloDelMes = (m: unknown) => (m && typeof m === 'object' && !Array.isArray(m)
+      ? Object.fromEntries(Object.entries(m as Record<string, unknown>).filter(([k]) => k.startsWith(mesNuevo)))
+      : m);
+    const limpio: Record<string, unknown> = { ...p };
+    for (const k of ['excludedShiftPaxDates', 'excludedShiftDates']) if (limpio[k]) limpio[k] = soloDelMes(limpio[k]);
+    if (Array.isArray(limpio.excludedDates)) limpio.excludedDates = (limpio.excludedDates as string[]).filter((f) => String(f).startsWith(mesNuevo));
+    out.push({ ...(limpio as typeof p), allowedShiftTypes: lista, ...(shifts ? { shifts } : {}) });
   }
   return out;
 }
