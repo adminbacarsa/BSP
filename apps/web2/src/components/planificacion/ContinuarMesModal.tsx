@@ -18,6 +18,8 @@ export type ContinuarMesVista = {
   mesLabel: string;
   mesAnteriorLabel: string;
   resultados: ResultadoGuardia[];
+  /** Huecos que la copia deja sin nadie, cubiertos con volantes, guardias de otros objetivos o RET de otros objetivos. */
+  disponibles?: SugerenciaNivelacion[];
   cortos: DiaCorto[];
   sobrados: AlertaCupo[];
   avisos: AvisosCobertura;
@@ -145,9 +147,11 @@ export function ContinuarMesModal({ vista, onAplicar, onCancelar }: Props) {
   const [elegidos, setElegidos] = useState<Set<string>>(() => new Set(conCiclo.map((r) => r.employeeId)));
   // Lo que el mes anterior se cubrió suelto (VFM de domingo por alguien de Peaje) arranca tildado: así el mes nuevo
   // queda igual al copiado. Nivelación, rotación y relevante siguen destildados.
-  const [nivelar, setNivelar] = useState<Set<string>>(() => new Set(
-    conCiclo.flatMap((r) => r.sugerencias || []).filter((sg) => sg.tipo === 'suelto').map(claveSugerencia),
-  ));
+  const [nivelar, setNivelar] = useState<Set<string>>(() => new Set([
+    ...conCiclo.flatMap((r) => r.sugerencias || []).filter((sg) => sg.tipo === 'suelto').map(claveSugerencia),
+    // Volantes y RET antes que 12 h: también arrancan tildados.
+    ...(vista.disponibles || []).map(claveSugerencia),
+  ]));
   const [activarMes, setActivarMes] = useState(() => !!(vista.activar?.marcado && vista.activar.puede && vista.activar.permiso));
 
   const sugerencias = useMemo(
@@ -197,7 +201,7 @@ export function ContinuarMesModal({ vista, onAplicar, onCancelar }: Props) {
     if (next.has(k)) next.delete(k); else next.add(k);
     return next;
   });
-  const aceptadas = sugerenciasVisibles.filter((s) => nivelar.has(claveSugerencia(s)));
+  const aceptadas = [...sugerenciasVisibles, ...(vista.disponibles || [])].filter((s) => nivelar.has(claveSugerencia(s)));
 
   return (
     <div className="fixed inset-0 z-[10050] flex items-center justify-center bg-black/45 backdrop-blur-sm p-4" onClick={onCancelar} data-continuar-mes-modal>
@@ -448,6 +452,37 @@ export function ContinuarMesModal({ vista, onAplicar, onCancelar }: Props) {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-0.5">
                 {sugerenciasRelevante.map((s) => {
+                  const k = claveSugerencia(s);
+                  return (
+                    <label key={k} className="flex items-center gap-2 text-[11px] text-slate-800 cursor-pointer hover:bg-white/70 rounded-lg px-1 py-0.5" data-continuar-sugerencia={k}>
+                      <input type="checkbox" checked={nivelar.has(k)} onChange={() => toggleNivelar(k)} />
+                      <span className="font-medium">{s.texto}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {(vista.disponibles || []).length > 0 && (
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 px-3 py-2.5 shadow-sm" data-continuar-disponibles>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wide text-emerald-950">
+                  Cubrir con volantes y RET · {(vista.disponibles || []).length}
+                </div>
+                <div className="flex gap-2 text-[11px] font-bold">
+                  <button type="button" className="text-emerald-800 hover:underline" onClick={() => setNivelar((prev) => new Set([...prev, ...(vista.disponibles || []).map(claveSugerencia)]))}>Tildar todas</button>
+                  <button type="button" className="text-slate-500 hover:underline" onClick={() => setNivelar((prev) => {
+                    const next = new Set(prev);
+                    for (const s of vista.disponibles || []) next.delete(claveSugerencia(s));
+                    return next;
+                  })}>Ninguna</button>
+                </div>
+              </div>
+              <div className="text-[11px] text-emerald-950/80 mt-0.5 mb-1.5">
+                Lo que la copia deja sin nadie, cubierto con volantes del objetivo, guardias de otros objetivos con horas libres o gente en RET en otro objetivo (se suman a la grilla). Va antes que extender a 12 h; el franco trabajado no se propone.
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-0.5">
+                {(vista.disponibles || []).map((s) => {
                   const k = claveSugerencia(s);
                   return (
                     <label key={k} className="flex items-center gap-2 text-[11px] text-slate-800 cursor-pointer hover:bg-white/70 rounded-lg px-1 py-0.5" data-continuar-sugerencia={k}>

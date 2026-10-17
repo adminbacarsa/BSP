@@ -147,7 +147,7 @@ export type SugerenciaNivelacion = {
   texto: string;
   celda: CeldaPropuesta;
   /** `relevante` = seguir los francos de los puestos que cubre. Arranca destildada, igual que la nivelación. */
-  tipo?: 'nivelacion' | 'relevante' | 'suelto' | 'rotacion';
+  tipo?: 'nivelacion' | 'relevante' | 'suelto' | 'rotacion' | 'disponible';
   /** `rotacion`: puesto al que pertenece el cambio y la frase del grupo (se tilda todo junto). */
   grupo?: string;
   grupoTexto?: string;

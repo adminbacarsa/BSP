@@ -495,7 +495,7 @@ import { alternativasPareja, cambiarPareja, estiloJornada12, horarioDoce, moverV
 import { avisosDesdeLectura, faltantesDelDia, leerDia, lineasDeSobra, proponerLiberar, SIN_PUESTO, type FaltanteBanda, type GuardiaSobra, type PuestoServicio, type TurnoDia } from '@/lib/planificacion/lecturaBandas';
 import { PanelesMarco } from '@/components/planificacion/PanelesPlanificacion';
 import type { CandidatoFaltante } from '@/components/planificacion/BandasFaltantesPanel';
-import { armarMesDesdeServicio, type TipoGuardiaArmado } from '@/lib/planificacion/armarMesServicio';
+import { armarMesDesdeServicio, cubrirHuecosConDisponibles, type TipoGuardiaArmado } from '@/lib/planificacion/armarMesServicio';
 import {
     clasificarSeleccionLicencia,
     diasQueQuedaron,
@@ -12298,11 +12298,44 @@ function PlanificacionDesktop() {
                     r.sugerencias = [...(r.sugerencias || []), sg];
                 }
             }
+            // Lo que sigue sin nadie: volantes, guardias de otros objetivos y RET de otros objetivos, antes que 12 h.
+            const retPorDia = new Map<string, Array<{ id: string; nombre: string; objetivo: string }>>();
+            const horasFueraMap = new Map<string, number>();
+            for (const [key, t] of Object.entries(shiftsMap) as Array<[string, any]>) {
+                const mm = key.match(/^(.*)_(\d{4}-\d{2}-\d{2})$/);
+                if (!mm || !t || t.isDeleted || objsGrupo.includes(String(t.objectiveId || ''))) continue;
+                const code = String(t.code || '').toUpperCase();
+                if (code === 'RET') {
+                    const l = retPorDia.get(mm[2]) || [];
+                    l.push({ id: mm[1], nombre: String((employees.find((e: any) => e.id === mm[1]) as any)?.name || t.employeeName || mm[1]), objetivo: getObjectiveName(String(t.objectiveId || '')) || 'otro objetivo' });
+                    retPorDia.set(mm[2], l);
+                } else if (code && !['F', 'FF', 'FP'].includes(code) && !t.isFranco) {
+                    horasFueraMap.set(mm[1], (horasFueraMap.get(mm[1]) || 0) + (Number(t.hours) || 0));
+                }
+            }
+            const conSueltasAplicadas = resultados.map((r) => {
+                const su = new Map((r.sugerencias || []).filter((x) => x.tipo === 'suelto').map((x) => [x.dateStr, x.celda]));
+                return su.size ? { ...r, propuestas: [...r.propuestas.filter((c) => !su.has(c.dateStr)), ...su.values()] } : r;
+            });
+            const disponibles = cubrirHuecosConDisponibles({
+                objectiveId: objContinuar,
+                dias,
+                guardias: guardiasBase.map((e: any) => ({ id: e.id, nombre: e.name || e.id, previos: previosPorEmp.get(e.id) || [] })),
+                estructura: estructuraContinuar,
+                estadoCelda,
+                turnoHabilitado,
+                tipoDe: tipoArmado,
+                ocupadoFuera,
+                retFuera: (ds) => retPorDia.get(ds) || [],
+                horasFueraDe: (id) => horasFueraMap.get(id) || 0,
+            }, conSueltasAplicadas);
             const cambios: Record<string, any> = {};
             for (const r of resultados) {
                 // Los estimados arrancan tildados: cuentan para la cobertura de la vista previa.
                 for (const c of r.propuestas) cambios[`${c.employeeId}_${c.dateStr}`] = cambioContinuar(c);
             }
+            // Los disponibles arrancan tildados: cuentan en la cobertura de la vista previa.
+            for (const d of disponibles) cambios[`${d.celda.employeeId}_${d.dateStr}`] = cambioContinuar(d.celda);
             const merged = { ...pendingChanges, ...cambios };
             const cyclesForCoverage = autoSelectedCyclesRef.current?.length ? autoSelectedCyclesRef.current : autoCycles;
             const cortos: DiaCorto[] = [];
@@ -12382,6 +12415,7 @@ function PlanificacionDesktop() {
             };
             setContinuarVista({
                 modo,
+                disponibles,
                 mesLabel: currentDate.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' }),
                 mesAnteriorLabel: (() => {
                     const ult = resultados.map((r) => r.ciclo?.ultimoDia || '').filter(Boolean).sort().pop();
@@ -12486,6 +12520,10 @@ function PlanificacionDesktop() {
             const key = `${s.celda.employeeId}_${s.dateStr}`;
             return escritas.has(key) || s.tipo === 'relevante' || s.tipo === 'suelto' || s.tipo === 'rotacion';
         });
+        // Volantes y RET de otros objetivos: no están entre los elegidos (no tienen propuesta propia).
+        aceptadas.push(...sugerencias.filter((s) => s.tipo === 'disponible'));
+        const sumarAGrilla = sugerencias.filter((s) => s.tipo === 'disponible' && !dotacionBaseEmployees.some((e: any) => e.id === s.celda.employeeId)).map((s) => s.celda.employeeId);
+        if (sumarAGrilla.length) setPinnedExternalEmpIds((prev) => new Set([...prev, ...sumarAGrilla]));
         // Regla de no repetir: ninguna sugerencia deja una franja de un puesto con más gente que la que pide el servicio ese día.
         const estructuraDe = (objId: string): any[] => ((enGrupoRapido && grupoSlaMap[objId]?.length ? grupoSlaMap[objId] : effectivePosStructure) || []) as any[];
         const claveFranja = (ch: any, ds: string) => `${String(ch.objectiveId || selectedObjective)}|${String(ch.positionName || '')}|${String(ch.code || '').toUpperCase()}|${ds}`;

@@ -844,3 +844,26 @@ test('armar el mes desde el servicio: cubre todas las franjas sin 12 h si alcanz
   const r2 = armarMesDesdeServicio(pocos);
   assert.ok(r2.some((r) => r.propuestas.some((c) => c.code === 'D12')));
 });
+
+test('continuar: el hueco que queda se cubre con el volante antes que con un RET de otro objetivo, y sin choque', async () => {
+  const { cubrirHuecosConDisponibles } = await import('./armarMesServicio');
+  const dias = ['2026-11-01', '2026-11-02'];
+  const est = [{ positionName: P1, qty: 1, shifts: [{ code: 'M', startTime: '07:00', endTime: '15:00', hours: 8 }] }];
+  const propio = { employeeId: 'p', nombre: 'PROPIO', ciclo: null, origenCiclo: null, estimado: false, notaEstimado: null, continuaEn: '', motivoSinCiclo: null,
+    propuestas: [{ employeeId: 'p', dateStr: '2026-11-01', code: 'M', name: 'M', positionName: P1, startTime: '07:00', endTime: '15:00', hours: 8, isFranco: false }],
+    omitidas: { licencia: 0, ocupada: 0, bloqueada: 0, sinDato: 0, excluida: 0 }, revisar: [], horasPropuestas: 8, plantilla: null, sugerencias: [] };
+  const base = {
+    ...input([{ id: 'p', nombre: 'PROPIO', previos: [] }, { id: 'vol', nombre: 'VOLANTE, UNO', previos: [] }], dias),
+    estructura: est,
+    tipoDe: (id: string) => (id === 'vol' ? 'volante' as const : 'propio' as const),
+    retFuera: () => [{ id: 'ret', nombre: 'RETEN, OTRO', objetivo: 'Banco' }],
+  };
+  const out = cubrirHuecosConDisponibles(base, [propio as any]);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].dateStr, '2026-11-02');
+  assert.equal(out[0].celda.employeeId, 'vol');
+  assert.equal(out[0].tipo, 'disponible');
+  // Si el volante trabaja en su objetivo ese día, entra el RET del otro objetivo.
+  const ocupado = cubrirHuecosConDisponibles({ ...base, ocupadoFuera: (id: string, ds: string) => (id === 'vol' && ds === '2026-11-02' ? { startTime: '08:00', endTime: '16:00', hours: 8 } : null) }, [propio as any]);
+  assert.equal(ocupado[0].celda.employeeId, 'ret');
+});

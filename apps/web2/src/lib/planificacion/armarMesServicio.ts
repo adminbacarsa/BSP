@@ -9,7 +9,7 @@
  *  - Máx. 6 días seguidos, 48 h (56 h si la racha tiene una jornada de 12 h), descanso ≥ 12 h, tope 200 h.
  * Lógica pura: devuelve el mismo formato que «Continuar», así la vista previa y el borrador son los mismos.
  */
-import type { CeldaPropuesta, ContinuarInput, PuestoSla, ResultadoGuardia } from './continuarMesAnterior';
+import type { CeldaPropuesta, ContinuarInput, PuestoSla, ResultadoGuardia, SugerenciaNivelacion } from './continuarMesAnterior';
 import { codigoDeCiclo, diaIndex, turnoHabilitadoPorEstructura } from './continuarMesAnterior';
 import { bandaDe } from './continuarC2';
 import { getEffectiveShiftQuantityOnDate } from '../slaPlanningMatch';
@@ -311,3 +311,98 @@ export function huecosDelArmado(input: ArmarMesInput, resultados: ResultadoGuard
 }
 
 export { diaIndex };
+
+/**
+ * «Continuar»: lo que la copia deja sin nadie se cubre con gente disponible antes que con 12 h. Orden: volantes del
+ * objetivo → guardias de otros objetivos en la dotación → RET de otros objetivos ese día (de toda la empresa). Sin choque,
+ * descanso ≥ 12 h, racha ≤ 6 y 200 h (contando su turno en otro objetivo). Van como sugerencias `disponible` (tildadas).
+ */
+export function cubrirHuecosConDisponibles(
+  input: ArmarMesInput & {
+    /** RET de otros objetivos ese día (quien no está en la dotación). */
+    retFuera?: (dateStr: string) => Array<{ id: string; nombre: string; objetivo: string }>;
+    /** Horas del mes en otros objetivos de quien no está en la dotación. */
+    horasFueraDe?: (employeeId: string) => number;
+  },
+  resultados: ResultadoGuardia[],
+): SugerenciaNivelacion[] {
+  const dias = input.dias;
+  if (!dias.length) return [];
+  const tipo = (id: string): TipoGuardiaArmado => input.tipoDe?.(id) || 'propio';
+  const huecos = huecosDelArmado(input, resultados);
+  if (!huecos.length) return [];
+  // Turno de cada uno por día: lo propuesto, lo de otro objetivo y lo que se va sugiriendo.
+  const dia = new Map<string, { ini: number; fin: number } | 'F' | null>();
+  const horas = new Map<string, number>();
+  const k = (id: string, ds: string) => `${id}_${ds}`;
+  const ventanaDe = (id: string, ds: string): { ini: number; fin: number } | 'F' | null => {
+    if (dia.has(k(id, ds))) return dia.get(k(id, ds))!;
+    const fuera = input.ocupadoFuera?.(id, ds);
+    return fuera ? ventana(fuera.startTime, fuera.endTime, ds) : null;
+  };
+  for (const r of resultados) {
+    let h = 0;
+    for (const c of r.propuestas) {
+      dia.set(k(r.employeeId, c.dateStr), c.isFranco ? 'F' : ventana(c.startTime, c.endTime, c.dateStr));
+      if (!c.isFranco) h += c.hours;
+    }
+    horas.set(r.employeeId, h);
+  }
+  for (const g of input.guardias) {
+    let h = horas.get(g.id) || 0;
+    if (input.ocupadoFuera) for (const ds of dias) { const o = input.ocupadoFuera(g.id, ds); if (o) { const v = ventana(o.startTime, o.endTime, ds); h += Number(o.hours) || (v ? (v.fin - v.ini) / H : 8); } }
+    horas.set(g.id, h);
+  }
+  const trabaja = (id: string, ds: string) => { const v = ventanaDe(id, ds); return !!v && v !== 'F'; };
+  const puede = (id: string, ds: string, v: { ini: number; fin: number }, dur: number, horasBase: number) => {
+    if (ventanaDe(id, ds)) return false;
+    if (input.estadoCelda(id, ds) !== null && input.guardias.some((g) => g.id === id)) return false;
+    const antes = ventanaDe(id, sumarDias(ds, -1));
+    if (antes && antes !== 'F' && v.ini - antes.fin < 12 * H) return false;
+    const despues = ventanaDe(id, sumarDias(ds, 1));
+    if (despues && despues !== 'F' && despues.ini - v.fin < 12 * H) return false;
+    let racha = 1;
+    for (let i = 1; i <= 6 && trabaja(id, sumarDias(ds, -i)); i++) racha++;
+    for (let i = 1; i <= 6 && trabaja(id, sumarDias(ds, i)); i++) racha++;
+    if (racha > 6) return false;
+    return horasBase + dur <= TOPE;
+  };
+  const out: SugerenciaNivelacion[] = [];
+  const fecha = (ds: string) => `${ds.slice(8, 10)}/${ds.slice(5, 7)}`;
+  for (const h of huecos) {
+    const pos = input.estructura.find((p) => p.positionName === h.positionName);
+    const sh = (pos?.shifts || []).find((s) => up(s.code) === up(h.code));
+    if (!sh?.startTime || !sh?.endTime) continue;
+    const v = ventana(sh.startTime, sh.endTime, h.dateStr);
+    if (!v) continue;
+    const dur = Number(sh.hours) || (v.fin - v.ini) / H;
+    for (let n = 0; n < h.faltan; n++) {
+      const enDotacion = input.guardias
+        .filter((g) => tipo(g.id) !== 'propio')
+        .sort((a, b) => (tipo(a.id) === 'volante' ? 0 : 1) - (tipo(b.id) === 'volante' ? 0 : 1) || (horas.get(a.id) || 0) - (horas.get(b.id) || 0))
+        .map((g) => ({ id: g.id, nombre: g.nombre, origen: tipo(g.id) === 'volante' ? 'volante' : 'de otro objetivo' }));
+      const rets = (input.retFuera?.(h.dateStr) || [])
+        .filter((r) => !input.guardias.some((g) => g.id === r.id))
+        .map((r) => ({ id: r.id, nombre: r.nombre, origen: `de RET en ${r.objetivo}` }));
+      const elegido = [...enDotacion, ...rets].find((c) => {
+        const base = horas.get(c.id) ?? input.horasFueraDe?.(c.id) ?? 0;
+        return puede(c.id, h.dateStr, v, dur, base);
+      });
+      if (!elegido) break;
+      dia.set(k(elegido.id, h.dateStr), v);
+      horas.set(elegido.id, (horas.get(elegido.id) ?? input.horasFueraDe?.(elegido.id) ?? 0) + dur);
+      out.push({
+        dateStr: h.dateStr,
+        de: '',
+        a: String(sh.code),
+        tipo: 'disponible',
+        texto: `${fecha(h.dateStr)} · ${String(sh.code)} (${h.positionName}): ${elegido.nombre.split(',')[0]}, ${elegido.origen} · ${Math.round(horas.get(elegido.id) || 0)} h en el mes`,
+        celda: {
+          employeeId: elegido.id, dateStr: h.dateStr, code: String(sh.code), name: String(sh.name || sh.code), positionName: h.positionName,
+          startTime: String(sh.startTime), endTime: String(sh.endTime), hours: dur, isFranco: false,
+        },
+      });
+    }
+  }
+  return out;
+}
