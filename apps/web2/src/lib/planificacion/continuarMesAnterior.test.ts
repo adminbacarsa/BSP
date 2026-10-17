@@ -626,7 +626,7 @@ test('nunca más de 6 turnos de 8 h seguidos: el 7.º de un ciclo M×7 queda de 
   let max = 0;
   for (const d of dias) {
     const c = codigos(r)[d];
-    racha = c && c !== 'F' ? racha + 1 : 0;
+    racha = c && c !== 'F' && c !== 'RET' ? racha + 1 : 0;
     max = Math.max(max, racha);
   }
   assert.ok(max <= 6, `racha máxima ${max}`);
@@ -722,7 +722,7 @@ test('servicio de lunes a lunes: 5 días de 10 h (50 h) se cortan, el tope es 48
   const dias = Array.from({ length: 31 }, (_, i) => `2026-10-${String(i + 1).padStart(2, '0')}`);
   const [r] = proponerContinuacion(input([{ id: 'g', nombre: 'G', previos, puestoPreferido: 'X' }], dias, { estructura: est }));
   let racha = 0; let max = 0;
-  for (const d of dias) { const c = codigos(r)[d]; racha = c && c !== 'F' ? racha + 10 : 0; max = Math.max(max, racha); }
+  for (const d of dias) { const c = codigos(r)[d]; racha = c && c !== 'F' && c !== 'RET' ? racha + 10 : 0; max = Math.max(max, racha); }
   assert.ok(max <= 48, `racha máxima ${max} h`);
 });
 
@@ -736,7 +736,7 @@ test('el ciclo en M/T/N cae en la franja del puesto aunque el servicio la llame 
   ];
   const previos = armar(['M', 'M', 'M', 'M', 'F', 'F'], '2026-08-01', '2026-09-30', 0, 'Puesto 5');
   const [r] = proponerContinuacion(input([{ id: 'a', nombre: 'A', previos, puestoPreferido: 'Puesto 5' }], ['2026-10-01', '2026-10-02', '2026-10-03', '2026-10-04', '2026-10-05', '2026-10-06'], { estructura: est }));
-  const trabajo = r.propuestas.filter((c) => !c.isFranco);
+  const trabajo = r.propuestas.filter((c) => !c.isFranco && c.code !== 'RET');
   assert.ok(trabajo.length >= 3, JSON.stringify(r.propuestas.map((c) => c.code)));
   assert.ok(trabajo.every((c) => c.code === 'M' && c.positionName === 'Puesto 5' && c.startTime === '07:00'));
   assert.equal(r.revisar.length, 0);
@@ -765,10 +765,12 @@ test('objetivo sin rotación fija (Casino): el mes nuevo es el anterior por día
     assert.equal(r.origenCiclo, 'semana');
     const cortados = new Set(r.revisar.filter((x) => /racha/.test(x.motivo)).flatMap((x) => x.dias));
     for (const c of r.propuestas) {
-      if (cortados.has(c.dateStr)) { assert.equal(c.isFranco, true); continue; }
+      if (cortados.has(c.dateStr)) { assert.ok(c.isFranco || c.code === 'RET'); continue; }
       // 4 semanas antes (o 5 para el 29 y 30 de noviembre): mismo día de la semana.
       const fuenteIdx = diaIndex(c.dateStr) - 28 >= diaIndex('2026-11-01') ? diaIndex(c.dateStr) - 35 : diaIndex(c.dateStr) - 28;
       const t = g.previos.find((p) => p.dateStr === ymdDeIndex(fuenteIdx))!;
+      // El tercer franco seguido pasa a RET.
+      if (c.code === 'RET' && t.code === 'F') continue;
       assert.equal(c.isFranco ? 'F' : c.code, t.code, c.dateStr);
       if (!c.isFranco) assert.equal(c.positionName, t.positionName, c.dateStr);
     }
@@ -878,4 +880,12 @@ test('continuar: el franco del volante en su objetivo no se usa (sería franco t
     francoFuera: () => true,
   }, []);
   assert.equal(out.length, 0);
+});
+
+test('nunca 3 francos seguidos: el tercero pasa a RET', async () => {
+  const { sinTresFrancosSeguidos } = await import('./continuarMesAnterior');
+  const c = (d: string, f: boolean) => ({ employeeId: 'g', dateStr: d, code: f ? 'F' : 'M', name: '', positionName: f ? 'General' : P1, startTime: '', endTime: '', hours: f ? 0 : 8, isFranco: f });
+  const r: any = { employeeId: 'g', propuestas: [c('2026-11-01', true), c('2026-11-02', true), c('2026-11-03', true), c('2026-11-04', false)] };
+  sinTresFrancosSeguidos([r]);
+  assert.deepEqual(r.propuestas.map((x: any) => x.code), ['F', 'F', 'RET', 'M']);
 });

@@ -10,7 +10,7 @@
  * Lógica pura: devuelve el mismo formato que «Continuar», así la vista previa y el borrador son los mismos.
  */
 import type { CeldaPropuesta, ContinuarInput, PuestoSla, ResultadoGuardia, SugerenciaNivelacion } from './continuarMesAnterior';
-import { codigoDeCiclo, diaIndex, turnoHabilitadoPorEstructura } from './continuarMesAnterior';
+import { codigoDeCiclo, diaIndex, sinTresFrancosSeguidos, turnoHabilitadoPorEstructura } from './continuarMesAnterior';
 import { bandaDe } from './continuarC2';
 import { getEffectiveShiftQuantityOnDate } from '../slaPlanningMatch';
 
@@ -259,7 +259,7 @@ export function armarMesDesdeServicio(input: ArmarMesInput): ResultadoGuardia[] 
   }
 
   const etiqueta = `armado desde el servicio · ${ciclo === 8 ? '6+2' : '5+1'} escalonado`;
-  return input.guardias.map((g) => {
+  const salida = input.guardias.map((g) => {
     const e = est.get(g.id)!;
     const t = tipo(g.id);
     const propuestas: CeldaPropuesta[] = [];
@@ -291,6 +291,8 @@ export function armarMesDesdeServicio(input: ArmarMesInput): ResultadoGuardia[] 
       sugerencias: [],
     } as ResultadoGuardia;
   });
+  sinTresFrancosSeguidos(salida);
+  return salida;
 }
 
 /** Turnos que quedaron sin nadie por día (para el aviso de la vista previa). */

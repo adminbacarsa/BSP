@@ -1900,6 +1900,29 @@ export function copiarPorSemana(input: ContinuarInput, g: ContinuarInput['guardi
   return res;
 }
 
+/**
+ * Nunca 3 francos seguidos (regla de Mauro 17/10): en un bloque de 3 o más, el tercero pasa a RET (stand-by, disponible
+ * para cubrir). Un RET de guardia sin horario no suma horas.
+ */
+export function sinTresFrancosSeguidos(resultados: ResultadoGuardia[]): void {
+  for (const r of resultados) {
+    const orden = [...r.propuestas].sort((a, b) => a.dateStr.localeCompare(b.dateStr));
+    let seguidos = 0;
+    let prevIdx = -Infinity;
+    for (const c of orden) {
+      const idx = diaIndex(c.dateStr);
+      if (idx !== prevIdx + 1) seguidos = 0;
+      prevIdx = idx;
+      if (!c.isFranco) { seguidos = 0; continue; }
+      seguidos += 1;
+      if (seguidos >= 3) {
+        Object.assign(c, { code: 'RET', name: 'Retén', positionName: 'Retén', startTime: '00:00', endTime: '00:00', hours: 0, isFranco: false });
+        seguidos = 0;
+      }
+    }
+  }
+}
+
 const MESES_TXT = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 
 export function proponerContinuacion(input: ContinuarInput): ResultadoGuardia[] {
@@ -1944,6 +1967,7 @@ export function proponerContinuacion(input: ContinuarInput): ResultadoGuardia[] 
       cortarRachas(input, copia);
       cubrirConLibres(input, copia);
       codigosComoElMesCopiado(input, copia);
+      sinTresFrancosSeguidos(copia);
       return copia;
     }
     // Con rotación, quien no tiene ciclo se copia igual por día de la semana (para revisar) en vez de quedar vacío.
@@ -1969,6 +1993,7 @@ export function proponerContinuacion(input: ContinuarInput): ResultadoGuardia[] 
   sugerirAlternos(input, resultados);
   aplicarReacomodoRelevante(input, resultados);
   codigosComoElMesCopiado(input, resultados);
+  sinTresFrancosSeguidos(resultados);
   return resultados;
 }
 
