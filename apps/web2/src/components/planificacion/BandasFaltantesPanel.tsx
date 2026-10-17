@@ -2,8 +2,16 @@ import React, { useMemo, useState } from 'react';
 import type { FaltanteBanda } from '@/lib/planificacion/lecturaBandas';
 import { filaFaltante, resumenFaltantes } from '@/lib/planificacion/panelesPlanif';
 
+/** Quien puede cubrir la banda antes de extender a 12 h (RET, volante, libre, de otro objetivo). */
+export type CandidatoFaltante = { empId: string; nombre: string; tipo: 'RET' | 'VOLANTE' | 'LIBRE' | 'CERCANO'; horas: number };
+
+const ETIQUETA_TIPO: Record<CandidatoFaltante['tipo'], string> = { RET: 'RET', VOLANTE: 'Volante', LIBRE: 'Libre', CERCANO: 'Otro objetivo' };
+
 type Props = {
   faltantes: FaltanteBanda[];
+  /** Candidatos en orden (RET → volante → libre → otro objetivo); van antes del par de 12 h y del franco. */
+  candidatosDe?: (faltante: FaltanteBanda) => CandidatoFaltante[];
+  onAsignarCandidato?: (faltante: FaltanteBanda, empId: string) => void;
   puedeFranco: boolean;
   onAplicar: (faltante: FaltanteBanda) => void;
   onAplicarTodas: () => void;
@@ -21,7 +29,7 @@ function propuestaDe(f: FaltanteBanda): string {
 }
 
 /** Filas del mes: día · puesto · banda · propuesta · acciones. */
-export function BandasFaltantesPanel({ faltantes, puedeFranco, onAplicar, onAplicarTodas, onPasarAFt, onElegirOtro }: Props) {
+export function BandasFaltantesPanel({ faltantes, puedeFranco, onAplicar, onAplicarTodas, onPasarAFt, onElegirOtro, candidatosDe, onAsignarCandidato }: Props) {
   const [francoDe, setFrancoDe] = useState<string | null>(null);
   const conPar = faltantes.filter((f) => f.propuesta);
   const paraFranco = faltantes.length - conPar.length;
@@ -40,6 +48,27 @@ export function BandasFaltantesPanel({ faltantes, puedeFranco, onAplicar, onApli
           return (
             <li key={clave} className="rounded-xl border border-slate-100 px-2 py-1.5" data-faltante={clave}>
               <p className="break-words text-[12px] font-bold leading-snug text-slate-800">{texto}</p>
+              {(() => {
+                const cands = candidatosDe ? candidatosDe(f).slice(0, 4) : [];
+                if (!cands.length || !onAsignarCandidato) return null;
+                return (
+                  <div className="mt-1 flex flex-wrap items-center gap-1" data-faltante-candidatos={clave}>
+                    <span className="text-[10px] font-black uppercase text-emerald-700">Antes que 12 h:</span>
+                    {cands.map((c) => (
+                      <button
+                        key={c.empId}
+                        type="button"
+                        onClick={() => onAsignarCandidato(f, c.empId)}
+                        className="rounded-lg border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-900 hover:bg-emerald-100"
+                        title={`Asignar ${f.banda} de ${f.positionName} a ${c.nombre} · ${ETIQUETA_TIPO[c.tipo]} · ${Math.round(c.horas)} h en el mes`}
+                        data-faltante-candidato={c.empId}
+                      >
+                        {ETIQUETA_TIPO[c.tipo]} · {c.nombre.split(',')[0]} ({Math.round(c.horas)} h)
+                      </button>
+                    ))}
+                  </div>
+                );
+              })()}
               <div className="mt-1 flex flex-wrap gap-1">
                 {f.propuesta ? (
                   <>

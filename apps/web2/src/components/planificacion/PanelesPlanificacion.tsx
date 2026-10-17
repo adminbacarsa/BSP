@@ -13,7 +13,7 @@ import {
   type EstadoPaneles,
   type PestanaPanel,
 } from '@/lib/planificacion/panelesPlanif';
-import { BandasFaltantesPanel } from '@/components/planificacion/BandasFaltantesPanel';
+import { BandasFaltantesPanel, type CandidatoFaltante } from '@/components/planificacion/BandasFaltantesPanel';
 import { ModoRapidoAvisosPanel } from '@/components/planificacion/ModoRapidoPiezas';
 import { ConsultasEnCursoPill } from '@/components/planificacion/ConsultasEnCurso';
 
@@ -27,6 +27,8 @@ type Props = {
   onAplicarTodas: () => void;
   onPasarAFt: (faltante: FaltanteBanda, franco: { empId: string; nombre: string }) => void;
   onElegirOtro: (faltante: FaltanteBanda) => void;
+  candidatosDe?: (faltante: FaltanteBanda) => CandidatoFaltante[];
+  onAsignarCandidato?: (faltante: FaltanteBanda, empId: string) => void;
   avisos: AvisoRapido[];
   sinServicio: boolean;
   modoRapido: boolean;
@@ -130,6 +132,8 @@ export function PanelesMarco(props: Props) {
                 onAplicarTodas={props.onAplicarTodas}
                 onPasarAFt={props.onPasarAFt}
                 onElegirOtro={props.onElegirOtro}
+                candidatosDe={props.candidatosDe}
+                onAsignarCandidato={props.onAsignarCandidato}
               />
             )}
             {pestana === 'avisos' && (

@@ -494,6 +494,7 @@ import { applyOperationalGapCloseToChanges, applySingleWorkerFullGapCloseToChang
 import { alternativasPareja, cambiarPareja, estiloJornada12, horarioDoce, moverVista12, proponerCierre12h, slaExigeCobertura, textoRango12h, textoResumen12h, textoVista12, volverA8, type CtxHorario12, type Propuesta12h, type TurnoPuesto12 } from '@/lib/planificacion/cierre12h';
 import { avisosDesdeLectura, faltantesDelDia, leerDia, lineasDeSobra, proponerLiberar, SIN_PUESTO, type FaltanteBanda, type GuardiaSobra, type PuestoServicio, type TurnoDia } from '@/lib/planificacion/lecturaBandas';
 import { PanelesMarco } from '@/components/planificacion/PanelesPlanificacion';
+import type { CandidatoFaltante } from '@/components/planificacion/BandasFaltantesPanel';
 import {
     clasificarSeleccionLicencia,
     diasQueQuedaron,
@@ -16909,6 +16910,99 @@ function PlanificacionDesktop() {
         if (!esCeldaFranco(s)) return [];
         return [{ empId: e.id, nombre: String(e.name || e.id) }];
     });
+    /** Franja del puesto para una banda (M/T/N), sin las de 12 h: M, o la propia del puesto (P5M). */
+    const franjaDeBanda = (positionName: string, banda: string) => {
+        const b = normalizarCodigo(banda);
+        return ((getShiftsForPosition(positionName, selectedObjective) as TurnoSla[]) || []).find((s) => {
+            const c = normalizarCodigo(s.code);
+            return !/D12$|N12$/.test(c) && (c === b || bandaDeCodigoPuesto(c) === b);
+        });
+    };
+    /** Inicio y fin en ms (hora AR) de un turno de la grilla o de una franja «HH:MM» en ese día. */
+    const ventanaMs = (startTime: any, endTime: any, dateStr: string): { ini: number; fin: number } | null => {
+        const ms = (v: any): number | null => {
+            if (!v) return null;
+            if (typeof v === 'string' && /^\d{1,2}:\d{2}$/.test(v)) return new Date(`${dateStr}T${v.padStart(5, '0')}:00-03:00`).getTime();
+            const d = v?.toDate ? v.toDate() : v instanceof Date ? v : typeof v === 'string' ? new Date(v) : null;
+            return d && !isNaN(d.getTime()) ? d.getTime() : null;
+        };
+        const ini = ms(startTime);
+        let fin = ms(endTime);
+        if (ini == null || fin == null) return null;
+        if (fin <= ini) fin += 24 * 3600e3;
+        return { ini, fin };
+    };
+    const turnoTrabajoDe = (empId: string, ds: string) => {
+        const key = `${empId}_${ds}`;
+        const p = pendingChanges[key];
+        const t = p ? (p.isDeleted ? null : p) : shiftsMap[key];
+        if (!t || t.isDeleted || t.isFranco || t.isNovedad || t.isAbsent) return null;
+        const code = normalizarCodigo(t.code || '');
+        if (!code || ['F', 'FF', 'FP', 'RET'].includes(code)) return null;
+        const aus = absencesMap[key];
+        if (esCeldaLicencia({ code, tieneAusencia: !!(aus && isActiveAbsence(aus)) })) return null;
+        return t;
+    };
+    /**
+     * Quién cubre la banda que falta antes de extender a 12 h: RET → volante del objetivo → guardia propio sin turno →
+     * guardia de otro objetivo en la dotación (dentro de cada uno, el más lejos de 200 h). Sin choque ese día,
+     * descanso ≥ 12 h con el día anterior y el siguiente, racha ≤ 6 y tope de 200 h. El franco no entra (va al final).
+     */
+    const candidatosFaltante = (f: { dateStr: string; positionName: string; banda: string }): CandidatoFaltante[] => {
+        if (!selectedObjective || bloqueoMesCerrado) return [];
+        const franja = franjaDeBanda(f.positionName, f.banda);
+        if (!franja?.startTime || !franja?.endTime) return [];
+        const nuevo = ventanaMs(franja.startTime, franja.endTime, f.dateStr);
+        if (!nuevo) return [];
+        const horasTurno = Number(franja.hours) || (nuevo.fin - nuevo.ini) / 3600e3;
+        const prev = previousCalendarDayStr(f.dateStr);
+        const next = getDateKey(new Date(new Date(`${f.dateStr}T12:00:00`).getTime() + 864e5));
+        const sumaDias = (ds: string, n: number) => getDateKey(new Date(new Date(`${ds}T12:00:00`).getTime() + n * 864e5));
+        const orden: Record<CandidatoFaltante['tipo'], number> = { RET: 0, VOLANTE: 1, LIBRE: 2, CERCANO: 3 };
+        const out: CandidatoFaltante[] = [];
+        for (const emp of dotacionBaseEmployees as any[]) {
+            const key = `${emp.id}_${f.dateStr}`;
+            const p = pendingChanges[key];
+            const t = p ? (p.isDeleted ? null : p) : shiftsMap[key];
+            const aus = absencesMap[key];
+            if (aus && isActiveAbsence(aus)) continue;
+            const code = normalizarCodigo(t && !t.isDeleted ? t.code || '' : '');
+            let tipo: CandidatoFaltante['tipo'];
+            if (code === 'RET') tipo = 'RET';
+            else if (t && !t.isDeleted && code) continue; // turno, franco o licencia: no
+            else if ((emp.volante || []).includes(selectedObjective)) tipo = 'VOLANTE';
+            else if (emp.preferredObjectiveId === selectedObjective || slaIdToObjId[emp.preferredObjectiveId] === selectedObjective) tipo = 'LIBRE';
+            else tipo = 'CERCANO';
+            const horas = Number(empMonthlyHours[emp.id]) || 0;
+            if (horas + horasTurno > 200) continue;
+            const antes = turnoTrabajoDe(emp.id, prev);
+            const vA = antes ? ventanaMs(antes.startTime, antes.endTime, prev) : null;
+            if (vA && nuevo.ini - vA.fin < 12 * 3600e3) continue;
+            const despues = turnoTrabajoDe(emp.id, next);
+            const vD = despues ? ventanaMs(despues.startTime, despues.endTime, next) : null;
+            if (vD && vD.ini - nuevo.fin < 12 * 3600e3) continue;
+            let racha = 1;
+            for (let i = 1; i <= 6 && turnoTrabajoDe(emp.id, sumaDias(f.dateStr, -i)); i++) racha++;
+            for (let i = 1; i <= 6 && turnoTrabajoDe(emp.id, sumaDias(f.dateStr, i)); i++) racha++;
+            if (racha > 6) continue;
+            out.push({ empId: emp.id, nombre: String(emp.name || emp.id), tipo, horas });
+        }
+        return out.sort((a, b) => orden[a.tipo] - orden[b.tipo] || a.horas - b.horas);
+    };
+    const asignarCandidatoFaltante = (f: { dateStr: string; positionName: string; banda: string }, empId: string) => {
+        const r = displayedEmployees.findIndex((e: { id: string }) => e.id === empId);
+        const c = diasRapido.indexOf(f.dateStr);
+        if (r < 0 || c < 0) { toast.message('Ese guardia no está en la grilla.'); return; }
+        const franja = franjaDeBanda(f.positionName, f.banda);
+        if (!franja) { toast.message(`${f.positionName} no tiene la banda ${f.banda} en el servicio.`); return; }
+        const code = normalizarCodigo(franja.code);
+        escribirRapido([{
+            r,
+            c,
+            code,
+            fuente: { code, startTime: franja.startTime, endTime: franja.endTime, hours: franja.hours, name: franja.name || code, positionName: f.positionName, forzarPuesto: true },
+        }]);
+    };
     const pasarAFtDirecto = (empId: string, dateStr: string, banda: string, positionName: string) => {
         if (!canAssignFT) { toast.message('Sin permiso para asignar Franco Trabajado (FT).'); return; }
         const r = displayedEmployees.findIndex((e: { id: string }) => e.id === empId);
@@ -19546,6 +19640,8 @@ function PlanificacionDesktop() {
                                 onAplicarTodas={() => aplicarPropuestas12(lecturaMes.faltantes.flatMap((f) => (f.propuesta ? [f.propuesta] : [])))}
                                 onPasarAFt={(f, fr) => pasarAFtDirecto(fr.empId, f.dateStr, f.banda, f.positionName)}
                                 onElegirOtro={(f) => { if (f.propuesta) setPropuesta12([f.propuesta]); }}
+                                candidatosDe={candidatosFaltante}
+                                onAsignarCandidato={asignarCandidatoFaltante}
                                 avisos={modoRapido ? avisosRapidoSinVer : []}
                                 sinServicio={sinServicioEnMes}
                                 modoRapido={modoRapido}
