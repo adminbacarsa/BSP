@@ -1851,6 +1851,11 @@ export function copiarPorSemana(input: ContinuarInput, g: ContinuarInput['guardi
       });
       continue;
     }
+    // La jornada de 12 h del mes copiado vuelve a su banda de 8 h: las 12 h son lo último (se agregan si falta gente).
+    if (FAMILIA[dia.code]) {
+      const ocho = resolverPuesto(input.estructura, dia.pos, FAMILIA[dia.code]);
+      if (!('motivo' in ocho)) dia = { ...dia, code: FAMILIA[dia.code] };
+    }
     const sla = resolverPuesto(input.estructura, dia.pos, dia.code);
     if ('motivo' in sla && dia.code === 'RET') {
       // RET de guardia (sin franja en el servicio): como lo tenía.
@@ -1898,6 +1903,48 @@ export function copiarPorSemana(input: ContinuarInput, g: ContinuarInput['guardi
   res.continuaEn = `el ${Number(input.dias[0].slice(8, 10))} como el ${Number(ymdDeIndex(primero - 28).slice(8, 10))} de ${mes}`;
   if (!res.propuestas.length) res.motivoSinCiclo = 'No tiene días en este objetivo para copiar';
   return res;
+}
+
+/**
+ * Descanso entre un día y el siguiente, contando el último turno del mes anterior: con menos de 8 h el día queda de
+ * franco y se lista para revisar (de 8 a 12 h se permite y pide PIN al publicar, como en la grilla). Vale para cualquier camino de «Continuar» (ciclo, plantilla, copia por semana).
+ */
+export function cortarDescansos(input: ContinuarInput, resultados: ResultadoGuardia[]): void {
+  if (!input.dias.length) return;
+  const primero = diaIndex(input.dias[0]);
+  const msDe = (ds: string, hhmm: string) => new Date(`${ds}T${String(hhmm || '00:00').padStart(5, '0')}:00-03:00`).getTime();
+  for (const r of resultados) {
+    const g = input.guardias.find((x) => x.id === r.employeeId);
+    let finPrevio = -Infinity;
+    for (const t of g?.previos || []) {
+      const idx = diaIndex(String(t.dateStr || ''));
+      if (idx !== primero - 1) continue;
+      const code = codigoDeCiclo(t, input.objectiveId);
+      if (!code || code === 'F' || code === 'RET') continue;
+      const w = ventanaTrabajo(t.startTime, t.endTime);
+      if (w) finPrevio = Math.max(finPrevio, msDe(String(t.dateStr), w.start) + w.hours * 3600e3);
+    }
+    const orden = [...r.propuestas].sort((a, b) => a.dateStr.localeCompare(b.dateStr));
+    let prevIdx = primero - 1;
+    for (const c of orden) {
+      const idx = diaIndex(c.dateStr);
+      if (idx > prevIdx + 1) finPrevio = -Infinity;
+      prevIdx = idx;
+      if (c.isFranco || c.code === 'RET' || !c.startTime) { finPrevio = -Infinity; continue; }
+      const ini = msDe(c.dateStr, c.startTime);
+      if (ini - finPrevio < 8 * 3600e3) {
+        const motivo = 'menos de 8 h de descanso con el turno anterior: queda de franco';
+        const item = r.revisar.find((x) => x.motivo === motivo && x.code === c.code);
+        if (item) item.dias.push(c.dateStr); else r.revisar.push({ positionName: c.positionName, code: c.code, dias: [c.dateStr], motivo });
+        Object.assign(c, { code: 'F', name: 'Franco', positionName: 'General', startTime: '00:00', endTime: '00:00', hours: 0, isFranco: true });
+        finPrevio = -Infinity;
+        continue;
+      }
+      finPrevio = ini + (Number(c.hours) || 8) * 3600e3;
+    }
+    r.horasPropuestas = r.propuestas.reduce((a, x) => a + (x.isFranco ? 0 : x.hours), 0);
+    r.horasPropuestas = r.propuestas.reduce((a, x) => a + (x.isFranco ? 0 : x.hours), 0);
+  }
 }
 
 /**
@@ -1965,6 +2012,7 @@ export function proponerContinuacion(input: ContinuarInput): ResultadoGuardia[] 
       const copia = input.guardias.map((g) => copiarPorSemana(input, g, mesCopiado));
       // La racha manda igual: máx. 6 turnos de 8 h / 4 de 12 h seguidos (48 h; 56 h lun–vie), contando el fin del mes copiado.
       cortarRachas(input, copia);
+      cortarDescansos(input, copia);
       cubrirConLibres(input, copia);
       codigosComoElMesCopiado(input, copia);
       sinTresFrancosSeguidos(copia);
@@ -1984,6 +2032,7 @@ export function proponerContinuacion(input: ContinuarInput): ResultadoGuardia[] 
   }
   cortarRachas(input, resultados);
   anclarPorPuesto(input, resultados);
+  cortarDescansos(input, resultados);
   cubrirConLibres(input, resultados);
   if (input.cupoDia) {
     const nivel = nivelarResultados(input, resultados, historias);

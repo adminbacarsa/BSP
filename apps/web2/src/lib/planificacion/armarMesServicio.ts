@@ -28,6 +28,8 @@ export type ArmarMesInput = ContinuarInput & {
 type Slot = { pos: string; code: string; name: string; startTime: string; endTime: string; dur: number; doce: boolean };
 
 const H = 3600e3;
+/** D12/N12 cuentan como su banda de 8 h para el puesto habitual. */
+const FAMILIA_8: Record<string, string> = { D12: 'M', N12: 'N' };
 const TOPE = 200;
 
 function up(v: unknown): string {
@@ -111,6 +113,8 @@ function maxDoce(estructura: PuestoSla[]): number {
 type Estado = {
   run: number; runH: number; run12: number; fr: number; finMs: number; horas: number;
   prev: string | null; plan: Array<Slot | null>;
+  /** Último turno trabajado (sigue después de los francos) y su puesto y franja habitual del mes anterior. */
+  ultimo: Slot | null; habitual: Map<string, number>;
 };
 
 export function armarMesDesdeServicio(input: ArmarMesInput): ResultadoGuardia[] {
@@ -140,14 +144,55 @@ export function armarMesDesdeServicio(input: ArmarMesInput): ResultadoGuardia[] 
     if (!run) for (let i = 1; i <= 7 && !porDia.get(sumarDias(primero, -i))?.trabaja; i++) fr++;
     let horasFuera = 0;
     if (input.ocupadoFuera) for (const ds of dias) { const o = input.ocupadoFuera(g.id, ds); if (o) horasFuera += Number(o.hours) || ((ventana(o.startTime, o.endTime, ds)?.fin ?? 0) - (ventana(o.startTime, o.endTime, ds)?.ini ?? 0)) / H; }
-    est.set(g.id, { run, runH, run12: 0, fr, finMs, horas: horasFuera, prev: null, plan: [] });
+    const habitual = new Map<string, number>();
+    for (const t of g.previos || []) {
+      const code = codigoDeCiclo(t);
+      if (!code || code === 'F' || code === 'RET') continue;
+      const k = `${String(t.positionName || '').trim()}|${up(FAMILIA_8[up(code)] || code)}`;
+      habitual.set(k, (habitual.get(k) || 0) + 1);
+    }
+    est.set(g.id, { run, runH, run12: 0, fr, finMs, horas: horasFuera, prev: null, plan: [], ultimo: null, habitual });
   }
 
   // Ritmo de los propios: 6+2 si alcanza la gente, si no 5+1. Francos escalonados para que cada día descanse parejo.
   const propios = input.guardias.filter((g) => tipo(g.id) === 'propio');
   const promedio = dias.reduce((a, ds) => a + slotsDelDia(input.estructura, ds, habilitado, 0).length, 0) / dias.length;
   const disponibles = propios.filter((g) => dias.some((ds) => input.estadoCelda(g.id, ds) === null)).length || 1;
-  const [ciclo, trabaja] = promedio <= disponibles * 0.75 ? [8, 6] : [6, 5];
+  // Ritmo: el de los meses anteriores (largo típico del bloque trabajado y del franco). Si con ese no alcanza la gente,
+  // el siguiente más ajustado.
+  const [ciclo, trabaja] = (() => {
+    const bloques = new Map<number, number>();
+    const francos = new Map<number, number>();
+    for (const g of propios) {
+      const dias0 = new Map<string, boolean>();
+      for (const t of g.previos || []) {
+        const code = codigoDeCiclo(t);
+        if (!code || !t.dateStr) continue;
+        const w = code !== 'F' && code !== 'RET';
+        if (w || !dias0.has(t.dateStr)) dias0.set(t.dateStr, w);
+      }
+      const orden = [...dias0.keys()].sort();
+      let run = 0; let off = 0; let prev = '';
+      for (const ds of orden) {
+        const seguido = prev && sumarDias(prev, 1) === ds;
+        const w = dias0.get(ds)!;
+        if (!seguido) { run = 0; off = 0; }
+        if (w) { if (off) { francos.set(off, (francos.get(off) || 0) + 1); off = 0; } run++; }
+        else { if (run) { bloques.set(run, (bloques.get(run) || 0) + 1); run = 0; } off++; }
+        prev = ds;
+      }
+    }
+    const moda = (m: Map<number, number>, min: number, max: number, def: number) => {
+      let best = def; let n = 0;
+      for (const [k, v] of m) if (k >= min && k <= max && v > n) { best = k; n = v; }
+      return best;
+    };
+    const w0 = moda(bloques, 3, 6, 6);
+    const o0 = moda(francos, 1, 2, 2);
+    const opciones: Array<[number, number]> = [[w0 + o0, w0], [8, 6], [6, 5], [7, 6]];
+    for (const [c, t] of opciones) if (promedio <= disponibles * (t / c)) return [c, t];
+    return [7, 6];
+  })();
   const fase = new Map<string, number>();
   {
     // Fase deseada: seguir la racha con la que cerró el mes anterior; después se reparte parejo.
@@ -198,6 +243,10 @@ export function armarMesDesdeServicio(input: ArmarMesInput): ResultadoGuardia[] 
         if (ant && ant.pos === s.pos && up(ant.code) === up(s.code)) c -= 30;
         else if (ant && bandaDe(up(ant.code)) === bandaDe(up(s.code))) c -= 12;
         else if (ant) c += 10;
+        // Después de los francos vuelve a su turno del bloque anterior (bandas fijas).
+        if (!ant && e.ultimo && e.ultimo.pos === s.pos && up(e.ultimo.code) === up(s.code)) c -= 25;
+        // Su puesto y franja habitual del mes anterior.
+        c -= Math.min(e.habitual.get(`${s.pos}|${up(FAMILIA_8[up(s.code)] || s.code)}`) || 0, 12) * 1.5;
         return c + e.horas / 20;
       };
       const asignarGrupo = (ids: string[]) => {
@@ -246,7 +295,7 @@ export function armarMesDesdeServicio(input: ArmarMesInput): ResultadoGuardia[] 
       const s = elegido!.asign.get(g.id);
       if (s) {
         const v = ventana(s.startTime, s.endTime, ds)!;
-        e.finMs = v.fin; e.run++; e.runH += s.dur; e.run12 += s.doce ? 1 : 0; e.fr = 0; e.horas += s.dur; e.prev = s.code;
+        e.finMs = v.fin; e.run++; e.runH += s.dur; e.run12 += s.doce ? 1 : 0; e.fr = 0; e.horas += s.dur; e.prev = s.code; e.ultimo = s;
         e.plan.push(s);
       } else {
         const fuera = input.ocupadoFuera?.(g.id, ds);

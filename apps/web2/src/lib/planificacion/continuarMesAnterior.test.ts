@@ -743,7 +743,7 @@ test('el ciclo en M/T/N cae en la franja del puesto aunque el servicio la llame 
 });
 
 
-test('objetivo sin rotación fija (Casino): el mes nuevo es el anterior por día de la semana, con puesto y D12/N12', () => {
+test('objetivo sin rotación fija (Casino): el mes nuevo es el anterior por día de la semana, con puesto; D12/N12 pasan a su banda de 8 h', () => {
   // Un solo mes armado a mano: cada guardia cambia de banda y de puesto sin repetir un ciclo.
   const azar = (seed: number) => () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
   const guardias = [0, 1, 2, 3].map((g) => {
@@ -763,7 +763,7 @@ test('objetivo sin rotación fija (Casino): el mes nuevo es el anterior por día
   for (const r of res) {
     const g = guardias.find((x) => x.id === r.employeeId)!;
     assert.equal(r.origenCiclo, 'semana');
-    const cortados = new Set(r.revisar.filter((x) => /racha/.test(x.motivo)).flatMap((x) => x.dias));
+    const cortados = new Set(r.revisar.filter((x) => /racha|descanso/.test(x.motivo)).flatMap((x) => x.dias));
     for (const c of r.propuestas) {
       if (cortados.has(c.dateStr)) { assert.ok(c.isFranco || c.code === 'RET'); continue; }
       // 4 semanas antes (o 5 para el 29 y 30 de noviembre): mismo día de la semana.
@@ -771,7 +771,8 @@ test('objetivo sin rotación fija (Casino): el mes nuevo es el anterior por día
       const t = g.previos.find((p) => p.dateStr === ymdDeIndex(fuenteIdx))!;
       // El tercer franco seguido pasa a RET.
       if (c.code === 'RET' && t.code === 'F') continue;
-      assert.equal(c.isFranco ? 'F' : c.code, t.code, c.dateStr);
+      const esperado = t.code === 'D12' ? 'M' : t.code === 'N12' ? 'N' : t.code;
+      assert.equal(c.isFranco ? 'F' : c.code, esperado, c.dateStr);
       if (!c.isFranco) assert.equal(c.positionName, t.positionName, c.dateStr);
     }
     assert.equal(r.propuestas.length, 30);
@@ -888,4 +889,25 @@ test('nunca 3 francos seguidos: el tercero pasa a RET', async () => {
   const r: any = { employeeId: 'g', propuestas: [c('2026-11-01', true), c('2026-11-02', true), c('2026-11-03', true), c('2026-11-04', false)] };
   sinTresFrancosSeguidos([r]);
   assert.deepEqual(r.propuestas.map((x: any) => x.code), ['F', 'F', 'RET', 'M']);
+});
+
+test('continuar: nunca menos de 8 h de descanso entre un día y el siguiente (8–12 h pide PIN)', () => {
+  const guardias = [0, 1, 2, 3].map((g) => {
+    // Semanas que alternan N y M el mismo día de la semana: copiadas de semanas distintas, quedaría N → M al día siguiente.
+    const previos = diasDelMes(2026, 10).map((d, i) => {
+      const code = (i + g) % 9 === 8 ? 'F' : (Math.floor(i / 7) + g) % 2 ? 'N' : 'M';
+      return { dateStr: d, code, positionName: code === 'F' ? 'General' : P1, objectiveId: OBJ, startTime: code === 'N' ? '22:00' : '06:00', endTime: code === 'N' ? '06:00' : '14:00' };
+    });
+    return { id: `g${g}`, nombre: `G${g}`, previos };
+  });
+  const res = proponerContinuacion(input(guardias, diasDelMes(2026, 11)));
+  for (const r of res) {
+    const orden = [...r.propuestas].filter((c) => !c.isFranco && c.code !== 'RET').sort((a, b) => a.dateStr.localeCompare(b.dateStr));
+    for (let i = 1; i < orden.length; i++) {
+      if (diaIndex(orden[i].dateStr) !== diaIndex(orden[i - 1].dateStr) + 1) continue;
+      const fin = new Date(`${orden[i - 1].dateStr}T${orden[i - 1].startTime}:00-03:00`).getTime() + orden[i - 1].hours * 3600e3;
+      const ini = new Date(`${orden[i].dateStr}T${orden[i].startTime}:00-03:00`).getTime();
+      assert.ok(ini - fin >= 8 * 3600e3, `${r.employeeId} ${orden[i].dateStr}`);
+    }
+  }
 });
