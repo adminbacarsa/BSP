@@ -25,7 +25,8 @@ export type ArmarMesInput = ContinuarInput & {
   francoFuera?: (employeeId: string, dateStr: string) => boolean;
 };
 
-type Slot = { pos: string; code: string; name: string; startTime: string; endTime: string; dur: number; doce: boolean };
+/** `lv` = franja solo de lunes a viernes: la racha puede llegar a 56 h (Rondín 5 × 10 h). */
+type Slot = { pos: string; code: string; name: string; startTime: string; endTime: string; dur: number; doce: boolean; lv?: boolean };
 
 const H = 3600e3;
 /** D12/N12 cuentan como su banda de 8 h para el puesto habitual. */
@@ -88,7 +89,9 @@ function slotsDelDia(estructura: PuestoSla[], dateStr: string, habilitado: (pos:
       const b = bandaDe(up(s.code));
       if (b && sacar[b] > 0) { const q = Math.min(n, sacar[b]); n -= q; sacar[b] -= q; }
       for (let i = 0; i < n; i++) {
-        out.push({ pos: pos.positionName, code: String(s.code), name: String(s.name || s.code), startTime: String(s.startTime), endTime: String(s.endTime), dur: Number(s.hours) || horasEntre(String(s.startTime), String(s.endTime)), doce: false });
+        const dias = (s.days || []).map((d) => up(d));
+        const lv = dias.length > 0 && !dias.includes('S') && !dias.includes('D');
+        out.push({ pos: pos.positionName, code: String(s.code), name: String(s.name || s.code), startTime: String(s.startTime), endTime: String(s.endTime), dur: Number(s.hours) || horasEntre(String(s.startTime), String(s.endTime)), doce: false, lv });
       }
     }
     for (let i = 0; i < paxDoce; i++) {
@@ -117,7 +120,68 @@ type Estado = {
   ultimo: Slot | null; habitual: Map<string, number>;
 };
 
+/**
+ * Prueba el ritmo de los meses anteriores y los siguientes que alcanzan (6+2, 5+1, 6+1) y se queda con el que deja
+ * menos huecos; entre esos, el que usa menos jornadas de 12 h (van al final); si empatan, el de la historia.
+ */
 export function armarMesDesdeServicio(input: ArmarMesInput): ResultadoGuardia[] {
+  let mejor: { res: ResultadoGuardia[]; huecos: number; doce: number } | null = null;
+  for (const ritmo of ritmosCandidatos(input)) {
+    const res = armarConRitmo(input, ritmo);
+    const huecos = huecosDelArmado(input, res).reduce((a, h) => a + h.faltan, 0);
+    const doce = res.reduce((a, r) => a + r.propuestas.filter((c) => /D12$|N12$/.test(up(c.code))).length, 0);
+    if (!mejor || huecos < mejor.huecos || (huecos === mejor.huecos && doce < mejor.doce)) mejor = { res, huecos, doce };
+    if (mejor.huecos === 0 && mejor.doce === 0) break;
+  }
+  return mejor?.res || [];
+}
+
+/** Ritmos a probar: el de los meses anteriores primero y después los que alcanzan para el servicio. */
+function ritmosCandidatos(input: ArmarMesInput): Array<[number, number]> {
+  const dias = input.dias;
+  const habilitado = input.turnoHabilitado
+    || ((pos: string, code: string, ds: string) => turnoHabilitadoPorEstructura(input.estructura, pos, code, ds));
+  const tipo = (id: string): TipoGuardiaArmado => input.tipoDe?.(id) || 'propio';
+  const propios = input.guardias.filter((g) => tipo(g.id) === 'propio');
+  const promedio = dias.reduce((a, ds) => a + slotsDelDia(input.estructura, ds, habilitado, 0).length, 0) / Math.max(1, dias.length);
+  const disponibles = propios.filter((g) => dias.some((ds) => input.estadoCelda(g.id, ds) === null)).length || 1;
+  const bloques = new Map<number, number>();
+  const francos = new Map<number, number>();
+  for (const g of propios) {
+    const dias0 = new Map<string, boolean>();
+    for (const t of g.previos || []) {
+      const code = codigoDeCiclo(t);
+      if (!code || !t.dateStr) continue;
+      const w = code !== 'F' && code !== 'RET';
+      if (w || !dias0.has(t.dateStr)) dias0.set(t.dateStr, w);
+    }
+    let run = 0; let off = 0; let prev = '';
+    for (const ds of [...dias0.keys()].sort()) {
+      const seguido = prev && sumarDias(prev, 1) === ds;
+      const w = dias0.get(ds)!;
+      if (!seguido) { run = 0; off = 0; }
+      if (w) { if (off) { francos.set(off, (francos.get(off) || 0) + 1); off = 0; } run++; }
+      else { if (run) { bloques.set(run, (bloques.get(run) || 0) + 1); run = 0; } off++; }
+      prev = ds;
+    }
+  }
+  const moda = (m: Map<number, number>, min: number, max: number, def: number) => {
+    let best = def; let n = 0;
+    for (const [k, v] of m) if (k >= min && k <= max && v > n) { best = k; n = v; }
+    return best;
+  };
+  const w0 = moda(bloques, 3, 6, 6);
+  const o0 = moda(francos, 1, 2, 2);
+  const out: Array<[number, number]> = [];
+  for (const r of [[w0 + o0, w0], [8, 6], [6, 5], [7, 6]] as Array<[number, number]>) {
+    if (out.some((x) => x[0] === r[0] && x[1] === r[1])) continue;
+    if (promedio <= disponibles * (r[1] / r[0]) || out.length === 0) out.push(r);
+  }
+  if (!out.some((x) => x[0] === 7)) out.push([7, 6]);
+  return out;
+}
+
+function armarConRitmo(input: ArmarMesInput, ritmo: [number, number]): ResultadoGuardia[] {
   const dias = input.dias;
   if (!dias.length) return [];
   const habilitado = input.turnoHabilitado
@@ -156,43 +220,7 @@ export function armarMesDesdeServicio(input: ArmarMesInput): ResultadoGuardia[] 
 
   // Ritmo de los propios: 6+2 si alcanza la gente, si no 5+1. Francos escalonados para que cada día descanse parejo.
   const propios = input.guardias.filter((g) => tipo(g.id) === 'propio');
-  const promedio = dias.reduce((a, ds) => a + slotsDelDia(input.estructura, ds, habilitado, 0).length, 0) / dias.length;
-  const disponibles = propios.filter((g) => dias.some((ds) => input.estadoCelda(g.id, ds) === null)).length || 1;
-  // Ritmo: el de los meses anteriores (largo típico del bloque trabajado y del franco). Si con ese no alcanza la gente,
-  // el siguiente más ajustado.
-  const [ciclo, trabaja] = (() => {
-    const bloques = new Map<number, number>();
-    const francos = new Map<number, number>();
-    for (const g of propios) {
-      const dias0 = new Map<string, boolean>();
-      for (const t of g.previos || []) {
-        const code = codigoDeCiclo(t);
-        if (!code || !t.dateStr) continue;
-        const w = code !== 'F' && code !== 'RET';
-        if (w || !dias0.has(t.dateStr)) dias0.set(t.dateStr, w);
-      }
-      const orden = [...dias0.keys()].sort();
-      let run = 0; let off = 0; let prev = '';
-      for (const ds of orden) {
-        const seguido = prev && sumarDias(prev, 1) === ds;
-        const w = dias0.get(ds)!;
-        if (!seguido) { run = 0; off = 0; }
-        if (w) { if (off) { francos.set(off, (francos.get(off) || 0) + 1); off = 0; } run++; }
-        else { if (run) { bloques.set(run, (bloques.get(run) || 0) + 1); run = 0; } off++; }
-        prev = ds;
-      }
-    }
-    const moda = (m: Map<number, number>, min: number, max: number, def: number) => {
-      let best = def; let n = 0;
-      for (const [k, v] of m) if (k >= min && k <= max && v > n) { best = k; n = v; }
-      return best;
-    };
-    const w0 = moda(bloques, 3, 6, 6);
-    const o0 = moda(francos, 1, 2, 2);
-    const opciones: Array<[number, number]> = [[w0 + o0, w0], [8, 6], [6, 5], [7, 6]];
-    for (const [c, t] of opciones) if (promedio <= disponibles * (t / c)) return [c, t];
-    return [7, 6];
-  })();
+  const [ciclo, trabaja] = ritmo;
   const fase = new Map<string, number>();
   {
     // Fase deseada: seguir la racha con la que cerró el mes anterior; después se reparte parejo.
@@ -227,7 +255,7 @@ export function armarMesDesdeServicio(input: ArmarMesInput): ResultadoGuardia[] 
       const vm = fueraMan ? ventana(fueraMan.startTime, fueraMan.endTime, sumarDias(ds, 1)) : null;
       if (vm && vm.ini - v.fin < 12 * H) return false;
       if (e.run >= 6) return false;
-      if (e.runH + s.dur > (s.doce || e.run12 ? 56 : 48)) return false;
+      if (e.runH + s.dur > (s.doce || e.run12 || s.lv ? 56 : 48)) return false;
       if (e.horas + s.dur > TOPE) return false;
       return true;
     };
@@ -274,10 +302,21 @@ export function armarMesDesdeServicio(input: ArmarMesInput): ResultadoGuardia[] 
           pend = pend.filter((x) => x !== best!.id);
         }
       };
-      // 1) Propios en su fase (si sobran, descansa el de más horas: mejor franco que RET sin usar).
+      // 1) Propios en su fase. Si sobran, trabajan primero los que están en medio de su bloque y los que van más
+      // atrasados en horas; descansa el que viene de un solo franco (le quedan dos) o terminó su bloque.
+      const prioridad = (id: string) => {
+        const e = est.get(id)!;
+        let p = e.horas;
+        if (e.run >= 1 && e.run <= 4) p -= 60;
+        if (e.run >= 5) p += 15;
+        if (e.run === 0 && e.fr === 1) p += 30;
+        return p;
+      };
       const enTurno = propios.map((g) => g.id).filter((id) => enFase(id, di) && libre(id))
-        .sort((a, b) => est.get(a)!.horas - est.get(b)!.horas);
-      asignarGrupo(enTurno);
+        .sort((a, b) => prioridad(a) - prioridad(b));
+      const cupoHoy = libres.length;
+      asignarGrupo(enTurno.slice(0, cupoHoy));
+      if (libres.length) asignarGrupo(enTurno.slice(cupoHoy));
       // 2) Volantes y 3) guardias de otros objetivos, el más lejos de 200 h primero.
       for (const t of ['volante', 'otro'] as const) {
         if (!libres.length) break;
@@ -287,7 +326,8 @@ export function armarMesDesdeServicio(input: ArmarMesInput): ResultadoGuardia[] 
       }
       // 4) Propios fuera de su fase (después de las 12 h), sin pasar 6 seguidos ni 200 h.
       if (libres.length && doce === topeDoce) asignarGrupo(propios.map((g) => g.id).filter((id) => !asign.has(id) && libre(id)));
-      elegido = { asign, faltan: libres };
+      // Gana la prueba con menos huecos; entre iguales, la de menos 12 h (la primera).
+      if (!elegido || libres.length < elegido.faltan.length) elegido = { asign, faltan: libres };
       if (!libres.length) break;
     }
     for (const g of input.guardias) {

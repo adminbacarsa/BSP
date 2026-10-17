@@ -132,7 +132,10 @@ function hoursOf(shift: any): { key: string; hours: number } | null {
     return hs > 0 ? { key: 'SIN_CODIGO', hours: r1(hs) } : null;
   }
   const fromClock = dur >= 0.5 && dur <= 16 ? dur : 0;
-  const hs = fromClock || CODE_FALLBACK[code] || 8;
+  // Borrador con horario «HH:MM» (sin fecha): las horas del turno antes que el 8 por defecto (PP de 7 h).
+  const declaradas = Number(shift?.hours);
+  const fromHours = declaradas >= 0.5 && declaradas <= 16 ? declaradas : 0;
+  const hs = fromClock || fromHours || CODE_FALLBACK[code] || 8;
   return { key: code, hours: r1(hs) };
 }
 

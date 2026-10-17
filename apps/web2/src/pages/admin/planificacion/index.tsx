@@ -2140,7 +2140,9 @@ function PlanificacionDesktop() {
     const [leyendaAbierta, setLeyendaAbierta] = useState(true);
     /** Clic en la leyenda: solo los turnos de ese puesto (o de ese turno del puesto). */
     const [filtroLeyenda, setFiltroLeyenda] = useState<{ puesto: string; code?: string } | null>(null);
-    useEffect(() => { setFiltroLeyenda(null); }, [selectedObjective]);
+    // Al cambiar de objetivo (por cualquier camino) se vacía el filtro y los guardias sumados a mano: los volantes y
+    // los sumados de Casino no pasan a Obrador.
+    useEffect(() => { setFiltroLeyenda(null); setPinnedExternalEmpIds(new Set()); }, [selectedObjective]);
     const leyendaGrupo = useMemo(() => {
         if (!(selectedGrupo && grupoUnifiedMode)) return null;
         const puestos: Array<{ name: string; shifts: any[] }> = [];
@@ -14585,9 +14587,13 @@ function PlanificacionDesktop() {
                 const fin = hhmm(sh.endTime);
                 // Vista agrupada: el color es el del objetivo (como en la grilla); si no, el del puesto.
                 const iObj = enGrupo ? (selectedGrupo!.objectiveIds as string[]).indexOf(String(sh.objectiveId || '')) : -1;
-                const colorPos = enGrupo
-                    ? (iObj >= 0 ? GRUPO_COLOR_HEX[iObj % GRUPO_COLOR_HEX.length] : undefined)
-                    : colorPuestoGrilla[String(sh.positionName || '')]?.color;
+                // Turno de otro objetivo (el del Banco de un volante): gris, no el color de un puesto de acá.
+                const deOtroObjetivo = !enGrupo && !!sh.objectiveId && String(sh.objectiveId) !== String(selectedObjective);
+                const colorPos = deOtroObjetivo
+                    ? '#94a3b8'
+                    : enGrupo
+                        ? (iObj >= 0 ? GRUPO_COLOR_HEX[iObj % GRUPO_COLOR_HEX.length] : undefined)
+                        : colorPuestoGrilla[String(sh.positionName || '')]?.color;
                 celdas[d.dateStr] = {
                     code: sh.isFrancoTrabajado ? `FT·${code}` : code,
                     ...(!franco && ini && fin && ini !== fin ? { horario: `${ini}–${fin}` } : {}),
