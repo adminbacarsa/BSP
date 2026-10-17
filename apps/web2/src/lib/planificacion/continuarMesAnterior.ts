@@ -130,7 +130,7 @@ export type RevisarPuesto = {
  * `plantilla` = ciclo del objetivo (c2) en la fase del guardia. `fijo` = el período de todo su historial.
  * `corte` y `bloques` son estimados: el modal los deja destildados.
  */
-export type OrigenCiclo = 'plantilla' | 'fijo' | 'corte' | 'bloques' | 'semana';
+export type OrigenCiclo = 'plantilla' | 'fijo' | 'corte' | 'bloques' | 'semana' | 'armado';
 
 export type PlantillaGuardia = {
   periodo: number | null;

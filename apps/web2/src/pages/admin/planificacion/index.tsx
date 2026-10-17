@@ -495,6 +495,7 @@ import { alternativasPareja, cambiarPareja, estiloJornada12, horarioDoce, moverV
 import { avisosDesdeLectura, faltantesDelDia, leerDia, lineasDeSobra, proponerLiberar, SIN_PUESTO, type FaltanteBanda, type GuardiaSobra, type PuestoServicio, type TurnoDia } from '@/lib/planificacion/lecturaBandas';
 import { PanelesMarco } from '@/components/planificacion/PanelesPlanificacion';
 import type { CandidatoFaltante } from '@/components/planificacion/BandasFaltantesPanel';
+import { armarMesDesdeServicio, type TipoGuardiaArmado } from '@/lib/planificacion/armarMesServicio';
 import {
     clasificarSeleccionLicencia,
     diasQueQuedaron,
@@ -11973,7 +11974,7 @@ function PlanificacionDesktop() {
         }
     };
 
-    const abrirContinuarMesAnterior = async () => {
+    const abrirContinuarMesAnterior = async (modo: 'continuar' | 'armar' = 'continuar') => {
         if (!selectedObjective) return;
         if (msgBloqueoEdicion && !sinServicioEnMes) { toast.error(msgBloqueoEdicion); return; }
         // Vista agrupada: el grupo se continúa como un solo cronograma con puestos «Objetivo · Puesto»
@@ -12224,7 +12225,33 @@ function PlanificacionDesktop() {
             const extenderServicio = !!activarServicioRef.current;
             const estadoPrevio = enGrupo ? null : await fetchPlanificacionEstadoDoc(empresaId, selectedObjective, m === 0 ? y - 1 : y, m === 0 ? 12 : m).catch(() => null);
             const punteroGuardado = estadoPrevio?.data?.continuarPuntero;
-            const resultados = proponerContinuacion({
+            // «Armar el mes»: propios, volantes y guardias de otros objetivos; el turno que tienen en otro objetivo cuenta.
+            const tipoArmado = (id: string): TipoGuardiaArmado => {
+                const emp = employees.find((e: any) => e.id === id) as any;
+                if (!emp) return 'otro';
+                const pref = String(slaIdToObjId[emp.preferredObjectiveId] || emp.preferredObjectiveId || '');
+                if (objsGrupo.includes(pref)) return 'propio';
+                if (objsGrupo.some((o: string) => (emp.volante || []).includes(o))) return 'volante';
+                return 'otro';
+            };
+            const ocupadoFuera = (id: string, ds: string) => {
+                const t = shiftsMap[`${id}_${ds}`];
+                if (!t || t.isDeleted || objsGrupo.includes(String(t.objectiveId || ''))) return null;
+                const code = String(t.code || '').toUpperCase();
+                if (!code || ['F', 'FF', 'FP', 'RET'].includes(code) || t.isFranco || esCeldaLicencia({ code, tieneAusencia: false })) return null;
+                return { startTime: t.startTime, endTime: t.endTime, hours: Number(t.hours) || undefined };
+            };
+            const resultados = modo === 'armar' ? armarMesDesdeServicio({
+                objectiveId: objContinuar,
+                dias,
+                guardias: guardiasBase.map((e: any) => ({ id: e.id, nombre: e.name || e.id, previos: previosPorEmp.get(e.id) || [], puestoPreferido: etiquetar(resolveObjectiveForEmp(e.id), getEmpDefaultPos(e.id) || '') })),
+                estructura: estructuraContinuar,
+                estadoCelda,
+                diaBloqueado: (ds) => isPlanningDateLocked(ds) || (!enGrupo && !activarServicioRef.current && isOutsideServiceRange(ds)),
+                turnoHabilitado,
+                tipoDe: tipoArmado,
+                ocupadoFuera,
+            }) : proponerContinuacion({
                 objectiveId: objContinuar,
                 dias,
                 guardias: guardiasBase.map((e: any) => ({ id: e.id, nombre: e.name || e.id, previos: previosPorEmp.get(e.id) || [], puestoPreferido: etiquetar(resolveObjectiveForEmp(e.id), getEmpDefaultPos(e.id) || '') })),
@@ -12245,7 +12272,7 @@ function PlanificacionDesktop() {
                 const rot = new Map((r.sugerencias || []).filter((x) => x.tipo === 'rotacion').map((x) => [x.dateStr, x.celda]));
                 return rot.size ? { ...r, propuestas: r.propuestas.map((c) => rot.get(c.dateStr) || c) } : r;
             });
-            const sueltas = sugerenciasSueltas({
+            const sueltas = modo === 'armar' ? [] : sugerenciasSueltas({
                 dias,
                 estructura: estructuraContinuar,
                 turnoHabilitado,
@@ -12354,6 +12381,7 @@ function PlanificacionDesktop() {
                 return h;
             };
             setContinuarVista({
+                modo,
                 mesLabel: currentDate.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' }),
                 mesAnteriorLabel: (() => {
                     const ult = resultados.map((r) => r.ciclo?.ultimoDia || '').filter(Boolean).sort().pop();
@@ -18951,13 +18979,24 @@ function PlanificacionDesktop() {
                                 <button
                                     type="button"
                                     data-continuar-mes
-                                    onClick={abrirContinuarMesAnterior}
+                                    onClick={() => { void abrirContinuarMesAnterior(); }}
                                     disabled={!selectedObjective || prevMonthLoading || (!!msgBloqueoEdicion && !sinServicioEnMes)}
                                     title={(msgBloqueoEdicion && !sinServicioEnMes ? msgBloqueoEdicion : null) || (sinServicioEnMes ? 'Continuar desde el mes anterior y activar el servicio del mes' : 'Continuar desde el mes anterior: sigue el ciclo de cada guardia desde donde quedó (vista previa antes de aplicar)')}
                                     aria-label="Continuar desde el mes anterior"
                                     className="flex items-center justify-center w-8 h-8 bg-slate-100 rounded-lg hover:bg-teal-50 hover:text-teal-600 transition-colors disabled:opacity-40 shrink-0"
                                 >
                                     {prevMonthLoading ? <Loader2 size={16} className="animate-spin text-teal-600"/> : <Repeat size={16}/>}
+                                </button>
+                                <button
+                                    type="button"
+                                    data-armar-mes
+                                    onClick={() => { void abrirContinuarMesAnterior('armar'); }}
+                                    disabled={!selectedObjective || prevMonthLoading || (!!msgBloqueoEdicion && !sinServicioEnMes)}
+                                    title={(msgBloqueoEdicion && !sinServicioEnMes ? msgBloqueoEdicion : null) || 'Armar el mes desde el servicio: cuenta los turnos de cada puesto y los completa con los guardias (francos escalonados, cerca de 200 h, volantes antes que 12 h). Vista previa antes de aplicar.'}
+                                    aria-label="Armar el mes desde el servicio"
+                                    className="flex items-center justify-center w-8 h-8 bg-slate-100 rounded-lg hover:bg-violet-50 hover:text-violet-600 transition-colors disabled:opacity-40 shrink-0"
+                                >
+                                    <Wand2 size={16}/>
                                 </button>
                                 <button
                                     type="button"

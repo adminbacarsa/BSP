@@ -13,6 +13,8 @@ import {
 export type DiaCorto = { dateStr: string; cerrados: number; requeridos: number };
 
 export type ContinuarMesVista = {
+  /** armar = «Armar el mes desde el servicio» (no copia el mes anterior). */
+  modo?: 'continuar' | 'armar';
   mesLabel: string;
   mesAnteriorLabel: string;
   resultados: ResultadoGuardia[];
@@ -130,6 +132,7 @@ function textoOrigen(r: ResultadoGuardia): string {
   if (p?.via === 'compañero' && p.copiaDe) return `copia de ${apellido(p.copiaDe)}`;
   if (p?.via === 'herencia' && p.copiaDe) return `hereda la fila de ${apellido(p.copiaDe)}`;
   if (p?.via === 'plantilla') return `plantilla del objetivo${p.periodo ? ` (${p.periodo} días)` : ''}${p.grupo ? ` · grupo ${p.grupo}` : ''}`;
+  if (r.origenCiclo === 'armado') return r.ciclo?.etiqueta || 'armado desde el servicio';
   if (r.origenCiclo === 'semana') return r.ciclo?.etiqueta || 'igual que el mes anterior, por día de la semana';
   return 'su propio ciclo';
 }
@@ -203,13 +206,21 @@ export function ContinuarMesModal({ vista, onAplicar, onCancelar }: Props) {
           <div>
             <div className="flex items-center gap-2 text-slate-900 font-black text-base">
               <Repeat size={18} className="text-teal-600" />
-              Continuar desde {vista.mesAnteriorLabel}
+              {vista.modo === 'armar' ? <>Armar {vista.mesLabel} desde el servicio</> : <>Continuar desde {vista.mesAnteriorLabel}</>}
             </div>
+            {vista.modo === 'armar' ? (
+            <div className="text-[12px] text-slate-500 mt-0.5" data-armar-mes-texto>
+              Se cuentan los turnos de cada puesto del servicio y se completan con los guardias del objetivo: francos escalonados (6+2 si alcanza la gente, si no 5+1), cada uno sigue su turno durante el bloque y todos quedan cerca de 200 h sin pasarse.
+              Si faltan, entran los volantes y los guardias de otros objetivos con horas libres; después la extensión a 12 h. El franco trabajado no se propone.
+              Máx. 6 días seguidos y 12 h de descanso. Las licencias y las celdas que ya tienen algo no se tocan. Queda en borrador hasta «Guardar cronograma».
+            </div>
+            ) : (
             <div className="text-[12px] text-slate-500 mt-0.5">
               Se lee el plan de cada guardia (sin coberturas, extensiones ni eventos) y se sigue en {vista.mesLabel} desde donde quedó
               {ultimoLeido ? <> (último día cargado: {ultimoLeido.slice(8)}/{ultimoLeido.slice(5, 7)})</> : null}.
               Los que rotan igual siguen la plantilla del objetivo. Las licencias cargadas y las celdas que ya tienen algo no se tocan. Queda en borrador hasta «Guardar cronograma».
             </div>
+            )}
           </div>
           <button type="button" onClick={onCancelar} aria-label="Cerrar" className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500"><X size={18} /></button>
         </div>

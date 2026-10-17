@@ -812,3 +812,35 @@ test('quien estuvo de licencia todo el mes anterior cubre lo que falta, con máx
   }
   assert.equal(lic.estimado, true);
 });
+
+test('armar el mes desde el servicio: cubre todas las franjas sin 12 h si alcanza la gente, máx. 6 seguidos y 200 h', async () => {
+  const { armarMesDesdeServicio, huecosDelArmado } = await import('./armarMesServicio');
+  const est24 = [{
+    positionName: P1, qty: 1,
+    shifts: [
+      { code: 'M', startTime: '07:00', endTime: '15:00', hours: 8 },
+      { code: 'T', startTime: '15:00', endTime: '23:00', hours: 8 },
+      { code: 'N', startTime: '23:00', endTime: '07:00', hours: 8 },
+      { code: 'D12', startTime: '07:00', endTime: '19:00', hours: 12 },
+      { code: 'N12', startTime: '19:00', endTime: '07:00', hours: 12 },
+    ],
+  }];
+  const guardias = ['a', 'b', 'c', 'd', 'e'].map((id) => ({ id, nombre: id.toUpperCase(), previos: [] }));
+  const inp = { ...input(guardias, diasDelMes(2026, 11)), estructura: est24 };
+  const res = armarMesDesdeServicio(inp);
+  assert.equal(huecosDelArmado(inp, res).length, 0);
+  for (const r of res) {
+    assert.ok(r.horasPropuestas <= 200);
+    assert.ok(!r.propuestas.some((c) => /12/.test(c.code)), 'sin 12 h');
+    let seg = 0;
+    for (const d of diasDelMes(2026, 11)) {
+      const c = r.propuestas.find((x) => x.dateStr === d);
+      seg = c && !c.isFranco ? seg + 1 : 0;
+      assert.ok(seg <= 6);
+    }
+  }
+  // Con 3 guardias no alcanza: entra la extensión a 12 h antes que dejar huecos.
+  const pocos = { ...input(guardias.slice(0, 3), diasDelMes(2026, 11)), estructura: est24 };
+  const r2 = armarMesDesdeServicio(pocos);
+  assert.ok(r2.some((r) => r.propuestas.some((c) => c.code === 'D12')));
+});
