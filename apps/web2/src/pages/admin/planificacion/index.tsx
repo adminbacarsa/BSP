@@ -1751,6 +1751,8 @@ function PlanificacionDesktop() {
     const { isSuperAdmin, rolePermissions, loading: sessionAuthLoading, user: authUser } = useAuth();
     const canPublishPlanning = isSuperAdmin || (rolePermissions['PLANNING'] || []).includes('publish');
     const canCorrectPlanning = isSuperAdmin || (rolePermissions['PLANNING'] || []).includes('correct');
+    /** Agregar o quitar volantes del objetivo (mismo campo que la solapa VOLANTE del legajo). */
+    const canEditVolantes = isSuperAdmin || (rolePermissions['PLANNING'] || []).includes('update') || (rolePermissions['RRHH'] || []).includes('update');
     const canAutoLab = canAccessAutoLab(isSuperAdmin, rolePermissions);
     const canAssignFT = canAssignFrancoTrabajado(isSuperAdmin, rolePermissions);
     const canConvocarEventual = canConvocarEventuales(isSuperAdmin, rolePermissions as Record<string, string[]>);
@@ -1785,6 +1787,7 @@ function PlanificacionDesktop() {
     const [forceShowAll, setForceShowAll] = useState(false);
     const [dotacionPoolReady, setDotacionPoolReady] = useState(false);
     const [showVolantes, setShowVolantes] = useState(false);
+    const [volanteBusqueda, setVolanteBusqueda] = useState('');
     const [nearbyKmRadius, setNearbyKmRadius] = useState(DOTACION_NEARBY_KM_DEFAULT);
     const [nearbyKmDraft, setNearbyKmDraft] = useState(String(DOTACION_NEARBY_KM_DEFAULT));
     const [dotacionPoolType, setDotacionPoolType] = useState<'RET' | 'F' | 'LIBRE' | null>('RET');
@@ -3097,20 +3100,22 @@ function PlanificacionDesktop() {
                     slaIdToObjId[e.preferredObjectiveId] === objId,
                 ) || activeGuestIdsForObjective.has(e.id) || pinnedExternalEmpIds.has(e.id)
                 || (slaEncargadoEmployeeId && e.id === slaEncargadoEmployeeId)
-                || !!(e.planificacionDotacion && selectedObjective && e.planificacionDotacion[selectedObjective]),
+                || !!(e.planificacionDotacion && selectedObjective && e.planificacionDotacion[selectedObjective])
+                || selectedGrupo.objectiveIds.some((objId: string) => (e.volante || []).includes(objId)),
             );
         } else {
             list = list.filter(e =>
                 e.preferredObjectiveId === selectedObjective ||
                 slaIdToObjId[e.preferredObjectiveId] === selectedObjective ||
                 activeGuestIdsForObjective.has(e.id) || pinnedExternalEmpIds.has(e.id) ||
-                (showVolantes && (e.volante || []).includes(selectedObjective))
+                // Los volantes del objetivo siempre están en la dotación (no se pierden al pasar de mes).
+                (e.volante || []).includes(selectedObjective)
                 || (slaEncargadoEmployeeId && e.id === slaEncargadoEmployeeId)
                 || !!(e.planificacionDotacion && selectedObjective && e.planificacionDotacion[selectedObjective]),
             );
         }
         return list;
-    }, [employees, selectedObjective, showVolantes, slaIdToObjId, activeGuestIdsForObjective, pinnedExternalEmpIds, selectedGrupo, grupoUnifiedMode, slaEncargadoEmployeeId]);
+    }, [employees, selectedObjective, slaIdToObjId, activeGuestIdsForObjective, pinnedExternalEmpIds, selectedGrupo, grupoUnifiedMode, slaEncargadoEmployeeId]);
 
     const employeeMonthStats = useMemo(() => {
         const stats: Record<string, { shiftCount: number; dominantBand: string | null }> = {};
@@ -7751,6 +7756,30 @@ function PlanificacionDesktop() {
             window.removeEventListener('keydown', onKey);
         };
     }, [openDrop, repositionContextDropPanel]);
+    const cambiarVolante = async (emp: any, agregar: boolean) => {
+        if (!selectedObjective || !emp?.id) return;
+        if (!canEditVolantes) { toast.error('Necesitás permiso de Planificación o RRHH para cambiar volantes'); return; }
+        const actual: string[] = Array.isArray(emp.volante) ? emp.volante : [];
+        const volante = agregar ? [...new Set([...actual, selectedObjective])] : actual.filter((x) => x !== selectedObjective);
+        try {
+            await updateDoc(doc(db, 'empleados', emp.id), { volante });
+            await addDoc(collection(db, 'audit_logs'), stampEmpresaId({
+                action: agregar ? 'VOLANTE_OBJETIVO_AGREGADO' : 'VOLANTE_OBJETIVO_QUITADO',
+                module: 'PLANIFICADOR',
+                details: `${agregar ? 'Agregó' : 'Quitó'} a ${emp.name} como volante de ${getObjectiveName(selectedObjective)}`,
+                employeeId: emp.id,
+                objectiveId: selectedObjective,
+                objectiveName: getObjectiveName(selectedObjective),
+                timestamp: serverTimestamp(),
+                actorName: activeActorName,
+                actorUid: getAuth().currentUser?.uid,
+            }, empresaId));
+            toast.success(agregar ? `${emp.name} es volante de ${getObjectiveName(selectedObjective)}` : `${emp.name} ya no es volante de este objetivo`);
+        } catch (err: any) {
+            console.error('[volante]', err);
+            toast.error('No se pudo guardar el volante');
+        }
+    };
     const handleTransferEmployee = async (emp: any) => { if (!selectedObjective) return; if (!confirm(`¿Transferir a ${emp.name} a este objetivo?`)) return; try { await updateDoc(doc(db, 'empleados', emp.id), { preferredObjectiveId: selectedObjective }); await addDoc(collection(db, 'audit_logs'), stampEmpresaId({ action: 'TRANSFERENCIA_OBJETIVO', module: 'PLANIFICADOR', details: `Transfirió a ${emp.name} al objetivo ${getObjectiveName(selectedObjective)}`, timestamp: serverTimestamp(), actorName: activeActorName, actorUid: getAuth().currentUser?.uid, objectiveId: selectedObjective, objectiveName: getObjectiveName(selectedObjective) }, empresaId)); toast.success("Transferencia exitosa"); } catch (e) { toast.error("Error al transferir"); } };
     const handleDelete = async () => {
         if (msgBloqueoEdicion) { toast.error(msgBloqueoEdicion); return; }
@@ -19118,9 +19147,10 @@ function PlanificacionDesktop() {
                                 {/* VOLANTE — mostrar/ocultar guardias volante sin turno */}
                                 {selectedObjective && (
                                     <button
-                                        onClick={() => setShowVolantes(p => !p)}
-                                        title={showVolantes ? 'Ocultar volantes sin turno' : 'Mostrar volantes disponibles para este objetivo'}
+                                        onClick={() => { setShowVolantes(p => !p); setVolanteBusqueda(''); }}
+                                        title="Volantes del objetivo: ver, agregar o quitar"
                                         aria-label="Volantes"
+                                        data-volantes-boton
                                         className={`flex items-center justify-center w-8 h-8 rounded-xl border transition-colors shrink-0 ${showVolantes ? 'bg-violet-100 border-violet-300 text-violet-700' : 'bg-white border-slate-200 text-slate-500 hover:bg-violet-50 hover:border-violet-200 hover:text-violet-600'}`}
                                     >
                                         <Shuffle size={16}/>
@@ -21976,6 +22006,71 @@ function PlanificacionDesktop() {
                                 <button type="button" onClick={() => setDiaNoTrabaja(null)} className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-bold text-slate-600">Cancelar</button>
                                 <button type="button" disabled={diaNoTrabaja.guardando} onClick={() => { void aplicarDiaNoTrabaja(); }} data-dia-confirmar className="rounded-lg bg-rose-600 px-2.5 py-1 text-[11px] font-black text-white disabled:opacity-40">{diaNoTrabaja.guardando ? 'Guardando…' : 'No se trabaja'}</button>
                             </div>
+                        </div>
+                    </div>,
+                    document.body,
+                )}
+                {showVolantes && selectedObjective && typeof document !== 'undefined' && createPortal(
+                    <div className="fixed inset-0 z-[12000] flex items-start justify-end bg-black/20 p-4" onMouseDown={() => setShowVolantes(false)}>
+                        <div className="mt-16 w-96 max-h-[75vh] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-3 text-[12px] shadow-xl" onMouseDown={(ev) => ev.stopPropagation()} data-volantes-panel>
+                            <div className="flex items-center justify-between">
+                                <p className="font-black text-slate-800">Volantes de {getObjectiveName(selectedObjective)}</p>
+                                <button type="button" onClick={() => setShowVolantes(false)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100"><X size={14} /></button>
+                            </div>
+                            <p className="text-[11px] text-slate-500">Guardias de otros objetivos que ayudan a cerrar la cobertura acá. Quedan en la dotación todos los meses y son los primeros candidatos después del RET propio.</p>
+                            {(() => {
+                                const lista = (employees as any[]).filter((e: any) => e.status !== 'inactivo' && (e.volante || []).includes(selectedObjective))
+                                    .sort((a: any, b: any) => String(a.name).localeCompare(String(b.name)));
+                                return (
+                                    <div className="mt-2 space-y-1">
+                                        {!lista.length && <p className="text-slate-500">Todavía no hay volantes en este objetivo.</p>}
+                                        {lista.map((e: any) => (
+                                            <div key={e.id} className="flex items-center gap-2 rounded-lg border border-slate-100 px-2 py-1" data-volante-emp={e.id}>
+                                                <div className="min-w-0 flex-1">
+                                                    <p className="truncate font-bold text-slate-800">{e.name}</p>
+                                                    <p className="truncate text-[10px] text-slate-500">Base: {e.preferredObjectiveId ? getObjectiveName(e.preferredObjectiveId) : 'sin objetivo asignado (cargalo en el legajo)'}</p>
+                                                </div>
+                                                <button type="button" onClick={() => scrollToEmployeeRow(e.id)} className="rounded-lg border border-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-600">Ir a la fila</button>
+                                                {canEditVolantes && <button type="button" onClick={() => { void cambiarVolante(e, false); }} className="rounded-lg border border-rose-200 px-2 py-0.5 text-[10px] font-bold text-rose-600">Quitar</button>}
+                                            </div>
+                                        ))}
+                                    </div>
+                                );
+                            })()}
+                            {canEditVolantes && (
+                                <div className="mt-3 border-t border-slate-100 pt-2">
+                                    <p className="text-[10px] font-black uppercase text-slate-500">+ Volante</p>
+                                    <input
+                                        value={volanteBusqueda}
+                                        onChange={(ev) => setVolanteBusqueda(ev.target.value)}
+                                        placeholder="Buscar guardia por apellido o legajo"
+                                        className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1 text-[12px]"
+                                        data-volante-buscar
+                                    />
+                                    {volanteBusqueda.trim().length >= 2 && (
+                                        <div className="mt-1 space-y-1">
+                                            {(employees as any[])
+                                                .filter((e: any) => e.status !== 'inactivo'
+                                                    && !(e.volante || []).includes(selectedObjective)
+                                                    && e.preferredObjectiveId !== selectedObjective
+                                                    && `${e.name || ''} ${e.fileNumber || ''}`.toUpperCase().includes(volanteBusqueda.trim().toUpperCase()))
+                                                .slice(0, 8)
+                                                .map((e: any) => (
+                                                    <button
+                                                        key={e.id}
+                                                        type="button"
+                                                        onClick={() => { void cambiarVolante(e, true); setVolanteBusqueda(''); }}
+                                                        className="flex w-full items-center gap-2 rounded-lg border border-slate-100 px-2 py-1 text-left hover:bg-violet-50"
+                                                        data-volante-agregar={e.id}
+                                                    >
+                                                        <span className="min-w-0 flex-1 truncate font-bold text-slate-800">{e.name}</span>
+                                                        <span className="truncate text-[10px] text-slate-500">{e.preferredObjectiveId ? getObjectiveName(e.preferredObjectiveId) : 'sin objetivo'}</span>
+                                                    </button>
+                                                ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                         </div>
                     </div>,
                     document.body,
