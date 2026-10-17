@@ -21,6 +21,8 @@ export type ArmarMesInput = ContinuarInput & {
   tipoDe?: (employeeId: string) => TipoGuardiaArmado;
   /** Turno de trabajo en otro objetivo ese día (para descanso y choque). */
   ocupadoFuera?: (employeeId: string, dateStr: string) => { startTime: unknown; endTime: unknown; hours?: number } | null;
+  /** Franco en su objetivo ese día: no se usa (sería franco trabajado, lo más caro). */
+  francoFuera?: (employeeId: string, dateStr: string) => boolean;
 };
 
 type Slot = { pos: string; code: string; name: string; startTime: string; endTime: string; dur: number; doce: boolean };
@@ -169,7 +171,7 @@ export function armarMesDesdeServicio(input: ArmarMesInput): ResultadoGuardia[] 
   const topeDoce = maxDoce(input.estructura);
   for (let di = 0; di < dias.length; di++) {
     const ds = dias[di];
-    const libre = (id: string) => !input.diaBloqueado?.(ds) && input.estadoCelda(id, ds) === null;
+    const libre = (id: string) => !input.diaBloqueado?.(ds) && input.estadoCelda(id, ds) === null && !input.francoFuera?.(id, ds);
     const puede = (id: string, s: Slot) => {
       const e = est.get(id)!;
       const v = ventana(s.startTime, s.endTime, ds)!;
@@ -356,6 +358,7 @@ export function cubrirHuecosConDisponibles(
   const trabaja = (id: string, ds: string) => { const v = ventanaDe(id, ds); return !!v && v !== 'F'; };
   const puede = (id: string, ds: string, v: { ini: number; fin: number }, dur: number, horasBase: number) => {
     if (ventanaDe(id, ds)) return false;
+    if (input.francoFuera?.(id, ds)) return false;
     if (input.estadoCelda(id, ds) !== null && input.guardias.some((g) => g.id === id)) return false;
     const antes = ventanaDe(id, sumarDias(ds, -1));
     if (antes && antes !== 'F' && v.ini - antes.fin < 12 * H) return false;

@@ -12241,6 +12241,11 @@ function PlanificacionDesktop() {
                 if (!code || ['F', 'FF', 'FP', 'RET'].includes(code) || t.isFranco || esCeldaLicencia({ code, tieneAusencia: false })) return null;
                 return { startTime: t.startTime, endTime: t.endTime, hours: Number(t.hours) || undefined };
             };
+            const francoFuera = (id: string, ds: string) => {
+                const t = shiftsMap[`${id}_${ds}`];
+                if (!t || t.isDeleted || objsGrupo.includes(String(t.objectiveId || ''))) return false;
+                return !!t.isFranco || ['F', 'FF', 'FP'].includes(String(t.code || '').toUpperCase());
+            };
             const resultados = modo === 'armar' ? armarMesDesdeServicio({
                 objectiveId: objContinuar,
                 dias,
@@ -12251,6 +12256,7 @@ function PlanificacionDesktop() {
                 turnoHabilitado,
                 tipoDe: tipoArmado,
                 ocupadoFuera,
+                francoFuera,
             }) : proponerContinuacion({
                 objectiveId: objContinuar,
                 dias,
@@ -12326,6 +12332,7 @@ function PlanificacionDesktop() {
                 turnoHabilitado,
                 tipoDe: tipoArmado,
                 ocupadoFuera,
+                francoFuera,
                 retFuera: (ds) => retPorDia.get(ds) || [],
                 horasFueraDe: (id) => horasFueraMap.get(id) || 0,
             }, conSueltasAplicadas);

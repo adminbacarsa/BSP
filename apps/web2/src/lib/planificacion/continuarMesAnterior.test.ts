@@ -867,3 +867,15 @@ test('continuar: el hueco que queda se cubre con el volante antes que con un RET
   const ocupado = cubrirHuecosConDisponibles({ ...base, ocupadoFuera: (id: string, ds: string) => (id === 'vol' && ds === '2026-11-02' ? { startTime: '08:00', endTime: '16:00', hours: 8 } : null) }, [propio as any]);
   assert.equal(ocupado[0].celda.employeeId, 'ret');
 });
+
+test('continuar: el franco del volante en su objetivo no se usa (sería franco trabajado)', async () => {
+  const { cubrirHuecosConDisponibles } = await import('./armarMesServicio');
+  const est = [{ positionName: P1, qty: 1, shifts: [{ code: 'M', startTime: '07:00', endTime: '15:00', hours: 8 }] }];
+  const out = cubrirHuecosConDisponibles({
+    ...input([{ id: 'vol', nombre: 'VOLANTE, UNO', previos: [] }], ['2026-11-01']),
+    estructura: est,
+    tipoDe: () => 'volante' as const,
+    francoFuera: () => true,
+  }, []);
+  assert.equal(out.length, 0);
+});
