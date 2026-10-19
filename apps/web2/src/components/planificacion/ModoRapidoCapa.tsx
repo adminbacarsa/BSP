@@ -135,10 +135,8 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
         return { left, top, width: right - left, height: bottom - top };
     }, [contenedorRef, td]);
 
-    const medir = useCallback(() => {
-        const cur = estado.current.cursor;
-        const rg = rangoRef.current;
-        const sr = estado.current.serie;
+    /** Marcas y fantasmas: solo al cambiar la grilla o las marcas, no en cada movimiento del cursor (eran 300 celdas medidas por tecla). */
+    const medirMarcas = useCallback(() => {
         const nuevasMarcas: Array<Caja & MarcaAviso> = [];
         for (const m of propsRef.current.marcas.slice(0, 300)) {
             const cj = cajaDe({ r: m.r, c: m.c });
@@ -149,6 +147,13 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
             const cj = cajaDe({ r: f.r, c: f.c });
             if (cj) fantasmas.push({ ...cj, code: f.code });
         }
+        setCajas((prev) => ({ ...prev, marcas: nuevasMarcas, fantasmas }));
+    }, [cajaDe]);
+
+    const medir = useCallback(() => {
+        const cur = estado.current.cursor;
+        const rg = rangoRef.current;
+        const sr = estado.current.serie;
         let serieCaja: Caja | null = null;
         if (rg && sr && (sr.r > rg.maxR || sr.c > rg.maxC)) {
             const derecha = sr.c - rg.maxC >= sr.r - rg.maxR;
@@ -156,16 +161,16 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
                 ? cajaDe({ r: rg.minR, c: rg.minC }, { r: rg.maxR, c: Math.max(rg.maxC, sr.c) })
                 : cajaDe({ r: rg.minR, c: rg.minC }, { r: Math.max(rg.maxR, sr.r), c: rg.maxC });
         }
-        setCajas({
+        setCajas((prev) => ({
+            ...prev,
             cursor: cur ? cajaDe(cur) : null,
             rango: rg && tamanoRango(rg) > 1 ? cajaDe({ r: rg.minR, c: rg.minC }, { r: rg.maxR, c: rg.maxC }) : (cur ? cajaDe(cur) : null),
             serie: serieCaja,
-            marcas: nuevasMarcas,
-            fantasmas,
-        });
+        }));
     }, [cajaDe]);
 
-    useLayoutEffect(() => { if (activo) medir(); }, [activo, cursor, ancla, serie, extra, version, marcas, medir]);
+    useLayoutEffect(() => { if (activo) medir(); }, [activo, cursor, ancla, serie, extra, version, medir]);
+    useLayoutEffect(() => { if (activo) medirMarcas(); }, [activo, version, marcas, medirMarcas]);
 
     useLayoutEffect(() => {
         if (!activo || texto == null || !cursor || sugerencias.length === 0) { setSugLugar(null); return; }
@@ -192,12 +197,12 @@ export const ModoRapidoCapa = forwardRef<CapaModoRapidoApi, Props>(function Modo
         if (!activo) return;
         const cont = contenedorRef.current;
         if (!cont || typeof ResizeObserver === 'undefined') return;
-        const ro = new ResizeObserver(() => medir());
+        const ro = new ResizeObserver(() => { medir(); medirMarcas(); });
         const tabla = cont.querySelector('table');
         if (tabla) ro.observe(tabla);
         ro.observe(cont);
         return () => ro.disconnect();
-    }, [activo, contenedorRef, medir, version]);
+    }, [activo, contenedorRef, medir, medirMarcas, version]);
 
     /** Lleva la celda a la vista teniendo en cuenta la columna fija de dotación y el encabezado. */
     const seguir = useCallback((cur: CeldaRC) => {
