@@ -1897,6 +1897,8 @@ function PlanificacionDesktop() {
     const [openDrop, setOpenDrop] = useState<'client' | 'objective' | 'grupo' | null>(null);
     const [selectedGrupo, setSelectedGrupo] = useState<GrupoObjetivos | null>(null);
     const [prepararMesOpen, setPrepararMesOpen] = useState(false);
+    /** «Preparar» desde la lista: al cargar el objetivo (o grupo) se abre Continuar / Armar solo. */
+    const autoPrepararRef = useRef<{ modo: 'continuar' | 'armar'; objectiveId: string; grupo: boolean } | null>(null);
     const [planViewReady, setPlanViewReady] = useState(false);
     useEffect(() => {
         const saved = readSessionJson<{
@@ -11981,6 +11983,20 @@ function PlanificacionDesktop() {
         }
     };
 
+    // «Preparar» desde la lista de «Preparar el mes»: cuando el objetivo (o el grupo) terminó de cargar, abre la vista previa.
+    useEffect(() => {
+        const auto = autoPrepararRef.current;
+        if (!auto || selectedObjective !== auto.objectiveId || !shiftsMapLoaded) return;
+        if (auto.grupo ? !(selectedGrupo && grupoUnifiedMode && Object.keys(grupoSlaMap).length > 1) : !(positionStructure || []).length) return;
+        const t = window.setTimeout(() => {
+            if (autoPrepararRef.current !== auto) return;
+            autoPrepararRef.current = null;
+            void abrirContinuarMesAnterior(auto.modo);
+        }, 600);
+        return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectedObjective, shiftsMapLoaded, selectedGrupo, grupoUnifiedMode, grupoSlaMap, positionStructure]);
+
     const abrirContinuarMesAnterior = async (modo: 'continuar' | 'armar' = 'continuar') => {
         if (!selectedObjective) return;
         if (msgBloqueoEdicion && !sinServicioEnMes) { toast.error(msgBloqueoEdicion); return; }
@@ -19527,7 +19543,7 @@ function PlanificacionDesktop() {
                                 absencesMap={absencesMap}
                                 year={currentDate.getFullYear()}
                                 month={currentDate.getMonth()}
-                                onAbrirObjetivo={(cid, oid, gk) => { setPrepararMesOpen(false); const g = gk ? grupos.find((x) => `grupo:${x.id}` === gk) : null; if (g) handleGrupoChange(g); else handleContextChange(cid, oid); }}
+                                onAbrirObjetivo={(cid, oid, gk, est) => { setPrepararMesOpen(false); const g = gk ? grupos.find((x) => `grupo:${x.id}` === gk) : null; autoPrepararRef.current = est ? { modo: est, objectiveId: oid, grupo: !!g } : null; if (g) handleGrupoChange(g); else handleContextChange(cid, oid); }}
                             />
                     {!selectedObjective ? (
                         <div className="flex flex-col items-center justify-center flex-1 gap-3 select-none">

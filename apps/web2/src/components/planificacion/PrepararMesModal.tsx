@@ -35,7 +35,7 @@ type Props = {
   year: number;
   /** 0-11 */
   month: number;
-  onAbrirObjetivo: (clientId: string, objectiveId: string, grupoKey?: string) => void;
+  onAbrirObjetivo: (clientId: string, objectiveId: string, grupoKey?: string, estrategia?: Estrategia) => void;
 };
 
 const TEXTO_FUERA: Record<Fila['estado'], string> = {
@@ -46,7 +46,7 @@ const TEXTO_FUERA: Record<Fila['estado'], string> = {
   error: 'No se pudo simular',
 };
 
-const COLUMNAS = 'grid grid-cols-[minmax(0,1fr)_60px_136px_72px_52px_60px_48px_32px] items-center gap-x-2';
+const COLUMNAS = 'grid grid-cols-[minmax(0,1fr)_60px_136px_72px_52px_60px_48px_104px] items-center gap-x-2';
 
 const metricasDe = (f: Fila): Metricas | undefined => (f.elegida === 'armar' ? f.armar : f.continuar);
 const otraDe = (f: Fila): Metricas | undefined => (f.elegida === 'armar' ? f.continuar : f.armar);
@@ -314,7 +314,10 @@ export function PrepararMesModal(props: Props) {
                     <div className="text-right text-[12px]">{num(m?.doce)}</div>
                     <div className="text-right text-[12px]">{num(m?.horasAl50)}</div>
                     <div className="text-right text-[12px]">{num(m?.ret, false)}</div>
-                    <button type="button" title="Abrir la grilla de este objetivo" onClick={() => props.onAbrirObjetivo(f.objetivos[0].clientId, f.objetivos[0].id, f.grupo ? f.key : undefined)} className="justify-self-end rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"><ExternalLink size={14} /></button>
+                    <div className="flex items-center justify-self-end gap-0.5">
+                      <button type="button" data-preparar-ir={f.key} title={`Abrir y ${f.elegida === 'armar' ? 'armar desde el servicio' : 'copiar el mes anterior'}: vista previa, después Aplicar y Guardar`} onClick={() => props.onAbrirObjetivo(f.objetivos[0].clientId, f.objetivos[0].id, f.grupo ? f.key : undefined, f.elegida)} className="rounded bg-indigo-600 px-2 py-1 text-[11px] font-bold text-white hover:bg-indigo-700">Preparar</button>
+                      <button type="button" title="Solo abrir la grilla" onClick={() => props.onAbrirObjetivo(f.objetivos[0].clientId, f.objetivos[0].id, f.grupo ? f.key : undefined)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"><ExternalLink size={14} /></button>
+                    </div>
                   </div>
                 );
               })}
