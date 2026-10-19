@@ -15341,6 +15341,34 @@ function PlanificacionDesktop() {
         }
     };
 
+    /** Con «exige cobertura», no deja pasar el PAX del turno (Museo: 4.º MM con MM×3). Lo de más se pide como RFZE/RFZF. */
+    const cupoLlenoRapido = (emp: any, ds: string, key: string, change: any, next: Record<string, any>): string | null => {
+        if (!exigeCoberturaGrilla) return null;
+        const code = String(change?.code || '').toUpperCase();
+        const posName = String(change?.positionName || '').trim();
+        if (!code || !posName || !isPlanningWorkShiftCode(code) || OBJECTIVE_NON_BILLABLE_CODES.has(code)) return null;
+        const objId = String(change?.objectiveId || resolveEffectiveShiftObjectiveId(emp, change, key) || selectedObjective || '');
+        const structure: any[] = (selectedGrupo && grupoUnifiedMode && grupoSlaMap[objId]) || positionStructure || [];
+        const posCfg = structure.find((p: any) => p.positionName === posName);
+        if (!posCfg || is24hCoverageType(posCfg)) return null;
+        const shiftCfg = (posCfg.shifts as any[] || []).find((sh: any) => String(sh.code || '').toUpperCase() === code);
+        if (!shiftCfg) return null;
+        const pax = Number(shiftCfg.quantity) > 0 ? Math.floor(Number(shiftCfg.quantity)) : Math.max(1, Number(posCfg.qty) || 1);
+        let n = 0;
+        for (const e of dotacionBaseEmployees) {
+            const k = `${e.id}_${ds}`;
+            if (k === key) continue;
+            const pend = next[k];
+            const sh = pend ? (pend.isDeleted ? null : pend) : shiftsMap[k];
+            if (!sh || String(sh.code || '').toUpperCase() !== code) continue;
+            if (isEmployeeOnLeave({ shiftCode: sh.code, absence: absencesMap[k] })) continue;
+            if (String(sh.positionName || '').trim() !== posName) continue;
+            if (String(resolveEffectiveShiftObjectiveId(e, sh, k) || '') !== objId) continue;
+            n++;
+        }
+        return n >= pax ? `Cupo ${code} de ${posName} completo (${pax}): lo de más va como refuerzo (RFZE o RFZF).` : null;
+    };
+
     const escribirRapido = (items: ItemRapido[]) => {
         const global = bloqueoGlobalRapido();
         if (global) { toast.message(global); return; }
@@ -15423,6 +15451,8 @@ function PlanificacionDesktop() {
             if (bl) { anotar(bl); continue; }
             const res = cambioRapido(emp, ds, code, ctx, it.fuente);
             if ('error' in res) { anotar(res.error); continue; }
+            const lleno = cupoLlenoRapido(emp, ds, key, res.change, next);
+            if (lleno) { anotar(lleno); continue; }
             next[key] = it.startTime ? { ...res.change, startTime: it.startTime, endTime: it.endTime || res.change.endTime } : res.change;
             if (res.novedad) novedades[key] = res.novedad;
             if (res.novedad) fechasAtrib.push(ds);
