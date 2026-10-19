@@ -15188,6 +15188,8 @@ function PlanificacionDesktop() {
             swapWith: null,
             swapDate: null,
             objectiveId,
+            // Opción elegida de otro objetivo del grupo: al guardar manda sobre el preferido (los dos llaman «Puesto» a su puesto).
+            ...(fuente?.objectiveId ? { puestoObjetivoElegido: fuente.objectiveId } : {}),
         };
         if (tipo === 'FRANCO') {
             const nombres: Record<string, string> = { F: 'Franco', FF: 'Franco feriado', FP: 'Franco permuta' };

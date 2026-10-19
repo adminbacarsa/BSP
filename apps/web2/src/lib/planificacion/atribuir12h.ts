@@ -496,8 +496,8 @@ export function parchesAtribucion(
     const p = claveDia(key);
     if (p) fechas.add(p.dateStr);
   };
+  // Solo los días con cambios: recorrer todo el mes reescribía al guardar turnos que nadie tocó (1 cambio → 125).
   for (const k of Object.keys(pending)) tomar(k);
-  for (const k of Object.keys(shifts)) tomar(k);
   const out: ParcheDia12[] = [];
   for (const dateStr of fechas) {
     const celdas = celdasDelDia(pending, shifts, dateStr, opts);
