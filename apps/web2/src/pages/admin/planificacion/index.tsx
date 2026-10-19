@@ -5625,11 +5625,26 @@ function PlanificacionDesktop() {
         return { required, closed, required24, closed24, codeCountsCerrados };
     }, [grupoSlaMap, dotacionBaseEmployees, pendingChanges, shiftsMap, absencesMap, resolveEffectiveShiftObjectiveId]);
 
+    /** Misma cuenta, guardada hasta que cambian los turnos: la fila COBERTURA del grupo la pedía día × objetivo en cada render. */
+    const grupoCoberturaCache = useMemo(
+        () => new Map<string, ReturnType<typeof sumGrupoObjectiveCoverageForDay>>(),
+        [sumGrupoObjectiveCoverageForDay],
+    );
+    const grupoCoberturaDia = useCallback((objId: string, dateStr: string, dayLetter: string) => {
+        const k = `${objId}|${dateStr}`;
+        let v = grupoCoberturaCache.get(k);
+        if (!v) {
+            v = sumGrupoObjectiveCoverageForDay(objId, dateStr, dayLetter, undefined);
+            grupoCoberturaCache.set(k, v);
+        }
+        return v;
+    }, [grupoCoberturaCache, sumGrupoObjectiveCoverageForDay]);
+
     const bandasAbiertasGrupoEn = useCallback((dateStr: string, dayLetter: string): BandaAbiertaGrupo[] => {
         if (!selectedGrupo || !grupoUnifiedMode) return [];
         const objetivos = selectedGrupo.objectiveIds.map((id: string, i: number) => {
             const structure = (grupoSlaMap[id] || []).filter((pos: any) => isPosActiveOnDay(pos, dayLetter, dateStr) && !isPosExcludedOnDate(pos, dateStr));
-            const conteo = sumGrupoObjectiveCoverageForDay(id, dateStr, dayLetter, undefined);
+            const conteo = grupoCoberturaDia(id, dateStr, dayLetter);
             return {
                 id,
                 name: selectedGrupo.objectiveNames[i] || id,
@@ -5638,7 +5653,7 @@ function PlanificacionDesktop() {
             };
         });
         return bandasAbiertasDelGrupo({ objetivos, dateStr, dayLetter });
-    }, [selectedGrupo, grupoUnifiedMode, grupoSlaMap, sumGrupoObjectiveCoverageForDay]);
+    }, [selectedGrupo, grupoUnifiedMode, grupoSlaMap, grupoCoberturaDia]);
 
     // Diagnóstico de cobertura agregado para la vista de grupo unificado
     const grupoGapReport = useMemo(() => {
@@ -5650,7 +5665,7 @@ function PlanificacionDesktop() {
             const dayLetter = getDayLetter(dateStr);
             let requiredPax = 0, closedPax = 0;
             for (const objId of selectedGrupo.objectiveIds) {
-                const units = sumGrupoObjectiveCoverageForDay(objId, dateStr, dayLetter, undefined);
+                const units = grupoCoberturaDia(objId, dateStr, dayLetter);
                 requiredPax += units.required;
                 closedPax += units.closed;
             }
@@ -16583,7 +16598,8 @@ function PlanificacionDesktop() {
         return out;
     }, [modoRapido, propuesta12, displayedEmployees, diasRapido]);
     const cursorVista12 = (cur: { r: number; c: number } | null) => {
-        if (!cur || !propuesta12Ref.current?.length) { setMotivoVista12(''); return; }
+        // Sin propuesta de 12 h no se toca el estado: cada movimiento del cursor redibujaba la página entera.
+        if (!cur || !propuesta12Ref.current?.length) { if (motivoVista12) setMotivoVista12(''); return; }
         const emp = displayedEmployees[cur.r];
         const ds = diasRapido[cur.c];
         if (!emp || !ds) { setMotivoVista12(''); return; }
@@ -18007,7 +18023,7 @@ function PlanificacionDesktop() {
                             // Vista unificada: misma lógica que cada crono (incluye créditos Ext+Adel).
                             // No reutilizar cycles del objetivo seleccionado: cada SLA del grupo tiene su propia rotación.
                             selectedGrupo.objectiveIds.forEach((objId: string) => {
-                                const units = sumGrupoObjectiveCoverageForDay(objId, dateStr, dayLetter, undefined);
+                                const units = grupoCoberturaDia(objId, dateStr, dayLetter);
                                 requiredPax += units.required;
                                 closedPax += units.closed;
                                 if (String(objId) === String(selectedObjective)) {
