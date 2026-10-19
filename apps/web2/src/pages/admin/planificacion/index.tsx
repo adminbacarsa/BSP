@@ -12006,7 +12006,19 @@ function PlanificacionDesktop() {
                 where('startTime', '<=', Timestamp.fromDate(hasta)),
             ))));
             const snap = { docs: snaps.flatMap((x) => x.docs) };
-            const guardiasBase = dotacionBaseEmployees;
+            // Quien trabajó en el objetivo (o grupo) el mes anterior sigue en la dotación aunque sea de afuera (ACEVEDO en Villa María).
+            const enDotacion = new Set(dotacionBaseEmployees.map((e: any) => e.id));
+            const desdeMesPrevio = getDateKey(new Date(y, m - 1, 1));
+            const venidos = new Set<string>();
+            for (const d of snap.docs) {
+                const t: any = d.data();
+                const st = t.startTime?.toDate ? getDateKey(t.startTime.toDate()) : '';
+                const code = String(t.code || '').toUpperCase();
+                if (!t.employeeId || t.isDeleted || enDotacion.has(t.employeeId) || st < desdeMesPrevio) continue;
+                if (!code || ['F', 'FF', 'FP', 'RET'].includes(code) || t.isFranco || t.origin === 'OPERATIONS_COVERAGE' || esCeldaLicencia({ code, tieneAusencia: false })) continue;
+                venidos.add(String(t.employeeId));
+            }
+            const guardiasBase = [...dotacionBaseEmployees, ...employees.filter((e: any) => venidos.has(e.id) && e.status !== 'inactivo')];
             const ids = new Set(guardiasBase.map((e: any) => e.id));
             const previosPorEmp = new Map<string, TurnoPrevioContinuar[]>();
             const salientesPorEmp = new Map<string, { nombre: string; previos: TurnoPrevioContinuar[] }>();
@@ -12533,7 +12545,7 @@ function PlanificacionDesktop() {
         });
         // Volantes y RET de otros objetivos: no están entre los elegidos (no tienen propuesta propia).
         aceptadas.push(...sugerencias.filter((s) => s.tipo === 'disponible'));
-        const sumarAGrilla = sugerencias.filter((s) => s.tipo === 'disponible' && !dotacionBaseEmployees.some((e: any) => e.id === s.celda.employeeId)).map((s) => s.celda.employeeId);
+        const sumarAGrilla = [...new Set([...sugerencias.filter((s) => s.tipo === 'disponible').map((s) => s.celda.employeeId), ...[...elegidos]])].filter((id) => !dotacionBaseEmployees.some((e: any) => e.id === id));
         if (sumarAGrilla.length) setPinnedExternalEmpIds((prev) => new Set([...prev, ...sumarAGrilla]));
         // Regla de no repetir: ninguna sugerencia deja una franja de un puesto con más gente que la que pide el servicio ese día.
         const estructuraDe = (objId: string): any[] => ((enGrupoRapido && grupoSlaMap[objId]?.length ? grupoSlaMap[objId] : effectivePosStructure) || []) as any[];
