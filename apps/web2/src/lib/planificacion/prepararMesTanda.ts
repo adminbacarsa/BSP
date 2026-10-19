@@ -205,7 +205,13 @@ export async function correrTanda(input: TandaInput): Promise<FilaTanda[]> {
           const prev = matching
             .filter((s) => { const d = toYyyyMmDd(s.startDate); return !!d && d < primerDia && up(s.status) !== 'INACTIVE'; })
             .sort((a, b) => String(toYyyyMmDd(b.startDate)).localeCompare(String(toYyyyMmDd(a.startDate))))[0];
-          if (prev) {
+          // Solo se copia el del mes anterior (termina en ese mes y no está cerrado). Uno viejo no arma nada.
+          const mesPrevio = `${month === 0 ? year - 1 : year}-${pad(month === 0 ? 12 : month)}`;
+          const finPrev = prev ? String(toYyyyMmDd(prev.endDate) || '') : '';
+          if (prev && (finPrev.slice(0, 7) !== mesPrevio || prev.closed === true)) {
+            fila.notas.push(`${u.grupo ? `${o.nombre}: ` : ''}sin servicio de ${mesNombre} y el último termina el ${finPrev.slice(8, 10)}/${finPrev.slice(5, 7)}/${finPrev.slice(0, 4)}: cargalo en Servicios`);
+            sinServicio += 1;
+          } else if (prev) {
             srv = { ...prev, positions: franjasParaMesSiguiente((prev.positions || []) as any[], mesKey) };
             fila.notas.push(`${u.grupo ? `${o.nombre}: ` : ''}servicio de ${mesNombre} sin activar (se toma el anterior)`);
             rangos.push({ desde: primerDia, hasta: ultimoDia });
