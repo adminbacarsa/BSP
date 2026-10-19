@@ -326,6 +326,7 @@ import {
     collectSplitBandCreditsForDay,
     creditosSplitPorDia,
     lookupSplitCreditsForPosition,
+    type PositionCoverageUnitResult,
 } from '@/lib/planificacion/positionCoverageUnits';
 import {
     acreditaCoberturaAlObjetivo,
@@ -492,7 +493,7 @@ let colaCobertura12: string[] | null = null;
 let ofrecerCobertura12: (claves: string[]) => void = () => {};
 import { applyOperationalGapCloseToChanges, applySingleWorkerFullGapCloseToChanges } from '@/lib/planificacion/operationalGapCoverage';
 import { alternativasPareja, cambiarPareja, estiloJornada12, horarioDoce, moverVista12, proponerCierre12h, slaExigeCobertura, textoRango12h, textoResumen12h, textoVista12, volverA8, type CtxHorario12, type Propuesta12h, type TurnoPuesto12 } from '@/lib/planificacion/cierre12h';
-import { avisosDesdeLectura, faltantesDelDia, leerDia, lineasDeSobra, proponerLiberar, SIN_PUESTO, type FaltanteBanda, type GuardiaSobra, type PuestoServicio, type TurnoDia } from '@/lib/planificacion/lecturaBandas';
+import { avisosDesdeLectura, esPuesto24, faltantesDelDia, leerDia, lineasDeSobra, proponerLiberar, SIN_PUESTO, type FaltanteBanda, type GuardiaSobra, type PuestoServicio, type TurnoDia } from '@/lib/planificacion/lecturaBandas';
 import { PanelesMarco } from '@/components/planificacion/PanelesPlanificacion';
 import type { CandidatoFaltante } from '@/components/planificacion/BandasFaltantesPanel';
 import { armarMesDesdeServicio, cubrirHuecosConDisponibles, type TipoGuardiaArmado } from '@/lib/planificacion/armarMesServicio';
@@ -5295,7 +5296,7 @@ function PlanificacionDesktop() {
         cycles?: string[],
         objectiveId?: string | null,
         structureForDominant?: any[],
-    ): { closed: number; required: number; schemeLabel: string } => {
+    ): PositionCoverageUnitResult => {
         const covObjId = objectiveId ?? selectedObjective;
         if (!isPosActiveOnDay(pos, dayLetter, dateStr)) return { closed: 0, required: 0, schemeLabel: '' };
         if (isPosExcludedOnDate(pos, dateStr)) return { closed: 0, required: 0, schemeLabel: 'EXCL' };
@@ -5370,6 +5371,7 @@ function PlanificacionDesktop() {
             closedUnits: units.closed,
             requiredUnits: units.required,
             schemeLabel: units.schemeLabel,
+            bandas: 'bandas' in units ? units.bandas : undefined,
             isPositionClosed: units.required > 0 && units.closed >= units.required,
             isExcludedDay: hoursStats.isExcludedDay,
         };
@@ -5546,9 +5548,9 @@ function PlanificacionDesktop() {
         dateStr: string,
         dayLetter: string,
         cycles?: string[],
-    ): { required: number; closed: number; codeCountsCerrados: Record<string, Record<string, number>> } => {
+    ): { required: number; closed: number; required24: number; closed24: number; codeCountsCerrados: Record<string, Record<string, number>> } => {
         const structure = grupoSlaMap[objId] || [];
-        if (!structure.length) return { required: 0, closed: 0, codeCountsCerrados: {} };
+        if (!structure.length) return { required: 0, closed: 0, required24: 0, closed24: 0, codeCountsCerrados: {} };
         const codeCountsByPos: Record<string, Record<string, number>> = {};
         for (const pos of structure) {
             codeCountsByPos[String(pos.positionName || 'General')] = {};
@@ -5597,6 +5599,8 @@ function PlanificacionDesktop() {
 
         let required = 0;
         let closed = 0;
+        let required24 = 0;
+        let closed24 = 0;
         const codeCountsCerrados: Record<string, Record<string, number>> = {};
         for (const pos of structure) {
             if (!isPosActiveOnDay(pos, dayLetter, dateStr)) continue;
@@ -5611,8 +5615,12 @@ function PlanificacionDesktop() {
             const units = countPositionClosedUnitsFromShifts(pos, dayLetter, codeCounts, cycles, true, dateStr);
             required += units.required;
             closed += units.closed;
+            if (esPuesto24(pos)) {
+                required24 += units.required;
+                closed24 += units.closed;
+            }
         }
-        return { required, closed, codeCountsCerrados };
+        return { required, closed, required24, closed24, codeCountsCerrados };
     }, [grupoSlaMap, dotacionBaseEmployees, pendingChanges, shiftsMap, absencesMap, resolveEffectiveShiftObjectiveId]);
 
     const bandasAbiertasGrupoEn = useCallback((dateStr: string, dayLetter: string): BandaAbiertaGrupo[] => {
@@ -17966,8 +17974,8 @@ function PlanificacionDesktop() {
                                 requiredPax += units.required;
                                 closedPax += units.closed;
                                 if (String(objId) === String(selectedObjective)) {
-                                    reqLectura += units.required;
-                                    closedLectura += units.closed;
+                                    reqLectura += units.required24;
+                                    closedLectura += units.closed24;
                                 }
                             });
                         } else {
@@ -17979,9 +17987,12 @@ function PlanificacionDesktop() {
                             );
                             requiredPax += units.required;
                             closedPax += units.closed;
+                            // La lectura por horas solo lee puestos 24 h: no tapa lo que falta en un puesto custom (Museo MM×3+ME).
+                            if (esPuesto24(pos)) {
+                                reqLectura += units.required;
+                                closedLectura += units.closed;
+                            }
                         });
-                        reqLectura = requiredPax;
-                        closedLectura = closedPax;
                         }
 
                         const lecturaDia = lecturaMes.porDia[dateStr];
@@ -21620,7 +21631,7 @@ function PlanificacionDesktop() {
                                                     const excludedToday = isPosExcludedOnDate(p, selectedCell.dateStr);
                                                     return (
                                                     <option key={p.positionName} value={p.positionName} disabled={excludedToday}>
-                                                        {p.positionName}{preferenciaGeneroOptionSuffix(p.preferenciaGenero)}{excludedToday ? ' — EXCLUIDO este día' : ''} ({p.qty} pax - Meta: {(p.activeDays?.includes(getDayLetter(selectedCell.dateStr)) && !excludedToday) ? dailyCoverageHoursTargetWithPerShiftPax(p, Number(p.qty) || 1, getDayLetter(selectedCell.dateStr), autoSelectedCyclesRef.current?.length ? autoSelectedCyclesRef.current : autoCycles, selectedCell.dateStr) : 0}h)
+                                                        {p.positionName}{preferenciaGeneroOptionSuffix(p.preferenciaGenero)}{excludedToday ? ' — EXCLUIDO este día' : ''} ({(p.shifts || []).some((sh: any) => Number(sh.quantity) > 0) ? (p.shifts || []).map((sh: any) => `${sh.code}×${Number(sh.quantity) > 0 ? sh.quantity : p.qty}`).join(' + ') : `${p.qty} pax`} - Meta: {(p.activeDays?.includes(getDayLetter(selectedCell.dateStr)) && !excludedToday) ? dailyCoverageHoursTargetWithPerShiftPax(p, Number(p.qty) || 1, getDayLetter(selectedCell.dateStr), autoSelectedCyclesRef.current?.length ? autoSelectedCyclesRef.current : autoCycles, selectedCell.dateStr) : 0}h)
                                                     </option>
                                                     );
                                                 })}
@@ -21684,7 +21695,10 @@ function PlanificacionDesktop() {
                                             const displayTarget = isExcludedDay
                                                 ? 'Excluido SLA'
                                                 : coverageData.isActiveDay ? `${coverageData.target}h` : `Sin cobertura`;
-                                            const unitsLabel = coverageData.isActiveDay && coverageData.requiredUnits > 0
+                                            const bandasPax = (coverageData as { bandas?: Array<{ code: string; tiene: number; pide: number }> }).bandas;
+                                            const unitsLabel = coverageData.isActiveDay && coverageData.requiredUnits > 0 && bandasPax?.length
+                                                ? bandasPax.map((b) => `${b.code} ${b.tiene}/${b.pide}`).join(' · ')
+                                                : coverageData.isActiveDay && coverageData.requiredUnits > 0
                                                 ? `${coverageData.closedUnits}/${coverageData.requiredUnits} puesto${coverageData.requiredUnits > 1 ? 's' : ''}`
                                                 : null;
                                             const bgClass = isExcludedDay
@@ -21714,7 +21728,7 @@ function PlanificacionDesktop() {
                                                             {unitsLabel && (
                                                                 <div className={`text-xs font-black px-2 py-0.5 rounded ${bgClass}`}>
                                                                     {unitsLabel}
-                                                                    {coverageData.schemeLabel ? ` (${coverageData.schemeLabel})` : ''}
+                                                                    {coverageData.schemeLabel && !bandasPax?.length ? ` (${coverageData.schemeLabel})` : ''}
                                                                 </div>
                                                             )}
                                                         </div>
@@ -21776,14 +21790,6 @@ function PlanificacionDesktop() {
                                                             title="Retén — guardia disponible sin turno asignado (horas tácitas, no suman al límite)"
                                                         >
                                                             <span>RET</span><span className="text-[8px]">Retén</span>
-                                                        </button>
-                                                        <button
-                                                            onClick={() => handleAssignDeployment('SURPLUS')}
-                                                            disabled={isServiceLocked || !activePosition || activePosition === 'General' || activePosition === 'Retén'}
-                                                            className="p-2 bg-violet-100 text-violet-800 border border-violet-300 rounded-lg flex flex-col items-center justify-center font-black disabled:opacity-40"
-                                                            title="Refuerzo — puesto ya cubierto; no suma cobertura SLA"
-                                                        >
-                                                            <span>REF</span><span className="text-[8px]">Refuerzo</span>
                                                         </button>
                                                         <button
                                                             onClick={() => handleAssignDeployment('TRAINING')}

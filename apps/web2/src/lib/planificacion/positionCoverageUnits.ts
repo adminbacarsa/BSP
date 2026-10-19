@@ -578,6 +578,8 @@ export interface PositionCoverageUnitResult {
     closed: number;
     required: number;
     schemeLabel: string;
+    /** Puesto con PAX por turno (Museo MM×3 + ME×1): cuántos tiene y pide cada turno. */
+    bandas?: Array<{ code: string; tiene: number; pide: number }>;
 }
 
 export interface DayCoverageTotals {
@@ -771,11 +773,11 @@ export function countPositionClosedUnitsFromShifts(
     // Custom con PAX por turno (o corte parcial de PAX): 1 unidad cerrada = todos los turnos en su PAX efectivo.
     const hasPerShiftPax = effBands.some(b => b.quantity != null && Number(b.quantity) > 0) || hasPaxCuts;
     if (hasPerShiftPax) {
-        const allFull = effBands.every(b => {
-            const need = effectiveBandQty(b.code, b.quantity);
-            return need <= 0 || (codeCounts[b.code] || 0) >= need;
-        });
-        return { closed: allFull ? 1 : 0, required: 1, schemeLabel };
+        const bandas = effBands
+            .map(b => ({ code: b.code, tiene: codeCounts[b.code] || 0, pide: effectiveBandQty(b.code, b.quantity) }))
+            .filter(b => b.pide > 0);
+        const allFull = bandas.every(b => b.tiene >= b.pide);
+        return { closed: allFull ? 1 : 0, required: 1, schemeLabel, bandas };
     }
     const closed = Math.min(qty, closedUnitsFromBandScheme(codeCounts, bandCodes));
     return { closed, required: qty, schemeLabel };
