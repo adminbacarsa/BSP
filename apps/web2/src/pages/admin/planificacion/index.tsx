@@ -1978,6 +1978,8 @@ function PlanificacionDesktop() {
     const [grupoSlaMap, setGrupoSlaMap] = useState<Record<string, any[]>>({});
     const [grupoTotalVendidas, setGrupoTotalVendidas] = useState(0);
     const [grupoVendidasByObjective, setGrupoVendidasByObjective] = useState<Record<string, number>>({});
+    /** Objetivos del grupo sin servicio activo en el mes (se llena al cargar los servicios; vacío mientras carga). */
+    const [grupoSinServicioMes, setGrupoSinServicioMes] = useState<string[]>([]);
     const dotacionMigratedRef = useRef(false);
     const objectiveSortAppliedRef = useRef<string | null>(null);
     const [empPosPicker, setEmpPosPicker] = useState<{ empId: string; x: number; y: number; maxHeight: number; floating?: boolean } | null>(null);
@@ -6544,6 +6546,7 @@ function PlanificacionDesktop() {
             setGrupoSlaMap({});
             setGrupoTotalVendidas(0);
             setGrupoVendidasByObjective({});
+            setGrupoSinServicioMes([]);
             return;
         }
         const fetchGroupSlas = async () => {
@@ -6557,6 +6560,7 @@ function PlanificacionDesktop() {
                 const viewMonth = currentDate.getMonth();
                 const result: Record<string, any[]> = {};
                 const vendidasByObj: Record<string, number> = {};
+                const sinServicio: string[] = [];
                 let totalVendidas = 0;
                 for (const objId of selectedGrupo.objectiveIds) {
                     const matching = filterSlasForPlanningContext(allDocs, String(clienteDeObjetivo(objId)?.id || selectedClient), objId, clients, slaIdToObjId);
@@ -6573,6 +6577,7 @@ function PlanificacionDesktop() {
                         totalVendidas += objVend;
                     } else {
                         vendidasByObj[objId] = 0;
+                        sinServicio.push(objId);
                     }
                     const { structure } = buildPlanningPositionStructure(srvForStructure, { monthHasSla, hasExactMatch: !!hasExactMatch });
                     result[objId] = structure.length > 0 ? structure : [{ positionName: 'General', shifts: DEFAULT_PLANNING_SHIFTS.map((s: any) => ({ ...s })), qty: 1, activeDays: ['L','M','X','J','V','S','D'], coverageType: '24hs' }];
@@ -6580,11 +6585,13 @@ function PlanificacionDesktop() {
                 setGrupoSlaMap(result);
                 setGrupoTotalVendidas(totalVendidas);
                 setGrupoVendidasByObjective(vendidasByObj);
+                setGrupoSinServicioMes(sinServicio);
             } catch (e) {
                 console.error('GRUPO SLA ERROR:', e);
                 setGrupoSlaMap({});
                 setGrupoTotalVendidas(0);
                 setGrupoVendidasByObjective({});
+                setGrupoSinServicioMes([]);
             }
         };
         fetchGroupSlas();
@@ -12019,7 +12026,7 @@ function PlanificacionDesktop() {
     // Servicio del mes primero: sin servicio no se copia, arma ni pega bien. Se crea copiando el del mes anterior.
     const [creandoServicioMes, setCreandoServicioMes] = useState(false);
     const objetivosSinServicioMes: string[] = selectedGrupo && grupoUnifiedMode
-        ? (selectedGrupo.objectiveIds as string[]).filter((o) => !(Number(grupoVendidasByObjective[o]) > 0))
+        ? (selectedGrupo.objectiveIds as string[]).filter((o) => grupoSinServicioMes.includes(o))
         : (selectedObjective && sinServicioEnMes ? [selectedObjective] : []);
     const crearServiciosDelMes = async (objIds: string[]) => {
         if (!objIds.length || !empresaId) return;
