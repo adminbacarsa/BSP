@@ -1,3 +1,4 @@
+import { esCeldaLicencia } from '@/lib/planificacion/seleccionLicencia';
 import { coalescePlannedTurnosForCell } from '@/lib/planificacion/planningTurnoCoalesce';
 import {
   billableHoursForPlanningCell,
@@ -70,6 +71,8 @@ export function computePlanningMonthHoursBreakdown(params: {
       const dateStr = getDateKey(day);
       const turnos = resolveCellTurnos(emp.id, dateStr);
       if (!turnos.length) return;
+      // Licencia (V, E, A…) sobre un turno: el doc conserva la banda, pero no son horas del puesto ni facturables.
+      if (turnos.some((t) => esCeldaLicencia({ code: String(t?.code || '').toUpperCase(), tieneAusencia: false }) || t?.isNovedad === true)) return;
 
       const billable = billableHoursForPlanningCell(turnos, dateStr, emp.id, ctx);
       const row = ensureEmp(emp);
