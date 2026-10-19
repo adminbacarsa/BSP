@@ -207,3 +207,8 @@ export function turnoDeFilaGrupo(
     }
     return null;
 }
+
+/** Clave del lugar de una fila («NUEVA CBA 08:00 a 14:00hs» → «NUEVA CBA»), para guardar su objetivo. */
+export function normLugar(puestoFila: string): string {
+    return normNombre(String(puestoFila || '').replace(/\d{1,2}[:.]\d{2}.*$/, '')).replace(/\s+/g, ' ').trim();
+}

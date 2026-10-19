@@ -7,7 +7,7 @@ import { esCeldaLicencia } from './seleccionLicencia';
 import type { ColorCelda } from './pegadoExcelColor';
 import { resolverEquivalencia, type EquivalenciaCodigo } from './equivalenciaCodigo';
 import { partirCodigoAjeno, resolverEquivalenciaOtro, type EquivalenciaOtro } from './asignarOtroObjetivo';
-import { codigoEnBloque, turnoDeFilaGrupo, horasDeFranja, resolverCodigoPuesto, type PuestoMesPegado } from './codigoPuestoPlanilla';
+import { codigoEnBloque, normLugar, turnoDeFilaGrupo, horasDeFranja, resolverCodigoPuesto, type PuestoMesPegado } from './codigoPuestoPlanilla';
 
 export type CeldaRC = { r: number; c: number };
 export type RangoRC = { minR: number; maxR: number; minC: number; maxC: number };
@@ -733,6 +733,8 @@ export type PreviewPegadoExcel = {
     resumen: string;
     diasE: DiaEPegado[];
     conColor: boolean;
+    /** Vista agrupada: lugares de la fila («NUEVA CBA») que no se emparejaron con un objetivo del grupo. */
+    lugaresSinObjetivo?: string[];
 };
 
 /** La «E» se toma como evento por defecto si ese día la tienen 3 o más guardias. */
@@ -913,7 +915,10 @@ function clasificarColumnas(rows: string[][]): { kinds: KindCol[]; diaDesde: num
         const nombres = vals.filter(pareceNombre).length;
         const legajos = vals.filter((v) => /^\d{3,6}$/.test(v.trim())).length;
         const dias = vals.filter(pareceDia).length;
-        if (nombres / n >= 0.5 && nombres >= legajos) kinds.push('nombre');
+        // «CENTRO 08:00 a 15:00hs»: el lugar con su horario es el puesto de la fila, no un nombre.
+        const conHora = vals.filter((v) => /\d{1,2}[:.]\d{2}/.test(v) && /[A-Za-z]{3,}/.test(v)).length;
+        if (conHora / n >= 0.5) kinds.push('puesto');
+        else if (nombres / n >= 0.5 && nombres >= legajos) kinds.push('nombre');
         else if (legajos / n >= 0.5 && legajos > dias) kinds.push('legajo');
         else if (dias / n >= 0.5) kinds.push('dia');
         else kinds.push('puesto');
@@ -1007,6 +1012,8 @@ export function prepararPegadoExcel(
         colores?: Array<Array<ColorCelda | null> | null> | null;
         /** Si el objetivo tiene equivalencias, mandan sobre M/T/N genéricos y sobre el patrón P1 M. */
         equivalencias?: readonly EquivalenciaCodigo[] | null;
+        /** Vista agrupada: lugar de la fila (normLugar) → nombre del objetivo, guardado por grupo. */
+        lugares?: Record<string, string> | null;
         equivalenciasOtro?: readonly EquivalenciaOtro[] | null;
         /** Puestos y franjas del servicio del mes. «P1 M» se resuelve acá antes de preguntar otro objetivo. */
         puestosDelMes?: readonly PuestoMesPegado[] | null;
@@ -1022,6 +1029,7 @@ export function prepararPegadoExcel(
     const descSet = new Set<string>();
     const codigosAjenos: CodigoAjenoPegado[] = [];
     let algunoConNombre = false;
+    const lugaresSin = new Set<string>();
     for (const bloque of bloques) {
         const datos = bloque.filter((f) => !esEncabezado(f) && !esNota(f) && f.some((v) => v.trim()));
         if (!datos.length) continue;
@@ -1071,8 +1079,10 @@ export function prepararPegadoExcel(
                     continue;
                 }
                 const rojo = color?.fondo === 'ROJO' || color?.letra === 'ROJO';
-                const deFila = turnoDeFilaGrupo(puestoFila, raw, opts.puestosDelMes);
+                const lugarGuardado = puestoFila ? opts.lugares?.[normLugar(puestoFila)] : undefined;
+                const deFila = turnoDeFilaGrupo(lugarGuardado || puestoFila, raw, opts.puestosDelMes);
                 if (deFila) { celdas.push({ col, ...deFila }); continue; }
+                if (puestoFila && /^(M|T|N|D12|N12)$/.test(etiquetaCodigoExcel(raw).replace(/[\s.\-]/g, '')) && (opts.puestosDelMes || []).some((p) => p.positionName.includes(' · '))) lugaresSin.add(normLugar(puestoFila));
                 const enBloque = codigoEnBloque(puestoFila, raw);
                 const eqPrefijo = enBloque ? resolverEquivalencia(enBloque, rojo, opts.equivalencias) : null;
                 const eqRaw = resolverEquivalencia(raw, rojo, opts.equivalencias);
@@ -1168,6 +1178,7 @@ export function prepararPegadoExcel(
         codigosAjenos,
         diasE: diasConE(filas),
         conColor: !!opts.colores,
+        ...(lugaresSin.size ? { lugaresSinObjetivo: [...lugaresSin] } : {}),
         resumen: textoResumenPegado({
             filas: filas.length,
             encontrados: filas.length - sinEncontrar.length,
