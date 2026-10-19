@@ -3,11 +3,12 @@
  * objetivos (o los de un cliente o un grupo) y muestra cuál conviene en cada uno. Solo lectura: no escribe nada.
  * Va en un portal: la barra de la grilla no lo tapa.
  */
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { collection, getDocs, query, Timestamp, where } from 'firebase/firestore';
 import { CalendarRange, ChevronDown, ChevronRight, ExternalLink, Loader2, Wand2, X } from 'lucide-react';
 import { db } from '@/lib/firebase';
+import { readSessionJson, writeSessionJson } from '@/lib/persistSession';
 import { empresaCollectionQuery, fetchPlanificacionPublishStatus } from '@/lib/multiempresa';
 import { filterSlasForPlanningTenant } from '@/lib/slaPlanningMatch';
 import type { Estrategia, Metricas } from '@/lib/planificacion/prepararMes';
@@ -20,6 +21,8 @@ type Vista = 'revisar' | 'completo' | 'cargado' | 'fuera';
 type Props = {
   open: boolean;
   onClose: () => void;
+  /** La pastilla «Volver» (con el panel cerrado y resultados guardados). */
+  onReabrir: () => void;
   empresaId: string;
   scopeEmpresa: boolean;
   clients: any[];
@@ -88,6 +91,22 @@ export function PrepararMesModal(props: Props) {
   const [vista, setVista] = useState<Vista>('revisar');
   const [verFuera, setVerFuera] = useState(false);
   const cortar = useRef(false);
+  const [simuladoAt, setSimuladoAt] = useState<number | null>(null);
+
+  // La vista previa se guarda por empresa y mes en la pestaña: entrar a un objetivo o recargar no la pierde.
+  const clave = `cosp-preparar-mes:${empresaId}:${year}-${String(month + 1).padStart(2, '0')}`;
+  const cargada = useRef<string | null>(null);
+  useEffect(() => {
+    const g = readSessionJson<{ filas: Fila[]; alcance: string; modo: ModoTanda; vista: Vista; at: number }>(clave);
+    setFilas(g?.filas || []);
+    if (g) { setAlcance(g.alcance || 'todos'); setModo(g.modo || 'auto'); setVista(g.vista || 'revisar'); }
+    setSimuladoAt(g?.at || null);
+    cargada.current = clave;
+  }, [clave]);
+  useEffect(() => {
+    if (cargada.current !== clave || corriendo) return;
+    if (filas.length) writeSessionJson(clave, { filas, alcance, modo, vista, at: simuladoAt || Date.now() });
+  }, [clave, filas, alcance, modo, vista, simuladoAt, corriendo]);
 
   const mesTxt = new Date(year, month, 1).toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
   const unidades = useMemo(() => unidadesDelMes(clients, grupos), [clients, grupos]);
@@ -133,6 +152,7 @@ export function PrepararMesModal(props: Props) {
     } catch (err) {
       console.error('[preparar mes]', err);
     } finally {
+      setSimuladoAt(Date.now());
       setCorriendo(false);
     }
   };
@@ -150,7 +170,24 @@ export function PrepararMesModal(props: Props) {
     .sort((x, y) => (metricasDe(y)?.horasSinCubrir || 0) - (metricasDe(x)?.horasSinCubrir || 0) || x.nombre.localeCompare(y.nombre)), [filas, vista]);
   const fuera = useMemo(() => filas.filter((f) => vistaDe(f) === 'fuera'), [filas]);
 
-  if (!open || typeof document === 'undefined') return null;
+  if (typeof document === 'undefined') return null;
+  if (!open) {
+    if (!filas.length || corriendo) return null;
+    const mesCorto = new Date(year, month, 1).toLocaleDateString('es-AR', { month: 'long' });
+    return createPortal(
+      <button
+        type="button"
+        onClick={props.onReabrir}
+        data-preparar-volver
+        className="fixed bottom-4 left-1/2 z-[2900] flex -translate-x-1/2 items-center gap-2 rounded-full border border-slate-300 bg-white px-4 py-2 text-[12px] font-bold text-slate-700 shadow-lg hover:bg-slate-50"
+      >
+        <CalendarRange size={15} /> Preparar {mesCorto}
+        <span className={conteo.n.revisar ? 'text-amber-600' : 'text-emerald-600'}>· {conteo.n.revisar ? `${conteo.n.revisar} para revisar` : 'todo completo'}</span>
+        <span className="text-indigo-600">· Volver</span>
+      </button>,
+      document.body,
+    );
+  }
 
   const tarjeta = (k: Exclude<Vista, 'fuera'>, titulo: string, tono: string) => (
     <button
@@ -221,7 +258,7 @@ export function PrepararMesModal(props: Props) {
               {tarjeta('cargado', 'Ya armados', 'text-slate-600')}
             </div>
             <div className="text-[12px] text-slate-500">
-              Piden {conteo.pedidas.toLocaleString('es-AR')} h · sin cubrir <b className={conteo.sinCubrir ? 'text-rose-600' : ''}>{conteo.sinCubrir.toLocaleString('es-AR')} h</b> · al 50 % <b className={conteo.al50 ? 'text-rose-600' : ''}>{conteo.al50} h</b> · {conteo.doce} turnos de 12 h · {conteo.ret} días en RET
+              {simuladoAt ? `Simulado a las ${new Date(simuladoAt).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })} · ` : ''}Piden {conteo.pedidas.toLocaleString('es-AR')} h · sin cubrir <b className={conteo.sinCubrir ? 'text-rose-600' : ''}>{conteo.sinCubrir.toLocaleString('es-AR')} h</b> · al 50 % <b className={conteo.al50 ? 'text-rose-600' : ''}>{conteo.al50} h</b> · {conteo.doce} turnos de 12 h · {conteo.ret} días en RET
             </div>
           </div>
         )}

@@ -19496,6 +19496,23 @@ function PlanificacionDesktop() {
                 {/* --- ÁREA PRINCIPAL DE LA GRILLA (PLANIFICACIÓN + COMPARACIÓN SPLIT VIEW) --- */}
                 <div className={`flex-1 min-h-0 overflow-hidden relative z-0 flex flex-col ${isServiceLocked ? 'opacity-75 grayscale-[0.5] pointer-events-none' : ''}`}>
                     
+                    {/* «Preparar el mes» queda montado siempre: entrar a un objetivo no pierde la vista previa. */}
+                            <PrepararMesModal
+                                open={prepararMesOpen}
+                                onClose={() => setPrepararMesOpen(false)}
+                                onReabrir={() => setPrepararMesOpen(true)}
+                                empresaId={empresaId}
+                                scopeEmpresa={scopeEmpresa}
+                                clients={clients}
+                                employees={employees}
+                                grupos={grupos}
+                                slaIdToObjId={slaIdToObjId}
+                                shiftsMap={shiftsMap}
+                                absencesMap={absencesMap}
+                                year={currentDate.getFullYear()}
+                                month={currentDate.getMonth()}
+                                onAbrirObjetivo={(cid, oid) => { setPrepararMesOpen(false); handleContextChange(cid, oid); }}
+                            />
                     {!selectedObjective ? (
                         <div className="flex flex-col items-center justify-center flex-1 gap-3 select-none">
                             <div className="w-16 h-16 rounded-xl bg-slate-100 flex items-center justify-center">
@@ -19513,21 +19530,6 @@ function PlanificacionDesktop() {
                                     <Wand2 size={16}/> Preparar {currentDate.toLocaleDateString('es-AR', { month: 'long' })} de todos los objetivos
                                 </button>
                             )}
-                            <PrepararMesModal
-                                open={prepararMesOpen}
-                                onClose={() => setPrepararMesOpen(false)}
-                                empresaId={empresaId}
-                                scopeEmpresa={scopeEmpresa}
-                                clients={clients}
-                                employees={employees}
-                                grupos={grupos}
-                                slaIdToObjId={slaIdToObjId}
-                                shiftsMap={shiftsMap}
-                                absencesMap={absencesMap}
-                                year={currentDate.getFullYear()}
-                                month={currentDate.getMonth()}
-                                onAbrirObjetivo={(cid, oid) => { setPrepararMesOpen(false); handleContextChange(cid, oid); }}
-                            />
                         </div>
                     ) : (
                         <>
