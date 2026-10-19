@@ -176,3 +176,32 @@ export function resolverCodigoPuesto(
     }
     return null;
 }
+
+/**
+ * Vista agrupada: la columna de la fila nombra el objetivo («CENTRO 08:00 a 15:00hs», «CERRO DE LAS ROSAS»).
+ * Si un solo objetivo del grupo tiene todas esas palabras en su nombre («Sucursal Centro · Puesto»), la M/T/N de la
+ * fila es el turno de esa banda en ese objetivo.
+ */
+export function turnoDeFilaGrupo(
+    puestoFila: string,
+    raw: string,
+    puestos: readonly PuestoMesPegado[] | null | undefined,
+): CodigoPuestoResuelto | null {
+    if (!puestos?.length || !puestoFila) return null;
+    const banda = compacto(raw);
+    if (!(BANDAS as readonly string[]).includes(banda)) return null;
+    const palabras = normNombre(puestoFila.replace(/\d{1,2}[:.]\d{2}.*$/, ''))
+        .split(' ')
+        .filter((p) => p.length >= 3 && !/^(HS|HORARIO|SUCURSAL|DEL|LAS|LOS)$/.test(p));
+    if (!palabras.length) return null;
+    const delGrupo = puestos.filter((p) => p.positionName.includes(' · '));
+    const objetivoDe = (p: PuestoMesPegado) => normNombre(p.positionName.split(' · ')[0]);
+    const hits = delGrupo.filter((p) => { const o = ` ${objetivoDe(p)} `; return palabras.every((w) => o.includes(` ${w} `)); });
+    const objetivos = [...new Set(hits.map(objetivoDe))];
+    if (objetivos.length !== 1) return null;
+    for (const p of hits) {
+        const sh = turnoDeBanda(p, '', banda);
+        if (sh) return armar(p, sh);
+    }
+    return null;
+}

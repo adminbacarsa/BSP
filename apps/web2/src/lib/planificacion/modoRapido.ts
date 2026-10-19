@@ -7,7 +7,7 @@ import { esCeldaLicencia } from './seleccionLicencia';
 import type { ColorCelda } from './pegadoExcelColor';
 import { resolverEquivalencia, type EquivalenciaCodigo } from './equivalenciaCodigo';
 import { partirCodigoAjeno, resolverEquivalenciaOtro, type EquivalenciaOtro } from './asignarOtroObjetivo';
-import { codigoEnBloque, horasDeFranja, resolverCodigoPuesto, type PuestoMesPegado } from './codigoPuestoPlanilla';
+import { codigoEnBloque, turnoDeFilaGrupo, horasDeFranja, resolverCodigoPuesto, type PuestoMesPegado } from './codigoPuestoPlanilla';
 
 export type CeldaRC = { r: number; c: number };
 export type RangoRC = { minR: number; maxR: number; minC: number; maxC: number };
@@ -1071,6 +1071,8 @@ export function prepararPegadoExcel(
                     continue;
                 }
                 const rojo = color?.fondo === 'ROJO' || color?.letra === 'ROJO';
+                const deFila = turnoDeFilaGrupo(puestoFila, raw, opts.puestosDelMes);
+                if (deFila) { celdas.push({ col, ...deFila }); continue; }
                 const enBloque = codigoEnBloque(puestoFila, raw);
                 const eqPrefijo = enBloque ? resolverEquivalencia(enBloque, rojo, opts.equivalencias) : null;
                 const eqRaw = resolverEquivalencia(raw, rojo, opts.equivalencias);
