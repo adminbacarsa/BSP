@@ -19511,7 +19511,7 @@ function PlanificacionDesktop() {
                                 absencesMap={absencesMap}
                                 year={currentDate.getFullYear()}
                                 month={currentDate.getMonth()}
-                                onAbrirObjetivo={(cid, oid) => { setPrepararMesOpen(false); handleContextChange(cid, oid); }}
+                                onAbrirObjetivo={(cid, oid, gk) => { setPrepararMesOpen(false); const g = gk ? grupos.find((x) => `grupo:${x.id}` === gk) : null; if (g) handleGrupoChange(g); else handleContextChange(cid, oid); }}
                             />
                     {!selectedObjective ? (
                         <div className="flex flex-col items-center justify-center flex-1 gap-3 select-none">

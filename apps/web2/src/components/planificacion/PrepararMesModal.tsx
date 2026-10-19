@@ -35,7 +35,7 @@ type Props = {
   year: number;
   /** 0-11 */
   month: number;
-  onAbrirObjetivo: (clientId: string, objectiveId: string) => void;
+  onAbrirObjetivo: (clientId: string, objectiveId: string, grupoKey?: string) => void;
 };
 
 const TEXTO_FUERA: Record<Fila['estado'], string> = {
@@ -314,7 +314,7 @@ export function PrepararMesModal(props: Props) {
                     <div className="text-right text-[12px]">{num(m?.doce)}</div>
                     <div className="text-right text-[12px]">{num(m?.horasAl50)}</div>
                     <div className="text-right text-[12px]">{num(m?.ret, false)}</div>
-                    <button type="button" title="Abrir la grilla de este objetivo" onClick={() => props.onAbrirObjetivo(f.objetivos[0].clientId, f.objetivos[0].id)} className="justify-self-end rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"><ExternalLink size={14} /></button>
+                    <button type="button" title="Abrir la grilla de este objetivo" onClick={() => props.onAbrirObjetivo(f.objetivos[0].clientId, f.objetivos[0].id, f.grupo ? f.key : undefined)} className="justify-self-end rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"><ExternalLink size={14} /></button>
                   </div>
                 );
               })}
