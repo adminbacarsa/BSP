@@ -1,10 +1,12 @@
 /**
  * «Preparar el mes» desde la pantalla principal de Planificación: simula «Continuar» y «Armar el mes» en todos los
  * objetivos (o los de un cliente o un grupo) y muestra cuál conviene en cada uno. Solo lectura: no escribe nada.
+ * Va en un portal: la barra de la grilla no lo tapa.
  */
 import React, { useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { collection, getDocs, query, Timestamp, where } from 'firebase/firestore';
-import { CalendarRange, Loader2, X, ExternalLink, Wand2, Repeat } from 'lucide-react';
+import { CalendarRange, ChevronDown, ChevronRight, ExternalLink, Loader2, Wand2, X } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import { empresaCollectionQuery, fetchPlanificacionPublishStatus } from '@/lib/multiempresa';
 import { filterSlasForPlanningTenant } from '@/lib/slaPlanningMatch';
@@ -12,8 +14,8 @@ import type { Estrategia, Metricas } from '@/lib/planificacion/prepararMes';
 import { correrTanda, unidadesDelMes, type FilaTanda, type ModoTanda } from '@/lib/planificacion/prepararMesTanda';
 import type { GrupoObjetivos } from '@/services/gruposService';
 
-type Modo = ModoTanda;
 type Fila = FilaTanda;
+type Vista = 'revisar' | 'completo' | 'cargado' | 'fuera';
 
 type Props = {
   open: boolean;
@@ -33,45 +35,69 @@ type Props = {
   onAbrirObjetivo: (clientId: string, objectiveId: string) => void;
 };
 
-const TEXTO_ESTADO: Record<Fila['estado'], string> = {
+const TEXTO_FUERA: Record<Fila['estado'], string> = {
   ok: '',
-  publicado: 'Ya publicado: no se toca',
+  publicado: 'Ya publicado',
   sin_servicio: 'Sin servicio',
-  sin_guardias: 'Sin guardias en la dotación',
+  sin_guardias: 'Sin guardias',
   error: 'No se pudo simular',
 };
 
-function CeldaMetricas({ m, elegida }: { m?: Metricas; elegida: boolean }) {
-  if (!m) return <td className="px-2 py-1.5 text-slate-300" colSpan={4}>—</td>;
-  const c = (v: number, malo: boolean) => <span className={malo && v > 0 ? 'text-rose-600 font-bold' : 'text-slate-600'}>{v}</span>;
-  const bg = elegida ? 'bg-emerald-50' : '';
-  return (
-    <>
-      <td className={`px-2 py-1.5 text-right tabular-nums ${bg}`}>{c(m.horasSinCubrir, true)}</td>
-      <td className={`px-2 py-1.5 text-right tabular-nums ${bg}`}>{c(m.doce, true)}</td>
-      <td className={`px-2 py-1.5 text-right tabular-nums ${bg}`}>{c(m.horasAl50, true)}</td>
-      <td className={`px-2 py-1.5 text-right tabular-nums ${bg}`}><span className="text-slate-600">{m.ret}</span></td>
-    </>
-  );
+const COLUMNAS = 'grid grid-cols-[minmax(0,1fr)_60px_136px_72px_52px_60px_48px_32px] items-center gap-x-2';
+
+const metricasDe = (f: Fila): Metricas | undefined => (f.elegida === 'armar' ? f.armar : f.continuar);
+const otraDe = (f: Fila): Metricas | undefined => (f.elegida === 'armar' ? f.continuar : f.armar);
+
+function vistaDe(f: Fila): Vista {
+  if (f.estado !== 'ok') return 'fuera';
+  const m = metricasDe(f);
+  if (!m) return 'fuera';
+  if (m.horasSinCubrir === 0 && m.horasAl50 === 0) return m.propuestas === 0 ? 'cargado' : 'completo';
+  return 'revisar';
+}
+
+/** Notas largas → chips cortos; el texto completo queda en el tooltip. */
+function chipsDe(notas: string[]): Array<{ texto: string; title: string }> {
+  const out: Array<{ texto: string; title: string }> = [];
+  const servicio = notas.filter((n) => /sin activar/.test(n));
+  if (servicio.length) out.push({ texto: 'servicio a activar', title: servicio.join('\n') });
+  for (const n of notas) {
+    const m = n.match(/ya tiene (\d+) celdas cargadas/);
+    if (m) out.push({ texto: `${m[1]} celdas ya cargadas`, title: 'Lo que ya está cargado en el mes no se toca.' });
+    else if (!/sin activar/.test(n)) out.push({ texto: n, title: n });
+  }
+  return out;
+}
+
+function resumenOtra(f: Fila): string {
+  const o = otraDe(f);
+  if (!o) return '';
+  const partes = [o.horasSinCubrir ? `${o.horasSinCubrir} h sin cubrir` : 'cubre todo'];
+  if (o.doce) partes.push(`${o.doce} de 12 h`);
+  if (o.horasAl50) partes.push(`${o.horasAl50} h al 50 %`);
+  return `${f.elegida === 'armar' ? 'copia' : 'armar'}: ${partes.join(' · ')}`;
 }
 
 export function PrepararMesModal(props: Props) {
   const { open, onClose, empresaId, scopeEmpresa, clients, employees, grupos, slaIdToObjId, shiftsMap, absencesMap, year, month } = props;
   const [alcance, setAlcance] = useState<string>('todos');
-  const [modo, setModo] = useState<Modo>('auto');
+  const [modo, setModo] = useState<ModoTanda>('auto');
   const [filas, setFilas] = useState<Fila[]>([]);
   const [corriendo, setCorriendo] = useState(false);
   const [avance, setAvance] = useState({ hechos: 0, total: 0, actual: '' });
+  const [vista, setVista] = useState<Vista>('revisar');
+  const [verFuera, setVerFuera] = useState(false);
   const cortar = useRef(false);
 
   const mesTxt = new Date(year, month, 1).toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
   const unidades = useMemo(() => unidadesDelMes(clients, grupos), [clients, grupos]);
 
   const opcionesAlcance = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const u of unidades) for (const o of u.objetivos) if (!m.has(o.clientId)) m.set(o.clientId, u.grupo ? '' : u.cliente);
-    for (const c of clients) if (m.has(String(c.id))) m.set(String(c.id), String(c.name || c.id));
-    return [...m.entries()].sort((x, y) => x[1].localeCompare(y[1]));
+    const ids = new Set(unidades.flatMap((u) => u.objetivos.map((o) => o.clientId)));
+    return clients
+      .filter((c: any) => ids.has(String(c.id)))
+      .map((c: any) => [String(c.id), String(c.name || c.id)] as [string, string])
+      .sort((x, y) => x[1].localeCompare(y[1]));
   }, [unidades, clients]);
 
   const elegidas = (u: (typeof unidades)[number]) => (alcance === 'todos' ? true : alcance.startsWith('grupo:') ? u.key === alcance : u.objetivos.some((o) => o.clientId === alcance));
@@ -80,6 +106,7 @@ export function PrepararMesModal(props: Props) {
     cortar.current = false;
     setCorriendo(true);
     setFilas([]);
+    setVista('revisar');
     const lista = unidades.filter(elegidas);
     setAvance({ hechos: 0, total: lista.length, actual: 'Cargando servicios…' });
     try {
@@ -110,41 +137,50 @@ export function PrepararMesModal(props: Props) {
     }
   };
 
-  const resumen = useMemo(() => {
+  const conteo = useMemo(() => {
+    const n: Record<Vista, number> = { revisar: 0, completo: 0, cargado: 0, fuera: 0 };
+    for (const f of filas) n[vistaDe(f)] += 1;
     const ok = filas.filter((f) => f.estado === 'ok');
-    const m = (f: Fila) => (f.elegida === 'armar' ? f.armar : f.continuar);
-    const completos = ok.filter((f) => (m(f)?.horasSinCubrir || 0) === 0 && (m(f)?.horasAl50 || 0) === 0);
-    return {
-      ok: ok.length,
-      completos: completos.length,
-      revisar: ok.length - completos.length,
-      saltados: filas.length - ok.length,
-      sinCubrir: ok.reduce((a, f) => a + (m(f)?.horasSinCubrir || 0), 0),
-      al50: ok.reduce((a, f) => a + (m(f)?.horasAl50 || 0), 0),
-      doce: ok.reduce((a, f) => a + (m(f)?.doce || 0), 0),
-      ret: ok.reduce((a, f) => a + (m(f)?.ret || 0), 0),
-      pedidas: ok.reduce((a, f) => a + (m(f)?.horasPedidas || 0), 0),
-    };
+    const sum = (k: keyof Metricas) => ok.reduce((a, f) => a + Number(metricasDe(f)?.[k] || 0), 0);
+    return { n, pedidas: sum('horasPedidas'), sinCubrir: sum('horasSinCubrir'), doce: sum('doce'), al50: sum('horasAl50'), ret: sum('ret') };
   }, [filas]);
 
-  if (!open) return null;
-  return (
-    <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-slate-900/50 p-3" data-preparar-mes>
-      <div className="flex max-h-[92vh] w-full max-w-[1200px] flex-col rounded-2xl bg-white shadow-xl">
-        <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4">
+  const visibles = useMemo(() => filas
+    .filter((f) => vistaDe(f) === vista)
+    .sort((x, y) => (metricasDe(y)?.horasSinCubrir || 0) - (metricasDe(x)?.horasSinCubrir || 0) || x.nombre.localeCompare(y.nombre)), [filas, vista]);
+  const fuera = useMemo(() => filas.filter((f) => vistaDe(f) === 'fuera'), [filas]);
+
+  if (!open || typeof document === 'undefined') return null;
+
+  const tarjeta = (k: Exclude<Vista, 'fuera'>, titulo: string, tono: string) => (
+    <button
+      key={k}
+      type="button"
+      onClick={() => setVista(k)}
+      data-preparar-tarjeta={k}
+      className={`min-w-[140px] flex-1 rounded-xl border px-3 py-2 text-left transition-colors ${vista === k ? 'border-slate-800 bg-slate-800' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
+    >
+      <div className={`text-2xl font-black tabular-nums ${vista === k ? 'text-white' : tono}`}>{conteo.n[k]}</div>
+      <div className={`text-[11px] font-bold ${vista === k ? 'text-slate-200' : 'text-slate-500'}`}>{titulo}</div>
+    </button>
+  );
+
+  const num = (v: number | undefined, malo = true) => <span className={`tabular-nums ${malo && v ? 'font-bold text-rose-600' : 'text-slate-500'}`}>{v ?? '—'}</span>;
+
+  return createPortal(
+    <div className="fixed inset-0 z-[3000] flex items-center justify-center bg-slate-900/50 p-3" data-preparar-mes onMouseDown={(e) => { if (e.target === e.currentTarget && !corriendo) onClose(); }}>
+      <div className="flex max-h-[94vh] w-full max-w-[1100px] flex-col overflow-hidden rounded-2xl bg-slate-50 shadow-2xl">
+        <div className="flex items-start justify-between gap-3 border-b border-slate-200 bg-white px-5 py-4">
           <div>
             <div className="flex items-center gap-2 text-lg font-black text-slate-800"><CalendarRange size={20} /> Preparar {mesTxt}</div>
-            <div className="mt-0.5 text-[12px] text-slate-500">
-              Simula la copia del mes anterior y el armado desde el servicio en cada objetivo y propone la mejor. Los grupos se arman como un solo cronograma.
-              Vista previa: no escribe nada. Lo publicado no se toca.
-            </div>
+            <div className="mt-0.5 text-[12px] text-slate-500">Vista previa: compara la copia del mes anterior con el armado desde el servicio en cada objetivo. No escribe nada.</div>
           </div>
           <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100" aria-label="Cerrar"><X size={18} /></button>
         </div>
 
-        <div className="flex flex-wrap items-end gap-3 border-b border-slate-100 px-5 py-3">
+        <div className="flex flex-wrap items-end gap-3 border-b border-slate-200 bg-white px-5 py-3">
           <label className="text-[11px] font-bold text-slate-500">Para
-            <select className="mt-1 block rounded-lg border border-slate-200 px-2 py-1.5 text-sm text-slate-800" value={alcance} onChange={(e) => setAlcance(e.target.value)} disabled={corriendo} data-preparar-alcance>
+            <select className="mt-1 block min-w-[220px] rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-800" value={alcance} onChange={(e) => setAlcance(e.target.value)} disabled={corriendo} data-preparar-alcance>
               <option value="todos">Toda la empresa ({unidades.length})</option>
               <optgroup label="Cliente">
                 {opcionesAlcance.map(([id, nombre]) => <option key={id} value={id}>{nombre}</option>)}
@@ -158,85 +194,124 @@ export function PrepararMesModal(props: Props) {
           </label>
           <div className="text-[11px] font-bold text-slate-500">Cómo
             <div className="mt-1 flex overflow-hidden rounded-lg border border-slate-200" data-preparar-modo>
-              {([['auto', 'Automático'], ['continuar', 'Copia del mes anterior'], ['armar', 'Armar desde el servicio']] as Array<[Modo, string]>).map(([k, t]) => (
+              {([['auto', 'Lo mejor en cada uno'], ['continuar', 'Copia'], ['armar', 'Armar']] as Array<[ModoTanda, string]>).map(([k, t]) => (
                 <button key={k} type="button" disabled={corriendo} onClick={() => setModo(k)} className={`px-3 py-1.5 text-sm ${modo === k ? 'bg-slate-800 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>{t}</button>
               ))}
             </div>
           </div>
-          <div className="ml-auto flex gap-2">
+          <div className="ml-auto">
             {corriendo
-              ? <button type="button" onClick={() => { cortar.current = true; }} className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold text-slate-600">Cortar</button>
-              : <button type="button" onClick={() => { void simular(); }} className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white hover:bg-indigo-700" data-preparar-simular><Wand2 size={15} /> Ver vista previa</button>}
+              ? <button type="button" onClick={() => { cortar.current = true; }} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-600">Cortar</button>
+              : <button type="button" onClick={() => { void simular(); }} className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white hover:bg-indigo-700" data-preparar-simular><Wand2 size={15} /> {filas.length ? 'Volver a simular' : 'Ver vista previa'}</button>}
           </div>
         </div>
 
-        {(corriendo || filas.length > 0) && (
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-5 py-2 text-[12px] text-slate-600" data-preparar-resumen>
-            {corriendo && <span className="flex items-center gap-1.5 font-bold text-indigo-700"><Loader2 size={14} className="animate-spin" /> {avance.hechos}/{avance.total} · {avance.actual}</span>}
-            <span><b>{resumen.ok}</b> para armar · <b className="text-emerald-700">{resumen.completos}</b> completos · <b className={resumen.revisar ? 'text-amber-700' : ''}>{resumen.revisar}</b> para revisar · {resumen.saltados} sin tocar</span>
-            <span>Pedidas <b>{resumen.pedidas}</b> h · sin cubrir <b className={resumen.sinCubrir ? 'text-rose-600' : ''}>{resumen.sinCubrir}</b> h · al 50 % <b className={resumen.al50 ? 'text-rose-600' : ''}>{resumen.al50}</b> h · 12 h <b>{resumen.doce}</b> · RET <b>{resumen.ret}</b></span>
+        {corriendo && (
+          <div className="border-b border-slate-200 bg-white px-5 py-2" data-preparar-avance>
+            <div className="flex items-center gap-2 text-[12px] font-bold text-indigo-700"><Loader2 size={14} className="animate-spin" /> {avance.hechos} de {avance.total} · {avance.actual}</div>
+            <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full bg-indigo-500 transition-all" style={{ width: `${avance.total ? Math.round((100 * avance.hechos) / avance.total) : 0}%` }} /></div>
           </div>
         )}
 
-        <div className="min-h-0 flex-1 overflow-auto px-5 pb-4">
+        {filas.length > 0 && (
+          <div className="space-y-2 px-5 pt-3" data-preparar-resumen>
+            <div className="flex flex-wrap gap-2">
+              {tarjeta('revisar', 'Para revisar', conteo.n.revisar ? 'text-amber-600' : 'text-slate-400')}
+              {tarjeta('completo', 'Completos', 'text-emerald-600')}
+              {tarjeta('cargado', 'Ya armados', 'text-slate-600')}
+            </div>
+            <div className="text-[12px] text-slate-500">
+              Piden {conteo.pedidas.toLocaleString('es-AR')} h · sin cubrir <b className={conteo.sinCubrir ? 'text-rose-600' : ''}>{conteo.sinCubrir.toLocaleString('es-AR')} h</b> · al 50 % <b className={conteo.al50 ? 'text-rose-600' : ''}>{conteo.al50} h</b> · {conteo.doce} turnos de 12 h · {conteo.ret} días en RET
+            </div>
+          </div>
+        )}
+
+        <div className="min-h-0 flex-1 overflow-auto px-5 py-3">
           {!filas.length && !corriendo ? (
-            <div className="py-12 text-center text-sm text-slate-400">Elegí para quién y cómo, y tocá «Ver vista previa».</div>
+            <div className="py-16 text-center text-sm text-slate-400">Elegí para quién y cómo, y tocá «Ver vista previa». Para toda la empresa tarda alrededor de un minuto.</div>
           ) : (
-            <table className="w-full text-[12px]" data-preparar-tabla>
-              <thead className="sticky top-0 bg-white text-[10px] uppercase text-slate-400">
-                <tr>
-                  <th className="px-2 py-1.5 text-left" rowSpan={2}>Objetivo</th>
-                  <th className="px-2 py-1.5 text-right" rowSpan={2}>Pedidas</th>
-                  <th className="px-2 py-1 text-center border-b border-slate-100" colSpan={4}><span className="inline-flex items-center gap-1"><Repeat size={11} /> Copia</span></th>
-                  <th className="px-2 py-1 text-center border-b border-slate-100" colSpan={4}><span className="inline-flex items-center gap-1"><Wand2 size={11} /> Armar</span></th>
-                  <th className="px-2 py-1.5 text-left" rowSpan={2}>Usar</th>
-                  <th rowSpan={2} />
-                </tr>
-                <tr>
-                  {[0, 1].map((k) => (
-                    <React.Fragment key={k}>
-                      <th className="px-2 py-1 text-right" title="Horas del servicio sin nadie">sin cubrir</th>
-                      <th className="px-2 py-1 text-right" title="Turnos D12/N12">12 h</th>
-                      <th className="px-2 py-1 text-right" title="Horas que pasan de 200 por guardia">al 50 %</th>
-                      <th className="px-2 py-1 text-right" title="Días en RET">RET</th>
-                    </React.Fragment>
+            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white" data-preparar-tabla>
+              <div className={`${COLUMNAS} sticky top-0 border-b border-slate-100 bg-white px-3 py-2 text-[10px] font-black uppercase text-slate-400`}>
+                <div>Objetivo</div>
+                <div className="text-right">Piden</div>
+                <div className="text-center">Usar</div>
+                <div className="text-right" title="Horas del servicio sin nadie">Sin cubrir</div>
+                <div className="text-right" title="Turnos D12/N12">12 h</div>
+                <div className="text-right" title="Horas que pasan de 200 por guardia">Al 50 %</div>
+                <div className="text-right" title="Días en RET: disponibles para otro objetivo">RET</div>
+                <div />
+              </div>
+              {visibles.length === 0 && <div className="px-3 py-6 text-center text-[12px] text-slate-400">{corriendo ? 'Simulando…' : 'Nada en esta vista.'}</div>}
+              {visibles.map((f) => {
+                const m = metricasDe(f);
+                const otra = resumenOtra(f);
+                return (
+                  <div key={f.key} className={`${COLUMNAS} border-b border-slate-100 px-3 py-2 last:border-0`} data-preparar-fila={f.key}>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="truncate font-bold text-slate-800">{f.nombre}</span>
+                        {f.grupo && <span className="rounded border border-slate-200 px-1 text-[10px] font-bold text-slate-500">grupo</span>}
+                        {chipsDe(f.notas).map((c) => <span key={c.texto} title={c.title} className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">{c.texto}</span>)}
+                      </div>
+                      <div className="truncate text-[11px] text-slate-400" title={f.porQue ? `Recomendada: ${f.recomendada === 'armar' ? 'armar' : 'copia'} (${f.porQue})` : undefined}>
+                        {f.cliente}{otra ? ` · ${otra}` : ''}
+                      </div>
+                    </div>
+                    <div className="text-right text-[12px] tabular-nums text-slate-500">{m?.horasPedidas ?? '—'}</div>
+                    <div className="flex justify-center">
+                      <div className="flex overflow-hidden rounded-lg border border-slate-200 text-[11px]" data-preparar-elegida={f.key}>
+                        {(['continuar', 'armar'] as Estrategia[]).map((e) => (
+                          <button
+                            key={e}
+                            type="button"
+                            title={f.recomendada === e ? `Recomendada: ${f.porQue}` : undefined}
+                            onClick={() => setFilas((prev) => prev.map((x) => (x.key === f.key ? { ...x, elegida: e } : x)))}
+                            className={`px-2 py-1 font-bold ${f.elegida === e ? 'bg-slate-800 text-white' : 'bg-white text-slate-500 hover:bg-slate-50'}`}
+                          >
+                            {e === 'armar' ? 'Armar' : 'Copia'}{f.recomendada === e ? ' ★' : ''}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="text-right text-[12px]">{num(m?.horasSinCubrir)}</div>
+                    <div className="text-right text-[12px]">{num(m?.doce)}</div>
+                    <div className="text-right text-[12px]">{num(m?.horasAl50)}</div>
+                    <div className="text-right text-[12px]">{num(m?.ret, false)}</div>
+                    <button type="button" title="Abrir la grilla de este objetivo" onClick={() => props.onAbrirObjetivo(f.objetivos[0].clientId, f.objetivos[0].id)} className="justify-self-end rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"><ExternalLink size={14} /></button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {fuera.length > 0 && (
+            <div className="mt-3 rounded-xl border border-slate-200 bg-white" data-preparar-fuera>
+              <button type="button" onClick={() => setVerFuera((v) => !v)} className="flex w-full items-center gap-1.5 px-3 py-2 text-left text-[12px] font-bold text-slate-500">
+                {verFuera ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                No se arman ({fuera.length}): {(['sin_servicio', 'publicado', 'sin_guardias', 'error'] as Fila['estado'][])
+                  .map((e) => ({ e, n: fuera.filter((f) => f.estado === e).length }))
+                  .filter((x) => x.n)
+                  .map((x) => `${x.n} ${TEXTO_FUERA[x.e].toLowerCase()}`)
+                  .join(' · ')}
+              </button>
+              {verFuera && (
+                <div className="grid grid-cols-1 gap-x-4 border-t border-slate-100 px-3 py-2 text-[12px] sm:grid-cols-2">
+                  {fuera.map((f) => (
+                    <div key={f.key} className="flex items-center justify-between gap-2 py-0.5">
+                      <span className="truncate text-slate-700">{f.nombre} <span className="text-slate-400">· {f.cliente}</span></span>
+                      <span className="shrink-0 text-[11px] text-slate-400" title={f.notas.join('\n') || undefined}>{TEXTO_FUERA[f.estado]}</span>
+                    </div>
                   ))}
-                </tr>
-              </thead>
-              <tbody>
-                {filas.map((f) => (
-                  <tr key={f.key} className="border-t border-slate-100 align-top" data-preparar-fila={f.key}>
-                    <td className="px-2 py-1.5">
-                      <div className="font-bold text-slate-800">{f.nombre}{f.grupo && <span className="ml-1.5 rounded border border-slate-200 px-1 text-[10px] font-bold text-slate-500">grupo</span>}</div>
-                      <div className="text-[11px] text-slate-400">{f.cliente}</div>
-                      {f.estado !== 'ok' && <div className="text-[11px] font-bold text-slate-500">{TEXTO_ESTADO[f.estado]}</div>}
-                      {f.notas.map((n) => <div key={n} className="text-[11px] text-amber-700">{n}</div>)}
-                      {f.porQue && <div className="text-[11px] text-slate-500">Recomendada: {f.recomendada === 'armar' ? 'armar' : 'copia'} ({f.porQue})</div>}
-                    </td>
-                    <td className="px-2 py-1.5 text-right tabular-nums text-slate-600">{f.continuar?.horasPedidas ?? '—'}</td>
-                    <CeldaMetricas m={f.continuar} elegida={f.elegida === 'continuar'} />
-                    <CeldaMetricas m={f.armar} elegida={f.elegida === 'armar'} />
-                    <td className="px-2 py-1.5">
-                      {f.estado === 'ok' && (
-                        <select className="rounded border border-slate-200 px-1 py-0.5 text-[12px]" value={f.elegida} onChange={(e) => setFilas((prev) => prev.map((x) => (x.key === f.key ? { ...x, elegida: e.target.value as Estrategia } : x)))} data-preparar-elegida={f.key}>
-                          <option value="continuar">Copia</option>
-                          <option value="armar">Armar</option>
-                        </select>
-                      )}
-                    </td>
-                    <td className="px-2 py-1.5">
-                      <button type="button" title="Abrir la grilla de este objetivo" onClick={() => props.onAbrirObjetivo(f.objetivos[0].clientId, f.objetivos[0].id)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"><ExternalLink size={14} /></button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                </div>
+              )}
+            </div>
           )}
         </div>
-        <div className="border-t border-slate-100 px-5 py-2.5 text-[11px] text-slate-400">
-          Cada objetivo cuenta lo que la tanda ya le dio a cada guardia en los anteriores (no queda en dos lugares el mismo día y sus horas suman). Cambiar «Usar» no vuelve a simular los que siguen.
+        <div className="border-t border-slate-200 bg-white px-5 py-2.5 text-[11px] text-slate-400">
+          ★ = recomendada (el motivo, al pasar el mouse). Cada objetivo cuenta lo que la tanda ya le dio a cada guardia en los anteriores. Cambiar la estrategia de una fila no vuelve a simular las demás.
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
