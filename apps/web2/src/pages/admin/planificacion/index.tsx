@@ -496,6 +496,7 @@ import { avisosDesdeLectura, faltantesDelDia, leerDia, lineasDeSobra, proponerLi
 import { PanelesMarco } from '@/components/planificacion/PanelesPlanificacion';
 import type { CandidatoFaltante } from '@/components/planificacion/BandasFaltantesPanel';
 import { armarMesDesdeServicio, cubrirHuecosConDisponibles, type TipoGuardiaArmado } from '@/lib/planificacion/armarMesServicio';
+import { PrepararMesModal } from '@/components/planificacion/PrepararMesModal';
 import {
     clasificarSeleccionLicencia,
     diasQueQuedaron,
@@ -1895,6 +1896,7 @@ function PlanificacionDesktop() {
     const [columnSelectSource, setColumnSelectSource] = useState<number | null>(null);
     const [openDrop, setOpenDrop] = useState<'client' | 'objective' | 'grupo' | null>(null);
     const [selectedGrupo, setSelectedGrupo] = useState<GrupoObjetivos | null>(null);
+    const [prepararMesOpen, setPrepararMesOpen] = useState(false);
     const [planViewReady, setPlanViewReady] = useState(false);
     useEffect(() => {
         const saved = readSessionJson<{
@@ -19501,6 +19503,31 @@ function PlanificacionDesktop() {
                             </div>
                             <p className="font-bold text-base text-slate-400">Seleccioná un cliente y objetivo</p>
                             <p className="text-sm text-slate-300">La grilla de planificación aparecerá aquí</p>
+                            {(isSuperAdmin || (rolePermissions['PLANNING'] || []).includes('update')) && (
+                                <button
+                                    type="button"
+                                    data-preparar-mes-abrir
+                                    onClick={() => setPrepararMesOpen(true)}
+                                    className="mt-3 flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-indigo-700"
+                                >
+                                    <Wand2 size={16}/> Preparar {currentDate.toLocaleDateString('es-AR', { month: 'long' })} de todos los objetivos
+                                </button>
+                            )}
+                            <PrepararMesModal
+                                open={prepararMesOpen}
+                                onClose={() => setPrepararMesOpen(false)}
+                                empresaId={empresaId}
+                                scopeEmpresa={scopeEmpresa}
+                                clients={clients}
+                                employees={employees}
+                                grupos={grupos}
+                                slaIdToObjId={slaIdToObjId}
+                                shiftsMap={shiftsMap}
+                                absencesMap={absencesMap}
+                                year={currentDate.getFullYear()}
+                                month={currentDate.getMonth()}
+                                onAbrirObjetivo={(cid, oid) => { setPrepararMesOpen(false); handleContextChange(cid, oid); }}
+                            />
                         </div>
                     ) : (
                         <>
