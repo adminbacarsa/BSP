@@ -20110,9 +20110,7 @@ function PlanificacionDesktop() {
                                                 );
                                             }
                                             if (code === 'REF') {
-                                                return (
-                                                    <button key="all_REF" type="button" onClick={() => openBulkDeployPicker('SURPLUS')} disabled={isServiceLocked} title="Refuerzo — elegí banda del puesto" className={`w-7 h-6 rounded font-black text-[9px] ${getDefaultStyle('REF')}`}>REF</button>
-                                                );
+                                                return null;
                                             }
                                             if (code === 'ESC') {
                                                 return (
@@ -20186,9 +20184,7 @@ function PlanificacionDesktop() {
                                                                     );
                                                                 }
                                                                 if (code === 'REF') {
-                                                                    return (
-                                                                        <button key={`${emp.id}_REF`} type="button" onClick={() => openBulkDeployPicker('SURPLUS', { onlyEmpId: emp.id, positionName: empPos || undefined })} disabled={isServiceLocked || !empPos} title={!empPos ? 'Sin puesto asignado' : `${emp.name} · REF en ${empPos}`} className={`w-7 h-6 rounded font-black text-[9px] ${getDefaultStyle('REF')} ${!empPos ? 'opacity-30 cursor-not-allowed' : ''}`}>REF</button>
-                                                                    );
+                                                                    return null;
                                                                 }
                                                                 if (code === 'ESC') {
                                                                     return (
