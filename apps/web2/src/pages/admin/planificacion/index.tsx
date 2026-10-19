@@ -497,6 +497,7 @@ import { PanelesMarco } from '@/components/planificacion/PanelesPlanificacion';
 import type { CandidatoFaltante } from '@/components/planificacion/BandasFaltantesPanel';
 import { armarMesDesdeServicio, cubrirHuecosConDisponibles, type TipoGuardiaArmado } from '@/lib/planificacion/armarMesServicio';
 import { PrepararMesModal } from '@/components/planificacion/PrepararMesModal';
+import { planServicioMes } from '@/lib/planificacion/crearServicioMes';
 import {
     clasificarSeleccionLicencia,
     diasQueQuedaron,
@@ -11997,6 +11998,39 @@ function PlanificacionDesktop() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [selectedObjective, shiftsMapLoaded, selectedGrupo, grupoUnifiedMode, grupoSlaMap, positionStructure]);
 
+    // Servicio del mes primero: sin servicio no se copia, arma ni pega bien. Se crea copiando el del mes anterior.
+    const [creandoServicioMes, setCreandoServicioMes] = useState(false);
+    const objetivosSinServicioMes: string[] = selectedGrupo && grupoUnifiedMode
+        ? (selectedGrupo.objectiveIds as string[]).filter((o) => !(Number(grupoVendidasByObjective[o]) > 0))
+        : (selectedObjective && sinServicioEnMes ? [selectedObjective] : []);
+    const crearServiciosDelMes = async (objIds: string[]) => {
+        if (!objIds.length || !empresaId) return;
+        if (!(isSuperAdmin || (rolePermissions['SERVICES'] || []).includes('update'))) { toast.error('Crear el servicio del mes lo hace Servicios (permiso de Servicios).'); return; }
+        setCreandoServicioMes(true);
+        try {
+            const snapSla = await getDocs(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa));
+            const allSla = filterSlasForPlanningTenant(snapSla.docs.map((d) => ({ id: d.id, ...(d.data() as any) })), empresaId, scopeEmpresa, tenantClientIds);
+            const hechos: string[] = [];
+            const no: string[] = [];
+            for (const oid of objIds) {
+                const cid = String(clienteDeObjetivo(oid)?.id || selectedClient);
+                const cliente = clients.find((c: any) => c.id === cid);
+                const plan = planServicioMes({ matching: filterSlasForPlanningContext(allSla, cid, oid, clients, slaIdToObjId) as any[], year: currentDate.getFullYear(), month: currentDate.getMonth() + 1, clienteActivo: !!cliente && isClientOperational(cliente.status) });
+                const nombre = getObjectiveName(oid) || oid;
+                if (plan.estado === 'crear') { await plan.run({ empresaId, migracionCompleta, scopeEmpresa, via: 'PLANIFICACION_SERVICIO_MES' }); hechos.push(nombre); }
+                else if (plan.estado === 'no_se_puede') no.push(`${nombre}: ${plan.motivo}`);
+            }
+            if (hechos.length) toast.success(`Servicio del mes creado copiando el anterior: ${hechos.join(', ')}.`);
+            if (no.length) toast.error(no.join(' · '), { duration: 9000 });
+            setDataRefreshNonce((n) => n + 1);
+        } catch (err) {
+            console.error('[servicio del mes]', err);
+            toast.error('No se pudo crear el servicio del mes.');
+        } finally {
+            setCreandoServicioMes(false);
+        }
+    };
+
     const abrirContinuarMesAnterior = async (modo: 'continuar' | 'armar' = 'continuar') => {
         if (!selectedObjective) return;
         if (msgBloqueoEdicion && !sinServicioEnMes) { toast.error(msgBloqueoEdicion); return; }
@@ -19466,6 +19500,17 @@ function PlanificacionDesktop() {
                             </div>
                             </div>
 
+                            {objetivosSinServicioMes.length > 0 && (
+                                <div className="bg-amber-50 border border-amber-300 px-3 py-2 rounded-xl flex items-center gap-3 no-print" data-servicio-mes-falta>
+                                    <Database size={16} className="text-amber-600 shrink-0"/>
+                                    <p className="text-[11px] font-bold text-amber-900 truncate">
+                                        {currentDate.toLocaleDateString('es-AR', { month: 'long' })} no tiene servicio{objetivosSinServicioMes.length > 1 || (selectedGrupo && grupoUnifiedMode) ? ` en ${objetivosSinServicioMes.map((o) => getObjectiveName(o) || o).join(', ')}` : ''}: crealo antes de copiar, armar o pegar.
+                                    </p>
+                                    <button type="button" disabled={creandoServicioMes} onClick={() => { void crearServiciosDelMes(objetivosSinServicioMes); }} className="ml-auto shrink-0 rounded-lg bg-amber-600 px-3 py-1.5 text-[11px] font-black text-white hover:bg-amber-700 disabled:opacity-50" data-crear-servicio-mes>
+                                        {creandoServicioMes ? 'Creando…' : `Crearlo copiando ${new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1).toLocaleDateString('es-AR', { month: 'long' })}`}
+                                    </button>
+                                </div>
+                            )}
                             {sinServicioEnMes && (
                                 <div className="bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl flex items-center gap-3 no-print" data-sin-servicio>
                                     <Database size={16} className="text-slate-500 shrink-0"/>
@@ -19533,6 +19578,8 @@ function PlanificacionDesktop() {
                                 open={prepararMesOpen}
                                 onClose={() => setPrepararMesOpen(false)}
                                 onReabrir={() => setPrepararMesOpen(true)}
+                                migracionCompleta={migracionCompleta}
+                                puedeCrearServicio={isSuperAdmin || (rolePermissions['SERVICES'] || []).includes('update')}
                                 empresaId={empresaId}
                                 scopeEmpresa={scopeEmpresa}
                                 clients={clients}

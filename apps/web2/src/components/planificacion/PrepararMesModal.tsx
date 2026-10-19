@@ -10,7 +10,10 @@ import { CalendarRange, ChevronDown, ChevronRight, ExternalLink, Loader2, Wand2,
 import { db } from '@/lib/firebase';
 import { readSessionJson, writeSessionJson } from '@/lib/persistSession';
 import { empresaCollectionQuery, fetchPlanificacionPublishStatus } from '@/lib/multiempresa';
-import { filterSlasForPlanningTenant } from '@/lib/slaPlanningMatch';
+import { filterSlasForPlanningContext, filterSlasForPlanningTenant } from '@/lib/slaPlanningMatch';
+import { planServicioMes } from '@/lib/planificacion/crearServicioMes';
+import { isClientOperational } from '@/lib/crm/clientLifecycle';
+import { toast } from 'sonner';
 import type { Estrategia, Metricas } from '@/lib/planificacion/prepararMes';
 import { correrTanda, unidadesDelMes, type FilaTanda, type ModoTanda } from '@/lib/planificacion/prepararMesTanda';
 import type { GrupoObjetivos } from '@/services/gruposService';
@@ -36,6 +39,9 @@ type Props = {
   /** 0-11 */
   month: number;
   onAbrirObjetivo: (clientId: string, objectiveId: string, grupoKey?: string, estrategia?: Estrategia) => void;
+  migracionCompleta: boolean;
+  /** SERVICES update o SuperAdmin. */
+  puedeCrearServicio: boolean;
 };
 
 const TEXTO_FUERA: Record<Fila['estado'], string> = {
@@ -157,6 +163,38 @@ export function PrepararMesModal(props: Props) {
     }
   };
 
+  const descartar = () => {
+    try { sessionStorage.removeItem(clave); } catch { /* sin storage */ }
+    setFilas([]);
+    setSimuladoAt(null);
+    onClose();
+  };
+  const [creandoServicios, setCreandoServicios] = useState(false);
+  const sinServicioMes = useMemo(() => filas.filter((f) => f.notas.some((n) => /sin activar/.test(n))), [filas]);
+  const crearServiciosQueFaltan = async () => {
+    setCreandoServicios(true);
+    try {
+      const snapSla = await getDocs(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa));
+      const tenantIds = new Set(clients.map((c: any) => String(c.id)));
+      const allSla = filterSlasForPlanningTenant(snapSla.docs.map((d) => ({ id: d.id, ...(d.data() as any) })), empresaId, scopeEmpresa, tenantIds);
+      let hechos = 0;
+      const no: string[] = [];
+      for (const f of sinServicioMes) for (const o of f.objetivos) {
+        const cliente = clients.find((c: any) => String(c.id) === o.clientId);
+        const plan = planServicioMes({ matching: filterSlasForPlanningContext(allSla as any[], o.clientId, o.id, clients, slaIdToObjId) as any[], year, month: month + 1, clienteActivo: !!cliente && isClientOperational(cliente.status) });
+        if (plan.estado === 'crear') { await plan.run({ empresaId, migracionCompleta: props.migracionCompleta, scopeEmpresa, via: 'PREPARAR_MES' }); hechos += 1; }
+        else if (plan.estado === 'no_se_puede') no.push(`${o.nombre}: ${plan.motivo}`);
+      }
+      if (hechos) toast.success(`${hechos} servicio(s) del mes creados copiando el anterior. Volvé a simular.`);
+      if (no.length) toast.error(no.join(' · '), { duration: 10000 });
+    } catch (err) {
+      console.error('[preparar mes · servicios]', err);
+      toast.error('No se pudieron crear los servicios del mes.');
+    } finally {
+      setCreandoServicios(false);
+    }
+  };
+
   const conteo = useMemo(() => {
     const n: Record<Vista, number> = { revisar: 0, completo: 0, cargado: 0, fuera: 0 };
     for (const f of filas) n[vistaDe(f)] += 1;
@@ -175,16 +213,19 @@ export function PrepararMesModal(props: Props) {
     if (!filas.length || corriendo) return null;
     const mesCorto = new Date(year, month, 1).toLocaleDateString('es-AR', { month: 'long' });
     return createPortal(
+      <div className="fixed bottom-4 left-1/2 z-[2900] flex -translate-x-1/2 items-center rounded-full border border-slate-300 bg-white shadow-lg">
       <button
         type="button"
         onClick={props.onReabrir}
         data-preparar-volver
-        className="fixed bottom-4 left-1/2 z-[2900] flex -translate-x-1/2 items-center gap-2 rounded-full border border-slate-300 bg-white px-4 py-2 text-[12px] font-bold text-slate-700 shadow-lg hover:bg-slate-50"
+        className="flex items-center gap-2 rounded-l-full px-4 py-2 text-[12px] font-bold text-slate-700 hover:bg-slate-50"
       >
         <CalendarRange size={15} /> Preparar {mesCorto}
         <span className={conteo.n.revisar ? 'text-amber-600' : 'text-emerald-600'}>· {conteo.n.revisar ? `${conteo.n.revisar} para revisar` : 'todo completo'}</span>
         <span className="text-indigo-600">· Volver</span>
-      </button>,
+      </button>
+      <button type="button" onClick={descartar} title="Descartar la vista previa" aria-label="Descartar la vista previa" data-preparar-descartar className="rounded-r-full border-l border-slate-200 px-2.5 py-2 text-slate-400 hover:bg-slate-50 hover:text-rose-600"><X size={14} /></button>
+      </div>,
       document.body,
     );
   }
@@ -252,6 +293,14 @@ export function PrepararMesModal(props: Props) {
 
         {filas.length > 0 && (
           <div className="space-y-2 px-5 pt-3" data-preparar-resumen>
+            {sinServicioMes.length > 0 && !corriendo && (
+              <div className="flex flex-wrap items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-[12px] text-amber-900" data-preparar-servicios-faltan>
+                <span><b>{sinServicioMes.length}</b> sin el servicio de {mesTxt.split(' ')[0]}: se simularon con el del mes anterior. Crealos antes de armar.</span>
+                {props.puedeCrearServicio
+                  ? <button type="button" disabled={creandoServicios} onClick={() => { void crearServiciosQueFaltan(); }} className="ml-auto rounded-lg bg-amber-600 px-3 py-1.5 text-[11px] font-black text-white hover:bg-amber-700 disabled:opacity-50">{creandoServicios ? 'Creando…' : 'Crear los servicios que faltan'}</button>
+                  : <span className="ml-auto text-[11px]">Los crea Servicios.</span>}
+              </div>
+            )}
             <div className="flex flex-wrap gap-2">
               {tarjeta('revisar', 'Para revisar', conteo.n.revisar ? 'text-amber-600' : 'text-slate-400')}
               {tarjeta('completo', 'Completos', 'text-emerald-600')}
@@ -347,8 +396,10 @@ export function PrepararMesModal(props: Props) {
             </div>
           )}
         </div>
-        <div className="border-t border-slate-200 bg-white px-5 py-2.5 text-[11px] text-slate-400">
-          ★ = recomendada (el motivo, al pasar el mouse). Cada objetivo cuenta lo que la tanda ya le dio a cada guardia en los anteriores. Cambiar la estrategia de una fila no vuelve a simular las demás.
+        <div className="flex items-center gap-3 border-t border-slate-200 bg-white px-5 py-2.5 text-[11px] text-slate-400">
+          {filas.length > 0 && !corriendo && <button type="button" onClick={descartar} className="shrink-0 rounded-lg border border-slate-200 px-3 py-1.5 text-[11px] font-bold text-slate-600 hover:bg-slate-50" data-preparar-descartar-panel>Descartar vista previa</button>}
+          <span>
+          ★ = recomendada (el motivo, al pasar el mouse). Cada objetivo cuenta lo que la tanda ya le dio a cada guardia en los anteriores. Cambiar la estrategia de una fila no vuelve a simular las demás.</span>
         </div>
       </div>
     </div>,
