@@ -107,6 +107,8 @@ export function partirCodigoAjeno(raw: string): { marca: string; banda: string |
     if (/^(M|T|N|D12|N12|F|FF|FP|FT|RET|REF|ESC|V|L|E|A|AA|PG|ART|SGS|SUS|LT|EV)$/.test(compact.replace(/\s/g, ''))) return null;
     const m = compact.match(/^(.*?)(?:\s*\/\s*|\s+)(M|T|N|D12|N12)$/);
     if (m && m[1].trim()) {
+        // «FT/N» es franco trabajado en la N, no un objetivo «FT».
+        if (/^(FT|F|FF|FP|RET)$/.test(m[1].trim())) return null;
         return { marca: m[1].trim().replace(/\s+/g, ' '), banda: m[2] };
     }
     if (/^[A-Z0-9][A-Z0-9 .'-]{1,}$/.test(compact) && compact.length >= 2) {
