@@ -155,6 +155,16 @@ describe('modo rápido · códigos y horario', () => {
         assert.deepEqual(sugerirCodigos('n', ops).map((o) => o.code), ['N', 'N12', 'NX']);
         assert.deepEqual(sugerirCodigos('', ops, 2).map((o) => o.code), ['N12', 'N']);
     });
+    it('autocompletar en el grupo: el mismo T 14–22 de dos objetivos son dos opciones', () => {
+        const ops = [
+            { code: 'T', horario: '14:00–22:00', puesto: 'Arroyo Tegua · Puesto' },
+            { code: 'T', horario: '14:00–22:00', puesto: 'Arroyo Tegua · Puesto' },
+            { code: 'T', horario: '14:00–22:00', puesto: 'Piedras Moras · PM' },
+            { code: 'T', horario: '14:00–22:00', detalle: 'Usado en el objetivo' },
+            { code: 'T', horario: '15:00–23:00', detalle: 'Estándar' },
+        ];
+        assert.deepEqual(sugerirCodigos('t', ops).map((o) => o.puesto || o.horario), ['Arroyo Tegua · Puesto', 'Piedras Moras · PM', '15:00–23:00']);
+    });
     it('horario: SLA del puesto, estándar, último usado; código desconocido = null', () => {
         const sla = [{ code: 'M', startTime: '06:00', endTime: '14:00', hours: 8, positionName: 'Puesto 1' }];
         assert.equal(horarioDeCodigo('m', { slaPuesto: sla })?.startTime, '06:00');

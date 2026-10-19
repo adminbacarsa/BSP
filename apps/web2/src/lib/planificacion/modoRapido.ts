@@ -306,11 +306,16 @@ export function bandaDeCodigoPuesto(code: string): string | null {
 export function sugerirCodigos(prefijo: string, opciones: OpcionCodigo[], max = 8): OpcionCodigo[] {
     const p = normalizarCodigo(prefijo);
     const vistos = new Set<string>();
-    // Un mismo código en dos puestos con otro horario son dos opciones (N 22–06 · Puesto 1 y N 23–07 · Puesto 2).
+    // Un mismo código en dos puestos son dos opciones aunque tengan el mismo horario
+    // (vista agrupada Tegua+Moras: T 14–22 de cada objetivo). Sin puesto, no repite un horario ya ofrecido.
+    const conHorario = new Set<string>();
     const unicas = opciones.filter((o) => {
-        const k = `${o.code.toUpperCase()}|${o.horario || ''}`;
+        const base = `${o.code.toUpperCase()}|${o.horario || ''}`;
+        if (!o.puesto && o.horario && conHorario.has(base)) return false;
+        const k = `${base}|${o.puesto || ''}`;
         if (vistos.has(k)) return false;
         vistos.add(k);
+        if (o.horario) conHorario.add(base);
         return true;
     });
     if (!p) return unicas.slice(0, max);
