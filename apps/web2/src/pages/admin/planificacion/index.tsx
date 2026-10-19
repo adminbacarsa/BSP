@@ -12092,7 +12092,8 @@ function PlanificacionDesktop() {
                         if (propuesta.error || preview.error) { noSe.push(`${nombreObj}: ${propuesta.error || preview.error}`); continue; }
                         activarGrupoRef.current.push({ objectiveId: oid, nombre: nombreObj, services: matching, last: propuesta.last, plan: preview.plan, newEndDate: decision.newEndDate });
                         activables.push(nombreObj);
-                        if (!estructuraPorObj[oid].length) {
+                        // Sin servicio del mes la grilla deja «General» de relleno: se usa el servicio que se activa.
+                        if (!estructuraPorObj[oid].length || estructuraPorObj[oid].every((p: any) => p.positionName === 'General')) {
                             const built = buildPlanningPositionStructure({ ...(propuesta.last as any), positions: franjasParaMesSiguiente(((propuesta.last as any).positions || []) as any[], `${y}-${String(m + 1).padStart(2, '0')}`) } as any, { monthHasSla: true, hasExactMatch: true });
                             estructuraPorObj[oid] = built.structure as any[];
                         }
