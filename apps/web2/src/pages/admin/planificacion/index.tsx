@@ -3377,13 +3377,21 @@ function PlanificacionDesktop() {
                     ? pref
                     : selectedGrupo.objectiveIds.find((id: string) => empDefaultPos[`${emp.id}___${id}`] || (emp.volante || []).includes(id));
                 const puesto = nativo ? String(empDefaultPos[`${emp.id}___${nativo}`] || '').trim() : '';
-                if (nativo) fuentes.push({ puesto: puesto || 'sin puesto', objetivoId: nativo });
+                if (nativo) {
+                    // Sin puesto: se muestra el lugar (lo que distingue al objetivo: «Centro», «Cinerama»), no «sin puesto».
+                    const nombres = objetivos.map((o) => String(o.nombre || ''));
+                    const comunes = new Set((nombres[0] || '').split(/\s+/).filter((w) => w && nombres.every((n) => n.split(/\s+/).includes(w))));
+                    const nombreObj = String(objetivos.find((o) => o.id === nativo)?.nombre || '');
+                    const corto = nombreObj.split(/\s+/).filter((w) => !comunes.has(w)).join(' ') || nombreObj;
+                    const unico = ((grupoSlaMap[nativo] || []) as any[]).filter((p) => p.positionName && p.positionName !== 'General');
+                    fuentes.push({ puesto: puesto || (unico.length === 1 ? String(unico[0].positionName) : corto), objetivoId: nativo });
+                }
             }
             const et = etiquetaFilaGrupo(fuentes, objetivos);
             if (et) map.set(emp.id, et);
         }
         return map;
-    }, [selectedGrupo, grupoUnifiedMode, displayedEmployees, daysInMonth, pendingChanges, shiftsMap, empDefaultPos, slaIdToObjId]);
+    }, [selectedGrupo, grupoUnifiedMode, displayedEmployees, daysInMonth, pendingChanges, shiftsMap, empDefaultPos, slaIdToObjId, grupoSlaMap]);
 
     /** Guardias activos en dotación (excluye REF/ESC asignados como rol — no entran al auto ni al conteo). */
     const planningDotacionEmployees = useMemo(
@@ -15043,8 +15051,14 @@ function PlanificacionDesktop() {
     };
     const puestoFilaRapido = (empId: string, c?: CtxCeldaGrilla): string => {
         const real = (n?: string | null) => (n && n !== 'General' && n !== 'Retén' ? n : null);
+        // Grupo: si el objetivo del guardia tiene un solo puesto, ese (Sucursales Capital).
+        const unicoGrupo = () => {
+            if (!(selectedGrupo && grupoUnifiedMode)) return null;
+            const ps = ((grupoSlaMap[resolveObjectiveForEmp(empId) || ''] || []) as any[]).filter((p) => real(p.positionName));
+            return ps.length === 1 ? String(ps[0].positionName) : null;
+        };
         return real(c?.p?.positionName) || real(c?.s?.positionName) || real(getEmpDefaultPos(empId))
-            || real(dominantPosition?.positionName) || 'General';
+            || unicoGrupo() || real(dominantPosition?.positionName) || 'General';
     };
     const puestosRapido = (r: number, c: number) => {
         const { emp, ctx } = ctxRapido(r, c);
