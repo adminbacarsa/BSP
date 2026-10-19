@@ -6541,8 +6541,11 @@ function PlanificacionDesktop() {
                     const matching = filterSlasForPlanningContext(allDocs, String(clienteDeObjetivo(objId)?.id || selectedClient), objId, clients, slaIdToObjId);
                     const { vigente: srv, hasExactMatch, fallback } = pickSlaForPlanningMonth(matching, viewYear, viewMonth);
                     const closedSlaG = srv ? null : pickClosedSlaForPlanningMonth(matching, viewYear, viewMonth);
-                    const srvForStructure = srv ?? fallback ?? closedSlaG;
-                    const monthHasSla = planningMonthHasActiveSla(matching, viewYear, viewMonth) || !!closedSlaG;
+                    // Servicio del mes que «Continuar» deja pendiente (se escribe al guardar): manda sobre el relleno.
+                    const mesVistaG = `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}`;
+                    const pendG = serviciosPendientes.find((x) => x.objectiveId === objId && x.mesKey === mesVistaG)?.virtual;
+                    const srvForStructure = pendG ?? srv ?? fallback ?? closedSlaG;
+                    const monthHasSla = !!pendG || planningMonthHasActiveSla(matching, viewYear, viewMonth) || !!closedSlaG;
                     if (monthHasSla && srvForStructure) {
                         const objVend = resolvePlanningMonthSlaHours(srvForStructure, viewYear, viewMonth);
                         vendidasByObj[objId] = objVend;
@@ -6564,7 +6567,7 @@ function PlanificacionDesktop() {
             }
         };
         fetchGroupSlas();
-    }, [selectedGrupo, grupoUnifiedMode, selectedClient, currentDate, empresaId, scopeEmpresa, clients, tenantClientIds, slaIdToObjId]);
+    }, [selectedGrupo, grupoUnifiedMode, selectedClient, currentDate, empresaId, scopeEmpresa, clients, tenantClientIds, slaIdToObjId, serviciosPendientes]);
 
     // LISTENER DE NOVEDADES Y OTROS DATOS
     useEffect(() => {
