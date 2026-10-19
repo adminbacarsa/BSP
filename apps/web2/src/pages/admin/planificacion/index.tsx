@@ -3371,17 +3371,19 @@ function PlanificacionDesktop() {
                 fuentes.push({ puesto, objetivoId });
             }
             if (!fuentes.length) {
-                const nativo = ids.has(emp.preferredObjectiveId)
-                    ? emp.preferredObjectiveId
-                    : selectedGrupo.objectiveIds.find((id: string) => empDefaultPos[`${emp.id}___${id}`]);
+                // Mes vacío: el objetivo preferido (o el de su dotación) igual se muestra, con o sin puesto.
+                const pref = String(slaIdToObjId[emp.preferredObjectiveId] || emp.preferredObjectiveId || '');
+                const nativo = ids.has(pref)
+                    ? pref
+                    : selectedGrupo.objectiveIds.find((id: string) => empDefaultPos[`${emp.id}___${id}`] || (emp.volante || []).includes(id));
                 const puesto = nativo ? String(empDefaultPos[`${emp.id}___${nativo}`] || '').trim() : '';
-                if (puesto && nativo) fuentes.push({ puesto, objetivoId: nativo });
+                if (nativo) fuentes.push({ puesto: puesto || 'sin puesto', objetivoId: nativo });
             }
             const et = etiquetaFilaGrupo(fuentes, objetivos);
             if (et) map.set(emp.id, et);
         }
         return map;
-    }, [selectedGrupo, grupoUnifiedMode, displayedEmployees, daysInMonth, pendingChanges, shiftsMap, empDefaultPos]);
+    }, [selectedGrupo, grupoUnifiedMode, displayedEmployees, daysInMonth, pendingChanges, shiftsMap, empDefaultPos, slaIdToObjId]);
 
     /** Guardias activos en dotación (excluye REF/ESC asignados como rol — no entran al auto ni al conteo). */
     const planningDotacionEmployees = useMemo(
