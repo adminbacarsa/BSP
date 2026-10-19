@@ -196,7 +196,9 @@ export function turnoDeFilaGrupo(
     if (!palabras.length) return null;
     const delGrupo = puestos.filter((p) => p.positionName.includes(' · '));
     const objetivoDe = (p: PuestoMesPegado) => normNombre(p.positionName.split(' · ')[0]);
-    const hits = delGrupo.filter((p) => { const o = ` ${objetivoDe(p)} `; return palabras.every((w) => o.includes(` ${w} `)); });
+    // «CBA» = «CORDOBA»: mismo comienzo o las letras en orden dentro de la palabra.
+    const parecida = (w: string, o: string) => o === w || o.startsWith(w) || (w.length >= 3 && o[0] === w[0] && [...w].every((ch, i, arr) => { const k = o.indexOf(ch, i === 0 ? 0 : o.indexOf(arr[i - 1]) + 1); return k >= 0; }));
+    const hits = delGrupo.filter((p) => { const ws = objetivoDe(p).split(' '); return palabras.every((w) => ws.some((o) => parecida(w, o))); });
     const objetivos = [...new Set(hits.map(objetivoDe))];
     if (objetivos.length !== 1) return null;
     for (const p of hits) {
