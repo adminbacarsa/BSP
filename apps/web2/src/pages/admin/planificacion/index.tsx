@@ -15529,7 +15529,13 @@ function PlanificacionDesktop() {
             return [];
         }
     };
-    const puestosDelMesPegado = () => (effectivePosStructure || []).map((p: { positionName?: string; shifts?: Array<{ code?: string; name?: string; startTime?: string; endTime?: string; hours?: number }> }) => ({
+    // Vista agrupada: los puestos de todos los objetivos del grupo, con su etiqueta «Objetivo · Puesto».
+    const estructuraPegado = (): any[] => (enGrupoRapido && selectedGrupo
+        ? (selectedGrupo.objectiveIds as string[]).flatMap((oid) => ((grupoSlaMap[oid] || []) as any[])
+            .filter((p) => p.positionName && p.positionName !== 'General')
+            .map((p) => ({ ...p, positionName: etiquetaPuestoGrupo(oid, String(p.positionName)) })))
+        : (effectivePosStructure || []) as any[]);
+    const puestosDelMesPegado = () => estructuraPegado().map((p: { positionName?: string; shifts?: Array<{ code?: string; name?: string; startTime?: string; endTime?: string; hours?: number }> }) => ({
         positionName: String(p.positionName || ''),
         shifts: (p.shifts || []).map((s) => ({
             code: String(s.code || ''),
@@ -15565,6 +15571,7 @@ function PlanificacionDesktop() {
         const matriz = parsearTsv(texto);
         if (!matriz.length) return;
         const conocidos = new Set(opcionesDeCodigo([], slaTodosRapido, ultimoUsadoRapido, catalogoNovedad).map((o) => normalizarCodigo(o.code)));
+        for (const p of estructuraPegado()) for (const st of (p.shifts || []) as any[]) if (st?.code) conocidos.add(normalizarCodigo(String(st.code)));
         const colores = html ? coloresParaTsv(matriz, html) : null;
         const equivalencias = await equivalenciasDelObjetivo();
         const preview = prepararPegadoExcel(matriz, { guardias: guardiasPegado(), cursor: inicio, cols: dimsRapido.cols, conocidos, colores, equivalencias, equivalenciasOtro: await equivalenciasOtroDelObjetivo(), puestosDelMes: puestosDelMesPegado() });
@@ -15578,6 +15585,7 @@ function PlanificacionDesktop() {
         const matriz = parsearTsv(texto);
         if (!matriz.length) return;
         const conocidos = new Set(opcionesDeCodigo([], slaTodosRapido, ultimoUsadoRapido, catalogoNovedad).map((o) => normalizarCodigo(o.code)));
+        for (const p of estructuraPegado()) for (const st of (p.shifts || []) as any[]) if (st?.code) conocidos.add(normalizarCodigo(String(st.code)));
         const colores = html ? coloresParaTsv(matriz, html) : null;
         const equivalencias = await equivalenciasDelObjetivo();
         const preview = prepararPegadoExcel(matriz, { guardias: guardiasPegado(), cursor: null, cols: dimsRapido.cols, conocidos, colores, equivalencias, equivalenciasOtro: await equivalenciasOtroDelObjetivo(), puestosDelMes: puestosDelMesPegado() });
