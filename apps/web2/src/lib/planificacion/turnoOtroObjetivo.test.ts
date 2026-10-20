@@ -2,8 +2,11 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   celdaOtroObjetivoBloqueada,
+  decisionCambioSobreFranco,
   decisionGuardadoTurnoAjeno,
   esTurnoAjenoAlCrono,
+  esVolanteDelCrono,
+  francoORetSinObjetivo,
   idsObjetivosDelCrono,
   saltearEscrituraTurnoAjeno,
   sanearPendientesTurnoAjeno,
@@ -118,4 +121,77 @@ it('F y RET de otro objetivo: F ↔ RET queda en su objetivo; al RET se le asign
   assert.equal(celdaOtroObjetivoBloqueada(franco as any, permitidos), false);
   assert.equal(celdaOtroObjetivoBloqueada({ id: 'm1', objectiveId: 'banco', code: 'M' } as any, permitidos), true);
   assert.equal(celdaOtroObjetivoBloqueada({ id: 'ft', objectiveId: 'banco', code: 'F', isFrancoTrabajado: true } as any, permitidos), true);
+});
+
+describe('volante: franco y RET en el cronograma donde está asignado', () => {
+  const obrador = ['obrador'];
+  const francoAjeno = { id: 'f1', objectiveId: 'banco', code: 'F' };
+  const francoSinObj = { id: 'f2', objectiveId: '', code: 'F' };
+
+  it('volante F→M no es FT, aunque el franco sea de otro objetivo o no tenga objetivo', () => {
+    assert.equal(esVolanteDelCrono(['obrador'], obrador), true);
+    assert.equal(esVolanteDelCrono(['banco'], obrador), false);
+    const deOtro = decisionCambioSobreFranco({ esVolante: true, codigoActual: 'F', codigoNuevo: 'M' });
+    assert.equal(deOtro.esFrancoTrabajado, false);
+    assert.equal(deOtro.permitido, true);
+    const guardado = decisionGuardadoTurnoAjeno({
+      cambio: { code: 'M', isFrancoTrabajado: false },
+      docs: [francoAjeno],
+      permitidos: obrador,
+      volante: true,
+    });
+    assert.equal(guardado.escribir, true);
+    assert.equal(guardado.rechazado, false);
+    assert.equal(guardado.objetivoAjeno, undefined);
+    assert.deepEqual(guardado.borrarIds, ['f1']);
+    const sinObj = decisionCambioSobreFranco({ esVolante: true, codigoActual: 'F', codigoNuevo: 'M' });
+    assert.equal(sinObj.esFrancoTrabajado, false);
+    assert.equal(francoORetSinObjetivo(francoSinObj), true);
+    const explicito = decisionCambioSobreFranco({ esVolante: true, codigoActual: 'F', codigoNuevo: 'M', ftExplicito: true });
+    assert.equal(explicito.esFrancoTrabajado, true);
+  });
+
+  it('volante F→RET está permitido, y un turno sobre su RET también', () => {
+    const fRet = decisionCambioSobreFranco({ esVolante: true, codigoActual: 'F', codigoNuevo: 'RET' });
+    assert.equal(fRet.permitido, true);
+    assert.equal(fRet.esFrancoTrabajado, false);
+    const guardado = decisionGuardadoTurnoAjeno({
+      cambio: { code: 'RET', isFrancoTrabajado: false },
+      docs: [francoAjeno],
+      permitidos: obrador,
+      volante: true,
+    });
+    assert.equal(guardado.escribir, true);
+    assert.equal(guardado.rechazado, false);
+    const sobreRet = decisionCambioSobreFranco({ esVolante: true, codigoActual: 'RET', codigoNuevo: 'M' });
+    assert.equal(sobreRet.permitido, true);
+    assert.equal(sobreRet.esFrancoTrabajado, false);
+    const retTurno = decisionGuardadoTurnoAjeno({
+      cambio: { code: 'M', isFrancoTrabajado: false },
+      docs: [{ id: 'r1', objectiveId: 'banco', code: 'RET' }],
+      permitidos: obrador,
+      volante: true,
+    });
+    assert.equal(retTurno.escribir, true);
+    assert.equal(retTurno.objetivoAjeno, undefined);
+  });
+
+  it('quien no es volante: F→M sigue siendo FT y el franco ajeno no se pisa sin FT', () => {
+    const propio = decisionCambioSobreFranco({ esVolante: false, codigoActual: 'F', codigoNuevo: 'M' });
+    assert.equal(propio.esFrancoTrabajado, true);
+    assert.equal(propio.permitido, true);
+    const ajeno = decisionGuardadoTurnoAjeno({
+      cambio: { code: 'M', isFrancoTrabajado: false },
+      docs: [francoAjeno],
+      permitidos: obrador,
+    });
+    assert.equal(ajeno.escribir, false);
+    assert.equal(ajeno.motivo, 'franco');
+    const ft = decisionGuardadoTurnoAjeno({
+      cambio: { code: 'M', isFrancoTrabajado: true },
+      docs: [francoAjeno],
+      permitidos: obrador,
+    });
+    assert.equal(ft.escribir, true);
+  });
 });

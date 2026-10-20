@@ -34,6 +34,12 @@ export function confirmarFtPideBanda(texto: string, elegida: number): boolean {
     return raw === 'FT' && elegida < 0;
 }
 
+/** «FT» o «FT·M»: el usuario pidió franco trabajado, no un turno común. */
+export function esMarcaFtExplicita(texto: string): boolean {
+    const raw = String(texto || '').trim().toUpperCase().replace(/\s+/g, '');
+    return raw === 'FT' || /^FT[·•.][A-Z0-9]+$/.test(raw);
+}
+
 function bandaEscrita(texto: string): string | null {
     const raw = String(texto || '').trim().toUpperCase().replace(/\s+/g, '');
     const m = raw.match(/^FT[·•.]([A-Z0-9]+)$/);

@@ -23,11 +23,92 @@ function codigoDe(d: { code?: string } | null | undefined): string {
  * Franco o RET de otro objetivo (el que trabaja de lunes a viernes en otro lado y está de franco el finde):
  * desde este cronograma se puede pasar F ↔ RET (no es franco trabajado) y al RET asignarle un turno de acá.
  * Sus turnos de trabajo siguen sin tocarse.
+ * Un volante es la excepción: su F (de cualquier objetivo, o sin objetivo) pasa a turno de este cronograma
+ * sin ser franco trabajado. Ver `decisionCambioSobreFranco`.
  */
 export function esAjenoFlexible(d: { code?: string; isFrancoTrabajado?: boolean } | null | undefined): boolean {
   if (!d || d.isFrancoTrabajado) return false;
   const c = codigoDe(d);
   return FRANCOS.has(c) || c === 'RET';
+}
+
+/** El guardia está marcado volante de alguno de los objetivos de este cronograma. */
+export function esVolanteDelCrono(
+  volante: readonly string[] | null | undefined,
+  objetivos: readonly string[],
+): boolean {
+  if (!objetivos.length) return false;
+  const set = new Set(objetivos.map((id) => String(id)));
+  return (volante || []).some((id) => set.has(String(id)));
+}
+
+/** F/FF/FP o RET guardado sin objectiveId: en la grilla del volante se ve y se edita. */
+export function francoORetSinObjetivo(
+  shift: { code?: string; isFrancoTrabajado?: boolean; isFranco?: boolean; objectiveId?: string | null; isDeleted?: boolean; isSecondBlock?: boolean } | null | undefined,
+): boolean {
+  if (!shift || shift.isDeleted || shift.isSecondBlock) return false;
+  if (!esFrancoORetEditable(shift)) return false;
+  const obj = shift.objectiveId;
+  return obj == null || String(obj).trim() === '';
+}
+
+/** F/FF/FP (también si solo viene isFranco) o RET, y no es un FT ya marcado. */
+export function esFrancoORetEditable(
+  d: { code?: string; isFranco?: boolean; isFrancoTrabajado?: boolean } | null | undefined,
+): boolean {
+  if (!d || d.isFrancoTrabajado) return false;
+  if (esAjenoFlexible(d)) return true;
+  return d.isFranco === true;
+}
+
+export type DecisionCambioFranco = {
+  permitido: boolean;
+  esFrancoTrabajado: boolean;
+};
+
+/**
+ * Al escribir un código sobre un franco o un RET.
+ * Volante: F → turno de este cronograma no es FT; F ↔ RET y turno sobre RET están permitidos.
+ * Quien no es volante: un turno de trabajo sobre F sigue siendo franco trabajado.
+ */
+export function decisionCambioSobreFranco(input: {
+  esVolante: boolean;
+  codigoActual?: string | null;
+  codigoNuevo: string;
+  /** El usuario pidió FT a propósito (FT·M o el botón de franco trabajado). */
+  ftExplicito?: boolean;
+}): DecisionCambioFranco {
+  const actual = codigoDe({ code: input.codigoActual || '' });
+  const nuevo = codigoDe({ code: input.codigoNuevo });
+  const sobreFranco = FRANCOS.has(actual);
+  const sobreRet = actual === 'RET';
+  const nuevoFranco = FRANCOS.has(nuevo);
+  const nuevoRet = nuevo === 'RET';
+  const nuevoTrabajo = nuevo !== '' && !nuevoFranco && !nuevoRet && nuevo !== 'FT';
+
+  if (input.ftExplicito) {
+    return { permitido: sobreFranco, esFrancoTrabajado: sobreFranco };
+  }
+
+  if (input.esVolante && (sobreFranco || sobreRet)) {
+    if (nuevoFranco || nuevoRet || nuevoTrabajo) {
+      return { permitido: true, esFrancoTrabajado: false };
+    }
+  }
+
+  if (!input.esVolante && sobreFranco && nuevoTrabajo) {
+    return { permitido: true, esFrancoTrabajado: true };
+  }
+
+  if (sobreFranco && nuevoRet) {
+    return { permitido: true, esFrancoTrabajado: false };
+  }
+
+  if (sobreRet && (nuevoFranco || nuevoTrabajo)) {
+    return { permitido: true, esFrancoTrabajado: false };
+  }
+
+  return { permitido: true, esFrancoTrabajado: false };
 }
 
 export function idsObjetivosDelCrono(
@@ -102,6 +183,8 @@ export function decisionGuardadoTurnoAjeno(input: {
   cambio: { isDeleted?: boolean; isSecondBlock?: boolean; code?: string; isFrancoTrabajado?: boolean } | null | undefined;
   docs: readonly TurnoGuardadoMin[];
   permitidos: readonly string[];
+  /** Volante de este cronograma: su F ajeno se reemplaza por un turno de acá, sin exigirle FT. */
+  volante?: boolean;
 }): DecisionGuardadoAjeno {
   const docs = (input.docs || []).filter((d) => d && d.isDeleted !== true);
   const ajeno = (d: TurnoGuardadoMin) => esTurnoAjenoAlCrono(d.objectiveId, input.permitidos);
@@ -122,7 +205,11 @@ export function decisionGuardadoTurnoAjeno(input: {
       return { escribir: true, borrarIds: borrar, rechazado: false, objetivoAjeno: String(ajeno.objectiveId || ''), ajeno };
     }
     // Turno directo sobre su F: vale solo como franco trabajado (FT, horas extra); si no, primero RET.
+    // El franco de un volante no es FT: el turno queda en este cronograma y se borra el F ajeno.
     if (ajenosPrimarios.some((d) => FRANCOS.has(codigoDe(d))) && !input.cambio?.isFrancoTrabajado) {
+      if (input.volante) {
+        return { escribir: true, borrarIds: borrar, rechazado: false, ajeno };
+      }
       return { escribir: false, borrarIds: [], rechazado: true, motivo: 'franco' };
     }
     return { escribir: true, borrarIds: borrar, rechazado: false, ajeno };
@@ -149,6 +236,7 @@ export function sanearPendientesTurnoAjeno(input: {
   next: Record<string, any>;
   docsPorClave: Record<string, readonly TurnoGuardadoMin[]>;
   permitidos: readonly string[];
+  esVolante?: (empId: string) => boolean;
 }): { changes: Record<string, any>; rechazadas: { key: string; objectiveId: string; motivo?: 'franco' }[] } {
   const prev = input.prev || {};
   const next = input.next || {};
@@ -160,6 +248,7 @@ export function sanearPendientesTurnoAjeno(input: {
     if (cambio == null) continue;
     const docsKey = key.endsWith('_B2') ? key.slice(0, -3) : key;
     const docs = input.docsPorClave[docsKey] || [];
+    const empId = (key.endsWith('_B2') ? key.slice(0, -3) : key).split('_')[0] || '';
     const decision = decisionGuardadoTurnoAjeno({
       cambio: {
         isDeleted: cambio.isDeleted === true,
@@ -169,6 +258,7 @@ export function sanearPendientesTurnoAjeno(input: {
       },
       docs,
       permitidos: input.permitidos,
+      volante: input.esVolante?.(empId) === true,
     });
     if (!decision.escribir) {
       if (changes === next) changes = { ...next };

@@ -226,6 +226,10 @@ import {
     textoAvisoFrancoAjeno,
     textoAvisoTurnoAjeno,
     esAjenoFlexible,
+    esFrancoORetEditable,
+    esVolanteDelCrono,
+    francoORetSinObjetivo,
+    decisionCambioSobreFranco,
 } from '@/lib/planificacion/turnoOtroObjetivo';
 import {
     decidirAsignacionOtroObjetivo,
@@ -281,7 +285,7 @@ import {
     bandaDeCodigoPuesto,
     type TipoNovedadRapida,
 } from '@/lib/planificacion/modoRapido';
-import { esCeldaFranco, etiquetaFt, opcionesBandaFt, payloadConsultaFt, resolverEscrituraFt } from '@/lib/planificacion/francoTrabajadoRapido';
+import { esCeldaFranco, esMarcaFtExplicita, etiquetaFt, opcionesBandaFt, payloadConsultaFt, resolverEscrituraFt } from '@/lib/planificacion/francoTrabajadoRapido';
 import { tablaCodigosPlanilla } from '@/lib/planificacion/codigosHorarioPegado';
 import { claveEquivalencia, type EquivalenciaCodigo } from '@/lib/planificacion/equivalenciaCodigo';
 import { mesLabelDe, resolverTurnoCopiado } from '@/lib/planificacion/copiarTurno';
@@ -1034,6 +1038,7 @@ function resolveCellShiftDisplay(
     grupoUnifiedMode: boolean,
     pendingChanges: Record<string, any>,
     shiftsMap: Record<string, any>,
+    opts?: { volante?: boolean },
 ): { s: any | null; p: any | null } {
     const key = `${empId}_${dateStr}`;
     const rawP = pendingChanges[key];
@@ -1064,6 +1069,9 @@ function resolveCellShiftDisplay(
                 return { s: rawS, p: null };
             }
         }
+        if (opts?.volante && francoORetSinObjetivo(rawS)) {
+            return { s: rawS, p: null };
+        }
         return { s: null, p: null };
     }
 
@@ -1088,6 +1096,10 @@ function resolveCellShiftDisplay(
         ) {
             return { s: rawP, p: null };
         }
+    }
+
+    if (opts?.volante && francoORetSinObjetivo(rawS)) {
+        return { s: rawS, p: null };
     }
 
     return { s: null, p: null };
@@ -1413,8 +1425,11 @@ function calcularCeldaGrilla(e: EntradaCeldaGrilla, emp: any, isGuest: boolean, 
     const grupoUnifiedMode = e.grupoUnifiedMode;
     const cellDateStr = getDateKey(day);
     const key = `${emp.id}_${cellDateStr}`;
+    const objetivosCrono = idsObjetivosDelCrono(selectedObjective, selectedGrupo?.objectiveIds, !!(selectedGrupo && grupoUnifiedMode));
+    const volanteAca = esVolanteDelCrono(emp?.volante, objetivosCrono);
     const displayShift = resolveCellShiftDisplay(
         emp.id, cellDateStr, selectedObjective, selectedGrupo, grupoUnifiedMode, e.pendingChanges, e.shiftsMap,
+        { volante: volanteAca },
     );
     let s = displayShift.s;
     const p = displayShift.p;
@@ -1529,7 +1544,9 @@ function calcularCeldaGrilla(e: EntradaCeldaGrilla, emp: any, isGuest: boolean, 
     const _rawOtherObj = isShiftAtOtherObjective(s, p, selectedObjective);
     const _activeShiftObjId = ((p && !p.isDeleted) ? p : s)?.objectiveId;
     // F y RET de otro objetivo se editan desde acá (F ↔ RET, y al RET un turno de este objetivo).
-    const _cellIsRetAtOtherObj = _rawOtherObj && esAjenoFlexible(activeShift as any);
+    // El volante también edita su F/RET de otro objetivo: no quedan en solo lectura.
+    const _francoRetVolante = volanteAca && esFrancoORetEditable(activeShift as any);
+    const _cellIsRetAtOtherObj = _rawOtherObj && (esAjenoFlexible(activeShift as any) || _francoRetVolante);
     const _ajenoAlGrupo = !(selectedGrupo && grupoUnifiedMode && _activeShiftObjId && selectedGrupo.objectiveIds.includes(_activeShiftObjId));
     const isOtherObjectiveShift = !!(_rawOtherObj
         && !_cellIsRetAtOtherObj
@@ -2420,7 +2437,16 @@ function PlanificacionDesktop() {
             const lista = g.cellTurnosMap[primary];
             docsPorClave[primary] = lista?.length ? lista : (g.shiftsMap[primary] ? [g.shiftsMap[primary]] : []);
         }
-        const { changes, rechazadas } = sanearPendientesTurnoAjeno({ prev, next, docsPorClave, permitidos });
+        const { changes, rechazadas } = sanearPendientesTurnoAjeno({
+            prev,
+            next,
+            docsPorClave,
+            permitidos,
+            esVolante: (empId) => esVolanteDelCrono(
+                g.employees.find((e: any) => e.id === empId)?.volante,
+                permitidos,
+            ),
+        });
         if (rechazadas.length) {
             const textos = [...new Set(rechazadas.map((r) => {
                 const empId = r.key.split('_')[0];
@@ -8681,6 +8707,7 @@ function PlanificacionDesktop() {
                         },
                         docs: docsGuard,
                         permitidos: permitidosGuard,
+                        volante: esVolanteDelCrono(empObj?.volante, permitidosGuard),
                     });
                     if (!decisionAjeno.escribir) {
                         const ajeno = docsGuard.find((d: any) => esTurnoAjenoAlCrono(d?.objectiveId, permitidosGuard) && !d?.isSecondBlock);
@@ -10810,8 +10837,8 @@ function PlanificacionDesktop() {
                 const existing = shiftsMap[key];
                 const docsFranco = (cellTurnosMap[key]?.length ? cellTurnosMap[key] : (existing ? [existing] : [])) as any[];
                 if (docsFranco.some((d) => celdaOtroObjetivoBloqueada(d, permitidosBulk))) continue;
-                if (existing && (existing.code === 'F' || existing.isFranco) && shiftConfig && shiftConfig.code !== 'F') {
-                    francosReplaced++;
+                if (existing && (existing.code === 'F' || existing.isFranco) && !existing.isFrancoTrabajado && shiftConfig && shiftConfig.code !== 'F') {
+                    if (!esVolanteDelCrono(emp.volante, permitidosBulk)) francosReplaced++;
                 }
             }
         }
@@ -10900,7 +10927,7 @@ function PlanificacionDesktop() {
                 if (isBulkCovBlocked(emp.id, assignPos, codeUpper)) { skippedCoverage++; continue; }
                 let cellIsFT = false;
                 if (existing && (existing.code === 'F' || existing.isFranco) && shiftConfig.code !== 'F') {
-                    cellIsFT = markAsFT;
+                    cellIsFT = markAsFT && !esVolanteDelCrono(emp.volante, permitidosBulk);
                 }
                 newChanges[key] = {
                     code: (codeUpper === 'REF' || codeUpper === 'ESC')
@@ -11564,17 +11591,19 @@ function PlanificacionDesktop() {
         if (['V', 'L', 'A', 'E', 'AA'].includes(existingCode)) { toast.warning("Novedad RRHH (ausencia/vacaciones/licencia): no se puede planificar encima."); return; }
         const key = `${selectedCell.empId}_${selectedCell.dateStr}`;
         const existing = selectedCell.currentShift;
-        const isFT = !correctionMode && francoMode === 'FT_SELECTION';
-        if (isFT && !canAssignFT) {
-            toast.error('Sin permiso para asignar Franco Trabajado (FT). Activá «Franco FT» en el rol de Planificación.');
-            setFrancoMode('NONE');
-            return;
-        }
         const permitidosAsignar = idsObjetivosDelCrono(
             selectedObjective,
             selectedGrupo?.objectiveIds,
             !!(selectedGrupo && grupoUnifiedMode),
         );
+        const empAsignar = employees.find((e: any) => e.id === selectedCell.empId);
+        const volanteAsignar = esVolanteDelCrono(empAsignar?.volante, permitidosAsignar);
+        const isFT = !correctionMode && francoMode === 'FT_SELECTION' && !volanteAsignar;
+        if (isFT && !canAssignFT) {
+            toast.error('Sin permiso para asignar Franco Trabajado (FT). Activá «Franco FT» en el rol de Planificación.');
+            setFrancoMode('NONE');
+            return;
+        }
         const docsAsignar = (cellTurnosMap[key]?.length ? cellTurnosMap[key] : (shiftsMap[key] ? [shiftsMap[key]] : [])) as any[];
         const ajenoAsignar = docsAsignar.find((d) => celdaOtroObjetivoBloqueada(d, permitidosAsignar));
         if (ajenoAsignar) {
@@ -11672,7 +11701,7 @@ function PlanificacionDesktop() {
             setAuthWarningMessage('');
             return;
         }
-        applyToPending({ ...pendingAssignment.shiftConfig, positionName: pendingAssignment.positionName, isFrancoTrabajado: francoMode === 'FT_SELECTION', isExtended: false, isEarlyStart: false, plannedNovedad: modifiers.plannedNovedad });
+        applyToPending({ ...pendingAssignment.shiftConfig, positionName: pendingAssignment.positionName, isFrancoTrabajado: francoMode === 'FT_SELECTION' && !esVolanteDelCrono(employees.find((e: any) => e.id === selectedCell?.empId)?.volante, idsObjetivosDelCrono(selectedObjective, selectedGrupo?.objectiveIds, !!(selectedGrupo && grupoUnifiedMode))), isExtended: false, isEarlyStart: false, plannedNovedad: modifiers.plannedNovedad });
         setPendingAssignment(null);
         setAuthWarningMessage('');
     };
@@ -11991,6 +12020,7 @@ function PlanificacionDesktop() {
             const rfzOnCell = rfzByEmpDate[key];
             const { s: cellS, p: cellP } = resolveCellShiftDisplay(
                 emp.id, dateStr, selectedObjective, selectedGrupo, grupoUnifiedMode, pendingChanges, shiftsMap,
+                { volante: esVolanteDelCrono(emp.volante, idsObjetivosDelCrono(selectedObjective, selectedGrupo?.objectiveIds, !!(selectedGrupo && grupoUnifiedMode))) },
             );
             const absence = absencesMap[key]; 
             if (selection.start.r === selection.end.r && selection.start.c === selection.end.c) { setSelection({ start: null, end: null }); } 
@@ -15284,7 +15314,8 @@ function PlanificacionDesktop() {
         const deTodos = slaTodosRapido.filter((st) => turnoValeEnFecha(st, ds));
         const base = opcionesDeCodigo(delPuesto as TurnoSla[], deTodos, ultimoUsadoRapido, catalogoNovedad);
         const actual = ctx?.p && !ctx.p.isDeleted ? ctx.p : ctx?.s;
-        if (!esCeldaFranco(actual)) return base;
+        const volanteOpciones = !!(emp && esVolanteDelCrono(emp.volante, idsObjetivosDelCrono(selectedObjective, selectedGrupo?.objectiveIds, !!(selectedGrupo && grupoUnifiedMode))));
+        if (!esCeldaFranco(actual) || volanteOpciones) return base;
         return [...base, ...opcionesBandaFt(getShiftsForPosition(pos, objId) as TurnoSla[])];
     };
 
@@ -15367,31 +15398,45 @@ function PlanificacionDesktop() {
             };
         }
         const celdaFt = (c?.p && !c.p.isDeleted) ? c.p : c?.s;
+        const volanteAca = esVolanteDelCrono(
+            emp?.volante,
+            idsObjetivosDelCrono(selectedObjective, selectedGrupo?.objectiveIds, !!(selectedGrupo && grupoUnifiedMode)),
+        );
+        const ftExplicito = esMarcaFtExplicita(code);
+        const decisionFranco = decisionCambioSobreFranco({
+            esVolante: volanteAca,
+            codigoActual: String(celdaFt?.code || (celdaFt?.isFranco ? 'F' : '')),
+            codigoNuevo: code,
+            ftExplicito,
+        });
         const ft = resolverEscrituraFt({
             texto: code,
             celda: celdaFt,
             bandas: getShiftsForPosition(pos, objectiveId) as TurnoSla[],
             puede: canAssignFT,
         });
-        if (ft.accion === 'pedir_banda') return { error: 'Elegí la banda del franco trabajado: FT · M, T, N…' };
-        if (ft.accion === 'sin_permiso') return { error: 'Sin permiso para asignar Franco Trabajado (FT).' };
-        if (ft.accion === 'no_franco') return { error: 'FT se escribe sobre un franco (F, FF o FP).' };
-        if (ft.accion === 'ft') {
-            const deFuente = !!(fuente && normalizarCodigo(fuente.code || '') === ft.code && fuente.startTime && fuente.endTime);
-            return {
-                change: {
-                    ...base,
-                    code: ft.code,
-                    name: (deFuente && fuente?.name) || ft.name,
-                    hours: deFuente ? (Number(fuente?.hours) || ft.hours) : ft.hours,
-                    startTime: deFuente ? fuente?.startTime : ft.startTime,
-                    endTime: deFuente ? fuente?.endTime : ft.endTime,
-                    positionName: (deFuente && fuente?.positionName) || pos,
-                    isFranco: false,
-                    isFrancoTrabajado: true,
-                    coveredFromFranco: true,
-                },
-            };
+        const volanteSinFt = volanteAca && !decisionFranco.esFrancoTrabajado && (ft.accion === 'ft' || ft.accion === 'sin_permiso');
+        if (!volanteSinFt) {
+            if (ft.accion === 'pedir_banda') return { error: 'Elegí la banda del franco trabajado: FT · M, T, N…' };
+            if (ft.accion === 'sin_permiso') return { error: 'Sin permiso para asignar Franco Trabajado (FT).' };
+            if (ft.accion === 'no_franco') return { error: 'FT se escribe sobre un franco (F, FF o FP).' };
+            if (ft.accion === 'ft') {
+                const deFuente = !!(fuente && normalizarCodigo(fuente.code || '') === ft.code && fuente.startTime && fuente.endTime);
+                return {
+                    change: {
+                        ...base,
+                        code: ft.code,
+                        name: (deFuente && fuente?.name) || ft.name,
+                        hours: deFuente ? (Number(fuente?.hours) || ft.hours) : ft.hours,
+                        startTime: deFuente ? fuente?.startTime : ft.startTime,
+                        endTime: deFuente ? fuente?.endTime : ft.endTime,
+                        positionName: (deFuente && fuente?.positionName) || pos,
+                        isFranco: false,
+                        isFrancoTrabajado: true,
+                        coveredFromFranco: true,
+                    },
+                };
+            }
         }
         if (code === 'EV') {
             return { error: 'EV es un evento: no se escribe desde la grilla. Para enfermedad usá E.' };
@@ -21874,6 +21919,12 @@ function PlanificacionDesktop() {
                                     const francoRestH = francoRestHModal;
                                     const hasDraft = shift.draft === true;
                                     const isCrossObjectiveShift = shift.objectiveId && String(shift.objectiveId) !== String(selectedObjective);
+                                    const empModal = employees.find((e: any) => e.id === selectedCell.empId);
+                                    const volanteEnCrono = esVolanteDelCrono(
+                                        empModal?.volante,
+                                        idsObjetivosDelCrono(selectedObjective, selectedGrupo?.objectiveIds, !!(selectedGrupo && grupoUnifiedMode)),
+                                    );
+                                    const francoAjenoSoloFt = !!(isCrossObjectiveShift && isFrancoShift && !volanteEnCrono);
                                     return (
                                         <>
                                             <div className="flex justify-between items-start mb-5">
@@ -22014,7 +22065,7 @@ function PlanificacionDesktop() {
                                             {correctionMode && previewIsPublished && renderDayCoverageClosures(selectedCell.dateStr)}
 
                                             {/* Acciones */}
-                                            {isCrossObjectiveShift && isFrancoShift && canAssignFT && (
+                                            {francoAjenoSoloFt && canAssignFT && (
                                                 <button
                                                     onClick={() => { setFrancoMode('FT_SELECTION'); setCellEditMode(true); }}
                                                     disabled={isServiceLocked}
@@ -22023,7 +22074,7 @@ function PlanificacionDesktop() {
                                                     <ArrowRightCircle size={14}/> Traer como Franco Trabajado (FT)
                                                 </button>
                                             )}
-                                            {canEdit && !previewIsPublished && !(isCrossObjectiveShift && isFrancoShift) && (
+                                            {canEdit && !previewIsPublished && !francoAjenoSoloFt && (
                                                 <div className="flex flex-col gap-2">
                                                     <div className="flex gap-2">
                                                         <button
@@ -22041,7 +22092,7 @@ function PlanificacionDesktop() {
                                                             <Trash2 size={14}/>
                                                         </button>
                                                     </div>
-                                                    {isFrancoShift && canAssignFT && (
+                                                    {isFrancoShift && canAssignFT && !volanteEnCrono && (
                                                         <button
                                                             onClick={() => { setFrancoMode('FT_SELECTION'); setCellEditMode(true); }}
                                                             disabled={isServiceLocked}
