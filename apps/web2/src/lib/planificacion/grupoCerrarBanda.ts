@@ -124,6 +124,101 @@ export function acreditaCoberturaAlObjetivo(
   return String(shift.objectiveId || '') === String(objectiveId);
 }
 
+export type PasoCierreBanda<T = undefined> =
+  | { via: 'asignar'; empId: string }
+  | { via: '12h'; empIds: string[]; extra: T }
+  | { via: 'ft'; empId: string };
+
+export type PlanCierreBandas<T = undefined> = {
+  banda: string;
+  pedidos: number;
+  pasos: PasoCierreBanda<T>[];
+  quedaron: number;
+};
+
+/**
+ * Texto del botón de «Puestos sin cerrar».
+ * Una banda: «CERRAR BANDA T». Varias: «CERRAR 2 BANDAS T».
+ */
+export function textoBotonCerrarBanda(missing: number, banda: string): string {
+  const n = Math.max(1, Math.floor(Number(missing) || 1));
+  const b = String(banda || '').trim().toUpperCase();
+  if (n === 1) return `CERRAR BANDA ${b}`.trim();
+  return `CERRAR ${n} BANDAS ${b}`;
+}
+
+/** Aviso cuando no alcanzan los candidatos para todas las bandas pedidas. */
+export function textoResultadoCierreBanda(input: { banda: string; cerradas: number; quedaron: number }): string {
+  const b = String(input.banda || '').trim().toUpperCase();
+  const c = Math.max(0, Math.floor(Number(input.cerradas) || 0));
+  const q = Math.max(0, Math.floor(Number(input.quedaron) || 0));
+  const cerradas = c === 1 ? `Se cerró 1 banda ${b}` : `Se cerraron ${c} bandas ${b}`;
+  const quedan = q === 1 ? `Quedó 1 banda ${b} sin cerrar.` : `Quedaron ${q} bandas ${b} sin cerrar.`;
+  if (q <= 0) return `${cerradas}.`;
+  if (c <= 0) return quedan;
+  return `${cerradas}. ${quedan}`;
+}
+
+/**
+ * Cierra `faltante` bandas del mismo código.
+ * Por cada una, el llamador ya ordenó asignables (RET → volante → libre → otro objetivo).
+ * Si no queda nadie de 8 h, entra el par de 12 h; si no, el franco (FT).
+ * Quien ya cerró una no se vuelve a usar. Si no hay candidato, se corta y `quedaron` dice cuántas faltan.
+ */
+export function planCerrarBandas<T>(input: {
+  banda: string;
+  faltante: number;
+  asignables: readonly { empId: string }[];
+  francos: readonly { empId: string }[];
+  par12: (usados: ReadonlySet<string>) => { empIds: readonly string[]; extra: T } | null;
+}): PlanCierreBandas<T> {
+  const banda = String(input.banda || '').trim().toUpperCase();
+  const pedidos = Math.max(0, Math.floor(Number(input.faltante) || 0));
+  const usados = new Set<string>();
+  const pasos: PasoCierreBanda<T>[] = [];
+  let iAsig = 0;
+  let iFt = 0;
+  const tomarAsignable = (): PasoCierreBanda<T> | null => {
+    while (iAsig < input.asignables.length) {
+      const empId = String(input.asignables[iAsig++]?.empId || '').trim();
+      if (!empId || usados.has(empId)) continue;
+      usados.add(empId);
+      return { via: 'asignar', empId };
+    }
+    return null;
+  };
+  const tomarFranco = (): PasoCierreBanda<T> | null => {
+    while (iFt < input.francos.length) {
+      const empId = String(input.francos[iFt++]?.empId || '').trim();
+      if (!empId || usados.has(empId)) continue;
+      usados.add(empId);
+      return { via: 'ft', empId };
+    }
+    return null;
+  };
+  while (pasos.length < pedidos) {
+    const asig = tomarAsignable();
+    if (asig) {
+      pasos.push(asig);
+      continue;
+    }
+    const par = input.par12(usados);
+    const ids = [...new Set((par?.empIds || []).map((id) => String(id || '').trim()).filter(Boolean))];
+    if (par && ids.length >= 2 && ids.every((id) => !usados.has(id))) {
+      for (const id of ids) usados.add(id);
+      pasos.push({ via: '12h', empIds: ids, extra: par.extra });
+      continue;
+    }
+    const ft = tomarFranco();
+    if (ft) {
+      pasos.push(ft);
+      continue;
+    }
+    break;
+  }
+  return { banda, pedidos, pasos, quedaron: Math.max(0, pedidos - pasos.length) };
+}
+
 /** Un guardia de otro objetivo del grupo puede extender; uno de afuera, no. */
 export function objetivoPermitidoParaExtender(
   shiftObjectiveId: string | null | undefined,

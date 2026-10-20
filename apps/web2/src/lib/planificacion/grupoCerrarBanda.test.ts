@@ -5,7 +5,11 @@ import {
   acreditaCoberturaAlObjetivo,
   bandasAbiertasDelGrupo,
   objetivoPermitidoParaExtender,
+  planCerrarBandas,
+  textoBotonCerrarBanda,
+  textoResultadoCierreBanda,
 } from './grupoCerrarBanda';
+import { proponerCierre12h, type TurnoPuesto12 } from './cierre12h';
 import { countPositionClosedUnitsFromShifts } from './positionCoverageUnits';
 import { collectSplitBandCreditsForDay } from './positionCoverageUnits';
 import { listEarlyStartCandidates, listExtensionCandidates } from './planningRecompositionApply';
@@ -217,4 +221,71 @@ test('el adelanto de la N lista el grupo entero, mismo puesto primero, y deja af
   const ext = listExtensionCandidates('N', dia, 'casa', employees, shiftsMap, {}, [], ctx);
   assert.deepEqual(ext.map((r) => r.id), ['alaniz', 'escobar']);
   assert.equal(ext.find((r) => r.id === 'escobar')?.etiquetaLista, 'ESCOBAR · T · Niños');
+});
+
+test('faltante 2 T cierra las dos bandas y el botón lo dice', () => {
+  assert.equal(textoBotonCerrarBanda(2, 'T'), 'CERRAR 2 BANDAS T');
+  assert.equal(textoBotonCerrarBanda(1, 'T'), 'CERRAR BANDA T');
+
+  const dia = '2026-10-01';
+  const sla = [
+    { code: 'M', hours: 8, startTime: '07:00', endTime: '15:00' },
+    { code: 'T', hours: 8, startTime: '15:00', endTime: '23:00' },
+    { code: 'N', hours: 8, startTime: '23:00', endTime: '07:00' },
+    { code: 'D12', hours: 12, startTime: '07:00', endTime: '19:00' },
+    { code: 'N12', hours: 12, startTime: '19:00', endTime: '07:00' },
+  ];
+  const turnos: TurnoPuesto12[] = [
+    { empId: 'm1', nombre: 'MAÑANA UNO', dateStr: dia, code: 'M', positionName: 'Guardia' },
+    { empId: 'm2', nombre: 'MAÑANA DOS', dateStr: dia, code: 'M', positionName: 'Guardia' },
+    { empId: 'n1', nombre: 'NOCHE UNO', dateStr: dia, code: 'N', positionName: 'Guardia' },
+    { empId: 'n2', nombre: 'NOCHE DOS', dateStr: dia, code: 'N', positionName: 'Guardia' },
+  ];
+  const parDe = (usados: ReadonlySet<string>) => {
+    const prop = proponerCierre12h({
+      dateStr: dia,
+      positionName: 'Guardia',
+      faltantes: ['T'],
+      turnos: turnos.filter((t) => !usados.has(t.empId)),
+      sla,
+      cupos: { GUARDIA: 2 },
+    });
+    if (!prop || prop.modo !== 'par' || prop.cambios.length < 2) return null;
+    return { empIds: prop.cambios.map((c) => c.empId), extra: prop };
+  };
+
+  const dosPares = planCerrarBandas({
+    banda: 'T',
+    faltante: 2,
+    asignables: [],
+    francos: [],
+    par12: parDe,
+  });
+  assert.equal(dosPares.pasos.length, 2);
+  assert.equal(dosPares.quedaron, 0);
+  assert.equal(dosPares.pasos.every((p) => p.via === '12h'), true);
+  const gente = dosPares.pasos.flatMap((p) => (p.via === '12h' ? p.empIds : []));
+  assert.equal(new Set(gente).size, 4);
+
+  const conRet = planCerrarBandas({
+    banda: 'T',
+    faltante: 2,
+    asignables: [{ empId: 'ret1' }],
+    francos: [],
+    par12: parDe,
+  });
+  assert.deepEqual(conRet.pasos.map((p) => p.via), ['asignar', '12h']);
+  assert.equal(conRet.pasos[0].via === 'asignar' && conRet.pasos[0].empId, 'ret1');
+  assert.equal(conRet.quedaron, 0);
+
+  const soloUna = planCerrarBandas({
+    banda: 'T',
+    faltante: 2,
+    asignables: [{ empId: 'ret1' }],
+    francos: [],
+    par12: () => null,
+  });
+  assert.equal(soloUna.pasos.length, 1);
+  assert.equal(soloUna.quedaron, 1);
+  assert.equal(textoResultadoCierreBanda({ banda: 'T', cerradas: 1, quedaron: 1 }), 'Se cerró 1 banda T. Quedó 1 banda T sin cerrar.');
 });

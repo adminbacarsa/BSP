@@ -334,6 +334,9 @@ import {
 import {
     acreditaCoberturaAlObjetivo,
     bandasAbiertasDelGrupo,
+    planCerrarBandas,
+    textoBotonCerrarBanda,
+    textoResultadoCierreBanda,
     type BandaAbiertaGrupo,
 } from '@/lib/planificacion/grupoCerrarBanda';
 import {
@@ -18261,6 +18264,144 @@ function PlanificacionDesktop() {
         setSlaGapCloseModal({ dateStr, positionName: gap.positionName, gapBand, objectiveId: gap.objectiveId });
     }, []);
 
+    const cerrarBandasDesdePie = (
+        dateStr: string,
+        gap: { positionName: string; code: string; gapBand?: string; missing: number; detail?: string; objectiveId?: string },
+    ) => {
+        const gapBand = inferGapBandForClose(gap);
+        if (!gapBand) {
+            toast.error('No se pudo determinar la banda SLA a cerrar. Usá Tratamiento o Extender jornada.');
+            return;
+        }
+        if (bloqueoMesCerrado) { toast.error(AVISO_MES_CERRADO); return; }
+        const faltante = Math.max(1, Math.floor(Number(gap.missing) || 1));
+        const objectiveId = gap.objectiveId || selectedObjective || '';
+        const enGrilla = new Set(displayedEmployees.map((e: { id: string }) => e.id));
+        const asignables = candidatosFaltante({ dateStr, positionName: gap.positionName, banda: gapBand })
+            .filter((c) => enGrilla.has(c.empId));
+        const francos = canAssignFT ? francosVisibles(dateStr).filter((f) => enGrilla.has(f.empId)) : [];
+        const turnos = turnos12(dateStr);
+        const cupos: Record<string, number> = {};
+        for (const p of positionStructure || []) {
+            const nombre = String(p.positionName || '').trim().toUpperCase().replace(/\s+/g, ' ');
+            if (nombre) cupos[nombre] = Math.max(1, Number(p.qty) || 1);
+        }
+        const sla = getShiftsForPosition(gap.positionName, objectiveId) as TurnoSla[];
+        const plan = planCerrarBandas({
+            banda: gapBand,
+            faltante,
+            asignables,
+            francos,
+            par12: (usados) => {
+                const prop = proponerCierre12h({
+                    dateStr,
+                    positionName: gap.positionName,
+                    faltantes: [gapBand],
+                    turnos: turnos.filter((t) => !usados.has(t.empId)),
+                    sla,
+                    slaDe: (pos, objId) => (getShiftsForPosition(pos, objId || objectiveId) as TurnoSla[]) || [],
+                    cupos,
+                    objectiveId,
+                });
+                if (!prop || prop.modo !== 'par' || prop.cambios.length < 2) return null;
+                return { empIds: prop.cambios.map((c) => c.empId), extra: prop };
+            },
+        });
+        const filaDe = new Map(displayedEmployees.map((e: { id: string }, i: number) => [e.id, i]));
+        const next = { ...pendingChangesRef.current };
+        const avisos: string[] = [];
+        let hechas = 0;
+        const fechas12: string[] = [];
+        const escribir = (empId: string, ds: string, code: string, fuente: FuenteRapida) => {
+            const r = filaDe.get(empId);
+            const c = diasRapido.indexOf(ds);
+            if (r == null || c < 0) { avisos.push('Ese guardia no está en la grilla.'); return false; }
+            const celda = ctxRapido(r, c);
+            if (!celda.emp) return false;
+            const bl = bloqueoCeldaRapido(celda.emp, ds, celda.ctx, normalizarCodigo(code));
+            if (bl) { avisos.push(bl); return false; }
+            const res = cambioRapido(celda.emp, ds, normalizarCodigo(code), celda.ctx, fuente);
+            if ('error' in res) { avisos.push(res.error); return false; }
+            const key = `${empId}_${ds}`;
+            const lleno = cupoLlenoRapido(celda.emp, ds, key, res.change, next);
+            if (lleno) { avisos.push(lleno); return false; }
+            next[key] = res.change;
+            return true;
+        };
+        for (const paso of plan.pasos) {
+            if (paso.via === 'asignar') {
+                const franja = franjaDeBanda(gap.positionName, gapBand);
+                if (!franja) { avisos.push(`${gap.positionName} no tiene la banda ${gapBand} en el servicio.`); continue; }
+                const code = normalizarCodigo(franja.code);
+                if (escribir(paso.empId, dateStr, code, {
+                    code, startTime: franja.startTime, endTime: franja.endTime, hours: franja.hours, name: franja.name || code, positionName: gap.positionName, forzarPuesto: true,
+                    ...(gap.objectiveId ? { objectiveId: gap.objectiveId } : {}),
+                })) hechas++;
+            } else if (paso.via === 'ft') {
+                const codeBanda = normalizarCodigo(gapBand);
+                const slaFt = sla.find((s) => normalizarCodigo(s.code) === codeBanda);
+                if (escribir(paso.empId, dateStr, `FT·${codeBanda}`, {
+                    code: codeBanda,
+                    startTime: slaFt?.startTime,
+                    endTime: slaFt?.endTime,
+                    hours: slaFt?.hours,
+                    name: slaFt?.name || codeBanda,
+                    positionName: gap.positionName,
+                    ...(gap.objectiveId ? { objectiveId: gap.objectiveId } : {}),
+                })) hechas++;
+            } else {
+                const parcial: Record<string, any> = {};
+                const fechas: string[] = [];
+                let ok = 0;
+                for (const ch of paso.extra.cambios) {
+                    const r = filaDe.get(ch.empId);
+                    const c = diasRapido.indexOf(ch.dateStr);
+                    if (r == null || c < 0) continue;
+                    const celda = ctxRapido(r, c);
+                    if (!celda.emp) continue;
+                    const fuente: FuenteRapida = {
+                        code: ch.code, startTime: ch.startTime, endTime: ch.endTime, hours: ch.hours, name: ch.code, positionName: ch.positionName || gap.positionName,
+                    };
+                    const bl = bloqueoCeldaRapido(celda.emp, ch.dateStr, celda.ctx, ch.code);
+                    if (bl) { avisos.push(bl); continue; }
+                    const res = cambioRapido(celda.emp, ch.dateStr, ch.code, celda.ctx, fuente);
+                    if ('error' in res) { avisos.push(res.error); continue; }
+                    parcial[`${ch.empId}_${ch.dateStr}`] = {
+                        ...res.change,
+                        positionName: ch.positionName || res.change.positionName,
+                        employeeName: String(celda.emp.name || ''),
+                        coverageMode: '12H',
+                        coversBandCode: paso.extra.banda,
+                        coversDateStr: paso.extra.dateStr,
+                        coversPositionName: ch.coversPositionName || gap.positionName,
+                        ...(ch.coversObjectiveId ? { coversObjectiveId: ch.coversObjectiveId } : {}),
+                    };
+                    fechas.push(ch.dateStr);
+                    ok++;
+                }
+                if (ok >= 2 && ok === paso.extra.cambios.length) {
+                    Object.assign(next, parcial);
+                    fechas12.push(...fechas);
+                    hechas++;
+                }
+            }
+        }
+        const quedaron = Math.max(0, faltante - hechas);
+        const msg = textoResultadoCierreBanda({ banda: gapBand, cerradas: hechas, quedaron });
+        if (hechas > 0) {
+            if (fechas12.length) sellarAtribucion12(next, [...new Set(fechas12)]);
+            if (!commitPendingChanges(next)) return;
+            setCoverageTooltip(null);
+            const extra = avisos[0] ? ` ${avisos[0]}` : '';
+            if (quedaron > 0) toast.message(`${msg}${extra}`);
+            else toast.success(`${msg} Quedó en borrador: guardá el cronograma.`);
+            return;
+        }
+        if (avisos[0]) toast.message(`${msg} ${avisos[0]}`);
+        else toast.message(msg);
+        openSlaGapCloseFromPie(dateStr, gap);
+    };
+
     useEffect(() => {
         const claves = colaCobertura12;
         if (!claves?.length) return;
@@ -18511,13 +18652,14 @@ function PlanificacionDesktop() {
                                 )}
                                 {(() => {
                                     const closeBand = inferGapBandForClose(g);
+                                    const faltan = Math.max(1, Math.floor(Number(g.missing) || 1));
                                     return closeBand ? (
                                     <button
                                         type="button"
                                         onClick={(e) => {
                                             e.preventDefault();
                                             e.stopPropagation();
-                                            openSlaGapCloseFromPie(coverageTooltip.dateStr, g);
+                                            cerrarBandasDesdePie(coverageTooltip.dateStr, g);
                                         }}
                                         onMouseDown={(e) => {
                                             e.preventDefault();
@@ -18525,7 +18667,7 @@ function PlanificacionDesktop() {
                                         }}
                                         className="mt-0.5 w-full py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-[9px] font-black uppercase tracking-wide pointer-events-auto"
                                     >
-                                        Cerrar banda {closeBand}
+                                        {textoBotonCerrarBanda(faltan, closeBand)}
                                     </button>
                                     ) : null;
                                 })()}
