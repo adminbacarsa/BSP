@@ -7,6 +7,7 @@ import { analyzeDayCoverageGaps, flattenDayGapsForUi } from './coverageGapAnalys
 import type { PlanningPositionLike } from './coverageGapAnalysis';
 import { listVacancyGapBandOptions } from './vacancyGapBands';
 import type { VacancyPositionSla } from './vacancySplitBands';
+import { bandaDeCodigoPuesto, descansoEntre, normalizarCodigo } from './modoRapido';
 
 export type ObjetivoConteoDia = {
   id: string;
@@ -217,6 +218,180 @@ export function planCerrarBandas<T>(input: {
     break;
   }
   return { banda, pedidos, pasos, quedaron: Math.max(0, pedidos - pasos.length) };
+}
+
+/**
+ * Objetivo del turno que escribe el cierre.
+ * El hueco manda: si el guardia prefiere otro objetivo, el turno igual queda en el hueco.
+ */
+export function objectiveIdEscrituraCierre(gapObjectiveId: string, preferidoDelGuardia?: string): string {
+  const gap = String(gapObjectiveId || '').trim();
+  if (gap) return gap;
+  return String(preferidoDelGuardia || '').trim();
+}
+
+/** Cuántas bandas de esa fila quedaron cerradas después de escribir, no cuántos turnos se intentaron. */
+export function cierreContado(faltanteAntes: number, faltanteDespues: number): { cerradas: number; quedaron: number } {
+  const antes = Math.max(0, Math.floor(Number(faltanteAntes) || 0));
+  const despues = Math.max(0, Math.floor(Number(faltanteDespues) || 0));
+  return { cerradas: Math.max(0, antes - despues), quedaron: despues };
+}
+
+export function faltanteDeBandaAbierta(
+  bandas: readonly Pick<BandaAbiertaGrupo, 'objectiveId' | 'positionName' | 'band' | 'missing'>[],
+  objetivo: { objectiveId: string; positionName: string; band: string },
+): number {
+  const band = String(objetivo.band || '').trim().toUpperCase();
+  return bandas
+    .filter((b) => b.objectiveId === objetivo.objectiveId && b.positionName === objetivo.positionName && b.band === band)
+    .reduce((s, b) => s + (Number(b.missing) || 0), 0);
+}
+
+const NO_CUENTA_CIERRE = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET', 'REF', 'ESC', 'SUS', 'SGS', 'EV']);
+
+export type TurnoConteoCierre = {
+  objectiveId?: string | null;
+  positionName?: string | null;
+  code?: string | null;
+  isDeleted?: boolean;
+  isFranco?: boolean;
+  isFrancoTrabajado?: boolean;
+  isNovedad?: boolean;
+  isAbsent?: boolean;
+};
+
+/** Códigos del día que viven en ese objetivo. Un turno en el objetivo preferido del guardia no entra. */
+export function conteosCierreObjetivo(
+  objectiveId: string,
+  turnos: readonly TurnoConteoCierre[],
+): Record<string, Record<string, number>> {
+  const obj = String(objectiveId || '').trim();
+  const out: Record<string, Record<string, number>> = {};
+  for (const t of turnos) {
+    if (!t || t.isDeleted || t.isNovedad || t.isAbsent) continue;
+    if (t.isFranco && !t.isFrancoTrabajado) continue;
+    if (String(t.objectiveId || '').trim() !== obj) continue;
+    const code = String(t.code || '').trim().toUpperCase();
+    if (!code || NO_CUENTA_CIERRE.has(code)) continue;
+    const pos = String(t.positionName || '').trim() || 'General';
+    if (!out[pos]) out[pos] = {};
+    out[pos][code] = (out[pos][code] || 0) + 1;
+  }
+  return out;
+}
+
+/**
+ * Cupo de cada objetivo del grupo (`objectiveId|PUESTO`).
+ * La clave sin objetivo hacía que el número del seleccionado cerrara un hueco en otro.
+ */
+export function cuposCierrePorObjetivo(
+  estructuras: Readonly<Record<string, readonly { positionName?: string; qty?: number }[] | undefined>>,
+): Record<string, number> {
+  const cupos: Record<string, number> = {};
+  for (const [objId, puestos] of Object.entries(estructuras)) {
+    const id = String(objId || '').trim();
+    if (!id) continue;
+    for (const p of puestos || []) {
+      const nombre = String(p.positionName || '').trim().toUpperCase().replace(/\s+/g, ' ');
+      if (!nombre) continue;
+      cupos[`${id}|${nombre}`] = Math.max(1, Number(p.qty) || 1);
+    }
+  }
+  return cupos;
+}
+
+/** Franja de 8 h del puesto (M, o P5T). No devuelve D12/N12. */
+export function franjaBandaDeSla<T extends { code?: string }>(shifts: readonly T[], banda: string): T | undefined {
+  const b = normalizarCodigo(banda);
+  return shifts.find((s) => {
+    const c = normalizarCodigo(s.code || '');
+    return !/D12$|N12$/.test(c) && (c === b || bandaDeCodigoPuesto(c) === b);
+  });
+}
+
+export function jornadaEs12(t: { code?: string; hours?: number } | null | undefined): boolean {
+  if (!t) return false;
+  const c = normalizarCodigo(t.code || '');
+  if (c === 'D12' || c === 'N12' || /(?:^|[^A-Z0-9])(?:D12|N12)$/.test(c) || /D12$|N12$/.test(c)) return true;
+  return Number(t.hours) >= 12;
+}
+
+function sumarDiasCierre(ds: string, n: number): string {
+  const [y, m, d] = ds.split('-').map(Number);
+  const dt = new Date(y, (m || 1) - 1, d || 1);
+  dt.setDate(dt.getDate() + n);
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+}
+
+/** Días de 12 h seguidos, contando el turno ya pasado a 12 h. */
+export function rachaDoceSeguidos(dateStr: string, propuestoEs12: boolean, dias12: readonly string[]): number {
+  if (!propuestoEs12 || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return 0;
+  const set = new Set(dias12);
+  set.add(dateStr);
+  let n = 1;
+  for (let i = 1; i < 8; i++) {
+    if (!set.has(sumarDiasCierre(dateStr, -i))) break;
+    n++;
+  }
+  for (let i = 1; i < 8; i++) {
+    if (!set.has(sumarDiasCierre(dateStr, i))) break;
+    n++;
+  }
+  return n;
+}
+
+export type VecinoJornadaCierre = {
+  code: string;
+  startTime: string;
+  endTime: string;
+};
+
+/**
+ * Tope 200 h, máx. 4 turnos de 12 h seguidos y descanso contra el horario nuevo
+ * (el D12 ya alargado, no la M de 8 h que estaba). Null si se puede escribir.
+ */
+export function motivoBloqueoJornadaCierre(input: {
+  horasMes: number;
+  horasAntes: number;
+  horasDespues: number;
+  tope?: number;
+  topeAutorizado?: boolean;
+  dateStr: string;
+  propuesto: { code: string; startTime?: string; endTime?: string; hours?: number };
+  anterior?: VecinoJornadaCierre | null;
+  siguiente?: VecinoJornadaCierre | null;
+  /** Otros días que ya son jornada de 12 h. El día propuesto se suma si el turno nuevo lo es. */
+  dias12?: readonly string[];
+  descansoMin?: number;
+}): string | null {
+  const tope = Number(input.tope) > 0 ? Number(input.tope) : 200;
+  const total = (Number(input.horasMes) || 0) + (Number(input.horasDespues) || 0) - (Number(input.horasAntes) || 0);
+  if (!input.topeAutorizado && total > tope + 1e-6) {
+    return `${Math.round(total)} h en el mes (tope ${tope} h)`;
+  }
+  const es12 = jornadaEs12(input.propuesto);
+  const racha = rachaDoceSeguidos(input.dateStr, es12, input.dias12 || []);
+  if (racha > 4) return `${racha} turnos de 12 h seguidos (máximo 4)`;
+  const min = input.descansoMin ?? 12;
+  const prop = input.propuesto;
+  if (prop.startTime && prop.endTime) {
+    const propuesto = { code: prop.code, startTime: prop.startTime, endTime: prop.endTime, trabajo: true as const };
+    if (input.anterior?.startTime && input.anterior.endTime) {
+      const h = descansoEntre(
+        { code: input.anterior.code, startTime: input.anterior.startTime, endTime: input.anterior.endTime, trabajo: true },
+        propuesto,
+      );
+      if (h != null && h < min) return `descanso ${String(h).replace('.', ',')} h con el turno anterior`;
+    }
+    if (input.siguiente?.startTime && input.siguiente.endTime) {
+      const h = descansoEntre(
+        propuesto,
+        { code: input.siguiente.code, startTime: input.siguiente.startTime, endTime: input.siguiente.endTime, trabajo: true },
+      );
+      if (h != null && h < min) return `descanso ${String(h).replace('.', ',')} h con el turno siguiente`;
+    }
+  }
+  return null;
 }
 
 /** Un guardia de otro objetivo del grupo puede extender; uno de afuera, no. */

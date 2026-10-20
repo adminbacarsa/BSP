@@ -334,6 +334,12 @@ import {
 import {
     acreditaCoberturaAlObjetivo,
     bandasAbiertasDelGrupo,
+    cierreContado,
+    cuposCierrePorObjetivo,
+    faltanteDeBandaAbierta,
+    franjaBandaDeSla,
+    motivoBloqueoJornadaCierre,
+    objectiveIdEscrituraCierre,
     planCerrarBandas,
     textoBotonCerrarBanda,
     textoResultadoCierreBanda,
@@ -17268,12 +17274,11 @@ function PlanificacionDesktop() {
         return [{ empId: e.id, nombre: String(e.name || e.id) }];
     });
     /** Franja del puesto para una banda (M/T/N), sin las de 12 h: M, o la propia del puesto (P5M). */
-    const franjaDeBanda = (positionName: string, banda: string) => {
-        const b = normalizarCodigo(banda);
-        return ((getShiftsForPosition(positionName, selectedObjective) as TurnoSla[]) || []).find((s) => {
-            const c = normalizarCodigo(s.code);
-            return !/D12$|N12$/.test(c) && (c === b || bandaDeCodigoPuesto(c) === b);
-        });
+    const franjaDeBanda = (positionName: string, banda: string, objectiveId?: string) => {
+        return franjaBandaDeSla(
+            (getShiftsForPosition(positionName, objectiveId || selectedObjective) as TurnoSla[]) || [],
+            banda,
+        );
     };
     /** Inicio y fin en ms (hora AR) de un turno de la grilla o de una franja «HH:MM» en ese día. */
     const ventanaMs = (startTime: any, endTime: any, dateStr: string): { ini: number; fin: number } | null => {
@@ -17305,9 +17310,9 @@ function PlanificacionDesktop() {
      * guardia de otro objetivo en la dotación (dentro de cada uno, el más lejos de 200 h). Sin choque ese día,
      * descanso ≥ 12 h con el día anterior y el siguiente, racha ≤ 6 y tope de 200 h. El franco no entra (va al final).
      */
-    const candidatosFaltante = (f: { dateStr: string; positionName: string; banda: string }): CandidatoFaltante[] => {
+    const candidatosFaltante = (f: { dateStr: string; positionName: string; banda: string; objectiveId?: string }): CandidatoFaltante[] => {
         if (!selectedObjective || bloqueoMesCerrado) return [];
-        const franja = franjaDeBanda(f.positionName, f.banda);
+        const franja = franjaDeBanda(f.positionName, f.banda, f.objectiveId);
         if (!franja?.startTime || !franja?.endTime) return [];
         const nuevo = ventanaMs(franja.startTime, franja.endTime, f.dateStr);
         if (!nuevo) return [];
@@ -18304,6 +18309,8 @@ function PlanificacionDesktop() {
         dateStr: string,
         gap: { positionName: string; code: string; gapBand?: string; missing: number; detail?: string; objectiveId?: string },
     ) => {
+        const global = bloqueoGlobalRapido();
+        if (global) { toast.message(global); return; }
         const gapBand = inferGapBandForClose(gap);
         if (!gapBand) {
             toast.error('No se pudo determinar la banda SLA a cerrar. Usá Tratamiento o Extender jornada.');
@@ -18311,36 +18318,126 @@ function PlanificacionDesktop() {
         }
         if (bloqueoMesCerrado) { toast.error(AVISO_MES_CERRADO); return; }
         const faltante = Math.max(1, Math.floor(Number(gap.missing) || 1));
-        const objectiveId = gap.objectiveId || selectedObjective || '';
+        const objectiveId = objectiveIdEscrituraCierre(gap.objectiveId || selectedObjective || '');
         const enGrilla = new Set(displayedEmployees.map((e: { id: string }) => e.id));
-        const asignables = candidatosFaltante({ dateStr, positionName: gap.positionName, banda: gapBand })
+        const asignables = candidatosFaltante({ dateStr, positionName: gap.positionName, banda: gapBand, objectiveId })
             .filter((c) => enGrilla.has(c.empId));
         const francos = canAssignFT ? francosVisibles(dateStr).filter((f) => enGrilla.has(f.empId)) : [];
         const turnos = turnos12(dateStr);
-        const cupos: Record<string, number> = {};
-        for (const p of positionStructure || []) {
-            const nombre = String(p.positionName || '').trim().toUpperCase().replace(/\s+/g, ' ');
-            if (nombre) cupos[nombre] = Math.max(1, Number(p.qty) || 1);
+        const estructurasCupo: Record<string, { positionName?: string; qty?: number }[]> = {};
+        if (selectedGrupo && grupoUnifiedMode) {
+            for (const id of selectedGrupo.objectiveIds || []) {
+                const est = grupoSlaMap[id];
+                if (est?.length) estructurasCupo[id] = est;
+            }
         }
+        if (objectiveId && !estructurasCupo[objectiveId]?.length) estructurasCupo[objectiveId] = positionStructure || [];
+        const cupos = cuposCierrePorObjetivo(estructurasCupo);
         const sla = getShiftsForPosition(gap.positionName, objectiveId) as TurnoSla[];
+        const diaOff = (ds: string, n: number) => {
+            const [y, m, d] = ds.split('-').map(Number);
+            const dt = new Date(y, (m || 1) - 1, d || 1);
+            dt.setDate(dt.getDate() + n);
+            return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+        };
+        const turnoEn = (empId: string, ds: string, overlay: Record<string, any>) => {
+            const key = `${empId}_${ds}`;
+            const p = overlay[key] !== undefined ? overlay[key] : pendingChangesRef.current[key];
+            const t = p ? (p.isDeleted ? null : p) : shiftsMap[key];
+            if (!t || t.isDeleted || t.isFranco || t.isNovedad || t.isAbsent) return null;
+            const code = normalizarCodigo(t.code || '');
+            if (!code || ['F', 'FF', 'FP', 'RET', 'EV'].includes(code)) return null;
+            const aus = absencesMap[key];
+            if (aus && isActiveAbsence(aus)) return null;
+            return t;
+        };
+        const horasTurno = (t: { hours?: number; code?: string } | null | undefined) => {
+            const n = Number(t?.hours);
+            if (n > 0) return n;
+            const c = normalizarCodigo(t?.code || '');
+            if (c === 'D12' || c === 'N12') return 12;
+            if (c === 'M' || c === 'T' || c === 'N') return 8;
+            return 0;
+        };
+        const bloqueoJornada = (
+            empId: string,
+            ds: string,
+            propuesto: { code: string; startTime?: string; endTime?: string; hours?: number },
+            horasAntes: number,
+            overlay: Record<string, any>,
+        ): string | null => {
+            const dias12: string[] = [];
+            for (let i = -6; i <= 6; i++) {
+                if (i === 0) continue;
+                const d = diaOff(ds, i);
+                const t = turnoEn(empId, d, overlay);
+                if (!t) continue;
+                const code = normalizarCodigo(t.code || '');
+                if (code === 'D12' || code === 'N12' || Number(t.hours) >= 12) dias12.push(d);
+            }
+            const vecino = (d: string) => {
+                const t = turnoEn(empId, d, overlay);
+                if (!t) return null;
+                const startTime = hhmmRapido(t.startTime);
+                const endTime = hhmmRapido(t.endTime);
+                if (!startTime || !endTime) return null;
+                return { code: normalizarCodigo(t.code || ''), startTime, endTime };
+            };
+            return motivoBloqueoJornadaCierre({
+                horasMes: Number(empMonthlyHours[empId]) || 0,
+                horasAntes,
+                horasDespues: Number(propuesto.hours) || horasTurno(propuesto),
+                tope: planningLimits.monthly,
+                topeAutorizado: authorizedOver200Ids.has(empId) || !topeRequierePin(topeGrants[empId], periodoPlan),
+                dateStr: ds,
+                propuesto,
+                anterior: vecino(diaOff(ds, -1)),
+                siguiente: vecino(diaOff(ds, 1)),
+                dias12,
+            });
+        };
+        let motivo12 = '';
         const plan = planCerrarBandas({
             banda: gapBand,
             faltante,
             asignables,
             francos,
             par12: (usados) => {
-                const prop = proponerCierre12h({
-                    dateStr,
-                    positionName: gap.positionName,
-                    faltantes: [gapBand],
-                    turnos: turnos.filter((t) => !usados.has(t.empId)),
-                    sla,
-                    slaDe: (pos, objId) => (getShiftsForPosition(pos, objId || objectiveId) as TurnoSla[]) || [],
-                    cupos,
-                    objectiveId,
-                });
-                if (!prop || prop.modo !== 'par' || prop.cambios.length < 2) return null;
-                return { empIds: prop.cambios.map((c) => c.empId), extra: prop };
+                const saltar = new Set(usados);
+                for (let guard = 0; guard < 12; guard++) {
+                    const prop = proponerCierre12h({
+                        dateStr,
+                        positionName: gap.positionName,
+                        faltantes: [gapBand],
+                        turnos: turnos.filter((t) => !saltar.has(t.empId)),
+                        sla,
+                        slaDe: (pos, objId) => (getShiftsForPosition(pos, objId || objectiveId) as TurnoSla[]) || [],
+                        cupos,
+                        objectiveId,
+                    });
+                    if (!prop || prop.modo !== 'par' || prop.cambios.length < 2) return null;
+                    const malo = prop.cambios.find((ch) => {
+                        const actual = turnos.find((t) => t.empId === ch.empId && t.dateStr === ch.dateStr);
+                        return !!bloqueoJornada(
+                            ch.empId,
+                            ch.dateStr,
+                            { code: ch.code, startTime: ch.startTime, endTime: ch.endTime, hours: ch.hours },
+                            horasTurno(actual) || 8,
+                            pendingChangesRef.current,
+                        );
+                    });
+                    if (!malo) return { empIds: prop.cambios.map((c) => c.empId), extra: prop };
+                    const actual = turnos.find((t) => t.empId === malo.empId && t.dateStr === malo.dateStr);
+                    motivo12 = bloqueoJornada(
+                        malo.empId,
+                        malo.dateStr,
+                        { code: malo.code, startTime: malo.startTime, endTime: malo.endTime, hours: malo.hours },
+                        horasTurno(actual) || 8,
+                        pendingChangesRef.current,
+                    ) || motivo12;
+                    saltar.add(malo.empId);
+                }
+                return null;
             },
         });
         const filaDe = new Map(displayedEmployees.map((e: { id: string }, i: number) => [e.id, i]));
@@ -18361,31 +18458,57 @@ function PlanificacionDesktop() {
             const key = `${empId}_${ds}`;
             const lleno = cupoLlenoRapido(celda.emp, ds, key, res.change, next);
             if (lleno) { avisos.push(lleno); return false; }
-            next[key] = res.change;
+            next[key] = { ...res.change, objectiveId: objectiveIdEscrituraCierre(objectiveId, res.change.objectiveId) };
             return true;
         };
         for (const paso of plan.pasos) {
             if (paso.via === 'asignar') {
-                const franja = franjaDeBanda(gap.positionName, gapBand);
-                if (!franja) { avisos.push(`${gap.positionName} no tiene la banda ${gapBand} en el servicio.`); continue; }
+                const franja = franjaBandaDeSla(sla, gapBand);
+                if (!franja?.startTime || !franja.endTime) { avisos.push(`${gap.positionName} no tiene la banda ${gapBand} en el servicio.`); continue; }
                 const code = normalizarCodigo(franja.code);
                 if (escribir(paso.empId, dateStr, code, {
                     code, startTime: franja.startTime, endTime: franja.endTime, hours: franja.hours, name: franja.name || code, positionName: gap.positionName, forzarPuesto: true,
-                    ...(gap.objectiveId ? { objectiveId: gap.objectiveId } : {}),
+                    objectiveId,
                 })) hechas++;
             } else if (paso.via === 'ft') {
-                const codeBanda = normalizarCodigo(gapBand);
-                const slaFt = sla.find((s) => normalizarCodigo(s.code) === codeBanda);
+                const franja = franjaBandaDeSla(sla, gapBand);
+                if (!franja?.startTime || !franja.endTime) { avisos.push(`${gap.positionName} no tiene la banda ${gapBand} en el servicio.`); continue; }
+                const codeBanda = normalizarCodigo(franja.code);
+                const horas = Number(franja.hours) || 8;
+                const blFt = bloqueoJornada(paso.empId, dateStr, { code: codeBanda, startTime: franja.startTime, endTime: franja.endTime, hours: horas }, 0, next);
+                if (blFt) { avisos.push(blFt); continue; }
                 if (escribir(paso.empId, dateStr, `FT·${codeBanda}`, {
                     code: codeBanda,
-                    startTime: slaFt?.startTime,
-                    endTime: slaFt?.endTime,
-                    hours: slaFt?.hours,
-                    name: slaFt?.name || codeBanda,
+                    startTime: franja.startTime,
+                    endTime: franja.endTime,
+                    hours: horas,
+                    name: franja.name || codeBanda,
                     positionName: gap.positionName,
-                    ...(gap.objectiveId ? { objectiveId: gap.objectiveId } : {}),
+                    objectiveId,
                 })) hechas++;
             } else {
+                const malo12 = paso.extra.cambios.find((ch) => {
+                    const actual = turnos.find((t) => t.empId === ch.empId && t.dateStr === ch.dateStr);
+                    return !!bloqueoJornada(
+                        ch.empId,
+                        ch.dateStr,
+                        { code: ch.code, startTime: ch.startTime, endTime: ch.endTime, hours: ch.hours },
+                        horasTurno(actual) || 8,
+                        next,
+                    );
+                });
+                if (malo12) {
+                    const actual = turnos.find((t) => t.empId === malo12.empId && t.dateStr === malo12.dateStr);
+                    const msg12 = bloqueoJornada(
+                        malo12.empId,
+                        malo12.dateStr,
+                        { code: malo12.code, startTime: malo12.startTime, endTime: malo12.endTime, hours: malo12.hours },
+                        horasTurno(actual) || 8,
+                        next,
+                    );
+                    if (msg12) avisos.push(msg12);
+                    continue;
+                }
                 const parcial: Record<string, any> = {};
                 const fechas: string[] = [];
                 let ok = 0;
@@ -18397,6 +18520,7 @@ function PlanificacionDesktop() {
                     if (!celda.emp) continue;
                     const fuente: FuenteRapida = {
                         code: ch.code, startTime: ch.startTime, endTime: ch.endTime, hours: ch.hours, name: ch.code, positionName: ch.positionName || gap.positionName,
+                        objectiveId,
                     };
                     const bl = bloqueoCeldaRapido(celda.emp, ch.dateStr, celda.ctx, ch.code);
                     if (bl) { avisos.push(bl); continue; }
@@ -18404,6 +18528,7 @@ function PlanificacionDesktop() {
                     if ('error' in res) { avisos.push(res.error); continue; }
                     parcial[`${ch.empId}_${ch.dateStr}`] = {
                         ...res.change,
+                        objectiveId: objectiveIdEscrituraCierre(objectiveId, res.change.objectiveId),
                         positionName: ch.positionName || res.change.positionName,
                         employeeName: String(celda.emp.name || ''),
                         coverageMode: '12H',
@@ -18422,14 +18547,79 @@ function PlanificacionDesktop() {
                 }
             }
         }
-        const quedaron = Math.max(0, faltante - hechas);
-        const msg = textoResultadoCierreBanda({ banda: gapBand, cerradas: hechas, quedaron });
-        if (hechas > 0) {
-            if (fechas12.length) sellarAtribucion12(next, [...new Set(fechas12)]);
+        if (fechas12.length) sellarAtribucion12(next, [...new Set(fechas12)]);
+        const dayLetter = getDayLetter(dateStr);
+        const cruda = (objectiveId && grupoSlaMap[objectiveId]?.length ? grupoSlaMap[objectiveId] : positionStructure) || [];
+        const filtrada = cruda.filter((pos: any) => isPosActiveOnDay(pos, dayLetter, dateStr) && !isPosExcludedOnDate(pos, dateStr));
+        const structure = filtrada.some((p: any) => p.positionName === gap.positionName) ? filtrada : cruda;
+        const codeCountsByPos: Record<string, Record<string, number>> = {};
+        for (const pos of structure) codeCountsByPos[String(pos.positionName || 'General')] = {};
+        const empById = new Map<string, any>(dotacionBaseEmployees.map((e: any) => [e.id, e]));
+        const leer = (empId: string, ds: string) => {
+            const key = `${empId}_${ds}`;
+            const pend = next[key];
+            if (pend?.isDeleted) return null;
+            return pend || shiftsMap[key] || null;
+        };
+        for (const emp of dotacionBaseEmployees as any[]) {
+            const key = `${emp.id}_${dateStr}`;
+            const raw = leer(emp.id, dateStr);
+            if (!raw) continue;
+            if (isEmployeeOnLeave({ shiftCode: raw.code, absence: absencesMap[key] })) continue;
+            const explicit = raw.objectiveId ? String(slaIdToObjId[String(raw.objectiveId)] || raw.objectiveId) : '';
+            const effectiveObjId = explicit || resolveNativeObjectiveInGrupo(emp) || '';
+            if (String(effectiveObjId) !== String(objectiveId)) continue;
+            const code = String(raw.code || '').toUpperCase();
+            if (!code || OBJECTIVE_NON_BILLABLE_CODES.has(code)) continue;
+            const shiftPos = String(raw.positionName || '').trim() || 'sin puesto';
+            if (!codeCountsByPos[shiftPos]) codeCountsByPos[shiftPos] = {};
+            codeCountsByPos[shiftPos][code] = (codeCountsByPos[shiftPos][code] || 0) + 1;
+        }
+        const splitCredits = structure.length ? collectSplitBandCreditsForDay(
+            dotacionBaseEmployees,
+            dateStr,
+            (empId, ds) => {
+                const emp = empById.get(empId) || { id: empId };
+                const raw = leer(empId, ds);
+                if (!raw) return null;
+                const explicit = raw.objectiveId ? String(slaIdToObjId[String(raw.objectiveId)] || raw.objectiveId) : '';
+                const obj = explicit || resolveNativeObjectiveInGrupo(emp) || raw.objectiveId;
+                if (!acreditaCoberturaAlObjetivo({ ...raw, objectiveId: obj || raw.objectiveId }, objectiveId)) return null;
+                return { ...raw, objectiveId };
+            },
+            {
+                selectedObjective: objectiveId,
+                isPendingChange: (empId, ds) => next[`${empId}_${ds}`] != null,
+                resolveOriginalShift: (empId, ds) => shiftsMap[`${empId}_${ds}`] || null,
+                shiftsMap,
+                pendingChanges: next,
+            },
+        ) : {};
+        const codeCountsCerrados: Record<string, Record<string, number>> = {};
+        for (const pos of structure) {
+            const posName = String(pos.positionName || 'General');
+            const codeCounts: Record<string, number> = { ...(codeCountsByPos[posName] || {}) };
+            const posCredits = lookupSplitCreditsForPosition(splitCredits, posName);
+            for (const [bandCode, n] of Object.entries(posCredits)) codeCounts[bandCode] = (codeCounts[bandCode] || 0) + n;
+            codeCountsCerrados[posName] = codeCounts;
+        }
+        const despues = structure.length
+            ? faltanteDeBandaAbierta(bandasAbiertasDelGrupo({
+                dateStr,
+                dayLetter,
+                objetivos: [{ id: objectiveId, name: objectiveId, positions: structure, codeCountsByPosition: codeCountsCerrados }],
+            }), { objectiveId, positionName: gap.positionName, band: gapBand })
+            : Math.max(0, faltante - hechas);
+        const contado = hechas > 0
+            ? cierreContado(faltante, despues)
+            : { cerradas: 0, quedaron: Math.max(faltante, despues) };
+        if (contado.quedaron > 0 && motivo12 && !avisos.includes(motivo12)) avisos.push(motivo12);
+        const msg = textoResultadoCierreBanda({ banda: gapBand, cerradas: contado.cerradas, quedaron: contado.quedaron });
+        if (contado.cerradas > 0) {
             if (!commitPendingChanges(next)) return;
             setCoverageTooltip(null);
             const extra = avisos[0] ? ` ${avisos[0]}` : '';
-            if (quedaron > 0) toast.message(`${msg}${extra}`);
+            if (contado.quedaron > 0) toast.message(`${msg}${extra}`);
             else toast.success(`${msg} Quedó en borrador: guardá el cronograma.`);
             return;
         }

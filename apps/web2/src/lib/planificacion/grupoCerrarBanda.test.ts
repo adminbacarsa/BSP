@@ -4,7 +4,14 @@ import {
   acreditacionCierreElegido,
   acreditaCoberturaAlObjetivo,
   bandasAbiertasDelGrupo,
+  cierreContado,
+  conteosCierreObjetivo,
+  cuposCierrePorObjetivo,
+  faltanteDeBandaAbierta,
+  franjaBandaDeSla,
+  motivoBloqueoJornadaCierre,
   objetivoPermitidoParaExtender,
+  objectiveIdEscrituraCierre,
   planCerrarBandas,
   textoBotonCerrarBanda,
   textoResultadoCierreBanda,
@@ -288,4 +295,196 @@ test('faltante 2 T cierra las dos bandas y el botón lo dice', () => {
   assert.equal(soloUna.pasos.length, 1);
   assert.equal(soloUna.quedaron, 1);
   assert.equal(textoResultadoCierreBanda({ banda: 'T', cerradas: 1, quedaron: 1 }), 'Se cerró 1 banda T. Quedó 1 banda T sin cerrar.');
+});
+
+const vigilancia = {
+  positionName: 'Vigilancia',
+  qty: 1,
+  coverageType: '24hs',
+  shifts: [
+    { code: 'M', hours: 8, startTime: '07:00', endTime: '15:00', quantity: 1 },
+    { code: 'T', hours: 8, startTime: '15:00', endTime: '23:00', quantity: 1 },
+    { code: 'N', hours: 8, startTime: '23:00', endTime: '07:00', quantity: 1 },
+  ],
+};
+
+test('el par D12+N12 se escribe en el objetivo del hueco y ahí cierra la T', () => {
+  assert.equal(objectiveIdEscrituraCierre('vifood', 'peaje'), 'vifood');
+  const dia = DIA;
+  const base = { dateStr: dia, dayLetter: LETRA, positionName: 'Vigilancia', banda: 'T' };
+  const puestosVifood = [{ ...vigilancia, qty: 1 }];
+  const antes = bandasAbiertasDelGrupo({
+    dateStr: dia,
+    dayLetter: LETRA,
+    objetivos: [{
+      id: 'vifood',
+      name: 'Vifood',
+      positions: puestosVifood,
+      codeCountsByPosition: { Vigilancia: { M: 1, N: 1 } },
+    }],
+  });
+  assert.equal(faltanteDeBandaAbierta(antes, { objectiveId: 'vifood', positionName: 'Vigilancia', band: 'T' }), 1);
+
+  const mal = [
+    { objectiveId: 'peaje', positionName: 'Vigilancia', code: 'D12' },
+    { objectiveId: 'peaje', positionName: 'Vigilancia', code: 'N12' },
+  ];
+  const abiertasMal = bandasAbiertasDelGrupo({
+    dateStr: dia,
+    dayLetter: LETRA,
+    objetivos: [{
+      id: 'vifood',
+      name: 'Vifood',
+      positions: puestosVifood,
+      codeCountsByPosition: conteosCierreObjetivo('vifood', mal),
+    }],
+  });
+  const faltanteMal = faltanteDeBandaAbierta(abiertasMal, { objectiveId: 'vifood', positionName: 'Vigilancia', band: 'T' });
+  assert.equal(faltanteMal, 1);
+  assert.deepEqual(cierreContado(1, faltanteMal), { cerradas: 0, quedaron: 1 });
+
+  const bien = mal.map((t) => ({ ...t, objectiveId: objectiveIdEscrituraCierre('vifood', t.objectiveId) }));
+  assert.deepEqual(bien.map((t) => t.objectiveId), ['vifood', 'vifood']);
+  const abiertasBien = bandasAbiertasDelGrupo({
+    dateStr: dia,
+    dayLetter: LETRA,
+    objetivos: [{
+      id: 'vifood',
+      name: 'Vifood',
+      positions: puestosVifood,
+      codeCountsByPosition: conteosCierreObjetivo('vifood', bien),
+    }],
+  });
+  const faltanteBien = faltanteDeBandaAbierta(abiertasBien, { objectiveId: 'vifood', positionName: 'Vigilancia', band: 'T' });
+  assert.equal(faltanteBien, 0);
+  assert.deepEqual(cierreContado(base.banda === 'T' ? 1 : 0, faltanteBien), { cerradas: 1, quedaron: 0 });
+});
+
+test('cerrar la T de Peaje no se lleva una M de Vifood: el cupo es el de cada objetivo', () => {
+  const dia = DIA;
+  const turnos: TurnoPuesto12[] = [
+    { empId: 'mv1', nombre: 'MAÑANA VIFOOD', dateStr: dia, code: 'M', positionName: 'Vigilancia', objectiveId: 'vifood' },
+    { empId: 'mv2', nombre: 'MAÑANA VIFOOD 2', dateStr: dia, code: 'M', positionName: 'Vigilancia', objectiveId: 'vifood' },
+    { empId: 'np', nombre: 'NOCHE PEAJE', dateStr: dia, code: 'N', positionName: 'Vigilancia', objectiveId: 'peaje' },
+  ];
+  const sla = vigilancia.shifts;
+  const cuposDelSeleccionado = { VIGILANCIA: 1 };
+  const cuposDelGrupo = cuposCierrePorObjetivo({
+    peaje: [{ positionName: 'Vigilancia', qty: 1 }],
+    vifood: [{ positionName: 'Vigilancia', qty: 2 }],
+  });
+  assert.equal(cuposDelGrupo['vifood|VIGILANCIA'], 2);
+  assert.equal(cuposDelGrupo.VIGILANCIA, undefined);
+
+  const mal = proponerCierre12h({
+    dateStr: dia,
+    positionName: 'Vigilancia',
+    faltantes: ['T'],
+    turnos,
+    sla,
+    cupos: cuposDelSeleccionado,
+    objectiveId: 'peaje',
+  });
+  assert.equal(mal?.modo, 'par');
+  assert.equal(mal?.cambios.some((c) => c.empId === 'mv1' || c.empId === 'mv2'), true);
+
+  const bien = proponerCierre12h({
+    dateStr: dia,
+    positionName: 'Vigilancia',
+    faltantes: ['T'],
+    turnos,
+    sla,
+    cupos: cuposDelGrupo,
+    objectiveId: 'peaje',
+  });
+  assert.notEqual(bien?.modo, 'par');
+  assert.equal(bien?.cambios.some((c) => c.empId === 'mv1' || c.empId === 'mv2'), false);
+});
+
+test('el horario de 8 h sale del SLA del objetivo del hueco', () => {
+  const peaje = [{ code: 'T', startTime: '14:00', endTime: '22:00', hours: 8, name: 'Tarde' }];
+  const vifood = [
+    { code: 'T', startTime: '15:00', endTime: '23:00', hours: 8, name: 'Tarde' },
+    { code: 'D12', startTime: '07:00', endTime: '19:00', hours: 12, name: 'D12' },
+  ];
+  const franja = franjaBandaDeSla(vifood, 'T');
+  assert.equal(franja?.startTime, '15:00');
+  assert.equal(franja?.endTime, '23:00');
+  assert.notEqual(franja?.startTime, franjaBandaDeSla(peaje, 'T')?.startTime);
+  assert.equal(franjaBandaDeSla(vifood, 'T')?.code, 'T');
+});
+
+test('el par de 12 h y el FT respetan tope, racha de 4 y el descanso del turno ya alargado', () => {
+  const dia = '2026-10-09';
+  const tope = motivoBloqueoJornadaCierre({
+    horasMes: 198,
+    horasAntes: 8,
+    horasDespues: 12,
+    dateStr: dia,
+    propuesto: { code: 'D12', startTime: '07:00', endTime: '19:00', hours: 12 },
+  });
+  assert.match(tope || '', /tope 200 h/);
+
+  const justo = motivoBloqueoJornadaCierre({
+    horasMes: 196,
+    horasAntes: 8,
+    horasDespues: 12,
+    dateStr: dia,
+    propuesto: { code: 'D12', startTime: '07:00', endTime: '19:00', hours: 12 },
+  });
+  assert.equal(justo, null);
+
+  const ft = motivoBloqueoJornadaCierre({
+    horasMes: 196,
+    horasAntes: 0,
+    horasDespues: 8,
+    dateStr: dia,
+    propuesto: { code: 'T', startTime: '15:00', endTime: '23:00', hours: 8 },
+  });
+  assert.match(ft || '', /tope 200 h/);
+  assert.equal(motivoBloqueoJornadaCierre({
+    horasMes: 196,
+    horasAntes: 0,
+    horasDespues: 8,
+    topeAutorizado: true,
+    dateStr: dia,
+    propuesto: { code: 'T', startTime: '15:00', endTime: '23:00', hours: 8 },
+  }), null);
+
+  const medidoEn8 = motivoBloqueoJornadaCierre({
+    horasMes: 40,
+    horasAntes: 8,
+    horasDespues: 8,
+    dateStr: dia,
+    propuesto: { code: 'M', startTime: '07:00', endTime: '15:00', hours: 8 },
+    siguiente: { code: 'M', startTime: '06:00', endTime: '14:00' },
+  });
+  assert.equal(medidoEn8, null);
+  const alargado = motivoBloqueoJornadaCierre({
+    horasMes: 40,
+    horasAntes: 8,
+    horasDespues: 12,
+    dateStr: dia,
+    propuesto: { code: 'D12', startTime: '07:00', endTime: '19:00', hours: 12 },
+    siguiente: { code: 'M', startTime: '06:00', endTime: '14:00' },
+  });
+  assert.match(alargado || '', /descanso/);
+
+  const racha = motivoBloqueoJornadaCierre({
+    horasMes: 40,
+    horasAntes: 8,
+    horasDespues: 12,
+    dateStr: dia,
+    propuesto: { code: 'D12', startTime: '07:00', endTime: '19:00', hours: 12 },
+    dias12: ['2026-10-06', '2026-10-07', '2026-10-08', '2026-10-10'],
+  });
+  assert.match(racha || '', /12 h seguidos/);
+  assert.equal(motivoBloqueoJornadaCierre({
+    horasMes: 40,
+    horasAntes: 8,
+    horasDespues: 12,
+    dateStr: dia,
+    propuesto: { code: 'D12', startTime: '07:00', endTime: '19:00', hours: 12 },
+    dias12: ['2026-10-06', '2026-10-07', '2026-10-08'],
+  }), null);
 });
