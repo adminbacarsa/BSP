@@ -290,9 +290,10 @@ import { tablaCodigosPlanilla } from '@/lib/planificacion/codigosHorarioPegado';
 import { claveEquivalencia, type EquivalenciaCodigo } from '@/lib/planificacion/equivalenciaCodigo';
 import { mesLabelDe, resolverTurnoCopiado } from '@/lib/planificacion/copiarTurno';
 import { avisoJornadaTura, HORAS_TURA, puestoAdmite12h, textoTura, tramoTura, type LadoTura } from '@/lib/planificacion/turaRapido';
+import { camposExtCobertura, esBandaNocheCodigo, HORAS_EXT_COBERTURA, siglaAgregado, textoExtCobertura, validarCargaAgregado } from '@/lib/planificacion/extCoberturaRapido';
 import { crearTuraPlanificacion } from '@/lib/refuerzo/crearTuraPlanificacion';
 import { coberturaPorHoras, textoHoras, type PuestoHoras, type TramoHoras } from '@/lib/planificacion/coberturaHoras';
-import { acreditarExtEntrePuestos, textoFacturableCliente, type TurnoExt } from '@/lib/planificacion/extEntrePuestos';
+import { acreditarExtEntrePuestos, deltaCierreExtEntre, textoFacturableCliente, turnoExtDelObjetivo, type TurnoExt } from '@/lib/planificacion/extEntrePuestos';
 import { crearRfzePlanificacion } from '@/lib/refuerzo/crearRfzePlanificacion';
 import { modifyRefuerzoPuntual } from '@/lib/refuerzo/modifyRefuerzoPuntual';
 import { cancelRefuerzoPuntual } from '@/lib/refuerzo/cancelRefuerzoPuntual';
@@ -1649,6 +1650,9 @@ function calcularCeldaGrilla(e: EntradaCeldaGrilla, emp: any, isGuest: boolean, 
         puntoExclusion: !!(isExclusionCol && !content),
         swap: isSwap ? (swapPending ? 'S!' : 'S') : '',
         mas: !!(isExtended || isEarly || isCoverageSplitCell),
+        marcaAgregado: isCoverageSplitCell
+            ? (siglaAgregado({ isExtended: !!isExtended, isEarlyStart: !!isEarly }) || undefined)
+            : (activeShift?.id && e.turaMap[activeShift.id] ? 'TURA' : undefined),
         liberado: covRole === 'LIBERATED',
         usado: isCoverageSourceUsed,
         descansoReducido: !!cellShift?.descansoReducido,
@@ -2342,7 +2346,7 @@ function PlanificacionDesktop() {
         destinoId: string;
         /** Franja pegada del mismo puesto sin nadie ese día: se puede cubrir extendiendo (no es TURA). */
         cubrir?: { code: string; desde: string; hasta: string; lado: 'antes' | 'despues' } | null;
-        modo: 'cubrir' | 'tura';
+        modo: 'cubrir' | 'tura' | 'cobertura';
     } | null>(null);
     const [motivoVista12, setMotivoVista12] = useState('');
     const propuesta12Ref = useRef<Propuesta12h[] | null>(null);
@@ -5596,18 +5600,20 @@ function PlanificacionDesktop() {
                 if (!raw) continue;
                 const explicit = pending?.objectiveId ?? raw.objectiveId;
                 const obj = explicit ? String(slaIdToObjId[explicit] || explicit) : '';
-                if (obj && obj !== String(selectedObjective)) continue;
+                const cubreId = raw.coversObjectiveId ? String(slaIdToObjId[raw.coversObjectiveId] || raw.coversObjectiveId) : '';
+                const prefId = emp.preferredObjectiveId ? String(slaIdToObjId[emp.preferredObjectiveId] || emp.preferredObjectiveId) : '';
+                const legajoId = String(resolveNativeObjectiveInGrupo(emp) || prefId || '');
+                const entraExt = turnoExtDelObjetivo(
+                    { objectiveId: obj, coversObjectiveId: cubreId },
+                    String(selectedObjective),
+                    { objetivoLegajo: obj || cubreId ? undefined : legajoId },
+                );
+                const ajeno = !!(obj && obj !== String(selectedObjective));
+                if (ajeno && !entraExt) continue;
                 const code = String(raw.code || '').toUpperCase();
                 const nombre = String(emp.name || emp.id);
                 const positionName = String(raw.positionName || '').trim();
-                turnos.push({
-                    empId: emp.id,
-                    nombre,
-                    code,
-                    positionName,
-                    hours: Number(raw.hours) || undefined,
-                });
-                {
+                if (entraExt) {
                     const iniExt = relojExt(raw.startTime);
                     const finExt = relojExt(raw.endTime);
                     const claveExt = `${emp.id}|${code}|${iniExt}|${finExt}|${relojExt(raw.segmentFromTime)}|${relojExt(raw.segmentToTime)}`;
@@ -5629,6 +5635,14 @@ function PlanificacionDesktop() {
                         });
                     }
                 }
+                if (ajeno) continue;
+                turnos.push({
+                    empId: emp.id,
+                    nombre,
+                    code,
+                    positionName,
+                    hours: Number(raw.hours) || undefined,
+                });
                 {
                     const aus0 = absencesMap[key];
                     const noTrabaja = code === 'F' || code === 'FF' || code === 'FP' || code === 'RET' || code === 'EV' || raw.isFranco || raw.isNovedad || raw.isAbsent
@@ -5672,8 +5686,10 @@ function PlanificacionDesktop() {
                         .map((st) => ({ code: String(st.code || ''), startTime: String(st.startTime), endTime: String(st.endTime), qty: Number(st.quantity) || Number(p.qty) || 1 })),
                 }));
             for (const tura of Object.values(turaMap || {})) {
-                const fila = tura as { fecha?: string; startTime?: unknown; endTime?: unknown; objectiveId?: string; positionName?: string; employeeName?: string; hours?: number; parentShiftId?: string; id?: string };
-                if (fila.objectiveId && String(fila.objectiveId) !== String(selectedObjective)) continue;
+                const fila = tura as { fecha?: string; startTime?: unknown; endTime?: unknown; objectiveId?: string; coversObjectiveId?: string; positionName?: string; employeeName?: string; hours?: number; parentShiftId?: string; id?: string };
+                const turaObj = fila.objectiveId ? String(slaIdToObjId[fila.objectiveId] || fila.objectiveId) : '';
+                const turaCubre = fila.coversObjectiveId ? String(slaIdToObjId[fila.coversObjectiveId] || fila.coversObjectiveId) : '';
+                if (!turnoExtDelObjetivo({ objectiveId: turaObj, coversObjectiveId: turaCubre }, String(selectedObjective))) continue;
                 const fecha = String(fila.fecha || '').slice(0, 10);
                 const iso = String(fila.startTime || '').slice(0, 10);
                 if (fecha !== dateStr && iso !== dateStr) continue;
@@ -5718,7 +5734,7 @@ function PlanificacionDesktop() {
             }));
         }
         return { porDia, sobraPorDia, faltantes, avisos, facturableCliente, vendidasReloj, turaHoras, extEnHuecoHoras };
-    }, [selectedObjective, positionStructure, daysInMonth, dotacionBaseEmployees, pendingChanges, shiftsMap, slaIdToObjId, absencesMap, empMonthlyHours, exigeCoberturaGrilla, turaMap]);
+    }, [selectedObjective, positionStructure, daysInMonth, dotacionBaseEmployees, pendingChanges, shiftsMap, slaIdToObjId, absencesMap, empMonthlyHours, exigeCoberturaGrilla, turaMap, resolveNativeObjectiveInGrupo]);
 
     /** Días con huecos para publicar y el resumen: un día cerrado por horas (doble control) no cuenta. */
     const diasConHuecos = useMemo(() => {
@@ -5751,6 +5767,17 @@ function PlanificacionDesktop() {
         }
 
         const empById = new Map<string, any>(dotacionBaseEmployees.map((e: any) => [e.id, e]));
+        const turnosExt: TurnoExt[] = [];
+        const vistosExt = new Set<string>();
+        const relojExt = (v: unknown): string => {
+            const hm = hhmmRapido(v);
+            if (hm) return hm;
+            if (typeof v !== 'string') return '';
+            const iso = v.match(/T(\d{2}):(\d{2})/);
+            if (iso) return `${iso[1]}:${iso[2]}`;
+            const m = v.match(/(\d{1,2}):(\d{2})/);
+            return m ? `${m[1].padStart(2, '0')}:${m[2]}` : '';
+        };
 
         for (const emp of dotacionBaseEmployees) {
             const key = `${emp.id}_${dateStr}`;
@@ -5760,6 +5787,38 @@ function PlanificacionDesktop() {
                 ? (pendingChanges[key].isDeleted ? null : pendingChanges[key])
                 : shiftsMap[key];
             if (!shift) continue;
+            const explicit = pendingChanges[key]?.objectiveId ?? shift.objectiveId;
+            const obj = explicit ? String(slaIdToObjId[explicit] || explicit) : '';
+            const cubreId = shift.coversObjectiveId ? String(slaIdToObjId[shift.coversObjectiveId] || shift.coversObjectiveId) : '';
+            const prefId = emp.preferredObjectiveId ? String(slaIdToObjId[emp.preferredObjectiveId] || emp.preferredObjectiveId) : '';
+            const legajoId = String(resolveNativeObjectiveInGrupo(emp) || prefId || '');
+            if (turnoExtDelObjetivo(
+                { objectiveId: obj, coversObjectiveId: cubreId },
+                objId,
+                { objetivoLegajo: obj || cubreId ? undefined : legajoId },
+            )) {
+                const codeExt = String(shift.code || '').toUpperCase();
+                const iniExt = relojExt(shift.startTime);
+                const finExt = relojExt(shift.endTime);
+                const claveExt = `${emp.id}|${codeExt}|${iniExt}|${finExt}|${relojExt(shift.segmentFromTime)}|${relojExt(shift.segmentToTime)}`;
+                if (!vistosExt.has(claveExt) && (codeExt === 'TURA' || iniExt || shift.isExtended || shift.isEarlyStart)) {
+                    vistosExt.add(claveExt);
+                    turnosExt.push({
+                        positionName: String(shift.positionName || '').trim(),
+                        nombre: String(emp.name || emp.id).split(',')[0],
+                        code: codeExt,
+                        startTime: iniExt,
+                        endTime: finExt,
+                        hours: Number(shift.hours) || undefined,
+                        isExtended: shift.isExtended === true,
+                        isEarlyStart: shift.isEarlyStart === true,
+                        segmentFromTime: relojExt(shift.segmentFromTime),
+                        segmentToTime: relojExt(shift.segmentToTime),
+                        extExtraHours: Number(shift.extExtraHours ?? shift.extensionExtraHours) || undefined,
+                        isTura: codeExt === 'TURA' || shift.isTura === true,
+                    });
+                }
+            }
             const effectiveObjId = resolveEffectiveShiftObjectiveId(emp, shift, key);
             if (String(effectiveObjId || '') !== String(objId)) continue;
             const code = String(shift.code || '').toUpperCase();
@@ -5796,6 +5855,23 @@ function PlanificacionDesktop() {
         let required24 = 0;
         let closed24 = 0;
         const codeCountsCerrados: Record<string, Record<string, number>> = {};
+        const puestosExt = structure
+            .filter((pos: any) => pos.exigeCobertura !== false && isPosActiveOnDay(pos, dayLetter, dateStr) && !isPosExcludedOnDate(pos, dateStr))
+            .map((pos: any) => ({
+                positionName: String(pos.positionName || ''),
+                franjas: ((pos.shifts || []) as any[])
+                    .filter((st) => st.startTime && st.endTime)
+                    .filter((st) => (Array.isArray(st.specificDates) && st.specificDates.length
+                        ? st.specificDates.includes(dateStr)
+                        : !Array.isArray(st.days) || !st.days.length || st.days.includes(dayLetter) || correFeriado(st, dateStr)))
+                    .map((st) => ({
+                        code: String(st.code || ''),
+                        startTime: String(st.startTime),
+                        endTime: String(st.endTime),
+                        qty: Number(st.quantity) || Number(pos.qty) || 1,
+                    })),
+            }));
+        const extEntre = acreditarExtEntrePuestos(puestosExt, turnosExt);
         for (const pos of structure) {
             if (!isPosActiveOnDay(pos, dayLetter, dateStr)) continue;
             if (isPosExcludedOnDate(pos, dateStr)) continue;
@@ -5807,15 +5883,17 @@ function PlanificacionDesktop() {
             }
             codeCountsCerrados[posName] = codeCounts;
             const units = countPositionClosedUnitsFromShifts(pos, dayLetter, codeCounts, cycles, true, dateStr);
+            const cruce = extEntre.porPuesto.find((p) => normalizePlanningPositionName(p.positionName) === normalizePlanningPositionName(posName));
+            const delta = deltaCierreExtEntre(units, cruce);
             required += units.required;
-            closed += units.closed;
+            closed += units.closed + delta;
             if (esPuesto24(pos)) {
                 required24 += units.required;
-                closed24 += units.closed;
+                closed24 += units.closed + delta;
             }
         }
         return { required, closed, required24, closed24, codeCountsCerrados };
-    }, [grupoSlaMap, dotacionBaseEmployees, pendingChanges, shiftsMap, absencesMap, resolveEffectiveShiftObjectiveId]);
+    }, [grupoSlaMap, dotacionBaseEmployees, pendingChanges, shiftsMap, absencesMap, resolveEffectiveShiftObjectiveId, resolveNativeObjectiveInGrupo, slaIdToObjId]);
 
     /** Misma cuenta, guardada hasta que cambian los turnos: la fila COBERTURA del grupo la pedía día × objetivo en cada render. */
     const grupoCoberturaCache = useMemo(
@@ -15418,7 +15496,21 @@ function PlanificacionDesktop() {
         fuente?: FuenteRapida | null,
     ): { change: Record<string, any>; novedad?: Record<string, any> } | { error: string } => {
         const tipo = tipoDeCodigo(code);
-        let objectiveId = fuente?.objectiveId || resolveObjectiveForEmp(emp.id);
+        const celdaPrevia = (c?.p && !c.p.isDeleted) ? c.p : c?.s;
+        const volanteAca = esVolanteDelCrono(
+            emp?.volante,
+            idsObjetivosDelCrono(selectedObjective, selectedGrupo?.objectiveIds, !!(selectedGrupo && grupoUnifiedMode)),
+        );
+        const oidCelda = String(celdaPrevia?.objectiveId || '').trim();
+        const lugarTocado = (
+            !fuente?.objectiveId
+            && volanteAca
+            && esFrancoORetEditable(celdaPrevia)
+            && !!selectedGrupo
+            && grupoUnifiedMode
+            && selectedGrupo.objectiveIds.includes(oidCelda)
+        ) ? oidCelda : '';
+        let objectiveId = fuente?.objectiveId || lugarTocado || resolveObjectiveForEmp(emp.id);
         let pos = puestoFilaRapido(emp.id, c);
         // En el grupo el código manda: VFM va al puesto de Vifood que lo tiene, aunque el guardia sea de Peaje.
         // Vale también mirando un solo objetivo del grupo (Peaje Ruta 5 → el VFM se escribe en Vifood).
@@ -15453,6 +15545,8 @@ function PlanificacionDesktop() {
             objectiveId,
             // Opción elegida de otro objetivo del grupo: al guardar manda sobre el preferido (los dos llaman «Puesto» a su puesto).
             ...(fuente?.objectiveId ? { puestoObjetivoElegido: fuente.objectiveId } : {}),
+            // F/RET del volante: la M queda en la celda tocada, no en su objetivo preferido.
+            ...(lugarTocado && objectiveId === lugarTocado ? { objectiveIdLugar: lugarTocado } : {}),
         };
         if (tipo === 'FRANCO') {
             const nombres: Record<string, string> = { F: 'Franco', FF: 'Franco feriado', FP: 'Franco permuta' };
@@ -15471,11 +15565,7 @@ function PlanificacionDesktop() {
                 novedad: { employeeId: emp.id, employeeName: emp.name || '', startDate: ds, endDate: ds, type: code, reason: motivoNovedadRef.current || 'Cargado en modo rápido', status: 'APPROVED', _modoRapido: true },
             };
         }
-        const celdaFt = (c?.p && !c.p.isDeleted) ? c.p : c?.s;
-        const volanteAca = esVolanteDelCrono(
-            emp?.volante,
-            idsObjetivosDelCrono(selectedObjective, selectedGrupo?.objectiveIds, !!(selectedGrupo && grupoUnifiedMode)),
-        );
+        const celdaFt = celdaPrevia;
         const ftExplicito = esMarcaFtExplicita(code);
         const decisionFranco = decisionCambioSobreFranco({
             esVolante: volanteAca,
@@ -16365,13 +16455,21 @@ function PlanificacionDesktop() {
         if (ocupada) return null;
         return { code: fc, desde: String(cand.f.startTime), hasta: String(cand.f.endTime), lado: cand.lado };
     };
-    const abrirTura = (emp: any, ds: string, ctx: CtxCeldaGrilla | undefined, pos: string) => {
+    const abrirTura = (emp: any, ds: string, ctx: { p?: any; s?: any } | undefined, pos: string, tipoInicial?: 'cobertura' | 'tura') => {
+        if (isPlanningDateLocked(ds)) { toast.message('Día cerrado: no se cargan horas.'); return; }
+        if (msgBloqueoEdicion) { toast.message(msgBloqueoEdicion); return; }
         const actual0 = ctx?.p && !ctx.p.isDeleted ? ctx.p : ctx?.s;
         const code0 = String(actual0?.code || '').toUpperCase();
         const ini0 = hhmmRapido(actual0?.startTime);
         const fin0 = hhmmRapido(actual0?.endTime);
         const cubrir = actual0 && code0 && ini0 && fin0 && !esCeldaFranco(actual0) ? franjaPegadaLibre(String(actual0.positionName || pos), ds, code0, ini0, fin0) : null;
-        if (cubrir) {
+        const sinTurno = !code0 || ['F', 'FF', 'FP', 'RET'].includes(code0) || esCeldaLicencia({ code: code0 }) || !ini0 || !fin0;
+        if (tipoInicial === 'cobertura') {
+            if (sinTurno) { toast.message('La cobertura va pegada a un turno de trabajo: ese día no tiene turno.'); return; }
+            setTuraEditor({ empId: emp.id, empName: String(emp.name || ''), ds, parentId: String(ctx?.s?.id || actual0?.id || ''), code: code0, inicio: ini0!, fin: fin0!, positionName: String(actual0.positionName || pos), lado: cubrir?.lado || 'despues', horas: 1, guardando: false, pidio: '', motivo: '', destinoId: '', cubrir, modo: 'cobertura' });
+            return;
+        }
+        if (cubrir && tipoInicial !== 'tura') {
             setTuraEditor({ empId: emp.id, empName: String(emp.name || ''), ds, parentId: String(actual0.id || ''), code: code0, inicio: ini0!, fin: fin0!, positionName: String(actual0.positionName || pos), lado: cubrir.lado, horas: 1, guardando: false, pidio: '', motivo: '', destinoId: '', cubrir, modo: 'cubrir' });
             return;
         }
@@ -16411,9 +16509,103 @@ function PlanificacionDesktop() {
             toast.message(err instanceof Error ? err.message : 'No se pudo extender para cubrir la franja.');
         }
     };
+    const validacionAgregado = (t: NonNullable<typeof turaEditor>) => {
+        const mover = (delta: number) => {
+            const d = new Date(`${t.ds}T12:00:00`);
+            d.setDate(d.getDate() + delta);
+            return getDateKey(d);
+        };
+        const vecino = (ds: string) => {
+            const key = `${t.empId}_${ds}`;
+            const raw = pendingChanges[key] && !pendingChanges[key].isDeleted ? pendingChanges[key] : shiftsMap[key];
+            if (!raw || raw.isDeleted) return null;
+            const code = String(raw.code || '').toUpperCase();
+            if (['F', 'FF', 'FP', 'V', 'L', 'E', 'A', 'AA', 'PG', 'ART', 'RET', 'ESC'].includes(code)) return null;
+            const startTime = hhmmRapido(raw.startTime);
+            const endTime = hhmmRapido(raw.endTime);
+            if (!startTime || !endTime) return null;
+            const extra = Number(raw.extExtraHours) || 0;
+            if (raw.isEarlyStart && extra > 0 && startTime) {
+                const m = startTime.split(':').map(Number);
+                const desde = ((m[0] * 60 + m[1] - extra * 60) % 1440 + 1440) % 1440;
+                const hh = `${String(Math.floor(desde / 60)).padStart(2, '0')}:${String(desde % 60).padStart(2, '0')}`;
+                return { startTime: hh, endTime };
+            }
+            if (raw.isExtended && extra > 0 && endTime) {
+                const m = endTime.split(':').map(Number);
+                const hasta = (m[0] * 60 + m[1] + extra * 60) % 1440;
+                const hh = `${String(Math.floor(hasta / 60)).padStart(2, '0')}:${String(hasta % 60).padStart(2, '0')}`;
+                return { startTime, endTime: hh };
+            }
+            return { startTime, endTime };
+        };
+        const bandasNoche: Array<{ startTime: string; endTime: string }> = [];
+        for (const p of (effectivePosStructure || []) as any[]) {
+            for (const s of (p?.shifts || []) as any[]) {
+                if (!esBandaNocheCodigo(s?.code)) continue;
+                const startTime = hhmmRapido(s.startTime);
+                const endTime = hhmmRapido(s.endTime);
+                if (startTime && endTime) bandasNoche.push({ startTime, endTime });
+            }
+        }
+        const guardado = shiftsMap[`${t.empId}_${t.ds}`];
+        const extraYa = guardado && !guardado.isDeleted && (guardado.isExtended || guardado.isEarlyStart) ? Number(guardado.extExtraHours) || 0 : 0;
+        const mensajeBloqueo = isPlanningDateLocked(t.ds) ? 'Día cerrado: no se cargan horas.' : (msgBloqueoEdicion || '');
+        return validarCargaAgregado({
+            tipo: t.modo === 'cobertura' ? 'cobertura' : 'tura',
+            inicio: t.inicio,
+            fin: t.fin,
+            lado: t.lado,
+            horas: t.horas,
+            bloqueado: !!mensajeBloqueo,
+            mensajeBloqueo,
+            horasMes: Number(empMonthlyHours?.[t.empId]) || 0,
+            horasExtraYaContadas: extraYa,
+            previo: vecino(mover(-1)),
+            siguiente: vecino(mover(1)),
+            bandasNoche,
+        });
+    };
+    const confirmarCobertura = () => {
+        const t = turaEditor;
+        if (!t || t.modo !== 'cobertura' || t.guardando) return;
+        const rechazo = validacionAgregado(t);
+        if (rechazo) { toast.message(rechazo); return; }
+        const campos = camposExtCobertura(t.code, t.inicio, t.fin, { lado: t.lado, horas: t.horas });
+        if (!campos) return;
+        const key = `${t.empId}_${t.ds}`;
+        const pend = pendingChanges[key];
+        const base = pend && !pend.isDeleted ? pend : (shiftsMap[key] && !shiftsMap[key].isDeleted ? shiftsMap[key] : null);
+        const ok = commitPendingChanges({
+            ...pendingChanges,
+            [key]: {
+                ...(base || {}),
+                ...campos,
+                isTemp: true,
+                code: base?.code || t.code,
+                name: base?.name || base?.code || t.code,
+                startTime: base?.startTime || `${t.inicio}:00`,
+                endTime: base?.endTime || `${t.fin}:00`,
+                hours: base?.hours,
+                positionName: base?.positionName || t.positionName,
+                employeeId: t.empId,
+                employeeName: base?.employeeName || t.empName,
+                objectiveId: base?.objectiveId || selectedObjective,
+                clientId: base?.clientId || selectedClient || '',
+            },
+        });
+        if (ok === false) return;
+        toast.success(`${textoExtCobertura(t.code, t.inicio, t.fin, { lado: t.lado, horas: t.horas })} · ${t.empName.split(',')[0]}. Guardá el cronograma.`);
+        setTuraEditor(null);
+    };
     const confirmarTura = async () => {
         const t = turaEditor;
         if (t?.modo === 'cubrir' && t.cubrir) { confirmarCubrirExtendiendo(); return; }
+        if (t?.modo === 'cobertura') { confirmarCobertura(); return; }
+        if (t && t.modo === 'tura') {
+            const rechazo = validacionAgregado(t);
+            if (rechazo) { toast.message(rechazo); return; }
+        }
         if (t && !t.parentId) { toast.message('Guardá el cronograma y después agregá el TURA: va atado al turno guardado.'); return; }
         if (!t || t.guardando || !empresaId || !selectedObjective) return;
         const tramo = tramoTura(t.inicio, t.fin, { lado: t.lado, horas: t.horas });
@@ -16762,11 +16954,16 @@ function PlanificacionDesktop() {
             const enCampo = (ev.target as HTMLElement | null)?.closest?.('[data-tura-editor] input, [data-tura-editor] select');
             if (enCampo && k !== 'Enter' && k !== 'Escape') return;
             let hecho = true;
-            if (/^[1-8]$/.test(k)) setTuraEditor((prev) => (prev ? { ...prev, horas: Number(k) } : prev));
+            if (/^[1-8]$/.test(k)) setTuraEditor((prev) => {
+                if (!prev || prev.modo === 'cubrir') return prev;
+                const n = Number(k);
+                if (prev.modo === 'cobertura' && n > 4) return prev;
+                return { ...prev, horas: n };
+            });
             else if (k === 'ArrowLeft') setTuraEditor((prev) => (prev ? { ...prev, lado: 'antes' } : prev));
             else if (k === 'ArrowRight') setTuraEditor((prev) => (prev ? { ...prev, lado: 'despues' } : prev));
             else if (k === 'Tab') setTuraEditor((prev) => (prev ? { ...prev, lado: prev.lado === 'antes' ? 'despues' : 'antes' } : prev));
-            else if (k === 'ArrowUp') setTuraEditor((prev) => (prev ? { ...prev, horas: Math.min(8, prev.horas + 1) } : prev));
+            else if (k === 'ArrowUp') setTuraEditor((prev) => (prev ? { ...prev, horas: Math.min(prev.modo === 'cobertura' ? 4 : 8, prev.horas + 1) } : prev));
             else if (k === 'ArrowDown') setTuraEditor((prev) => (prev ? { ...prev, horas: Math.max(1, prev.horas - 1) } : prev));
             else if (k === 'Enter' || k === '+') void confirmarTuraRef.current();
             else if (k === 'Escape') setTuraEditor(null);
@@ -18327,10 +18524,10 @@ function PlanificacionDesktop() {
                             const crucePos = lecturaMes.porDia[dateStr]?.extEntre?.porPuesto.find(
                                 (p) => normalizePlanningPositionName(p.positionName) === normalizePlanningPositionName(String(pos.positionName || '')),
                             );
-                            if (crucePos && units.required > 0 && crucePos.cerrado && units.closed < units.required) {
-                                const delta = units.required - units.closed;
-                                closedPax += delta;
-                                if (esPuesto24(pos)) closedLectura += delta;
+                            const deltaExt = deltaCierreExtEntre(units, crucePos);
+                            if (deltaExt > 0) {
+                                closedPax += deltaExt;
+                                if (esPuesto24(pos)) closedLectura += deltaExt;
                             }
                             if (units.avisoHoras && !crucePos?.cerrado) avisosReloj.push(units.avisoHoras);
                             if (crucePos?.textos.length) avisosReloj.push(...crucePos.textos);
@@ -22655,6 +22852,7 @@ function PlanificacionDesktop() {
                                                     : (pendingChanges[extKey] || selectedCell.currentShift);
                                                 const canExtendCell = isShiftEligibleForExtension(extShift) && !isConsolidated;
                                                 return canExtendCell ? (
+                                                    <>
                                                     <button
                                                         type="button"
                                                         onClick={() => {
@@ -22680,6 +22878,27 @@ function PlanificacionDesktop() {
                                                     >
                                                         <Timer size={14} /> Extender jornada (+horas)
                                                     </button>
+                                                    <button
+                                                        type="button"
+                                                        data-ext-cobertura
+                                                        onClick={() => {
+                                                            const emp = (employees as any[]).find((e: any) => e.id === selectedCell.empId);
+                                                            if (!emp) return;
+                                                            const pend = pendingChanges[extKey];
+                                                            abrirTura(
+                                                                emp,
+                                                                selectedCell.dateStr,
+                                                                { s: selectedCell.currentShift, p: pend && !pend.isDeleted ? pend : undefined },
+                                                                String(extShift?.positionName || activePosition || ''),
+                                                                'cobertura',
+                                                            );
+                                                            setSelectedCell(null);
+                                                        }}
+                                                        className="w-full py-2.5 rounded-xl text-xs font-black border-2 border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 flex items-center justify-center gap-2"
+                                                    >
+                                                        <Timer size={14} /> Cobertura o TURA (+1…+4 h)
+                                                    </button>
+                                                    </>
                                                 ) : null;
                                             })()}
                                             <button
@@ -23204,33 +23423,37 @@ function PlanificacionDesktop() {
                     document.body,
                 )}
                 {turaEditor && typeof document !== 'undefined' && createPortal(
-                    <div className="fixed bottom-6 left-1/2 z-[12000] w-[min(34rem,calc(100vw-2rem))] -translate-x-1/2 rounded-2xl border border-rose-200 bg-white p-3 text-[12px] shadow-xl" data-tura-editor>
+                    <div className={`fixed bottom-6 left-1/2 z-[12000] w-[min(34rem,calc(100vw-2rem))] -translate-x-1/2 rounded-2xl border bg-white p-3 text-[12px] shadow-xl ${turaEditor.modo === 'cobertura' ? 'border-emerald-200' : 'border-rose-200'}`} data-tura-editor>
                         <p className="font-black text-slate-800">
                             Agregar horas a {turaEditor.empName.split(',')[0]} · {turaEditor.code} {turaEditor.inicio}–{turaEditor.fin} · {turaEditor.ds.slice(8, 10)}/{turaEditor.ds.slice(5, 7)}
                         </p>
-                        <p className="text-[11px] text-slate-500">Puesto que no es de 24 h: no pasa a D12/N12.</p>
+                        <p className="text-[11px] text-slate-500">{turaEditor.modo === 'cobertura' ? 'Cobertura: acredita el hueco y no suma sobre lo vendido.' : 'Puesto que no es de 24 h: no pasa a D12/N12.'}</p>
+                        <div className="mt-1.5 flex gap-1" data-tura-modos>
+                            <button type="button" data-tura-modo="cobertura" onClick={() => setTuraEditor((prev) => (prev ? { ...prev, modo: 'cobertura', horas: Math.min(4, prev.horas) } : prev))} className={`rounded-lg px-2 py-1 text-[11px] font-black ${turaEditor.modo === 'cobertura' ? 'bg-emerald-700 text-white' : 'border border-slate-200 text-slate-700'}`}>Cobertura</button>
+                            <button type="button" data-tura-modo="tura" onClick={() => setTuraEditor((prev) => (prev ? { ...prev, modo: 'tura' } : prev))} className={`rounded-lg px-2 py-1 text-[11px] font-black ${turaEditor.modo === 'tura' ? 'bg-rose-700 text-white' : 'border border-slate-200 text-slate-700'}`}>TURA</button>
+                        </div>
                         {turaEditor.cubrir && (
-                            <div className="mt-1.5 flex flex-col gap-1" data-tura-modos>
-                                <button type="button" data-tura-modo="cubrir" onClick={() => setTuraEditor((prev) => (prev ? { ...prev, modo: 'cubrir' } : prev))} className={`rounded-lg px-2 py-1 text-left text-[11px] font-bold ${turaEditor.modo === 'cubrir' ? 'bg-indigo-600 text-white' : 'border border-slate-200 text-slate-700'}`}>
-                                    Cubrir {turaEditor.cubrir.code} {turaEditor.cubrir.desde}–{turaEditor.cubrir.hasta} extendiendo la jornada: {turaEditor.cubrir.lado === 'despues' ? `${turaEditor.inicio}–${turaEditor.cubrir.hasta}` : `${turaEditor.cubrir.desde}–${turaEditor.fin}`} (cierra la franja, no es TURA)
-                                </button>
-                                <button type="button" data-tura-modo="tura" onClick={() => setTuraEditor((prev) => (prev ? { ...prev, modo: 'tura' } : prev))} className={`rounded-lg px-2 py-1 text-left text-[11px] font-bold ${turaEditor.modo === 'tura' ? 'bg-rose-700 text-white' : 'border border-slate-200 text-slate-700'}`}>
-                                    TURA: horas agregadas a pedido del cliente (facturable)
-                                </button>
-                            </div>
+                            <button type="button" data-tura-modo="cubrir" onClick={() => setTuraEditor((prev) => (prev ? { ...prev, modo: 'cubrir' } : prev))} className={`mt-1.5 w-full rounded-lg px-2 py-1 text-left text-[11px] font-bold ${turaEditor.modo === 'cubrir' ? 'bg-indigo-600 text-white' : 'border border-slate-200 text-slate-700'}`}>
+                                Cubrir {turaEditor.cubrir.code} {turaEditor.cubrir.desde}–{turaEditor.cubrir.hasta} extendiendo la jornada: {turaEditor.cubrir.lado === 'despues' ? `${turaEditor.inicio}–${turaEditor.cubrir.hasta}` : `${turaEditor.cubrir.desde}–${turaEditor.fin}`} (cierra la franja)
+                            </button>
                         )}
-                        {turaEditor.modo === 'tura' && (<>
-                        {(['antes', 'despues'] as const).map((lado) => (
+                        {(turaEditor.modo === 'tura' || turaEditor.modo === 'cobertura') && (<>
+                        {(['antes', 'despues'] as const).map((lado) => {
+                            const cobertura = turaEditor.modo === 'cobertura';
+                            const horas = cobertura ? HORAS_EXT_COBERTURA : HORAS_TURA;
+                            const activo = cobertura ? 'bg-emerald-700 text-white' : 'bg-rose-700 text-white';
+                            return (
                             <div key={lado} className="mt-1.5 flex items-center gap-1" data-tura-lado={lado}>
-                                <button type="button" onClick={() => setTuraEditor((prev) => (prev ? { ...prev, lado } : prev))} className={`w-20 rounded-lg px-2 py-1 text-left text-[11px] font-black ${turaEditor.lado === lado ? 'bg-rose-700 text-white' : 'border border-slate-200 text-slate-600'}`}>
+                                <button type="button" onClick={() => setTuraEditor((prev) => (prev ? { ...prev, lado } : prev))} className={`w-20 rounded-lg px-2 py-1 text-left text-[11px] font-black ${turaEditor.lado === lado ? activo : 'border border-slate-200 text-slate-600'}`}>
                                     {lado === 'antes' ? 'Antes' : 'Después'}
                                 </button>
-                                {HORAS_TURA.map((h) => (
-                                    <button key={h} type="button" data-tura-horas={`${lado}-${h}`} onClick={() => setTuraEditor((prev) => (prev ? { ...prev, lado, horas: h } : prev))} className={`h-7 w-7 rounded-lg text-[11px] font-black tabular-nums ${turaEditor.lado === lado && turaEditor.horas === h ? 'bg-rose-700 text-white' : 'border border-slate-200 text-slate-600 hover:bg-rose-50'}`}>{h}</button>
+                                {horas.map((h) => (
+                                    <button key={h} type="button" data-tura-horas={`${lado}-${h}`} onClick={() => setTuraEditor((prev) => (prev ? { ...prev, lado, horas: h } : prev))} className={`h-7 w-7 rounded-lg text-[11px] font-black tabular-nums ${turaEditor.lado === lado && turaEditor.horas === h ? activo : 'border border-slate-200 text-slate-600 hover:bg-slate-50'}`}>{h}</button>
                                 ))}
                             </div>
-                        ))}
-                        {(() => {
+                            );
+                        })}
+                        {turaEditor.modo === 'tura' && (() => {
                             const objs = ((clients.find((c: any) => c.id === selectedClient)?.objetivos || []) as any[])
                                 .filter((o) => String(o.status || 'ACTIVE').toUpperCase() !== 'INACTIVE')
                                 .map((o) => ({ id: String(o.id || ''), nombre: String(o.name || o.id || '') }))
@@ -23244,6 +23467,7 @@ function PlanificacionDesktop() {
                                 </label>
                             );
                         })()}
+                        {turaEditor.modo === 'tura' && (
                         <div className="mt-1.5 grid grid-cols-2 gap-2">
                             <label className="text-[10px] font-bold text-slate-500">¿Quién lo pidió? *
                                 <input value={turaEditor.pidio} onChange={(e) => setTuraEditor((prev) => (prev ? { ...prev, pidio: e.target.value } : prev))} placeholder="Cliente · Juan Pérez" className="block w-full rounded-lg border border-slate-200 px-2 py-1 text-[11px] text-slate-800" data-tura-pidio />
@@ -23252,16 +23476,22 @@ function PlanificacionDesktop() {
                                 <input value={turaEditor.motivo} onChange={(e) => setTuraEditor((prev) => (prev ? { ...prev, motivo: e.target.value } : prev))} placeholder="Evento, apertura…" className="block w-full rounded-lg border border-slate-200 px-2 py-1 text-[11px] text-slate-800" data-tura-motivo />
                             </label>
                         </div>
-                        <p className="mt-1.5 font-bold text-rose-800" data-tura-texto>{textoTura(turaEditor.code, turaEditor.inicio, turaEditor.fin, { lado: turaEditor.lado, horas: turaEditor.horas })}</p>
-                        </>)}
-                        {avisoJornadaTura(turaEditor.inicio, turaEditor.fin, turaEditor.horas) && (
-                            <p className="text-[11px] font-bold text-amber-700">{avisoJornadaTura(turaEditor.inicio, turaEditor.fin, turaEditor.horas)}</p>
                         )}
+                        <p className={`mt-1.5 font-bold ${turaEditor.modo === 'cobertura' ? 'text-emerald-800' : 'text-rose-800'}`} data-tura-texto>
+                            {turaEditor.modo === 'cobertura'
+                                ? textoExtCobertura(turaEditor.code, turaEditor.inicio, turaEditor.fin, { lado: turaEditor.lado, horas: turaEditor.horas })
+                                : textoTura(turaEditor.code, turaEditor.inicio, turaEditor.fin, { lado: turaEditor.lado, horas: turaEditor.horas })}
+                        </p>
+                        {(() => {
+                            const rechazo = validacionAgregado(turaEditor);
+                            return rechazo ? <p className="text-[11px] font-bold text-amber-700" data-tura-rechazo>{rechazo}</p> : null;
+                        })()}
+                        </>)}
                         <div className="mt-2 flex items-center justify-between">
-                            <span className="text-[10px] text-slate-400">1–8 horas · ← antes · → después · Enter agrega · Esc cancela</span>
+                            <span className="text-[10px] text-slate-400">{turaEditor.modo === 'cobertura' ? '1–4 horas' : '1–8 horas'} · ← antes · → después · Enter agrega · Esc cancela</span>
                             <div className="flex gap-2">
                                 <button type="button" onClick={() => setTuraEditor(null)} className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-bold text-slate-600">Cancelar</button>
-                                <button type="button" disabled={turaEditor.guardando} onClick={() => { void confirmarTura(); }} className={`rounded-lg px-2.5 py-1 text-[11px] font-black text-white disabled:opacity-40 ${turaEditor.modo === 'cubrir' ? 'bg-indigo-600' : 'bg-rose-700'}`} data-tura-confirmar>{turaEditor.guardando ? 'Guardando…' : turaEditor.modo === 'cubrir' ? 'Extender y cubrir' : 'Agregar TURA'}</button>
+                                <button type="button" disabled={turaEditor.guardando} onClick={() => { void confirmarTura(); }} className={`rounded-lg px-2.5 py-1 text-[11px] font-black text-white disabled:opacity-40 ${turaEditor.modo === 'cobertura' ? 'bg-emerald-700' : turaEditor.modo === 'cubrir' ? 'bg-indigo-600' : 'bg-rose-700'}`} data-tura-confirmar>{turaEditor.guardando ? 'Guardando…' : turaEditor.modo === 'cobertura' ? 'Cargar cobertura' : turaEditor.modo === 'cubrir' ? 'Extender y cubrir' : 'Agregar TURA'}</button>
                             </div>
                         </div>
                     </div>,

@@ -94,6 +94,34 @@ function horasDe(min: number): number {
   return Math.round((min / 60) * 10) / 10;
 }
 
+/**
+ * El turno entra al cruce solo si es de este objetivo.
+ * Sin objectiveId no se asume: hace falta el objetivo del legajo.
+ * Si marca el objetivo del hueco (`coversObjectiveId`), acredita ahí y no en el de origen.
+ */
+export function turnoExtDelObjetivo(
+  shift: { objectiveId?: string | null; coversObjectiveId?: string | null } | null | undefined,
+  objectiveId: string,
+  opts?: { objetivoLegajo?: string | null },
+): boolean {
+  if (!shift || !objectiveId) return false;
+  const cubre = String(shift.coversObjectiveId || '').trim();
+  if (cubre) return cubre === String(objectiveId);
+  const propio = String(shift.objectiveId || '').trim();
+  if (propio) return propio === String(objectiveId);
+  const legajo = String(opts?.objetivoLegajo || '').trim();
+  return !!legajo && legajo === String(objectiveId);
+}
+
+/** Mismo delta que el pie de un objetivo: si el cruce cerró el puesto, suma lo que faltaba por código. */
+export function deltaCierreExtEntre(
+  units: { required: number; closed: number },
+  cruce: { cerrado: boolean } | undefined,
+): number {
+  if (!cruce || !(units.required > 0) || !cruce.cerrado || units.closed >= units.required) return 0;
+  return units.required - units.closed;
+}
+
 export function esExtensionTura(shift: { code?: string; isTura?: boolean } | null | undefined): boolean {
   if (!shift) return false;
   if (shift.isTura === true) return true;
@@ -290,16 +318,29 @@ export function acreditarExtEntrePuestos(puestos: readonly PuestoExt[], turnos: 
     let cubMin = 0;
     let faltMin = 0;
     const textos: string[] = [];
+    // Dos franjas del mismo puesto (MM 08–20 y ME 10–14) comparten minutos.
+    // La demanda de cada minuto se cuenta una sola vez.
+    let desdeMin = DIA * 2;
+    let hastaMin = 0;
+    for (const f of p.franjas) {
+      if (f.a < desdeMin) desdeMin = f.a;
+      if (f.b > hastaMin) hastaMin = f.b;
+    }
+    for (let m = desdeMin; m < hastaMin; m++) {
+      const need = demanda[i][m];
+      if (!(need > 0)) continue;
+      const cub = Math.min(oferta[i][m], need);
+      vendMin += need;
+      cubMin += cub;
+      faltMin += need - cub;
+    }
     for (const f of p.franjas) {
       const huecos: number[] = [];
       let foreign = 0;
       for (let m = f.a; m < f.b; m++) {
         const need = demanda[i][m];
         const cub = Math.min(oferta[i][m], need);
-        vendMin += need;
-        cubMin += cub;
         const falta = need - cub;
-        faltMin += falta;
         if (falta > 0) huecos.push(m);
         if (ajenos[i].some((d) => {
           const v = ventana(d.desde, d.hasta);

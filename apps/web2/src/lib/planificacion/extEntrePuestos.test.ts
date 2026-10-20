@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { acreditarExtEntrePuestos, textoFacturableCliente, type PuestoExt, type TurnoExt } from './extEntrePuestos';
+import { acreditarExtEntrePuestos, deltaCierreExtEntre, textoFacturableCliente, turnoExtDelObjetivo, type PuestoExt, type TurnoExt } from './extEntrePuestos';
 
 function turno(p: TurnoExt): TurnoExt {
   return p;
@@ -78,5 +78,49 @@ describe('extensión entre puestos del mismo objetivo', () => {
     assert.equal(origen?.facturable, 8);
     assert.equal(origen?.cedidasHoras, 4);
     assert.equal(r.facturable, r.vendidas - 4);
+  });
+
+  it('MM 08–20 y ME 10–14 cuentan cada minuto una vez: el solape no se vende dos veces', () => {
+    const puestos: PuestoExt[] = [{
+      positionName: 'Vigilador',
+      franjas: [
+        { code: 'MM', startTime: '08:00', endTime: '20:00', qty: 1 },
+        { code: 'ME', startTime: '10:00', endTime: '14:00', qty: 1 },
+      ],
+    }];
+    const r = acreditarExtEntrePuestos(puestos, [
+      turno({ positionName: 'Vigilador', nombre: 'A', code: 'MM', startTime: '08:00', endTime: '20:00' }),
+      turno({ positionName: 'Vigilador', nombre: 'B', code: 'ME', startTime: '10:00', endTime: '14:00' }),
+    ]);
+    assert.equal(r.vendidas, 16);
+    assert.equal(r.facturable, 16);
+    assert.equal(r.cerrado, true);
+    const solo = acreditarExtEntrePuestos(puestos, [
+      turno({ positionName: 'Vigilador', nombre: 'A', code: 'MM', startTime: '08:00', endTime: '20:00' }),
+    ]);
+    assert.equal(solo.vendidas, 16);
+    assert.equal(solo.facturable, 12);
+    assert.equal(solo.cerrado, false);
+    assert.equal(solo.porPuesto[0]?.faltanHoras, 4);
+  });
+});
+
+describe('el turno de ext pertenece al objetivo', () => {
+  it('sin objectiveId no entra; el legajo o el objetivo del hueco sí', () => {
+    assert.equal(turnoExtDelObjetivo({ objectiveId: '' }, 'A'), false);
+    assert.equal(turnoExtDelObjetivo({}, 'A', { objetivoLegajo: 'B' }), false);
+    assert.equal(turnoExtDelObjetivo({}, 'A', { objetivoLegajo: 'A' }), true);
+    assert.equal(turnoExtDelObjetivo({ objectiveId: 'B' }, 'A', { objetivoLegajo: 'A' }), false);
+    assert.equal(turnoExtDelObjetivo({ objectiveId: 'A', coversObjectiveId: 'B' }, 'A'), false);
+    assert.equal(turnoExtDelObjetivo({ objectiveId: 'A', coversObjectiveId: 'B' }, 'B'), true);
+  });
+});
+
+describe('cierre de ext en el pie', () => {
+  it('suma el puesto que el cruce cerró y no el que ya estaba cerrado', () => {
+    assert.equal(deltaCierreExtEntre({ required: 1, closed: 0 }, { cerrado: true }), 1);
+    assert.equal(deltaCierreExtEntre({ required: 1, closed: 1 }, { cerrado: true }), 0);
+    assert.equal(deltaCierreExtEntre({ required: 1, closed: 0 }, { cerrado: false }), 0);
+    assert.equal(deltaCierreExtEntre({ required: 0, closed: 0 }, { cerrado: true }), 0);
   });
 });

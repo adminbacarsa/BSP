@@ -78,6 +78,46 @@ test('el puesto en los dos objetivos usa el preferido, si no el turno del mes, s
   assert.equal(elegido.ok && elegido.motivo, 'elegido');
 });
 
+test('el lugar tocado manda sobre el preferido si el puesto está en los dos', () => {
+  const decision = resolverObjetivoDelPuesto({
+    positionName: 'Guardia',
+    objetivos: grupo,
+    preferidoId: CASA,
+    tocadoId: NINOS,
+  });
+  assert.equal(decision.ok, true);
+  if (decision.ok) {
+    assert.equal(decision.objectiveId, NINOS);
+    assert.equal(decision.motivo, 'lugar');
+  }
+  const elegido = resolverObjetivoDelPuesto({
+    positionName: 'Guardia',
+    objetivos: grupo,
+    preferidoId: NINOS,
+    tocadoId: NINOS,
+    elegidoId: CASA,
+  });
+  assert.equal(elegido.ok && elegido.objectiveId, CASA);
+  assert.equal(elegido.ok && elegido.motivo, 'elegido');
+  const ajeno = resolverObjetivoDelPuesto({
+    positionName: 'Guardia',
+    objetivos: grupo,
+    preferidoId: CASA,
+    tocadoId: 'afuera',
+  });
+  assert.equal(ajeno.ok && ajeno.objectiveId, CASA);
+  assert.equal(ajeno.ok && ajeno.motivo, 'preferido');
+  const aplicado = aplicarObjetivosDePuesto({
+    'vol_2026-10-05': { positionName: 'Guardia', objectiveId: CASA, objectiveIdLugar: NINOS, code: 'M' },
+  }, {
+    objetivos: grupo,
+    preferidoDe: () => CASA,
+    objetivosDelMesDe: () => [CASA],
+  });
+  assert.equal(aplicado.ambiguos.length, 0);
+  assert.equal(aplicado.changes['vol_2026-10-05'].objectiveId, NINOS);
+});
+
 test('un puesto que ningún SLA del grupo tiene no se guarda', () => {
   const decision = resolverObjetivoDelPuesto({
     positionName: 'Cochera',

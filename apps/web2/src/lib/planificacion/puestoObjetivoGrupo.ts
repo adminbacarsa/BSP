@@ -14,7 +14,7 @@ export type ObjetivoConPuestos = {
 export type CandidatoObjetivo = { id: string; name: string };
 
 export type DecisionObjetivoPuesto =
-  | { ok: true; objectiveId: string; motivo: 'unico' | 'preferido' | 'turno-mes' | 'elegido' | 'sin-puesto' }
+  | { ok: true; objectiveId: string; motivo: 'unico' | 'lugar' | 'preferido' | 'turno-mes' | 'elegido' | 'sin-puesto' }
   | { ok: false; motivo: 'ambiguo'; candidatos: CandidatoObjetivo[]; puesto: string }
   | { ok: false; motivo: 'fuera'; puesto: string };
 
@@ -56,8 +56,9 @@ export function objetivosConElPuesto(
 
 /**
  * Un puesto en un solo objetivo del grupo va a ese objetivo, aunque el guardia
- * prefiera otro. Si está en varios, manda la elección, después el preferido y
- * después el objetivo de sus turnos del mes. Si no se puede, hay que elegir.
+ * prefiera otro. Si está en varios, manda la elección, después el lugar tocado
+ * (fila, hueco o celda), después el preferido y después el objetivo de sus
+ * turnos del mes. Si no se puede, hay que elegir.
  * General / vacío no es un puesto del SLA.
  */
 export function resolverObjetivoDelPuesto(input: {
@@ -66,6 +67,8 @@ export function resolverObjetivoDelPuesto(input: {
   preferidoId?: string | null;
   objetivosDelMes?: readonly string[] | null;
   elegidoId?: string | null;
+  /** Objetivo de la celda, fila o hueco que el planificador tocó. */
+  tocadoId?: string | null;
   respaldoId?: string | null;
 }): DecisionObjetivoPuesto {
   const puesto = String(input.positionName ?? '').trim();
@@ -81,6 +84,10 @@ export function resolverObjetivoDelPuesto(input: {
   }
   if (candidatos.length === 1) {
     return { ok: true, objectiveId: candidatos[0].id, motivo: 'unico' };
+  }
+  const tocado = String(input.tocadoId || '').trim();
+  if (tocado && candidatos.some((c) => c.id === tocado)) {
+    return { ok: true, objectiveId: tocado, motivo: 'lugar' };
   }
   const preferido = String(input.preferidoId || '').trim();
   if (preferido && candidatos.some((c) => c.id === preferido)) {
@@ -98,6 +105,8 @@ export type CambioConPuesto = {
   positionName?: string | null;
   objectiveId?: string | null;
   puestoObjetivoElegido?: string | null;
+  /** Celda, fila o hueco donde el planificador escribió el turno. */
+  objectiveIdLugar?: string | null;
 };
 
 export type AmbiguoPuesto = {
@@ -149,6 +158,7 @@ export function aplicarObjetivosDePuesto<T extends CambioConPuesto>(
       preferidoId: ctx.preferidoDe(empId),
       objetivosDelMes: ctx.objetivosDelMesDe(empId),
       elegidoId: ctx.elecciones?.[clave] || change.puestoObjetivoElegido || null,
+      tocadoId: change.objectiveIdLugar || null,
       respaldoId: ctx.respaldoDe?.(empId) || change.objectiveId || null,
     });
     if (!decision.ok && decision.motivo === 'fuera') {
