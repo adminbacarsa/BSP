@@ -840,9 +840,27 @@ function cerrarPorCantidadDeBanda(
     return { closed: allFull ? 1 : 0, required: 1, schemeLabel, bandas: estados, sobra, sobraDetalle };
 }
 
-export function etiquetaCoberturaDia(closed: number, required: number, sobra = 0): string {
+/** Suma de «Falta N h …» del reloj (hueco dentro de la tolerancia). */
+export function horasFaltantesDeAviso(aviso: string): number {
+    let total = 0;
+    for (const m of String(aviso || '').matchAll(/Falta (\d+(?:\.\d+)?) h/g)) {
+        total += Number(m[1]) || 0;
+    }
+    return Math.round(total * 10) / 10;
+}
+
+/** Marca corta del pie: «⚠1h». Vacía si el día no tiene hueco de reloj. */
+export function marcaHorasFaltantes(aviso: string): string {
+    const h = horasFaltantesDeAviso(aviso);
+    if (!(h > 0)) return '';
+    return `⚠${h}h`;
+}
+
+export function etiquetaCoberturaDia(closed: number, required: number, sobra = 0, avisoHoras = ''): string {
     const base = `${closed}/${required}`;
-    return sobra > 0 ? `${base} +${sobra}` : base;
+    const extra = sobra > 0 ? ` +${sobra}` : '';
+    const marca = marcaHorasFaltantes(avisoHoras);
+    return marca ? `${base}${extra} ${marca}` : `${base}${extra}`;
 }
 
 export function evaluarCoberturaDia(
@@ -893,7 +911,7 @@ export function evaluarCoberturaDia(
         if (units.avisoHoras) result.avisoHoras = [result.avisoHoras, units.avisoHoras].filter(Boolean).join(' · ');
     }
     aplicarExtDeOtrosPuestos(positions, turnos, result);
-    result.etiqueta = etiquetaCoberturaDia(result.closed, result.required, result.sobra);
+    result.etiqueta = etiquetaCoberturaDia(result.closed, result.required, result.sobra, result.avisoHoras);
     return result;
 }
 

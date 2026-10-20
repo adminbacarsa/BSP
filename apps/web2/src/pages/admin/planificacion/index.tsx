@@ -328,6 +328,7 @@ import { calculatePositionMonthHours } from '@/lib/servicios/slaHoursCalculator'
 import { applyRotationsForMonth } from '@/lib/planificacion/slaRotationMonthPlanner';
 import {
     countPositionClosedUnitsFromShifts,
+    marcaHorasFaltantes,
     normalizePlanningPositionName,
     is24hsSinglePaxBandMixBlocked,
     PLANNING_NON_BILLABLE_CODES,
@@ -2011,6 +2012,7 @@ function PlanificacionDesktop() {
         sinPuesto?: string[];
         deMas?: boolean;
         cubiertoPor?: string[];
+        horasFaltantes?: boolean;
     } | null>(null);
     const [focoSobra, setFocoSobra] = useState('');
     const [rango12, setRango12] = useState<{ titulo: string; dias: Array<DiaUi12 & { propuesta: Propuesta12h | null }> } | null>(null);
@@ -18347,19 +18349,20 @@ function PlanificacionDesktop() {
                         const isCovered = requiredPax > 0 && cerradoMostrar >= requiredPax;
                         const extra = lecturaDia?.mostrar && lecturaDia.turnosFuera > 0 ? lecturaDia.turnosFuera : 0;
                         const marcaDeMas = sobraPersonas > 0 || extra > 0;
+                        const marcaHoras = marcaHorasFaltantes(avisosReloj.join(' · '));
                         const bandasGrupo = selectedGrupo && grupoUnifiedMode && !isCovered && requiredPax > 0
                             ? bandasAbiertasGrupoEn(dateStr, dayLetter)
                             : [];
                         const cls = bloqueoMesCerrado
                             ? 'bg-slate-100 text-slate-400'
-                            : (requiredPax === 0 ? 'bg-slate-50 text-slate-400' : (marcaDeMas ? 'bg-amber-50 text-amber-700 cursor-pointer' : (isCovered ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-600 cursor-pointer')));
+                            : (requiredPax === 0 ? 'bg-slate-50 text-slate-400' : (marcaDeMas || (isCovered && !!marcaHoras) ? 'bg-amber-50 text-amber-700 cursor-pointer' : (isCovered ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-600 cursor-pointer')));
                         const porHoras = !!lecturaDia?.cerradoPorHoras && closedLectura < reqLectura;
                         const textosCruce = lecturaDia?.extEntre?.textos || [];
                         const tituloLectura = [
                             porHoras ? `Franjas ${closedPax}/${requiredPax} · cerrado por horas (otro código, extensión o puesto)` : '',
                             textosCruce.join(' · '),
                             lecturaDia?.textoHoras || '',
-                            avisosReloj.filter((a) => !(lecturaDia?.textoHoras || '').toLowerCase().includes('falta') && !textosCruce.includes(a)).join(' · '),
+                            avisosReloj.filter((a) => !(lecturaDia?.textoHoras || '').includes(a) && !textosCruce.includes(a)).join(' · '),
                             lecturaDia?.mostrar ? lecturaDia.texto : '',
                             sobraLineas.join(' · '),
                         ].filter(Boolean).join(' · ');
@@ -18369,6 +18372,7 @@ function PlanificacionDesktop() {
                                 data-cobertura-dia={dateStr}
                                 data-cobertura-horas={porHoras ? '1' : undefined}
                                 data-cobertura-extra={sobraPersonas || extra || undefined}
+                                data-cobertura-marca={marcaHoras || undefined}
                                 tabIndex={modoRapido ? 0 : undefined}
                                 className={`text-center border-r border-b text-[10px] font-black ${cls}`}
                                 colSpan={1}
@@ -18380,7 +18384,7 @@ function PlanificacionDesktop() {
                                 onClick={(e) => {
                                     if (bloqueoMesCerrado) return;
                                     const textosCruce = lecturaDia?.extEntre?.textos || [];
-                                    const hayLectura = !!(lecturaDia?.mostrar && (marcaDeMas || lecturaDia.sinPuesto.length || lecturaDia.avisoServicio || avisosReloj.length)) || textosCruce.length > 0;
+                                    const hayLectura = !!(lecturaDia?.mostrar && (marcaDeMas || lecturaDia.sinPuesto.length || lecturaDia.avisoServicio)) || textosCruce.length > 0 || avisosReloj.length > 0;
                                     if (!hayLectura && (isCovered || requiredPax === 0)) return;
                                     const mismoPuesto = (a: string, b: string) => normalizePlanningPositionName(a) === normalizePlanningPositionName(b);
                                     const gaps = (bandasGrupo.length > 0
@@ -18422,12 +18426,13 @@ function PlanificacionDesktop() {
                                         sinPuesto: lecturaDia?.sinPuesto.map((t) => t.nombre) || [],
                                         deMas: marcaDeMas,
                                         cubiertoPor: textosCruce.filter((t) => t.includes('cubierto')),
+                                        horasFaltantes: !!marcaHoras,
                                     });
                                 }}
                             >
                                 {requiredPax > 0 ? (
                                     <span className="inline-flex flex-col items-center leading-none">
-                                        <span>{cerradoMostrar}/{requiredPax}{sobraPersonas > 0 ? ` +${sobraPersonas}` : ''}{porHoras && <sup className="ml-px text-[7px] font-black text-emerald-800">h</sup>}</span>
+                                        <span>{cerradoMostrar}/{requiredPax}{sobraPersonas > 0 ? ` +${sobraPersonas}` : ''}{marcaHoras ? <span className="text-amber-700">{` ${marcaHoras}`}</span> : null}{porHoras && <sup className="ml-px text-[7px] font-black text-emerald-800">h</sup>}</span>
                                         {sobraPersonas === 0 && extra > 0 && <span className="mt-0.5 text-[8px] font-black text-amber-600" title={`${extra} turnos de más`}>+{extra}</span>}
                                     </span>
                                 ) : (extra > 0 ? <span className="text-[9px] text-amber-600">+{extra}</span> : '-')}
@@ -19017,9 +19022,9 @@ function PlanificacionDesktop() {
                     onMouseDown={(e) => e.stopPropagation()}
                 >
                     <div className="bg-slate-900 text-white text-[10px] font-black px-3 py-2 rounded-lg shadow-sm flex flex-col gap-1.5 min-w-[240px] max-w-[420px] max-h-[calc(100dvh-24px)] overflow-y-auto" data-puestos-sin-cerrar>
-                        <div className={`text-[9px] uppercase tracking-wide mb-0.5 ${coverageTooltip.gaps.length === 0 && coverageTooltip.cubiertoPor?.length ? 'text-emerald-300' : coverageTooltip.deMas && coverageTooltip.gaps.length === 0 ? 'text-amber-300' : 'text-rose-300'}`}>
+                        <div className={`text-[9px] uppercase tracking-wide mb-0.5 ${coverageTooltip.gaps.length === 0 && coverageTooltip.cubiertoPor?.length ? 'text-emerald-300' : (coverageTooltip.deMas || coverageTooltip.horasFaltantes) && coverageTooltip.gaps.length === 0 ? 'text-amber-300' : 'text-rose-300'}`}>
                             {coverageTooltip.gaps.length === 0
-                                ? (coverageTooltip.cubiertoPor?.length ? 'Cubierto por extensión' : 'Puestos con de más')
+                                ? (coverageTooltip.cubiertoPor?.length ? 'Cubierto por extensión' : coverageTooltip.horasFaltantes && !coverageTooltip.deMas ? 'Falta menos de un turno' : 'Puestos con de más')
                                 : 'Puestos sin cerrar'} · {coverageTooltip.dateStr.slice(8)}
                         </div>
                         {!!coverageTooltip.cubiertoPor?.length && (
@@ -22393,6 +22398,7 @@ function PlanificacionDesktop() {
                                             const bandasPax = (coverageData as { bandas?: Array<{ code: string; tiene: number; pide: number }> }).bandas;
                                             const sobraDetalle = (coverageData as { sobraDetalle?: string[] }).sobraDetalle || [];
                                             const avisoHorasPuesto = (coverageData as { avisoHoras?: string }).avisoHoras || '';
+                                            const marcaHorasModal = marcaHorasFaltantes(avisoHorasPuesto);
                                             const unitsLabel = coverageData.isActiveDay && coverageData.requiredUnits > 0 && bandasPax?.length
                                                 ? bandasPax.map((b) => `${b.code} ${b.tiene}/${b.pide}`).join(' · ')
                                                 : coverageData.isActiveDay && coverageData.requiredUnits > 0
@@ -22401,7 +22407,7 @@ function PlanificacionDesktop() {
                                             const bgClass = isExcludedDay
                                                 ? 'bg-rose-100 text-rose-700'
                                                 : coverageData.isActiveDay
-                                                ? (isUnitsCovered ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-600')
+                                                ? (marcaHorasModal && isUnitsCovered ? 'bg-amber-100 text-amber-700' : (isUnitsCovered ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-600'))
                                                 : 'bg-slate-100 text-slate-500';
                                             const barColor = isExcludedDay
                                                 ? 'bg-rose-300'
@@ -22423,8 +22429,9 @@ function PlanificacionDesktop() {
                                                                 </span>
                                                             </div>
                                                             {unitsLabel && (
-                                                                <div className={`text-xs font-black px-2 py-0.5 rounded ${bgClass}`}>
+                                                                <div className={`text-xs font-black px-2 py-0.5 rounded ${bgClass}`} data-cobertura-marca={marcaHorasModal || undefined}>
                                                                     {unitsLabel}
+                                                                    {marcaHorasModal ? ` ${marcaHorasModal}` : ''}
                                                                     {coverageData.schemeLabel && !bandasPax?.length ? ` (${coverageData.schemeLabel})` : ''}
                                                                 </div>
                                                             )}
@@ -22433,7 +22440,7 @@ function PlanificacionDesktop() {
                                                             <p key={linea} className="text-[10px] font-bold text-amber-700 mb-1">{linea}</p>
                                                         ))}
                                                         {avisoHorasPuesto && (
-                                                            <p className="text-[10px] font-bold text-amber-700 mb-1">{avisoHorasPuesto}</p>
+                                                            <p className="text-[10px] font-bold text-amber-700 mb-1" data-aviso-horas>{avisoHorasPuesto}</p>
                                                         )}
                                                         <div className="flex items-center justify-between mb-2">
                                                             <span className="text-[9px] text-slate-400 font-bold">Horas SLA</span>

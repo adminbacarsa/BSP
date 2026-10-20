@@ -107,9 +107,33 @@ describe('Casino Villa María: cantidad por banda', () => {
       t('T', 'Guardia', '14:00', '22:00'),
       t('N', 'Guardia', '22:00', '06:00'),
     ]);
-    assert.equal(r.etiqueta, '4/4');
+    assert.equal(r.etiqueta, '4/4 ⚠1h');
     assert.equal(guardiaDe(r).bandas?.map((b) => `${b.code} ${b.tiene}/${b.pide}`).join(' · '), 'M 1/1 · T 2/2 · N 2/2');
     assert.match(guardiaDe(r).avisoHoras || '', /Falta 1 h en Guardia \(06:00–07:00\)/);
+  });
+
+  it('Casino Miramar 2/10: el hueco de 14 a 15 cierra el día y marca la hora', () => {
+    const miramar = {
+      positionName: 'Guardia',
+      qty: 2,
+      coverageType: '24hs',
+      shifts: [
+        { code: 'M', hours: 8, startTime: '06:00', endTime: '14:00', quantity: 2 },
+        { code: 'T', hours: 8, startTime: '14:00', endTime: '22:00', quantity: 2 },
+        { code: 'N', hours: 8, startTime: '22:00', endTime: '06:00', quantity: 2 },
+      ],
+    };
+    const r = evaluarCoberturaDia([miramar], [
+      t('M', 'Guardia', '06:00', '18:00', { nombre: 'CHAVEZ' }),
+      t('M', 'Guardia', '06:00', '14:00', { nombre: 'CARNERO' }),
+      t('T', 'Guardia', '15:00', '23:00', { nombre: 'CORDOBA' }),
+      t('N', 'Guardia', '18:00', '06:00', { nombre: 'BAZAN' }),
+      t('N', 'Guardia', '22:00', '06:00', { nombre: 'AGUILERA' }),
+    ], 'V', '2026-10-02');
+    assert.equal(r.closed, 1);
+    assert.equal(r.required, 1);
+    assert.match(r.avisoHoras, /Falta 1 h en Guardia \(14:00–15:00\)/);
+    assert.equal(r.etiqueta, '1/1 ⚠1h');
   });
 
   it('el puesto con quantity 2 y PAX por banda es una sola cobertura', () => {
