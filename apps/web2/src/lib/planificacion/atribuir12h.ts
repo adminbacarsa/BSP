@@ -337,6 +337,12 @@ function diaMenos(ds: string): string {
   return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
 }
 
+function diaMas(ds: string): string {
+  const [y, m, d] = ds.split('-').map(Number);
+  const dt = new Date(y, (m || 1) - 1, (d || 1) + 1);
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+}
+
 function diaIndex(ymd: string): number {
   const [y, m, d] = ymd.split('-').map(Number);
   return Math.round(Date.UTC(y, (m || 1) - 1, d || 1) / 86400000);
@@ -533,6 +539,53 @@ export function textoPata12(
 
 export type ParcheDia12 = Parche12 & { dateStr: string };
 
+function firmaLicencia(raw: Turno12 | null | undefined): { code: string; banda: string; puesto: string } | null {
+  if (!raw || raw.isDeleted) return null;
+  const code = up(raw.code);
+  if (!code || NO_LICENCIA.has(code)) return null;
+  return {
+    code,
+    banda: bandaDeOriginal(String(raw.originalCode || '')),
+    puesto: String(raw.originalPositionName || raw.positionName || '').trim().toUpperCase(),
+  };
+}
+
+function sigueRacha(raw: Turno12 | null | undefined, firma: { code: string; banda: string; puesto: string }): boolean {
+  const f = firmaLicencia(raw);
+  if (!f || f.code !== firma.code) return false;
+  if (firma.banda && f.banda && f.banda !== firma.banda) return false;
+  if (firma.puesto && f.puesto && f.puesto !== firma.puesto) return false;
+  return true;
+}
+
+/** El inicio de la racha cambia: los días siguientes de la misma licencia/banda/puesto hay que volver a atribuir. */
+function extenderRacha(
+  pending: Record<string, Turno12 | null | undefined>,
+  shifts: Record<string, Turno12 | null | undefined>,
+  fechas: Set<string>,
+): void {
+  const vistas = new Set<string>();
+  for (const key of Object.keys(pending)) {
+    const p = claveDia(key);
+    if (!p) continue;
+    const firmas = [firmaLicencia(leerRaw(pending, shifts, key)), firmaLicencia(shifts[key])];
+    for (const firma of firmas) {
+      if (!firma) continue;
+      const id = `${p.empId}|${p.dateStr}|${firma.code}|${firma.banda}|${firma.puesto}`;
+      if (vistas.has(id)) continue;
+      vistas.add(id);
+      let cur = p.dateStr;
+      for (let i = 0; i < 40; i++) {
+        const next = diaMas(cur);
+        const raw = leerRaw(pending, shifts, `${p.empId}_${next}`);
+        if (!sigueRacha(raw, firma)) break;
+        fechas.add(next);
+        cur = next;
+      }
+    }
+  }
+}
+
 export function parchesAtribucion(
   pending: Record<string, Turno12 | null | undefined>,
   shifts: Record<string, Turno12 | null | undefined>,
@@ -545,6 +598,7 @@ export function parchesAtribucion(
   };
   // Solo los días con cambios: recorrer todo el mes reescribía al guardar turnos que nadie tocó (1 cambio → 125).
   for (const k of Object.keys(pending)) tomar(k);
+  extenderRacha(pending, shifts, fechas);
   const out: ParcheDia12[] = [];
   for (const dateStr of fechas) {
     const celdas = celdasDelDia(pending, shifts, dateStr, opts);

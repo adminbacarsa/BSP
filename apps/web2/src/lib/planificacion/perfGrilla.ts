@@ -4,6 +4,9 @@
  */
 export type MedicionCommit = { etiqueta: string; ms: number; at: number; celdas: number };
 
+/** Una medición olvidada no acumula commits sin límite. */
+const TOPE_COMMITS_GRILLA = 1000;
+
 export function inicioRenderGrilla(): number {
     return typeof performance !== 'undefined' ? performance.now() : 0;
 }
@@ -15,6 +18,7 @@ export function registrarCommitGrilla(inicio: number, etiqueta: string): void {
     const ahora = performance.now();
     const celdas = document.querySelectorAll('[data-testid=grilla-celda]').length;
     destino.push({ etiqueta, ms: Math.round((ahora - inicio) * 100) / 100, at: ahora, celdas });
+    if (destino.length > TOPE_COMMITS_GRILLA) destino.splice(0, destino.length - TOPE_COMMITS_GRILLA);
 }
 
 /** Tiempo por cálculo de la página: solo con el medidor prendido (`window.__planifSecciones`). */

@@ -38,8 +38,15 @@ export function MedidorVelocidad() {
             });
             setTop(Object.entries(w.__planifSecciones || {}).sort((a, b) => b[1].ms - a[1].ms).slice(0, 6));
         }, 500);
-        (window as unknown as { __reiniciarMedir?: () => void }).__reiniciarMedir = () => { w.__planifPerf = []; w.__planifSecciones = {}; trabas.length = 0; };
-        return () => { window.clearInterval(t); obs?.disconnect(); };
+        const win = window as unknown as { __reiniciarMedir?: () => void };
+        win.__reiniciarMedir = () => { w.__planifPerf = []; w.__planifSecciones = {}; trabas.length = 0; };
+        return () => {
+            window.clearInterval(t);
+            obs?.disconnect();
+            delete w.__planifPerf;
+            delete w.__planifSecciones;
+            delete win.__reiniciarMedir;
+        };
     }, []);
 
     if (!activo) return null;

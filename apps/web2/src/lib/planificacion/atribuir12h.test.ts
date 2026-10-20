@@ -155,6 +155,47 @@ test('un par cubre una sola licencia: gana la que empezó antes', () => {
   assert.ok(parches.every((p) => p.coversEmployeeId === 'antes'));
 });
 
+test('cambiar el comienzo de la licencia recalcula la racha siguiente, no el mes', () => {
+  const art = { code: 'ART', originalCode: 'T', positionName: 'Puesto 1', employeeName: 'ANTES, ANA' };
+  const v = { code: 'V', originalCode: 'T', positionName: 'Puesto 1', employeeName: 'TARDE, LUIS' };
+  const pata = (date: string, code: 'D12' | 'N12', nombre: string) => ({
+    code,
+    coverageMode: '12H',
+    coversEmployeeId: 'antes',
+    coversEmployeeName: 'ANTES, ANA',
+    coversAbsenceCode: 'ART',
+    coversBandCode: 'T',
+    coversPositionName: 'Puesto 1',
+    coversDateStr: date,
+    employeeName: nombre,
+  });
+  const shifts: Record<string, any> = {};
+  for (const d of ['01', '02', '03', '04']) {
+    const date = `2026-10-${d}`;
+    shifts[`antes_${date}`] = { ...art };
+    shifts[`tarde_${date}`] = { ...v };
+    shifts[`d_${date}`] = pata(date, 'D12', 'REGALO');
+    shifts[`n_${date}`] = pata(date, 'N12', 'HERRANTE');
+  }
+  shifts['antes_2026-10-05'] = { code: 'F', employeeName: 'ANTES, ANA' };
+  shifts['tarde_2026-10-05'] = { ...v };
+  shifts['d_2026-10-05'] = pata('2026-10-05', 'D12', 'REGALO');
+  shifts['n_2026-10-05'] = pata('2026-10-05', 'N12', 'HERRANTE');
+  shifts['d_2026-10-20'] = pata('2026-10-20', 'D12', 'REGALO');
+  const pending = {
+    'antes_2026-10-01': { code: 'M', originalCode: 'T', positionName: 'Puesto 1', employeeName: 'ANTES, ANA' },
+  };
+  const guardado = aplicarAtribucionAlGuardar(pending, shifts);
+  assert.equal(guardado['antes_2026-10-01'].code, 'M');
+  for (const d of ['02', '03', '04']) {
+    assert.equal(guardado[`d_2026-10-${d}`].coversEmployeeId, 'tarde', d);
+    assert.equal(guardado[`n_2026-10-${d}`].coversEmployeeId, 'tarde', d);
+    assert.equal(guardado[`d_2026-10-${d}`].coversAbsenceCode, 'V', d);
+  }
+  assert.equal(guardado['d_2026-10-05'], undefined);
+  assert.equal(guardado['d_2026-10-20'], undefined);
+});
+
 test('textoLicencia12 con índice da lo mismo que sin índice', () => {
   const pending: Record<string, any> = {
     'baigorria_2026-10-12': { code: 'V', originalCode: 'T', positionName: 'Puesto 1', employeeName: 'BAIGORRIA, LUIS' },
