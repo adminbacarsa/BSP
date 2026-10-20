@@ -1097,6 +1097,114 @@ export function cambioBorradorImport(
   };
 }
 
+/** Ids de guardias cruzados, en el orden de las filas del Excel. */
+export function ordenIdsPlanilla(filas: FilaPlanilla[], cruce: CruceFila[]): string[] {
+  const porFila = new Map(cruce.map((c) => [c.fila, c]));
+  const ids: string[] = [];
+  for (const f of [...filas].sort((a, b) => a.fila - b.fila)) {
+    const c = porFila.get(f.fila);
+    if (!c || c.estado !== 'encontrado' || !c.employeeId) continue;
+    ids.push(c.employeeId);
+  }
+  return armarOrdenFilasPlanilla([], ids);
+}
+
+/**
+ * Los de la planilla quedan primero, en ese orden.
+ * Quien ya estaba y no viene en la planilla queda al final, en su orden actual.
+ */
+export function armarOrdenFilasPlanilla(ordenActual: string[], idsPlanilla: string[]): string[] {
+  const dePlanilla: string[] = [];
+  const vistos = new Set<string>();
+  for (const id of idsPlanilla) {
+    const limpio = String(id || '').trim();
+    if (!limpio || vistos.has(limpio)) continue;
+    vistos.add(limpio);
+    dePlanilla.push(limpio);
+  }
+  const resto: string[] = [];
+  for (const id of ordenActual) {
+    const limpio = String(id || '').trim();
+    if (!limpio || vistos.has(limpio)) continue;
+    vistos.add(limpio);
+    resto.push(limpio);
+  }
+  return [...dePlanilla, ...resto];
+}
+
+export type OrdenPlanillaInput = {
+  ordenPorClave: Record<string, string[]>;
+  /** Guardias de esta confirmación, en el orden de las filas. */
+  idsPlanilla: string[];
+  /** Filas ya confirmadas en esta importación (otro objetivo del mismo grupo). */
+  idsAcumuladosGrupo: string[];
+  objectiveId: string;
+  claveVisible: string;
+  idsVisibles: string[];
+  vistaAgrupada: boolean;
+  idsGrupo: string[];
+  clavesYaActualizadas: string[];
+};
+
+function conOcultos(visibles: string[], guardado: string[]): string[] {
+  if (!visibles.length) return guardado;
+  if (!guardado.length) return visibles;
+  const enPantalla = new Set(visibles);
+  return [...visibles, ...guardado.filter((id) => id && !enPantalla.has(id))];
+}
+
+/** Arma el orden del objetivo y, si está en un grupo, el de la grilla agrupada. */
+export function ordenTrasPlanilla(input: OrdenPlanillaInput): {
+  ordenPorClave: Record<string, string[]>;
+  clavesActualizadas: string[];
+  idsAcumuladosGrupo: string[];
+} {
+  const sucias = new Set(input.clavesYaActualizadas);
+  const visibleKey = input.claveVisible || '__all__';
+  const groupKey = input.idsGrupo[0] || '';
+  const enGrupo = !!groupKey && input.idsGrupo.includes(input.objectiveId);
+  const prev = input.ordenPorClave;
+  const acumulado = enGrupo
+    ? armarOrdenFilasPlanilla(input.idsPlanilla, input.idsAcumuladosGrupo)
+    : input.idsAcumuladosGrupo;
+
+  const baseDe = (key: string): string[] => {
+    const guardado = prev[key] || [];
+    if (sucias.has(key) && guardado.length) return guardado;
+    const esGrillaGrupo = input.vistaAgrupada && (key === visibleKey || key === groupKey);
+    const esObjetivoVisible = !input.vistaAgrupada && key === visibleKey && key === input.objectiveId;
+    if (esGrillaGrupo || esObjetivoVisible) return conOcultos(input.idsVisibles, guardado);
+    if (guardado.length) return guardado;
+    if (enGrupo && groupKey && (prev[groupKey] || []).length) return prev[groupKey];
+    if (input.vistaAgrupada && enGrupo) return input.idsVisibles;
+    return [];
+  };
+
+  const idsDe = (key: string): string[] => {
+    if (!enGrupo) return input.idsPlanilla;
+    if (key === groupKey || (input.vistaAgrupada && key === visibleKey)) return acumulado;
+    return input.idsPlanilla;
+  };
+
+  const claves: string[] = [];
+  const sumar = (key: string) => {
+    if (!key || claves.includes(key)) return;
+    if (key !== input.objectiveId && !baseDe(key).length) return;
+    claves.push(key);
+  };
+  sumar(input.objectiveId);
+  if (enGrupo) sumar(groupKey);
+  if (input.vistaAgrupada) sumar(visibleKey);
+
+  const ordenPorClave = { ...prev };
+  for (const key of claves) ordenPorClave[key] = armarOrdenFilasPlanilla(baseDe(key), idsDe(key));
+  return {
+    ordenPorClave,
+    clavesActualizadas: [...input.clavesYaActualizadas, ...claves.filter((k) => !sucias.has(k))],
+    idsAcumuladosGrupo: acumulado,
+  };
+}
+
 export function resumenPreview(items: ItemPreview[]): { nuevas: number; cambian: number; iguales: number; noToca: number } {
   return {
     nuevas: items.filter((i) => i.estado === 'nueva').length,

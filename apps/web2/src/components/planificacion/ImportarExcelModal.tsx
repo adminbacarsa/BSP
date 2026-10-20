@@ -18,6 +18,7 @@ import {
   proponerDestino,
   proponerReglas,
   ajustarReglasAlServicio,
+  ordenIdsPlanilla,
   resumenPreview,
   sugerirCuadros,
   vistaPrevia,
@@ -64,6 +65,8 @@ export type AplicarImportPayload = {
   reglas: ReglaMapeo[];
   sinServicio: boolean;
   quedaOtro: boolean;
+  /** Guardias cruzados, en el orden de las filas del Excel. */
+  ordenIds: string[];
 };
 
 type Props = {
@@ -362,7 +365,7 @@ export function ImportarExcelModal({ ctx, onCargar, onAplicar, onCancelar, puede
   };
 
   const aplicar = async () => {
-    if (!grupo || !listoParaAplicar) return;
+    if (!grupo || !cuadro || !listoParaAplicar) return;
     const quedaOtro = grupoIdx < grupos.length - 1;
     const ok = await onAplicar({
       clientId: grupo.clienteId,
@@ -372,6 +375,7 @@ export function ImportarExcelModal({ ctx, onCargar, onAplicar, onCancelar, puede
       reglas,
       sinServicio: grupo.sinServicio,
       quedaOtro,
+      ordenIds: ordenIdsPlanilla(cuadro.filas, cruceOk),
     });
     if (!ok) return;
     if (quedaOtro) {

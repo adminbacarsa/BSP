@@ -578,7 +578,7 @@ import type { AltaHecha } from '@/lib/rrhh/altaLegajoClient';
 import { ImportarExcelModal, type AplicarImportPayload, type ImportarExcelContexto, type ServicioDestino } from '@/components/planificacion/ImportarExcelModal';
 import { ServicioPlanillaModal, type ServicioMesPlanilla } from '@/components/planificacion/ServicioPlanillaModal';
 import { avisosFueraDeServicio } from '@/lib/planificacion/servicioDesdePlanilla';
-import { cambioBorradorImport, normPlanilla, type CeldaActual, type ObjetivoCatalogo, type ReglaMapeo } from '@/lib/planificacion/importarExcel';
+import { cambioBorradorImport, normPlanilla, ordenTrasPlanilla, type CeldaActual, type ObjetivoCatalogo, type ReglaMapeo } from '@/lib/planificacion/importarExcel';
 import {
     alertasDescansoCambioMes,
     alertasTope,
@@ -1932,6 +1932,17 @@ function PlanificacionDesktop() {
         if (typeof window === 'undefined') return {};
         try { return JSON.parse(localStorage.getItem('planif_emp_order') || '{}'); } catch { return {}; }
     });
+    const customOrderRef = useRef(customOrderMap);
+    const ordenImportSucioRef = useRef<string[]>([]);
+    const grupoOrdenRef = useRef<string[]>([]);
+    const planillaGrupoRef = useRef<string[]>([]);
+    useEffect(() => { customOrderRef.current = customOrderMap; }, [customOrderMap]);
+    const persistirOrdenFilas = (next: Record<string, string[]>, sucias?: string[]) => {
+        customOrderRef.current = next;
+        if (sucias) ordenImportSucioRef.current = sucias;
+        setCustomOrderMap(next);
+        try { localStorage.setItem('planif_emp_order', JSON.stringify(next)); } catch { /* cuota */ }
+    };
     const [dragOverVisual, setDragOverVisual] = useState<number | null>(null);
     const arrastreFilaRef = useRef<{ activo: boolean; clientY: number; raf: number; grilla: HTMLElement | null }>({
         activo: false, clientY: 0, raf: 0, grilla: null,
@@ -3382,6 +3393,11 @@ function PlanificacionDesktop() {
         const ids = new Set(sorted.map((e: any) => e.id));
         return [...sorted, ...dotacionPoolCandidates.filter((e: any) => !ids.has(e.id))];
     }, [dotacionBaseEmployees, bandFilter, employeeMonthStats, sortBy, sortDir, selectedObjective, customOrderMap, empDefaultPos, clients, forceShowAll, dotacionPoolCandidates]);
+
+    useEffect(() => {
+        const visible = selectedObjective || '__all__';
+        ordenImportSucioRef.current = ordenImportSucioRef.current.filter((k) => k !== visible);
+    }, [displayedEmployees, selectedObjective]);
 
     useEffect(() => {
         if (!selectedObjective) return;
@@ -7437,16 +7453,14 @@ function PlanificacionDesktop() {
         const [removed] = ids.splice(fromIdx, 1);
         ids.splice(toIdx, 0, removed);
         const key = selectedObjective || '__all__';
-        const newMap = { ...customOrderMap, [key]: ids };
-        setCustomOrderMap(newMap);
-        try { localStorage.setItem('planif_emp_order', JSON.stringify(newMap)); } catch {}
+        const newMap = { ...customOrderRef.current, [key]: ids };
+        persistirOrdenFilas(newMap, [key]);
     };
     const clearCustomOrder = () => {
         const key = selectedObjective || '__all__';
-        const newMap = { ...customOrderMap };
+        const newMap = { ...customOrderRef.current };
         delete newMap[key];
-        setCustomOrderMap(newMap);
-        try { localStorage.setItem('planif_emp_order', JSON.stringify(newMap)); } catch {}
+        persistirOrdenFilas(newMap, []);
     };
 
     const getEmpDefaultPos = (empId: string) => empDefaultPos[`${empId}___${selectedObjective}`] || null;
@@ -12887,6 +12901,8 @@ function PlanificacionDesktop() {
     const abrirImportarExcel = async (preseleccionar: boolean) => {
         if (!empresaId || bloqueoMesCerrado) return;
         if (preseleccionar && !selectedObjective) return;
+        grupoOrdenRef.current = [];
+        planillaGrupoRef.current = [];
         try {
             const cat = await armarCatalogoPlanilla();
             setImportarCtx({
@@ -13070,6 +13086,26 @@ function PlanificacionDesktop() {
             if (typeof window !== 'undefined') localStorage.setItem(modoRapidoStorageKey, '1');
         }
         if (n > 0 && !origenArranqueRef.current && !armadoGuardado?.iniciadoAt) origenArranqueRef.current = 'IMPORTAR_EXCEL';
+        if (payload.ordenIds?.length) {
+            const vistaAgrupada = !!(selectedGrupo && grupoUnifiedMode);
+            if (selectedGrupo?.objectiveIds?.length) grupoOrdenRef.current = selectedGrupo.objectiveIds.map(String);
+            const idsGrupo = selectedGrupo?.objectiveIds?.includes(payload.objectiveId)
+                ? selectedGrupo.objectiveIds.map(String)
+                : (grupoOrdenRef.current.includes(payload.objectiveId) ? grupoOrdenRef.current : []);
+            const { ordenPorClave, clavesActualizadas, idsAcumuladosGrupo } = ordenTrasPlanilla({
+                ordenPorClave: customOrderRef.current,
+                idsPlanilla: payload.ordenIds,
+                idsAcumuladosGrupo: planillaGrupoRef.current,
+                objectiveId: payload.objectiveId,
+                claveVisible: selectedObjective || '__all__',
+                idsVisibles: displayedEmployees.map((e: { id: string }) => e.id),
+                vistaAgrupada,
+                idsGrupo,
+                clavesYaActualizadas: ordenImportSucioRef.current,
+            });
+            planillaGrupoRef.current = idsAcumuladosGrupo;
+            persistirOrdenFilas(ordenPorClave, clavesActualizadas);
+        }
         commitPendingChanges(next);
         if (Object.keys(novedades).length) setPendingNovedades((prev) => (mismo ? { ...prev, ...novedades } : novedades));
         try {

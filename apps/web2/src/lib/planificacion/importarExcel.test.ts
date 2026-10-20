@@ -18,9 +18,14 @@ import {
   resumenPreview,
   sugerirCuadros,
   vistaPrevia,
+  armarOrdenFilasPlanilla,
+  ordenIdsPlanilla,
+  ordenTrasPlanilla,
   type CeldaPlano,
+  type CruceFila,
   type CuadroPlanilla,
   type EmpleadoCruce,
+  type FilaPlanilla,
   type TurnoServicio,
 } from './importarExcel';
 
@@ -317,6 +322,60 @@ describe('importar planilla', () => {
     assert.deepEqual(reglas.map((r) => `${r.code} · ${r.puesto}`), ['D12 · Guardia', 'N12 · Guardia']);
     const d = resolverDestino(reglas[1], 'MM', turnos, refs);
     assert.deepEqual([d.code, d.positionName, d.startTime, d.endTime], ['N12', 'Guardia', '19:00', '07:00']);
+  });
+
+  it('el orden de filas sigue la planilla y deja al final a quien no viene', () => {
+    const fila = (n: number, nombre: string): FilaPlanilla => ({ fila: n, nombre, legajo: '', puesto: '', celdas: [] });
+    const cruce: CruceFila[] = [
+      { fila: 12, nombrePlanilla: 'B', legajo: '', estado: 'encontrado', employeeId: 'b', nota: '', candidatos: [] },
+      { fila: 9, nombrePlanilla: 'A', legajo: '', estado: 'encontrado', employeeId: 'a', nota: '', candidatos: [] },
+      { fila: 10, nombrePlanilla: 'X', legajo: '', estado: 'no', employeeId: null, nota: '', candidatos: [] },
+      { fila: 11, nombrePlanilla: 'A2', legajo: '', estado: 'encontrado', employeeId: 'a', nota: '', candidatos: [] },
+      { fila: 8, nombrePlanilla: 'Nuevo', legajo: '', estado: 'encontrado', employeeId: 'n', nota: '', candidatos: [] },
+    ];
+    assert.deepEqual(ordenIdsPlanilla([fila(12, 'B'), fila(9, 'A'), fila(10, 'X'), fila(11, 'A2'), fila(8, 'Nuevo')], cruce), ['n', 'a', 'b']);
+    assert.deepEqual(armarOrdenFilasPlanilla(['a', 'b', 'c', 'd'], ['b', 'n', 'b', '']), ['b', 'n', 'a', 'c', 'd']);
+
+    const objetivo = ordenTrasPlanilla({
+      ordenPorClave: { obj: ['a', 'b', 'c'] },
+      idsPlanilla: ['c', 'a'],
+      idsAcumuladosGrupo: [],
+      objectiveId: 'obj',
+      claveVisible: 'obj',
+      idsVisibles: ['a', 'b', 'c'],
+      vistaAgrupada: false,
+      idsGrupo: [],
+      clavesYaActualizadas: [],
+    });
+    assert.deepEqual(objetivo.ordenPorClave.obj, ['c', 'a', 'b']);
+
+    const grupo = ordenTrasPlanilla({
+      ordenPorClave: {},
+      idsPlanilla: ['p', 'q'],
+      idsAcumuladosGrupo: [],
+      objectiveId: 'obj2',
+      claveVisible: 'obj1',
+      idsVisibles: ['a', 'p', 'b', 'q'],
+      vistaAgrupada: true,
+      idsGrupo: ['obj1', 'obj2'],
+      clavesYaActualizadas: [],
+    });
+    assert.deepEqual(grupo.ordenPorClave.obj1, ['p', 'q', 'a', 'b']);
+    assert.deepEqual(grupo.ordenPorClave.obj2, ['p', 'q', 'a', 'b']);
+
+    const segundo = ordenTrasPlanilla({
+      ordenPorClave: grupo.ordenPorClave,
+      idsPlanilla: ['b', 'z'],
+      idsAcumuladosGrupo: grupo.idsAcumuladosGrupo,
+      objectiveId: 'obj1',
+      claveVisible: 'obj2',
+      idsVisibles: ['p', 'q'],
+      vistaAgrupada: false,
+      idsGrupo: ['obj1', 'obj2'],
+      clavesYaActualizadas: [],
+    });
+    assert.deepEqual(segundo.ordenPorClave.obj1, ['p', 'q', 'b', 'z', 'a']);
+    assert.deepEqual(segundo.ordenPorClave.obj2, ['p', 'q', 'a', 'b']);
   });
 });
 
