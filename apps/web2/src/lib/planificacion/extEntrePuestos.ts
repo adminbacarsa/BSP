@@ -90,6 +90,21 @@ function ventana(inicio: string, fin: string): [number, number] | null {
   return [a, b];
 }
 
+/** Hueco que cruza medianoche: 22–06 queda en 1320–1800; el tramo 00–06, en 0–360. Se prueban ambos. */
+function desplazos(m: number): number[] {
+  const alt = m < DIA ? m + DIA : m - DIA;
+  return alt >= 0 && alt < DIA * 2 ? [m, alt] : [m];
+}
+
+function solapa(a0: number, a1: number, b0: number, b1: number): boolean {
+  const pisa = (x0: number, x1: number) => x0 < b1 && x1 > b0;
+  return pisa(a0, a1) || pisa(a0 + DIA, a1 + DIA) || pisa(a0 - DIA, a1 - DIA);
+}
+
+function minutoEn(m: number, a: number, b: number): boolean {
+  return (m >= a && m < b) || (m >= a + DIA && m < b + DIA) || (m >= a - DIA && m < b - DIA);
+}
+
 function horasDe(min: number): number {
   return Math.round((min / 60) * 10) / 10;
 }
@@ -291,8 +306,9 @@ export function acreditarExtEntrePuestos(puestos: readonly PuestoExt[], turnos: 
   const tomar = (lib: Libre, destino: number, cede: boolean) => {
     const quedan: number[] = [];
     for (const m of lib.libres) {
-      if (destino >= 0 && m < demanda[destino].length && oferta[destino][m] < demanda[destino][m]) {
-        oferta[destino][m] += 1;
+      const hit = destino >= 0 ? desplazos(m).find((x) => oferta[destino][x] < demanda[destino][x]) : undefined;
+      if (hit != null) {
+        oferta[destino][hit] += 1;
         extEnHueco += 1;
         if (cede) {
           const origen = indice(lib.origen);
@@ -344,12 +360,12 @@ export function acreditarExtEntrePuestos(puestos: readonly PuestoExt[], turnos: 
         if (falta > 0) huecos.push(m);
         if (ajenos[i].some((d) => {
           const v = ventana(d.desde, d.hasta);
-          return !!v && m >= v[0] && m < v[1];
+          return !!v && minutoEn(m, v[0], v[1]);
         })) foreign += Math.min(1, cub);
       }
       const donantes = ajenos[i].filter((d) => {
         const v = ventana(d.desde, d.hasta);
-        return !!v && v[0] < f.b && v[1] > f.a;
+        return !!v && solapa(v[0], v[1], f.a, f.b);
       });
       if (huecos.length === 0 && donantes.length) {
         textos.push(`${p.nombre} ${hora(f.desde)}–${hora(f.hasta)}: cubierto por ${textoDonantes(donantes)}`);

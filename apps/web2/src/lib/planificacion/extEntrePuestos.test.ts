@@ -105,6 +105,61 @@ describe('extensión entre puestos del mismo objetivo', () => {
   });
 });
 
+describe('tramo que cruza medianoche', () => {
+  it('el adelanto 02–06 tapa el hueco 22–06 y entra al facturable', () => {
+    const r = acreditarExtEntrePuestos(dia24, [
+      turno({ positionName: 'M', nombre: 'X', code: 'M', startTime: '06:00', endTime: '14:00', isEarlyStart: true, segmentFromTime: '02:00', segmentToTime: '06:00' }),
+    ]);
+    const noche = r.porPuesto.find((p) => p.positionName === 'N');
+    const manana = r.porPuesto.find((p) => p.positionName === 'M');
+    assert.equal(noche?.facturable, 4);
+    assert.equal(noche?.faltanHoras, 4);
+    assert.equal(noche?.cerrado, false);
+    assert.equal(manana?.facturable, 8);
+    assert.equal(manana?.cedidasHoras, 4);
+    assert.equal(r.extEnHuecoHoras, 4);
+    assert.equal(r.facturable, 12);
+    assert.equal(r.vendidas, 24);
+    assert.match(noche?.textos.join(' ') || '', /cubierto por adel\. de X 02–06/);
+    assert.match(noche?.textos.join(' ') || '', /falta 22–02/);
+  });
+
+  it('la extensión 18–22 tapa el tramo inicial del hueco 18–06', () => {
+    const puestos: PuestoExt[] = [
+      { positionName: 'D', franjas: [{ code: 'D12', startTime: '06:00', endTime: '18:00', qty: 1 }] },
+      { positionName: 'N', franjas: [{ code: 'N12', startTime: '18:00', endTime: '06:00', qty: 1 }] },
+    ];
+    const r = acreditarExtEntrePuestos(puestos, [
+      turno({ positionName: 'D', nombre: 'X', code: 'D12', startTime: '06:00', endTime: '18:00', isExtended: true, segmentFromTime: '18:00', segmentToTime: '22:00' }),
+    ]);
+    const noche = r.porPuesto.find((p) => p.positionName === 'N');
+    const dia = r.porPuesto.find((p) => p.positionName === 'D');
+    assert.equal(noche?.facturable, 4);
+    assert.equal(noche?.faltanHoras, 8);
+    assert.equal(dia?.facturable, 12);
+    assert.equal(dia?.cedidasHoras, 4);
+    assert.equal(r.facturable, 16);
+    assert.equal(r.vendidas, 24);
+    assert.match(noche?.textos.join(' ') || '', /cubierto por ext\. de X 18–22/);
+    assert.match(noche?.textos.join(' ') || '', /falta 22–06/);
+  });
+
+  it('un tramo que no cruza medianoche no se corre al otro día', () => {
+    const r = acreditarExtEntrePuestos(dia24, [
+      turno({ positionName: 'M', nombre: 'X', code: 'M', startTime: '06:00', endTime: '14:00', isExtended: true, segmentFromTime: '14:00', segmentToTime: '18:00' }),
+    ]);
+    const tarde = r.porPuesto.find((p) => p.positionName === 'T');
+    const noche = r.porPuesto.find((p) => p.positionName === 'N');
+    assert.equal(tarde?.facturable, 4);
+    assert.equal(tarde?.faltanHoras, 4);
+    assert.equal(noche?.facturable, 0);
+    assert.equal(noche?.faltanHoras, 8);
+    assert.equal(r.porPuesto.find((p) => p.positionName === 'M')?.cedidasHoras, 4);
+    assert.equal(r.facturable, 12);
+    assert.equal(r.vendidas, 24);
+  });
+});
+
 describe('el turno de ext pertenece al objetivo', () => {
   it('sin objectiveId no entra; el legajo o el objetivo del hueco sí', () => {
     assert.equal(turnoExtDelObjetivo({ objectiveId: '' }, 'A'), false);
