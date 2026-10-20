@@ -1176,6 +1176,7 @@ const posAsEngineDef = (pos: any) => ({
     shifts: pos?.shifts,
     activeDays: pos?.activeDays,
     coverageType: pos?.coverageType,
+    trabajaFeriados: pos?.trabajaFeriados,
     excludedDates: pos?.excludedDates,
     excludedShiftDates: pos?.excludedShiftDates,
     excludedShiftPaxDates: pos?.excludedShiftPaxDates,
@@ -13017,7 +13018,7 @@ function PlanificacionDesktop() {
                         startTime: hm(st.startTime),
                         endTime: hm(st.endTime),
                         quantity: st.quantity ?? p.qty ?? null,
-                        dias: Array.isArray(st.days) ? st.days.map((d) => String(d)) : [], ...(Array.isArray((st as any).specificDates) && (st as any).specificDates.length ? { fechas: (st as any).specificDates.map((d: unknown) => String(d)) } : {}), ...((st as any).feriados === true ? { feriados: true } : {}),
+                        dias: Array.isArray(st.days) ? st.days.map((d) => String(d)) : [], ...(Array.isArray((st as any).specificDates) && (st as any).specificDates.length ? { fechas: (st as any).specificDates.map((d: unknown) => String(d)) } : {}), ...((st as any).feriados === true ? { feriados: true } : {}), ...(p.trabajaFeriados === false ? { trabajaFeriados: false as const } : {}),
                     }))),
                 };
                 if (cubreActual) servicios.push(fila);
@@ -13071,6 +13072,7 @@ function PlanificacionDesktop() {
                 endTime: t.endTime,
                 cantidad: t.quantity || 1,
                 dias: t.dias || [],
+                ...(t.trabajaFeriados === false ? { trabajaFeriados: false as const } : {}),
             }));
             const hmTurno = (v: unknown) => {
                 const m = String(v || '').match(/(\d{1,2}):(\d{2})/);
@@ -13123,6 +13125,7 @@ function PlanificacionDesktop() {
                         endTime: t.endTime,
                         cantidad: t.quantity || 1,
                         dias: t.dias || [],
+                        ...(t.trabajaFeriados === false ? { trabajaFeriados: false as const } : {}),
                     })),
                 })),
                 preseleccion: selectedObjective ? {

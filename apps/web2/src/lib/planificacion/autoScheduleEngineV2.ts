@@ -79,6 +79,7 @@ import { buildFixedBandPlan, assignFixedBandOffsets, computeFixedBandGlobalStagg
 import { enforceFrancoStreakRules } from './francoStreakGuard';
 import { isApretarCronoDay, isApretarScheduleActive, isContingencyApretarDay, isModo12Day, getModo12Days, usesExpandedRetPool } from './objectiveCoverageDemand';
 import { correFeriado } from '@/lib/servicios/turnoFeriados';
+import { puestoSalteaFeriado } from '@/lib/servicios/slaHoursCalculator';
 import { assignmentBreaksBandTransition, nextAssignmentBreaksBandTransition, normBand } from './rotativeBandGuard';
 import { computeModo12AbsenceOfferCredit } from './planningCoveragePolicy';
 import {
@@ -283,6 +284,8 @@ export interface V2PositionDef {
     excludedShiftDates?: Record<string, string[]>;
     /** Exclusión de N pax por banda: fecha → { código → pax }. */
     excludedShiftPaxDates?: Record<string, Record<string, number>>;
+    /** false = −F: el feriado es un día no activo para este puesto. */
+    trabajaFeriados?: boolean;
 }
 
 export interface V2EmployeeDef {
@@ -879,6 +882,7 @@ export function normalize24hsPositionCalendars(positions: V2PositionDef[]): V2Po
 
 export function positionIsActiveOn(pos: V2PositionDef, dayLetter: string, dateStr?: string): boolean {
     if (dateStr && pos.excludedDates?.includes(dateStr)) return false;
+    if (puestoSalteaFeriado(pos, dateStr)) return false;
 
     if (is24hsCoverage(pos)) return true;
 

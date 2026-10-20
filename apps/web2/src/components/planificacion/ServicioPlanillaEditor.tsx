@@ -171,8 +171,10 @@ export function ServicioPlanillaEditor({ cuadro, semilla, year, month, mesLabel,
             const propias = franjas.filter((f) => f.puesto === puesto);
             const t = tipoPuestoPropuesto(puesto, propias);
             const pax = Math.max(1, ...propias.map((f) => Math.round(f.cantidad) || 1));
+            const trabajaFeriados = !propias.some((f) => f.trabajaFeriados === false);
+            const marcarFeriados = (trabaja: boolean) => setFranjas((prev) => prev.map((f) => (f.puesto === puesto ? { ...f, trabajaFeriados: trabaja } : f)));
             return (
-              <span key={puesto} data-servicio-tipo={t.tipo} title={t.motivo} className={`flex flex-wrap items-center gap-1 rounded-xl border px-2 py-1 text-[11px] ${t.tipo === '24hs' ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+              <span key={puesto} data-servicio-tipo={t.tipo} data-servicio-feriados-puesto={trabajaFeriados ? '+F' : '−F'} title={t.motivo} className={`flex flex-wrap items-center gap-1 rounded-xl border px-2 py-1 text-[11px] ${t.tipo === '24hs' ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
                 <input
                   key={`n-${puesto}`}
                   defaultValue={puesto}
@@ -182,8 +184,12 @@ export function ServicioPlanillaEditor({ cuadro, semilla, year, month, mesLabel,
                   onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
                   className="w-24 rounded border border-transparent bg-transparent px-0.5 font-black hover:border-slate-300 focus:border-indigo-400 focus:bg-white"
                 />
-                <span>· ×{pax} pax · {t.tipo === '24hs' ? '24 HS' : 'Custom'}</span>
+                <span>· {t.tipo === '24hs' ? `×${pax} pax · 24 HS` : 'Custom'}</span>
                 <span className="text-slate-500">({t.motivo})</span>
+                <span className="inline-flex overflow-hidden rounded-lg border border-slate-300">
+                  <button type="button" data-servicio-puesto-feriados={`${puesto}|+`} title="Se trabaja en feriados" onClick={() => marcarFeriados(true)} className={`px-1.5 py-0.5 font-black ${trabajaFeriados ? 'bg-emerald-600 text-white' : 'bg-white text-slate-500'}`}>+F</button>
+                  <button type="button" data-servicio-puesto-feriados={`${puesto}|-`} title="No se trabaja en feriados: no exigen cobertura ni suman horas vendidas" onClick={() => marcarFeriados(false)} className={`px-1.5 py-0.5 font-black ${trabajaFeriados ? 'bg-white text-slate-500' : 'bg-slate-800 text-white'}`}>−F</button>
+                </span>
                 {pax > 1 && (
                   <button type="button" data-servicio-separar={puesto} onClick={() => setFranjas((prev) => separarPuesto(prev, puesto))} className="rounded-lg border border-slate-300 bg-white px-1.5 py-0.5 font-bold text-slate-700 hover:bg-slate-50">
                     Separar en {pax} puestos ×1

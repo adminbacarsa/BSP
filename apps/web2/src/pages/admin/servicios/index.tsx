@@ -4236,6 +4236,11 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                               </div>
                               <div className="mt-1 flex items-center gap-2 flex-wrap">
                                 <span className="text-[10px] font-bold text-indigo-500 bg-indigo-50 dark:bg-indigo-900/50 px-2 rounded">{pos.coverageType === '24hs' ? '24 HS' : pos.coverageType.toUpperCase()}</span>
+                                {pos.coverageType !== 'eventos' && (
+                                  <span className={`text-[10px] font-black px-2 py-0.5 rounded border ${pos.trabajaFeriados === false ? 'text-slate-600 bg-slate-100 border-slate-200 dark:bg-slate-700 dark:text-slate-200' : 'text-emerald-800 bg-emerald-100 border-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-200'}`} title={pos.trabajaFeriados === false ? 'No se trabaja en feriados' : 'Se trabaja en feriados'}>
+                                    {pos.trabajaFeriados === false ? '−F' : '+F'}
+                                  </span>
+                                )}
                                 {pos.preferenciaGenero === 'M' && <span className="text-[10px] font-black text-blue-700 bg-blue-100 px-2 py-0.5 rounded" title="Solo masculino">♂ M</span>}
                                 {pos.preferenciaGenero === 'F' && <span className="text-[10px] font-black text-pink-700 bg-pink-100 px-2 py-0.5 rounded" title="Solo femenino">♀ F</span>}
                                 <span className="text-[10px] font-black text-amber-800 dark:text-amber-200 bg-amber-100 dark:bg-amber-900/40 px-2 py-0.5 rounded border border-amber-200 dark:border-amber-800" title="Horas de cobertura por día (un puesto). Rango si cambia según el día de la semana.">
@@ -5569,6 +5574,18 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                 return `${days.length} días/semana → Franco en días no seleccionados`;
                             })()}
                         </p>
+                        <div className="mt-3">
+                            <label className="text-[10px] font-black uppercase text-slate-400 ml-1 mb-1 block">Feriados</label>
+                            <div className="inline-flex overflow-hidden rounded-xl border border-slate-200 dark:border-slate-600">
+                                <button type="button" data-puesto-feriados="+F" onClick={() => setPositionForm((prev) => ({ ...prev, trabajaFeriados: true }))} className={`px-3 py-1.5 text-[11px] font-black ${positionForm.trabajaFeriados !== false ? 'bg-emerald-600 text-white' : 'bg-white dark:bg-slate-900 text-slate-500'}`}>+F</button>
+                                <button type="button" data-puesto-feriados="−F" onClick={() => setPositionForm((prev) => ({ ...prev, trabajaFeriados: false }))} className={`px-3 py-1.5 text-[11px] font-black ${positionForm.trabajaFeriados === false ? 'bg-slate-800 text-white' : 'bg-white dark:bg-slate-900 text-slate-500'}`}>−F</button>
+                            </div>
+                            <p className="text-[9px] text-slate-400 font-bold mt-1">
+                                {positionForm.trabajaFeriados === false
+                                  ? '−F: los feriados del mes no exigen cobertura ni suman horas vendidas, igual que un día no activo.'
+                                  : '+F: se trabaja en feriados (el día cuenta como cualquier otro de la semana).'}
+                            </p>
+                        </div>
                     </div>
                     )}
                     <div>

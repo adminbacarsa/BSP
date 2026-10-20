@@ -20,6 +20,8 @@ export type TurnoServicio = {
   endTime: string;
   quantity?: number | null;
   dias?: string[];
+  /** −F del puesto: el feriado no exige cobertura ni suma horas vendidas. Ausente = +F. */
+  trabajaFeriados?: boolean;
 };
 
 export type EmpleadoCruce = {

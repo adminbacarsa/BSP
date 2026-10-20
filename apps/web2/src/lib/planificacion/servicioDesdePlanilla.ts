@@ -39,6 +39,8 @@ export type FranjaServicioPlanilla = {
   definirHorario?: boolean;
   /** «+ feriados»: además de sus días, corre los feriados nacionales. */
   feriados?: boolean;
+  /** false = el puesto no se trabaja en feriados (−F). Sin valor = se trabaja (+F). */
+  trabajaFeriados?: boolean;
   /** Código que traía la planilla, cuando se conservó el del servicio. */
   codigoPlanilla?: string;
 };
@@ -52,6 +54,7 @@ export type FranjaVigente = {
   dias: string[];
   fechas?: string[];
   feriados?: boolean;
+  trabajaFeriados?: boolean;
 };
 
 export type EstadoDiff = 'coincide' | 'distinto' | 'falta' | 'sobra';
@@ -474,12 +477,23 @@ export function proponerServicioDesdePlanilla(cuadro: CuadroPlanilla, year: numb
         };
       };
       const kDias: number[] = [];
+      const extraDias = { M: 0, T: 0, N: 0 };
+      let diasConGente = 0;
       for (let dia = 1; dia <= ultimo; dia++) {
         const e = efectivo(dia);
-        if (e.M + e.T + e.N > 0) kDias.push(Math.floor(Math.min(e.M, e.T, e.N) + 1e-9));
+        if (e.M + e.T + e.N <= 0) continue;
+        diasConGente += 1;
+        const base = Math.floor(Math.min(e.M, e.T, e.N) + 1e-9);
+        kDias.push(base);
+        for (const b of ['M', 'T', 'N'] as const) {
+          if (Math.floor(e[b] - base + 1e-9) >= 1) extraDias[b] += 1;
+        }
       }
       const k = moda(kDias);
       if (!(k >= 1)) continue;
+      // 1×M 2×T 2×N: dos bandas por encima del mínimo. Es un puesto, no un 24 h más extras.
+      const bandasConExtra = (['M', 'T', 'N'] as const).filter((b) => diasConGente > 0 && extraDias[b] / diasConGente >= 0.5);
+      if (bandasConExtra.length >= 2) continue;
       const horarioBanda = (b: string) => {
         const mejor = keys.filter((x) => bandaDe(meta.get(x)!.code) === b)
           .sort((a, c) => [...cuenta.get(c)!.values()].reduce((s1, v) => s1 + v, 0) - [...cuenta.get(a)!.values()].reduce((s1, v) => s1 + v, 0))[0];
@@ -780,6 +794,8 @@ export type PosicionServicioDoc = {
   activeDays: string[];
   allowedShiftTypes: TurnoServicioDoc[];
   status: 'ACTIVE';
+  /** false = −F: los feriados no exigen cobertura ni suman horas vendidas. */
+  trabajaFeriados?: boolean;
 };
 
 /** Las franjas regulares del puesto cubren las 24 h del día (M+T+N, D12+N12, P1M+P1T+P1N…). */
@@ -797,9 +813,49 @@ export function cubre24Horas(franjas: ReadonlyArray<Pick<FranjaServicioPlanilla,
 
 const PUESTO_FRANJA_PROPIA = /RONDIN|ENCARGAD|CORTINA|REFUERZO|RELEVANTE|VOLANTE/;
 
+type FranjaBanda = Pick<FranjaServicioPlanilla, 'code' | 'startTime' | 'endTime' | 'fechas'> & { cantidad?: number };
+
+/** M, T o N de 8 h. N12/D12 no entran (el 12 no es un sufijo de la N). */
+function bandaOcho(code: string): 'M' | 'T' | 'N' | null {
+  const c = claveCodigo(code);
+  if (c === 'D12' || c === 'N12' || c.endsWith('D12') || c.endsWith('N12')) return null;
+  if (c === 'M' || c === 'T' || c === 'N') return c;
+  const m = c.match(/^(?:P\d+|PL)([MTN])$/);
+  return m ? (m[1] as 'M' | 'T' | 'N') : null;
+}
+
+type ClasifMtn =
+  | { tipo: '24hs'; cantidad: number }
+  | { tipo: 'custom'; M: number; T: number; N: number; horasDia: number };
+
+/** M+T+N con la misma cantidad → 24 h. Cantidades distintas → custom (1×M 2×T 2×N = 40 h, nunca 24 h × 2). */
+function clasificacionMtn(puesto: string, franjas: ReadonlyArray<FranjaBanda>): ClasifMtn | null {
+  if (PUESTO_FRANJA_PROPIA.test(normPlanilla(puesto))) return null;
+  const cant = new Map<'M' | 'T' | 'N', number[]>();
+  const horas = new Map<'M' | 'T' | 'N', number>();
+  for (const f of franjas) {
+    if (f.fechas?.length) continue;
+    const b = bandaOcho(f.code);
+    if (!b) continue;
+    const q = Math.max(1, Math.round(Number(f.cantidad) || 1));
+    cant.set(b, [...(cant.get(b) || []), q]);
+    horas.set(b, (horas.get(b) || 0) + horasEntre(f.startTime, f.endTime) * q);
+  }
+  const bands = ['M', 'T', 'N'] as const;
+  if (!bands.every((b) => (cant.get(b) || []).length === 1)) return null;
+  const M = cant.get('M')![0];
+  const T = cant.get('T')![0];
+  const N = cant.get('N')![0];
+  if (M === T && T === N) return cubre24Horas(franjas) ? { tipo: '24hs', cantidad: M } : null;
+  const horasDia = Math.round(((horas.get('M') || 0) + (horas.get('T') || 0) + (horas.get('N') || 0)) * 10) / 10;
+  return { tipo: 'custom', M, T, N, horasDia };
+}
+
 /** Tipo con el que se va a crear el puesto y por qué, para mostrarlo antes de guardar. */
-export function tipoPuestoPropuesto(puesto: string, franjas: ReadonlyArray<Pick<FranjaServicioPlanilla, 'startTime' | 'endTime' | 'fechas' | 'code'>>): { tipo: '24hs' | 'custom'; motivo: string } {
+export function tipoPuestoPropuesto(puesto: string, franjas: ReadonlyArray<FranjaBanda>): { tipo: '24hs' | 'custom'; motivo: string } {
   if (PUESTO_FRANJA_PROPIA.test(normPlanilla(puesto))) return { tipo: 'custom', motivo: 'franja propia (no se le piden M+T+N)' };
+  const clasif = clasificacionMtn(puesto, franjas);
+  if (clasif?.tipo === 'custom') return { tipo: 'custom', motivo: `M×${clasif.M} T×${clasif.T} N×${clasif.N} · ${clasif.horasDia} h/día` };
   const codigos = [...new Set(franjas.filter((f) => !f.fechas?.length).map((f) => f.code))].join('+');
   if (cubre24Horas(franjas)) return { tipo: '24hs', motivo: `${codigos} cubren el día · admite D12/N12` };
   return { tipo: 'custom', motivo: `${codigos || 'sus franjas'} no cubren las 24 h · las horas de más van como TURA` };
@@ -839,8 +895,12 @@ export function posicionesDesdeFranjas(
       } as TurnoServicioDoc;
     });
     const dias = ordenarDias(list.flatMap((f) => (f.fechas?.length ? diasDeFechas(f.fechas) : f.dias.length ? f.dias : ORDEN_DIAS)));
-    const coverageType = (previa?.coverageType && !String(previa.id || '').startsWith('planilla_') ? String(previa.coverageType) : '')
+    const clasif = clasificacionMtn(list[0].puesto, list);
+    const coverageType = clasif?.tipo
+      || (previa?.coverageType && !String(previa.id || '').startsWith('planilla_') ? String(previa.coverageType) : '')
       || (!PUESTO_FRANJA_PROPIA.test(normPlanilla(list[0].puesto)) && cubre24Horas(list) ? '24hs' : 'custom');
+    const sinFeriados = list.some((f) => f.trabajaFeriados === false);
+    const conFeriados = list.some((f) => f.trabajaFeriados === true);
     // Todo puesto de 24 h admite D12/N12: si la planilla no los trae, salen de la mañana del puesto
     // (Casino: M 07–15 → D12 07–19 / N12 19–07, la M y la T rojas de la referencia).
     if (coverageType === '24hs') {
@@ -858,15 +918,17 @@ export function posicionesDesdeFranjas(
       ...((previa || {}) as object),
       id: String(previa?.id || `planilla_${n}`),
       name: previa?.name || list[0].puesto,
-      // Un puesto cargado a mano en Servicios conserva su tipo; el que armó la planilla se recalcula.
+      // M+T+N con cantidades distintas pisa un 24 h viejo. Sin las tres bandas, un puesto cargado a mano conserva su tipo.
       coverageType,
-      quantity: Math.max(...list.map((f) => f.cantidad), 1),
+      quantity: clasif?.tipo === '24hs' ? clasif.cantidad : Math.max(...list.map((f) => f.cantidad), 1),
       // Los 7 días van escritos: Servicios lee la lista vacía como «0 días/semana».
       activeDays: dias.length ? dias : [...ORDEN_DIAS],
       allowedShiftTypes: shifts,
       ...((previa as { shifts?: unknown } | undefined)?.shifts ? { shifts } : {}),
       status: 'ACTIVE',
     });
+    if (sinFeriados) (out[out.length - 1] as PosicionServicioDoc).trabajaFeriados = false;
+    else if (conFeriados) delete (out[out.length - 1] as { trabajaFeriados?: boolean }).trabajaFeriados;
   }
   return out;
 }
@@ -1039,6 +1101,7 @@ export function franjasDesdeVigente(vigente: readonly FranjaVigente[]): FranjaSe
     dias: ORDEN_DIAS.filter((d) => (f.dias || []).map((x) => x.toUpperCase()).includes(d)),
     ...(f.fechas?.length ? { fechas: [...f.fechas] } : {}),
     ...(f.feriados ? { feriados: true } : {}),
+    ...(f.trabajaFeriados === false ? { trabajaFeriados: false } : f.trabajaFeriados === true ? { trabajaFeriados: true } : {}),
   }));
 }
 

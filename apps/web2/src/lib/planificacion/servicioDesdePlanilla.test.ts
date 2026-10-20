@@ -3,6 +3,8 @@ import { describe, it } from 'node:test';
 import { detectarCuadros, normPlanilla, type CeldaPlano } from './importarExcel';
 import { prepararPegadoExcel } from './modoRapido';
 import { claveEquivalencia, type EquivalenciaCodigo } from './equivalenciaCodigo';
+import { calculateSlaHoursForMonth } from '../servicios/slaHoursCalculator';
+import { evaluarCoberturaDia } from './positionCoverageUnits';
 import {
   adoptarCodigoVigente,
   avisosFueraDeServicio,
@@ -368,6 +370,93 @@ describe('servicio desde la planilla · puesto de 24 h', () => {
   it('al actualizar, un puesto existente conserva su tipo', () => {
     const docs = posicionesDesdeFranjas([f('Puesto 1', 'M', '07:00', '15:00')], [{ id: 'x', name: 'Puesto 1', coverageType: '24hs', quantity: 1, activeDays: [], allowedShiftTypes: [], status: 'ACTIVE' }]);
     assert.equal(docs[0].coverageType, '24hs');
+  });
+});
+
+describe('cantidad por banda al armar el puesto', () => {
+  const banda = (code: 'M' | 'T' | 'N', cantidad: number) => ({
+    id: code,
+    puesto: 'Guardia',
+    code,
+    startTime: code === 'M' ? '07:00' : code === 'T' ? '15:00' : '23:00',
+    endTime: code === 'M' ? '15:00' : code === 'T' ? '23:00' : '07:00',
+    cantidad,
+    dias: [] as Array<'L' | 'M' | 'X' | 'J' | 'V' | 'S' | 'D'>,
+  });
+  const qty = (pos: { allowedShiftTypes: Array<{ code: string; quantity?: number }> }, code: string) =>
+    pos.allowedShiftTypes.find((s) => s.code === code)?.quantity;
+
+  it('1-1-1 es 24 h con quantity 1', () => {
+    const [pos] = posicionesDesdeFranjas([banda('M', 1), banda('T', 1), banda('N', 1)]);
+    assert.equal(pos.coverageType, '24hs');
+    assert.equal(pos.quantity, 1);
+    assert.equal(tipoPuestoPropuesto('Guardia', [banda('M', 1), banda('T', 1), banda('N', 1)]).tipo, '24hs');
+  });
+
+  it('2-2-2 es 24 h con quantity 2', () => {
+    const [pos] = posicionesDesdeFranjas([banda('M', 2), banda('T', 2), banda('N', 2)]);
+    assert.equal(pos.coverageType, '24hs');
+    assert.equal(pos.quantity, 2);
+  });
+
+  it('1-2-2 es custom M1 T2 N2 y suma 40 h por día', () => {
+    const franjas = [banda('M', 1), banda('T', 2), banda('N', 2)];
+    const [pos] = posicionesDesdeFranjas(franjas, [{
+      id: 'guardia', name: 'Guardia', coverageType: '24hs', quantity: 2, activeDays: [], allowedShiftTypes: [{ code: 'T', name: 'T', startTime: '15:00', endTime: '23:00', hours: 8, quantity: 1 }], status: 'ACTIVE',
+    }]);
+    assert.equal(pos.coverageType, 'custom');
+    assert.equal(qty(pos, 'M'), 1);
+    assert.equal(qty(pos, 'T'), 2);
+    assert.equal(qty(pos, 'N'), 2);
+    assert.equal(pos.allowedShiftTypes.some((s) => s.code === 'D12'), false);
+    const horas = calculateSlaHoursForMonth([pos as any], '2026-10-05', '2026-10-05', [], 2026, 9).total;
+    assert.equal(horas, 40);
+    assert.match(tipoPuestoPropuesto('Guardia', franjas).motivo, /40 h/);
+  });
+
+  it('la planilla 1×M 2×T 2×N no se parte en 24 h más extras', () => {
+    const todos = (raw: string) => Array.from({ length: 31 }, () => ({ raw }));
+    const [cuadro] = detectarCuadros(planilla([
+      { nombre: 'PEREZ JUAN', puesto: 'Guardia', celdas: todos('M') },
+      { nombre: 'GOMEZ ANA', puesto: 'Guardia', celdas: todos('T') },
+      { nombre: 'LOPEZ MARIO', puesto: 'Guardia', celdas: todos('T') },
+      { nombre: 'DIAZ LUIS', puesto: 'Guardia', celdas: todos('N') },
+      { nombre: 'RUIZ JOSE', puesto: 'Guardia', celdas: todos('N') },
+    ]), 2026, 10);
+    const prop = proponerServicioDesdePlanilla(cuadro, 2026, 10);
+    const linea = (f: { puesto: string; code: string; cantidad: number }) => `${f.puesto}·${f.code}×${f.cantidad}`;
+    assert.deepEqual(prop.franjas.map(linea).sort(), ['Guardia·M×1', 'Guardia·N×2', 'Guardia·T×2'].sort());
+    const pos = posicionesDesdeFranjas(prop.franjas).find((p) => p.name === 'Guardia');
+    assert.equal(pos?.coverageType, 'custom');
+  });
+});
+
+describe('feriados del puesto', () => {
+  const puesto = {
+    name: 'Guardia',
+    positionName: 'Guardia',
+    quantity: 1,
+    qty: 1,
+    coverageType: 'custom' as const,
+    activeDays: ['L', 'M', 'X', 'J', 'V', 'S', 'D'],
+    status: 'ACTIVE' as const,
+    allowedShiftTypes: [{ code: 'M', name: 'M', startTime: '07:00', endTime: '15:00', hours: 8, quantity: 1 }],
+    shifts: [{ code: 'M', hours: 8, startTime: '07:00', endTime: '15:00', quantity: 1 }],
+  };
+
+  it('−F en un feriado no exige cobertura y descuenta ese día de las vendidas; +F sigue igual', () => {
+    const mas = calculateSlaHoursForMonth([puesto as any], '2026-10-01', '2026-10-31', [], 2026, 9).total;
+    const menos = calculateSlaHoursForMonth([{ ...puesto, trabajaFeriados: false } as any], '2026-10-01', '2026-10-31', [], 2026, 9).total;
+    assert.equal(mas - menos, 8);
+    assert.equal(evaluarCoberturaDia([{ ...puesto, trabajaFeriados: false }], [], 'L', '2026-10-12').required, 0);
+    assert.equal(evaluarCoberturaDia([puesto], [], 'L', '2026-10-12').required, 1);
+    assert.equal(evaluarCoberturaDia([{ ...puesto, trabajaFeriados: false }], [], 'L', '2026-10-05').required, 1);
+  });
+
+  it('el editor guarda −F en el puesto', () => {
+    const franjas = [{ id: 'm', puesto: 'Guardia', code: 'M', startTime: '07:00', endTime: '15:00', cantidad: 1, dias: [] as Array<'L'>, trabajaFeriados: false as const }];
+    const [pos] = posicionesDesdeFranjas(franjas, [{ id: 'g', name: 'Guardia', coverageType: 'custom', quantity: 1, activeDays: [], allowedShiftTypes: [], status: 'ACTIVE', trabajaFeriados: true }]);
+    assert.equal(pos.trabajaFeriados, false);
   });
 });
 

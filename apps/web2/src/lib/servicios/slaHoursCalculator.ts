@@ -71,6 +71,15 @@ export function isArgentineHoliday(dateStr: string): boolean {
   return (AR_FERIADOS_VARIABLES[year] ?? []).includes(norm);
 }
 
+/** −F en el puesto: ese feriado no se trabaja (no cobertura, no horas vendidas). Sin el campo, se trabaja. */
+export function puestoSalteaFeriado(
+  pos: { trabajaFeriados?: boolean } | null | undefined,
+  dateStr?: string,
+): boolean {
+  if (!dateStr || pos?.trabajaFeriados !== false) return false;
+  return isArgentineHoliday(dateStr);
+}
+
 import { isPositionActiveOnDate } from '@/lib/servicios/slaPositionActive';
 import type { ServicePosition, ShiftVariant } from '@/services/slaService';
 import {
@@ -148,6 +157,7 @@ export function computePositionDayComposition(
   let dayTotal = 0;
   let dayNight = 0;
   if (isEventosPosition(pos)) return { dayTotal: 0, dayNight: 0 };
+  if (puestoSalteaFeriado(pos, dateStr)) return { dayTotal: 0, dayNight: 0 };
   if (isEncargadoPosition(pos) && !positionIncludeInSlaTotals(pos)) return { dayTotal: 0, dayNight: 0 };
   if (isEncargadoPosition(pos) && resolveEncargadoScheduleMode(pos) === 'rotating') {
     return { dayTotal: 0, dayNight: 0 };

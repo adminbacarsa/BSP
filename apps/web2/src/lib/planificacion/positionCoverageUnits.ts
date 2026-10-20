@@ -10,6 +10,7 @@ import { resolveTitularVacancyWorkShift } from './vacancyCoverage';
 import { paxBoostDeltaForDate } from '@/lib/servicios/paxBoostRanges';
 import { diaAcreditacionCobertura, sumarDiasCalendario } from './coberturaDiaHueco';
 import { correFeriado } from '@/lib/servicios/turnoFeriados';
+import { puestoSalteaFeriado } from '@/lib/servicios/slaHoursCalculator';
 
 export const PLANNING_NON_BILLABLE_CODES = new Set([
     'F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET', 'REF', 'ESC', 'SUS', 'SGS', 'EV',
@@ -851,6 +852,7 @@ export function evaluarCoberturaDia(
         coverageType?: string;
         shifts?: Array<{ code?: string; hours?: number; quantity?: number; startTime?: string; endTime?: string }>;
         activeDays?: string[];
+        trabajaFeriados?: boolean;
     }>,
     turnos: Array<TurnoRelojCobertura & { positionName?: string }>,
     dayLetter = 'J',
@@ -882,7 +884,7 @@ export function evaluarCoberturaDia(
             if (!code || PLANNING_NON_BILLABLE_CODES.has(code)) continue;
             counts[code] = (counts[code] || 0) + 1;
         }
-        const units = countPositionClosedUnitsFromShifts(pos, dayLetter, counts, undefined, true, dateStr, propios);
+        const units = countPositionClosedUnitsFromShifts(pos, dayLetter, counts, undefined, !puestoSalteaFeriado(pos, dateStr), dateStr, propios);
         result.positions.push({ positionName: posName, ...units });
         result.closed += units.closed;
         result.required += units.required;

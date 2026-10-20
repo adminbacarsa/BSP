@@ -33,6 +33,8 @@ export interface ServicePosition {
   quantity: number;
   allowedShiftTypes: ShiftVariant[];
   activeDays: string[];
+  /** false = −F: los feriados nacionales no exigen cobertura ni suman horas vendidas. Sin valor o true = +F (se trabaja). */
+  trabajaFeriados?: boolean;
   excludedDates?: string[];  // YYYY-MM-DD: días sin servicio solo para este puesto
   /**
    * Exclusión parcial por banda: fecha → códigos (M, T, N…).

@@ -303,6 +303,8 @@ export type PlanningPositionRow = {
   excludedShiftPaxDates?: Record<string, Record<string, number>>;
   preferenciaGenero?: string;
   exigeCobertura?: boolean;
+  /** false = −F: el feriado no exige cobertura ni suma horas vendidas. */
+  trabajaFeriados?: boolean;
   _serviceId?: string;
   _serviceRange?: string;
 };
@@ -406,6 +408,7 @@ export function buildPlanningPositionStructure(
         coverageType: posCoverageType,
         ...(pos.preferenciaGenero ? { preferenciaGenero: String(pos.preferenciaGenero) } : {}),
         ...(pos.exigeCobertura === false ? { exigeCobertura: false as const } : {}),
+        ...(pos.trabajaFeriados === false ? { trabajaFeriados: false as const } : {}),
         ...(posExcluded.length > 0 ? { positionExcludedDates: [...posExcluded] } : {}),
         ...(mergedExcluded.length > 0 ? { excludedDates: mergedExcluded } : {}),
         ...(excludedShiftDates && Object.keys(excludedShiftDates).length > 0

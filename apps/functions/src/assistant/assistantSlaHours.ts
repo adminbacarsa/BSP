@@ -2,6 +2,8 @@
  * Cálculo de horas vendidas SLA — misma lógica que Servicios (calculateMonthlyBreakdown / computePositionDayComposition).
  */
 
+import { isArgentineHoliday } from '../common/feriadosAr';
+
 const WEEK_DAY_CODES = ['D', 'L', 'M', 'X', 'J', 'V', 'S'] as const;
 
 type ShiftVariant = { code: string; startTime: string; endTime: string; hours?: number };
@@ -148,8 +150,10 @@ export function slaHorasVendidasMesCalendario(
   while (cur <= end) {
     days += 1;
     const dayCode = WEEK_DAY_CODES[cur.getDay()];
+    const ymd = `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}-${String(cur.getDate()).padStart(2, '0')}`;
     for (const pos of posList) {
       const p = pos as Record<string, unknown>;
+      if (p.trabajaFeriados === false && isArgentineHoliday(ymd)) continue;
       const activeDays = Array.isArray(p.activeDays) ? (p.activeDays as string[]) : null;
       if (activeDays && activeDays.length > 0 && !activeDays.includes(dayCode)) continue;
       const q = Math.max(1, Number(p.quantity) || 1);
