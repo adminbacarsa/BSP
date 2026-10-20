@@ -4,6 +4,7 @@
  */
 
 import { effectiveShiftsForPositionDay } from './autoScheduleEngineV2';
+import { acreditarExtEntrePuestos } from './extEntrePuestos';
 import { esFranjaPropia } from './lecturaBandas';
 import { resolveTitularVacancyWorkShift } from './vacancyCoverage';
 import { paxBoostDeltaForDate } from '@/lib/servicios/paxBoostRanges';
@@ -602,6 +603,9 @@ export type TurnoRelojCobertura = {
     segmentFromTime?: string;
     segmentToTime?: string;
     extExtraHours?: number;
+    nombre?: string;
+    /** Horas pedidas por el cliente: se facturan aparte y no tapan un hueco de la empresa. */
+    isTura?: boolean;
 };
 
 const MINUTOS_DIA = 1440;
@@ -886,8 +890,70 @@ export function evaluarCoberturaDia(
         if (units.sobraDetalle?.length) result.sobraDetalle.push(...units.sobraDetalle);
         if (units.avisoHoras) result.avisoHoras = [result.avisoHoras, units.avisoHoras].filter(Boolean).join(' · ');
     }
+    aplicarExtDeOtrosPuestos(positions, turnos, result);
     result.etiqueta = etiquetaCoberturaDia(result.closed, result.required, result.sobra);
     return result;
+}
+
+function aplicarExtDeOtrosPuestos(
+    positions: Array<{ positionName?: string; shifts?: Array<{ code?: string; quantity?: number; startTime?: string; endTime?: string }> }>,
+    turnos: Array<TurnoRelojCobertura & { positionName?: string }>,
+    result: {
+        closed: number;
+        required: number;
+        sobra: number;
+        avisoHoras: string;
+        positions: Array<{ positionName: string } & PositionCoverageUnitResult>;
+    },
+): void {
+    const puestos = positions
+        .map((pos) => ({
+            positionName: String(pos.positionName || 'General'),
+            franjas: (pos.shifts || [])
+                .filter((s) => s.startTime && s.endTime)
+                .map((s) => ({
+                    code: s.code,
+                    startTime: String(s.startTime),
+                    endTime: String(s.endTime),
+                    qty: s.quantity,
+                })),
+        }))
+        .filter((p) => p.franjas.length);
+    if (!puestos.length) return;
+    const cruce = acreditarExtEntrePuestos(puestos, turnos.map((t) => ({
+        positionName: t.positionName,
+        nombre: t.nombre,
+        code: t.code,
+        startTime: t.startTime,
+        endTime: t.endTime,
+        hours: t.hours,
+        isExtended: t.isExtended,
+        isEarlyStart: t.isEarlyStart,
+        segmentFromTime: t.segmentFromTime,
+        segmentToTime: t.segmentToTime,
+        extExtraHours: t.extExtraHours,
+        isTura: t.isTura || String(t.code || '').toUpperCase() === 'TURA',
+    })));
+    const mismo = (a: string, b: string) => normalizePlanningPositionName(a) === normalizePlanningPositionName(b);
+    for (const pos of result.positions) {
+        const c = cruce.porPuesto.find((p) => mismo(p.positionName, pos.positionName));
+        if (!c) continue;
+        const yaCerrado = pos.required > 0 && pos.closed >= pos.required;
+        if (!yaCerrado && c.textos.length) {
+            const linea = c.textos.join(' · ');
+            pos.avisoHoras = [pos.avisoHoras, linea].filter(Boolean).join(' · ');
+            result.avisoHoras = [result.avisoHoras, linea].filter(Boolean).join(' · ');
+        }
+        if (c.cerrado && !yaCerrado && pos.required > 0) {
+            pos.closed = pos.required;
+            if (pos.vendidasHoras != null) pos.facturable = pos.vendidasHoras;
+        }
+        if (c.cedidasHoras > 0 && pos.sobraHoras) {
+            pos.sobraHoras = Math.max(0, Math.round((pos.sobraHoras - c.cedidasHoras) * 10) / 10);
+        }
+    }
+    result.closed = result.positions.reduce((s, p) => s + p.closed, 0);
+    result.sobra = result.positions.reduce((s, p) => s + (p.sobra || 0), 0);
 }
 
 export interface DayCoverageTotals {
