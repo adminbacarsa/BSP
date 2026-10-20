@@ -29,6 +29,8 @@ export type VistaCelda = {
     puntoExclusion: boolean;
     swap: '' | 'S' | 'S!';
     mas: boolean;
+    /** EXT / ADEL acreditan cobertura; TURA se factura aparte. */
+    marcaAgregado?: 'EXT' | 'ADEL' | 'TURA';
     liberado: boolean;
     usado: boolean;
     descansoReducido: boolean;
@@ -128,7 +130,12 @@ function CeldaGrillaBase({ vista: v, fila, col, seleccionada, colElegir, elegirA
                 {v.swap && (
                     <div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${v.swap === 'S!' ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{v.swap}</div>
                 )}
-                {v.mas && <div className="absolute -top-1 -right-1 text-[8px] bg-red-900 text-white px-1 rounded-full border border-white/40">+</div>}
+                {v.marcaAgregado ? (
+                    <div
+                        data-marca-agregado={v.marcaAgregado}
+                        className={`absolute -top-1 -right-1 text-[6px] font-black text-white px-0.5 rounded border border-white/50 ${v.marcaAgregado === 'TURA' ? 'bg-rose-700' : v.marcaAgregado === 'ADEL' ? 'bg-indigo-700' : 'bg-emerald-700'}`}
+                    >{v.marcaAgregado}</div>
+                ) : v.mas ? <div className="absolute -top-1 -right-1 text-[8px] bg-red-900 text-white px-1 rounded-full border border-white/40">+</div> : null}
                 {v.liberado && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-emerald-600 text-white px-0.5 rounded">RET</div>}
                 {v.usado && <div className="absolute -top-1 -left-1 text-[7px] font-black bg-violet-600 text-white px-0.5 rounded z-10" title="Turno usado en cobertura operativa">U</div>}
                 {v.menuRol ? (
