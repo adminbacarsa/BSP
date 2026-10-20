@@ -652,6 +652,7 @@ import { aporteDelTurnoAlDia, sumarDiasCalendario } from '@/lib/planificacion/co
 import { sumarAportePorDiaYPuesto } from '@/lib/planificacion/aporteCoberturaMes';
 import { AVISO_MES_CERRADO, mesCerrado } from '@/lib/planificacion/mesCerradoPlanif';
 import { computePlanningMonthHoursBreakdown } from '@/lib/planificacion/planningMonthHoursBreakdown';
+import { textoCierreContraVendidas, textoFueraDelCierre } from '@/lib/planificacion/desgloseCierreTexto';
 import { planificarColumnaConCache, type PlannerColumnCache } from '@/lib/planificacion/plannerColumnHours';
 import { textoTooltipCeldaTope, textoTooltipFilaTope, type CruceTope } from '@/lib/planificacion/topeGrilla';
 import {
@@ -5368,6 +5369,14 @@ function PlanificacionDesktop() {
         if (isPosExcludedOnDate(pos, dateStr)) return { closed: 0, required: 0, schemeLabel: 'EXCL' };
 
         const codeCounts: Record<string, number> = {};
+        const turnosReloj: Array<{
+            code?: string; startTime?: string; endTime?: string; hours?: number;
+            isExtended?: boolean; isEarlyStart?: boolean; segmentFromTime?: string; segmentToTime?: string; extExtraHours?: number;
+        }> = [];
+        const relojDe = (v: unknown) => {
+            const hm = hhmmRapido(v);
+            return hm || (typeof v === 'string' && /^\d{1,2}:\d{2}/.test(v) ? v.slice(0, 5) : undefined);
+        };
         employeesList.forEach((emp: any) => {
             const key = `${emp.id}_${dateStr}`;
             const absence = absencesMap[key];
@@ -5383,8 +5392,27 @@ function PlanificacionDesktop() {
             const code = String(shift.code || '').toUpperCase();
             if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) return;
             const shiftPos = String(shift.positionName || '').trim();
-            if (!shiftPos || shiftPos !== pos.positionName) return;
-            codeCounts[code] = (codeCounts[code] || 0) + 1;
+            const cubre = String(shift.coversPositionName || '').trim();
+            if (shiftPos === pos.positionName) {
+                codeCounts[code] = (codeCounts[code] || 0) + 1;
+                turnosReloj.push({
+                    code,
+                    startTime: relojDe(shift.startTime),
+                    endTime: relojDe(shift.endTime),
+                    hours: Number(shift.hours) || undefined,
+                    isExtended: shift.isExtended === true,
+                    isEarlyStart: shift.isEarlyStart === true,
+                    segmentFromTime: relojDe(shift.segmentFromTime),
+                    segmentToTime: relojDe(shift.segmentToTime),
+                    extExtraHours: Number(shift.extExtraHours ?? shift.extensionExtraHours) || undefined,
+                });
+            } else if (cubre === pos.positionName && relojDe(shift.segmentFromTime) && relojDe(shift.segmentToTime)) {
+                turnosReloj.push({
+                    code: String(shift.coversBandCode || code).toUpperCase(),
+                    startTime: relojDe(shift.segmentFromTime),
+                    endTime: relojDe(shift.segmentToTime),
+                });
+            }
         });
 
         const precomputado = (!objectiveId || String(objectiveId) === String(selectedObjective))
@@ -5412,7 +5440,7 @@ function PlanificacionDesktop() {
             codeCounts[bandCode] = (codeCounts[bandCode] || 0) + n;
         }
 
-        return countPositionClosedUnitsFromShifts(pos, dayLetter, codeCounts, cycles, true, dateStr);
+        return countPositionClosedUnitsFromShifts(pos, dayLetter, codeCounts, cycles, true, dateStr, turnosReloj);
     };
 
     // 🛑 MEMOIZACIÓN CRÍTICA PARA EL MODAL
@@ -5438,6 +5466,8 @@ function PlanificacionDesktop() {
             requiredUnits: units.required,
             schemeLabel: units.schemeLabel,
             bandas: 'bandas' in units ? units.bandas : undefined,
+            sobraDetalle: 'sobraDetalle' in units ? units.sobraDetalle : undefined,
+            avisoHoras: 'avisoHoras' in units ? units.avisoHoras : undefined,
             isPositionClosed: units.required > 0 && units.closed >= units.required,
             isExcludedDay: hoursStats.isExcludedDay,
         };
@@ -18143,6 +18173,9 @@ function PlanificacionDesktop() {
                         // Puestos cerrados: 1 pax = esquema SLA completo (M+T+N, D12+N12, M+T, etc.).
                         let requiredPax = 0;
                         let closedPax = 0;
+                        let sobraPersonas = 0;
+                        const sobraLineas: string[] = [];
+                        const avisosReloj: string[] = [];
                         // Lo que cuenta la lectura por horas (solo del objetivo seleccionado; en el grupo, su parte).
                         let reqLectura = 0;
                         let closedLectura = 0;
@@ -18170,6 +18203,9 @@ function PlanificacionDesktop() {
                             );
                             requiredPax += units.required;
                             closedPax += units.closed;
+                            sobraPersonas += units.sobra || 0;
+                            if (units.sobraDetalle?.length) sobraLineas.push(...units.sobraDetalle);
+                            if (units.avisoHoras) avisosReloj.push(units.avisoHoras);
                             // La lectura por horas solo lee puestos 24 h: no tapa lo que falta en un puesto custom (Museo MM×3+ME).
                             if (esPuesto24(pos)) {
                                 reqLectura += units.required;
@@ -18184,24 +18220,27 @@ function PlanificacionDesktop() {
                         const cerradoMostrar = objetivoCubierto ? closedPax + Math.max(0, reqLectura - closedLectura) : closedPax;
                         const isCovered = requiredPax > 0 && cerradoMostrar >= requiredPax;
                         const extra = lecturaDia?.mostrar && lecturaDia.turnosFuera > 0 ? lecturaDia.turnosFuera : 0;
+                        const marcaDeMas = sobraPersonas > 0 || extra > 0;
                         const bandasGrupo = selectedGrupo && grupoUnifiedMode && !isCovered && requiredPax > 0
                             ? bandasAbiertasGrupoEn(dateStr, dayLetter)
                             : [];
                         const cls = bloqueoMesCerrado
                             ? 'bg-slate-100 text-slate-400'
-                            : (requiredPax === 0 ? 'bg-slate-50 text-slate-400' : (extra > 0 ? 'bg-amber-50 text-amber-700 cursor-pointer' : (isCovered ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-600 cursor-pointer')));
+                            : (requiredPax === 0 ? 'bg-slate-50 text-slate-400' : (marcaDeMas ? 'bg-amber-50 text-amber-700 cursor-pointer' : (isCovered ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-600 cursor-pointer')));
                         const porHoras = !!lecturaDia?.cerradoPorHoras && closedLectura < reqLectura;
                         const tituloLectura = [
                             porHoras ? `Franjas ${closedPax}/${requiredPax} · cerrado por horas (otro código, extensión o puesto)` : '',
                             lecturaDia?.textoHoras || '',
+                            avisosReloj.filter((a) => !(lecturaDia?.textoHoras || '').toLowerCase().includes('falta')).join(' · '),
                             lecturaDia?.mostrar ? lecturaDia.texto : '',
+                            sobraLineas.join(' · '),
                         ].filter(Boolean).join(' · ');
                         return (
                             <td
                                 key={dateStr}
                                 data-cobertura-dia={dateStr}
                                 data-cobertura-horas={porHoras ? '1' : undefined}
-                                data-cobertura-extra={extra || undefined}
+                                data-cobertura-extra={sobraPersonas || extra || undefined}
                                 tabIndex={modoRapido ? 0 : undefined}
                                 className={`text-center border-r border-b text-[10px] font-black ${cls}`}
                                 colSpan={1}
@@ -18212,7 +18251,7 @@ function PlanificacionDesktop() {
                                     : undefined)}
                                 onClick={(e) => {
                                     if (bloqueoMesCerrado) return;
-                                    const hayLectura = !!(lecturaDia?.mostrar && (extra > 0 || lecturaDia.sinPuesto.length || lecturaDia.avisoServicio));
+                                    const hayLectura = !!(lecturaDia?.mostrar && (marcaDeMas || lecturaDia.sinPuesto.length || lecturaDia.avisoServicio || avisosReloj.length));
                                     if (!hayLectura && (isCovered || requiredPax === 0)) return;
                                     const gaps = bandasGrupo.length > 0
                                         ? bandasGrupo.map((b) => ({
@@ -18245,14 +18284,14 @@ function PlanificacionDesktop() {
                                         y: e.clientY,
                                         lectura: tituloLectura,
                                         sinPuesto: lecturaDia?.sinPuesto.map((t) => t.nombre) || [],
-                                        deMas: extra > 0,
+                                        deMas: marcaDeMas,
                                     });
                                 }}
                             >
                                 {requiredPax > 0 ? (
                                     <span className="inline-flex flex-col items-center leading-none">
-                                        <span>{cerradoMostrar}/{requiredPax}{porHoras && <sup className="ml-px text-[7px] font-black text-emerald-800">h</sup>}</span>
-                                        {extra > 0 && <span className="mt-0.5 text-[8px] font-black text-amber-600" title={`${extra} turnos de más`}>+{extra}</span>}
+                                        <span>{cerradoMostrar}/{requiredPax}{sobraPersonas > 0 ? ` +${sobraPersonas}` : ''}{porHoras && <sup className="ml-px text-[7px] font-black text-emerald-800">h</sup>}</span>
+                                        {sobraPersonas === 0 && extra > 0 && <span className="mt-0.5 text-[8px] font-black text-amber-600" title={`${extra} turnos de más`}>+{extra}</span>}
                                     </span>
                                 ) : (extra > 0 ? <span className="text-[9px] text-amber-600">+{extra}</span> : '-')}
                             </td>
@@ -22200,6 +22239,8 @@ function PlanificacionDesktop() {
                                                 ? 'Excluido SLA'
                                                 : coverageData.isActiveDay ? `${coverageData.target}h` : `Sin cobertura`;
                                             const bandasPax = (coverageData as { bandas?: Array<{ code: string; tiene: number; pide: number }> }).bandas;
+                                            const sobraDetalle = (coverageData as { sobraDetalle?: string[] }).sobraDetalle || [];
+                                            const avisoHorasPuesto = (coverageData as { avisoHoras?: string }).avisoHoras || '';
                                             const unitsLabel = coverageData.isActiveDay && coverageData.requiredUnits > 0 && bandasPax?.length
                                                 ? bandasPax.map((b) => `${b.code} ${b.tiene}/${b.pide}`).join(' · ')
                                                 : coverageData.isActiveDay && coverageData.requiredUnits > 0
@@ -22236,6 +22277,12 @@ function PlanificacionDesktop() {
                                                                 </div>
                                                             )}
                                                         </div>
+                                                        {sobraDetalle.map((linea) => (
+                                                            <p key={linea} className="text-[10px] font-bold text-amber-700 mb-1">{linea}</p>
+                                                        ))}
+                                                        {avisoHorasPuesto && (
+                                                            <p className="text-[10px] font-bold text-amber-700 mb-1">{avisoHorasPuesto}</p>
+                                                        )}
                                                         <div className="flex items-center justify-between mb-2">
                                                             <span className="text-[9px] text-slate-400 font-bold">Horas SLA</span>
                                                             <span className={`text-[10px] font-black ${sobranHoras > 0 || sinPuestoTurno ? 'text-amber-600' : isHoursCovered ? 'text-emerald-600' : 'text-rose-500'}`} data-cobertura-horas>
@@ -24598,10 +24645,23 @@ function PlanificacionDesktop() {
                                     const legajoSum = Math.round(Object.values(empMonthlyHours).reduce((a: number, v: number) => a + (v || 0), 0));
                                     const showConBorrador = Math.abs(plannerWorkingHours - publishedPlanMesh.hours) > 0.05;
                                     const fueraFilas = Math.round(((showConBorrador ? plannerWorkingHours : publishedPlanMesh.hours) - legajoSum) * 10) / 10;
-                                    const cierreResto = Math.round((publishedPlanMesh.hours - b.baseSla - publishedPlanMesh.ftHours - publishedPlanMesh.uncodedHours) * 10) / 10;
                                     const vend = (selectedGrupo && grupoUnifiedMode && grupoTotalVendidas > 0) ? grupoTotalVendidas : slaVendidas;
                                     const deltaBaseVsVend = vend > 0 ? Math.round(b.baseSla - vend) : 0;
-                                    const deltaFactVsVend = vend > 0 ? Math.round(publishedPlanMesh.hours - vend) : 0;
+                                    const mesPublicado = isCronogramaPublicado;
+                                    const horasCierreVs = mesPublicado ? publishedPlanMesh.hours : (plannerWorkingHours > 0 ? plannerWorkingHours : b.baseSla);
+                                    const deltaVsVend = vend > 0 ? Math.round(horasCierreVs - vend) : 0;
+                                    const textoVs = !mesPublicado
+                                        ? textoCierreContraVendidas({ mesPublicado: false, horasCierre: horasCierreVs, vendidas: vend })
+                                        : (deltaVsVend === 0 && deltaBaseVsVend !== 0 && b.coverageExtra > 0
+                                            ? `Cierre OK (${b.baseSla}h base + ${b.coverageExtra}h ext)`
+                                            : textoCierreContraVendidas({ mesPublicado: true, horasCierre: publishedPlanMesh.hours, vendidas: vend }));
+                                    const fueraTxt = textoFueraDelCierre({
+                                        mesPublicado,
+                                        horasPublicadas: publishedPlanMesh.hours,
+                                        baseSla: b.baseSla,
+                                        ftHours: publishedPlanMesh.ftHours,
+                                        uncodedHours: publishedPlanMesh.uncodedHours,
+                                    });
                                     const codes = Object.entries(publishedPlanMesh.byCode)
                                         .map(([code, v]) => [code, v.hours] as [string, number])
                                         .sort((a, c) => c[1] - a[1]);
@@ -24653,24 +24713,15 @@ function PlanificacionDesktop() {
                                                     <p className="text-[9px] font-black uppercase text-teal-700">Cierre contra vendidas</p>
                                                     <p className="text-xl font-black text-teal-800">{b.baseSla}h</p>
                                                     <p className="text-[10px] text-slate-500">
-                                                        No es el plan. Fuera: FT {publishedPlanMesh.ftHours}h
-                                                        {publishedPlanMesh.uncodedHours ? `, sin código ${publishedPlanMesh.uncodedHours}h` : ''}
-                                                        {cierreResto ? `, ${cierreResto}h que el cierre descarta` : ''}
-                                                        {` · ${b.baseSla} + eso = ${publishedPlanMesh.hours}h`}
+                                                        {fueraTxt}
                                                     </p>
                                                 </div>
-                                                <div className={`rounded-xl border p-3 ${vend > 0 && deltaFactVsVend !== 0 ? 'border-rose-200 bg-rose-50/50' : 'border-slate-200 bg-white'}`}>
+                                                <div className={`rounded-xl border p-3 ${vend > 0 && deltaVsVend !== 0 ? 'border-rose-200 bg-rose-50/50' : 'border-slate-200 bg-white'}`}>
                                                     <p className="text-[9px] font-black uppercase text-slate-400">Vendidas SLA</p>
                                                     <p className="text-xl font-black text-teal-700">{vend || '—'}h</p>
                                                     {vend > 0 && (
-                                                        <p className={`text-[10px] font-bold ${deltaFactVsVend < 0 ? 'text-rose-600' : deltaFactVsVend > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
-                                                            {deltaFactVsVend === 0
-                                                                ? (deltaBaseVsVend !== 0 && b.coverageExtra > 0
-                                                                    ? `Cierre OK (${b.baseSla}h base + ${b.coverageExtra}h ext)`
-                                                                    : 'Cierre OK')
-                                                                : deltaFactVsVend < 0
-                                                                    ? `Faltan ${-deltaFactVsVend}h facturables`
-                                                                    : `+${deltaFactVsVend}h sobre vendidas`}
+                                                        <p className={`text-[10px] font-bold ${deltaVsVend < 0 ? 'text-rose-600' : deltaVsVend > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                                                            {textoVs}
                                                         </p>
                                                     )}
                                                 </div>

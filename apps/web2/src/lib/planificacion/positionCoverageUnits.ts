@@ -579,7 +579,315 @@ export interface PositionCoverageUnitResult {
     required: number;
     schemeLabel: string;
     /** Puesto con PAX por turno (Museo MM×3 + ME×1): cuántos tiene y pide cada turno. */
-    bandas?: Array<{ code: string; tiene: number; pide: number }>;
+    bandas?: Array<{ code: string; tiene: number; pide: number; desde?: string; hasta?: string }>;
+    /** Personas de más en alguna franja (la celda muestra «4/4 +N»). */
+    sobra?: number;
+    sobraDetalle?: string[];
+    /** Hueco de reloj que no tira la banda (ej. 06:00–07:00). */
+    avisoHoras?: string;
+    /** Horas que cubren lo vendido. Lo que pasa de la franja no se suma. */
+    facturable?: number;
+    vendidasHoras?: number;
+    sobraHoras?: number;
+}
+
+export type TurnoRelojCobertura = {
+    code?: string;
+    positionName?: string;
+    startTime?: string;
+    endTime?: string;
+    hours?: number;
+    isExtended?: boolean;
+    isEarlyStart?: boolean;
+    segmentFromTime?: string;
+    segmentToTime?: string;
+    extExtraHours?: number;
+};
+
+const MINUTOS_DIA = 1440;
+const TOLERANCIA_HUECO_MIN = 60;
+
+function aMinuto(hm: string): number | null {
+    const m = String(hm || '').match(/(\d{1,2}):(\d{2})/);
+    return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+}
+
+function aHm(min: number): string {
+    const v = ((min % MINUTOS_DIA) + MINUTOS_DIA) % MINUTOS_DIA;
+    return `${String(Math.floor(v / 60)).padStart(2, '0')}:${String(v % 60).padStart(2, '0')}`;
+}
+
+function horaCorta(hm: string): string {
+    const m = String(hm || '').match(/^(\d{1,2}):(\d{2})$/);
+    if (!m) return hm;
+    if (m[2] === '00') return String(Number(m[1]));
+    return `${Number(m[1])}:${m[2]}`;
+}
+
+function horasDeMinutos(min: number): number {
+    return Math.round((min / 60) * 10) / 10;
+}
+
+/** Ventana en minutos 0–2880. Si termina antes o igual, cruza la medianoche. */
+function intervalosReloj(inicio: string, fin: string): Array<[number, number]> {
+    const a = aMinuto(inicio);
+    let b = aMinuto(fin);
+    if (a == null || b == null || a === b) return [];
+    if (b <= a) b += MINUTOS_DIA;
+    return [[a, b]];
+}
+
+function finDesdeInicio(inicio: string, horas: number): string | null {
+    const a = aMinuto(inicio);
+    if (a == null || !(horas > 0)) return null;
+    return aHm(a + Math.round(horas * 60));
+}
+
+function pintar(oferta: number[], tramos: Array<[number, number]>) {
+    for (const [a, b] of tramos) {
+        const desde = Math.max(0, a);
+        const hasta = Math.min(oferta.length, b);
+        for (let m = desde; m < hasta; m++) oferta[m] += 1;
+    }
+}
+
+function presenciaTurno(t: TurnoRelojCobertura, ventanaDeCodigo: (code: string) => Array<[number, number]>): Array<[number, number]> {
+    const out: Array<[number, number]> = [];
+    const ini = String(t.startTime || '').slice(0, 5);
+    const finExplicito = String(t.endTime || '').slice(0, 5);
+    const fin = finExplicito || (ini ? finDesdeInicio(ini, Number(t.hours) || 0) || '' : '');
+    if (ini && fin) out.push(...intervalosReloj(ini, fin));
+    const segA = String(t.segmentFromTime || '').slice(0, 5);
+    const segB = String(t.segmentToTime || '').slice(0, 5);
+    if (segA && segB) out.push(...intervalosReloj(segA, segB));
+    else if (t.isExtended && fin && Number(t.extExtraHours) > 0) {
+        const hasta = finDesdeInicio(fin, Number(t.extExtraHours));
+        if (hasta) out.push(...intervalosReloj(fin, hasta));
+    } else if (t.isEarlyStart && ini && Number(t.extExtraHours) > 0) {
+        const desdeMin = aMinuto(ini);
+        if (desdeMin != null) {
+            const desde = aHm(desdeMin - Math.round(Number(t.extExtraHours) * 60));
+            out.push(...intervalosReloj(desde, ini));
+        }
+    }
+    if (!out.length) out.push(...ventanaDeCodigo(String(t.code || '').toUpperCase()));
+    return out;
+}
+
+function ventanasHueco(oferta: number[], desde: number, hasta: number, pide: number): Array<{ desde: string; hasta: string; min: number }> {
+    const out: Array<{ desde: string; hasta: string; min: number }> = [];
+    let abierta: number | null = null;
+    for (let m = desde; m <= hasta; m++) {
+        const falta = m < hasta && (oferta[m] || 0) < pide;
+        if (falta && abierta == null) abierta = m;
+        if (!falta && abierta != null) {
+            out.push({ desde: aHm(abierta), hasta: aHm(m), min: m - abierta });
+            abierta = null;
+        }
+    }
+    return out;
+}
+
+type BandaPedida = { code: string; pide: number; desde: string; hasta: string; horas: number };
+
+function bandasExplicitas(
+    allShifts: Array<{ code?: string; hours?: number; quantity?: number; startTime?: string; endTime?: string }>,
+    effectiveBandQty: (code: string, shiftQty?: number) => number,
+    fullSkip: Set<string>,
+): BandaPedida[] {
+    const explicitas = allShifts.filter((s) => {
+        const code = String(s.code || '').toUpperCase();
+        return code && !fullSkip.has(code) && s.quantity != null && Number(s.quantity) > 0;
+    });
+    if (!explicitas.length) return [];
+    const ocho = explicitas.filter((s) => shiftBandHours(s) < 12);
+    const doce = explicitas.filter((s) => shiftBandHours(s) >= 12);
+    const elegidas = ocho.length > 0 ? ocho : doce;
+    const vistas = new Set<string>();
+    const out: BandaPedida[] = [];
+    for (const s of elegidas) {
+        const code = String(s.code || '').toUpperCase();
+        if (!code || vistas.has(code)) continue;
+        vistas.add(code);
+        const pide = effectiveBandQty(code, s.quantity);
+        if (pide <= 0) continue;
+        const desde = String(s.startTime || '').slice(0, 5);
+        const hasta = String(s.endTime || '').slice(0, 5) || (desde ? finDesdeInicio(desde, shiftBandHours(s)) || '' : '');
+        out.push({ code, pide, desde, hasta, horas: shiftBandHours(s) });
+    }
+    return out;
+}
+
+/** D12 suma a la M, N12 a la N y el par a la T. Sirve cuando el turno no trae horario. */
+function acreditar12h(codeCounts: Record<string, number>): Record<string, number> {
+    const d12 = codeCounts.D12 || 0;
+    const n12 = codeCounts.N12 || 0;
+    return {
+        ...codeCounts,
+        M: (codeCounts.M || 0) + d12,
+        T: (codeCounts.T || 0) + Math.min(d12, n12),
+        N: (codeCounts.N || 0) + n12,
+    };
+}
+
+function cerrarPorCantidadDeBanda(
+    posName: string,
+    schemeLabel: string,
+    bandas: BandaPedida[],
+    codeCounts: Record<string, number>,
+    turnos?: TurnoRelojCobertura[],
+): PositionCoverageUnitResult {
+    const porCodigo = new Map(bandas.map((b) => [b.code, b]));
+    const ventanaDeCodigo = (code: string): Array<[number, number]> => {
+        const b = porCodigo.get(code);
+        if (b?.desde && b?.hasta) return intervalosReloj(b.desde, b.hasta);
+        const fijas: Record<string, [string, string]> = {
+            M: ['06:00', '14:00'], T: ['14:00', '22:00'], N: ['22:00', '06:00'],
+            D12: ['06:00', '18:00'], N12: ['18:00', '06:00'],
+        };
+        const par = fijas[code];
+        return par ? intervalosReloj(par[0], par[1]) : [];
+    };
+    const conReloj = (turnos || []).some((t) => String(t.startTime || '').includes(':'));
+    if (conReloj && bandas.every((b) => b.desde && b.hasta)) {
+        const oferta = new Array<number>(MINUTOS_DIA * 2).fill(0);
+        for (const t of turnos || []) pintar(oferta, presenciaTurno(t, ventanaDeCodigo));
+        let cubiertas = 0;
+        let pedidas = 0;
+        let sobranMin = 0;
+        const estados: NonNullable<PositionCoverageUnitResult['bandas']> = [];
+        const avisos: string[] = [];
+        for (const b of bandas) {
+            const tramo = intervalosReloj(b.desde, b.hasta)[0];
+            if (!tramo) continue;
+            const [desde, hasta] = tramo;
+            const mins: number[] = [];
+            for (let m = desde; m < hasta; m++) {
+                const n = oferta[m] || 0;
+                mins.push(n);
+                pedidas += b.pide;
+                cubiertas += Math.min(n, b.pide);
+                sobranMin += Math.max(0, n - b.pide);
+            }
+            const tope = mins.length ? Math.max(...mins) : 0;
+            let tiene = 0;
+            for (let nivel = tope; nivel >= 0; nivel--) {
+                const cortos = mins.filter((n) => n < nivel).length;
+                if (cortos <= TOLERANCIA_HUECO_MIN) { tiene = nivel; break; }
+            }
+            estados.push({ code: b.code, tiene, pide: b.pide, desde: b.desde, hasta: b.hasta });
+            if (tiene >= b.pide) {
+                const huecos = ventanasHueco(oferta, desde, hasta, b.pide);
+                const minHueco = huecos.reduce((s, h) => s + h.min, 0);
+                if (minHueco > 0) {
+                    const donde = huecos.slice(0, 2).map((h) => `${h.desde}–${h.hasta}`).join(', ');
+                    avisos.push(`Falta ${horasDeMinutos(minHueco)} h en ${posName} (${donde})`);
+                }
+            }
+        }
+        const acred = acreditar12h(codeCounts);
+        for (const estado of estados) {
+            const relleno = Math.min(acred[estado.code] || 0, estado.pide);
+            estado.tiene = Math.max(estado.tiene, relleno);
+        }
+        const sobraDetalle: string[] = [];
+        let sobra = 0;
+        for (const estado of estados) {
+            if (estado.tiene <= estado.pide) continue;
+            const n = estado.tiene - estado.pide;
+            sobra += n;
+            const rango = estado.desde && estado.hasta ? ` ${horaCorta(estado.desde)}–${horaCorta(estado.hasta)}` : '';
+            sobraDetalle.push(`Sobra ${n} en ${posName}${rango} (${estado.code})`);
+        }
+        const allFull = estados.length > 0 && estados.every((b) => b.tiene >= b.pide);
+        return {
+            closed: allFull ? 1 : 0,
+            required: 1,
+            schemeLabel,
+            bandas: estados,
+            sobra,
+            sobraDetalle,
+            avisoHoras: avisos.join(' · '),
+            facturable: horasDeMinutos(cubiertas),
+            vendidasHoras: horasDeMinutos(pedidas),
+            sobraHoras: horasDeMinutos(sobranMin),
+        };
+    }
+    const acred = acreditar12h(codeCounts);
+    const estados = bandas.map((b) => ({
+        code: b.code,
+        tiene: acred[b.code] || 0,
+        pide: b.pide,
+        desde: b.desde,
+        hasta: b.hasta,
+    }));
+    const sobraDetalle: string[] = [];
+    let sobra = 0;
+    for (const b of estados) {
+        if (b.tiene > b.pide) {
+            const n = b.tiene - b.pide;
+            sobra += n;
+            const rango = b.desde && b.hasta ? ` ${horaCorta(b.desde)}–${horaCorta(b.hasta)}` : '';
+            sobraDetalle.push(`Sobra ${n} en ${posName}${rango} (${b.code})`);
+        }
+    }
+    const allFull = estados.length > 0 && estados.every((b) => b.tiene >= b.pide);
+    return { closed: allFull ? 1 : 0, required: 1, schemeLabel, bandas: estados, sobra, sobraDetalle };
+}
+
+export function etiquetaCoberturaDia(closed: number, required: number, sobra = 0): string {
+    const base = `${closed}/${required}`;
+    return sobra > 0 ? `${base} +${sobra}` : base;
+}
+
+export function evaluarCoberturaDia(
+    positions: Array<{
+        positionName?: string;
+        qty?: number;
+        coverageType?: string;
+        shifts?: Array<{ code?: string; hours?: number; quantity?: number; startTime?: string; endTime?: string }>;
+        activeDays?: string[];
+    }>,
+    turnos: Array<TurnoRelojCobertura & { positionName?: string }>,
+    dayLetter = 'J',
+    dateStr?: string,
+): {
+    closed: number;
+    required: number;
+    sobra: number;
+    etiqueta: string;
+    sobraDetalle: string[];
+    avisoHoras: string;
+    positions: Array<{ positionName: string } & PositionCoverageUnitResult>;
+} {
+    const result = {
+        closed: 0,
+        required: 0,
+        sobra: 0,
+        etiqueta: '0/0',
+        sobraDetalle: [] as string[],
+        avisoHoras: '',
+        positions: [] as Array<{ positionName: string } & PositionCoverageUnitResult>,
+    };
+    for (const pos of positions) {
+        const posName = String(pos.positionName || 'General');
+        const propios = turnos.filter((t) => normalizePlanningPositionName(t.positionName || '') === normalizePlanningPositionName(posName));
+        const counts: Record<string, number> = {};
+        for (const t of propios) {
+            const code = String(t.code || '').toUpperCase();
+            if (!code || PLANNING_NON_BILLABLE_CODES.has(code)) continue;
+            counts[code] = (counts[code] || 0) + 1;
+        }
+        const units = countPositionClosedUnitsFromShifts(pos, dayLetter, counts, undefined, true, dateStr, propios);
+        result.positions.push({ positionName: posName, ...units });
+        result.closed += units.closed;
+        result.required += units.required;
+        result.sobra += units.sobra || 0;
+        if (units.sobraDetalle?.length) result.sobraDetalle.push(...units.sobraDetalle);
+        if (units.avisoHoras) result.avisoHoras = [result.avisoHoras, units.avisoHoras].filter(Boolean).join(' · ');
+    }
+    result.etiqueta = etiquetaCoberturaDia(result.closed, result.required, result.sobra);
+    return result;
 }
 
 export interface DayCoverageTotals {
@@ -666,7 +974,7 @@ export function countPositionClosedUnitsFromShifts(
         positionName?: string;
         qty?: number;
         coverageType?: string;
-        shifts?: Array<{ code?: string; hours?: number; quantity?: number }>;
+        shifts?: Array<{ code?: string; hours?: number; quantity?: number; startTime?: string; endTime?: string }>;
         activeDays?: string[];
         excludedShiftDates?: Record<string, string[]>;
         excludedShiftPaxDates?: Record<string, Record<string, number>>;
@@ -677,6 +985,7 @@ export function countPositionClosedUnitsFromShifts(
     cycles?: string[],
     isActiveOnDay = true,
     dateStr?: string,
+    turnos?: TurnoRelojCobertura[],
 ): PositionCoverageUnitResult {
     const qty = Math.max(1, Number(pos.qty) || 1);
     const schemeLabel = positionSchemeLabelForDay(pos, dayLetter, cycles, dateStr);
@@ -716,6 +1025,11 @@ export function countPositionClosedUnitsFromShifts(
         const boost = dateStr ? paxBoostDeltaForDate(pos, dateStr) : 0;
         return Math.max(0, base - (paxCuts[c] || 0) + boost);
     };
+
+    const pedidas = bandasExplicitas(allShifts, effectiveBandQty, fullSkip);
+    if (pedidas.length > 0) {
+        return cerrarPorCantidadDeBanda(String(pos.positionName || 'General'), schemeLabel, pedidas, codeCounts, turnos);
+    }
 
     if (coverageType === '24hs' || coverageType === '24' || coverageType === '24h') {
         const bands8 = [...new Set(

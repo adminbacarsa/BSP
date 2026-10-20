@@ -140,7 +140,12 @@ export function analyzePositionDayGap(
     let missingBandsPrimary: BandGap[] = [];
     let missingBandsAlternate: BandGap[] = [];
 
-    if (coverageType === '24hs' || coverageType === '24' || coverageType === '24h') {
+    if (units.bandas?.length) {
+        primaryScheme = units.bandas.map((b) => b.code).join('+') || schemeLabel;
+        missingBandsPrimary = units.bandas
+            .filter((b) => b.tiene < b.pide)
+            .map((b) => ({ code: b.code, missing: b.pide - b.tiene }));
+    } else if (coverageType === '24hs' || coverageType === '24' || coverageType === '24h') {
         const { bands8, bands12 } = get24hsBandSets(pos);
         const mtnBands = bands8.length > 0 ? bands8 : ['M', 'T', 'N'];
         const altBands = bands12.length >= 2 ? bands12 : ['D12', 'N12'];

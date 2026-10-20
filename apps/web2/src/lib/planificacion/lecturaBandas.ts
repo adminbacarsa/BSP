@@ -26,7 +26,7 @@ export type PuestoServicio = {
   qty?: number;
   coverageType?: string;
   exigeCobertura?: boolean;
-  shifts?: Array<{ code?: string; hours?: number; startTime?: string }>;
+  shifts?: Array<{ code?: string; hours?: number; startTime?: string; endTime?: string; quantity?: number }>;
 };
 
 export type CuentasBanda = { M: number; T: number; N: number };
@@ -196,13 +196,46 @@ export function acreditarCodigos(codeCounts: Record<string, number>): Record<str
 }
 
 function delta(cuentas: CuentasBanda, juegos: number): { falta: CuentasBanda; sobra: CuentasBanda } {
+  return deltaContra(cuentas, { M: juegos, T: juegos, N: juegos });
+}
+
+function deltaContra(cuentas: CuentasBanda, pedidos: CuentasBanda): { falta: CuentasBanda; sobra: CuentasBanda } {
   const falta: CuentasBanda = { M: 0, T: 0, N: 0 };
   const sobra: CuentasBanda = { M: 0, T: 0, N: 0 };
   (['M', 'T', 'N'] as Banda[]).forEach((b) => {
-    falta[b] = Math.max(0, juegos - cuentas[b]);
-    sobra[b] = Math.max(0, cuentas[b] - juegos);
+    falta[b] = Math.max(0, pedidos[b] - cuentas[b]);
+    sobra[b] = Math.max(0, cuentas[b] - pedidos[b]);
   });
   return { falta, sobra };
+}
+
+function cantidadExplicita(pos: PuestoServicio): boolean {
+  return (pos.shifts || []).some((s) => s.quantity != null && Number(s.quantity) > 0);
+}
+
+/** Lo que pide cada banda. Con quantity en el turno, no usa el PAX del puesto. */
+function pedidosDe(puestos24: readonly PuestoServicio[]): CuentasBanda {
+  const out: CuentasBanda = { M: 0, T: 0, N: 0 };
+  for (const p of puestos24) {
+    const q = Math.max(1, Number(p.qty) || 1);
+    if (!cantidadExplicita(p)) {
+      out.M += q;
+      out.T += q;
+      out.N += q;
+      continue;
+    }
+    for (const b of ['M', 'T', 'N'] as Banda[]) {
+      const sh = (p.shifts || []).find((s) => up(s.code) === b);
+      if (!sh) continue;
+      const n = sh.quantity != null && Number(sh.quantity) > 0 ? Math.floor(Number(sh.quantity)) : q;
+      out[b] += n;
+    }
+  }
+  return out;
+}
+
+function pideBanda(pos: PuestoServicio, banda: Banda): number {
+  return pedidosDe([pos])[banda];
 }
 
 function textoFaltaSobra(falta: CuentasBanda, sobra: CuentasBanda): string {
@@ -305,13 +338,16 @@ export function leerDia(input: { turnos: readonly TurnoDia[]; puestos: readonly 
   const bolsa = contarEstandar(estandar);
   const cuentas = bolsa.cuentas;
   const crudo = bolsa.crudo;
-  const { falta, sobra } = delta(cuentas, juegosPedidos);
-  const faltaLocalDelta = delta(local.cuentas, juegosPedidos).falta;
+  const pedidos = pedidosDe(puestos24);
+  const porBanda = puestos24.some(cantidadExplicita);
+  const { falta, sobra } = porBanda ? deltaContra(cuentas, pedidos) : delta(cuentas, juegosPedidos);
+  const faltaLocalDelta = (porBanda ? deltaContra(local.cuentas, pedidos) : delta(local.cuentas, juegosPedidos)).falta;
   const faltaLocal = puestos24.some((pos) => {
-    const qty = Math.max(1, Number(pos.qty) || 1);
     const del = estandar.filter((t) => mismo(t.positionName || '', pos.positionName));
     if (!del.length) return false;
-    const loc = delta(contarEstandar(del).cuentas, qty).falta;
+    const loc = porBanda
+      ? deltaContra(contarEstandar(del).cuentas, pedidosDe([pos])).falta
+      : delta(contarEstandar(del).cuentas, Math.max(1, Number(pos.qty) || 1)).falta;
     return loc.M + loc.T + loc.N > 0;
   });
   const entre = textoEntrePuestos(estandar);
@@ -348,14 +384,17 @@ export function leerDia(input: { turnos: readonly TurnoDia[]; puestos: readonly 
   const textoHoras = mostrar ? `${horasTrabajadas}/${horasVendidas} h · ${puestos24.length} puestos de 24 h` : '';
   const puestoFaltaT = puestos24.find((pos) => {
     const del = estandar.filter((t) => mismo(t.positionName || '', pos.positionName));
-    return contarEstandar(del).cuentas.T < (pos.qty || 1);
+    return contarEstandar(del).cuentas.T < pideBanda(pos, 'T');
   })?.positionName || '';
   const completar = textoCompletarPar(estandar, falta, puestoFaltaT);
+  const lineaCantidad = porBanda
+    ? `M ${cuentas.M}/${pedidos.M} · T ${cuentas.T}/${pedidos.T} · N ${cuentas.N}/${pedidos.N}`
+    : '';
   const base = [
     customTxt,
-    `M ${crudo.M} · T ${crudo.T} · N ${crudo.N}`,
+    lineaCantidad || `M ${crudo.M} · T ${crudo.T} · N ${crudo.N}`,
     lineaBanda,
-    mostrar ? `servicio: ${puestos24.length} puestos × ${paxServicio} pax` : '',
+    porBanda ? '' : (mostrar ? `servicio: ${puestos24.length} puestos × ${paxServicio} pax` : ''),
     avisoServicio || '',
   ].filter(Boolean).join(' · ');
   const sobraTxt = mostrar && sobranHoras > 0
@@ -391,9 +430,8 @@ export function leerDia(input: { turnos: readonly TurnoDia[]; puestos: readonly 
 /** El puesto de 24 h que todavía tiene lugar en esa banda. */
 export function puestoConLugar(banda: Banda, puestos: readonly PuestoServicio[], turnos: readonly TurnoDia[]): string | null {
   for (const pos of puestos.filter(esPuesto24)) {
-    const qty = Math.max(1, Number(pos.qty) || 1);
     const { cuentas } = contarEstandar(turnos.filter((t) => mismo(t.positionName || '', pos.positionName) && !esCustom(t, puestos)));
-    if (cuentas[banda] < qty) return pos.positionName;
+    if (cuentas[banda] < pideBanda(pos, banda)) return pos.positionName;
   }
   return null;
 }
@@ -426,9 +464,10 @@ export function lineasDeSobra(puestos: readonly PuestoServicio[], turnos: readon
   const cuenta = turnos.filter((t) => !NO_CUENTA.has(up(t.code)) && !turnoSinPuesto(t.positionName) && !esCustom(t, puestos));
   const lineas: LineaSobra[] = [];
   for (const pos of puestos.filter(esPuesto24)) {
-    const qty = Math.max(1, Number(pos.qty) || 1);
+    const qtyPuesto = Math.max(1, Number(pos.qty) || 1);
     const del = cuenta.filter((t) => mismo(t.positionName || '', pos.positionName));
     for (const code of ['M', 'T', 'N', 'D12', 'N12'] as const) {
+      const qty = code === 'M' || code === 'T' || code === 'N' ? pideBanda(pos, code) : qtyPuesto;
       const gente = del.filter((t) => up(t.code) === code);
       if (gente.length <= qty) continue;
       const sobra = gente.length - qty;
@@ -556,7 +595,9 @@ export function faltantesDelDia(input: {
     const delPuesto = input.turnos.filter((t) => mismo(t.positionName || '', pos.positionName) && !esCustom(t, input.puestos) && !turnoSinPuesto(t.positionName));
     const { cuentas } = contarEstandar(delPuesto);
     if (cuentas.M + cuentas.T + cuentas.N === 0) continue;
-    const { falta } = delta(cuentas, qty);
+    const { falta } = cantidadExplicita(pos)
+      ? deltaContra(cuentas, pedidosDe([pos]))
+      : delta(cuentas, qty);
     const pool = input.turnos12
       .slice()
       .sort((a, b) => (horas[a.empId] || 0) - (horas[b.empId] || 0) || a.nombre.localeCompare(b.nombre, 'es'));
