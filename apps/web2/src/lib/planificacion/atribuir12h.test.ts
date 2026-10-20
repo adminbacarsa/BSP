@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { aplicarAtribucionAlGuardar, elegirTitular, recalcularDia12, textoLicencia12, textoPata12, type CeldaDia12, type Licencia12 } from './atribuir12h';
+import { aplicarAtribucionAlGuardar, elegirTitular, indexar12, recalcularDia12, textoLicencia12, textoPata12, type CeldaDia12, type Licencia12 } from './atribuir12h';
 
 const regalo: Licencia12 = {
   empId: 'regalo', nombre: 'REGALO, JUAN', code: 'ART', banda: 'T', positionName: 'Puesto 2', inicio: '2026-10-01', orden: 2,
@@ -153,4 +153,24 @@ test('un par cubre una sola licencia: gana la que empezó antes', () => {
   ]);
   assert.equal(parches.length, 2);
   assert.ok(parches.every((p) => p.coversEmployeeId === 'antes'));
+});
+
+test('textoLicencia12 con índice da lo mismo que sin índice', () => {
+  const pending: Record<string, any> = {
+    'baigorria_2026-10-12': { code: 'V', originalCode: 'T', positionName: 'Puesto 1', employeeName: 'BAIGORRIA, LUIS' },
+    'regalo_2026-10-12': { code: 'D12', employeeName: 'REGALO, JUAN' },
+    'herrante_2026-10-12': { code: 'N12', employeeName: 'HERRANTE, PEDRO', positionName: 'Puesto 1' },
+    'perez_2026-10-13': { isDeleted: true },
+  };
+  const shifts: Record<string, any> = {
+    'regalo_2026-10-10': { code: 'D12', positionName: 'Puesto 3' },
+    'regalo_2026-10-12': { code: 'M' },
+    'baigorria_2026-10-13': { code: 'V' },
+    'perez_2026-10-13': { code: 'D12', coverageMode: '12H', coversEmployeeId: 'baigorria', employeeName: 'PEREZ' },
+    'gomez_2026-10-13': { code: 'N12', coverageMode: '12H', coversEmployeeId: 'baigorria', employeeName: 'GOMEZ' },
+  };
+  const indice = indexar12(pending, shifts);
+  for (const [t, d] of [['baigorria', '2026-10-12'], ['baigorria', '2026-10-13'], ['regalo', '2026-10-12'], ['x', '2026-10-14']]) {
+    assert.equal(textoLicencia12(pending, shifts, t, d, { indice }), textoLicencia12(pending, shifts, t, d), `${t} ${d}`);
+  }
 });

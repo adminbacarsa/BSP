@@ -294,10 +294,42 @@ type Turno12 = {
   isFrancoTrabajado?: boolean;
 };
 
+/** Claves del borrador y lo guardado agrupadas por día y por guardia (borrador primero), para no recorrer el mes por celda. */
+export type Indice12 = {
+  porDia: Map<string, string[]>;
+  porEmp: Map<string, Array<[string, Turno12 | null | undefined, string]>>;
+};
+
 export type OptsCeldas12 = {
   ordenDe?: (empId: string) => number;
   nombreDe?: (empId: string, raw: Turno12 | null | undefined) => string;
+  indice?: Indice12;
 };
+
+export function indexar12(
+  pending: Record<string, Turno12 | null | undefined>,
+  shifts: Record<string, Turno12 | null | undefined>,
+): Indice12 {
+  const porDia = new Map<string, string[]>();
+  const porEmp = new Map<string, Array<[string, Turno12 | null | undefined, string]>>();
+  const vistoDia = new Set<string>();
+  const tomar = (key: string, raw: Turno12 | null | undefined, conEmp: boolean) => {
+    const p = claveDia(key);
+    if (!p) return;
+    const idDia = `${p.empId}_${p.dateStr}`;
+    if (!vistoDia.has(idDia)) {
+      vistoDia.add(idDia);
+      const l = porDia.get(p.dateStr);
+      if (l) l.push(p.empId); else porDia.set(p.dateStr, [p.empId]);
+    }
+    if (!conEmp) return;
+    const e = porEmp.get(p.empId);
+    if (e) e.push([key, raw, p.dateStr]); else porEmp.set(p.empId, [[key, raw, p.dateStr]]);
+  };
+  for (const [k, raw] of Object.entries(pending)) tomar(k, raw, true);
+  for (const [k, raw] of Object.entries(shifts)) tomar(k, raw, !Object.prototype.hasOwnProperty.call(pending, k));
+  return { porDia, porEmp };
+}
 
 function diaMenos(ds: string): string {
   const [y, m, d] = ds.split('-').map(Number);
@@ -331,6 +363,7 @@ function heredarBanda(
   empId: string,
   dateStr: string,
   code: string,
+  indice?: Indice12,
 ): { code: string; position: string } {
   const want = up(code);
   let mejor: { dist: number; code: string; position: string } | null = null;
@@ -344,6 +377,10 @@ function heredarBanda(
     const dist = Math.abs(diaIndex(p.dateStr) - diaIndex(dateStr));
     if (!mejor || dist < mejor.dist) mejor = { dist, code: banda ? String(raw.originalCode) : '', position: pos };
   };
+  if (indice) {
+    for (const [k, raw] of indice.porEmp.get(empId) || []) mirar(k, raw);
+    return { code: mejor?.code || '', position: mejor?.position || '' };
+  }
   for (const [k, raw] of Object.entries(pending)) mirar(k, raw);
   for (const [k, raw] of Object.entries(shifts)) {
     if (Object.prototype.hasOwnProperty.call(pending, k)) continue;
@@ -379,13 +416,15 @@ export function celdasDelDia(
   dateStr: string,
   opts: OptsCeldas12 = {},
 ): CeldaDia12[] {
-  const ids = new Set<string>();
+  const ids = new Set<string>(opts.indice?.porDia.get(dateStr) || []);
   const tomar = (key: string) => {
     const p = claveDia(key);
     if (p && p.dateStr === dateStr) ids.add(p.empId);
   };
-  for (const k of Object.keys(pending)) tomar(k);
-  for (const k of Object.keys(shifts)) tomar(k);
+  if (!opts.indice) {
+    for (const k of Object.keys(pending)) tomar(k);
+    for (const k of Object.keys(shifts)) tomar(k);
+  }
   const out: CeldaDia12[] = [];
   for (const empId of ids) {
     const raw = leerRaw(pending, shifts, `${empId}_${dateStr}`);
@@ -394,7 +433,7 @@ export function celdasDelDia(
     let originalCode = String(raw.originalCode || '');
     let positionName = String(raw.originalPositionName || raw.positionName || '');
     if ((!originalCode || !positionName) && code && !NO_LICENCIA.has(up(code))) {
-      const h = heredarBanda(pending, shifts, empId, dateStr, code);
+      const h = heredarBanda(pending, shifts, empId, dateStr, code, opts.indice);
       if (!originalCode) originalCode = h.code;
       if (!positionName) positionName = h.position;
     }
@@ -435,6 +474,7 @@ function textoGuardado(
   shifts: Record<string, Turno12 | null | undefined>,
   titularId: string,
   dateStr: string,
+  indice?: Indice12,
 ): string {
   const lados: Array<{ nombre: string; code: 'D12' | 'N12' }> = [];
   const visto = new Set<string>();
@@ -449,6 +489,13 @@ function textoGuardado(
     visto.add(code);
     lados.push({ code, nombre: String(raw.employeeName || '') });
   };
+  if (indice) {
+    for (const empId of indice.porDia.get(dateStr) || []) {
+      const k = `${empId}_${dateStr}`;
+      mirar(leerRaw(pending, shifts, k), k);
+    }
+    return textoCubiertaPor(lados);
+  }
   for (const [k, raw] of Object.entries(pending)) mirar(raw, k);
   for (const [k, raw] of Object.entries(shifts)) {
     if (Object.prototype.hasOwnProperty.call(pending, k)) continue;
@@ -467,7 +514,7 @@ export function textoLicencia12(
 ): string {
   const celdas = celdasDelDia(pending, shifts, dateStr, opts);
   const derivado = ladosDe(celdas, recalcularDia12(celdas), titularId);
-  return derivado || textoGuardado(pending, shifts, titularId, dateStr);
+  return derivado || textoGuardado(pending, shifts, titularId, dateStr, opts.indice);
 }
 
 /** «Cubre a BAIGORRIA (V) · T · Puesto 1» de esa pata, derivado del día. */

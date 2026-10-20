@@ -454,7 +454,7 @@ import {
     textoDecisionCobertura,
     type CoberturaExistente,
 } from '@/lib/planificacion/coberturaExistente';
-import { aplicarAtribucionAlGuardar, celdasDelDia, recalcularDia12, textoLicencia12, textoPata12, textoTooltip12 } from '@/lib/planificacion/atribuir12h';
+import { aplicarAtribucionAlGuardar, celdasDelDia, indexar12, recalcularDia12, textoLicencia12, textoPata12, textoTooltip12 } from '@/lib/planificacion/atribuir12h';
 import MenuRapidoCobertura, { FranjaModoElegir } from '@/components/planificacion/MenuRapidoCobertura';
 import {
     apellidoMarca,
@@ -1329,6 +1329,7 @@ const rfzDocToShiftView = (rfz: any) => ({
 const CELDA_BORRADA = { borrada: true } as const;
 
 type EntradaCeldaGrilla = {
+    indice12: () => import('@/lib/planificacion/atribuir12h').Indice12;
     /** Un color y una sigla por puesto del servicio, para distinguirlos en la celda (vista de un objetivo). */
     colorPuesto?: Record<string, { color: string; sigla: string }>;
     selectedObjective: any;
@@ -1595,6 +1596,7 @@ function calcularCeldaGrilla(e: EntradaCeldaGrilla, emp: any, isGuest: boolean, 
                 ? excludedPositionsTooltip(excludedOnDay, cellDateStr)
                 : undefined;
     const borrado = content === CELDA_BORRADA;
+    const texto12 = isLeaveCell ? textoLicencia12(e.pendingChanges, e.shiftsMap, emp.id, cellDateStr, { indice: e.indice12() }) : '';
     const vista: VistaCelda = {
         key,
         contenido: borrado ? null : content,
@@ -1625,8 +1627,8 @@ function calcularCeldaGrilla(e: EntradaCeldaGrilla, emp: any, isGuest: boolean, 
         focoSobra: e.focoSobra === key,
         menuRol: menuRol || undefined,
         menuMarca: menuRol ? marcaCeldaMenuRapido(menuRol, menuCubre) : undefined,
-        marca12: isLeaveCell ? (textoLicencia12(e.pendingChanges, e.shiftsMap, emp.id, cellDateStr) ? '12h' : undefined) : undefined,
-        marca12Titulo: isLeaveCell ? (textoLicencia12(e.pendingChanges, e.shiftsMap, emp.id, cellDateStr) || undefined) : undefined,
+        marca12: texto12 ? '12h' : undefined,
+        marca12Titulo: texto12 || undefined,
         cubiertoTitulo: cubierto ? (p?.menuRapidoTexto || s?.menuRapidoTexto || (coveredByCell ? `Cubierto por ${coveredByCell}` : 'Cubierto')) : undefined,
         estado: statusIndicator || undefined,
         conflicto: !!hasConflict,
@@ -14779,6 +14781,7 @@ function PlanificacionDesktop() {
         return out;
     }, [effectivePosStructure]);
     const entradaCeldas: EntradaCeldaGrilla = {
+        indice12: () => indexar12(pendingChanges, shiftsMap),
         colorPuesto: colorPuestoGrilla,
         selectedObjective,
         selectedGrupo,
@@ -14806,10 +14809,12 @@ function PlanificacionDesktop() {
         const vistas: Record<string, VistaCelda> = {};
         const ctx: Record<string, CtxCeldaGrilla> = {};
         const prev = vistasPrevRef.current;
+        let indice: ReturnType<typeof indexar12> | null = null;
+        const entrada = { ...entradaCeldas, indice12: () => (indice ??= indexar12(pendingChanges, shiftsMap)) };
         for (const emp of filasCeldas as any[]) {
             const isGuest = esInvitadoEnGrilla(emp, selectedObjective, selectedGrupo, grupoUnifiedMode, slaIdToObjId);
             daysInMonth.forEach((day, dayIndex) => {
-                const r = calcularCeldaGrilla(entradaCeldas, emp, isGuest, day, dayIndex);
+                const r = calcularCeldaGrilla(entrada, emp, isGuest, day, dayIndex);
                 vistas[r.vista.key] = reusarVista(prev[r.vista.key], r.vista);
                 ctx[r.vista.key] = r.ctx;
             });
