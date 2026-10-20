@@ -643,8 +643,8 @@ import { aporteDelTurnoAlDia, sumarDiasCalendario } from '@/lib/planificacion/co
 import { sumarAportePorDiaYPuesto } from '@/lib/planificacion/aporteCoberturaMes';
 import { AVISO_MES_CERRADO, mesCerrado } from '@/lib/planificacion/mesCerradoPlanif';
 import { computePlanningMonthHoursBreakdown } from '@/lib/planificacion/planningMonthHoursBreakdown';
-import { buildPlannerColumnHours, collectPlannerColumnShifts } from '@/lib/planificacion/plannerColumnHours';
-import { cruceTopeDeTurnos, textoTooltipCeldaTope, textoTooltipFilaTope, type CruceTope } from '@/lib/planificacion/topeGrilla';
+import { planificarColumnaConCache, type PlannerColumnCache } from '@/lib/planificacion/plannerColumnHours';
+import { textoTooltipCeldaTope, textoTooltipFilaTope, type CruceTope } from '@/lib/planificacion/topeGrilla';
 import {
     billableHoursForPlanningCell,
     resolveTurnosForPlanningCellKey,
@@ -1746,6 +1746,81 @@ function computeServiceRuleChanges(
         }
     }
     return additions;
+}
+
+function indicePorLegajo<T>(source: Record<string, T> | undefined): {
+    porLegajo: Map<string, { key: string; value: T }[]>;
+    porClave: Map<string, T>;
+} {
+    const porLegajo = new Map<string, { key: string; value: T }[]>();
+    const porClave = new Map<string, T>();
+    for (const key of Object.keys(source || {})) {
+        const value = (source as Record<string, T>)[key];
+        porClave.set(key, value);
+        const employeeId = key.slice(0, Math.max(0, key.length - 11));
+        let list = porLegajo.get(employeeId);
+        if (!list) {
+            list = [];
+            porLegajo.set(employeeId, list);
+        }
+        list.push({ key, value });
+    }
+    return { porLegajo, porClave };
+}
+
+function recolectarLctLegajo(
+    employeeId: string,
+    celdas: { key: string; value: any[] }[],
+    pendientes: { key: string; value: any }[],
+    pendingByKey: Map<string, any>,
+    conItems: boolean,
+): { refs: unknown[]; items: LctShiftInput[] } {
+    const refs: unknown[] = [];
+    const items: LctShiftInput[] = [];
+    const seen = new Set<string>();
+    const push = (key: string, sh: any) => {
+        if (!sh || sh.isDeleted) return;
+        const dateStr = key.slice(-10);
+        refs.push(key, sh);
+        if (!conItems) return;
+        items.push({
+            employeeId,
+            employeeName: sh.employeeName || '',
+            dateStr,
+            code: sh.code || sh.type,
+            startTime: sh.startTime,
+            endTime: sh.endTime,
+            realEndTime: sh.realEndTime,
+            hours: sh.hours,
+            objectiveId: sh.objectiveId,
+            objectiveName: sh.objectiveName,
+            origin: sh.origin,
+        });
+    };
+    for (const { key, value: turnos } of celdas) {
+        const pending = pendingByKey.get(key);
+        if (pending?.isDeleted) { seen.add(key); continue; }
+        if (pending && !pending.isDeleted) {
+            push(key, pending);
+            (turnos || []).filter(isEventoTurno).forEach((t) => push(key, t));
+            seen.add(key);
+            continue;
+        }
+        (turnos || []).forEach((t) => push(key, t));
+        seen.add(key);
+    }
+    for (const { key, value: pending } of pendientes) {
+        if (seen.has(key) || pending?.isDeleted) continue;
+        push(key, pending);
+    }
+    return { refs, items };
+}
+
+function mismoMapaTexto(a: Record<string, string>, b: Record<string, string>): boolean {
+    const ak = Object.keys(a);
+    if (ak.length !== Object.keys(b).length) return false;
+    for (const k of ak) if (a[k] !== b[k]) return false;
+    return true;
 }
 
 function PlanificacionDesktop() {
@@ -3768,12 +3843,13 @@ function PlanificacionDesktop() {
         setSortDir('asc');
     }, [selectedObjective, positionStructure]);
 
-    const plannerColumn = useMemo(() => {
+    const plannerColumnCacheRef = useRef<PlannerColumnCache | null>(null);
+    const plannerBundle = useMemo(() => {
         const groupMode = !!(selectedGrupo && grupoUnifiedMode && selectedGrupo.objectiveIds?.length);
         const objectiveIds = groupMode
             ? selectedGrupo.objectiveIds.map((id: string) => String(id))
             : (selectedObjective ? [String(selectedObjective)] : []);
-        return buildPlannerColumnHours({
+        const out = planificarColumnaConCache({
             cellTurnosMap,
             shiftsMap,
             pendingChanges,
@@ -3781,32 +3857,20 @@ function PlanificacionDesktop() {
             groupMode,
             employeeIds: displayedEmployees.map((emp: any) => String(emp.id)),
             mes: `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`,
-        });
-    }, [cellTurnosMap, shiftsMap, pendingChanges, displayedEmployees, selectedObjective, selectedGrupo, grupoUnifiedMode, currentDate]);
-
-    const empMonthlyHours = plannerColumn.byEmployee;
-    const cruceTopePorEmp = useMemo(() => {
-        const groupMode = !!(selectedGrupo && grupoUnifiedMode && selectedGrupo.objectiveIds?.length);
-        const objectiveIds = groupMode
-            ? selectedGrupo.objectiveIds.map((id: string) => String(id))
-            : (selectedObjective ? [String(selectedObjective)] : []);
-        const { visible } = collectPlannerColumnShifts({
-            cellTurnosMap,
-            shiftsMap,
-            pendingChanges,
-            objectiveIds,
-            groupMode,
-            employeeIds: displayedEmployees.map((emp: any) => String(emp.id)),
-            mes: `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`,
-        });
-        return cruceTopeDeTurnos(visible, (t) => {
+        }, planningLimits.monthly, (t) => {
             if (typeof t?.dateStr === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(t.dateStr)) return t.dateStr;
             const raw = t?.startTime?.toDate ? t.startTime.toDate() : t?.startTime;
             if (!raw) return '';
             if (typeof raw === 'string' && /^\d{1,2}:\d{2}/.test(raw.trim())) return '';
             try { return getDateKey(raw); } catch { return ''; }
-        }, planningLimits.monthly);
+        }, plannerColumnCacheRef.current);
+        plannerColumnCacheRef.current = out.cache;
+        return out;
     }, [cellTurnosMap, shiftsMap, pendingChanges, displayedEmployees, selectedObjective, selectedGrupo, grupoUnifiedMode, planningLimits.monthly, currentDate]);
+
+    const plannerColumn = plannerBundle.column;
+    const empMonthlyHours = plannerColumn.byEmployee;
+    const cruceTopePorEmp = plannerBundle.cruce;
     const publishedPlanMesh = plannerColumn.published;
     const plannerWorkingHours = plannerColumn.working.hours;
 
@@ -4022,70 +4086,39 @@ function PlanificacionDesktop() {
     // Art. 197 LCT: menos de 12 h entre el tope de cierre (inicio + 12:59) y el próximo turno, también de otro objetivo. Solo aviso.
     // Cada legajo se calcula aparte: si sus turnos no cambiaron se reusa el resultado anterior.
     const lctCacheRef = useRef<Map<string, { refs: unknown[]; gaps: Record<string, string> }>>(new Map());
+    const lctMapRef = useRef<Record<string, string>>({});
+    const indiceTurnosLct = useMemo(() => indicePorLegajo(cellTurnosMap), [cellTurnosMap]);
+    const indicePendingLct = useMemo(() => indicePorLegajo(pendingChanges), [pendingChanges]);
     const lctRestByCell = useMemo(() => {
-        const porLegajo = new Map<string, { refs: unknown[]; list: LctShiftInput[] }>();
-        const seen = new Set<string>();
-        const push = (key: string, sh: any) => {
-            if (!sh || sh.isDeleted) return;
-            const dateStr = key.slice(-10);
-            const employeeId = key.slice(0, Math.max(0, key.length - 11));
-            let grupo = porLegajo.get(employeeId);
-            if (!grupo) {
-                grupo = { refs: [], list: [] };
-                porLegajo.set(employeeId, grupo);
-            }
-            grupo.refs.push(key, sh);
-            grupo.list.push({
-                employeeId,
-                employeeName: sh.employeeName || '',
-                dateStr,
-                code: sh.code || sh.type,
-                startTime: sh.startTime,
-                endTime: sh.endTime,
-                realEndTime: sh.realEndTime,
-                hours: sh.hours,
-                objectiveId: sh.objectiveId,
-                objectiveName: sh.objectiveName,
-                origin: sh.origin,
-            });
-        };
-        Object.entries(cellTurnosMap).forEach(([key, turnos]) => {
-            const pending = pendingChanges[key];
-            if (pending?.isDeleted) { seen.add(key); return; }
-            if (pending && !pending.isDeleted) {
-                push(key, pending);
-                // El EV del servidor sigue existiendo aunque haya un cambio pendiente en la celda.
-                (turnos || []).filter(isEventoTurno).forEach((t) => push(key, t));
-                seen.add(key);
-                return;
-            }
-            (turnos || []).forEach((t) => push(key, t));
-            seen.add(key);
-        });
-        Object.entries(pendingChanges).forEach(([key, pending]) => {
-            if (seen.has(key) || pending?.isDeleted) return;
-            push(key, pending);
-        });
         const anterior = lctCacheRef.current;
         const siguiente = new Map<string, { refs: unknown[]; gaps: Record<string, string> }>();
         const map: Record<string, string> = {};
-        porLegajo.forEach((grupo, employeeId) => {
+        const ids = new Set<string>([...indiceTurnosLct.porLegajo.keys(), ...indicePendingLct.porLegajo.keys()]);
+        ids.forEach((employeeId) => {
+            const celdas = indiceTurnosLct.porLegajo.get(employeeId) || [];
+            const pendientes = indicePendingLct.porLegajo.get(employeeId) || [];
             const prev = anterior.get(employeeId);
+            const sonda = recolectarLctLegajo(employeeId, celdas, pendientes, indicePendingLct.porClave, false);
             let gaps: Record<string, string>;
-            if (prev && prev.refs.length === grupo.refs.length && prev.refs.every((r, i) => r === grupo.refs[i])) {
+            let refs = sonda.refs;
+            if (prev && prev.refs.length === sonda.refs.length && prev.refs.every((r, i) => r === sonda.refs[i])) {
                 gaps = prev.gaps;
             } else {
+                const pleno = recolectarLctLegajo(employeeId, celdas, pendientes, indicePendingLct.porClave, true);
+                refs = pleno.refs;
                 gaps = {};
-                findLctRestGaps(grupo.list).forEach((g) => {
+                findLctRestGaps(pleno.items).forEach((g) => {
                     g.cellKeys.forEach((c) => { gaps[c] = gaps[c] ? `${gaps[c]} | ${g.message}` : g.message; });
                 });
             }
-            siguiente.set(employeeId, { refs: grupo.refs, gaps });
+            siguiente.set(employeeId, { refs, gaps });
             Object.assign(map, gaps);
         });
         lctCacheRef.current = siguiente;
+        if (mismoMapaTexto(lctMapRef.current, map)) return lctMapRef.current;
+        lctMapRef.current = map;
         return map;
-    }, [cellTurnosMap, pendingChanges]);
+    }, [indiceTurnosLct, indicePendingLct]);
 
     // Horas en el ciclo CCT actual (corre del 26 del mes anterior al 25 del mes activo).
     // Suma:
@@ -6318,6 +6351,21 @@ function PlanificacionDesktop() {
     }, []);
 
     const tenantClientIds = useMemo(() => new Set(clients.map((c) => c.id)), [clients]);
+    const serviciosSlaCacheRef = useRef<{ key: string; promise: Promise<any[]> } | null>(null);
+    const leerServiciosSla = (): Promise<any[]> => {
+        const key = `${String(empresaId || '')}|${scopeEmpresa ? 1 : 0}|${dataRefreshNonce}`;
+        const hit = serviciosSlaCacheRef.current;
+        if (hit && hit.key === key) return hit.promise;
+        let promise!: Promise<any[]>;
+        promise = getDocs(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa))
+            .then((snap) => snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as any[])
+            .catch((err) => {
+                if (serviciosSlaCacheRef.current?.promise === promise) serviciosSlaCacheRef.current = null;
+                throw err;
+            });
+        serviciosSlaCacheRef.current = { key, promise };
+        return promise;
+    };
 
     // 🛑 V8.60 - SELECCIÓN DE SERVICIO POR FECHA: usa la versión de servicios_sla vigente para el mes visualizado
     useEffect(() => {
@@ -6332,18 +6380,17 @@ function PlanificacionDesktop() {
         }
         const fetchSLA = async () => {
             try {
-                const snap = await getDocs(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa));
+                const rows = await leerServiciosSla();
                 const mesVista = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
                 const pendientesAca = serviciosPendientes.filter((p) => p.objectiveId === selectedObjective && p.mesKey === mesVista);
                 const allDocs = filterSlasForPlanningTenant(
                     [
-                        ...snap.docs.map((d) => {
-                            const row = { id: d.id, ...(d.data() as any) };
-                            const upd = pendientesAca.find((p) => p.tipo === 'actualizar' && p.virtual?.id === d.id);
+                        ...rows.map((row) => {
+                            const upd = pendientesAca.find((p) => p.tipo === 'actualizar' && p.virtual?.id === row.id);
                             return upd ? { ...row, ...upd.virtual } : row;
                         }),
                         ...pendientesAca.filter((p) => p.tipo === 'crear').map((p) => p.virtual),
-                    ],
+                    ] as any[],
                     empresaId,
                     scopeEmpresa,
                     tenantClientIds,
@@ -6572,9 +6619,9 @@ function PlanificacionDesktop() {
         }
         const fetchGroupSlas = async () => {
             try {
-                const snap = await getDocs(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa));
+                const rows = await leerServiciosSla();
                 const allDocs = filterSlasForPlanningTenant(
-                    snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })),
+                    rows as any[],
                     empresaId, scopeEmpresa, tenantClientIds,
                 );
                 const viewYear = currentDate.getFullYear();
@@ -14631,6 +14678,8 @@ function PlanificacionDesktop() {
         }
         return filtered;
     }, [positionStructure, daysInMonth]);
+    const excludedPosFirma = JSON.stringify(excludedPositionsByDate);
+    const excludedPositionsEstables = useMemo(() => excludedPositionsByDate, [excludedPosFirma]);
 
     const planningEventosCellsByDay = useMemo(() => {
         if (!selectedObjective) return {};
@@ -14746,9 +14795,15 @@ function PlanificacionDesktop() {
             pie: `${empresa?.name || 'COSP'} · generado ${new Date().toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`,
         });
     };
+    const cierreGrillaFirma = `${enforcePlanningClosureRules ? 1 : 0}|${JSON.stringify(planningSlaRanges ?? null)}`;
+    const fechaBloqueadaFnsRef = useRef({ isPlanningDateLocked, isOutsideServiceRange });
+    fechaBloqueadaFnsRef.current = { isPlanningDateLocked, isOutsideServiceRange };
     const fechaBloqueadaGrilla = useCallback(
-        (dateStr: string) => isPlanningDateLocked(dateStr) || isOutsideServiceRange(dateStr),
-        [isPlanningDateLocked, isOutsideServiceRange],
+        (dateStr: string) => {
+            const f = fechaBloqueadaFnsRef.current;
+            return f.isPlanningDateLocked(dateStr) || f.isOutsideServiceRange(dateStr);
+        },
+        [cierreGrillaFirma],
     );
     const nombreObjetivoRef = useRef(getObjectiveName);
     nombreObjetivoRef.current = getObjectiveName;
@@ -14780,9 +14835,20 @@ function PlanificacionDesktop() {
         });
         return out;
     }, [effectivePosStructure]);
+    const colorPuestoFirma = JSON.stringify(colorPuestoGrilla);
+    const colorPuestoEstable = useMemo(() => colorPuestoGrilla, [colorPuestoFirma]);
+    const consultasFirma = vacancyConsultas.map((c) => JSON.stringify({
+        id: c.id,
+        status: c.status,
+        venceAtMs: c.venceAtMs,
+        titularEmployeeId: c.titularEmployeeId,
+        jornadas: c.jornadas,
+        respuestas: c.respuestas,
+    })).join('~');
+    const vacancyConsultasEstables = useMemo(() => vacancyConsultas, [consultasFirma]);
     const entradaCeldas: EntradaCeldaGrilla = {
         indice12: () => indexar12(pendingChanges, shiftsMap),
-        colorPuesto: colorPuestoGrilla,
+        colorPuesto: colorPuestoEstable,
         selectedObjective,
         selectedGrupo,
         grupoUnifiedMode,
@@ -14795,8 +14861,8 @@ function PlanificacionDesktop() {
         turaMap,
         lctRestByCell,
         cruceTopePorEmp,
-        excludedPositionsByDate,
-        vacancyConsultas,
+        excludedPositionsByDate: excludedPositionsEstables,
+        vacancyConsultas: vacancyConsultasEstables,
         isServiceLocked,
         fechaBloqueada: fechaBloqueadaGrilla,
         nombreObjetivo: (objId: string) => nombreObjetivoRef.current(objId),
@@ -14804,7 +14870,16 @@ function PlanificacionDesktop() {
         focoSobra,
     };
     const vistasPrevRef = useRef<Record<string, VistaCelda>>({});
-    const filasCeldas = comparingSnapshot ? compareGridEmployees : displayedEmployees;
+    const filasCeldasBase = comparingSnapshot ? compareGridEmployees : displayedEmployees;
+    const filasCeldasRef = useRef<any[] | null>(null);
+    if (
+        !filasCeldasRef.current
+        || filasCeldasRef.current.length !== filasCeldasBase.length
+        || filasCeldasBase.some((emp: any, i: number) => emp !== filasCeldasRef.current![i])
+    ) {
+        filasCeldasRef.current = filasCeldasBase;
+    }
+    const filasCeldas = filasCeldasRef.current;
     const celdasGrilla = useMemo(() => {
         const vistas: Record<string, VistaCelda> = {};
         const ctx: Record<string, CtxCeldaGrilla> = {};
@@ -14825,8 +14900,8 @@ function PlanificacionDesktop() {
     }, [
         filasCeldas, daysInMonth, selectedObjective, selectedGrupo, grupoUnifiedMode, slaIdToObjId,
         pendingChanges, shiftsMap, rfzByEmpDate, absencesMap, planPublicadoGrilla, cellTurnosMap, turaMap,
-        lctRestByCell, cruceTopePorEmp, excludedPositionsByDate, vacancyConsultas, isServiceLocked, fechaBloqueadaGrilla, clients,
-        sobraFirma, focoSobra, colorPuestoGrilla,
+        lctRestByCell, cruceTopePorEmp, excludedPositionsEstables, vacancyConsultasEstables, isServiceLocked, fechaBloqueadaGrilla,
+        sobraFirma, focoSobra, colorPuestoEstable,
     ]);
     const ctxCeldasExtraRef = useRef<Record<string, CtxCeldaGrilla>>({});
     const celdaDeGrilla = (emp: any, isGuest: boolean, day: Date, dayIndex: number) => {
