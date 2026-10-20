@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useTransition, useCallback, useDeferredValue } from 'react';
+﻿import React, { useState, useEffect, useLayoutEffect, useMemo as useMemoReact, useRef, useTransition, useCallback, useDeferredValue } from 'react';
 import { createPortal } from 'react-dom';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
@@ -204,7 +204,9 @@ import {
   resolveCoverGuardDisplayName,
 } from '@/lib/cosp/coverageSemantics';
 import { PlanningCoverageLegend } from '@/components/planificacion/PlanningCoverageLegend';
-import { inicioRenderGrilla, registrarCommitGrilla } from '@/lib/planificacion/perfGrilla';
+import { crearUseMemoMedido, inicioRenderGrilla, medirSeccion, registrarCommitGrilla, reiniciarOrdenMemo } from '@/lib/planificacion/perfGrilla';
+
+const useMemo = crearUseMemoMedido(useMemoReact);
 import { MedidorVelocidad } from '@/components/planificacion/MedidorVelocidad';
 import { etiquetaFilaGrupo, partesObjetivo, puestoDeTurno, type EtiquetaFilaGrupo } from '@/lib/planificacion/etiquetaFilaGrupo';
 import { opcionesGrupoVista } from '@/lib/planificacion/grupoDesplegable';
@@ -1745,6 +1747,7 @@ function computeServiceRuleChanges(
 }
 
 function PlanificacionDesktop() {
+    reiniciarOrdenMemo();
     const perfRenderInicio = inicioRenderGrilla();
     useLayoutEffect(() => registrarCommitGrilla(perfRenderInicio, 'pagina'));
     const { empresaId, empresa, loadingEmpresa } = useEmpresa();
@@ -19956,7 +19959,7 @@ function PlanificacionDesktop() {
                                 }}
                                 className={`relative min-w-0 flex-1 min-h-0 overflow-auto custom-scrollbar rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/40 transition-opacity duration-150 outline-none ${(isFilterPending || (selectedObjective && !shiftsMapLoaded)) ? 'opacity-70' : ''} ${correctionMode ? 'pb-2' : ''} ${modoRapido ? 'ring-1 ring-indigo-200' : ''}`}
                             >
-                                {renderGrid(false, undefined, undefined, undefined, correctionMode ? { highlightCoverageFooter: true } : undefined)}
+                                {medirSeccion('grilla (renderGrid)', () => renderGrid(false, undefined, undefined, undefined, correctionMode ? { highlightCoverageFooter: true } : undefined))}
                                 <MedidorVelocidad />
                                 <ModoRapidoCapa
                                     ref={capaRapidaRef}
