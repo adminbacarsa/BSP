@@ -735,22 +735,32 @@ export function countPositionClosedUnitsFromShifts(
         }
         const d12 = codeCounts.D12 || 0;
         const n12 = codeCounts.N12 || 0;
+        const pares12 = Math.min(d12, n12);
+        // D12 cubre 07–19 (M + mitad de T) y N12 cubre 19–07 (mitad de T + N).
+        // El mínimo de esas franjas es la cantidad de unidades de 24 h, sin reutilizar gente.
         const acred8: Record<string, number> = {
             ...codeCounts,
             M: (codeCounts.M || 0) + d12,
             N: (codeCounts.N || 0) + n12,
-            T: (codeCounts.T || 0) + Math.min(d12, n12),
+            T: (codeCounts.T || 0) + pares12,
         };
         let closed = 0;
-        if (bands8.length > 0) {
-            closed = Math.min(qty, closedUnitsFromBandScheme(acred8, bands8));
-        } else if (bands12.length === 0) {
-            closed = Math.min(qty, closedUnitsFromBandScheme(acred8, ['M', 'T', 'N'].filter((c) => !fullSkip.has(c))));
+        const bands8Medidos = bands8.length > 0
+            ? bands8
+            : (bands12.length === 0 ? ['M', 'T', 'N'].filter((c) => !fullSkip.has(c)) : []);
+        if (bands8Medidos.length > 0) {
+            closed = Math.min(qty, closedUnitsFromBandScheme(acred8, bands8Medidos));
         }
+        // El par ya está dentro de acred8. Sumarlo de nuevo cuenta dos veces a las mismas personas
+        // (Casino: D12+N12 + M + N daba 2/2 con la tarde 15–23 en una sola persona).
+        const contoParEn8 = bands8Medidos.some((c) => c === 'M' || c === 'T' || c === 'N');
+        const counts12 = contoParEn8
+            ? { ...codeCounts, D12: Math.max(0, d12 - pares12), N12: Math.max(0, n12 - pares12) }
+            : codeCounts;
         if (closed < qty && bands12.length >= 2) {
-            closed += Math.min(qty - closed, closedUnitsFromBandScheme(codeCounts, bands12));
+            closed += Math.min(qty - closed, closedUnitsFromBandScheme(counts12, bands12));
         } else if (closed < qty && bands8.length === 0 && bands12.length === 0) {
-            closed += Math.min(qty - closed, closedUnitsFromBandScheme(codeCounts, ['D12', 'N12'].filter((c) => !fullSkip.has(c))));
+            closed += Math.min(qty - closed, closedUnitsFromBandScheme(counts12, ['D12', 'N12'].filter((c) => !fullSkip.has(c))));
         }
         return { closed, required: qty, schemeLabel };
     }
