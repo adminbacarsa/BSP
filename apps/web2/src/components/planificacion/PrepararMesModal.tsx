@@ -12,7 +12,6 @@ import { readSessionJson, writeSessionJson } from '@/lib/persistSession';
 import { empresaCollectionQuery, fetchPlanificacionPublishStatus } from '@/lib/multiempresa';
 import { filterSlasForPlanningContext, filterSlasForPlanningTenant } from '@/lib/slaPlanningMatch';
 import { planServicioMes } from '@/lib/planificacion/crearServicioMes';
-import { isClientOperational } from '@/lib/crm/clientLifecycle';
 import { toast } from 'sonner';
 import type { Estrategia, Metricas } from '@/lib/planificacion/prepararMes';
 import { correrTanda, unidadesDelMes, type FilaTanda, type ModoTanda } from '@/lib/planificacion/prepararMesTanda';
@@ -50,6 +49,7 @@ const TEXTO_FUERA: Record<Fila['estado'], string> = {
   sin_servicio: 'Sin servicio',
   sin_guardias: 'Sin guardias',
   error: 'No se pudo simular',
+  fuera_operacion: 'Fuera de operación',
 };
 
 const COLUMNAS = 'grid grid-cols-[minmax(0,1fr)_60px_136px_72px_52px_60px_48px_104px] items-center gap-x-2';
@@ -178,14 +178,28 @@ export function PrepararMesModal(props: Props) {
       const tenantIds = new Set(clients.map((c: any) => String(c.id)));
       const allSla = filterSlasForPlanningTenant(snapSla.docs.map((d) => ({ id: d.id, ...(d.data() as any) })), empresaId, scopeEmpresa, tenantIds);
       let hechos = 0;
+      let mes = '';
+      let origen = '';
       const no: string[] = [];
       for (const f of sinServicioMes) for (const o of f.objetivos) {
         const cliente = clients.find((c: any) => String(c.id) === o.clientId);
-        const plan = planServicioMes({ matching: filterSlasForPlanningContext(allSla as any[], o.clientId, o.id, clients, slaIdToObjId) as any[], year, month: month + 1, clienteActivo: !!cliente && isClientOperational(cliente.status) });
-        if (plan.estado === 'crear') { await plan.run({ empresaId, migracionCompleta: props.migracionCompleta, scopeEmpresa, via: 'PREPARAR_MES' }); hechos += 1; }
+        const plan = planServicioMes({
+          matching: filterSlasForPlanningContext(allSla as any[], o.clientId, o.id, clients, slaIdToObjId) as any[],
+          year,
+          month: month + 1,
+          cliente,
+          modo: 'automatico',
+        });
+        if (plan.estado === 'crear' && !plan.requiereConfirmacion) {
+          await plan.run({ empresaId, migracionCompleta: props.migracionCompleta, scopeEmpresa, via: 'PREPARAR_MES' });
+          hechos += 1;
+          mes = plan.mes;
+          origen = plan.mesOrigen;
+        }
         else if (plan.estado === 'no_se_puede') no.push(`${o.nombre}: ${plan.motivo}`);
       }
-      if (hechos) toast.success(`${hechos} servicio(s) del mes creados copiando el anterior. Volvé a simular.`);
+      if (hechos === 1 && mes && origen) toast.success(`Servicio de ${mes} copiado de ${origen}. Volvé a simular.`);
+      else if (hechos) toast.success(`${hechos} servicios de ${mes} copiados. Volvé a simular.`);
       if (no.length) toast.error(no.join(' · '), { duration: 10000 });
     } catch (err) {
       console.error('[preparar mes · servicios]', err);
@@ -206,7 +220,8 @@ export function PrepararMesModal(props: Props) {
   const visibles = useMemo(() => filas
     .filter((f) => vistaDe(f) === vista)
     .sort((x, y) => (metricasDe(y)?.horasSinCubrir || 0) - (metricasDe(x)?.horasSinCubrir || 0) || x.nombre.localeCompare(y.nombre)), [filas, vista]);
-  const fuera = useMemo(() => filas.filter((f) => vistaDe(f) === 'fuera'), [filas]);
+  const fueraOp = useMemo(() => filas.filter((f) => f.estado === 'fuera_operacion'), [filas]);
+  const fuera = useMemo(() => filas.filter((f) => f.estado !== 'fuera_operacion' && vistaDe(f) === 'fuera'), [filas]);
 
   if (typeof document === 'undefined') return null;
   if (!open) {
@@ -370,6 +385,22 @@ export function PrepararMesModal(props: Props) {
                   </div>
                 );
               })}
+            </div>
+          )}
+
+          {fueraOp.length > 0 && (
+            <div className="mt-3 rounded-xl border border-slate-200 bg-white" data-preparar-fuera-operacion>
+              <div className="px-3 py-2 text-[12px] font-bold text-slate-500">
+                Fuera de operación ({fueraOp.length}): no se les crea servicio
+              </div>
+              <div className="grid grid-cols-1 gap-x-4 border-t border-slate-100 px-3 py-2 text-[12px] sm:grid-cols-2">
+                {fueraOp.map((f) => (
+                  <div key={f.key} className="flex items-center justify-between gap-2 py-0.5">
+                    <span className="truncate text-slate-700">{f.nombre} <span className="text-slate-400">· {f.cliente}</span></span>
+                    <span className="shrink-0 text-[11px] text-slate-400" title={f.notas.join('\n') || undefined}>Fuera de operación</span>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 

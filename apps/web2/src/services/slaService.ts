@@ -84,7 +84,8 @@ export type SlaChangeAction =
   | 'REACTIVAR_PUESTO'
   | 'ALTA_PUESTO'
   | 'EDIT_PUESTO'
-  | 'ELIMINAR_PUESTO';
+  | 'ELIMINAR_PUESTO'
+  | 'COPIA_MES_ANTERIOR';
 
 export interface SlaChangeLogEntry {
   at: string;

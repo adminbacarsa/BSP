@@ -1,9 +1,10 @@
 /**
- * Al publicar el cronograma del último mes de un SLA con renovación automática,
- * crea el doc del mes siguiente (y le pone slaSeriesId al origen si no tenía).
- * Despublicar no borra. Idempotente.
+ * Al publicar el cronograma del último mes de un SLA, crea el doc del mes siguiente
+ * con la misma copia que Planificación (`copiarSlaMes`). No depende de autoRenewMonthly.
+ * Despublicar no borra. Idempotente. Solo copia M-1 si está abierto y el cliente sigue activo.
+ * Un SLA cerrado, un hueco o un cliente inactivo no se renuevan.
  */
-import { franjasParaMesSiguiente } from './franjasMesSiguiente';
+import { decidirCopiaSlaMes } from './copiarSlaMes';
 import * as admin from 'firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { onDocumentWritten } from 'firebase-functions/v2/firestore';
@@ -64,10 +65,6 @@ function objectiveActive(obj: { status?: unknown; active?: unknown } | undefined
   return String(obj.status ?? '').trim().toUpperCase() !== 'INACTIVE';
 }
 
-function rangesOverlap(aStart: string, aEnd: string, bStart: string, bEnd: string): boolean {
-  return aStart <= bEnd && aEnd >= bStart;
-}
-
 type SlaDoc = admin.firestore.QueryDocumentSnapshot;
 
 export type RenovarSlaResult = {
@@ -106,14 +103,15 @@ export async function renovarSlaAlPublicar(
   const last = pickLastOfPublishedMonth(rows, publishedKey);
   if (!last) return { action: 'skip', reason: 'no_es_el_ultimo_mes' };
   const data = last.data();
-  if (data.autoRenewMonthly !== true) return { action: 'skip', reason: 'sin_renovacion' };
   if (data.closed === true || isInactiveStatus(data.status)) return { action: 'skip', reason: 'cerrado_o_inactivo' };
 
   const clientId = String(data.clientId || '').trim();
+  let clienteDoc: Record<string, unknown> | null = null;
   if (clientId) {
     const clientSnap = await db.collection('clients').doc(clientId).get();
     const client = clientSnap.data() || {};
-    if (!clientSnap.exists || isInactiveStatus(client.status) || String(client.status || '').toUpperCase() === 'INACTIVE') {
+    clienteDoc = client;
+    if (!clientSnap.exists || isInactiveStatus(client.status) || String(client.status || '').toUpperCase() === 'INACTIVE' || client.active === false || client.isActive === false) {
       return { action: 'skip', reason: 'cliente_inactivo' };
     }
     const objs = (client.objetivos || client.objectives || []) as Array<{ id?: string; status?: unknown; active?: unknown }>;
@@ -122,43 +120,23 @@ export async function renovarSlaAlPublicar(
   }
 
   const next = nextMonthOf(year, month);
-  const others = rows.filter((d) => d.id !== last.id);
-  const clash = others.some((d) => {
-    const x = d.data();
-    if (isInactiveStatus(x.status)) return false;
-    const s = ymd(x.startDate);
-    const e = ymd(x.endDate);
-    return !!s && !!e && rangesOverlap(next.start, next.end, s, e);
-  });
-  if (clash) return { action: 'skip', reason: 'ya_existe' };
+  const decision = decidirCopiaSlaMes(
+    rows.map((d) => ({ id: d.id, ...d.data() })),
+    next.key,
+    { ahora: new Date().toISOString(), modo: 'automatico', cliente: clienteDoc },
+  );
+  if (decision.accion === 'existe') return { action: 'skip', reason: 'ya_existe' };
+  if (decision.accion === 'omitir') return { action: 'skip', reason: decision.motivo };
+  if (decision.accion !== 'crear') return { action: 'skip', reason: 'sin_origen' };
 
   const nombre = String(data.objectiveName || data.clientName || objectiveId);
-  const seriesId = String(data.slaSeriesId || '').trim()
-    || `sla_series_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-  if (!String(data.slaSeriesId || '').trim()) {
-    await last.ref.update({ slaSeriesId: seriesId });
+  if (decision.serieNuevaEnOrigen && !decision.origenCerrado) {
+    const origen = rows.find((d) => d.id === decision.origenId) || last;
+    await origen.ref.update({ slaSeriesId: decision.serieNuevaEnOrigen });
   }
   const copy: Record<string, unknown> = {
-    clientId: data.clientId,
-    clientName: data.clientName || '',
-    objectiveId,
-    objectiveName: data.objectiveName || '',
-    empresaId: data.empresaId || empresaId || undefined,
-    // El refuerzo fijo pasa con su patrón; las fechas del mes anterior no se arrastran.
-    positions: franjasParaMesSiguiente((data.positions || []) as any[], String(next.start).slice(0, 7)),
-    billingMode: data.billingMode ?? null,
-    billingFixedMonthlyHours: data.billingFixedMonthlyHours,
-    billingFixedMonthlyAmount: data.billingFixedMonthlyAmount,
-    billingPurchaseOrderId: data.billingPurchaseOrderId,
-    encargadoEmployeeId: data.encargadoEmployeeId || '',
-    encargadoEmployeeName: data.encargadoEmployeeName || '',
-    autoRenewMonthly: true,
-    ...(data.exigeCobertura === false ? { exigeCobertura: false } : {}),
-    slaSeriesId: seriesId,
-    status: 'active',
-    closed: false,
-    startDate: next.start,
-    endDate: next.end,
+    ...decision.doc,
+    empresaId: decision.doc.empresaId || empresaId || undefined,
     createdAt: FieldValue.serverTimestamp(),
     createdBy: 'RENOVACION_AUTOMATICA',
   };

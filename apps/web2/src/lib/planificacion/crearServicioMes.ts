@@ -1,39 +1,59 @@
 /**
- * Crear el servicio del mes copiando el del mes anterior, antes de copiar, armar o pegar el cronograma.
- * Misma puerta que «Agregar meses» (un doc por mes, `slaSeriesId`, no pisa un SLA que ya cubre el mes).
+ * Crear el servicio del mes.
+ * Automático: solo M-1 abierto y cliente activo (abrir Planificación, Preparar, publicar).
+ * Manual: el botón puede copiar el último SLA, con confirmación si hay hueco o está cerrado.
  */
-import { toYyyyMmDd } from '../firestoreDates';
-import { decidirActivarServicio } from './activarServicioMes';
-import { ejecutarAgregarMeses, proponerAgregarMeses, vistaPreviaAgregarMeses } from '../servicios/appendMonthsClient';
+import { decidirCopiaSlaMes, nombreMesDeClave, type ClienteCopiaSla } from '../servicios/copiarSlaMes';
+import { persistirCopiaSlaMes } from '../servicios/copiarSlaMesCliente';
 
 export type PlanServicioMes =
   | { estado: 'tiene' }
   | { estado: 'no_se_puede'; motivo: string; mes: string }
-  | { estado: 'crear'; mes: string; run: (ctx: { empresaId: string; migracionCompleta: boolean; scopeEmpresa: boolean; via: string }) => Promise<unknown> };
+  | {
+      estado: 'crear';
+      mes: string;
+      mesOrigen: string;
+      requiereConfirmacion: boolean;
+      confirmacion: string;
+      run: (ctx: { empresaId: string; migracionCompleta: boolean; scopeEmpresa: boolean; via: string }) => Promise<unknown>;
+    };
+
+function clienteDe(input: { cliente?: ClienteCopiaSla | null; clienteActivo?: boolean }): ClienteCopiaSla | null | undefined {
+  if (input.clienteActivo === false) return { ...(input.cliente || {}), status: 'INACTIVE' };
+  if (input.cliente) return input.cliente;
+  if (input.clienteActivo === true) return { status: 'ACTIVE' };
+  return undefined;
+}
 
 /** `matching` = servicios de ese objetivo (ya filtrados); `month` 1-12. */
-export function planServicioMes(input: { matching: any[]; year: number; month: number; clienteActivo: boolean }): PlanServicioMes {
-  const decision = decidirActivarServicio({
-    slas: input.matching.map((s) => ({
-      id: s.id,
-      startDate: toYyyyMmDd(s.startDate),
-      endDate: toYyyyMmDd(s.endDate),
-      closed: s.closed === true,
-      status: String(s.status || ''),
-    })),
-    year: input.year,
-    month: input.month,
-    clienteActivo: input.clienteActivo,
+export function planServicioMes(input: {
+  matching: any[];
+  year: number;
+  month: number;
+  clienteActivo?: boolean;
+  cliente?: ClienteCopiaSla | null;
+  modo?: 'automatico' | 'manual';
+}): PlanServicioMes {
+  const mesKey = `${input.year}-${String(input.month).padStart(2, '0')}`;
+  const mes = nombreMesDeClave(mesKey);
+  const decision = decidirCopiaSlaMes(input.matching, mesKey, {
+    modo: input.modo ?? 'automatico',
+    cliente: clienteDe(input),
   });
-  if (!decision.mostrar) return { estado: 'tiene' };
-  const seed = decision.puede && decision.lastId ? input.matching.find((s) => s.id === decision.lastId) : null;
-  if (!seed) return { estado: 'no_se_puede', mes: decision.mes, motivo: decision.motivo || 'No hay servicio anterior para copiar: crealo en Servicios.' };
-  const propuesta = { ...proponerAgregarMeses([seed], seed), last: seed };
-  const preview = vistaPreviaAgregarMeses({ services: input.matching, last: propuesta.last, mode: propuesta.mode, newEndDate: decision.newEndDate });
-  if (propuesta.error || preview.error) return { estado: 'no_se_puede', mes: decision.mes, motivo: String(propuesta.error || preview.error) };
+  if (decision.accion === 'existe') return { estado: 'tiene' };
+  if (decision.accion === 'sin_origen') {
+    return { estado: 'no_se_puede', mes, motivo: 'No hay servicio anterior para copiar: crealo en Servicios.' };
+  }
+  if (decision.accion === 'omitir') return { estado: 'no_se_puede', mes: decision.mesNombre, motivo: decision.aviso };
+  const confirmacion = decision.requiereConfirmacion
+    ? `${decision.aviso} ¿Crearlo copiando ${decision.mesOrigenNombre}?`
+    : '';
   return {
     estado: 'crear',
-    mes: decision.mes,
-    run: (ctx) => ejecutarAgregarMeses({ services: input.matching, last: propuesta.last, plan: preview.plan, newEndDate: decision.newEndDate, ...ctx }),
+    mes: decision.mesNombre,
+    mesOrigen: decision.mesOrigenNombre,
+    requiereConfirmacion: decision.requiereConfirmacion,
+    confirmacion,
+    run: (ctx) => persistirCopiaSlaMes(decision, ctx),
   };
 }

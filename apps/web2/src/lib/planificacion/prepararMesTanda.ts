@@ -3,7 +3,7 @@
  * La lectura de Firestore entra por parámetro (`historia`, `publicado`), así la pantalla y el script de medición
  * corren exactamente lo mismo. Solo lectura.
  */
-import { isClientOperational } from '../crm/clientLifecycle';
+import { clasePrepararServicio, clienteInactivoParaCopia, mesAnterior, slaCubreMes, slaOrigenCerrado } from '../servicios/copiarSlaMes';
 import { toYyyyMmDd } from '../firestoreDates';
 import {
   buildPlanningPositionStructure,
@@ -30,10 +30,12 @@ export type UnidadTanda = {
   clientId: string;
   objetivos: Array<{ id: string; nombre: string; clientId: string }>;
   grupo: boolean;
+  /** Cliente inactivo: se lista en «Fuera de operación» y no se simula. */
+  fueraOperacion?: boolean;
 };
 
 export type FilaTanda = UnidadTanda & {
-  estado: 'ok' | 'publicado' | 'sin_servicio' | 'sin_guardias' | 'error';
+  estado: 'ok' | 'publicado' | 'sin_servicio' | 'sin_guardias' | 'error' | 'fuera_operacion';
   notas: string[];
   continuar?: Metricas;
   armar?: Metricas;
@@ -92,7 +94,7 @@ export function turnoHabilitadoDe(estructura: PuestoSla[]) {
 export function unidadesDelMes(clients: any[], grupos: GrupoLike[]): UnidadTanda[] {
   const activos: Array<{ id: string; nombre: string; clientId: string; cliente: string }> = [];
   for (const c of clients) {
-    if (!isClientOperational(c.status)) continue;
+    if (clienteInactivoParaCopia(c)) continue;
     for (const o of (c.objetivos || []) as Array<{ id?: string; name?: string; status?: string }>) {
       const st = up(o.status || 'ACTIVE');
       if (st === 'INACTIVE' || st === 'INACTIVO') continue;
@@ -119,6 +121,22 @@ export function unidadesDelMes(clients: any[], grupos: GrupoLike[]): UnidadTanda
   for (const o of activos) {
     if (enGrupo.has(o.id)) continue;
     out.push({ key: o.id, nombre: o.nombre, cliente: o.cliente, clientId: o.clientId, objetivos: [{ id: o.id, nombre: o.nombre, clientId: o.clientId }], grupo: false });
+  }
+  for (const c of clients) {
+    if (!clienteInactivoParaCopia(c)) continue;
+    for (const o of (c.objetivos || []) as Array<{ id?: string; name?: string }>) {
+      const id = String(o.id || '');
+      if (!id || out.some((u) => u.key === id || u.objetivos.some((x) => x.id === id))) continue;
+      out.push({
+        key: id,
+        nombre: String(o.name || id),
+        cliente: String(c.name || ''),
+        clientId: String(c.id),
+        objetivos: [{ id, nombre: String(o.name || id), clientId: String(c.id) }],
+        grupo: false,
+        fueraOperacion: true,
+      });
+    }
   }
   return out;
 }
@@ -173,6 +191,12 @@ export async function correrTanda(input: TandaInput): Promise<FilaTanda[]> {
     await new Promise((r) => setTimeout(r, 0));
     const fila: FilaTanda = { ...u, estado: 'ok', notas: [] };
     const cerrar = () => { resultado.push(fila); input.onFila?.([...resultado]); };
+    if (u.fueraOperacion) {
+      fila.estado = 'fuera_operacion';
+      fila.notas.push('Fuera de operación: cliente inactivo');
+      cerrar();
+      continue;
+    }
     try {
       const objIds = u.objetivos.map((o) => o.id);
       const unidadId = u.grupo ? '__grupo__' : objIds[0];
@@ -191,37 +215,50 @@ export async function correrTanda(input: TandaInput): Promise<FilaTanda[]> {
       if (publicados.every(Boolean)) { fila.estado = 'publicado'; cerrar(); continue; }
       if (publicados.some(Boolean)) fila.notas.push('parte del grupo ya publicada');
 
-      // Servicio del mes; si no está activo, el último anterior (lo que activaría «Continuar»).
+      // Servicio del mes. Sin él, solo se simula con el M-1 abierto. Cliente inactivo o último SLA cerrado/vencido anterior a M-1 no piden servicio.
       const estructura: PuestoSla[] = [];
       const rangos: Array<{ desde: string; hasta: string }> = [];
       let sinServicio = 0;
+      let fuera = 0;
+      const mesPrevio = mesAnterior(mesKey);
       for (const o of u.objetivos) {
         const matching = filterSlasForPlanningContext(allSla, o.clientId, o.id, clients, slaIdToObjId) as any[];
-        const pick = pickSlaForPlanningMonth(matching, year, month);
-        let srv: any = planningMonthHasActiveSla(matching, year, month) && pick.vigente ? pick.vigente : null;
-        if (srv) {
-          rangos.push({ desde: toYyyyMmDd(srv.startDate) || primerDia, hasta: toYyyyMmDd(srv.endDate) || ultimoDia });
-        } else {
+        const cliente = clients.find((c: any) => String(c.id) === o.clientId);
+        const clase = clasePrepararServicio(matching, mesKey, cliente);
+        const pref = u.grupo ? `${o.nombre}: ` : '';
+        let srv: any = null;
+        if (clase.clase === 'vigente') {
+          const pick = pickSlaForPlanningMonth(matching, year, month);
+          srv = planningMonthHasActiveSla(matching, year, month) && pick.vigente ? pick.vigente : null;
+          if (srv) rangos.push({ desde: toYyyyMmDd(srv.startDate) || primerDia, hasta: toYyyyMmDd(srv.endDate) || ultimoDia });
+        } else if (clase.clase === 'copiable') {
           const prev = matching
-            .filter((s) => { const d = toYyyyMmDd(s.startDate); return !!d && d < primerDia && up(s.status) !== 'INACTIVE'; })
-            .sort((a, b) => String(toYyyyMmDd(b.startDate)).localeCompare(String(toYyyyMmDd(a.startDate))))[0];
-          // Solo se copia el del mes anterior (termina en ese mes y no está cerrado). Uno viejo no arma nada.
-          const mesPrevio = `${month === 0 ? year - 1 : year}-${pad(month === 0 ? 12 : month)}`;
-          const finPrev = prev ? String(toYyyyMmDd(prev.endDate) || '') : '';
-          if (prev && (finPrev.slice(0, 7) !== mesPrevio || prev.closed === true)) {
-            fila.notas.push(`${u.grupo ? `${o.nombre}: ` : ''}sin servicio de ${mesNombre} y el último termina el ${finPrev.slice(8, 10)}/${finPrev.slice(5, 7)}/${finPrev.slice(0, 4)}: cargalo en Servicios`);
-            sinServicio += 1;
-          } else if (prev) {
+            .filter((s) => slaCubreMes(s, mesPrevio) && !slaOrigenCerrado(s))
+            .sort((a, b) => String(toYyyyMmDd(b.endDate)).localeCompare(String(toYyyyMmDd(a.endDate))))[0];
+          if (prev) {
             srv = { ...prev, positions: franjasParaMesSiguiente((prev.positions || []) as any[], mesKey) };
-            fila.notas.push(`${u.grupo ? `${o.nombre}: ` : ''}servicio de ${mesNombre} sin activar (se toma el anterior)`);
+            fila.notas.push(`${pref}servicio de ${mesNombre} sin activar (se toma el anterior)`);
             rangos.push({ desde: primerDia, hasta: ultimoDia });
-          } else sinServicio += 1;
+          } else {
+            sinServicio += 1;
+            fila.notas.push(`${pref}sin servicio de ${mesNombre}`);
+          }
+        } else if (clase.clase === 'fuera') {
+          fuera += 1;
+          fila.notas.push(`${pref}${clase.nota}`);
+        } else {
+          sinServicio += 1;
+          fila.notas.push(`${pref}${clase.nota}`);
         }
         if (!srv) continue;
         const { structure } = buildPlanningPositionStructure(srv, { monthHasSla: true, hasExactMatch: true });
         for (const p of structure as any[]) estructura.push({ ...p, positionName: etiquetar(o.id, p.positionName) });
       }
-      if (!estructura.length || sinServicio === u.objetivos.length) { fila.estado = 'sin_servicio'; cerrar(); continue; }
+      if (!estructura.length) {
+        fila.estado = fuera > 0 && sinServicio === 0 ? 'fuera_operacion' : 'sin_servicio';
+        cerrar();
+        continue;
+      }
       const turnoHabilitado = turnoHabilitadoDe(estructura);
       const diaBloqueado = (ds: string) => !rangos.some((r) => ds >= r.desde && ds <= r.hasta);
 
