@@ -534,6 +534,7 @@ import {
     textoRepetirQuedaron,
     type RecorridoDias,
 } from '@/lib/planificacion/seleccionLicencia';
+import { bandaOcupadaEnDatos, legajosQuePasanARet, turnoVigente } from '@/lib/planificacion/lecturaTurnoGrilla';
 import { format as formatFecha } from 'date-fns';
 import { alignVacancyGapBand } from '@/lib/planificacion/vacancySplitBands';
 import {
@@ -3552,6 +3553,10 @@ function PlanificacionDesktop() {
         return [...sorted, ...dotacionPoolCandidates.filter((e: any) => !ids.has(e.id))];
     }, [dotacionBaseEmployees, bandFilter, employeeMonthStats, sortBy, sortDir, selectedObjective, customOrderMap, empDefaultPos, clients, forceShowAll, dotacionPoolCandidates]);
 
+    // La grilla pesada espera un frame: el encabezado cambia al toque y el cálculo grande no traba el clic.
+    // El índice de fila (clic, modo rápido, guardado) se resuelve en esta lista, la misma que se pinta.
+    const filasGrilla = useDeferredValue(displayedEmployees);
+
     useEffect(() => {
         const visible = selectedObjective || '__all__';
         ordenImportSucioRef.current = ordenImportSucioRef.current.filter((k) => k !== visible);
@@ -3568,37 +3573,37 @@ function PlanificacionDesktop() {
     useEffect(() => {
         const pendiente = altaPegadoRef.current;
         if (!pendiente) return;
-        const fila = displayedEmployees.findIndex((e: { id: string }) => e.id === pendiente.employeeId);
+        const fila = filasGrilla.findIndex((e: { id: string }) => e.id === pendiente.employeeId);
         if (fila < 0) return;
         altaPegadoRef.current = null;
         setPegarExcel((prev) => {
             if (!prev || prev.paso !== 'resumen') return prev;
             return { ...prev, asignacion: { ...prev.asignacion, [pendiente.indice]: fila } };
         });
-    }, [displayedEmployees]);
+    }, [filasGrilla]);
 
     useEffect(() => {
         const cola = agregarPegadoRef.current;
         if (!cola.length) return;
-        const pendientes = cola.filter((p) => displayedEmployees.findIndex((e: { id: string }) => e.id === p.employeeId) < 0);
-        const listos = cola.filter((p) => displayedEmployees.findIndex((e: { id: string }) => e.id === p.employeeId) >= 0);
+        const pendientes = cola.filter((p) => filasGrilla.findIndex((e: { id: string }) => e.id === p.employeeId) < 0);
+        const listos = cola.filter((p) => filasGrilla.findIndex((e: { id: string }) => e.id === p.employeeId) >= 0);
         if (!listos.length) return;
         agregarPegadoRef.current = pendientes;
         setPegarExcel((prev) => {
             if (!prev || prev.paso !== 'resumen') return prev;
             const asignacion = { ...prev.asignacion };
             for (const p of listos) {
-                const fila = displayedEmployees.findIndex((e: { id: string }) => e.id === p.employeeId);
+                const fila = filasGrilla.findIndex((e: { id: string }) => e.id === p.employeeId);
                 if (fila >= 0) asignacion[p.indice] = fila;
             }
             return { ...prev, asignacion };
         });
-    }, [displayedEmployees]);
+    }, [filasGrilla]);
 
     useEffect(() => {
         const foco = focoCeldaRef.current;
         if (!foco) return;
-        const fila = displayedEmployees.findIndex((e: { id: string }) => e.id === foco.empId);
+        const fila = filasGrilla.findIndex((e: { id: string }) => e.id === foco.empId);
         const col = daysInMonth.findIndex((d) => getDateKey(d) === foco.dateStr);
         if (fila < 0 || col < 0) return;
         const td = document.querySelector(`[data-rc="${fila}:${col}"]`);
@@ -3609,7 +3614,7 @@ function PlanificacionDesktop() {
         focoCeldaRef.current = null;
         td.scrollIntoView({ block: 'center', inline: 'center' });
         td.classList.add('ring-2', 'ring-indigo-500');
-    }, [displayedEmployees, daysInMonth, ventanaFilas]);
+    }, [filasGrilla, daysInMonth, ventanaFilas]);
 
     const etiquetasGrupo = useMemo(() => {
         const map = new Map<string, EtiquetaFilaGrupo>();
@@ -3671,7 +3676,7 @@ function PlanificacionDesktop() {
         let hasNative = false;
         const seen = new Set<string>();
         for (let r = minR; r <= maxR; r++) {
-            const emp = displayedEmployees[r];
+            const emp = filasGrilla[r];
             if (!emp || seen.has(emp.id)) continue;
             seen.add(emp.id);
             if (selectedGrupo && grupoUnifiedMode) {
@@ -3680,7 +3685,7 @@ function PlanificacionDesktop() {
             }
         }
         return { hasExt, hasNative, empCount: seen.size };
-    }, [selection, displayedEmployees, selectedGrupo, grupoUnifiedMode, resolveNativeObjectiveInGrupo]);
+    }, [selection, filasGrilla, selectedGrupo, grupoUnifiedMode, resolveNativeObjectiveInGrupo]);
 
     /** Colaboradores únicos en la selección múltiple actual. */
     const bulkSelectionEmployees = useMemo(() => {
@@ -3690,13 +3695,13 @@ function PlanificacionDesktop() {
         const seen = new Set<string>();
         const list: any[] = [];
         for (let r = minR; r <= maxR; r++) {
-            const emp = displayedEmployees[r];
+            const emp = filasGrilla[r];
             if (!emp || seen.has(emp.id)) continue;
             seen.add(emp.id);
             list.push(emp);
         }
         return list;
-    }, [selection, displayedEmployees]);
+    }, [selection, filasGrilla]);
 
     /** Grupo unificado: panel integrado por colaborador en la barra de asignación. */
     const bulkPerEmpMode = useMemo(() => (
@@ -3929,7 +3934,7 @@ function PlanificacionDesktop() {
 
     const scrollToEmployeeRow = useCallback((empId: string) => {
         setHighlightEmpId(empId);
-        const idx = displayedEmployees.findIndex((e: { id: string }) => e.id === empId);
+        const idx = filasGrilla.findIndex((e: { id: string }) => e.id === empId);
         if (idx >= 0) setVentanaFilas({ desde: Math.max(0, idx - 8), hasta: idx + 24 });
         requestAnimationFrame(() => {
             document.getElementById(`plan-emp-${empId}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
@@ -3937,7 +3942,7 @@ function PlanificacionDesktop() {
         window.setTimeout(() => {
             setHighlightEmpId((prev) => (prev === empId ? null : prev));
         }, 2500);
-    }, [displayedEmployees]);
+    }, [filasGrilla]);
 
     useEffect(() => {
         if (!forceShowAll) return;
@@ -4264,8 +4269,6 @@ function PlanificacionDesktop() {
         return result;
     }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, selectedObjective, selectedGrupo, grupoUnifiedMode]);
 
-    // La grilla pesada espera un frame: el encabezado cambia al toque y el cálculo grande no traba el clic.
-    const filasGrilla = useDeferredValue(displayedEmployees);
     const montarFilasCompletas = modoRapido || !!comparingSnapshot || forceShowAll || arrastrandoFila || imprimiendoGrilla;
     const corteFilas = montarFilasCompletas
         ? { desde: 0, hasta: filasGrilla.length }
@@ -4791,7 +4794,7 @@ function PlanificacionDesktop() {
         let checked = 0;
 
         for (let r = minR; r <= maxR; r++) {
-            const emp = displayedEmployees[r];
+            const emp = filasGrilla[r];
             if (!emp) continue;
             for (let c = minC; c <= maxC; c++) {
                 const day = daysInMonth[c];
@@ -4822,7 +4825,7 @@ function PlanificacionDesktop() {
     }, [
         selection.start, selection.end, selectedObjective, selectedGrupo, grupoUnifiedMode, bulkPerEmpMode,
         bulkBarScopeObjectiveId, grupoSlaMap, bulkEffectiveStructure, positionStructure,
-        displayedEmployees, daysInMonth, pendingChanges, shiftsMap, empDefaultPos, bulkBarPosition,
+        filasGrilla, daysInMonth, pendingChanges, shiftsMap, empDefaultPos, bulkBarPosition,
     ]);
 
     /** Turnos de la barra mono filtrados por puesto efectivo (si hay). */
@@ -5007,7 +5010,7 @@ function PlanificacionDesktop() {
                 let hasBlocked = false;
                 let hasAllowed = false;
                 for (let r = minRBulk; r <= maxRBulk; r++) {
-                    const selEmp = displayedEmployees[r];
+                    const selEmp = filasGrilla[r];
                     if (!selEmp) continue;
                     const pa = activeSlaPositionAssignments.find((a: any) => a.employeeId === selEmp.id);
                     if (!pa?.slots?.length) { hasAllowed = true; continue; }
@@ -5025,7 +5028,7 @@ function PlanificacionDesktop() {
     }, [
         selection.start, selection.end, selectedObjective, bulkPerEmpMode, bulkBarScopeObjectiveId,
         bulkMonoPositionInfo, bulkEffectiveStructure, positionStructure, bulkMonoShifts, daysInMonth,
-        displayedEmployees, pendingChanges, shiftsMap, absencesMap, autoCycles, resolveEffectiveShiftObjectiveId,
+        displayedEmployees, filasGrilla, pendingChanges, shiftsMap, absencesMap, autoCycles, resolveEffectiveShiftObjectiveId,
         activeSlaPositionAssignments,
     ]);
 
@@ -5037,7 +5040,7 @@ function PlanificacionDesktop() {
         const maxR = Math.max(selection.start.r, selection.end.r);
         const visible = new Set<string>();
         for (let r = minR; r <= maxR; r++) {
-            const emp = displayedEmployees[r];
+            const emp = filasGrilla[r];
             if (!emp) continue;
             const pa = activeSlaPositionAssignments.find((a: any) => a.employeeId === emp.id);
             if (!pa?.slots?.length) return null;
@@ -5046,7 +5049,7 @@ function PlanificacionDesktop() {
             }
         }
         return visible.size > 0 ? visible : null;
-    }, [activeSlaPositionAssignments, selection.start, selection.end, displayedEmployees]);
+    }, [activeSlaPositionAssignments, selection.start, selection.end, filasGrilla]);
 
     /**
      * Mono-objetivo: multiselección con 2+ guardias → panel por colaborador
@@ -5113,14 +5116,14 @@ function PlanificacionDesktop() {
         if (!bulkShowPerEmpPanel || !bulkSelectionEmployees.length) return bulkSelectionEmployees;
 
         const gridIndex = new Map<string, number>();
-        displayedEmployees.forEach((emp: any, i: number) => { if (emp?.id) gridIndex.set(emp.id, i); });
+        filasGrilla.forEach((emp: any, i: number) => { if (emp?.id) gridIndex.set(emp.id, i); });
 
         return [...bulkSelectionEmployees].sort((a, b) => {
             const giA = gridIndex.get(a.id) ?? 9999;
             const giB = gridIndex.get(b.id) ?? 9999;
             return giA - giB;
         });
-    }, [bulkShowPerEmpPanel, bulkSelectionEmployees, displayedEmployees]);
+    }, [bulkShowPerEmpPanel, bulkSelectionEmployees, filasGrilla]);
 
     const objectivePublishLookupKey = useMemo(() => {
         if (!selectedObjective) return '';
@@ -8054,7 +8057,7 @@ function PlanificacionDesktop() {
         setDragOverVisual(null);
         cortarArrastreFila();
         if (isNaN(fromIdx) || fromIdx === toIdx) return;
-        const ids = displayedEmployees.map((emp: any) => emp.id);
+        const ids = filasGrilla.map((emp: any) => emp.id);
         const [removed] = ids.splice(fromIdx, 1);
         ids.splice(toIdx, 0, removed);
         const key = selectedObjective || '__all__';
@@ -10302,7 +10305,7 @@ function PlanificacionDesktop() {
         const maxC = Math.max(selection.start.c, selection.end.c);
         const out: { empId: string; dateStr: string; code?: string | null; tieneAusencia?: boolean }[] = [];
         for (let r = minR; r <= maxR; r++) {
-            const emp = displayedEmployees[r];
+            const emp = filasGrilla[r];
             if (!emp) continue;
             for (let c = minC; c <= maxC; c++) {
                 const dateStr = getDateKey(daysInMonth[c]);
@@ -11224,7 +11227,7 @@ function PlanificacionDesktop() {
 
         if (shiftConfig !== null && selectedGrupo && grupoUnifiedMode) {
             for (let r = minR; r <= maxR; r++) {
-                const emp = displayedEmployees[r];
+                const emp = filasGrilla[r];
                 if (!emp) continue;
                 if (opts?.onlyEmpId && emp.id !== opts.onlyEmpId) continue;
                 const extFallback = bulkEmpObjectiveOverrides[emp.id] || bulkTargetObjectiveId || selectedGrupo.objectiveIds[0] || null;
@@ -11371,7 +11374,7 @@ function PlanificacionDesktop() {
         };
 
         for (let r = minR; r <= maxR; r++) {
-            const emp = displayedEmployees[r];
+            const emp = filasGrilla[r];
             if (!emp) continue;
             if (opts?.onlyEmpId && emp.id !== opts.onlyEmpId) continue;
             for (let c = minC; c <= maxC; c++) {
@@ -11396,7 +11399,7 @@ function PlanificacionDesktop() {
         const helpersCache = new Map<string, ReturnType<typeof buildBulkHelpers>>();
 
         for (let r = minR; r <= maxR; r++) {
-            const emp = displayedEmployees[r];
+            const emp = filasGrilla[r];
             if (!emp) continue;
             if (opts?.onlyEmpId && emp.id !== opts.onlyEmpId) continue;
             const covObjId = getEmpBulkObjective(emp);
@@ -11569,7 +11572,7 @@ function PlanificacionDesktop() {
 
         if (selectedGrupo && grupoUnifiedMode) {
             for (let r = minR; r <= maxR; r++) {
-                const emp = displayedEmployees[r];
+                const emp = filasGrilla[r];
                 if (!emp) continue;
                 const extFallback = bulkEmpObjectiveOverrides[emp.id] || bulkTargetObjectiveId || selectedGrupo.objectiveIds[0] || null;
                 if (!resolveNativeObjectiveInGrupo(emp) && !extFallback) {
@@ -11601,7 +11604,7 @@ function PlanificacionDesktop() {
 
         const byCode = new Map<string, { shift: any }>();
         for (let r = minR; r <= maxR; r++) {
-            const emp = displayedEmployees[r];
+            const emp = filasGrilla[r];
             if (!emp) continue;
             const covObjId = getEmpBulkObjective(emp);
             if (!covObjId) continue;
@@ -11638,7 +11641,7 @@ function PlanificacionDesktop() {
             : autoCycles;
 
         for (let r = minR; r <= maxR; r++) {
-            const emp = displayedEmployees[r];
+            const emp = filasGrilla[r];
             if (!emp) continue;
             const covObjId = getEmpBulkObjective(emp);
             if (!covObjId) continue;
@@ -12378,7 +12381,7 @@ function PlanificacionDesktop() {
         const cells: Array<{ relRow: number; relCol: number; shift: any | null }> = [];
         for (let r = minR; r <= maxR; r++) {
             for (let c = minC; c <= maxC; c++) {
-                const emp = displayedEmployees[r];
+                const emp = filasGrilla[r];
                 if (!emp || c >= daysInMonth.length) continue;
                 const key = `${emp.id}_${getDateKey(daysInMonth[c])}`;
                 const shift = pendingChanges[key]
@@ -12391,7 +12394,7 @@ function PlanificacionDesktop() {
         setClipboardDim({ rows: maxR - minR + 1, cols: maxC - minC + 1 });
         setClipboardIsCut(asCut);
         return { minR, maxR, minC, maxC, cells };
-    }, [allowPlanningMultiSelect, selection, displayedEmployees, daysInMonth, pendingChanges, shiftsMap]);
+    }, [allowPlanningMultiSelect, selection, filasGrilla, daysInMonth, pendingChanges, shiftsMap]);
 
     const pasteClipboardAt = useCallback((targetRow: number, targetCol: number) => {
         if (msgBloqueoEdicion) { toast.error(msgBloqueoEdicion); return; }
@@ -12406,8 +12409,8 @@ function PlanificacionDesktop() {
         clipboard.forEach(({ relRow, relCol, shift }) => {
             const r = targetRow + relRow;
             const c = targetCol + relCol;
-            if (r < 0 || r >= displayedEmployees.length || c < 0 || c >= daysInMonth.length) return;
-            const emp = displayedEmployees[r];
+            if (r < 0 || r >= filasGrilla.length || c < 0 || c >= daysInMonth.length) return;
+            const emp = filasGrilla[r];
             const dateStr = getDateKey(daysInMonth[c]);
             if (isPlanningDateLocked(dateStr)) return;
             if (shift && isOutsideServiceRange(dateStr)) return;
@@ -12457,7 +12460,7 @@ function PlanificacionDesktop() {
                 : `${pasted} turno(s) pegado(s) — portapapeles listo para repetir`,
         );
         if (clipboardIsCut) setClipboardIsCut(false);
-    }, [allowPlanningMultiSelect, clipboard, clipboardIsCut, commitPendingChanges, displayedEmployees, daysInMonth, shiftsMap, cellTurnosMap, selectedObjective, isPlanningDateLocked, isOutsideServiceRange, selectedGrupo, grupoUnifiedMode, resolveObjectiveForEmp, objetivoDePuestoGrupo, getObjectiveName, msgBloqueoEdicion]);
+    }, [allowPlanningMultiSelect, clipboard, clipboardIsCut, commitPendingChanges, filasGrilla, daysInMonth, shiftsMap, cellTurnosMap, selectedObjective, isPlanningDateLocked, isOutsideServiceRange, selectedGrupo, grupoUnifiedMode, resolveObjectiveForEmp, objetivoDePuestoGrupo, getObjectiveName, msgBloqueoEdicion]);
 
     const cutSelection = useCallback(() => {
         if (!allowPlanningMultiSelect) {
@@ -12472,7 +12475,7 @@ function PlanificacionDesktop() {
         let cut = 0;
         for (let r = bounds.minR; r <= bounds.maxR; r++) {
             for (let c = bounds.minC; c <= bounds.maxC; c++) {
-                const emp = displayedEmployees[r];
+                const emp = filasGrilla[r];
                 if (!emp || c >= daysInMonth.length) continue;
                 const dateStr = getDateKey(daysInMonth[c]);
                 if (isPlanningDateLocked(dateStr)) continue;
@@ -12498,7 +12501,7 @@ function PlanificacionDesktop() {
         }
         commitPendingChanges(newChanges);
         toast.success(`${cut} celda(s) cortada(s) — Ctrl+V para pegar`);
-    }, [allowPlanningMultiSelect, isServiceLocked, activeServiceStatus.msg, copySelectionToClipboard, commitPendingChanges, displayedEmployees, daysInMonth, shiftsMap, cellTurnosMap, selectedObjective, selectedGrupo, grupoUnifiedMode, getObjectiveName, isPlanningDateLocked]);
+    }, [allowPlanningMultiSelect, isServiceLocked, activeServiceStatus.msg, copySelectionToClipboard, commitPendingChanges, filasGrilla, daysInMonth, shiftsMap, cellTurnosMap, selectedObjective, selectedGrupo, grupoUnifiedMode, getObjectiveName, isPlanningDateLocked]);
 
     // Atajos: Ctrl+C copiar, Ctrl+X cortar, Ctrl+V pegar, Ctrl+Z deshacer
     useEffect(() => {
@@ -12556,8 +12559,9 @@ function PlanificacionDesktop() {
             return;
         }
         if (selection.start && selection.end && selection.start.r === selection.end.r && selection.start.c === selection.end.c) {
-            const emp = displayedEmployees[selection.start.r]; 
-            const day = daysInMonth[selection.start.c]; 
+            const emp = filasGrilla[selection.start.r];
+            const day = daysInMonth[selection.start.c];
+            if (!emp || !day) return;
             const dateStr = getDateKey(day); 
             const key = `${emp.id}_${dateStr}`; 
             const rfzOnCell = rfzByEmpDate[key];
@@ -15797,7 +15801,7 @@ function PlanificacionDesktop() {
 
     // ── MODO RÁPIDO (grilla como planilla) ────────────────────────────────────
     modoRapidoRef.current = modoRapido && !comparingSnapshot && !!selectedObjective;
-    const dimsRapido = useMemo(() => ({ filas: displayedEmployees.length, cols: daysInMonth.length }), [displayedEmployees.length, daysInMonth.length]);
+    const dimsRapido = useMemo(() => ({ filas: filasGrilla.length, cols: daysInMonth.length }), [filasGrilla.length, daysInMonth.length]);
     const diasRapido = useMemo(() => daysInMonth.map((d) => getDateKey(d)), [daysInMonth]);
     const portapapelesRapidoRef = useRef<PortapapelesCrono | null>(null);
     useEffect(() => {
@@ -15902,8 +15906,8 @@ function PlanificacionDesktop() {
         if (c.isLeaveCell) return normalizarCodigo(c.leaveCellCode);
         return normalizarCodigo(c.cellCode || c.s?.code || '');
     };
-    const ctxRapido = (r: number, c: number) => {
-        const emp = displayedEmployees[r];
+    const ctxRapido = (r: number, c: number, empExplicito?: any) => {
+        const emp = empExplicito || filasGrilla[r];
         const ds = diasRapido[c];
         if (!emp || !ds) return { emp: null as any, ds: '', key: '', ctx: undefined as CtxCeldaGrilla | undefined };
         const key = `${emp.id}_${ds}`;
@@ -16192,7 +16196,7 @@ function PlanificacionDesktop() {
         };
     };
 
-    type ItemRapido = { r: number; c: number; code?: string; borrar?: boolean; fuente?: FuenteRapida | null; startTime?: string; endTime?: string };
+    type ItemRapido = { r: number; c: number; code?: string; borrar?: boolean; fuente?: FuenteRapida | null; startTime?: string; endTime?: string; emp?: any };
     const sellarAtribucion12 = (next: Record<string, any>, fechas: string[]) => {
         const byId: Record<string, any> = {};
         employees.forEach((e: any) => { byId[e.id] = e; });
@@ -16288,7 +16292,7 @@ function PlanificacionDesktop() {
         const bajas = new Map<string, { id: string; empId: string; nombre: string; type: string; start: string; end: string }>();
         for (const it of items) {
             if (!(it.borrar || !it.code)) continue;
-            const { emp, key, ctx } = ctxRapido(it.r, it.c);
+            const { emp, key, ctx } = ctxRapido(it.r, it.c, it.emp);
             if (!emp || !esNovedadCelda(ctx, key)) continue;
             const aus = absencesMap[key];
             if (!aus?.id) continue;
@@ -16326,7 +16330,7 @@ function PlanificacionDesktop() {
         const fechasAtrib: string[] = [];
         const fechasToco = new Set<string>();
         for (const it of items) {
-            const { emp, ds, key, ctx } = ctxRapido(it.r, it.c);
+            const { emp, ds, key, ctx } = ctxRapido(it.r, it.c, it.emp);
             if (!emp) continue;
             if (afectadoEvento[key]) sinMarcaEvento.push(key);
             if (it.borrar || !it.code) {
@@ -16403,7 +16407,7 @@ function PlanificacionDesktop() {
         toast.message(`${cortar ? 'Cortado' : 'Copiado'} ${celdas.length}×${celdas[0]?.length || 0} · se mantiene al cambiar de objetivo o mes`);
         return tsv;
     };
-    const guardiasPegado = () => displayedEmployees.map((e: any, fila: number) => ({
+    const guardiasPegado = () => filasGrilla.map((e: any, fila: number) => ({
         fila,
         nombre: String(e.name || e.id || ''),
         legajo: String(e.fileNumber || e.legajo || ''),
@@ -16564,7 +16568,7 @@ function PlanificacionDesktop() {
                 const d = preview.diasE.find((x) => x.col === cel.col);
                 const dec = decisiones[cel.col] || { tipo: d?.porDefecto || 'E', vinculo: null };
                 if (dec.tipo === 'E') { items.push({ r, c: cel.col, code: 'E' }); continue; }
-                const emp = displayedEmployees[r];
+                const emp = filasGrilla[r];
                 const ds = diasRapido[cel.col];
                 if (!emp || !ds) continue;
                 if (dec.vinculo) vinculadas.push({ emp, ds, vinculo: dec.vinculo });
@@ -16748,7 +16752,7 @@ function PlanificacionDesktop() {
     avisosRapidoRef.current = avisosRapido;
 
     const marcasRapido = useMemo<MarcaAviso[]>(() => {
-        const filaDe = new Map(displayedEmployees.map((e: any, i: number) => [e.id, i]));
+        const filaDe = new Map(filasGrilla.map((e: any, i: number) => [e.id, i]));
         const colDe = new Map(diasRapido.map((d, i) => [d, i]));
         const out: MarcaAviso[] = [];
         for (const a of avisosRapido) {
@@ -16765,11 +16769,11 @@ function PlanificacionDesktop() {
             out.push({ r, c, tipo: 'EVENTO', texto: `${texto} · cargá el evento en Eventos para asignarlo` });
         }
         return out;
-    }, [avisosRapido, avisosVistos, afectadoEvento, displayedEmployees, diasRapido]);
+    }, [avisosRapido, avisosVistos, afectadoEvento, filasGrilla, diasRapido]);
     const avisosRapidoSinVer = useMemo(() => avisosSinVer(avisosRapido, avisosVistos), [avisosRapido, avisosVistos]);
 
     const irAvisoRapido = (a: AvisoRapido) => {
-        const r = displayedEmployees.findIndex((e: any) => e.id === a.empId);
+        const r = filasGrilla.findIndex((e: any) => e.id === a.empId);
         const c = diasRapido.indexOf(a.dateStr);
         if (c >= 0 && (r >= 0 || a.tipo === 'SOBRECOBERTURA')) capaRapidaRef.current?.irA(r >= 0 ? r : 0, c);
     };
@@ -16887,7 +16891,7 @@ function PlanificacionDesktop() {
         const global = bloqueoGlobalRapido();
         if (global) { toast.message(global); return; }
         const next = { ...pendingChangesRef.current };
-        const filaDe = new Map(displayedEmployees.map((e: any, i: number) => [e.id, i]));
+        const filaDe = new Map(filasGrilla.map((e: any, i: number) => [e.id, i]));
         let hechos = 0;
         for (const prop of pares) {
             for (const ch of prop.cambios) {
@@ -16951,11 +16955,14 @@ function PlanificacionDesktop() {
             : franjas.find((x) => String(x.endTime) === inicio) ? { f: franjas.find((x) => String(x.endTime) === inicio), lado: 'antes' as const } : null;
         if (!cand?.f) return null;
         const fc = normalizarCodigo(String(cand.f.code || ''));
-        const ocupada = (displayedEmployees as any[]).some((e: any) => {
-            const cx = ctxDeCelda(`${e.id}_${ds}`);
-            const a = cx?.p && !cx.p.isDeleted ? cx.p : cx?.s;
-            return a && normalizarCodigo(String(a.code || '')) === fc && String(a.positionName || pos) === pos;
-        });
+        const ocupada = bandaOcupadaEnDatos(
+            (displayedEmployees as any[]).map((e: any) => {
+                const key = `${e.id}_${ds}`;
+                return { pending: pendingChanges[key], guardado: shiftsMap[key] };
+            }),
+            fc,
+            pos,
+        );
         if (ocupada) return null;
         return { code: fc, desde: String(cand.f.startTime), hasta: String(cand.f.endTime), lado: cand.lado };
     };
@@ -17224,18 +17231,26 @@ function PlanificacionDesktop() {
                 return d ? `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` : '';
             };
             const items: ItemRapido[] = [];
-            if (col >= 0) displayedEmployees.forEach((emp: any, r: number) => {
-                const key = `${emp.id}_${e.ds}`;
-                const cx = ctxDeCelda(key);
-                const actual: any = cx?.p && !cx.p.isDeleted ? cx.p : cx?.s;
-                if (!actual || absencesMap[key]) return;
-                const cod = String(actual.code || '').toUpperCase();
-                if (!cod || cod === 'RET' || esCeldaFranco(actual) || esCeldaLicencia({ code: cod, tieneAusencia: false })) return;
-                if (actual.objectiveId && String(actual.objectiveId) !== String(selectedObjective)) return;
-                if (alcance.tipo !== 'todo' && String(actual.positionName || '') !== alcance.puesto) return;
-                if (alcance.tipo === 'franja' && cod !== String(alcance.code).toUpperCase()) return;
-                items.push({ r, c: col, code: 'RET', fuente: { code: 'RET', name: 'Retén', startTime: hhmm(actual.startTime), endTime: hhmm(actual.endTime), hours: 0, positionName: String(actual.positionName || '') } });
-            });
+            if (col >= 0) {
+                const dotacion = (displayedEmployees as any[]).map((emp: any) => {
+                    const key = `${emp.id}_${e.ds}`;
+                    return { emp, empId: String(emp.id), pending: pendingChanges[key], guardado: shiftsMap[key], tieneAusencia: !!absencesMap[key] };
+                });
+                const pasan = new Set(legajosQuePasanARet(dotacion, String(selectedObjective), alcance));
+                for (const row of dotacion) {
+                    if (!pasan.has(row.empId)) continue;
+                    const actual = turnoVigente(row.pending, row.guardado);
+                    if (!actual) continue;
+                    const r = filasGrilla.findIndex((x: { id: string }) => x.id === row.empId);
+                    items.push({
+                        r: r >= 0 ? r : 0,
+                        c: col,
+                        emp: row.emp,
+                        code: 'RET',
+                        fuente: { code: 'RET', name: 'Retén', startTime: hhmm(actual.startTime), endTime: hhmm(actual.endTime), hours: 0, positionName: String(actual.positionName || '') },
+                    });
+                }
+            }
             if (items.length) escribirRapido(items);
             toast.success(`No se trabaja el ${e.ds.slice(8, 10)}/${e.ds.slice(5, 7)} (${texto})${items.length ? ` · ${items.length} turno(s) pasan a RET: guardá el cronograma` : ''}`);
             setDiaNoTrabaja(null);
@@ -17569,7 +17584,7 @@ function PlanificacionDesktop() {
     };
     const fantasmasVista12 = useMemo(() => {
         if (!modoRapido || !propuesta12?.length) return [] as Array<{ r: number; c: number; code: string }>;
-        const filaDe = new Map(displayedEmployees.map((e: any, i: number) => [e.id, i]));
+        const filaDe = new Map(filasGrilla.map((e: any, i: number) => [e.id, i]));
         const out: Array<{ r: number; c: number; code: string }> = [];
         for (const p of propuesta12) {
             for (const ch of p.cambios) {
@@ -17580,11 +17595,11 @@ function PlanificacionDesktop() {
             }
         }
         return out;
-    }, [modoRapido, propuesta12, displayedEmployees, diasRapido]);
+    }, [modoRapido, propuesta12, filasGrilla, diasRapido]);
     const cursorVista12 = (cur: { r: number; c: number } | null) => {
         // Sin propuesta de 12 h no se toca el estado: cada movimiento del cursor redibujaba la página entera.
         if (!cur || !propuesta12Ref.current?.length) { if (motivoVista12) setMotivoVista12(''); return; }
-        const emp = displayedEmployees[cur.r];
+        const emp = filasGrilla[cur.r];
         const ds = diasRapido[cur.c];
         if (!emp || !ds) { setMotivoVista12(''); return; }
         const r = moverVista12({
@@ -17602,7 +17617,7 @@ function PlanificacionDesktop() {
             const td = (e.target as HTMLElement | null)?.closest?.('td[data-rc]') as HTMLElement | null;
             if (!td) return;
             const [r, c] = String(td.getAttribute('data-rc') || '').split(':').map(Number);
-            const emp = displayedEmployees[r];
+            const emp = filasGrilla[r];
             const dia = daysInMonth[c];
             if (!emp || !dia || getDateKey(dia) !== propuesta12[0].dateStr) return;
             e.preventDefault();
@@ -17612,12 +17627,12 @@ function PlanificacionDesktop() {
         document.addEventListener('mousedown', onDown, true);
         return () => document.removeEventListener('mousedown', onDown, true);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [propuesta12, displayedEmployees, daysInMonth, modoRapido]);
+    }, [propuesta12, filasGrilla, daysInMonth, modoRapido]);
     /** `+`/Enter con el cursor sobre otro guardia del mismo día: ese pasa a ser la pareja y se aplica. Si no, se aplica lo propuesto. */
     const confirmar12ConCursor = (cur?: { r: number; c: number } | null) => {
         const p0 = propuesta12?.[0];
         if (p0 && cur) {
-            const emp = displayedEmployees[cur.r];
+            const emp = filasGrilla[cur.r];
             const dia = daysInMonth[cur.c];
             if (emp && dia && getDateKey(dia) === p0.dateStr && !p0.cambios.some((c) => c.empId === emp.id)) {
                 const turnos = turnos12(p0.dateStr);
@@ -17645,7 +17660,7 @@ function PlanificacionDesktop() {
         let next = { ...pendingChangesRef.current };
         const byId: Record<string, any> = {};
         employees.forEach((e: any) => { byId[e.id] = e; });
-        const filaDe = new Map(displayedEmployees.map((e: any, i: number) => [e.id, i]));
+        const filaDe = new Map(filasGrilla.map((e: any, i: number) => [e.id, i]));
         const listCtx = {
             positionStructure: effectivePosStructure as import('@/lib/planificacion/vacancySplitBands').VacancyPositionSla[],
             preferSamePosition: true as const,
@@ -17731,7 +17746,7 @@ function PlanificacionDesktop() {
             objectiveId: selectedObjective || undefined,
         });
         if (!lib.ok) { toast.message('motivo' in lib ? lib.motivo : 'No se libera.'); return; }
-        const filaDe = new Map(displayedEmployees.map((e: any, i: number) => [e.id, i]));
+        const filaDe = new Map(filasGrilla.map((e: any, i: number) => [e.id, i]));
         const r = filaDe.get(empId);
         const c = diasRapido.indexOf(dateStr);
         if (r == null || c < 0) { toast.message('Esa celda no está en la grilla.'); return; }
@@ -17763,7 +17778,7 @@ function PlanificacionDesktop() {
         toast.success(lib.texto);
     };
     const irSobra = (empId: string, dateStr: string) => {
-        const r = displayedEmployees.findIndex((e: any) => e.id === empId);
+        const r = filasGrilla.findIndex((e: any) => e.id === empId);
         const c = diasRapido.indexOf(dateStr);
         if (r < 0 || c < 0) { toast.message('Esa celda no está en la grilla.'); return; }
         setFocoSobra(`${empId}_${dateStr}`);
@@ -17974,7 +17989,7 @@ function PlanificacionDesktop() {
                 otros,
             });
             if (val.ok === false && 'mensaje' in val) { out.avisos.push({ mensaje: `${ped.nombre} ${fechaCorta(ped.dateStr)}: ${val.mensaje}` }); continue; }
-            const fila = displayedEmployees.findIndex((e: { id: string }) => e.id === ped.empId);
+            const fila = filasGrilla.findIndex((e: { id: string }) => e.id === ped.empId);
             const col = diasRapido.indexOf(ped.dateStr);
             if (fila < 0 || col < 0) { out.avisos.push({ mensaje: `${ped.nombre}: esa celda no está en la grilla.` }); continue; }
             const celda = ctxRapido(fila, col);
@@ -18077,7 +18092,7 @@ function PlanificacionDesktop() {
         for (const it of afuera) {
             const filaPreview = preview.filas[it.fila];
             const filaGrilla = filaPreview ? asignacion[filaPreview.indice] : null;
-            const emp = filaGrilla != null ? displayedEmployees[filaGrilla] : null;
+            const emp = filaGrilla != null ? filasGrilla[filaGrilla] : null;
             const ds = diasRapido[it.col];
             if (!emp || !ds) continue;
             pedidos.push({
@@ -18205,7 +18220,7 @@ function PlanificacionDesktop() {
         return out.sort((a, b) => orden[a.tipo] - orden[b.tipo] || a.horas - b.horas);
     };
     const asignarCandidatoFaltante = (f: { dateStr: string; positionName: string; banda: string }, empId: string) => {
-        const r = displayedEmployees.findIndex((e: { id: string }) => e.id === empId);
+        const r = filasGrilla.findIndex((e: { id: string }) => e.id === empId);
         const c = diasRapido.indexOf(f.dateStr);
         if (r < 0 || c < 0) { toast.message('Ese guardia no está en la grilla.'); return; }
         const franja = franjaDeBanda(f.positionName, f.banda);
@@ -18220,7 +18235,7 @@ function PlanificacionDesktop() {
     };
     const pasarAFtDirecto = (empId: string, dateStr: string, banda: string, positionName: string) => {
         if (!canAssignFT) { toast.message('Sin permiso para asignar Franco Trabajado (FT).'); return; }
-        const r = displayedEmployees.findIndex((e: { id: string }) => e.id === empId);
+        const r = filasGrilla.findIndex((e: { id: string }) => e.id === empId);
         const c = diasRapido.indexOf(dateStr);
         if (r < 0 || c < 0) { toast.message('Ese franco no está en la grilla.'); return; }
         const codeBanda = normalizarCodigo(banda);
@@ -19339,7 +19354,7 @@ function PlanificacionDesktop() {
                 return null;
             },
         });
-        const filaDe = new Map(displayedEmployees.map((e: { id: string }, i: number) => [e.id, i]));
+        const filaDe = new Map(filasGrilla.map((e: { id: string }, i: number) => [e.id, i]));
         const next = { ...pendingChangesRef.current };
         const avisos: string[] = [];
         let hechas = 0;
@@ -23610,7 +23625,7 @@ function PlanificacionDesktop() {
                 {pegarExcel && createPortal(
                     <PegarExcelModal
                         estado={pegarExcel}
-                        guardias={displayedEmployees.map((e: any, fila: number) => ({ fila, nombre: String(e.name || ''), legajo: String(e.fileNumber || e.legajo || '') }))}
+                        guardias={filasGrilla.map((e: any, fila: number) => ({ fila, nombre: String(e.name || ''), legajo: String(e.fileNumber || e.legajo || '') }))}
                         onCerrar={() => setPegarExcel(null)}
                         onRevisar={revisarPegadoExcel}
                         onAsignar={(indice, fila) => setPegarExcel((prev) => {
