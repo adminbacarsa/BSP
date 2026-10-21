@@ -10,3 +10,12 @@ test('Casino: horas del mes con fechas específicas y días del puesto escritos'
   assert.deepEqual(pos.find((p: any) => p.name === 'Guardia')!.activeDays, ['L', 'M', 'X', 'J', 'V', 'S', 'D']);
   assert.ok(pos.find((p: any) => p.name === 'Guardia')!.allowedShiftTypes.some((t: any) => t.code === 'D12' && t.startTime === '07:00' && t.endTime === '19:00'));
 });
+
+test('−F descuenta el feriado: guardia 8 h de octubre 2026 son 240 h, no 248', () => {
+  const f = (sinFeriado: boolean) => ({
+    puesto: 'Guardia', code: 'M', startTime: '07:00', endTime: '15:00', cantidad: 1, dias: [],
+    ...(sinFeriado ? { trabajaFeriados: false } : {}),
+  }) as any;
+  assert.equal(horasMesDeFranjas([f(false)], 2026, 10), 248);
+  assert.equal(horasMesDeFranjas([f(true)], 2026, 10), 240);
+});

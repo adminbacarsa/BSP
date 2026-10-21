@@ -238,6 +238,31 @@ function pideBanda(pos: PuestoServicio, banda: Banda): number {
   return pedidosDe([pos])[banda];
 }
 
+function horasBanda(s: { code?: string; hours?: number }): number {
+  const n = Number(s.hours);
+  if (n > 0) return n;
+  const plana = bandaPlana(up(s.code));
+  return plana === 'D12' || plana === 'N12' ? 12 : 8;
+}
+
+/** Sin cantidad por banda: 24 × PAX. Con cantidad: suma horas × cantidad (1×M 2×T 2×N = 40, no 24 × 2). M+T+N mandan sobre D12/N12. */
+function horasVendidasDePuesto(p: PuestoServicio): number {
+  const qPuesto = Math.max(1, Number(p.qty) || 1);
+  if (!cantidadExplicita(p)) return qPuesto * 24;
+  const shifts = p.shifts || [];
+  const deBanda = (b: string) => shifts.find((s) => bandaPlana(up(s.code)) === b);
+  const m = deBanda('M');
+  const t = deBanda('T');
+  const n = deBanda('N');
+  const d12 = deBanda('D12');
+  const n12 = deBanda('N12');
+  const base = m && t && n ? [m, t, n] : d12 && n12 ? [d12, n12] : shifts.filter((s) => !!bandaPlana(up(s.code)));
+  return base.reduce((acc, s) => {
+    const q = s.quantity != null && Number(s.quantity) > 0 ? Math.floor(Number(s.quantity)) : qPuesto;
+    return acc + horasBanda(s) * q;
+  }, 0);
+}
+
 function textoFaltaSobra(falta: CuentasBanda, sobra: CuentasBanda): string {
   const partes: string[] = [];
   (['M', 'T', 'N'] as Banda[]).forEach((b) => {
@@ -375,7 +400,7 @@ export function leerDia(input: { turnos: readonly TurnoDia[]; puestos: readonly 
   const custom = [...customMap.values()].map((g) => ({ ...g, cantidad: customTurnos.filter((t) => bandaDe(t) === g.banda).length }));
   // Los custom (Rondín, Encargada…) cierran contra su propia franja: no suman contra los puestos de 24 h.
   const horasTrabajadas = trabajo.filter((t) => !customTurnos.includes(t)).reduce((s, t) => s + horasDe(t), 0);
-  const horasVendidas = mostrar ? puestos24.reduce((s, p) => s + Math.max(1, Number(p.qty) || 1) * 24, 0) : 0;
+  const horasVendidas = mostrar ? puestos24.reduce((s, p) => s + horasVendidasDePuesto(p), 0) : 0;
   const sobranHoras = mostrar ? Math.max(0, Math.round((horasTrabajadas - horasVendidas) * 100) / 100) : 0;
   const turnosFuera = sobranHoras > 0 ? Math.round(sobranHoras / 8) : 0;
   const fs = textoFaltaSobra(falta, sobra);

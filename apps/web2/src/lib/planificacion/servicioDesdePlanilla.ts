@@ -19,6 +19,7 @@ import { claveEquivalencia, type EquivalenciaCodigo } from './equivalenciaCodigo
 import { HORARIO_ESTANDAR, horasEntre, type AvisoRapido } from './modoRapido';
 import { LICENCIA_CODES } from './bandaLicencia';
 import { textoLecturaFranjas } from './lecturaBandas';
+import { isArgentineHoliday } from '../servicios/slaHoursCalculator';
 
 export type DiaSemana = 'L' | 'M' | 'X' | 'J' | 'V' | 'S' | 'D';
 const ORDEN_DIAS: DiaSemana[] = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
@@ -943,8 +944,11 @@ export function horasMesDeFranjas(franjas: FranjaServicioPlanilla[], year: numbe
     const fechas = new Set((f.fechas || []).filter((x) => x.startsWith(mm)));
     let dias = 0;
     for (let d = 1; d <= ultimo; d++) {
+      const ymd = `${mm}${String(d).padStart(2, '0')}`;
+      // −F: el feriado no suma horas vendidas (igual que la prefactura).
+      if (f.trabajaFeriados === false && isArgentineHoliday(ymd)) continue;
       // Con fechas específicas (PP del 10 al 31) cuentan solo esas; si no, los días de la semana.
-      if (f.fechas?.length) { if (fechas.has(`${mm}${String(d).padStart(2, '0')}`)) dias += 1; continue; }
+      if (f.fechas?.length) { if (fechas.has(ymd)) dias += 1; continue; }
       if (!f.dias.length || set.has(letraDia(year, month, d))) dias += 1;
     }
     total += horas * f.cantidad * dias;

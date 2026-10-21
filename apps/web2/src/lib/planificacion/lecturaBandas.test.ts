@@ -271,6 +271,36 @@ test('N de más en Puesto 2 nombra el puesto y los guardias', () => {
   assert.match(linea!.texto, /BARRIOS/);
 });
 
+test('custom 1×M 2×T 2×N vende 40 h, no 24 × el máximo', () => {
+  const puestos: PuestoServicio[] = [{
+    positionName: 'Guardia',
+    qty: 2,
+    coverageType: 'custom',
+    shifts: [
+      { code: 'M', hours: 8, quantity: 1 },
+      { code: 'T', hours: 8, quantity: 2 },
+      { code: 'N', hours: 8, quantity: 2 },
+    ],
+  }];
+  assert.equal(leerDia({ turnos: [], puestos }).horasVendidas, 40);
+});
+
+test('24 h con la misma cantidad por banda sigue en 24 × pax aunque tenga D12/N12', () => {
+  const puestos: PuestoServicio[] = [{
+    positionName: 'Guardia',
+    qty: 2,
+    coverageType: '24hs',
+    shifts: [
+      { code: 'M', hours: 8, quantity: 2 },
+      { code: 'T', hours: 8, quantity: 2 },
+      { code: 'N', hours: 8, quantity: 2 },
+      { code: 'D12', hours: 12 },
+      { code: 'N12', hours: 12 },
+    ],
+  }];
+  assert.equal(leerDia({ turnos: [], puestos }).horasVendidas, 48);
+});
+
 test('P1M y P1T cierran la mañana y la tarde del puesto', () => {
   const compuesto: PuestoServicio[] = [{
     positionName: 'Puesto 1', qty: 1, coverageType: '24hs',

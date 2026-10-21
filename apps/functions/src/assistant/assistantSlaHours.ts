@@ -6,7 +6,7 @@ import { isArgentineHoliday } from '../common/feriadosAr';
 
 const WEEK_DAY_CODES = ['D', 'L', 'M', 'X', 'J', 'V', 'S'] as const;
 
-type ShiftVariant = { code: string; startTime: string; endTime: string; hours?: number };
+type ShiftVariant = { code: string; startTime: string; endTime: string; hours?: number; quantity?: number };
 
 const SHIFT_VARIANTS_DB: Record<string, ShiftVariant> = {
   M: { code: 'M', startTime: '07:00', endTime: '15:00', hours: 8 },
@@ -50,13 +50,17 @@ function analyzeShiftComposition(start: string, end: string): { total: number; n
 function computePositionDayComposition(pos: Record<string, unknown>, dayCode: string): { dayTotal: number; dayNight: number } {
   let dayTotal = 0;
   let dayNight = 0;
+  const shifts = (Array.isArray(pos.allowedShiftTypes) ? pos.allowedShiftTypes : []) as Array<Record<string, unknown>>;
+  // Con quantity en el turno, las horas ya salen por banda (1×M 2×T 2×N = 40). Si no, el PAX del puesto se aplica afuera.
+  const hasPerShiftQty = shifts.some((s) => s.quantity != null);
   const addVariant = (v: ShiftVariant) => {
     const comp = analyzeShiftComposition(v.startTime, v.endTime);
-    dayTotal += comp.total;
-    dayNight += comp.night;
+    const q = hasPerShiftQty ? Math.max(0, Math.floor(Number(v.quantity ?? pos.quantity) || 1)) : 1;
+    if (q <= 0) return;
+    dayTotal += comp.total * q;
+    dayNight += comp.night * q;
   };
   const cov = String(pos.coverageType || 'custom').toLowerCase();
-  const shifts = (Array.isArray(pos.allowedShiftTypes) ? pos.allowedShiftTypes : []) as Array<Record<string, unknown>>;
 
   if (cov === '24hs') {
     const m = shifts.find((s) => String(s.code) === 'M');
@@ -87,6 +91,7 @@ function computePositionDayComposition(pos: Record<string, unknown>, dayCode: st
         startTime: String(shift.startTime ?? '08:00'),
         endTime: String(shift.endTime ?? '16:00'),
         hours: Number(shift.hours) || undefined,
+        quantity: shift.quantity != null ? Number(shift.quantity) : undefined,
       };
       if (days.length > 0) {
         if (days.includes(dayCode)) addVariant(v);
@@ -156,7 +161,8 @@ export function slaHorasVendidasMesCalendario(
       if (p.trabajaFeriados === false && isArgentineHoliday(ymd)) continue;
       const activeDays = Array.isArray(p.activeDays) ? (p.activeDays as string[]) : null;
       if (activeDays && activeDays.length > 0 && !activeDays.includes(dayCode)) continue;
-      const q = Math.max(1, Number(p.quantity) || 1);
+      const turnos = Array.isArray(p.allowedShiftTypes) ? (p.allowedShiftTypes as Array<Record<string, unknown>>) : [];
+      const q = turnos.some((s) => s.quantity != null) ? 1 : Math.max(1, Number(p.quantity) || 1);
       const { dayTotal, dayNight } = computePositionDayComposition(p, dayCode);
       total += dayTotal * q;
       night += dayNight * q;
