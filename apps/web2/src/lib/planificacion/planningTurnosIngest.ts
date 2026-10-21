@@ -1,6 +1,10 @@
 import type { QueryDocumentSnapshot } from 'firebase/firestore';
 import { belongsToEmpresaView } from '@/lib/multiempresa';
 import { elegirVistaCelda } from '@/lib/planificacion/bandaLicencia';
+import { medirSeccion } from '@/lib/planificacion/perfGrilla';
+
+/** Docs por tanda: parte el hilo para que un mes grande no sea una sola traba. */
+const TANDA_TURNOS = 400;
 
 export function planningShiftViewFromSnap(d: QueryDocumentSnapshot): any {
     const data = d.data();
@@ -66,23 +70,32 @@ export type PlanningTurnosIngestResult = {
     rfzTodos: any[];
 };
 
-/** Convierte snapshot de turnos (mes) al estado de grilla de planificación. */
-export function ingestPlanningTurnosSnapshot(
+function vacioIngest(): PlanningTurnosIngestResult {
+    return {
+        shiftsMap: {},
+        cellTurnosMap: {},
+        allShiftIds: {},
+        turaMap: {},
+        secondBlockMap: {},
+        rfzVacantes: [],
+        rfzTodos: [],
+    };
+}
+
+function acumularDocs(
     docs: QueryDocumentSnapshot[],
     empresaId: string,
     migracionCompleta: boolean,
     getDateKey: (dateInput: any) => string,
-    opts?: { rfzOnly?: boolean; turaOnly?: boolean },
-): PlanningTurnosIngestResult {
-    const map: Record<string, any> = {};
-    const cellTurnos: Record<string, any[]> = {};
-    const allIds: Record<string, string[]> = {};
-    const turaM: Record<string, any> = {};
-    const secondBlocksMap: Record<string, { startTime: any; endTime: any }> = {};
-    const rfzVacs: any[] = [];
-    const rfzAll: any[] = [];
+    opts: { rfzOnly?: boolean; turaOnly?: boolean } | undefined,
+    into: PlanningTurnosIngestResult,
+): void {
     const rfzOnly = opts?.rfzOnly === true;
-
+    const map = into.shiftsMap;
+    const cellTurnos = into.cellTurnosMap;
+    const allIds = into.allShiftIds;
+    const turaM = into.turaMap;
+    const secondBlocksMap = into.secondBlockMap;
     docs.forEach((d) => {
         const data = d.data();
         if (!belongsToEmpresaView(data, empresaId, migracionCompleta)) return;
@@ -91,8 +104,8 @@ export function ingestPlanningTurnosSnapshot(
 
         if (code === 'RFZ') {
             const rfzData = { id: d.id, ...data };
-            rfzAll.push(rfzData);
-            if (!data.employeeId || data.employeeId === 'VACANTE') rfzVacs.push(rfzData);
+            into.rfzTodos.push(rfzData);
+            if (!data.employeeId || data.employeeId === 'VACANTE') into.rfzVacantes.push(rfzData);
             return;
         }
 
@@ -126,19 +139,55 @@ export function ingestPlanningTurnosSnapshot(
             map[key] = normalized;
         }
     });
+}
 
-    for (const [key, docs] of Object.entries(cellTurnos)) {
-        const vista = elegirVistaCelda(docs);
-        if (vista) map[key] = vista;
+function cerrarVistas(into: PlanningTurnosIngestResult): void {
+    for (const [key, lista] of Object.entries(into.cellTurnosMap)) {
+        const vista = elegirVistaCelda(lista);
+        if (vista) into.shiftsMap[key] = vista;
     }
+}
 
-    return {
-        shiftsMap: map,
-        cellTurnosMap: cellTurnos,
-        allShiftIds: allIds,
-        turaMap: turaM,
-        secondBlockMap: secondBlocksMap,
-        rfzVacantes: rfzVacs,
-        rfzTodos: rfzAll,
-    };
+/** Convierte snapshot de turnos (mes) al estado de grilla de planificación. */
+export function ingestPlanningTurnosSnapshot(
+    docs: QueryDocumentSnapshot[],
+    empresaId: string,
+    migracionCompleta: boolean,
+    getDateKey: (dateInput: any) => string,
+    opts?: { rfzOnly?: boolean; turaOnly?: boolean },
+): PlanningTurnosIngestResult {
+    const into = vacioIngest();
+    acumularDocs(docs, empresaId, migracionCompleta, getDateKey, opts, into);
+    cerrarVistas(into);
+    return into;
+}
+
+function cederHilo(): Promise<void> {
+    return new Promise((resolve) => { setTimeout(resolve, 0); });
+}
+
+/**
+ * Misma salida que ingestPlanningTurnosSnapshot, cediendo el hilo entre tandas.
+ * Un mes de toda la empresa deja de ser una sola traba de varios segundos.
+ */
+export async function ingestPlanningTurnosPorTandas(
+    docs: QueryDocumentSnapshot[],
+    empresaId: string,
+    migracionCompleta: boolean,
+    getDateKey: (dateInput: any) => string,
+    opts?: { rfzOnly?: boolean; turaOnly?: boolean },
+): Promise<PlanningTurnosIngestResult> {
+    if (docs.length <= TANDA_TURNOS) {
+        return medirSeccion('ingest turnos mes', () => ingestPlanningTurnosSnapshot(docs, empresaId, migracionCompleta, getDateKey, opts));
+    }
+    const into = vacioIngest();
+    for (let i = 0; i < docs.length; i += TANDA_TURNOS) {
+        const corte = docs.slice(i, i + TANDA_TURNOS);
+        medirSeccion('ingest turnos mes', () => {
+            acumularDocs(corte, empresaId, migracionCompleta, getDateKey, opts, into);
+        });
+        if (i + TANDA_TURNOS < docs.length) await cederHilo();
+    }
+    medirSeccion('ingest turnos mes vista', () => cerrarVistas(into));
+    return into;
 }

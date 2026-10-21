@@ -44,6 +44,26 @@ export function medirSeccion<T>(nombre: string, fn: () => T): T {
     }
 }
 
+/**
+ * Igual que medirSeccion, para un bloque con await o varios return.
+ * Hay que llamar al cierre en un finally. Sin ?medir=1 no hace nada.
+ */
+export function medirBloque(nombre: string): () => void {
+    if (typeof window === 'undefined') return () => {};
+    const destino = (window as unknown as { __planifSecciones?: Record<string, SeccionMedida> }).__planifSecciones;
+    if (!destino) return () => {};
+    const t = performance.now();
+    let cerrado = false;
+    return () => {
+        if (cerrado) return;
+        cerrado = true;
+        const e = destino[nombre] || { ms: 0, n: 0 };
+        e.ms += performance.now() - t;
+        e.n += 1;
+        destino[nombre] = e;
+    };
+}
+
 /** useMemo que cronometra su cálculo: «#orden · comienzo del código» (en producción el código viene minificado, el orden ubica cuál es). */
 export function crearUseMemoMedido(useMemoReact: <T>(f: () => T, deps: readonly unknown[] | undefined) => T) {
     return function useMemoMedido<T>(f: () => T, deps: readonly unknown[] | undefined): T {

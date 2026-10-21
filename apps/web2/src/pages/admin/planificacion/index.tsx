@@ -1,5 +1,5 @@
 ﻿import React, { useState, useEffect, useLayoutEffect, useMemo as useMemoReact, useRef, useTransition, useCallback, useDeferredValue } from 'react';
-import { createPortal } from 'react-dom';
+import { createPortal, flushSync } from 'react-dom';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import DashboardLayout from '@/components/layout/DashboardLayout';
@@ -189,7 +189,7 @@ import {
     setCachedPlanningMonth,
 } from '@/lib/planificacion/planningMonthCache';
 import { planningMonthAccess, classifyYearMonth } from '@/lib/dataRetention';
-import { ingestPlanningTurnosSnapshot, planningShiftViewFromSnap } from '@/lib/planificacion/planningTurnosIngest';
+import { ingestPlanningTurnosPorTandas, ingestPlanningTurnosSnapshot, planningShiftViewFromSnap } from '@/lib/planificacion/planningTurnosIngest';
 import type { OpsCoverageTooltipContext } from '@/lib/planificacion/opsCoverageCellTooltip';
 import {
     buildPlanningEventosCellsByDay,
@@ -204,7 +204,7 @@ import {
   resolveCoverGuardDisplayName,
 } from '@/lib/cosp/coverageSemantics';
 import { PlanningCoverageLegend } from '@/components/planificacion/PlanningCoverageLegend';
-import { crearUseMemoMedido, inicioRenderGrilla, medirSeccion, registrarCommitGrilla, reiniciarOrdenMemo } from '@/lib/planificacion/perfGrilla';
+import { crearUseMemoMedido, inicioRenderGrilla, medirBloque, medirSeccion, registrarCommitGrilla, reiniciarOrdenMemo } from '@/lib/planificacion/perfGrilla';
 
 const useMemo = crearUseMemoMedido(useMemoReact);
 import { MedidorVelocidad } from '@/components/planificacion/MedidorVelocidad';
@@ -1784,24 +1784,110 @@ function computeServiceRuleChanges(
     return additions;
 }
 
-function indicePorLegajo<T>(source: Record<string, T> | undefined): {
+type IndiceLegajo<T> = {
     porLegajo: Map<string, { key: string; value: T }[]>;
     porClave: Map<string, T>;
-} {
-    const porLegajo = new Map<string, { key: string; value: T }[]>();
+};
+
+function indicePorLegajo<T>(source: Record<string, T> | undefined): IndiceLegajo<T> {
+    return indicePorLegajoEstable(source, null);
+}
+
+/** Reusa la lista del legajo si sus celdas son los mismos objetos. Si nada cambió, devuelve el índice anterior. */
+function indicePorLegajoEstable<T>(source: Record<string, T> | undefined, prev: IndiceLegajo<T> | null): IndiceLegajo<T> {
+    const src = source || {};
     const porClave = new Map<string, T>();
-    for (const key of Object.keys(source || {})) {
-        const value = (source as Record<string, T>)[key];
-        porClave.set(key, value);
+    const grupos = new Map<string, string[]>();
+    for (const key of Object.keys(src)) {
+        porClave.set(key, src[key]);
         const employeeId = key.slice(0, Math.max(0, key.length - 11));
-        let list = porLegajo.get(employeeId);
-        if (!list) {
-            list = [];
-            porLegajo.set(employeeId, list);
+        let keys = grupos.get(employeeId);
+        if (!keys) {
+            keys = [];
+            grupos.set(employeeId, keys);
         }
-        list.push({ key, value });
+        keys.push(key);
     }
+    if (!prev) {
+        const porLegajo = new Map<string, { key: string; value: T }[]>();
+        for (const [employeeId, keys] of grupos) {
+            porLegajo.set(employeeId, keys.map((key) => ({ key, value: src[key] })));
+        }
+        return { porLegajo, porClave };
+    }
+    let todoIgual = prev.porLegajo.size === grupos.size;
+    const porLegajo = new Map<string, { key: string; value: T }[]>();
+    for (const [employeeId, keys] of grupos) {
+        const anterior = prev.porLegajo.get(employeeId);
+        if (anterior && listaLegajoIgual(anterior, keys, src)) {
+            porLegajo.set(employeeId, anterior);
+            continue;
+        }
+        todoIgual = false;
+        porLegajo.set(employeeId, keys.map((key) => ({ key, value: src[key] })));
+    }
+    if (todoIgual) return prev;
     return { porLegajo, porClave };
+}
+
+function listaLegajoIgual<T>(anterior: { key: string; value: T }[], keys: string[], src: Record<string, T>): boolean {
+    if (anterior.length !== keys.length) return false;
+    const set = new Set(keys);
+    if (set.size !== keys.length) return false;
+    for (const item of anterior) {
+        if (!set.has(item.key) || src[item.key] !== item.value) return false;
+    }
+    return true;
+}
+
+function mismoTurnoPlano(a: any, b: any): boolean {
+    if (a === b) return true;
+    if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return false;
+    const ka = Object.keys(a);
+    if (ka.length !== Object.keys(b).length) return false;
+    for (const k of ka) {
+        const av = a[k];
+        const bv = b[k];
+        if (av === bv) continue;
+        if (av && bv && typeof av === 'object' && typeof bv === 'object') {
+            if (av.seconds != null && av.seconds === bv.seconds && (av.nanoseconds || 0) === (bv.nanoseconds || 0)) continue;
+            if (Array.isArray(av) && Array.isArray(bv) && av.length === bv.length && av.every((x: unknown, i: number) => x === bv[i])) continue;
+        }
+        return false;
+    }
+    return true;
+}
+
+function compartirTurnos(prev: Record<string, any>, next: Record<string, any>): Record<string, any> {
+    if (prev === next || Object.keys(prev).length === 0) return Object.keys(prev).length === 0 ? next : prev;
+    let distinto = Object.keys(prev).length !== Object.keys(next).length;
+    const out: Record<string, any> = {};
+    for (const k of Object.keys(next)) {
+        const a = prev[k];
+        const b = next[k];
+        if (a && (a === b || mismoTurnoPlano(a, b))) out[k] = a;
+        else { out[k] = b; distinto = true; }
+    }
+    if (!distinto) {
+        for (const k of Object.keys(prev)) if (!(k in next)) { distinto = true; break; }
+    }
+    return distinto ? out : prev;
+}
+
+function compartirCeldas(prev: Record<string, any[]>, next: Record<string, any[]>): Record<string, any[]> {
+    if (Object.keys(prev).length === 0) return next;
+    let distinto = Object.keys(prev).length !== Object.keys(next).length;
+    const out: Record<string, any[]> = {};
+    for (const k of Object.keys(next)) {
+        const a = prev[k];
+        const b = next[k];
+        if (a && b && a.length === b.length && a.every((item, i) => item === b[i] || mismoTurnoPlano(item, b[i]))) out[k] = a;
+        else { out[k] = b; distinto = true; }
+    }
+    if (!distinto) {
+        for (const k of Object.keys(prev)) if (!(k in next)) { distinto = true; break; }
+    }
+    return distinto ? out : prev;
 }
 
 function recolectarLctLegajo(
@@ -2233,6 +2319,8 @@ function PlanificacionDesktop() {
     const [pendingNovedades, setPendingNovedades] = useState<Record<string, any>>({});
     const [selection, setSelection] = useState<{start: Coords | null, end: Coords | null}>({ start: null, end: null });
     const [isDragging, setIsDragging] = useState(false);
+    const [arrastrandoFila, setArrastrandoFila] = useState(false);
+    const [imprimiendoGrilla, setImprimiendoGrilla] = useState(false);
 
     const [showHistoryModal, setShowHistoryModal] = useState(false);
     const [historyVersions, setHistoryVersions] = useState<any[]>([]);
@@ -2313,6 +2401,8 @@ function PlanificacionDesktop() {
     const modoRapidoRef = useRef(false);
     const capaRapidaRef = useRef<CapaModoRapidoApi | null>(null);
     const grillaScrollRef = useRef<HTMLDivElement | null>(null);
+    const [ventanaFilas, setVentanaFilas] = useState({ desde: 0, hasta: 48 });
+    const [altoFilaGrilla, setAltoFilaGrilla] = useState(32);
     const [ayudaRapidaOpen, setAyudaRapidaOpen] = useState(false);
     const [pegarExcel, setPegarExcel] = useState<PegarExcelEstado | null>(null);
     const [catalogoNovedad, setCatalogoNovedad] = useState<TipoNovedadRapida[]>(() => NOVEDAD_TYPE_SEEDS.map((s) => ({ code: s.code, label: s.label })));
@@ -3487,13 +3577,15 @@ function PlanificacionDesktop() {
         const fila = displayedEmployees.findIndex((e: { id: string }) => e.id === foco.empId);
         const col = daysInMonth.findIndex((d) => getDateKey(d) === foco.dateStr);
         if (fila < 0 || col < 0) return;
-        focoCeldaRef.current = null;
         const td = document.querySelector(`[data-rc="${fila}:${col}"]`);
-        if (td instanceof HTMLElement) {
-            td.scrollIntoView({ block: 'center', inline: 'center' });
-            td.classList.add('ring-2', 'ring-indigo-500');
+        if (!(td instanceof HTMLElement)) {
+            setVentanaFilas({ desde: Math.max(0, fila - 8), hasta: fila + 16 });
+            return;
         }
-    }, [displayedEmployees, daysInMonth]);
+        focoCeldaRef.current = null;
+        td.scrollIntoView({ block: 'center', inline: 'center' });
+        td.classList.add('ring-2', 'ring-indigo-500');
+    }, [displayedEmployees, daysInMonth, ventanaFilas]);
 
     const etiquetasGrupo = useMemo(() => {
         const map = new Map<string, EtiquetaFilaGrupo>();
@@ -3813,13 +3905,15 @@ function PlanificacionDesktop() {
 
     const scrollToEmployeeRow = useCallback((empId: string) => {
         setHighlightEmpId(empId);
+        const idx = displayedEmployees.findIndex((e: { id: string }) => e.id === empId);
+        if (idx >= 0) setVentanaFilas({ desde: Math.max(0, idx - 8), hasta: idx + 24 });
         requestAnimationFrame(() => {
             document.getElementById(`plan-emp-${empId}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
         });
         window.setTimeout(() => {
             setHighlightEmpId((prev) => (prev === empId ? null : prev));
         }, 2500);
-    }, []);
+    }, [displayedEmployees]);
 
     useEffect(() => {
         if (!forceShowAll) return;
@@ -4146,42 +4240,112 @@ function PlanificacionDesktop() {
         return result;
     }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, selectedObjective, selectedGrupo, grupoUnifiedMode]);
 
+    // La grilla pesada espera un frame: el encabezado cambia al toque y el cálculo grande no traba el clic.
+    const filasGrilla = useDeferredValue(displayedEmployees);
+    const montarFilasCompletas = modoRapido || !!comparingSnapshot || forceShowAll || arrastrandoFila || imprimiendoGrilla;
+    const corteFilas = montarFilasCompletas
+        ? { desde: 0, hasta: filasGrilla.length }
+        : {
+            desde: Math.min(ventanaFilas.desde, filasGrilla.length),
+            hasta: Math.min(filasGrilla.length, Math.max(ventanaFilas.hasta, Math.min(ventanaFilas.desde, filasGrilla.length) + 24)),
+        };
+    const firmaCorteFilas = montarFilasCompletas ? `all:${filasGrilla.length}` : `${corteFilas.desde}:${corteFilas.hasta}:${filasGrilla.length}`;
+
     // Art. 197 LCT: menos de 12 h entre el tope de cierre (inicio + 12:59) y el próximo turno, también de otro objetivo. Solo aviso.
-    // Cada legajo se calcula aparte: si sus turnos no cambiaron se reusa el resultado anterior.
-    const lctCacheRef = useRef<Map<string, { refs: unknown[]; gaps: Record<string, string> }>>(new Map());
+    // Solo los legajos de la ventana (el resto, al scrollear). Si la lista del legajo no cambió, no se recorre.
+    const lctCacheRef = useRef<Map<string, { celdas: { key: string; value: any[] }[]; pendientes: { key: string; value: any }[]; gaps: Record<string, string> }>>(new Map());
     const lctMapRef = useRef<Record<string, string>>({});
-    const indiceTurnosLct = useMemo(() => indicePorLegajo(cellTurnosMap), [cellTurnosMap]);
-    const indicePendingLct = useMemo(() => indicePorLegajo(pendingChanges), [pendingChanges]);
-    const lctRestByCell = useMemo(() => {
+    const indiceTurnosPrevRef = useRef<IndiceLegajo<any[]> | null>(null);
+    const indicePendingPrevRef = useRef<IndiceLegajo<any> | null>(null);
+    const indiceTurnosLct = useMemo(() => {
+        const next = indicePorLegajoEstable(cellTurnosMap, indiceTurnosPrevRef.current);
+        indiceTurnosPrevRef.current = next;
+        return next;
+    }, [cellTurnosMap]);
+    const indicePendingLct = useMemo(() => {
+        const next = indicePorLegajoEstable(pendingChanges, indicePendingPrevRef.current);
+        indicePendingPrevRef.current = next;
+        return next;
+    }, [pendingChanges]);
+    const lctRestByCell = useMemo(() => medirSeccion('lctGaps', () => {
         const anterior = lctCacheRef.current;
-        const siguiente = new Map<string, { refs: unknown[]; gaps: Record<string, string> }>();
+        const siguiente = new Map<string, { celdas: { key: string; value: any[] }[]; pendientes: { key: string; value: any }[]; gaps: Record<string, string> }>();
         const map: Record<string, string> = {};
-        const ids = new Set<string>([...indiceTurnosLct.porLegajo.keys(), ...indicePendingLct.porLegajo.keys()]);
-        ids.forEach((employeeId) => {
+        const vistos = new Set<string>();
+        for (let i = 0; i < filasGrilla.length; i++) {
+            const employeeId = String(filasGrilla[i]?.id || '');
+            if (!employeeId || vistos.has(employeeId)) continue;
+            vistos.add(employeeId);
             const celdas = indiceTurnosLct.porLegajo.get(employeeId) || [];
             const pendientes = indicePendingLct.porLegajo.get(employeeId) || [];
             const prev = anterior.get(employeeId);
-            const sonda = recolectarLctLegajo(employeeId, celdas, pendientes, indicePendingLct.porClave, false);
             let gaps: Record<string, string>;
-            let refs = sonda.refs;
-            if (prev && prev.refs.length === sonda.refs.length && prev.refs.every((r, i) => r === sonda.refs[i])) {
+            if (prev && prev.celdas === celdas && prev.pendientes === pendientes) {
                 gaps = prev.gaps;
             } else {
                 const pleno = recolectarLctLegajo(employeeId, celdas, pendientes, indicePendingLct.porClave, true);
-                refs = pleno.refs;
                 gaps = {};
                 findLctRestGaps(pleno.items).forEach((g) => {
                     g.cellKeys.forEach((c) => { gaps[c] = gaps[c] ? `${gaps[c]} | ${g.message}` : g.message; });
                 });
             }
-            siguiente.set(employeeId, { refs, gaps });
+            siguiente.set(employeeId, { celdas, pendientes, gaps });
             Object.assign(map, gaps);
-        });
+        }
         lctCacheRef.current = siguiente;
         if (mismoMapaTexto(lctMapRef.current, map)) return lctMapRef.current;
         lctMapRef.current = map;
         return map;
-    }, [indiceTurnosLct, indicePendingLct]);
+    }), [indiceTurnosLct, indicePendingLct, filasGrilla]);
+
+    useEffect(() => {
+        const onBefore = () => { flushSync(() => setImprimiendoGrilla(true)); };
+        const onAfter = () => setImprimiendoGrilla(false);
+        window.addEventListener('beforeprint', onBefore);
+        window.addEventListener('afterprint', onAfter);
+        return () => {
+            window.removeEventListener('beforeprint', onBefore);
+            window.removeEventListener('afterprint', onAfter);
+        };
+    }, []);
+
+    useEffect(() => {
+        setVentanaFilas({ desde: 0, hasta: 48 });
+        const el = grillaScrollRef.current;
+        if (el) el.scrollTop = 0;
+    }, [selectedObjective, selectedGrupo?.id]);
+
+    useEffect(() => {
+        const el = grillaScrollRef.current;
+        if (!el || !selectedObjective || montarFilasCompletas) return;
+        let raf = 0;
+        const medir = () => {
+            const alto = altoFilaGrilla || 32;
+            const vista = el.clientHeight || 640;
+            const desde = Math.max(0, Math.floor(el.scrollTop / alto) - 8);
+            const hasta = Math.ceil((el.scrollTop + vista) / alto) + 10;
+            setVentanaFilas((prev) => (prev.desde === desde && prev.hasta === hasta ? prev : { desde, hasta }));
+        };
+        const onScroll = () => {
+            if (raf) return;
+            raf = requestAnimationFrame(() => { raf = 0; medir(); });
+        };
+        medir();
+        el.addEventListener('scroll', onScroll, { passive: true });
+        const ro = new ResizeObserver(onScroll);
+        ro.observe(el);
+        return () => {
+            el.removeEventListener('scroll', onScroll);
+            ro.disconnect();
+            if (raf) cancelAnimationFrame(raf);
+        };
+    }, [selectedObjective, selectedGrupo?.id, montarFilasCompletas, filasGrilla.length, altoFilaGrilla]);
+
+    useLayoutEffect(() => {
+        const fila = grillaScrollRef.current?.querySelector('tr[id^="plan-emp-"]');
+        const h = fila instanceof HTMLElement ? fila.getBoundingClientRect().height : 0;
+        if (h > 20 && Math.abs(h - altoFilaGrilla) > 1) setAltoFilaGrilla(Math.round(h));
+    }, [filasGrilla, firmaCorteFilas, altoFilaGrilla, anchoDotacion, presentacionDotacion]);
 
     // Horas en el ciclo CCT actual (corre del 26 del mes anterior al 25 del mes activo).
     // Suma:
@@ -6611,8 +6775,10 @@ function PlanificacionDesktop() {
             return;
         }
         const fetchSLA = async () => {
+            let fin = () => {};
             try {
                 const rows = await leerServiciosSla();
+                fin = medirBloque('efecto sla objetivo');
                 const mesVista = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
                 const pendientesAca = serviciosPendientes.filter((p) => p.objectiveId === selectedObjective && p.mesKey === mesVista);
                 const allDocs = filterSlasForPlanningTenant(
@@ -6709,6 +6875,8 @@ function PlanificacionDesktop() {
                 setHasActiveSLA(false);
                 setSlaVendidas(0);
                 setSlaPlanningHint('error al cargar contratos');
+            } finally {
+                fin();
             }
         };
         fetchSLA();
@@ -6762,6 +6930,8 @@ function PlanificacionDesktop() {
 
     // Auto-aplicar rotación cuando el mes está vacío y hay rotación configurada en el SLA
     useEffect(() => {
+        const fin = medirBloque('efecto rotacion');
+        try {
         if (!shiftsMapLoaded) return;
         if (!activeSlaServiceRotations?.length) return;
         if (!selectedObjective) return;
@@ -6816,6 +6986,7 @@ function PlanificacionDesktop() {
         const totalCount = activeSlaServiceRotations.length;
         const hint = desactCount > 0 ? ` (${rotacionesActivas.length}/${totalCount} activas)` : '';
         toast.info(`Rotación pre-cargada${hint} — revisá y guardá cuando estés listo`, { duration: 4000 });
+        } finally { fin(); }
     }, [activeSlaServiceRotations, mesRotacionesDesactivadas, hasActiveSLA, shiftsMap, shiftsMapLoaded, currentDate, selectedObjective, positionStructure, commitPendingChanges, activeSlaServiceRules, employees, selectedGrupo, grupoUnifiedMode]);
 
     useEffect(() => {
@@ -6850,8 +7021,10 @@ function PlanificacionDesktop() {
             return;
         }
         const fetchGroupSlas = async () => {
+            let fin = () => {};
             try {
                 const rows = await leerServiciosSla();
+                fin = medirBloque('efecto sla grupo');
                 const allDocs = filterSlasForPlanningTenant(
                     rows as any[],
                     empresaId, scopeEmpresa, tenantClientIds,
@@ -6892,6 +7065,8 @@ function PlanificacionDesktop() {
                 setGrupoTotalVendidas(0);
                 setGrupoVendidasByObjective({});
                 setGrupoSinServicioMes([]);
+            } finally {
+                fin();
             }
         };
         fetchGroupSlas();
@@ -6972,12 +7147,14 @@ function PlanificacionDesktop() {
             setEmployees([...porId.values()]);
         };
         const unsubE = onSnapshot(empleadosQ, snap => {
-            dataSyncRef.current.employees = true;
-            checkSynced();
-            propios = snap.docs
-                .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
-                .map(d => filaEmpleado(d.id, d.data() as Record<string, any>));
-            publicarEmpleados();
+            medirSeccion('snapshot empleados', () => {
+                dataSyncRef.current.employees = true;
+                checkSynced();
+                propios = snap.docs
+                    .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
+                    .map(d => filaEmpleado(d.id, d.data() as Record<string, any>));
+                publicarEmpleados();
+            });
         }, (e) => console.error('[plan] empleados error:', e));
         const unsubHab = onSnapshot(
             query(collection(db, 'empleados'), where('habilitadoEn', 'array-contains', empresaId)),
@@ -7127,16 +7304,49 @@ function PlanificacionDesktop() {
         const viewMonth = currentDate.getMonth() + 1;
         const cacheKey = planningMonthCacheKey(empresaId, viewYear, viewMonth);
         let prefetchTimer: number | undefined;
+        let vigente = true;
+        let generacion = 0;
 
         const applyIngested = (ingested: ReturnType<typeof ingestPlanningTurnosSnapshot>) => {
-            setShiftsMap(ingested.shiftsMap);
-            setCellTurnosMap(ingested.cellTurnosMap);
-            setAllShiftIds(ingested.allShiftIds);
-            setTuraMap((prev) => ({ ...prev, ...ingested.turaMap }));
-            setSecondBlockMap(ingested.secondBlockMap);
-            setRfzVacantes(ingested.rfzVacantes);
-            setRfzTodos(ingested.rfzTodos);
-            setShiftsMapLoaded(true);
+            const fin = medirBloque('aplicar turnos');
+            try {
+                setShiftsMap((prev) => compartirTurnos(prev, ingested.shiftsMap));
+                setCellTurnosMap((prev) => compartirCeldas(prev, ingested.cellTurnosMap));
+                setAllShiftIds((prev) => {
+                    const next = ingested.allShiftIds;
+                    const nk = Object.keys(next);
+                    if (Object.keys(prev).length !== nk.length) return next;
+                    for (const k of nk) {
+                        const a = prev[k];
+                        const b = next[k];
+                        if (!a || a.length !== b.length || a.some((id: string, i: number) => id !== b[i])) return next;
+                    }
+                    return prev;
+                });
+                setTuraMap((prev) => compartirTurnos(prev, { ...prev, ...ingested.turaMap }));
+                setSecondBlockMap((prev) => {
+                    const next = ingested.secondBlockMap;
+                    const nk = Object.keys(next);
+                    if (Object.keys(prev).length !== nk.length) return next;
+                    for (const k of nk) {
+                        if (prev[k]?.startTime !== next[k]?.startTime || prev[k]?.endTime !== next[k]?.endTime) return next;
+                    }
+                    return prev;
+                });
+                setRfzVacantes((prev) => (
+                    prev.length === ingested.rfzVacantes.length && prev.every((r, i) => r?.id === ingested.rfzVacantes[i]?.id)
+                        ? prev
+                        : ingested.rfzVacantes
+                ));
+                setRfzTodos((prev) => (
+                    prev.length === ingested.rfzTodos.length && prev.every((r, i) => r?.id === ingested.rfzTodos[i]?.id)
+                        ? prev
+                        : ingested.rfzTodos
+                ));
+                setShiftsMapLoaded(true);
+            } finally {
+                fin();
+            }
         };
 
         const cached = getCachedPlanningMonth(cacheKey);
@@ -7157,30 +7367,44 @@ function PlanificacionDesktop() {
         };
 
         const applyMainSnap = (snap: import('firebase/firestore').QuerySnapshot) => {
-            const ingested = ingestPlanningTurnosSnapshot(
-                snap.docs,
-                empresaId,
-                migracionCompleta,
-                getDateKey,
-            );
-            setCachedPlanningMonth(cacheKey, ingested);
-            applyIngested(ingested);
-            if (!prefetchTimer) {
-                prefetchTimer = window.setTimeout(() => {
-                    adjacentPlanningMonths(viewYear, viewMonth).forEach(({ year, month }) => {
-                        const key = planningMonthCacheKey(empresaId, year, month);
-                        if (getCachedPlanningMonth(key)) return;
-                        getDocs(buildPlanningMonthTurnosQuery({ empresaId, scopeEmpresa, year, month }))
-                            .then((adjSnap) => {
-                                setCachedPlanningMonth(
-                                    key,
-                                    ingestPlanningTurnosSnapshot(adjSnap.docs, empresaId, migracionCompleta, getDateKey),
-                                );
-                            })
-                            .catch(() => {});
-                    });
-                }, 600);
-            }
+            const gen = ++generacion;
+            void (async () => {
+                try {
+                    const ingested = await ingestPlanningTurnosPorTandas(
+                        snap.docs,
+                        empresaId,
+                        migracionCompleta,
+                        getDateKey,
+                    );
+                    if (!vigente || gen !== generacion) return;
+                    setCachedPlanningMonth(cacheKey, ingested);
+                    applyIngested(ingested);
+                    if (prefetchTimer || !vigente) return;
+                    prefetchTimer = window.setTimeout(() => {
+                        const lanzar = () => {
+                            adjacentPlanningMonths(viewYear, viewMonth).forEach(({ year, month }) => {
+                                const key = planningMonthCacheKey(empresaId, year, month);
+                                if (getCachedPlanningMonth(key)) return;
+                                getDocs(buildPlanningMonthTurnosQuery({ empresaId, scopeEmpresa, year, month }))
+                                    .then(async (adjSnap) => {
+                                        if (!vigente) return;
+                                        const adj = await ingestPlanningTurnosPorTandas(adjSnap.docs, empresaId, migracionCompleta, getDateKey);
+                                        if (!vigente) return;
+                                        setCachedPlanningMonth(key, adj);
+                                    })
+                                    .catch(() => {});
+                            });
+                        };
+                        const ric = (window as Window & { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number }).requestIdleCallback;
+                        if (typeof ric === 'function') ric(lanzar, { timeout: 2500 });
+                        else lanzar();
+                    }, 1200);
+                } catch (e) {
+                    if (!vigente || gen !== generacion) return;
+                    console.error('[plan] turnos mes error:', e);
+                    setShiftsMapLoaded(true);
+                }
+            })();
         };
 
         const turnosQ = buildPlanningMonthTurnosQuery({
@@ -7205,13 +7429,13 @@ function PlanificacionDesktop() {
                 month: viewMonth,
             });
             unsubRfz = onSnapshot(rfzQ, (snap) => {
-                const ingested = ingestPlanningTurnosSnapshot(
+                const ingested = medirSeccion('ingest rfz mes', () => ingestPlanningTurnosSnapshot(
                     snap.docs,
                     empresaId,
                     migracionCompleta,
                     getDateKey,
                     { rfzOnly: true },
-                );
+                ));
                 setRfzTodos((prev) => mergeRfzLists(prev, ingested.rfzTodos));
                 setRfzVacantes((prev) => mergeRfzLists(prev, ingested.rfzVacantes));
             }, () => {
@@ -7229,14 +7453,14 @@ function PlanificacionDesktop() {
                 month: viewMonth,
             });
             unsubTura = onSnapshot(turaQ, (snap) => {
-                const ingested = ingestPlanningTurnosSnapshot(
+                const ingested = medirSeccion('ingest tura mes', () => ingestPlanningTurnosSnapshot(
                     snap.docs,
                     empresaId,
                     migracionCompleta,
                     getDateKey,
                     { turaOnly: true },
-                );
-                setTuraMap((prev) => ({ ...prev, ...ingested.turaMap }));
+                ));
+                setTuraMap((prev) => compartirTurnos(prev, { ...prev, ...ingested.turaMap }));
             }, () => {
                 /* índice TURA+fecha opcional en emulador */
             });
@@ -7245,6 +7469,7 @@ function PlanificacionDesktop() {
         }
 
         return () => {
+            vigente = false;
             unsubS();
             unsubRfz();
             unsubTura();
@@ -7343,9 +7568,11 @@ function PlanificacionDesktop() {
     // Carga asignaciones de puesto: base desde empleados + overlay mensual desde planificacion_estados.
     // Si el mes actual no tiene datos propios, hereda del mes anterior (una sola vez al abrir el mes).
     useEffect(() => {
+        const fin = medirBloque('efecto dotacion');
         const { pos: basePos, shift: baseShift } = buildDotacionMapsFromEmployees(employees);
         setEmpDefaultPos(basePos);
         setEmpDefaultShift(baseShift);
+        fin();
         if (!selectedObjective) return;
         const year = currentDate.getFullYear();
         const month = currentDate.getMonth() + 1;
@@ -7597,6 +7824,7 @@ function PlanificacionDesktop() {
         s.grilla = null;
         if (s.raf) cancelAnimationFrame(s.raf);
         s.raf = 0;
+        setArrastrandoFila(false);
     };
     const frameArrastreFila = () => {
         const s = arrastreFilaRef.current;
@@ -7629,6 +7857,7 @@ function PlanificacionDesktop() {
     const handleRowDragStart = (e: React.DragEvent, idx: number) => {
         e.dataTransfer.effectAllowed = 'move';
         e.dataTransfer.setData('text/plain', String(idx));
+        setArrastrandoFila(true);
         const s = arrastreFilaRef.current;
         s.activo = true;
         s.clientY = e.clientY;
@@ -15128,7 +15357,7 @@ function PlanificacionDesktop() {
         focoSobra,
     };
     const vistasPrevRef = useRef<Record<string, VistaCelda>>({});
-    const filasCeldasBase = comparingSnapshot ? compareGridEmployees : displayedEmployees;
+    const filasCeldasBase = comparingSnapshot ? compareGridEmployees : filasGrilla;
     const filasCeldasRef = useRef<any[] | null>(null);
     if (
         !filasCeldasRef.current
@@ -15144,7 +15373,11 @@ function PlanificacionDesktop() {
         const prev = vistasPrevRef.current;
         let indice: ReturnType<typeof indexar12> | null = null;
         const entrada = { ...entradaCeldas, indice12: () => (indice ??= indexar12(pendingChanges, shiftsMap)) };
-        for (const emp of filasCeldas as any[]) {
+        const filasCalc = filasCeldas as any[];
+        const hastaCalc = Math.min(corteFilas.hasta, filasCalc.length);
+        for (let i = corteFilas.desde; i < hastaCalc; i++) {
+            const emp = filasCalc[i];
+            if (!emp) continue;
             const isGuest = esInvitadoEnGrilla(emp, selectedObjective, selectedGrupo, grupoUnifiedMode, slaIdToObjId);
             daysInMonth.forEach((day, dayIndex) => {
                 const r = calcularCeldaGrilla(entrada, emp, isGuest, day, dayIndex);
@@ -15156,7 +15389,7 @@ function PlanificacionDesktop() {
         return { vistas, ctx };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [
-        filasCeldas, daysInMonth, selectedObjective, selectedGrupo, grupoUnifiedMode, slaIdToObjId,
+        filasCeldas, firmaCorteFilas, daysInMonth, selectedObjective, selectedGrupo, grupoUnifiedMode, slaIdToObjId,
         pendingChanges, shiftsMap, rfzByEmpDate, absencesMap, planPublicadoGrilla, cellTurnosMap, turaMap,
         lctRestByCell, cruceTopePorEmp, excludedPositionsEstables, vacancyConsultasEstables, isServiceLocked, fechaBloqueadaGrilla,
         sobraFirma, focoSobra, colorPuestoEstable,
@@ -17822,7 +18055,10 @@ function PlanificacionDesktop() {
         employeesForRows?: typeof displayedEmployees,
         gridOpts?: { hideFooter?: boolean; compactRows?: boolean; minimalHeader?: boolean; highlightCoverageFooter?: boolean },
     ) => {
-        const gridEmployees = employeesForRows ?? displayedEmployees;
+        const gridEmployees = employeesForRows ?? filasGrilla;
+        const usarVentana = !employeesForRows && !isSnapshotView && !montarFilasCompletas;
+        const desdeFila = usarVentana ? Math.min(corteFilas.desde, gridEmployees.length) : 0;
+        const hastaFila = usarVentana ? Math.min(corteFilas.hasta, gridEmployees.length) : gridEmployees.length;
         const compareMinimal = !!gridOpts?.minimalHeader;
         const compareCompact = !!gridOpts?.compactRows;
         return (
@@ -18072,7 +18308,13 @@ function PlanificacionDesktop() {
                 )}
             </thead>
             <tbody>
-                {gridEmployees.map((emp, idx) => {
+                {usarVentana && desdeFila > 0 && (
+                    <tr aria-hidden="true" style={{ height: desdeFila * altoFilaGrilla }}>
+                        <td colSpan={1 + daysInMonth.length} />
+                    </tr>
+                )}
+                {gridEmployees.slice(desdeFila, hastaFila).map((emp, offset) => {
+                    const idx = desdeFila + offset;
                     const isGuest = selectedObjective && (
                         (selectedGrupo && grupoUnifiedMode)
                             ? !(selectedGrupo.objectiveIds.includes(emp.preferredObjectiveId) ||
@@ -18336,6 +18578,11 @@ function PlanificacionDesktop() {
                         </React.Fragment>
                     );
                 })}
+                {usarVentana && hastaFila < gridEmployees.length && (
+                    <tr aria-hidden="true" style={{ height: (gridEmployees.length - hastaFila) * altoFilaGrilla }}>
+                        <td colSpan={1 + daysInMonth.length} />
+                    </tr>
+                )}
                 {/* ── Fila Eventos: horas vendidas del día — no cubre SLA ni suma TURA/EV ── */}
                 {!isSnapshotView && Object.keys(planningEventosCellsByDay).length > 0 && (
                     <tr className="hover:bg-violet-50/40 dark:hover:bg-violet-950/20">
@@ -20799,7 +21046,6 @@ function PlanificacionDesktop() {
                                 className={`relative min-w-0 flex-1 min-h-0 overflow-auto custom-scrollbar rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/40 transition-opacity duration-150 outline-none ${(isFilterPending || (selectedObjective && !shiftsMapLoaded)) ? 'opacity-70' : ''} ${correctionMode ? 'pb-2' : ''} ${modoRapido ? 'ring-1 ring-indigo-200' : ''}`}
                             >
                                 {medirSeccion('grilla (renderGrid)', () => renderGrid(false, undefined, undefined, undefined, correctionMode ? { highlightCoverageFooter: true } : undefined))}
-                                <MedidorVelocidad />
                                 <ModoRapidoCapa
                                     ref={capaRapidaRef}
                                     activo={modoRapido && !!selectedObjective && !comparingSnapshot}
@@ -27938,7 +28184,10 @@ export default function PlanificacionPage() {
     const movil = useMovilMode();
     const [modoListo, setModoListo] = useState(false);
     useEffect(() => setModoListo(true), []);
-    if (!modoListo) return <div className="min-h-screen bg-slate-100" />;
-    if (movil) return <PlanificacionMovil />;
-    return <PlanificacionDesktop />;
+    return (
+        <>
+            <MedidorVelocidad />
+            {!modoListo ? <div className="min-h-screen bg-slate-100" /> : movil ? <PlanificacionMovil /> : <PlanificacionDesktop />}
+        </>
+    );
 }
