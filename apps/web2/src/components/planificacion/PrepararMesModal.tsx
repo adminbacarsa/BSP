@@ -41,6 +41,8 @@ type Props = {
   migracionCompleta: boolean;
   /** SERVICES update o SuperAdmin. */
   puedeCrearServicio: boolean;
+  /** Tras crear SLAs del mes, la grilla vuelve a leer servicios. */
+  onServiciosCreados?: () => void;
 };
 
 const TEXTO_FUERA: Record<Fila['estado'], string> = {
@@ -57,10 +59,16 @@ const COLUMNAS = 'grid grid-cols-[minmax(0,1fr)_60px_136px_72px_52px_60px_48px_1
 const metricasDe = (f: Fila): Metricas | undefined => (f.elegida === 'armar' ? f.armar : f.continuar);
 const otraDe = (f: Fila): Metricas | undefined => (f.elegida === 'armar' ? f.continuar : f.armar);
 
+function faltaServicioDe(f: Fila): boolean {
+  return f.estado === 'sin_servicio' || f.notas.some((n) => /sin activar/.test(n));
+}
+
 function vistaDe(f: Fila): Vista {
   if (f.estado !== 'ok') return 'fuera';
   const m = metricasDe(f);
   if (!m) return 'fuera';
+  // Sin el SLA del mes no está completo: se simuló con el anterior.
+  if (faltaServicioDe(f)) return 'revisar';
   if (m.horasSinCubrir === 0 && m.horasAl50 === 0) return m.propuestas === 0 ? 'cargado' : 'completo';
   return 'revisar';
 }
@@ -170,7 +178,7 @@ export function PrepararMesModal(props: Props) {
     onClose();
   };
   const [creandoServicios, setCreandoServicios] = useState(false);
-  const sinServicioMes = useMemo(() => filas.filter((f) => f.notas.some((n) => /sin activar/.test(n))), [filas]);
+  const sinServicioMes = useMemo(() => filas.filter(faltaServicioDe), [filas]);
   const crearServiciosQueFaltan = async () => {
     setCreandoServicios(true);
     try {
@@ -198,8 +206,12 @@ export function PrepararMesModal(props: Props) {
         }
         else if (plan.estado === 'no_se_puede') no.push(`${o.nombre}: ${plan.motivo}`);
       }
-      if (hechos === 1 && mes && origen) toast.success(`Servicio de ${mes} copiado de ${origen}. Volvé a simular.`);
-      else if (hechos) toast.success(`${hechos} servicios de ${mes} copiados. Volvé a simular.`);
+      if (hechos === 1 && mes && origen) toast.success(`Servicio de ${mes} copiado de ${origen}.`);
+      else if (hechos) toast.success(`${hechos} servicios de ${mes} copiados.`);
+      if (hechos) {
+        props.onServiciosCreados?.();
+        await simular();
+      }
       if (no.length) toast.error(no.join(' · '), { duration: 10000 });
     } catch (err) {
       console.error('[preparar mes · servicios]', err);
@@ -236,7 +248,7 @@ export function PrepararMesModal(props: Props) {
         className="flex items-center gap-2 rounded-l-full px-4 py-2 text-[12px] font-bold text-slate-700 hover:bg-slate-50"
       >
         <CalendarRange size={15} /> Preparar {mesCorto}
-        <span className={conteo.n.revisar ? 'text-amber-600' : 'text-emerald-600'}>· {conteo.n.revisar ? `${conteo.n.revisar} para revisar` : 'todo completo'}</span>
+        <span className={conteo.n.revisar || filas.some(faltaServicioDe) ? 'text-amber-600' : 'text-emerald-600'}>· {conteo.n.revisar ? `${conteo.n.revisar} para revisar` : filas.some(faltaServicioDe) ? `${filas.filter(faltaServicioDe).length} sin servicio` : 'todo completo'}</span>
         <span className="text-indigo-600">· Volver</span>
       </button>
       <button type="button" onClick={descartar} title="Descartar la vista previa" aria-label="Descartar la vista previa" data-preparar-descartar className="rounded-r-full border-l border-slate-200 px-2.5 py-2 text-slate-400 hover:bg-slate-50 hover:text-rose-600"><X size={14} /></button>

@@ -3,7 +3,7 @@ import { getAuth } from 'firebase/auth';
 import { db } from '@/lib/firebase';
 import { slaService, type ServiceSLA } from '@/services/slaService';
 import { franjasParaMesSiguiente } from '@/lib/planificacion/refuerzosRapido';
-import { calculateMonthlyBreakdown } from '@/lib/servicios/slaHoursCalculator';
+import { calculateMonthlyBreakdown, horasDelMesDestino } from '@/lib/servicios/slaHoursCalculator';
 import { findEncargadoPosition } from '@/lib/servicios/encargadoPosition';
 import { localTodayYmd, newSlaBornClosed, stripSlaLifecycle } from '@/lib/servicios/newSlaDraft';
 import {
@@ -162,7 +162,10 @@ export async function ejecutarAgregarMeses(input: {
   ).map((d) => {
     const bornClosed = newSlaBornClosed(d.endDate, today);
     // Cada mes con sus franjas: el refuerzo fijo pasa con su patrón; las fechas de otro mes no se arrastran.
-    return { ...d, positions: franjasParaMesSiguiente(((d as any).positions || []) as any[], String(d.startDate || '').slice(0, 7)) as any, closed: bornClosed, ...(bornClosed ? { closedReason: 'VENCIDO' } : {}) };
+    const positionsMes = franjasParaMesSiguiente(((d as any).positions || []) as any[], String(d.startDate || '').slice(0, 7)) as any;
+    // El doc es de un mes: las horas son las de ese mes, no la suma desde el inicio de la cadena.
+    const totalMonthlyHours = horasDelMesDestino(positionsMes, String(d.startDate || ''), String(d.endDate || ''), (d as { excludedDates?: string[] }).excludedDates);
+    return { ...d, positions: positionsMes, totalMonthlyHours, closed: bornClosed, ...(bornClosed ? { closedReason: 'VENCIDO' } : {}) };
   });
   const patches: AppendMonthsResultado['patches'] = [];
   if (!last.slaSeriesId) {

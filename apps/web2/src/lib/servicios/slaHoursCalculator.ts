@@ -328,6 +328,23 @@ export function serviceOverlapsMonth(startDate: string, endDate: string, year: n
   return sStart <= mEnd && sEnd >= mStart;
 }
 
+/**
+ * Horas del mes en que empieza el doc (el mes destino al agregar un mes).
+ * No suma los otros meses del rango: un noviembre de 1×8 h diario es 240, no octubre+noviembre.
+ */
+export function horasDelMesDestino(
+  positions: ServicePosition[],
+  startStr: string,
+  endStr: string,
+  excludedDates?: string[],
+): number {
+  const start = String(startStr || '').slice(0, 10);
+  const year = Number(start.slice(0, 4));
+  const month = Number(start.slice(5, 7));
+  if (!year || !month) return 0;
+  return Math.round(calculateSlaHoursForMonth(positions, startStr, endStr, excludedDates, year, month - 1).total);
+}
+
 export function calculateSlaHoursForMonth(
   positions: ServicePosition[],
   startStr: string,

@@ -2121,6 +2121,13 @@ function PlanificacionDesktop() {
     const [prepararMesOpen, setPrepararMesOpen] = useState(false);
     /** «Preparar» desde la lista: al cargar el objetivo (o grupo) se abre Continuar / Armar solo. */
     const autoPrepararRef = useRef<{ modo: 'continuar' | 'armar'; objectiveId: string; grupo: boolean } | null>(null);
+    /** Si «Preparar» tuvo que crear el SLA, al terminar la vista previa se escribe la grilla (no queda en «completo» vacío). */
+    const aplicarAutoPrepararRef = useRef(false);
+    const prepararCreandoRef = useRef<string | null>(null);
+    const prepararEsperaNonceRef = useRef(-1);
+    const crearServiciosDelMesRef = useRef<(objIds: string[]) => Promise<{ ok: boolean; errores: string[]; hechos: string[]; nonce: number }>>(async () => ({ ok: false, errores: [], hechos: [], nonce: 0 }));
+    const abrirContinuarRef = useRef<(modo: 'continuar' | 'armar') => Promise<void>>(async () => {});
+    const aplicarContinuarRef = useRef<((employeeIds: string[], sugerencias: SugerenciaNivelacion[], activarServicio?: boolean, vistaIn?: ContinuarMesVista | null) => Promise<void>) | null>(null);
     const [planViewReady, setPlanViewReady] = useState(false);
     useEffect(() => {
         const saved = readSessionJson<{
@@ -2261,6 +2268,14 @@ function PlanificacionDesktop() {
     const [isUnpublishing, setIsUnpublishing] = useState(false);
     const [isRefreshingCrono, setIsRefreshingCrono] = useState(false);
     const [dataRefreshNonce, setDataRefreshNonce] = useState(0);
+    const nonceEsperadoRef = useRef(0);
+    if (dataRefreshNonce > nonceEsperadoRef.current) nonceEsperadoRef.current = dataRefreshNonce;
+    const [slaLoadGen, setSlaLoadGen] = useState(0);
+    const slaNonceObjetivoRef = useRef(-1);
+    const slaNonceGrupoRef = useRef(-1);
+    /** `${objectiveId}|año-mesIndex|nonce` cuando terminó de leer el SLA de esa vista. */
+    const slaCargadoKeyRef = useRef('');
+    const slaGrupoKeyRef = useRef('');
     const [publishConfirmModal, setPublishConfirmModal] = useState<{
         isRepublish: boolean;
         warnings: string[];
@@ -7017,6 +7032,9 @@ function PlanificacionDesktop() {
                 setSlaVendidas(0);
                 setSlaPlanningHint('error al cargar contratos');
             } finally {
+                slaNonceObjetivoRef.current = dataRefreshNonce;
+                slaCargadoKeyRef.current = `${selectedObjective}|${currentDate.getFullYear()}-${currentDate.getMonth()}|${dataRefreshNonce}`;
+                setSlaLoadGen((n) => n + 1);
                 fin();
             }
         };
@@ -7208,11 +7226,14 @@ function PlanificacionDesktop() {
                 setGrupoVendidasByObjective({});
                 setGrupoSinServicioMes([]);
             } finally {
+                slaNonceGrupoRef.current = dataRefreshNonce;
+                slaGrupoKeyRef.current = `${selectedGrupo?.id || ''}|${currentDate.getFullYear()}-${currentDate.getMonth()}|${dataRefreshNonce}`;
+                setSlaLoadGen((n) => n + 1);
                 fin();
             }
         };
         fetchGroupSlas();
-    }, [selectedGrupo, grupoUnifiedMode, selectedClient, currentDate, empresaId, scopeEmpresa, clients, tenantClientIds, slaIdToObjId, serviciosPendientes, puedeCopiarServicio, sessionAuthLoading, selectedObjective]);
+    }, [selectedGrupo, grupoUnifiedMode, selectedClient, currentDate, empresaId, scopeEmpresa, clients, tenantClientIds, slaIdToObjId, dataRefreshNonce, serviciosPendientes, puedeCopiarServicio, sessionAuthLoading, selectedObjective]);
 
     // LISTENER DE NOVEDADES Y OTROS DATOS
     useEffect(() => {
@@ -12682,19 +12703,62 @@ function PlanificacionDesktop() {
         }
     };
 
-    // «Preparar» desde la lista de «Preparar el mes»: cuando el objetivo (o el grupo) terminó de cargar, abre la vista previa.
+    // «Preparar» (fila o grupo): si falta el SLA del mes, se crea con la misma función que el botón y después se escribe. Si no se puede, error: no queda «completo».
     useEffect(() => {
         const auto = autoPrepararRef.current;
         if (!auto || selectedObjective !== auto.objectiveId || !shiftsMapLoaded) return;
-        if (auto.grupo ? !(selectedGrupo && grupoUnifiedMode && Object.keys(grupoSlaMap).length > 1) : !(positionStructure || []).length) return;
+        const mesKeyCarga = `${currentDate.getFullYear()}-${currentDate.getMonth()}`;
+        if (slaCargadoKeyRef.current !== `${selectedObjective}|${mesKeyCarga}|${dataRefreshNonce}`) return;
+        if (auto.grupo && slaGrupoKeyRef.current !== `${selectedGrupo?.id || ''}|${mesKeyCarga}|${dataRefreshNonce}`) return;
+        const estructuraLista = auto.grupo
+            ? !!(selectedGrupo && grupoUnifiedMode && Object.keys(grupoSlaMap).length > 1)
+            : (positionStructure || []).length > 0;
+        if (!estructuraLista) return;
+        const clave = `${auto.objectiveId}|${auto.modo}|${auto.grupo ? 'g' : 'f'}`;
+        const faltan = auto.grupo && selectedGrupo
+            ? (selectedGrupo.objectiveIds as string[]).filter((o) => grupoSinServicioMes.includes(o))
+            : (sinServicioEnMes && selectedObjective ? [selectedObjective] : []);
+        const fase = prepararCreandoRef.current;
+        if (faltan.length) {
+            if (fase === `creando:${clave}`) return;
+            if (fase === `esperando:${clave}`) {
+                const objetivoListo = slaNonceObjetivoRef.current === prepararEsperaNonceRef.current;
+                const grupoListo = !auto.grupo || slaNonceGrupoRef.current === prepararEsperaNonceRef.current;
+                if (!objetivoListo || !grupoListo) return;
+                autoPrepararRef.current = null;
+                prepararCreandoRef.current = null;
+                toast.error('No se pudo usar el servicio del mes en la grilla. No se escribió el cronograma.');
+                return;
+            }
+            const t = window.setTimeout(() => {
+                void (async () => {
+                    if (autoPrepararRef.current !== auto) return;
+                    if (prepararCreandoRef.current === `creando:${clave}`) return;
+                    prepararCreandoRef.current = `creando:${clave}`;
+                    const res = await crearServiciosDelMesRef.current(faltan);
+                    if (autoPrepararRef.current !== auto) return;
+                    if (!res.ok) {
+                        autoPrepararRef.current = null;
+                        prepararCreandoRef.current = null;
+                        return;
+                    }
+                    prepararEsperaNonceRef.current = res.nonce;
+                    prepararCreandoRef.current = `esperando:${clave}`;
+                })();
+            }, 600);
+            return () => window.clearTimeout(t);
+        }
+        const creo = fase === `esperando:${clave}`;
         const t = window.setTimeout(() => {
             if (autoPrepararRef.current !== auto) return;
             autoPrepararRef.current = null;
-            void abrirContinuarMesAnterior(auto.modo);
+            prepararCreandoRef.current = null;
+            if (creo) aplicarAutoPrepararRef.current = true;
+            void abrirContinuarRef.current(auto.modo);
         }, 600);
         return () => window.clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [selectedObjective, shiftsMapLoaded, selectedGrupo, grupoUnifiedMode, grupoSlaMap, positionStructure]);
+    }, [selectedObjective, shiftsMapLoaded, selectedGrupo, grupoUnifiedMode, grupoSlaMap, positionStructure, sinServicioEnMes, grupoSinServicioMes, slaLoadGen]);
 
     // Servicio del mes primero: sin servicio no se copia, arma ni pega bien. Se crea copiando el del mes anterior.
     const [creandoServicioMes, setCreandoServicioMes] = useState(false);
@@ -12711,15 +12775,20 @@ function PlanificacionDesktop() {
         : `${currentDate.toLocaleDateString('es-AR', { month: 'long' })} no tiene servicio.`;
     const origenesBoton = [...new Set(avisosDelMes.filter((x) => x.info.puedeManual).map((x) => x.info.mesOrigenNombre).filter(Boolean))];
     const labelCrearServicio = origenesBoton.length === 1 ? `Crearlo copiando ${origenesBoton[0]}` : 'Crearlos copiando el último servicio';
-    const crearServiciosDelMes = async (objIds: string[]) => {
-        if (!objIds.length || !empresaId) return;
-        if (!puedeCopiarServicio) { toast.error('No tenés permiso de Servicios para copiar el servicio del mes.'); return; }
+    const crearServiciosDelMes = async (objIds: string[]): Promise<{ ok: boolean; errores: string[]; hechos: string[]; nonce: number }> => {
+        if (!objIds.length || !empresaId) return { ok: false, errores: [], hechos: [], nonce: dataRefreshNonce };
+        if (!puedeCopiarServicio) {
+            toast.error('No tenés permiso de Servicios para copiar el servicio del mes.');
+            return { ok: false, errores: ['Sin permiso de Servicios.'], hechos: [], nonce: dataRefreshNonce };
+        }
         setCreandoServicioMes(true);
         try {
             const snapSla = await getDocs(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa));
             const allSla = filterSlasForPlanningTenant(snapSla.docs.map((d) => ({ id: d.id, ...(d.data() as any) })), empresaId, scopeEmpresa, tenantClientIds);
             const frases: string[] = [];
-            const no: string[] = [];
+            const hechos: string[] = [];
+            const errores: string[] = [];
+            let cancelado = false;
             for (const oid of objIds) {
                 const cid = String(clienteDeObjetivo(oid)?.id || selectedClient);
                 const cliente = clients.find((c: any) => c.id === cid);
@@ -12731,28 +12800,45 @@ function PlanificacionDesktop() {
                     modo: 'manual',
                 });
                 const nombre = getObjectiveName(oid) || oid;
-                if (plan.estado === 'crear' && plan.requiereConfirmacion && typeof window !== 'undefined' && !window.confirm(plan.confirmacion)) continue;
+                if (plan.estado === 'crear' && plan.requiereConfirmacion && typeof window !== 'undefined' && !window.confirm(plan.confirmacion)) {
+                    cancelado = true;
+                    continue;
+                }
                 if (plan.estado === 'crear') {
                     copiaAutoRef.current.add(`${oid}|${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`);
                     await plan.run({ empresaId, migracionCompleta, scopeEmpresa, via: 'PLANIFICACION_SERVICIO_MES' });
+                    hechos.push(nombre);
                     frases.push(objIds.length > 1 ? `Servicio de ${plan.mes} copiado de ${plan.mesOrigen} (${nombre})` : `Servicio de ${plan.mes} copiado de ${plan.mesOrigen}`);
                 }
-                else if (plan.estado === 'no_se_puede') no.push(`${nombre}: ${plan.motivo}`);
+                else if (plan.estado === 'no_se_puede') errores.push(`${nombre}: ${plan.motivo}`);
             }
             if (frases.length) toast.success(frases.length === 1 ? `${frases[0]}.` : frases.join(' · '));
-            if (no.length) toast.error(no.join(' · '), { duration: 9000 });
-            setDataRefreshNonce((n) => n + 1);
+            if (errores.length) toast.error(errores.join(' · '), { duration: 9000 });
+            const ok = errores.length === 0 && !cancelado;
+            let nonce = dataRefreshNonce;
+            if (hechos.length || ok) {
+                nonce = nonceEsperadoRef.current + 1;
+                nonceEsperadoRef.current = nonce;
+                setDataRefreshNonce(nonce);
+            }
+            return { ok, errores, hechos, nonce };
         } catch (err) {
             console.error('[servicio del mes]', err);
             toast.error('No se pudo crear el servicio del mes.');
+            return { ok: false, errores: ['No se pudo crear el servicio del mes.'], hechos: [], nonce: dataRefreshNonce };
         } finally {
             setCreandoServicioMes(false);
         }
     };
+    crearServiciosDelMesRef.current = crearServiciosDelMes;
 
     const abrirContinuarMesAnterior = async (modo: 'continuar' | 'armar' = 'continuar') => {
         if (!selectedObjective) return;
-        if (msgBloqueoEdicion && !sinServicioEnMes) { toast.error(msgBloqueoEdicion); return; }
+        if (msgBloqueoEdicion && !sinServicioEnMes) {
+            aplicarAutoPrepararRef.current = false;
+            toast.error(msgBloqueoEdicion);
+            return;
+        }
         // Vista agrupada: el grupo se continúa como un solo cronograma con puestos «Objetivo · Puesto»
         // (un guardia de Peaje que hace VF en Vifood sigue su ciclo en los dos) y cada turno vuelve a su objetivo.
         const enGrupo = enGrupoRapido && !!selectedGrupo;
@@ -13209,7 +13295,7 @@ function PlanificacionDesktop() {
                 }
                 return h;
             };
-            setContinuarVista({
+            const vistaArmada: ContinuarMesVista = {
                 modo,
                 disponibles,
                 mesLabel: currentDate.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' }),
@@ -13226,21 +13312,41 @@ function PlanificacionDesktop() {
                 activar: activarVista,
                 descanso: alertasDescansoCambioMes(ultimosPrevios, resultados, dias[0]),
                 tope: alertasTope(resultados, horasYaCargadas),
-            });
+            };
+            if (aplicarAutoPrepararRef.current) {
+                aplicarAutoPrepararRef.current = false;
+                const idsAuto = vistaArmada.resultados.filter((r) => r.ciclo && r.propuestas.length > 0).map((r) => r.employeeId);
+                const idSetAuto = new Set(idsAuto);
+                const sugerenciasAuto = [
+                    ...vistaArmada.resultados.flatMap((r) => (idSetAuto.has(r.employeeId) ? (r.sugerencias || []) : []).filter((s) => s.tipo === 'suelto')),
+                    ...(vistaArmada.disponibles || []),
+                ];
+                const escritos = vistaArmada.resultados.reduce((a, r) => a + (idSetAuto.has(r.employeeId) ? r.propuestas.length : 0), 0);
+                if (!escritos) {
+                    toast.error(`No se escribió ${vistaArmada.mesLabel}: no hay turnos para cargar.`);
+                    return;
+                }
+                await aplicarContinuarRef.current?.(idsAuto, sugerenciasAuto, false, vistaArmada);
+                return;
+            }
+            setContinuarVista(vistaArmada);
         } catch (e) {
             console.error('[continuar mes anterior]', e);
+            aplicarAutoPrepararRef.current = false;
             toast.error('No se pudo leer el mes anterior');
         } finally {
             setPrevMonthLoading(false);
         }
     };
+    abrirContinuarRef.current = abrirContinuarMesAnterior;
 
-    const aplicarContinuarMesAnterior = async (employeeIds: string[], sugerencias: SugerenciaNivelacion[], activarServicio = false) => {
-        if (!continuarVista || !selectedObjective) return;
+    const aplicarContinuarMesAnterior = async (employeeIds: string[], sugerencias: SugerenciaNivelacion[], activarServicio = false, vistaIn?: ContinuarMesVista | null) => {
+        const vista = vistaIn || continuarVista;
+        if (!vista || !selectedObjective) return;
         const planActivar = activarServicio ? activarServicioRef.current : null;
         const planActualizar = activarServicio ? actualizarServicioRef.current : null;
         const mesKeyCont = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
-        const mesTxtCont = continuarVista.activar?.mes || 'este mes';
+        const mesTxtCont = vista.activar?.mes || 'este mes';
         const ops: ServicioPendiente[] = [];
         const virtualCrear = (last: SlaRow, oid: string, newEndDate: string) => ({
             ...last,
@@ -13268,7 +13374,7 @@ function PlanificacionDesktop() {
                 objectiveId: selectedObjective,
                 mesKey: mesKeyCont,
                 tipo: 'actualizar',
-                texto: `servicio de ${mesTxtCont} actualizado con el de ${continuarVista.activar?.mesBase || 'el mes anterior'}`,
+                texto: `servicio de ${mesTxtCont} actualizado con el de ${vista.activar?.mesBase || 'el mes anterior'}`,
                 virtual: { ...planActualizar.target, positions: franjasParaMesSiguiente(JSON.parse(JSON.stringify(planActualizar.base.positions || [])), mesKeyCont), exigeCobertura: (planActualizar.base as any).exigeCobertura ?? (planActualizar.target as any).exigeCobertura },
                 run: () => actualizarServicioDesdeBase({ ...planActualizar, empresaId, migracionCompleta, scopeEmpresa, via: 'CONTINUAR_MES' }),
             });
@@ -13301,7 +13407,7 @@ function PlanificacionDesktop() {
         let turnos = 0;
         let francos = 0;
         const escritas = new Set<string>();
-        for (const r of continuarVista.resultados) {
+        for (const r of vista.resultados) {
             if (!elegidos.has(r.employeeId)) continue;
             for (const c of r.propuestas) {
                 const key = `${c.employeeId}_${c.dateStr}`;
@@ -13371,7 +13477,7 @@ function PlanificacionDesktop() {
             origenArranqueRef.current = ORIGEN_CONTINUAR_MES;
         }
         continuarPunteroRef.current = punteroParaGuardar(
-            continuarVista.resultados.filter((r) => elegidos.has(r.employeeId)),
+            vista.resultados.filter((r) => elegidos.has(r.employeeId)),
             aceptadas,
             daysInMonth.map((d) => getDateKey(d)),
         );
@@ -13382,6 +13488,7 @@ function PlanificacionDesktop() {
             toast.success(`Continuado desde el mes anterior: ${turnos} turnos y ${francos} francos${niv} en borrador. Revisalos y guardá el cronograma.`);
         }
     };
+    aplicarContinuarRef.current = aplicarContinuarMesAnterior;
 
     const incorporarEmpleadoAlta = (emp: AltaHecha, objectiveId: string) => {
         const row = {
@@ -20925,6 +21032,7 @@ function PlanificacionDesktop() {
                                 onReabrir={() => setPrepararMesOpen(true)}
                                 migracionCompleta={migracionCompleta}
                                 puedeCrearServicio={puedeCopiarServicio}
+                                onServiciosCreados={() => setDataRefreshNonce((n) => n + 1)}
                                 empresaId={empresaId}
                                 scopeEmpresa={scopeEmpresa}
                                 clients={clients}
