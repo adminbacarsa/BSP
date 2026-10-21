@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { acreditarExtEntrePuestos, type PuestoExt } from './extEntrePuestos';
-import { camposExtCobertura, siglaAgregado, validarCargaAgregado } from './extCoberturaRapido';
+import { camposExtCobertura, horasExtraYaDelDia, siglaAgregado, validarCargaAgregado } from './extCoberturaRapido';
 
 const dia24: PuestoExt[] = [
   { positionName: 'M', franjas: [{ code: 'M', startTime: '06:00', endTime: '14:00', qty: 1 }] },
@@ -110,5 +110,47 @@ describe('carga de extensión de cobertura', () => {
       horas: 4,
       bandasNoche: noche,
     }), '');
+  });
+
+  it('reemplaza el extra ya contado del día y no frena al autorizado sobre 200 h', () => {
+    const base = {
+      tipo: 'cobertura' as const,
+      inicio: '07:00',
+      fin: '15:00',
+      lado: 'despues' as const,
+    };
+    assert.equal(validarCargaAgregado({
+      ...base,
+      horas: 2,
+      horasMes: 200,
+      horasExtraYaContadas: 4,
+    }), '');
+    assert.match(validarCargaAgregado({
+      ...base,
+      horas: 2,
+      horasMes: 200,
+    }), /202 h/);
+    assert.equal(validarCargaAgregado({
+      ...base,
+      horas: 4,
+      horasMes: 210,
+      topeAutorizado: true,
+    }), '');
+    assert.equal(validarCargaAgregado({
+      ...base,
+      horas: 4,
+      horasMes: 199,
+      diaEnCiclo: false,
+    }), '');
+  });
+
+  it('el extra del día sale del borrador y, si no hay, de lo guardado', () => {
+    const cuatro = { isExtended: true, extExtraHours: 4 };
+    const dos = { isEarlyStart: true, extExtraHours: 2 };
+    assert.equal(horasExtraYaDelDia(cuatro, dos), 4);
+    assert.equal(horasExtraYaDelDia(null, dos), 2);
+    assert.equal(horasExtraYaDelDia({ isDeleted: true, isExtended: true, extExtraHours: 9 }, dos), 2);
+    assert.equal(horasExtraYaDelDia({ isExtended: false }, cuatro), 0);
+    assert.equal(horasExtraYaDelDia(null, { isDeleted: true, isExtended: true, extExtraHours: 4 }), 0);
   });
 });

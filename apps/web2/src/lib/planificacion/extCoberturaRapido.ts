@@ -160,6 +160,22 @@ export function rechazoDescansoAgregado(
   return '';
 }
 
+type TurnoExtraDia = {
+  isDeleted?: boolean;
+  isExtended?: boolean;
+  isEarlyStart?: boolean;
+  extExtraHours?: number;
+} | null | undefined;
+
+/** Horas extra ya sumadas en ese día: el borrador si existe, si no lo guardado. */
+export function horasExtraYaDelDia(borrador: TurnoExtraDia, guardado: TurnoExtraDia): number {
+  const fuente = borrador && !borrador.isDeleted ? borrador : guardado;
+  if (!fuente || fuente.isDeleted) return 0;
+  if (!fuente.isExtended && !fuente.isEarlyStart) return 0;
+  const n = Number(fuente.extExtraHours);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
 export type ValidacionAgregado = {
   tipo: TipoAgregado;
   inicio: string;
@@ -168,9 +184,14 @@ export type ValidacionAgregado = {
   horas: number;
   bloqueado?: boolean;
   mensajeBloqueo?: string;
+  /** Horas del ciclo CCT 26→25 que ya incluyen el extra de este día, si el día cae en ese ciclo. */
   horasMes?: number;
   horasExtraYaContadas?: number;
   topeMes?: number;
+  /** Legajo con PIN / authorizedOver200: el tope de 200 h no bloquea. */
+  topeAutorizado?: boolean;
+  /** false si el día cae fuera del ciclo cuyas horas vienen en horasMes (26–fin → ciclo siguiente). */
+  diaEnCiclo?: boolean;
   previo?: Reloj | null;
   siguiente?: Reloj | null;
   bandasNoche?: ReadonlyArray<{ startTime: string; endTime: string }>;
@@ -188,10 +209,12 @@ export function validarCargaAgregado(v: ValidacionAgregado): string {
   const descanso = rechazoDescansoAgregado(v.inicio, v.fin, v.lado, v.horas, v.previo, v.siguiente);
   if (descanso) return descanso;
   const tope = v.topeMes && v.topeMes > 0 ? v.topeMes : TOPE_MES;
-  const ya = Number(v.horasMes) || 0;
-  const previas = Number(v.horasExtraYaContadas) || 0;
-  const queda = Math.round((ya - previas + v.horas) * 10) / 10;
-  if (queda > tope) return `Quedaría en ${queda} h: pasa el tope de ${tope} h.`;
+  if (!v.topeAutorizado && v.diaEnCiclo !== false) {
+    const ya = Number(v.horasMes) || 0;
+    const previas = Number(v.horasExtraYaContadas) || 0;
+    const queda = Math.round((ya - previas + v.horas) * 10) / 10;
+    if (queda > tope) return `Quedaría en ${queda} h: pasa el tope de ${tope} h.`;
+  }
   if (v.tipo === 'cobertura') {
     const tramo = tramoTura(v.inicio, v.fin, { lado: v.lado, horas: v.horas });
     if (tramo && tramoPisaNoche(tramo, v.bandasNoche || [])) return 'La N no se cubre con extensión ni adelanto.';

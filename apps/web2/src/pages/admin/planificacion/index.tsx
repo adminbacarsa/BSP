@@ -290,7 +290,8 @@ import { tablaCodigosPlanilla } from '@/lib/planificacion/codigosHorarioPegado';
 import { claveEquivalencia, type EquivalenciaCodigo } from '@/lib/planificacion/equivalenciaCodigo';
 import { mesLabelDe, resolverTurnoCopiado } from '@/lib/planificacion/copiarTurno';
 import { avisoJornadaTura, HORAS_TURA, puestoAdmite12h, textoTura, tramoTura, type LadoTura } from '@/lib/planificacion/turaRapido';
-import { camposExtCobertura, esBandaNocheCodigo, HORAS_EXT_COBERTURA, siglaAgregado, textoExtCobertura, validarCargaAgregado } from '@/lib/planificacion/extCoberturaRapido';
+import { camposExtCobertura, esBandaNocheCodigo, HORAS_EXT_COBERTURA, horasExtraYaDelDia, siglaAgregado, textoExtCobertura, validarCargaAgregado } from '@/lib/planificacion/extCoberturaRapido';
+import { liquidationCycleRange, ymdInRange } from '@/lib/hoursPeriod';
 import { crearTuraPlanificacion } from '@/lib/refuerzo/crearTuraPlanificacion';
 import { coberturaPorHoras, textoHoras, type PuestoHoras, type TramoHoras } from '@/lib/planificacion/coberturaHoras';
 import { acreditarExtEntrePuestos, deltaCierreExtEntre, textoFacturableCliente, turnoExtDelObjetivo, type TurnoExt } from '@/lib/planificacion/extEntrePuestos';
@@ -16548,8 +16549,9 @@ function PlanificacionDesktop() {
                 if (startTime && endTime) bandasNoche.push({ startTime, endTime });
             }
         }
-        const guardado = shiftsMap[`${t.empId}_${t.ds}`];
-        const extraYa = guardado && !guardado.isDeleted && (guardado.isExtended || guardado.isEarlyStart) ? Number(guardado.extExtraHours) || 0 : 0;
+        const keyDia = `${t.empId}_${t.ds}`;
+        const cicloCct = liquidationCycleRange(currentDate.getFullYear(), currentDate.getMonth() + 1);
+        const diaEnCiclo = ymdInRange(t.ds, cicloCct);
         const mensajeBloqueo = isPlanningDateLocked(t.ds) ? 'Día cerrado: no se cargan horas.' : (msgBloqueoEdicion || '');
         return validarCargaAgregado({
             tipo: t.modo === 'cobertura' ? 'cobertura' : 'tura',
@@ -16559,8 +16561,10 @@ function PlanificacionDesktop() {
             horas: t.horas,
             bloqueado: !!mensajeBloqueo,
             mensajeBloqueo,
-            horasMes: Number(empMonthlyHours?.[t.empId]) || 0,
-            horasExtraYaContadas: extraYa,
+            horasMes: Number(empCctCurrentHours?.[t.empId]) || 0,
+            horasExtraYaContadas: diaEnCiclo ? horasExtraYaDelDia(pendingChanges[keyDia], shiftsMap[keyDia]) : 0,
+            diaEnCiclo,
+            topeAutorizado: authorizedOver200Ids.has(t.empId) || !topeRequierePin(topeGrants[t.empId], periodoPlan),
             previo: vecino(mover(-1)),
             siguiente: vecino(mover(1)),
             bandasNoche,
