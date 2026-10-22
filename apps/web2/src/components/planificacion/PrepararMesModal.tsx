@@ -119,7 +119,15 @@ export function PrepararMesModal(props: Props) {
   }, [clave]);
   useEffect(() => {
     if (cargada.current !== clave || corriendo) return;
-    if (filas.length) writeSessionJson(clave, { filas, alcance, modo, vista, at: simuladoAt || Date.now() });
+    if (filas.length) {
+      const livianas = filas.map((f) => {
+        if (!f.celdas) return f;
+        const copia = { ...f };
+        delete copia.celdas;
+        return copia;
+      });
+      writeSessionJson(clave, { filas: livianas, alcance, modo, vista, at: simuladoAt || Date.now() });
+    }
   }, [clave, filas, alcance, modo, vista, simuladoAt, corriendo]);
 
   const mesTxt = new Date(year, month, 1).toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });

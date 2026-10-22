@@ -17,7 +17,7 @@ import { positionIsActiveOn } from './autoScheduleEngineV4';
 import { franjasParaMesSiguiente } from './refuerzosRapido';
 import { isActiveAbsence } from './absenceCodes';
 import { esCeldaLicencia } from './seleccionLicencia';
-import type { PuestoSla, TurnoPrevio } from './continuarMesAnterior';
+import type { CeldaPropuesta, PuestoSla, TurnoPrevio } from './continuarMesAnterior';
 import type { TipoGuardiaArmado } from './armarMesServicio';
 import { simularUnidad, turnoHabilitadoPorEstructura, type Estrategia, type Metricas, type TurnoMes } from './prepararMes';
 
@@ -42,7 +42,99 @@ export type FilaTanda = UnidadTanda & {
   recomendada?: Estrategia;
   porQue?: string;
   elegida?: Estrategia;
+  /** Celdas de la estrategia elegida (solo objetivos que no están publicados). */
+  celdas?: CeldaPropuesta[];
 };
+
+/** Borrador que entró por Preparar / Continuar / Armar. Al guardar se vuelve a leer la publicación. */
+export const DESDE_PREPARAR = 'desdePreparar' as const;
+
+export function avisoObjetivoYaPublicado(nombre: string): string {
+  return `${nombre} ya está publicado: se corrige desde el cronograma, no con Preparar`;
+}
+
+export function avisoNoSePudoVerificarPublicado(nombre: string): string {
+  return `No se pudo verificar si ${nombre} está publicado: no se escribió con Preparar`;
+}
+
+export function estaPublicadoEstado(data: { publishedAt?: unknown } | null | undefined): boolean {
+  return !!data && data.publishedAt != null && data.publishedAt !== '';
+}
+
+/** Lectura fresca, un doc de `planificacion_estados` por objetivo. Si no se puede leer, no se escribe. */
+export async function leerObjetivosPublicados(
+  objectiveIds: string[],
+  leer: (objectiveId: string) => Promise<{ publishedAt?: unknown } | null | undefined>,
+): Promise<{ publicados: Set<string>; sinLeer: Set<string> }> {
+  const publicados = new Set<string>();
+  const sinLeer = new Set<string>();
+  const ids = [...new Set(objectiveIds.map((id) => String(id || '').trim()).filter(Boolean))];
+  await Promise.all(ids.map(async (oid) => {
+    try {
+      const data = await leer(oid);
+      if (estaPublicadoEstado(data)) publicados.add(oid);
+    } catch {
+      sinLeer.add(oid);
+    }
+  }));
+  return { publicados, sinLeer };
+}
+
+export function celdaPrepararBloqueada(
+  objectiveId: unknown,
+  publicados: ReadonlySet<string>,
+  sinLeer: ReadonlySet<string>,
+): 'publicado' | 'sin_verificar' | null {
+  const oid = String(objectiveId ?? '').trim();
+  if (!oid) return null;
+  if (sinLeer.has(oid)) return 'sin_verificar';
+  if (publicados.has(oid)) return 'publicado';
+  return null;
+}
+
+/**
+ * Aplica propuestas de Preparar sobre un borrador. No pisa celdas que ya estaban
+ * ni escribe objetivos publicados (o que no se pudieron re-chequear).
+ */
+export function aplicarPropuestasPreparar(
+  borrador: Record<string, any>,
+  propuestas: Array<{ key: string; objectiveId: string; [k: string]: unknown }>,
+  publicados: ReadonlySet<string>,
+  sinLeer: ReadonlySet<string> = new Set(),
+): { borrador: Record<string, any>; bloqueados: string[]; sinVerificar: string[] } {
+  const next = { ...borrador };
+  const bloqueados = new Set<string>();
+  const sinVerificar = new Set<string>();
+  for (const c of propuestas) {
+    const motivo = celdaPrepararBloqueada(c.objectiveId, publicados, sinLeer);
+    if (motivo === 'publicado') { bloqueados.add(String(c.objectiveId)); continue; }
+    if (motivo === 'sin_verificar') { sinVerificar.add(String(c.objectiveId)); continue; }
+    const prev = next[c.key];
+    if (prev && !prev.isDeleted) continue;
+    next[c.key] = { ...c, [DESDE_PREPARAR]: true };
+  }
+  return { borrador: next, bloqueados: [...bloqueados], sinVerificar: [...sinVerificar] };
+}
+
+/** Al guardar: saca solo lo que puso Preparar si ese objetivo quedó publicado. Lo manual sigue. */
+export function quitarBorradorPrepararPublicado(
+  pending: Record<string, any>,
+  publicados: ReadonlySet<string>,
+  sinLeer: ReadonlySet<string> = new Set(),
+): { pending: Record<string, any>; bloqueados: string[]; sinVerificar: string[]; quitadas: string[] } {
+  const bloqueados = new Set<string>();
+  const sinVerificar = new Set<string>();
+  const quitadas: string[] = [];
+  const next: Record<string, any> = {};
+  for (const [k, v] of Object.entries(pending)) {
+    if (!v?.[DESDE_PREPARAR]) { next[k] = v; continue; }
+    const motivo = celdaPrepararBloqueada(v?.objectiveId, publicados, sinLeer);
+    if (motivo === 'publicado') { bloqueados.add(String(v.objectiveId)); quitadas.push(k); continue; }
+    if (motivo === 'sin_verificar') { sinVerificar.add(String(v.objectiveId)); quitadas.push(k); continue; }
+    next[k] = v;
+  }
+  return { pending: next, bloqueados: [...bloqueados], sinVerificar: [...sinVerificar], quitadas };
+}
 
 type GrupoLike = { id?: string; nombre?: string; objectiveIds?: string[] };
 
@@ -212,8 +304,11 @@ export async function correrTanda(input: TandaInput): Promise<FilaTanda[]> {
         return u.grupo && p && p !== 'General' ? `${nombresGrupo.get(String(oid)) || nombreObj.get(String(oid)) || oid} · ${p}` : p;
       };
       const publicados = await Promise.all(objIds.map((oid) => input.publicado(oid).catch(() => false)));
-      if (publicados.every(Boolean)) { fila.estado = 'publicado'; cerrar(); continue; }
-      if (publicados.some(Boolean)) fila.notas.push('parte del grupo ya publicada');
+      const idsPublicados = new Set(objIds.filter((_, i) => publicados[i]));
+      const objetivosAbiertos = u.objetivos.filter((o) => !idsPublicados.has(o.id));
+      if (objetivosAbiertos.length === 0) { fila.estado = 'publicado'; cerrar(); continue; }
+      if (idsPublicados.size > 0) fila.notas.push('parte del grupo ya publicada');
+      const idsAbiertos = objetivosAbiertos.map((o) => o.id);
 
       // Servicio del mes. Sin él, solo se simula con el M-1 abierto. Cliente inactivo o último SLA cerrado/vencido anterior a M-1 no piden servicio.
       const estructura: PuestoSla[] = [];
@@ -221,7 +316,7 @@ export async function correrTanda(input: TandaInput): Promise<FilaTanda[]> {
       let sinServicio = 0;
       let fuera = 0;
       const mesPrevio = mesAnterior(mesKey);
-      for (const o of u.objetivos) {
+      for (const o of objetivosAbiertos) {
         const matching = filterSlasForPlanningContext(allSla, o.clientId, o.id, clients, slaIdToObjId) as any[];
         const cliente = clients.find((c: any) => String(c.id) === o.clientId);
         const clase = clasePrepararServicio(matching, mesKey, cliente);
@@ -264,17 +359,17 @@ export async function correrTanda(input: TandaInput): Promise<FilaTanda[]> {
 
       // Dotación: preferido, volante o dotación del objetivo, o ya tiene algo cargado en el mes.
       const enUnidadMes = new Set<string>();
-      for (const [emp, porDia] of mesPorEmp) for (const t of porDia.values()) if (objIds.includes(String(t.objectiveId || ''))) enUnidadMes.add(emp);
+      for (const [emp, porDia] of mesPorEmp) for (const t of porDia.values()) if (idsAbiertos.includes(String(t.objectiveId || ''))) enUnidadMes.add(emp);
       const prefDe = (e: any) => String(slaIdToObjId[e.preferredObjectiveId] || e.preferredObjectiveId || '');
       const dotacion = employees.filter((e: any) => e.status !== 'inactivo' && (
-        objIds.includes(prefDe(e))
-        || objIds.some((oid) => (e.volante || []).includes(oid) || !!e.planificacionDotacion?.[oid])
+        idsAbiertos.includes(prefDe(e))
+        || idsAbiertos.some((oid) => (e.volante || []).includes(oid) || !!e.planificacionDotacion?.[oid])
         || enUnidadMes.has(String(e.id))));
       if (!dotacion.length) { fila.estado = 'sin_guardias'; cerrar(); continue; }
       const ids = new Set(dotacion.map((e: any) => String(e.id)));
 
       // Historia: hasta 3 meses antes.
-      const docs = (await Promise.all(objIds.map((oid) => input.historia(oid, new Date(year, month - 3, 1), new Date(year, month, 0, 23, 59, 59))))).flat();
+      const docs = (await Promise.all(idsAbiertos.map((oid) => input.historia(oid, new Date(year, month - 3, 1), new Date(year, month, 0, 23, 59, 59))))).flat();
       const previos = new Map<string, TurnoPrevio[]>();
       const salientes = new Map<string, { nombre: string; previos: TurnoPrevio[] }>();
       for (const raw of docs) {
@@ -299,8 +394,8 @@ export async function correrTanda(input: TandaInput): Promise<FilaTanda[]> {
       }
 
       const tipoDe = (e: any): TipoGuardiaArmado => {
-        if (objIds.includes(prefDe(e))) return 'propio';
-        if (objIds.some((oid) => (e.volante || []).includes(oid))) return 'volante';
+        if (idsAbiertos.includes(prefDe(e))) return 'propio';
+        if (idsAbiertos.some((oid) => (e.volante || []).includes(oid))) return 'volante';
         return 'otro';
       };
       const turnoDelMes = (id: string, ds: string): TurnoMes | null => {
@@ -308,7 +403,7 @@ export async function correrTanda(input: TandaInput): Promise<FilaTanda[]> {
         if (a && a.unidad !== u.key) return a;
         const t = mesPorEmp.get(id)?.get(ds);
         if (!t) return null;
-        const enU = objIds.includes(String(t.objectiveId || ''));
+        const enU = idsAbiertos.includes(String(t.objectiveId || ''));
         const sinHoras = esFrancoDoc(t) || up(t.code) === 'RET';
         return {
           code: up(t.code),
@@ -352,7 +447,7 @@ export async function correrTanda(input: TandaInput): Promise<FilaTanda[]> {
         dias,
         estructura,
         guardias: dotacion.map((e: any) => {
-          const oidPref = objIds.includes(prefDe(e)) ? prefDe(e) : objIds[0];
+          const oidPref = idsAbiertos.includes(prefDe(e)) ? prefDe(e) : idsAbiertos[0];
           const pos = e.planificacionDotacion?.[oidPref]?.positionName;
           return { id: String(e.id), nombre: String(e.name || e.id), previos: previos.get(String(e.id)) || [], puestoPreferido: pos ? etiquetar(oidPref, pos) : undefined, tipo: tipoDe(e) };
         }),
@@ -369,8 +464,10 @@ export async function correrTanda(input: TandaInput): Promise<FilaTanda[]> {
       fila.recomendada = sim.recomendada;
       fila.porQue = sim.porQue;
       fila.elegida = input.modo === 'auto' ? sim.recomendada : input.modo;
+      const celdasElegidas = fila.elegida === 'armar' ? sim.armar.celdas : sim.continuar.celdas;
+      fila.celdas = celdasElegidas;
       // Lo elegido cuenta para las unidades que siguen.
-      for (const c of (fila.elegida === 'armar' ? sim.armar.celdas : sim.continuar.celdas)) {
+      for (const c of celdasElegidas) {
         if (!asignado.has(c.employeeId)) asignado.set(c.employeeId, new Map());
         const sinHoras = c.isFranco || up(c.code) === 'RET';
         asignado.get(c.employeeId)!.set(c.dateStr, {

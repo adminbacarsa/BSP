@@ -525,7 +525,7 @@ import { PrepararMesModal } from '@/components/planificacion/PrepararMesModal';
 import { planServicioMes } from '@/lib/planificacion/crearServicioMes';
 import { decidirCopiaSlaMes, nombreMesDeClave, partirCopiaMasiva, textoConfirmacionCopiaMasiva, type DecisionCopiaSla } from '@/lib/servicios/copiarSlaMes';
 import { persistirCopiaSlaMes } from '@/lib/servicios/copiarSlaMesCliente';
-import { unidadesDelMes } from '@/lib/planificacion/prepararMesTanda';
+import { avisoNoSePudoVerificarPublicado, avisoObjetivoYaPublicado, celdaPrepararBloqueada, DESDE_PREPARAR, leerObjetivosPublicados, quitarBorradorPrepararPublicado, unidadesDelMes } from '@/lib/planificacion/prepararMesTanda';
 import {
     clasificarSeleccionLicencia,
     diasQueQuedaron,
@@ -9148,7 +9148,34 @@ function PlanificacionDesktop() {
         });
 
         const doSave = async () => {
-            const jobPending = { ...pendingParaGuardar };
+            let jobPending = { ...pendingParaGuardar };
+            const idsPrep = [...new Set(
+                Object.values(jobPending)
+                    .filter((v: any) => v?.[DESDE_PREPARAR] && v.objectiveId)
+                    .map((v: any) => String(v.objectiveId)),
+            )];
+            if (idsPrep.length) {
+                const anioGuardar = currentDate.getFullYear();
+                const mesGuardar = currentDate.getMonth() + 1;
+                const lecturaGuardar = !empresaId
+                    ? { publicados: new Set<string>(), sinLeer: new Set(idsPrep) }
+                    : await leerObjetivosPublicados(idsPrep, async (oid) => {
+                        const est = await fetchPlanificacionEstadoDoc(empresaId, oid, anioGuardar, mesGuardar);
+                        return (est?.data as { publishedAt?: unknown } | undefined) ?? null;
+                    });
+                const quitado = quitarBorradorPrepararPublicado(jobPending, lecturaGuardar.publicados, lecturaGuardar.sinLeer);
+                if (quitado.quitadas.length) {
+                    for (const oid of quitado.bloqueados) toast.message(avisoObjetivoYaPublicado(getObjectiveName(oid) || oid));
+                    for (const oid of quitado.sinVerificar) toast.message(avisoNoSePudoVerificarPublicado(getObjectiveName(oid) || oid));
+                    jobPending = quitado.pending;
+                    setPendingChanges((prev) => {
+                        const siguiente = { ...prev };
+                        for (const k of quitado.quitadas) delete siguiente[k];
+                        return siguiente;
+                    });
+                }
+            }
+            if (Object.keys(jobPending).length === 0) return;
             const motivoTope = authReasonRef.current.trim();
             if (overCap.length && motivoTope) {
                 const ids = new Set(overCap.map((e) => e.empId));
@@ -13654,6 +13681,43 @@ function PlanificacionDesktop() {
             toast.message(`El ${ops.map((o) => o.texto).join(' y el ')} se guarda con «Guardar cronograma». Si descartás los cambios, no se crea.`);
         }
         const elegidos = new Set(employeeIds);
+        const idsChequeo = new Set<string>();
+        const anotarObjetivo = (c: Parameters<typeof cambioContinuar>[0]) => {
+            const oid = String(cambioContinuar(c).objectiveId || '').trim();
+            if (oid) idsChequeo.add(oid);
+        };
+        for (const r of vista.resultados) {
+            if (!elegidos.has(r.employeeId)) continue;
+            for (const c of r.propuestas) anotarObjetivo(c);
+        }
+        for (const s of sugerencias) {
+            anotarObjetivo(s.celda);
+            if (s.francoA) anotarObjetivo({ ...s.celda, dateStr: s.francoA, code: 'F', name: 'Franco', positionName: 'General', isFranco: true, hours: 0 });
+        }
+        const anioEscribir = currentDate.getFullYear();
+        const mesEscribir = currentDate.getMonth() + 1;
+        const lecturaPub = !empresaId
+            ? { publicados: new Set<string>(), sinLeer: idsChequeo }
+            : await leerObjetivosPublicados([...idsChequeo], async (oid) => {
+                const est = await fetchPlanificacionEstadoDoc(empresaId, oid, anioEscribir, mesEscribir);
+                return (est?.data as { publishedAt?: unknown } | undefined) ?? null;
+            });
+        const avisadosPrep = new Set<string>();
+        const avisarPrep = (oid: string, motivo: 'publicado' | 'sin_verificar') => {
+            const clave = `${motivo}:${oid}`;
+            if (avisadosPrep.has(clave)) return;
+            avisadosPrep.add(clave);
+            const nombre = getObjectiveName(oid) || oid;
+            toast.message(motivo === 'publicado' ? avisoObjetivoYaPublicado(nombre) : avisoNoSePudoVerificarPublicado(nombre));
+        };
+        const bloqueadaPrep = (ch: { objectiveId?: unknown } | null | undefined) => {
+            const oid = String(ch?.objectiveId || '').trim();
+            if (!oid) return false;
+            const motivo = celdaPrepararBloqueada(oid, lecturaPub.publicados, lecturaPub.sinLeer);
+            if (!motivo) return false;
+            avisarPrep(oid, motivo);
+            return true;
+        };
         const next = { ...pendingChangesRef.current };
         let turnos = 0;
         let francos = 0;
@@ -13663,7 +13727,9 @@ function PlanificacionDesktop() {
             for (const c of r.propuestas) {
                 const key = `${c.employeeId}_${c.dateStr}`;
                 if (next[key] && !next[key].isDeleted) continue;
-                next[key] = cambioContinuar(c);
+                const ch = cambioContinuar(c);
+                if (bloqueadaPrep(ch)) continue;
+                next[key] = { ...ch, [DESDE_PREPARAR]: true };
                 escritas.add(key);
                 if (c.isFranco) francos += 1; else turnos += 1;
             }
@@ -13702,8 +13768,9 @@ function PlanificacionDesktop() {
             return getEffectiveShiftQuantityOnDate(pos, ds, sh.code, pos.qty) || pos.qty || 1;
         };
         const escribir = (key: string, ds: string, ch: any) => {
+            if (bloqueadaPrep(ch)) return;
             sumar(next[key] ?? shiftsMap[key], ds, -1);
-            next[key] = ch;
+            next[key] = { ...ch, [DESDE_PREPARAR]: true };
             sumar(ch, ds, 1);
         };
         let salteadas = 0;
