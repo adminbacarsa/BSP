@@ -14,6 +14,7 @@ import { filterSlasForPlanningContext, filterSlasForPlanningTenant } from '@/lib
 import { planServicioMes } from '@/lib/planificacion/crearServicioMes';
 import { toast } from 'sonner';
 import type { Estrategia, Metricas } from '@/lib/planificacion/prepararMes';
+import { TEXTO_SIN_VERIFICAR_PUBLICACION } from '@/lib/planificacion/objetivoPublicado';
 import { correrTanda, unidadesDelMes, type FilaTanda, type ModoTanda } from '@/lib/planificacion/prepararMesTanda';
 import type { GrupoObjetivos } from '@/services/gruposService';
 
@@ -52,6 +53,7 @@ const TEXTO_FUERA: Record<Fila['estado'], string> = {
   sin_guardias: 'Sin guardias',
   error: 'No se pudo simular',
   fuera_operacion: 'Fuera de operación',
+  sin_verificar: TEXTO_SIN_VERIFICAR_PUBLICACION,
 };
 
 const COLUMNAS = 'grid grid-cols-[minmax(0,1fr)_60px_136px_72px_52px_60px_48px_104px] items-center gap-x-2';
@@ -64,6 +66,7 @@ function faltaServicioDe(f: Fila): boolean {
 }
 
 function vistaDe(f: Fila): Vista {
+  if (f.estado === 'sin_verificar') return 'fuera';
   if (f.estado !== 'ok') return 'fuera';
   const m = metricasDe(f);
   if (!m) return 'fuera';
@@ -119,7 +122,15 @@ export function PrepararMesModal(props: Props) {
   }, [clave]);
   useEffect(() => {
     if (cargada.current !== clave || corriendo) return;
-    if (filas.length) writeSessionJson(clave, { filas, alcance, modo, vista, at: simuladoAt || Date.now() });
+    if (filas.length) {
+      const livianas = filas.map((f) => {
+        if (!f.celdas) return f;
+        const copia = { ...f };
+        delete copia.celdas;
+        return copia;
+      });
+      writeSessionJson(clave, { filas: livianas, alcance, modo, vista, at: simuladoAt || Date.now() });
+    }
   }, [clave, filas, alcance, modo, vista, simuladoAt, corriendo]);
 
   const mesTxt = new Date(year, month, 1).toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
@@ -248,7 +259,7 @@ export function PrepararMesModal(props: Props) {
         className="flex items-center gap-2 rounded-l-full px-4 py-2 text-[12px] font-bold text-slate-700 hover:bg-slate-50"
       >
         <CalendarRange size={15} /> Preparar {mesCorto}
-        <span className={conteo.n.revisar || filas.some(faltaServicioDe) ? 'text-amber-600' : 'text-emerald-600'}>· {conteo.n.revisar ? `${conteo.n.revisar} para revisar` : filas.some(faltaServicioDe) ? `${filas.filter(faltaServicioDe).length} sin servicio` : 'todo completo'}</span>
+        <span className={conteo.n.revisar || filas.some(faltaServicioDe) || filas.some((f) => f.estado === 'sin_verificar') ? 'text-amber-600' : 'text-emerald-600'}>· {conteo.n.revisar ? `${conteo.n.revisar} para revisar` : filas.some(faltaServicioDe) ? `${filas.filter(faltaServicioDe).length} sin servicio` : filas.some((f) => f.estado === 'sin_verificar') ? `${filas.filter((f) => f.estado === 'sin_verificar').length} sin verificar` : 'todo completo'}</span>
         <span className="text-indigo-600">· Volver</span>
       </button>
       <button type="button" onClick={descartar} title="Descartar la vista previa" aria-label="Descartar la vista previa" data-preparar-descartar className="rounded-r-full border-l border-slate-200 px-2.5 py-2 text-slate-400 hover:bg-slate-50 hover:text-rose-600"><X size={14} /></button>
@@ -420,7 +431,7 @@ export function PrepararMesModal(props: Props) {
             <div className="mt-3 rounded-xl border border-slate-200 bg-white" data-preparar-fuera>
               <button type="button" onClick={() => setVerFuera((v) => !v)} className="flex w-full items-center gap-1.5 px-3 py-2 text-left text-[12px] font-bold text-slate-500">
                 {verFuera ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                No se arman ({fuera.length}): {(['sin_servicio', 'publicado', 'sin_guardias', 'error'] as Fila['estado'][])
+                No se arman ({fuera.length}): {(['sin_servicio', 'publicado', 'sin_verificar', 'sin_guardias', 'error'] as Fila['estado'][])
                   .map((e) => ({ e, n: fuera.filter((f) => f.estado === e).length }))
                   .filter((x) => x.n)
                   .map((x) => `${x.n} ${TEXTO_FUERA[x.e].toLowerCase()}`)
