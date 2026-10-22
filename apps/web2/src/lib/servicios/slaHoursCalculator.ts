@@ -52,10 +52,10 @@ const AR_FERIADOS_VARIABLES: Record<string, string[]> = {
   '2027': [
     '2027-02-08', '2027-02-09', // Carnaval
     '2027-03-26',               // Viernes Santo (Pascua 28/3/2027)
-    '2027-06-17',               // Güemes (trasladable)
-    '2027-08-17',               // San Martín
-    '2027-10-12',               // Diversidad Cultural
-    '2027-11-20',               // Soberanía Nacional
+    '2027-06-21',               // Güemes (trasladado, 17/6 era jueves)
+    '2027-08-16',               // San Martín (trasladado, 17/8 era martes)
+    '2027-10-11',               // Diversidad Cultural (trasladado, 12/10 era martes)
+    '2027-11-20',               // Soberanía Nacional (20/11 es sábado, queda)
   ],
 };
 

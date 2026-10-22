@@ -1223,6 +1223,10 @@ export default function EmployeesPage() {
   const handleSaveHoliday = async () => { if(!holidayForm.name) return; await holidayService.add(holidayForm, empresaId); await registrarAuditoria('CREATE_HOLIDAY', `Feriado: ${holidayForm.name}`); setHolidayForm({ date: '', name: '', type: 'Nacional' }); loadHolidays(); };
   const handleDeleteHoliday = async (id: string) => { await holidayService.delete(id); await registrarAuditoria('DELETE_HOLIDAY', `Feriado ID: ${id}`); loadHolidays(); };
   const handleSyncHolidays = async () => {
+    if (!String(empresaId ?? '').trim()) {
+      addToast('Elegí una empresa antes de sincronizar', 'error');
+      return;
+    }
     setIsSyncing(true);
     try {
       const n = await holidayService.syncWithGovApi(syncYear, empresaId);
