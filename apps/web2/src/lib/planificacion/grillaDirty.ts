@@ -76,8 +76,27 @@ export function mismosNumeros(a: readonly number[], b: readonly number[]): boole
   return true;
 }
 
+const FLAGS_QUE_REEMPLAZA_EL_BORRADOR = ['isExtended', 'isReten', 'isEarlyStart', 'isTura'] as const;
+
+/**
+ * El borrador pisa el doc: si no trae extensión, retén, TURA ni tramo, esos campos
+ * no se heredan del turno viejo.
+ */
+function turnoDesdeBorrador(base: Record<string, any> | undefined, change: Record<string, any>): Record<string, any> {
+  const next: Record<string, any> = base ? { ...base, ...change } : { ...change };
+  for (const flag of FLAGS_QUE_REEMPLAZA_EL_BORRADOR) {
+    if (!Object.prototype.hasOwnProperty.call(change, flag)) delete next[flag];
+  }
+  for (const key of Object.keys(next)) {
+    if (!key.startsWith('segment') && !key.startsWith('adjusted')) continue;
+    if (!Object.prototype.hasOwnProperty.call(change, key)) delete next[key];
+  }
+  return next;
+}
+
 /**
  * Pasa el borrador al mapa de turnos en un solo objeto.
+ * El segundo bloque (_B2) entra con la misma clave que el pendiente.
  * Las claves que no están en el pendiente conservan la misma referencia.
  */
 export function aplicarPendientesEnTurnos(
@@ -87,7 +106,7 @@ export function aplicarPendientesEnTurnos(
   let cambio = false;
   const next: Record<string, any> = { ...prev };
   for (const [key, change] of Object.entries(pending)) {
-    if (!change || key.endsWith('_B2')) continue;
+    if (!change) continue;
     if (change.isDeleted) {
       if (key in next) {
         delete next[key];
@@ -95,8 +114,36 @@ export function aplicarPendientesEnTurnos(
       }
       continue;
     }
-    const base = prev[key];
-    next[key] = base ? { ...base, ...change } : { ...change };
+    next[key] = turnoDesdeBorrador(prev[key], change);
+    cambio = true;
+  }
+  return cambio ? next : prev;
+}
+
+/**
+ * El horario del segundo bloque se muestra por la clave de la celda (sin _B2),
+ * igual que el snapshot. Si el borrador no trae horario, no se deja el anterior.
+ */
+export function aplicarPendientesEnSegundoBloque(
+  prev: Record<string, { startTime: any; endTime: any }>,
+  pending: Record<string, any>,
+): Record<string, { startTime: any; endTime: any }> {
+  let cambio = false;
+  const next: Record<string, { startTime: any; endTime: any }> = { ...prev };
+  for (const [key, change] of Object.entries(pending)) {
+    if (!change || !key.endsWith('_B2')) continue;
+    const primary = key.slice(0, -3);
+    const traeHorario = change.isDeleted !== true && change.startTime != null && change.endTime != null;
+    if (!traeHorario) {
+      if (primary in next) {
+        delete next[primary];
+        cambio = true;
+      }
+      continue;
+    }
+    const actual = next[primary];
+    if (actual && actual.startTime === change.startTime && actual.endTime === change.endTime) continue;
+    next[primary] = { startTime: change.startTime, endTime: change.endTime };
     cambio = true;
   }
   return cambio ? next : prev;
