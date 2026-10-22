@@ -1,7 +1,12 @@
-
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, deleteDoc, query, orderBy, where } from 'firebase/firestore';
 import { stampEmpresaId } from '@/lib/multiempresa';
+import {
+  feriadoCuentaParaEmpresa,
+  mapArgentinaDatos,
+  mapNolaborables,
+  type FeriadoOficial,
+} from '@/lib/rrhh/feriadosGov';
 
 export interface Holiday {
   id?: string;
@@ -9,6 +14,33 @@ export interface Holiday {
   name: string;
   type: 'Nacional' | 'Puente' | 'Optativo' | 'Gremial';
   empresaId?: string;
+}
+
+const FERIADOS_ERROR = 'No se pudo conectar con el servidor de feriados';
+
+async function leerJson(url: string): Promise<unknown> {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.json();
+}
+
+/** Principal: argentinadatos. Si falla o viene vacía, nolaborables. */
+export async function cargarFeriadosOficiales(year: number): Promise<FeriadoOficial[]> {
+  try {
+    const data = await leerJson(`https://api.argentinadatos.com/v1/feriados/${year}`);
+    const mapped = mapArgentinaDatos(data).filter((h) => h.date.startsWith(`${year}-`));
+    if (mapped.length > 0) return mapped;
+  } catch {
+    /* respaldo */
+  }
+  try {
+    const data = await leerJson(`https://nolaborables.com.ar/api/v2/feriados/${year}`);
+    const mapped = mapNolaborables(data, year).filter((h) => h.date.startsWith(`${year}-`));
+    if (mapped.length > 0) return mapped;
+  } catch {
+    /* las dos fallaron */
+  }
+  throw new Error(FERIADOS_ERROR);
 }
 
 export const holidayService = {
@@ -40,35 +72,30 @@ export const holidayService = {
   delete: (id: string) => deleteDoc(doc(db, 'feriados', id)),
 
   syncWithGovApi: async (year: number, empresaId?: string) => {
-    try {
-      const response = await fetch(`https://nolaborables.com.ar/api/v2/feriados/${year}`);
-      if (!response.ok) throw new Error('No se pudo conectar con el servidor de feriados.');
-      
-      const data = await response.json();
-      let addedCount = 0;
+    const oficiales = await cargarFeriadosOficiales(year);
 
-      const existingQuery = query(collection(db, 'feriados'), where('date', '>=', `${year}-01-01`), where('date', '<=', `${year}-12-31`));
-      const existingDocs = await getDocs(existingQuery);
-      const existingDates = new Set(existingDocs.docs.map(d => d.data().date));
-
-      const batchPromises = data.map(async (h: any) => {
-          const month = String(h.mes).padStart(2, '0');
-          const day = String(h.dia).padStart(2, '0');
-          const dateStr = `${year}-${month}-${day}`;
-
-          if (!existingDates.has(dateStr)) {
-              addedCount++;
-              const row: Holiday = { date: dateStr, name: h.motivo, type: 'Nacional' };
-              return holidayService.add(row, empresaId);
-          }
-      });
-
-      await Promise.all(batchPromises);
-      return addedCount;
-
-    } catch (e) {
-      console.error("Error importando feriados:", e);
-      throw e;
+    const existingQuery = query(
+      collection(db, 'feriados'),
+      where('date', '>=', `${year}-01-01`),
+      where('date', '<=', `${year}-12-31`),
+    );
+    const existingDocs = await getDocs(existingQuery);
+    const existingDates = new Set<string>();
+    for (const d of existingDocs.docs) {
+      const data = d.data();
+      if (!feriadoCuentaParaEmpresa(data.empresaId, empresaId)) continue;
+      const date = String(data.date ?? '').slice(0, 10);
+      if (date) existingDates.add(date);
     }
+
+    let addedCount = 0;
+    for (const h of oficiales) {
+      if (existingDates.has(h.date)) continue;
+      existingDates.add(h.date);
+      addedCount += 1;
+      const row: Holiday = { date: h.date, name: h.name, type: h.type };
+      await holidayService.add(row, empresaId);
+    }
+    return addedCount;
   }
 };

@@ -49,11 +49,12 @@ const AR_FERIADOS_VARIABLES: Record<string, string[]> = {
     '2026-11-23',               // Soberanía Nacional (cuarto lunes de noviembre)
   ],
   '2027': [
-    '2027-02-01', '2027-02-02', // Carnaval
+    '2027-02-08', '2027-02-09', // Carnaval
     '2027-03-26',               // Viernes Santo (Pascua 28/3/2027)
-    '2027-08-16',               // San Martín (tercer lunes de agosto)
-    '2027-10-11',               // Diversidad Cultural (trasladado)
-    '2027-11-22',               // Soberanía Nacional (cuarto lunes de noviembre)
+    '2027-06-17',               // Güemes (trasladable)
+    '2027-08-17',               // San Martín
+    '2027-10-12',               // Diversidad Cultural
+    '2027-11-20',               // Soberanía Nacional
   ],
 };
 
