@@ -205,6 +205,7 @@ import {
 } from '@/lib/cosp/coverageSemantics';
 import { PlanningCoverageLegend } from '@/components/planificacion/PlanningCoverageLegend';
 import { crearUseMemoMedido, inicioRenderGrilla, medirBloque, medirSeccion, registrarCommitGrilla, reiniciarOrdenMemo } from '@/lib/planificacion/perfGrilla';
+import { alcanceDeClaves, aplicarPendientesEnTurnos, celdaEnAlcance, clavesDistintas, fusionarAlcance, mismosNumeros, mismosRefs, type AlcanceSucio } from '@/lib/planificacion/grillaDirty';
 
 const useMemo = crearUseMemoMedido(useMemoReact);
 import { MedidorVelocidad } from '@/components/planificacion/MedidorVelocidad';
@@ -599,7 +600,7 @@ import type { AltaHecha } from '@/lib/rrhh/altaLegajoClient';
 import { ImportarExcelModal, type AplicarImportPayload, type ImportarExcelContexto, type ServicioDestino } from '@/components/planificacion/ImportarExcelModal';
 import { ServicioPlanillaModal, type ServicioMesPlanilla } from '@/components/planificacion/ServicioPlanillaModal';
 import { avisosFueraDeServicio } from '@/lib/planificacion/servicioDesdePlanilla';
-import { cambioBorradorImport, normPlanilla, ordenTrasPlanilla, type CeldaActual, type ObjetivoCatalogo, type ReglaMapeo } from '@/lib/planificacion/importarExcel';
+import { cambioBorradorImport, cederHiloImport, normPlanilla, ordenTrasPlanilla, TANDA_IMPORT, type CeldaActual, type ObjetivoCatalogo, type ReglaMapeo } from '@/lib/planificacion/importarExcel';
 import {
     alertasDescansoCambioMes,
     alertasTope,
@@ -2035,6 +2036,43 @@ function PlanificacionDesktop() {
     const [employees, setEmployees] = useState<any[]>([]);
     const [slaIdToObjId, setSlaIdToObjId] = useState<Record<string, string>>({});
     const [shiftsMap, setShiftsMap] = useState<Record<string, any>>({});
+    const guardandoTurnosRef = useRef(0);
+    const snapDiferidoRef = useRef<{ snap: import('firebase/firestore').QuerySnapshot; aplicar: (snap: import('firebase/firestore').QuerySnapshot) => void } | null>(null);
+    const lecturaDiaCacheRef = useRef<Map<string, {
+        refs: unknown[];
+        horas: number[];
+        porDia: any;
+        sobra: any;
+        avisos: any[];
+        faltantes: any[];
+        facturable: number;
+        vendidas: number;
+        tura: number;
+        ext: number;
+        turnos: any[];
+        turnos12: any[];
+        francos: any[];
+        cerradoPorHoras: boolean;
+        extCerrado: boolean;
+    }>>(new Map());
+    const lecturaDiaFirmaRef = useRef('');
+    const gapDiaCacheRef = useRef<Map<string, { refs: unknown[]; counts: Record<string, Record<string, number>> }>>(new Map());
+    const gapDiaFirmaRef = useRef('');
+    const celdasAlcanceRef = useRef<{
+        global: string;
+        vistas: Record<string, VistaCelda>;
+        ctx: Record<string, CtxCeldaGrilla>;
+        pending: Record<string, any>;
+        shifts: Record<string, any>;
+        cells: Record<string, any[]>;
+        absences: Record<string, any>;
+        lct: Record<string, string>;
+        rfz: Record<string, any>;
+        tura: Record<string, any>;
+        cruce: Record<string, any>;
+        excluded: any;
+        sla: any;
+    } | null>(null);
     /** Últimos 6 días del mes anterior: descanso y racha al cerrar el día 1. No entra en el mes calendario. */
     const [turnosBorde, setTurnosBorde] = useState<Record<string, any>>({});
     const [cellTurnosMap, setCellTurnosMap] = useState<Record<string, any[]>>({});
@@ -5737,15 +5775,32 @@ function PlanificacionDesktop() {
         },
     );
 
-    const objectiveCoverageGapReport = useMemo(() => {
+    const objectiveCoverageGapReport = useMemo(() => medirSeccion('cobertura huecos', () => {
         if (!selectedObjective || !(positionStructure?.length)) return null;
         const days = daysInMonth.map(day => {
             const dateStr = getDateKey(day);
             return { dateStr, dayLetter: getDayLetter(dateStr) };
         });
+        const firmaEstructura = `${selectedObjective}\0${dotacionBaseEmployees.map((e: any) => e.id).join(',')}\0${days.map((d) => d.dateStr).join(',')}\0${String(dominantPosition?.positionName || '')}\0${positionStructure.length}`;
+        if (gapDiaFirmaRef.current !== firmaEstructura) {
+            gapDiaFirmaRef.current = firmaEstructura;
+            gapDiaCacheRef.current = new Map();
+        }
         const codeCountsByDay: Record<string, Record<string, Record<string, number>>> = {};
         for (const { dateStr } of days) {
-            codeCountsByDay[dateStr] = buildDayCodeCountsByPosition(dateStr);
+            const refs: unknown[] = [creditosDelMes[dateStr], positionStructure, coverageCyclesForObjective];
+            for (const emp of dotacionBaseEmployees) {
+                const key = `${emp.id}_${dateStr}`;
+                refs.push(pendingChanges[key], shiftsMap[key]);
+            }
+            const prevGap = gapDiaCacheRef.current.get(dateStr);
+            if (prevGap && mismosRefs(prevGap.refs, refs)) {
+                codeCountsByDay[dateStr] = prevGap.counts;
+                continue;
+            }
+            const counts = buildDayCodeCountsByPosition(dateStr);
+            gapDiaCacheRef.current.set(dateStr, { refs, counts });
+            codeCountsByDay[dateStr] = counts;
         }
         return analyzeObjectiveCoverageGaps(
             positionStructure,
@@ -5754,9 +5809,9 @@ function PlanificacionDesktop() {
             coverageCyclesForObjective,
             isPosActiveOnDay,
         );
-    }, [selectedObjective, positionStructure, daysInMonth, dotacionBaseEmployees, pendingChanges, shiftsMap, coverageCyclesForObjective, dominantPosition]);
+    }), [selectedObjective, positionStructure, daysInMonth, dotacionBaseEmployees, pendingChanges, shiftsMap, coverageCyclesForObjective, dominantPosition]);
 
-    const lecturaMes = useMemo(() => {
+    const lecturaMes = useMemo(() => medirSeccion('cobertura', () => {
         const porDia: Record<string, ReturnType<typeof leerDia> & { cerradoPorHoras?: boolean; textoHoras?: string; extEntre?: ReturnType<typeof acreditarExtEntrePuestos> }> = {};
         const sobraPorDia: Record<string, ReturnType<typeof lineasDeSobra>> = {};
         const faltantes: FaltanteBanda[] = [];
@@ -5773,8 +5828,57 @@ function PlanificacionDesktop() {
             shifts: p.shifts,
         }));
         if (!selectedObjective || !puestos.length) return { porDia, sobraPorDia, faltantes, avisos, facturableCliente: 0, vendidasReloj: 0, turaHoras: 0, extEnHuecoHoras: 0 };
+        const firmaLectura = `${selectedObjective}|${exigeCoberturaGrilla ? 1 : 0}|${dotacionBaseEmployees.map((e: any) => e.id).join('|')}|${daysInMonth.length}|${positionStructure.length}`;
+        if (lecturaDiaFirmaRef.current !== firmaLectura) {
+            lecturaDiaFirmaRef.current = firmaLectura;
+            lecturaDiaCacheRef.current = new Map();
+        }
         for (const day of daysInMonth) {
             const dateStr = getDateKey(day);
+            const refsDia: unknown[] = [slaIdToObjId, resolveNativeObjectiveInGrupo, positionStructure, exigeCoberturaGrilla];
+            for (const emp of dotacionBaseEmployees) {
+                const key = `${emp.id}_${dateStr}`;
+                refsDia.push(pendingChanges[key], shiftsMap[key], absencesMap[key]);
+            }
+            for (const tura of Object.values(turaMap || {})) {
+                const filaT = tura as { fecha?: string; startTime?: unknown };
+                const fechaT = String(filaT.fecha || '').slice(0, 10);
+                const isoT = String(filaT.startTime || '').slice(0, 10);
+                if (fechaT === dateStr || isoT === dateStr) refsDia.push(tura);
+            }
+            const horasDiaNum = dotacionBaseEmployees.map((emp: any) => Number(empMonthlyHours[emp.id]) || 0);
+            const prevDia = lecturaDiaCacheRef.current.get(dateStr);
+            if (prevDia && mismosRefs(prevDia.refs, refsDia)) {
+                porDia[dateStr] = prevDia.porDia;
+                sobraPorDia[dateStr] = prevDia.sobra;
+                avisos.push(...prevDia.avisos);
+                facturableCliente += prevDia.facturable;
+                vendidasReloj += prevDia.vendidas;
+                turaHoras += prevDia.tura;
+                extEnHuecoHoras += prevDia.ext;
+                if (mismosNumeros(prevDia.horas, horasDiaNum)) {
+                    faltantes.push(...prevDia.faltantes);
+                } else if (!prevDia.cerradoPorHoras && !prevDia.extCerrado) {
+                    const horasMesCache: Record<string, number> = {};
+                    dotacionBaseEmployees.forEach((emp: any, i: number) => { horasMesCache[emp.id] = horasDiaNum[i]; });
+                    const faltantesDia = faltantesDelDia({
+                        dateStr,
+                        puestos,
+                        turnos: prevDia.turnos,
+                        turnos12: prevDia.turnos12,
+                        horasMes: horasMesCache,
+                        francos: prevDia.francos,
+                        slaDe: (positionName) => (positionStructure || []).find((p: any) => p.positionName === positionName)?.shifts || [],
+                    });
+                    prevDia.horas = horasDiaNum;
+                    prevDia.faltantes = faltantesDia;
+                    faltantes.push(...faltantesDia);
+                } else {
+                    prevDia.horas = horasDiaNum;
+                    prevDia.faltantes = [];
+                }
+                continue;
+            }
             const turnos: TurnoDia[] = [];
             const tramosHoras: TramoHoras[] = [];
             const turnosExt: TurnoExt[] = [];
@@ -5917,10 +6021,11 @@ function PlanificacionDesktop() {
             const cerradoPorHoras = !!horasDia?.cerrado;
             porDia[dateStr] = { ...lectura, ...(cerradoPorHoras ? { reconcilia: true } : {}), cerradoPorHoras, textoHoras: horasDia ? textoHoras(horasDia) : '', extEntre };
             sobraPorDia[dateStr] = lineasDeSobra(puestos, turnos);
-            avisos.push(...avisosDesdeLectura(dateStr, lectura, turnos, puestos));
+            const avisosDia = avisosDesdeLectura(dateStr, lectura, turnos, puestos);
+            avisos.push(...avisosDia);
             const horasMes: Record<string, number> = {};
             for (const emp of dotacionBaseEmployees) horasMes[emp.id] = Number(empMonthlyHours[emp.id]) || 0;
-            if (!cerradoPorHoras && !extEntre.cerrado) faltantes.push(...faltantesDelDia({
+            const faltantesDia = (!cerradoPorHoras && !extEntre.cerrado) ? faltantesDelDia({
                 dateStr,
                 puestos,
                 turnos,
@@ -5928,10 +6033,28 @@ function PlanificacionDesktop() {
                 horasMes,
                 francos,
                 slaDe: (positionName) => (positionStructure || []).find((p: any) => p.positionName === positionName)?.shifts || [],
-            }));
+            }) : [];
+            faltantes.push(...faltantesDia);
+            lecturaDiaCacheRef.current.set(dateStr, {
+                refs: refsDia,
+                horas: horasDiaNum,
+                porDia: porDia[dateStr],
+                sobra: sobraPorDia[dateStr],
+                avisos: avisosDia,
+                faltantes: faltantesDia,
+                facturable: extEntre.facturable,
+                vendidas: extEntre.vendidas,
+                tura: extEntre.turaHoras,
+                ext: extEntre.extEnHuecoHoras,
+                turnos,
+                turnos12,
+                francos,
+                cerradoPorHoras,
+                extCerrado: !!extEntre.cerrado,
+            });
         }
         return { porDia, sobraPorDia, faltantes, avisos, facturableCliente, vendidasReloj, turaHoras, extEnHuecoHoras };
-    }, [selectedObjective, positionStructure, daysInMonth, dotacionBaseEmployees, pendingChanges, shiftsMap, slaIdToObjId, absencesMap, empMonthlyHours, exigeCoberturaGrilla, turaMap, resolveNativeObjectiveInGrupo]);
+    }), [selectedObjective, positionStructure, daysInMonth, dotacionBaseEmployees, pendingChanges, shiftsMap, slaIdToObjId, absencesMap, empMonthlyHours, exigeCoberturaGrilla, turaMap, resolveNativeObjectiveInGrupo]);
 
     /** Días con huecos para publicar y el resumen: un día cerrado por horas (doble control) no cuenta. */
     const diasConHuecos = useMemo(() => {
@@ -7592,7 +7715,7 @@ function PlanificacionDesktop() {
             return Array.from(byId.values());
         };
 
-        const applyMainSnap = (snap: import('firebase/firestore').QuerySnapshot) => {
+        const ingerirSnap = (snap: import('firebase/firestore').QuerySnapshot) => {
             const gen = ++generacion;
             void (async () => {
                 try {
@@ -7631,6 +7754,14 @@ function PlanificacionDesktop() {
                     setShiftsMapLoaded(true);
                 }
             })();
+        };
+
+        const applyMainSnap = (snap: import('firebase/firestore').QuerySnapshot) => {
+            if (guardandoTurnosRef.current > 0) {
+                snapDiferidoRef.current = { snap, aplicar: ingerirSnap };
+                return;
+            }
+            ingerirSnap(snap);
         };
 
         setTurnosBorde({});
@@ -9096,15 +9227,23 @@ function PlanificacionDesktop() {
             const origenArmado: OrigenArmado = origenArranqueRef.current
                 ?? (valsArmado.length > 0 && valsArmado.every((v) => v?._isAutoRotation || v?._isAutoCondition) ? 'ROTACION_SLA' : 'MANUAL');
             const slaCompletoArmado = slaMesCompleto(objectiveCoverageGapReport);
-            setPendingChanges((prev) => {
-                const next = { ...prev };
-                for (const k of jobKeys) delete next[k];
-                return next;
-            });
-            setPendingNovedades({});
-            setPendingRecompositionPackages([]);
-            clearUndoStack();
-            setBackgroundSaveCount((c) => c + 1);
+            guardandoTurnosRef.current += 1;
+            const shiftsAntesGuardar = shiftsMap;
+            const finGuardarEstado = medirBloque('guardar cronograma');
+            try {
+                setShiftsMap((prev) => aplicarPendientesEnTurnos(prev, jobPending));
+                setPendingChanges((prev) => {
+                    const next = { ...prev };
+                    for (const k of jobKeys) delete next[k];
+                    return next;
+                });
+                setPendingNovedades({});
+                setPendingRecompositionPackages([]);
+                clearUndoStack();
+                setBackgroundSaveCount((c) => c + 1);
+            } finally {
+                finGuardarEstado();
+            }
 
             planToastSaving(jobCount);
 
@@ -9148,6 +9287,7 @@ function PlanificacionDesktop() {
             }
 
             const restorePendingOnFailure = () => {
+                setShiftsMap(shiftsAntesGuardar);
                 setPendingChanges((prev) => {
                     const next = { ...prev };
                     for (const [k, v] of Object.entries(jobPending)) {
@@ -9840,6 +9980,12 @@ function PlanificacionDesktop() {
                     : undefined);
             } finally {
                 setBackgroundSaveCount((c) => Math.max(0, c - 1));
+                guardandoTurnosRef.current = Math.max(0, guardandoTurnosRef.current - 1);
+                if (guardandoTurnosRef.current === 0 && snapDiferidoRef.current) {
+                    const dif = snapDiferidoRef.current;
+                    snapDiferidoRef.current = null;
+                    dif.aplicar(dif.snap);
+                }
             }
             })();
         };
@@ -13873,13 +14019,22 @@ function PlanificacionDesktop() {
         const novedades: Record<string, any> = {};
         let n = 0;
         const empIds = new Set<string>();
-        for (const item of payload.items) {
-            const borrador = cambioBorradorImport(item, payload.objectiveId);
-            if (!borrador) continue;
-            next[borrador.key] = borrador.change;
-            if (borrador.novedad) novedades[borrador.key] = borrador.novedad;
-            empIds.add(item.employeeId);
-            n += 1;
+        const finImport = medirBloque('importar excel');
+        try {
+            for (let i = 0; i < payload.items.length; i += TANDA_IMPORT) {
+                const corte = payload.items.slice(i, i + TANDA_IMPORT);
+                for (const item of corte) {
+                    const borrador = cambioBorradorImport(item, payload.objectiveId);
+                    if (!borrador) continue;
+                    next[borrador.key] = borrador.change;
+                    if (borrador.novedad) novedades[borrador.key] = borrador.novedad;
+                    empIds.add(item.employeeId);
+                    n += 1;
+                }
+                if (i + TANDA_IMPORT < payload.items.length) await cederHiloImport();
+            }
+        } finally {
+            finImport();
         }
         if (mismo) {
             const enGrilla = new Set((displayedEmployees || []).map((e: any) => e.id));
@@ -15729,7 +15884,30 @@ function PlanificacionDesktop() {
     const celdasGrilla = useMemo(() => {
         const vistas: Record<string, VistaCelda> = {};
         const ctx: Record<string, CtxCeldaGrilla> = {};
-        const prev = vistasPrevRef.current;
+        const prevVistas = vistasPrevRef.current;
+        const globalEstable = `${selectedObjective}|${selectedGrupo?.id || ''}|${grupoUnifiedMode ? 1 : 0}|${planPublicadoGrilla ? 1 : 0}|${isServiceLocked ? 1 : 0}|${colorPuestoFirma}|${consultasFirma}|${sobraFirma}|${focoSobra || ''}`;
+        const previa = celdasAlcanceRef.current;
+        let alcance: AlcanceSucio = { empleados: new Set(), dias: new Set(), completo: true };
+        if (previa && previa.global === globalEstable && previa.excluded === excludedPositionsEstables && previa.sla === slaIdToObjId) {
+            const partes = [
+                alcanceDeClaves(clavesDistintas(previa.pending, pendingChanges)),
+                alcanceDeClaves(clavesDistintas(previa.shifts, shiftsMap)),
+                alcanceDeClaves(clavesDistintas(previa.cells, cellTurnosMap)),
+                alcanceDeClaves(clavesDistintas(previa.absences, absencesMap)),
+                alcanceDeClaves(clavesDistintas(previa.lct, lctRestByCell)),
+                alcanceDeClaves(clavesDistintas(previa.rfz, rfzByEmpDate)),
+            ];
+            alcance = fusionarAlcance(partes);
+            if (!alcance.completo && clavesDistintas(previa.tura, turaMap).length) {
+                alcance = { empleados: new Set(), dias: new Set(), completo: true };
+            }
+            if (!alcance.completo && previa.cruce !== cruceTopePorEmp) {
+                const empleados = new Set(alcance.empleados);
+                const ids = new Set([...Object.keys(previa.cruce || {}), ...Object.keys(cruceTopePorEmp || {})]);
+                for (const id of ids) if (previa.cruce[id] !== cruceTopePorEmp[id]) empleados.add(id);
+                alcance = { empleados, dias: alcance.dias, completo: false };
+            }
+        }
         let indice: ReturnType<typeof indexar12> | null = null;
         const entrada = { ...entradaCeldas, indice12: () => (indice ??= indexar12(pendingChanges, shiftsMap)) };
         const filasCalc = filasCeldas as any[];
@@ -15739,12 +15917,34 @@ function PlanificacionDesktop() {
             if (!emp) continue;
             const isGuest = esInvitadoEnGrilla(emp, selectedObjective, selectedGrupo, grupoUnifiedMode, slaIdToObjId);
             daysInMonth.forEach((day, dayIndex) => {
+                const dateStr = getDateKey(day);
+                const key = `${emp.id}_${dateStr}`;
+                if (!alcance.completo && !celdaEnAlcance(String(emp.id), dateStr, alcance) && previa?.vistas[key] && previa.ctx[key]) {
+                    vistas[key] = previa.vistas[key];
+                    ctx[key] = previa.ctx[key];
+                    return;
+                }
                 const r = calcularCeldaGrilla(entrada, emp, isGuest, day, dayIndex);
-                vistas[r.vista.key] = reusarVista(prev[r.vista.key], r.vista);
+                vistas[r.vista.key] = reusarVista(prevVistas[r.vista.key], r.vista);
                 ctx[r.vista.key] = r.ctx;
             });
         }
         vistasPrevRef.current = vistas;
+        celdasAlcanceRef.current = {
+            global: globalEstable,
+            vistas,
+            ctx,
+            pending: pendingChanges,
+            shifts: shiftsMap,
+            cells: cellTurnosMap,
+            absences: absencesMap,
+            lct: lctRestByCell,
+            rfz: rfzByEmpDate,
+            tura: turaMap,
+            cruce: cruceTopePorEmp,
+            excluded: excludedPositionsEstables,
+            sla: slaIdToObjId,
+        };
         return { vistas, ctx };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [
@@ -21425,7 +21625,7 @@ function PlanificacionDesktop() {
                                     activo={modoRapido && !!selectedObjective && !comparingSnapshot}
                                     contenedorRef={grillaScrollRef}
                                     dims={dimsRapido}
-                                    version={`${displayedEmployees.length}|${daysInMonth.length}|${Object.keys(pendingChanges).length}|${anchoDotacion}|${shiftsMapLoaded ? 1 : 0}|${propuesta12 ? textoVista12(propuesta12) : ''}|${motivoVista12}`}
+                                    version={`${displayedEmployees.length}|${daysInMonth.length}|${anchoDotacion}|${shiftsMapLoaded ? 1 : 0}|${propuesta12 ? textoVista12(propuesta12) : ''}|${motivoVista12}`}
                                     opciones={opcionesRapido}
                                     valorDe={(r, c) => codigoCtxRapido(ctxRapido(r, c).ctx)}
                                     marcas={marcasRapido}
