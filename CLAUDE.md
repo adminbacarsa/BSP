@@ -25,6 +25,7 @@ Períodos: Liquidación ciclo **26→25**; Prefactura/SLA mes calendario **1→f
 - Códigos CCT 422/05: M/T/N 8 h, D12/N12 12 h, RET stand-by (0 h facturables), ESC, F/FF/FP francos, FT franco trabajado (lo más caro, último recurso), licencias V/L/E/A/PG/ART, AA injustificada. REF eliminado: RFZF (permanente) / RFZE (eventual).
 - Jornada: tope 12:59 h; máx. 6 turnos seguidos de 8 h / 4 de 12 h (48 h, 56 h excepcional); descanso < 8 h nunca, 8–12 h con PIN; tope mensual 200 h (más con PIN).
 - Cobertura Bacar: falta una banda → D12+N12 de los otros dos; nunca Ext/Adel para la N. Orden: RET/disponibles/volantes → 12 h → FT.
+- Servicio desde planilla: horario del código según catálogo de la empresa o el servicio del objetivo (NE/NO/NN/TT/MA incluidos). Sin horario conocido se pregunta; no se inventa M/T/N 8 h ni N12. `activeDays` = unión de los días de las franjas.
 
 ## Entorno
 `.env.local` en `apps/web2` (no commitear). Emuladores: Firestore 8080, Auth 9099, Functions 5001, UI 4000. `npm run emulators`, `npm run seed`, `npm run dev` (:3001). Mauro prueba en **prod pruebas_sa**.

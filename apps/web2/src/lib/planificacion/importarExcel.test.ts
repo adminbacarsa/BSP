@@ -324,6 +324,37 @@ describe('importar planilla', () => {
     assert.deepEqual([d.code, d.positionName, d.startTime, d.endTime], ['N12', 'Guardia', '19:00', '07:00']);
   });
 
+  it('Claret: N de 9 h y NE no se reemplazan por N12 19–07', () => {
+    const turnos: TurnoServicio[] = [
+      { positionName: 'Vigilancia', code: 'M', startTime: '07:00', endTime: '15:00' },
+      { positionName: 'Vigilancia', code: 'T', startTime: '15:00', endTime: '23:00' },
+      { positionName: 'Vigilancia', code: 'N', startTime: '23:00', endTime: '08:00' },
+      { positionName: 'Vigilancia', code: 'NE', startTime: '23:00', endTime: '08:00' },
+    ];
+    assert.equal(conDoceEn24h(turnos).some((t) => t.code === 'N12' || t.code === 'D12'), false);
+    const red = { clave: 'N|red', codigo: 'N', color: 'red' as const, muestras: 4, accion: 'doce' as const, code: 'N', nota: '' };
+    const d = resolverDestino(red, 'Vigilancia', turnos, []);
+    assert.equal(d.code, 'N');
+    assert.equal(d.startTime, '23:00');
+    assert.equal(d.endTime, '08:00');
+    assert.equal(d.hours, 9);
+    const ne = resolverDestino(
+      { clave: 'NE|none', codigo: 'NE', color: 'none', muestras: 2, accion: 'turno', code: 'NE', nota: '' },
+      'Vigilancia', turnos, [],
+    );
+    assert.equal(ne.code, 'NE');
+    assert.equal(ne.endTime, '08:00');
+    assert.equal(ne.hours, 9);
+    const soloCatalogo = resolverDestino(
+      { clave: 'MA|none', codigo: 'MA', color: 'none', muestras: 1, accion: 'turno', code: 'MA', nota: '' },
+      'Vigilancia', [], [],
+      [{ code: 'MA', startTime: '07:00', endTime: '16:00' }],
+    );
+    assert.equal(soloCatalogo.startTime, '07:00');
+    assert.equal(soloCatalogo.endTime, '16:00');
+    assert.equal(proponerRegla('NE', 'none', [], [{ code: 'NE', startTime: '23:00', endTime: '08:00' }]).accion, 'turno');
+  });
+
   it('el orden de filas sigue la planilla y deja al final a quien no viene', () => {
     const fila = (n: number, nombre: string): FilaPlanilla => ({ fila: n, nombre, legajo: '', puesto: '', celdas: [] });
     const cruce: CruceFila[] = [
