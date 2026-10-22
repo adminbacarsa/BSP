@@ -180,7 +180,7 @@ import {
 import ObjectiveServiceAnalysisCard from '@/components/planificacion/ObjectiveServiceAnalysisCard';
 import { resolveCronogramPlanningRules } from '@/lib/planificacion/cronogramPlanningRules';
 import { dominantDotacionFromPlanningCells } from '@/lib/planificacion/seedDotacionFromPrevMonth';
-import { fetchPlanningMonthShifts, buildPlanningMonthTurnosQuery, buildPlanningMonthRfzQuery, buildPlanningMonthTuraQuery } from '@/lib/planificacion/loadPlanningMonthShifts';
+import { fetchPlanningMonthShifts, buildPlanningMonthTurnosQuery, buildPlanningMonthRfzQuery, buildPlanningMonthTuraQuery, previousCalendarMonth } from '@/lib/planificacion/loadPlanningMonthShifts';
 import { matchesEmployeeSearch } from '@/lib/planificacion/employeeSearch';
 import {
     adjacentPlanningMonths,
@@ -350,6 +350,8 @@ import {
     motivoBloqueoJornadaCierre,
     objectiveIdEscrituraCierre,
     planCerrarBandas,
+    recortarBordeMesAnterior,
+    ventanaJornadaCierre,
     textoBotonCerrarBanda,
     textoResultadoCierreBanda,
     type BandaAbiertaGrupo,
@@ -2033,6 +2035,8 @@ function PlanificacionDesktop() {
     const [employees, setEmployees] = useState<any[]>([]);
     const [slaIdToObjId, setSlaIdToObjId] = useState<Record<string, string>>({});
     const [shiftsMap, setShiftsMap] = useState<Record<string, any>>({});
+    /** Últimos 6 días del mes anterior: descanso y racha al cerrar el día 1. No entra en el mes calendario. */
+    const [turnosBorde, setTurnosBorde] = useState<Record<string, any>>({});
     const [cellTurnosMap, setCellTurnosMap] = useState<Record<string, any[]>>({});
     const [shiftsMapLoaded, setShiftsMapLoaded] = useState(false);
     const [turaMap, setTuraMap] = useState<Record<string, any>>({});       // parentShiftId → turno TURA
@@ -4376,7 +4380,7 @@ function PlanificacionDesktop() {
 
     // Horas en el ciclo CCT actual (corre del 26 del mes anterior al 25 del mes activo).
     // Suma:
-    //   - Cola del mes anterior (días 26..fin) → tomada de shiftsMap (no editable acá).
+    //   - Cola del mes anterior (días 26..fin) → shiftsMap o turnosBorde (no editable acá).
     //   - Días 1..25 del mes activo → toma pendingChanges si existe, si no shiftsMap.
     // Filtra códigos que no suman horas planificadas (RET, REF, ESC, F, FF, FP, FT, V, L, etc.).
     const empCctCurrentHours = useMemo(() => {
@@ -4402,7 +4406,7 @@ function PlanificacionDesktop() {
         };
         const acumular = (empId: string, key: string, useShiftsMap: boolean) => {
             const pending = pendingChanges[key];
-            const existing = shiftsMap[key];
+            const existing = shiftsMap[key] || turnosBorde[key];
             let activeShift: any = null;
             if (useShiftsMap) {
                 activeShift = existing;
@@ -4428,7 +4432,7 @@ function PlanificacionDesktop() {
             headDays.forEach((d) => acumular(emp.id, `${emp.id}_${getDateKey(d)}`, false));
         });
         return result;
-    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, currentDate, selectedObjective, slaCodeHoursHint, selectedGrupo, grupoUnifiedMode]);
+    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, turnosBorde, currentDate, selectedObjective, slaCodeHoursHint, selectedGrupo, grupoUnifiedMode]);
 
     /** Conteos del mes basados en turnos reales del objetivo (no tamaño de dotación asignada). */
     const objectiveMonthShiftMetrics = useMemo(() => {
@@ -7462,6 +7466,7 @@ function PlanificacionDesktop() {
     useEffect(() => {
         if (!empresaId) {
             setShiftsMap({});
+            setTurnosBorde({});
             setCellTurnosMap({});
             setShiftsMapLoaded(false);
             return;
@@ -7572,6 +7577,30 @@ function PlanificacionDesktop() {
                 }
             })();
         };
+
+        setTurnosBorde({});
+        const prevCal = previousCalendarMonth(viewYear, viewMonth);
+        const bordeKey = planningMonthCacheKey(empresaId, prevCal.year, prevCal.month);
+        const publicarBorde = (shifts: Record<string, any>) => {
+            if (!vigente) return;
+            setTurnosBorde(recortarBordeMesAnterior(shifts, viewYear, viewMonth));
+        };
+        const cacheBorde = getCachedPlanningMonth(bordeKey);
+        if (cacheBorde) publicarBorde(cacheBorde.shiftsMap);
+        else {
+            getDocs(buildPlanningMonthTurnosQuery({
+                empresaId,
+                scopeEmpresa,
+                year: prevCal.year,
+                month: prevCal.month,
+            })).then(async (snap) => {
+                if (!vigente) return;
+                const adj = await ingestPlanningTurnosPorTandas(snap.docs, empresaId, migracionCompleta, getDateKey);
+                if (!vigente) return;
+                setCachedPlanningMonth(bordeKey, adj);
+                publicarBorde(adj.shiftsMap);
+            }).catch(() => {});
+        }
 
         const turnosQ = buildPlanningMonthTurnosQuery({
             empresaId,
@@ -19248,16 +19277,10 @@ function PlanificacionDesktop() {
         if (objectiveId && !estructurasCupo[objectiveId]?.length) estructurasCupo[objectiveId] = positionStructure || [];
         const cupos = cuposCierrePorObjetivo(estructurasCupo);
         const sla = getShiftsForPosition(gap.positionName, objectiveId) as TurnoSla[];
-        const diaOff = (ds: string, n: number) => {
-            const [y, m, d] = ds.split('-').map(Number);
-            const dt = new Date(y, (m || 1) - 1, d || 1);
-            dt.setDate(dt.getDate() + n);
-            return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
-        };
         const turnoEn = (empId: string, ds: string, overlay: Record<string, any>) => {
             const key = `${empId}_${ds}`;
             const p = overlay[key] !== undefined ? overlay[key] : pendingChangesRef.current[key];
-            const t = p ? (p.isDeleted ? null : p) : shiftsMap[key];
+            const t = p ? (p.isDeleted ? null : p) : (shiftsMap[key] || turnosBorde[key]);
             if (!t || t.isDeleted || t.isFranco || t.isNovedad || t.isAbsent) return null;
             const code = normalizarCodigo(t.code || '');
             if (!code || ['F', 'FF', 'FP', 'RET', 'EV'].includes(code)) return null;
@@ -19280,34 +19303,30 @@ function PlanificacionDesktop() {
             horasAntes: number,
             overlay: Record<string, any>,
         ): string | null => {
-            const dias12: string[] = [];
-            for (let i = -6; i <= 6; i++) {
-                if (i === 0) continue;
-                const d = diaOff(ds, i);
-                const t = turnoEn(empId, d, overlay);
-                if (!t) continue;
-                const code = normalizarCodigo(t.code || '');
-                if (code === 'D12' || code === 'N12' || Number(t.hours) >= 12) dias12.push(d);
-            }
-            const vecino = (d: string) => {
-                const t = turnoEn(empId, d, overlay);
-                if (!t) return null;
-                const startTime = hhmmRapido(t.startTime);
-                const endTime = hhmmRapido(t.endTime);
-                if (!startTime || !endTime) return null;
-                return { code: normalizarCodigo(t.code || ''), startTime, endTime };
-            };
+            const cicloCct = liquidationCycleRange(currentDate.getFullYear(), currentDate.getMonth() + 1);
+            const ventana = ventanaJornadaCierre({
+                dateStr: ds,
+                leer: (d) => {
+                    const t = turnoEn(empId, d, overlay);
+                    if (!t) return null;
+                    const startTime = hhmmRapido(t.startTime) || '';
+                    const endTime = hhmmRapido(t.endTime) || '';
+                    return { code: normalizarCodigo(t.code || ''), hours: Number(t.hours) || undefined, startTime, endTime };
+                },
+            });
             return motivoBloqueoJornadaCierre({
-                horasMes: Number(empMonthlyHours[empId]) || 0,
+                horasMes: Number(empCctCurrentHours[empId]) || 0,
                 horasAntes,
                 horasDespues: Number(propuesto.hours) || horasTurno(propuesto),
                 tope: planningLimits.monthly,
                 topeAutorizado: authorizedOver200Ids.has(empId) || !topeRequierePin(topeGrants[empId], periodoPlan),
+                diaEnCiclo: ymdInRange(ds, cicloCct),
                 dateStr: ds,
                 propuesto,
-                anterior: vecino(diaOff(ds, -1)),
-                siguiente: vecino(diaOff(ds, 1)),
-                dias12,
+                anterior: ventana.anterior,
+                siguiente: ventana.siguiente,
+                dias12: ventana.dias12,
+                dias8: ventana.dias8,
             });
         };
         let motivo12 = '';

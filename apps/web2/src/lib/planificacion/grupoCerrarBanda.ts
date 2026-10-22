@@ -323,10 +323,106 @@ function sumarDiasCierre(ds: string, n: number): string {
   return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
 }
 
-/** Días de 12 h seguidos, contando el turno ya pasado a 12 h. */
-export function rachaDoceSeguidos(dateStr: string, propuestoEs12: boolean, dias12: readonly string[]): number {
-  if (!propuestoEs12 || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return 0;
-  const set = new Set(dias12);
+/** Ventana de la racha: 6 turnos de 8 h o 4 de 12 h, más el día anterior (descanso). */
+export const VENTANA_JORNADA_CIERRE = 6;
+
+/**
+ * Días del mes anterior que entran en la ventana al cerrar `dateStr`.
+ * El 01/11 con ventana 6 devuelve 26/10..31/10; el 04/11, solo 29/10..31/10.
+ */
+export function fechasBordeMesAnterior(dateStr: string, ventana = VENTANA_JORNADA_CIERRE): string[] {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return [];
+  const primero = `${dateStr.slice(0, 7)}-01`;
+  const out: string[] = [];
+  for (let i = 1; i <= ventana; i++) {
+    const d = sumarDiasCierre(dateStr, -i);
+    if (d < primero) out.push(d);
+  }
+  return out;
+}
+
+/** Turnos de los últimos `ventana` días del mes anterior al mes en pantalla (1..12). */
+export function recortarBordeMesAnterior(
+  shifts: Record<string, unknown> | undefined,
+  anio: number,
+  mes: number,
+  ventana = VENTANA_JORNADA_CIERRE,
+): Record<string, unknown> {
+  const primero = `${anio}-${String(mes).padStart(2, '0')}-01`;
+  const desde = sumarDiasCierre(primero, -ventana);
+  const out: Record<string, unknown> = {};
+  if (!shifts) return out;
+  for (const [k, v] of Object.entries(shifts)) {
+    const ds = k.slice(-10);
+    if (ds >= desde && ds < primero) out[k] = v;
+  }
+  return out;
+}
+
+export type LecturaJornadaCierre = {
+  code?: string;
+  hours?: number;
+  startTime?: string;
+  endTime?: string;
+};
+
+export type VecinoJornadaCierre = {
+  code: string;
+  startTime: string;
+  endTime: string;
+};
+
+function claseJornadaLeida(t: LecturaJornadaCierre | null | undefined): '12' | '8' | null {
+  if (!t) return null;
+  if (jornadaEs12(t)) return '12';
+  const c = normalizarCodigo(t.code || '');
+  if (c === 'M' || c === 'T' || c === 'N') return '8';
+  const h = Number(t.hours);
+  if (h > 0 && h < 12) return '8';
+  return null;
+}
+
+/**
+ * Racha y vecino de descanso. `leer` resuelve el turno de ese día
+ * (mes en pantalla, borrador, o borde del mes anterior).
+ */
+export function ventanaJornadaCierre(input: {
+  dateStr: string;
+  leer: (ds: string) => LecturaJornadaCierre | null;
+  ventana?: number;
+}): {
+  dias12: string[];
+  dias8: string[];
+  anterior: VecinoJornadaCierre | null;
+  siguiente: VecinoJornadaCierre | null;
+} {
+  const ventana = input.ventana ?? VENTANA_JORNADA_CIERRE;
+  const dias12: string[] = [];
+  const dias8: string[] = [];
+  const vecino = (d: string): VecinoJornadaCierre | null => {
+    const t = input.leer(d);
+    if (!t?.startTime || !t.endTime || !claseJornadaLeida(t)) return null;
+    return { code: normalizarCodigo(t.code || ''), startTime: t.startTime, endTime: t.endTime };
+  };
+  for (let i = 1; i <= ventana; i++) {
+    for (const signo of [-1, 1] as const) {
+      const d = sumarDiasCierre(input.dateStr, signo * i);
+      const k = claseJornadaLeida(input.leer(d));
+      if (k === '12') dias12.push(d);
+      else if (k === '8') dias8.push(d);
+    }
+  }
+  return {
+    dias12,
+    dias8,
+    anterior: vecino(sumarDiasCierre(input.dateStr, -1)),
+    siguiente: vecino(sumarDiasCierre(input.dateStr, 1)),
+  };
+}
+
+function rachaDiasSeguidos(dateStr: string, cuenta: boolean, dias: readonly string[]): number {
+  if (!cuenta || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return 0;
+  const set = new Set(dias);
   set.add(dateStr);
   let n = 1;
   for (let i = 1; i < 8; i++) {
@@ -340,15 +436,15 @@ export function rachaDoceSeguidos(dateStr: string, propuestoEs12: boolean, dias1
   return n;
 }
 
-export type VecinoJornadaCierre = {
-  code: string;
-  startTime: string;
-  endTime: string;
-};
+/** Días de 12 h seguidos, contando el turno ya pasado a 12 h. */
+export function rachaDoceSeguidos(dateStr: string, propuestoEs12: boolean, dias12: readonly string[]): number {
+  return rachaDiasSeguidos(dateStr, propuestoEs12, dias12);
+}
 
 /**
- * Tope 200 h, máx. 4 turnos de 12 h seguidos y descanso contra el horario nuevo
+ * Tope del ciclo CCT 26→25, máx. 4×12 h / 6×8 h y descanso contra el horario nuevo
  * (el D12 ya alargado, no la M de 8 h que estaba). Null si se puede escribir.
+ * `diaEnCiclo === false`: el día cae en el ciclo siguiente (26–fin); esas horas no se miden acá.
  */
 export function motivoBloqueoJornadaCierre(input: {
   horasMes: number;
@@ -356,22 +452,31 @@ export function motivoBloqueoJornadaCierre(input: {
   horasDespues: number;
   tope?: number;
   topeAutorizado?: boolean;
+  /** false si el día no cae en el ciclo cuyas horas vienen en horasMes. */
+  diaEnCiclo?: boolean;
   dateStr: string;
   propuesto: { code: string; startTime?: string; endTime?: string; hours?: number };
   anterior?: VecinoJornadaCierre | null;
   siguiente?: VecinoJornadaCierre | null;
   /** Otros días que ya son jornada de 12 h. El día propuesto se suma si el turno nuevo lo es. */
   dias12?: readonly string[];
+  /** Otros días de 8 h (M/T/N). El día propuesto se suma si el turno nuevo lo es. */
+  dias8?: readonly string[];
   descansoMin?: number;
 }): string | null {
   const tope = Number(input.tope) > 0 ? Number(input.tope) : 200;
   const total = (Number(input.horasMes) || 0) + (Number(input.horasDespues) || 0) - (Number(input.horasAntes) || 0);
-  if (!input.topeAutorizado && total > tope + 1e-6) {
+  if (!input.topeAutorizado && input.diaEnCiclo !== false && total > tope + 1e-6) {
     return `${Math.round(total)} h en el mes (tope ${tope} h)`;
   }
   const es12 = jornadaEs12(input.propuesto);
   const racha = rachaDoceSeguidos(input.dateStr, es12, input.dias12 || []);
   if (racha > 4) return `${racha} turnos de 12 h seguidos (máximo 4)`;
+  const codeProp = normalizarCodigo(input.propuesto.code);
+  const horasProp = Number(input.propuesto.hours);
+  const es8 = !es12 && (codeProp === 'M' || codeProp === 'T' || codeProp === 'N' || (horasProp > 0 && horasProp < 12));
+  const racha8 = rachaDiasSeguidos(input.dateStr, es8, input.dias8 || []);
+  if (racha8 > 6) return `${racha8} turnos de 8 h seguidos (máximo 6)`;
   const min = input.descansoMin ?? 12;
   const prop = input.propuesto;
   if (prop.startTime && prop.endTime) {

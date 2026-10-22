@@ -8,8 +8,11 @@ import {
   conteosCierreObjetivo,
   cuposCierrePorObjetivo,
   faltanteDeBandaAbierta,
+  fechasBordeMesAnterior,
   franjaBandaDeSla,
   motivoBloqueoJornadaCierre,
+  recortarBordeMesAnterior,
+  ventanaJornadaCierre,
   objetivoPermitidoParaExtender,
   objectiveIdEscrituraCierre,
   planCerrarBandas,
@@ -486,5 +489,122 @@ test('el par de 12 h y el FT respetan tope, racha de 4 y el descanso del turno y
     dateStr: dia,
     propuesto: { code: 'D12', startTime: '07:00', endTime: '19:00', hours: 12 },
     dias12: ['2026-10-06', '2026-10-07', '2026-10-08'],
+  }), null);
+});
+
+test('cerrar el 01/11 ve el N12 y los D12 del mes anterior, y el tope es el ciclo 26→25', () => {
+  const borde = fechasBordeMesAnterior('2026-11-01');
+  assert.deepEqual(borde, ['2026-10-31', '2026-10-30', '2026-10-29', '2026-10-28', '2026-10-27', '2026-10-26']);
+  assert.deepEqual(fechasBordeMesAnterior('2026-11-04'), ['2026-10-31', '2026-10-30', '2026-10-29']);
+
+  const octubre: Record<string, { code: string; startTime: string; endTime: string; hours: number }> = {};
+  for (const ds of ['2026-10-26', '2026-10-27', '2026-10-28', '2026-10-29', '2026-10-30', '2026-10-31', '2026-10-01']) {
+    octubre[`g1_${ds}`] = { code: 'D12', startTime: '07:00', endTime: '19:00', hours: 12 };
+  }
+  const recorte = recortarBordeMesAnterior(octubre, 2026, 11);
+  assert.equal(recorte['g1_2026-10-31'] != null, true);
+  assert.equal(recorte['g1_2026-10-26'] != null, true);
+  assert.equal(recorte['g1_2026-10-01'], undefined);
+
+  const mapa = (id: string, dias: Array<[string, string, string, string]>) => {
+    const m: Record<string, { code: string; startTime: string; endTime: string; hours: number }> = {};
+    for (const [ds, code, startTime, endTime] of dias) {
+      m[`${id}_${ds}`] = { code, startTime, endTime, hours: code === 'D12' || code === 'N12' ? 12 : 8 };
+    }
+    return m;
+  };
+  const bordeN = mapa('g1', [['2026-10-31', 'N12', '19:00', '07:00']]);
+  const conNoche = ventanaJornadaCierre({
+    dateStr: '2026-11-01',
+    leer: (ds) => bordeN[`g1_${ds}`] || null,
+  });
+  assert.equal(conNoche.anterior?.code, 'N12');
+  const descanso = motivoBloqueoJornadaCierre({
+    horasMes: 40,
+    horasAntes: 8,
+    horasDespues: 12,
+    dateStr: '2026-11-01',
+    propuesto: { code: 'D12', startTime: '07:00', endTime: '19:00', hours: 12 },
+    anterior: conNoche.anterior,
+    dias12: conNoche.dias12,
+  });
+  assert.match(descanso || '', /descanso/);
+
+  const bordeDoce = mapa('g1', [
+    ['2026-10-28', 'D12', '07:00', '19:00'],
+    ['2026-10-29', 'D12', '07:00', '19:00'],
+    ['2026-10-30', 'D12', '07:00', '19:00'],
+    ['2026-10-31', 'D12', '07:00', '19:00'],
+  ]);
+  const conDoce = ventanaJornadaCierre({
+    dateStr: '2026-11-01',
+    leer: (ds) => bordeDoce[`g1_${ds}`] || null,
+  });
+  assert.deepEqual(conDoce.dias12.slice().sort(), ['2026-10-28', '2026-10-29', '2026-10-30', '2026-10-31']);
+  const racha12 = motivoBloqueoJornadaCierre({
+    horasMes: 40,
+    horasAntes: 8,
+    horasDespues: 12,
+    dateStr: '2026-11-01',
+    propuesto: { code: 'D12', startTime: '07:00', endTime: '19:00', hours: 12 },
+    dias12: conDoce.dias12,
+  });
+  assert.match(racha12 || '', /12 h seguidos/);
+
+  const bordeOcho = mapa('g1', [
+    ['2026-10-26', 'M', '07:00', '15:00'],
+    ['2026-10-27', 'M', '07:00', '15:00'],
+    ['2026-10-28', 'M', '07:00', '15:00'],
+    ['2026-10-29', 'M', '07:00', '15:00'],
+    ['2026-10-30', 'M', '07:00', '15:00'],
+    ['2026-10-31', 'M', '07:00', '15:00'],
+  ]);
+  const conOcho = ventanaJornadaCierre({
+    dateStr: '2026-11-01',
+    leer: (ds) => bordeOcho[`g1_${ds}`] || null,
+  });
+  const racha8 = motivoBloqueoJornadaCierre({
+    horasMes: 40,
+    horasAntes: 0,
+    horasDespues: 8,
+    dateStr: '2026-11-01',
+    propuesto: { code: 'M', startTime: '07:00', endTime: '15:00', hours: 8 },
+    dias8: conOcho.dias8,
+  });
+  assert.match(racha8 || '', /8 h seguidos/);
+  assert.equal(motivoBloqueoJornadaCierre({
+    horasMes: 40,
+    horasAntes: 0,
+    horasDespues: 8,
+    dateStr: '2026-11-01',
+    propuesto: { code: 'M', startTime: '07:00', endTime: '15:00', hours: 8 },
+    dias8: conOcho.dias8.slice(1),
+  }), null);
+
+  const topeCiclo = motivoBloqueoJornadaCierre({
+    horasMes: 198,
+    horasAntes: 8,
+    horasDespues: 12,
+    dateStr: '2026-11-01',
+    diaEnCiclo: true,
+    propuesto: { code: 'D12', startTime: '07:00', endTime: '19:00', hours: 12 },
+  });
+  assert.match(topeCiclo || '', /tope 200 h/);
+  assert.equal(motivoBloqueoJornadaCierre({
+    horasMes: 198,
+    horasAntes: 8,
+    horasDespues: 12,
+    dateStr: '2026-11-01',
+    diaEnCiclo: true,
+    topeAutorizado: true,
+    propuesto: { code: 'D12', startTime: '07:00', endTime: '19:00', hours: 12 },
+  }), null);
+  assert.equal(motivoBloqueoJornadaCierre({
+    horasMes: 198,
+    horasAntes: 8,
+    horasDespues: 12,
+    dateStr: '2026-11-26',
+    diaEnCiclo: false,
+    propuesto: { code: 'D12', startTime: '07:00', endTime: '19:00', hours: 12 },
   }), null);
 });
