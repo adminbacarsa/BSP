@@ -346,9 +346,11 @@ import {
     bandasAbiertasDelGrupo,
     cierreContado,
     cuposCierrePorObjetivo,
+    decisionCierre12Publicado,
     faltanteDeBandaAbierta,
     franjaBandaDeSla,
     motivoBloqueoJornadaCierre,
+    objetivosCeldasCierre12,
     objectiveIdEscrituraCierre,
     planCerrarBandas,
     recortarBordeMesAnterior,
@@ -525,7 +527,7 @@ import { PrepararMesModal } from '@/components/planificacion/PrepararMesModal';
 import { planServicioMes } from '@/lib/planificacion/crearServicioMes';
 import { decidirCopiaSlaMes, nombreMesDeClave, partirCopiaMasiva, textoConfirmacionCopiaMasiva, type DecisionCopiaSla } from '@/lib/servicios/copiarSlaMes';
 import { persistirCopiaSlaMes } from '@/lib/servicios/copiarSlaMesCliente';
-import { avisoCeldaObjetivoPublicado, avisoCeldaSinVerificarPublicado, objetivoPublicado } from '@/lib/planificacion/objetivoPublicado';
+import { avisoCeldaObjetivoPublicado, avisoCeldaSinVerificarPublicado, objetivoDeLaCelda, objetivoPublicado } from '@/lib/planificacion/objetivoPublicado';
 import { avisoNoSePudoVerificarPublicado, avisoObjetivoYaPublicado, celdaPrepararBloqueada, DESDE_PREPARAR, leerObjetivosPublicados, quitarBorradorPrepararPublicado, unidadesDelMes } from '@/lib/planificacion/prepararMesTanda';
 import {
     clasificarSeleccionLicencia,
@@ -16440,15 +16442,16 @@ function PlanificacionDesktop() {
             return { change: { ...base, code, name: nombres[code], hours: 0, startTime: '00:00', ...(code === 'FP' ? { endTime: '23:59' } : {}), isFranco: true, positionName: pos } };
         }
         const novedadRes = resolverNovedad(code, catalogoNovedad);
+        const oidLicencia = objetivoDeLaCelda(oidCelda, objectiveId, selectedObjective);
         if (novedadRes) {
             return {
-                change: { code: novedadRes.code, name: novedadRes.label, isTemp: true, isNovedad: true, hours: 0, startTime: '00:00', ...camposBandaConservada((c?.p && !c.p.isDeleted ? c.p : c?.s) || null) },
+                change: { code: novedadRes.code, name: novedadRes.label, isTemp: true, isNovedad: true, hours: 0, startTime: '00:00', objectiveId: oidLicencia, ...camposBandaConservada((c?.p && !c.p.isDeleted ? c.p : c?.s) || null) },
                 novedad: { employeeId: emp.id, employeeName: emp.name || '', startDate: ds, endDate: ds, type: novedadRes.label, reason: motivoNovedadRef.current || 'Cargado en modo rápido', status: 'APPROVED', _modoRapido: true },
             };
         }
         if (tipo === 'LICENCIA') {
             return {
-                change: { code, name: code, isTemp: true, isNovedad: true, hours: 0, startTime: '00:00', ...camposBandaConservada((c?.p && !c.p.isDeleted ? c.p : c?.s) || null) },
+                change: { code, name: code, isTemp: true, isNovedad: true, hours: 0, startTime: '00:00', objectiveId: oidLicencia, ...camposBandaConservada((c?.p && !c.p.isDeleted ? c.p : c?.s) || null) },
                 novedad: { employeeId: emp.id, employeeName: emp.name || '', startDate: ds, endDate: ds, type: code, reason: motivoNovedadRef.current || 'Cargado en modo rápido', status: 'APPROVED', _modoRapido: true },
             };
         }
@@ -19801,6 +19804,38 @@ function PlanificacionDesktop() {
         const next = { ...pendingChangesRef.current };
         const avisos: string[] = [];
         let hechas = 0;
+        const anioCierre = currentDate.getFullYear();
+        const mesCierre = currentDate.getMonth() + 1;
+        const objetivoEscrito = (empId: string, ds: string, delTurno?: string): string => {
+            const key = `${empId}_${ds}`;
+            const p = pendingChangesRef.current[key];
+            const t = p ? (p.isDeleted ? null : p) : shiftsMap[key];
+            return objetivoDeLaCelda(String(t?.objectiveId || ''), delTurno, objectiveId);
+        };
+        const celdasDePaso = (paso: (typeof plan.pasos)[number]) => (
+            paso.via === '12h'
+                ? paso.extra.cambios.map((ch) => ({ objectiveId: objetivoEscrito(ch.empId, ch.dateStr, ch.objectiveId) }))
+                : [{ objectiveId: objetivoEscrito(paso.empId, dateStr) }]
+        );
+        const idsDonantes = new Set<string>();
+        for (const paso of plan.pasos) {
+            for (const id of objetivosCeldasCierre12({ huecoObjectiveId: objectiveId, celdas: celdasDePaso(paso) })) {
+                if (id && id !== objectiveId) idsDonantes.add(id);
+            }
+        }
+        const lecturaCierre = idsDonantes.size
+            ? await leerObjetivosPublicados([...idsDonantes], async (oid) => (
+                (await objetivoPublicado(empresaId, oid, anioCierre, mesCierre)) ? { publishedAt: true } : null
+            ))
+            : { publicados: new Set<string>(), sinLeer: new Set<string>() };
+        const avisadosCierre = new Set<string>();
+        const avisarCierrePub = (oid: string, motivo: 'publicado' | 'sin_verificar') => {
+            const clave = `${motivo}:${oid}`;
+            if (avisadosCierre.has(clave)) return;
+            avisadosCierre.add(clave);
+            const nombre = getObjectiveName(oid) || oid || nombreCierre;
+            avisos.push(motivo === 'publicado' ? avisoCeldaObjetivoPublicado(nombre) : avisoCeldaSinVerificarPublicado(nombre));
+        };
         const fechas12: string[] = [];
         const escribir = (empId: string, ds: string, code: string, fuente: FuenteRapida) => {
             const r = filaDe.get(empId);
@@ -19819,6 +19854,16 @@ function PlanificacionDesktop() {
             return true;
         };
         for (const paso of plan.pasos) {
+            const decisionPub = decisionCierre12Publicado({
+                huecoObjectiveId: objectiveId,
+                celdas: celdasDePaso(paso),
+                publicados: lecturaCierre.publicados,
+                sinLeer: lecturaCierre.sinLeer,
+            });
+            if (decisionPub.aplicar === false) {
+                avisarCierrePub(decisionPub.objectiveId, decisionPub.motivo);
+                continue;
+            }
             if (paso.via === 'asignar') {
                 const franja = franjaBandaDeSla(sla, gapBand);
                 if (!franja?.startTime || !franja.endTime) { avisos.push(`${gap.positionName} no tiene la banda ${gapBand} en el servicio.`); continue; }

@@ -2,11 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { elegirEstrategia, medirEstrategia, type EntradaUnidad, type Metricas } from './prepararMes';
 import type { CeldaPropuesta } from './continuarMesAnterior';
-import { objetivoPublicado, TEXTO_SIN_VERIFICAR_PUBLICACION } from './objetivoPublicado';
+import { objetivoDeLaCelda, objetivoPublicado, TEXTO_SIN_VERIFICAR_PUBLICACION } from './objetivoPublicado';
 import {
   aplicarPropuestasPreparar,
   correrTanda,
   DESDE_PREPARAR,
+  celdaPrepararBloqueada,
   leerObjetivosPublicados,
   quitarBorradorPrepararPublicado,
   unidadesDelMes,
@@ -160,6 +161,16 @@ test('objetivoPublicado sigue al legacy cuando el tenant no tiene publishedAt', 
     id === 'bacar_obj1_2026_11' ? { publishedAt: '2026-11-01T00:00:00.000Z' } : null
   ));
   assert.equal(tenantManda, true);
+});
+
+test('licencia del modo rápido chequea el objetivo de la celda, no el seleccionado del grupo', () => {
+  assert.equal(objetivoDeLaCelda('vifood', 'peaje', 'peaje'), 'vifood');
+  assert.equal(objetivoDeLaCelda('', 'vifood', 'peaje'), 'vifood');
+  assert.equal(objetivoDeLaCelda('', '', 'peaje'), 'peaje');
+  const oid = objetivoDeLaCelda('vifood', 'peaje', 'peaje');
+  assert.equal(celdaPrepararBloqueada(oid, new Set(['vifood']), new Set()), 'publicado');
+  assert.equal(celdaPrepararBloqueada(oid, new Set(), new Set(['vifood'])), 'sin_verificar');
+  assert.equal(celdaPrepararBloqueada('peaje', new Set(['vifood']), new Set()), null);
 });
 
 test('tanda: si no se puede leer la publicación, no se arma ni queda completo', async () => {

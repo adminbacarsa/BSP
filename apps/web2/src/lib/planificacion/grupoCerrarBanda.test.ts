@@ -7,7 +7,9 @@ import {
   cierreContado,
   conteosCierreObjetivo,
   cuposCierrePorObjetivo,
+  decisionCierre12Publicado,
   faltanteDeBandaAbierta,
+  objetivosCeldasCierre12,
   fechasBordeMesAnterior,
   franjaBandaDeSla,
   motivoBloqueoJornadaCierre,
@@ -607,4 +609,54 @@ test('cerrar el 01/11 ve el N12 y los D12 del mes anterior, y el tope es el cicl
     diaEnCiclo: false,
     propuesto: { code: 'D12', startTime: '07:00', endTime: '19:00', hours: 12 },
   }), null);
+});
+
+test('cerrar banda no aplica el par si el donante está publicado o no se pudo leer', () => {
+  const dia = '2026-10-12';
+  const prop = proponerCierre12h({
+    dateStr: dia,
+    positionName: 'Vigilancia',
+    faltantes: ['T'],
+    objectiveId: 'peaje',
+    cupos: { 'peaje|VIGILANCIA': 1, 'vifood|VIGILANCIA': 1 },
+    turnos: [
+      { empId: 'n-peaje', nombre: 'NORTE', dateStr: dia, code: 'N', positionName: 'Vigilancia', objectiveId: 'peaje' },
+      { empId: 'm-vifood', nombre: 'DONANTE', dateStr: dia, code: 'M', positionName: 'Vigilancia', objectiveId: 'vifood' },
+      { empId: 'm2-vifood', nombre: 'QUEDA', dateStr: dia, code: 'M', positionName: 'Vigilancia', objectiveId: 'vifood' },
+    ],
+  });
+  assert.equal(prop?.modo, 'par');
+  const donante = prop?.cambios.find((c) => c.empId === 'm-vifood');
+  assert.equal(donante?.objectiveId, 'vifood');
+  assert.equal(donante?.coversObjectiveId, 'peaje');
+  const celdas = (prop?.cambios || []).map((c) => ({ objectiveId: c.objectiveId }));
+  assert.deepEqual(objetivosCeldasCierre12({ huecoObjectiveId: 'peaje', celdas }), ['peaje', 'vifood']);
+  const publicado = decisionCierre12Publicado({
+    huecoObjectiveId: 'peaje',
+    celdas,
+    publicados: new Set(['vifood']),
+    sinLeer: new Set(),
+  });
+  assert.deepEqual(publicado, { aplicar: false, objectiveId: 'vifood', motivo: 'publicado' });
+  const sinLeer = decisionCierre12Publicado({
+    huecoObjectiveId: 'peaje',
+    celdas,
+    publicados: new Set(),
+    sinLeer: new Set(['vifood']),
+  });
+  assert.deepEqual(sinLeer, { aplicar: false, objectiveId: 'vifood', motivo: 'sin_verificar' });
+  const abierto = decisionCierre12Publicado({
+    huecoObjectiveId: 'peaje',
+    celdas,
+    publicados: new Set(),
+    sinLeer: new Set(),
+  });
+  assert.deepEqual(abierto, { aplicar: true });
+  const huecoPublicado = decisionCierre12Publicado({
+    huecoObjectiveId: 'peaje',
+    celdas,
+    publicados: new Set(['peaje']),
+    sinLeer: new Set(),
+  });
+  assert.deepEqual(huecoPublicado, { aplicar: false, objectiveId: 'peaje', motivo: 'publicado' });
 });

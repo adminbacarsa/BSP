@@ -30,6 +30,8 @@ export type Cambio12h = {
     hours: number;
     /** Puesto de donde sale. */
     positionName: string;
+    /** Objetivo de la celda que se reescribe (el donante). */
+    objectiveId?: string;
     /** Puesto al que se acredita la cobertura cuando no es el propio. */
     coversPositionName?: string;
     /** Objetivo al que se acredita cuando el turno es de otro objetivo del grupo. */
@@ -270,6 +272,7 @@ function cambio(
         endTime: h.endTime,
         hours: h.hours,
         positionName: t.positionName,
+        ...(t.objectiveId ? { objectiveId: t.objectiveId } : {}),
         ...(otroPuesto ? { coversPositionName: targetPos } : {}),
         ...(otroObj ? { coversObjectiveId: targetObj } : {}),
     };

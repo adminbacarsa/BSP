@@ -62,3 +62,21 @@ export function avisoCeldaObjetivoPublicado(nombre: string): string {
 export function avisoCeldaSinVerificarPublicado(nombre: string): string {
   return `No se pudo verificar si ${nombre} está publicado: no se escribió.`;
 }
+
+/**
+ * Objetivo que hay que re-leer antes de pisar una celda.
+ * Manda el turno que ya está en esa fila y columna. Si la celda está vacía,
+ * el que usaría un turno nuevo (fuente, lugar o guardia). El objetivo
+ * seleccionado del grupo solo entra si no hay otro.
+ */
+export function objetivoDeLaCelda(
+  objectiveIdCelda?: string | null,
+  objectiveIdTurno?: string | null,
+  respaldo?: string | null,
+): string {
+  const celda = String(objectiveIdCelda ?? '').trim();
+  if (celda) return celda;
+  const turno = String(objectiveIdTurno ?? '').trim();
+  if (turno) return turno;
+  return String(respaldo ?? '').trim();
+}

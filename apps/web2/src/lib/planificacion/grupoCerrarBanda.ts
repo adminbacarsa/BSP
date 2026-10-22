@@ -221,6 +221,44 @@ export function planCerrarBandas<T>(input: {
 }
 
 /**
+ * Objetivos de las celdas que un cierre reescribe: el hueco y cada donante.
+ * Una celda sin objetivo cuenta como el hueco.
+ */
+export function objetivosCeldasCierre12(input: {
+  huecoObjectiveId: string;
+  celdas: readonly { objectiveId?: string | null }[];
+}): string[] {
+  const hueco = String(input.huecoObjectiveId || '').trim();
+  const ids: string[] = [];
+  const add = (id: string) => {
+    const v = String(id || '').trim();
+    if (v && !ids.includes(v)) ids.push(v);
+  };
+  add(hueco);
+  for (const c of input.celdas) add(String(c.objectiveId || '').trim() || hueco);
+  return ids;
+}
+
+/**
+ * Si el hueco o algún donante está publicado, o no se pudo leer, ese cierre no se aplica.
+ * El primero bloqueado es el que hay que avisar.
+ */
+export function decisionCierre12Publicado(input: {
+  huecoObjectiveId: string;
+  celdas: readonly { objectiveId?: string | null }[];
+  publicados: ReadonlySet<string>;
+  sinLeer: ReadonlySet<string>;
+}): { aplicar: true } | { aplicar: false; objectiveId: string; motivo: 'publicado' | 'sin_verificar' } {
+  const objetivos = objetivosCeldasCierre12(input);
+  if (!objetivos.length) return { aplicar: false, objectiveId: '', motivo: 'sin_verificar' };
+  for (const oid of objetivos) {
+    if (input.sinLeer.has(oid)) return { aplicar: false, objectiveId: oid, motivo: 'sin_verificar' };
+    if (input.publicados.has(oid)) return { aplicar: false, objectiveId: oid, motivo: 'publicado' };
+  }
+  return { aplicar: true };
+}
+
+/**
  * Objetivo del turno que escribe el cierre.
  * El hueco manda: si el guardia prefiere otro objetivo, el turno igual queda en el hueco.
  */
