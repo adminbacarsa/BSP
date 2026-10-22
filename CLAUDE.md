@@ -46,7 +46,7 @@ Períodos: Liquidación ciclo **26→25**; Prefactura/SLA mes calendario **1→f
 - Antes de deployar revisar `git log origin/main..`. Functions no puede importar de `web2` ni `packages` (ver `check:functions-standalone`).
 - Tras hosting, OTA de la app: `npm run update:production` en `apps/mobile-guardia` (cuando aplique).
 
-## No tocar sin entender
+- Planificación (22/10): importar Excel, guardar y Enter del modo rápido rearman solo la fila/columna tocada; el cruce del Excel va en tandas.
 `useOperacionesMonitor.ts`, `firestore.rules`, docs de `planificacion_estados`, baja de clientes CRM (soft delete).
 
 ## Mantenimiento

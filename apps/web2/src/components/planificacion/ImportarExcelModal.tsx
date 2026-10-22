@@ -11,7 +11,8 @@ import type { EquivalenciaCodigo } from '@/lib/planificacion/equivalenciaCodigo'
 import { proponerDefinicion, textoCeldasVacias } from '@/lib/planificacion/definirCodigo';
 import {
   bloquesDeCuadros,
-  cruzarGuardias,
+  cederHiloImport,
+  cruzarGuardiasPorTandas,
   detectarCuadros,
   faltanEnPlanilla,
   normPlanilla,
@@ -21,7 +22,7 @@ import {
   ordenIdsPlanilla,
   resumenPreview,
   sugerirCuadros,
-  vistaPrevia,
+  vistaPreviaPorTandas,
   type BloqueDestino,
   type CeldaActual,
   type CruceFila,
@@ -105,6 +106,7 @@ type GrupoImport = {
 
 const LICENCIAS = ['V', 'E', 'A', 'L', 'AA', 'PG', 'SUS'];
 const FRANCOS = ['F', 'FF', 'FP'];
+const SIN_ACTUALES: CeldaActual[] = [];
 
 /** Un turno del servicio en la lista «Pasa a»: código y puesto («M@Guardia»). */
 const SEP_PUESTO = '@';
@@ -266,7 +268,7 @@ export function ImportarExcelModal({ ctx, onCargar, onAplicar, onCancelar, puede
   const grupo = grupos[grupoIdx] || null;
   const cuadro = useMemo(() => (grupo ? cuadroDelGrupo(grupo, cuadros) : null), [grupo, cuadros]);
   const reglas = (grupo && reglasPorClave[grupo.clave]) || [];
-  const actuales = cargado && grupo && cargado.clave === grupo.clave ? cargado.actuales : [];
+  const actuales = cargado && grupo && cargado.clave === grupo.clave ? cargado.actuales : SIN_ACTUALES;
   const dotacion = useMemo(
     () => ctx.empleados.filter((e) => !!grupo && e.objetivoPreferido === grupo.objectiveId),
     [ctx.empleados, grupo],
@@ -275,11 +277,10 @@ export function ImportarExcelModal({ ctx, onCargar, onAplicar, onCancelar, puede
     const ids = new Set(ctx.empleados.map((e) => e.id));
     return [...ctx.empleados, ...altas.filter((a) => !ids.has(a.id))];
   }, [ctx.empleados, altas]);
-  const cruce = useMemo(
-    () => (cuadro && cuadro.filas.length ? cruzarGuardias(cuadro.filas, empleadosCruce, ctx.empresaId) : []),
-    [cuadro, empleadosCruce, ctx.empresaId],
-  );
-  const cruceOk = useMemo(() => cruceResuelto(cruce, decisiones), [cruce, decisiones]);
+  const [previa, setPrevia] = useState<{ bruto: CruceFila[]; cruce: CruceFila[]; items: ItemPreview[] } | null>(null);
+  const [armandoPrevia, setArmandoPrevia] = useState(false);
+  const cruce = previa?.bruto || [];
+  const cruceOk = previa?.cruce || [];
   const faltan = useMemo(() => faltanEnPlanilla(cruceOk, dotacion), [cruceOk, dotacion]);
   const catalogoEmpresa = useMemo(() => {
     const out: Array<{ code: string; startTime: string; endTime: string }> = [];
@@ -295,23 +296,46 @@ export function ImportarExcelModal({ ctx, onCargar, onAplicar, onCancelar, puede
     }
     return out;
   }, [ctx.servicios]);
-  const items = useMemo(() => (cuadro && grupo ? vistaPrevia({
-    year: ctx.year,
-    month: ctx.month,
-    cuadro,
-    reglas,
-    cruce: cruceOk,
-    incluirDudosos: false,
-    turnos: grupo.turnos,
-    actuales,
-    diasCerrados: ctx.diasCerrados,
-    catalogo: catalogoEmpresa,
-  }) : []), [ctx, cuadro, grupo, reglas, cruceOk, actuales, catalogoEmpresa]);
+  const items = previa?.items || [];
+  useEffect(() => {
+    if (!cuadro || !grupo || !cuadro.filas.length) {
+      setPrevia(null);
+      setArmandoPrevia(false);
+      return;
+    }
+    let vivo = true;
+    setArmandoPrevia(true);
+    const year = ctx.year;
+    const month = ctx.month;
+    const diasCerrados = ctx.diasCerrados;
+    const empresaId = ctx.empresaId;
+    void (async () => {
+      const filasCruce = await cruzarGuardiasPorTandas(cuadro.filas, empleadosCruce, empresaId);
+      if (!vivo) return;
+      const ok = cruceResuelto(filasCruce, decisiones);
+      const armados = await vistaPreviaPorTandas({
+        year,
+        month,
+        cuadro,
+        reglas,
+        cruce: ok,
+        incluirDudosos: false,
+        turnos: grupo.turnos,
+        actuales,
+        diasCerrados,
+        catalogo: catalogoEmpresa,
+      });
+      if (!vivo) return;
+      setPrevia({ bruto: filasCruce, cruce: ok, items: armados });
+      setArmandoPrevia(false);
+    })();
+    return () => { vivo = false; };
+  }, [cuadro, grupo, reglas, empleadosCruce, decisiones, actuales, ctx.year, ctx.month, ctx.diasCerrados, ctx.empresaId, catalogoEmpresa]);
   const resumen = resumenPreview(items);
   const codigosSla = useMemo(() => [...new Set((grupo?.turnos || []).map((t) => t.code).filter(Boolean))], [grupo]);
   const importables = bloques.filter((b) => elecciones[b.key]?.importar);
   const destinoOk = importables.length > 0 && importables.every((b) => elecciones[b.key]?.objectiveId);
-  const listoParaAplicar = !!grupo && !!cargado && cargado.clave === grupo.clave && !cargando;
+  const listoParaAplicar = !!grupo && !!cargado && cargado.clave === grupo.clave && !cargando && !armandoPrevia && !!previa;
 
   const grupoClave = grupo?.clave || '';
   const objectiveIdCarga = grupo?.objectiveId || '';
@@ -339,7 +363,10 @@ export function ImportarExcelModal({ ctx, onCargar, onAplicar, onCancelar, puede
     try {
       const { celdasDesdeArrayBuffer } = await import('@/lib/planificacion/importarExcelXlsx');
       const buf = await file.arrayBuffer();
-      const hallados = detectarCuadros(celdasDesdeArrayBuffer(buf), ctx.year, ctx.month);
+      await cederHiloImport();
+      const celdas = celdasDesdeArrayBuffer(buf);
+      await cederHiloImport();
+      const hallados = detectarCuadros(celdas, ctx.year, ctx.month);
       if (!hallados.length) {
         setCuadros([]);
         setElecciones({});
@@ -842,7 +869,7 @@ export function ImportarExcelModal({ ctx, onCargar, onAplicar, onCancelar, puede
               onClick={() => { void aplicar(); }}
               className="rounded-xl bg-indigo-600 px-4 py-2 text-[12px] font-black text-white disabled:opacity-40"
             >
-              {grupoIdx < grupos.length - 1 ? 'Siguiente objetivo' : 'Aplicar borrador'}
+              {armandoPrevia ? 'Armando…' : grupoIdx < grupos.length - 1 ? 'Siguiente objetivo' : 'Aplicar borrador'}
             </button>
           )}
         </div>

@@ -152,7 +152,7 @@ export type HorarioCatalogo = {
 
 export type FuentesHorarioPlanilla = {
   catalogo?: readonly HorarioCatalogo[];
-  vigente?: readonly Array<{ puesto?: string; code: string; startTime: string; endTime: string }>;
+  vigente?: ReadonlyArray<{ puesto?: string; code: string; startTime: string; endTime: string }>;
 };
 
 function codigoDeRef(ref: Referencia, banda: string): string {

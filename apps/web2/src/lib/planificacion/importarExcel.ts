@@ -567,33 +567,59 @@ function tokHit(t: string, cands: string[]): boolean {
   return cands.some((c) => c === t || (t.length >= 3 && c.startsWith(t)) || (c.length >= 4 && t.startsWith(c)));
 }
 
-function puntaje(ptoks: string[], e: EmpleadoCruce): { sc: number; last: boolean; first: boolean } {
+type PrepNombre = { e: EmpleadoCruce; last: string[]; first: string[]; all: string[] };
+
+function puntajePrep(ptoks: string[], prep: PrepNombre): { sc: number; last: boolean; first: boolean } {
   if (!ptoks.length) return { sc: 0, last: false, first: false };
-  const p = partesNombre(e);
-  const hit = ptoks.filter((t) => tokHit(t, p.all)).length / ptoks.length;
-  return { sc: hit, last: ptoks.some((t) => tokHit(t, p.last)), first: ptoks.some((t) => tokHit(t, p.first)) };
+  const hit = ptoks.filter((t) => tokHit(t, prep.all)).length / ptoks.length;
+  return { sc: hit, last: ptoks.some((t) => tokHit(t, prep.last)), first: ptoks.some((t) => tokHit(t, prep.first)) };
+}
+
+function meterPrep(mapa: Map<string, PrepNombre[]>, clave: string, prep: PrepNombre): void {
+  const arr = mapa.get(clave);
+  if (!arr) { mapa.set(clave, [prep]); return; }
+  if (!arr.includes(prep)) arr.push(prep);
 }
 
 export function cruzarGuardias(filas: FilaPlanilla[], empleados: EmpleadoCruce[], empresaId: string): CruceFila[] {
   const activos = empleados.filter((e) => e.id);
+  const preps: PrepNombre[] = activos.map((e) => ({ e, ...partesNombre(e) }));
+  const prepDe = new Map<string, PrepNombre>();
   const porLeg = new Map<string, EmpleadoCruce[]>();
-  for (const e of activos) {
-    const leg = String(e.legajo || '').trim();
-    if (!leg) continue;
-    const arr = porLeg.get(leg) || [];
-    arr.push(e);
-    porLeg.set(leg, arr);
+  const porApellido = new Map<string, PrepNombre[]>();
+  const porApellido3 = new Map<string, PrepNombre[]>();
+  for (const prep of preps) {
+    prepDe.set(prep.e.id, prep);
+    const leg = String(prep.e.legajo || '').trim();
+    if (leg) {
+      const arr = porLeg.get(leg) || [];
+      arr.push(prep.e);
+      porLeg.set(leg, arr);
+    }
+    for (const last of prep.last) {
+      meterPrep(porApellido, last, prep);
+      if (last.length >= 3) meterPrep(porApellido3, last.slice(0, 3), prep);
+    }
   }
+  const candidatosNombre = (ptoks: string[]): PrepNombre[] => {
+    const vistos = new Set<PrepNombre>();
+    for (const t of ptoks) {
+      const lista = t.length < 3 ? (porApellido.get(t) || []) : (porApellido3.get(t.slice(0, 3)) || []);
+      for (const prep of lista) vistos.add(prep);
+    }
+    if (!vistos.size) return [];
+    return preps.filter((prep) => vistos.has(prep));
+  };
   const porNombre = (ptoks: string[]): CruceFila['candidatos'] extends infer _ ? { emp: EmpleadoCruce; ok: boolean; dudoso: boolean; nota: string; via: string } | null : never => {
     if (!ptoks.length) return null;
     const scored: Array<{ rank: number; e: EmpleadoCruce }> = [];
-    for (const e of activos) {
-      const p = puntaje(ptoks, e);
-      if (p.sc >= 0.99 && p.last && (p.first || ptoks.length === 1)) scored.push({ rank: 0, e });
-      else if (p.last && p.first && p.sc >= 0.5) scored.push({ rank: 1, e });
+    for (const prep of candidatosNombre(ptoks)) {
+      const p = puntajePrep(ptoks, prep);
+      if (p.sc >= 0.99 && p.last && (p.first || ptoks.length === 1)) scored.push({ rank: 0, e: prep.e });
+      else if (p.last && p.first && p.sc >= 0.5) scored.push({ rank: 1, e: prep.e });
     }
     if (!scored.length) {
-      const lastOnly = activos.filter((e) => ptoks[0] && partesNombre(e).last.includes(ptoks[0]));
+      const lastOnly = (porApellido.get(ptoks[0]) || []).map((prep) => prep.e);
       if (lastOnly.length === 1 && ptoks.length >= 2) {
         return { emp: lastOnly[0], ok: false, dudoso: true, via: 'apellido', nota: `Solo coincide el apellido: ${lastOnly[0].nombre}` };
       }
@@ -619,9 +645,9 @@ export function cruzarGuardias(filas: FilaPlanilla[], empleados: EmpleadoCruce[]
     const leg = String(f.legajo || '').trim();
     const base = { fila: f.fila, nombrePlanilla: f.nombre, legajo: leg, candidatos: [] as CruceFila['candidatos'] };
     if (leg && porLeg.has(leg)) {
-      const cands = [...porLeg.get(leg)!].sort((a, b) => Number(a.empresaId !== empresaId) - Number(b.empresaId !== empresaId) || puntaje(ptoks, b).sc - puntaje(ptoks, a).sc);
+      const cands = [...porLeg.get(leg)!].sort((a, b) => Number(a.empresaId !== empresaId) - Number(b.empresaId !== empresaId) || puntajePrep(ptoks, prepDe.get(b.id)!).sc - puntajePrep(ptoks, prepDe.get(a.id)!).sc);
       const e = cands[0];
-      const p = puntaje(ptoks, e);
+      const p = puntajePrep(ptoks, prepDe.get(e.id)!);
       if (p.sc >= 0.5 && p.last) {
         return { ...base, estado: 'encontrado' as const, employeeId: e.id, nota: '', candidatos: [{ id: e.id, nombre: e.nombre, legajo: leg }] };
       }
@@ -719,24 +745,37 @@ export function puestoDeTexto(textoPuesto: string, puestos: string[]): string {
   return fragmentos.length === 1 ? fragmentos[0] : '';
 }
 
-export function inferirPuesto(fila: FilaPlanilla, turnos: TurnoServicio[]): string {
-  const directo = puestoDeTexto(fila.puesto, [...new Set(turnos.map((t) => t.positionName))]);
-  if (directo) return directo;
+type IndicePuesto = { puestos: string[]; dueño: Map<string, Set<string>> };
+
+function indicePuesto(turnos: TurnoServicio[]): IndicePuesto {
+  const puestos: string[] = [];
+  const vistos = new Set<string>();
   const dueño = new Map<string, Set<string>>();
   for (const t of turnos) {
+    if (!vistos.has(t.positionName)) { vistos.add(t.positionName); puestos.push(t.positionName); }
     const k = claveCodigo(t.code);
     const set = dueño.get(k) || new Set<string>();
     set.add(t.positionName);
     dueño.set(k, set);
   }
+  return { puestos, dueño };
+}
+
+function inferirPuestoConIndice(fila: FilaPlanilla, indice: IndicePuesto): string {
+  const directo = puestoDeTexto(fila.puesto, indice.puestos);
+  if (directo) return directo;
   const cuenta = new Map<string, number>();
   for (const c of fila.celdas) {
-    const set = dueño.get(claveCodigo(c.raw));
+    const set = indice.dueño.get(claveCodigo(c.raw));
     if (!set || set.size !== 1) continue;
     const p = [...set][0];
     cuenta.set(p, (cuenta.get(p) || 0) + 1);
   }
   return [...cuenta.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || '';
+}
+
+export function inferirPuesto(fila: FilaPlanilla, turnos: TurnoServicio[]): string {
+  return inferirPuestoConIndice(fila, indicePuesto(turnos));
 }
 
 function esOtroObjetivo(raw: string, refs: Referencia[]): boolean {
@@ -1059,6 +1098,13 @@ export type CeldaActual = {
   noTocar?: string;
 };
 
+/** Filas por tanda al armar el Excel, para ceder el hilo entre una y otra. */
+export const TANDA_IMPORT = 40;
+
+export function cederHiloImport(): Promise<void> {
+  return new Promise((resolve) => { setTimeout(resolve, 0); });
+}
+
 export function vistaPrevia(opts: {
   year: number;
   month: number;
@@ -1074,17 +1120,25 @@ export function vistaPrevia(opts: {
   const reglaDe = new Map(opts.reglas.map((r) => [r.clave, r]));
   const cruceDe = new Map(opts.cruce.map((c) => [c.fila, c]));
   const actualDe = new Map(opts.actuales.map((c) => [`${c.employeeId}_${c.dateStr}`, c]));
+  const turnos = conDoceEn24h(opts.turnos);
+  const indice = indicePuesto(opts.turnos);
+  const destinoDe = new Map<string, DestinoCelda>();
   const out: ItemPreview[] = [];
   for (const fila of opts.cuadro.filas) {
     const cr = cruceDe.get(fila.fila);
     if (!cr?.employeeId) continue;
     if (cr.estado === 'no') continue;
     if (cr.estado === 'dudoso' && !opts.incluirDudosos) continue;
-    const puesto = inferirPuesto(fila, opts.turnos);
+    const puesto = inferirPuestoConIndice(fila, indice);
     for (const cel of fila.celdas) {
       const regla = reglaDe.get(claveMapeo(cel.raw, cel.color));
       if (!regla) continue;
-      const destino = resolverDestino(regla, puesto, opts.turnos, opts.cuadro.referencias, opts.catalogo || []);
+      const claveDestino = `${regla.clave}\0${regla.accion}\0${regla.code}\0${regla.puesto || ''}\0${puesto}`;
+      let destino = destinoDe.get(claveDestino);
+      if (!destino) {
+        destino = resolverDestino(regla, puesto, turnos, opts.cuadro.referencias, opts.catalogo || []);
+        destinoDe.set(claveDestino, destino);
+      }
       const dateStr = `${opts.year}-${String(opts.month).padStart(2, '0')}-${String(cel.dia).padStart(2, '0')}`;
       const actual = actualDe.get(`${cr.employeeId}_${dateStr}`);
       let estado: ItemPreview['estado'] = 'nueva';
@@ -1107,6 +1161,37 @@ export function vistaPrevia(opts: {
         codeActual: actual?.code || '',
       });
     }
+  }
+  return out;
+}
+
+/** Misma salida que cruzarGuardias, cediendo el hilo entre tandas de filas. */
+export async function cruzarGuardiasPorTandas(
+  filas: FilaPlanilla[],
+  empleados: EmpleadoCruce[],
+  empresaId: string,
+  ceder: () => Promise<void> = cederHiloImport,
+): Promise<CruceFila[]> {
+  if (filas.length <= TANDA_IMPORT) return cruzarGuardias(filas, empleados, empresaId);
+  const out: CruceFila[] = [];
+  for (let i = 0; i < filas.length; i += TANDA_IMPORT) {
+    out.push(...cruzarGuardias(filas.slice(i, i + TANDA_IMPORT), empleados, empresaId));
+    if (i + TANDA_IMPORT < filas.length) await ceder();
+  }
+  return out;
+}
+
+/** Misma salida que vistaPrevia, cediendo el hilo entre tandas de filas. El índice de puestos se arma una vez por tanda, no por fila. */
+export async function vistaPreviaPorTandas(
+  opts: Parameters<typeof vistaPrevia>[0],
+  ceder: () => Promise<void> = cederHiloImport,
+): Promise<ItemPreview[]> {
+  const filas = opts.cuadro.filas;
+  if (filas.length <= TANDA_IMPORT) return vistaPrevia(opts);
+  const out: ItemPreview[] = [];
+  for (let i = 0; i < filas.length; i += TANDA_IMPORT) {
+    out.push(...vistaPrevia({ ...opts, cuadro: { ...opts.cuadro, filas: filas.slice(i, i + TANDA_IMPORT) } }));
+    if (i + TANDA_IMPORT < filas.length) await ceder();
   }
   return out;
 }
