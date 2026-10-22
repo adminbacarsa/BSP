@@ -834,6 +834,35 @@ function horarioCatalogo(catalogo: readonly HorarioCatalogoPlanilla[], code: str
   return { inicio: hits[0].startTime.slice(0, 5), fin: hits[0].endTime.slice(0, 5) };
 }
 
+/** M/T/N de 8 h. Una N de 9 h (Claret 23–08) no es esta jornada. */
+function esJornadaOcho(hours: number): boolean {
+  return hours >= 7.5 && hours <= 8.5;
+}
+
+/** Horario del código en el servicio del puesto o, si ahí no está, en el catálogo. La leyenda no entra. */
+function horarioConocidoDelCodigo(
+  turnos: TurnoServicio[],
+  puesto: string,
+  base: string,
+  catalogo: readonly HorarioCatalogoPlanilla[],
+): { code: string; positionName: string; startTime: string; endTime: string; hours: number } | null {
+  const delCodigo = turnos.find((x) => claveCodigo(x.code) === base && x.positionName === puesto && x.startTime)
+    || turnos.find((x) => claveCodigo(x.code) === base && x.startTime);
+  const cat = delCodigo?.startTime ? null : horarioCatalogo(catalogo, base);
+  const startTime = (delCodigo?.startTime || cat?.inicio || '').slice(0, 5);
+  const endTime = (delCodigo?.endTime || cat?.fin || '').slice(0, 5);
+  if (!startTime || !endTime) return null;
+  const hours = horasEntre(startTime, endTime);
+  if (!(hours > 0)) return null;
+  return {
+    code: claveCodigo(delCodigo?.code || base),
+    positionName: delCodigo?.positionName || puesto,
+    startTime,
+    endTime,
+    hours,
+  };
+}
+
 /**
  * Un puesto con M, T y N es de 24 h y admite D12/N12 aunque el servicio no los liste: salen de su mañana
  * (Casino Guardia M 07–15 → D12 07–19 / N12 19–07, la M y la T rojas de la planilla).
@@ -995,6 +1024,15 @@ export function resolverDestino(
   }
   if (regla.accion === 'doce') {
     const base = claveCodigo(regla.code || 'M');
+    // El horario del código (servicio u catálogo) manda. La leyenda roja es 12 h solo si no hay otro horario (Casino: M/T/N de 8 h).
+    const conocido = horarioConocidoDelCodigo(turnos, puesto, base, catalogo);
+    if (conocido && !esJornadaOcho(conocido.hours)) {
+      return {
+        accion: 'turno', code: conocido.code, nombre: conocido.code,
+        positionName: conocido.positionName,
+        startTime: conocido.startTime, endTime: conocido.endTime, hours: conocido.hours,
+      };
+    }
     const t = doceDelPuesto(turnos, puesto, base, refs);
     if (t && horasEntre(t.startTime, t.endTime) >= 11) {
       return {
@@ -1012,14 +1050,9 @@ export function resolverDestino(
         startTime: refRoja.inicio, endTime: refRoja.fin, hours: horasEntre(refRoja.inicio, refRoja.fin),
       };
     }
-    const propio = turnos.find((x) => claveCodigo(x.code) === base && x.positionName === puesto && x.startTime)
-      || turnos.find((x) => claveCodigo(x.code) === base && x.startTime);
-    const cat = horarioCatalogo(catalogo, base);
-    const inicio = propio?.startTime || cat?.inicio || '';
-    const fin = propio?.endTime || cat?.fin || '';
     return {
-      accion: 'turno', code: base, nombre: base, positionName: propio?.positionName || puesto,
-      startTime: inicio, endTime: fin, hours: inicio && fin ? horasEntre(inicio, fin) : 0,
+      accion: 'turno', code: base, nombre: base, positionName: conocido?.positionName || puesto,
+      startTime: conocido?.startTime || '', endTime: conocido?.endTime || '', hours: conocido?.hours || 0,
     };
   }
   const t = turnoDeBanda(turnos, puesto, regla.code, refs, regla.color);

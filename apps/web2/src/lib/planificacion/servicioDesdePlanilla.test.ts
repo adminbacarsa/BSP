@@ -551,6 +551,32 @@ describe('Colegio Padre Claret · horario real del código', () => {
     assert.equal(pos.allowedShiftTypes.find((s) => s.code === 'N')?.hours, 9);
   });
 
+  it('N roja con leyenda de 12 h queda en N 9 h si el servicio define 23–08', () => {
+    const refs: CeldaPlano[] = [
+      { fila: 20, col: 24, valor: 'N', color: 'red' },
+      { fila: 20, col: 25, valor: 'Noche 12', color: 'none' },
+      { fila: 21, col: 25, valor: '19 a 07', color: 'none' },
+    ];
+    const [cuadro] = detectarCuadros(planilla([
+      { nombre: 'LOPEZ MARIO', puesto: 'Vigilancia', celdas: mes('N', LV, 'red') },
+    ], refs), 2026, 10);
+    const leyenda = cuadro.referencias.find((r) => r.codigo === 'N' && r.color === 'red');
+    assert.equal(leyenda?.inicio, '19:00');
+    assert.equal(leyenda?.fin, '07:00');
+    const horario = [{ puesto: 'Vigilancia', code: 'N', startTime: '23:00', endTime: '08:00' }];
+    const delServicio = proponerServicioDesdePlanilla(cuadro, 2026, 10, { vigente: horario });
+    const n = delServicio.franjas.find((f) => f.code === 'N');
+    assert.equal(n?.startTime, '23:00');
+    assert.equal(n?.endTime, '08:00');
+    assert.equal(delServicio.franjas.some((f) => f.code === 'N12'), false);
+    const eq = delServicio.equivalencias.find((e) => e.codigo === 'N' && e.color === 'red');
+    assert.equal(eq?.code, 'N');
+    assert.equal(eq?.endTime, '08:00');
+    const delCatalogo = proponerServicioDesdePlanilla(cuadro, 2026, 10, { catalogo: horario });
+    assert.equal(delCatalogo.franjas.find((f) => f.code === 'N')?.endTime, '08:00');
+    assert.equal(delCatalogo.franjas.some((f) => f.code === 'N12'), false);
+  });
+
   it('sin horario conocido pregunta y no inventa N 23–07 ni N12', () => {
     const prop = proponerServicioDesdePlanilla(cuadroClaret(), 2026, 10, { catalogo: [], vigente: [] });
     const n = prop.franjas.find((f) => f.code === 'N');
