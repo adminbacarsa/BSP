@@ -281,6 +281,20 @@ export function ImportarExcelModal({ ctx, onCargar, onAplicar, onCancelar, puede
   );
   const cruceOk = useMemo(() => cruceResuelto(cruce, decisiones), [cruce, decisiones]);
   const faltan = useMemo(() => faltanEnPlanilla(cruceOk, dotacion), [cruceOk, dotacion]);
+  const catalogoEmpresa = useMemo(() => {
+    const out: Array<{ code: string; startTime: string; endTime: string }> = [];
+    const vistos = new Set<string>();
+    for (const s of ctx.servicios) {
+      for (const t of s.turnos) {
+        if (!t.code || !t.startTime || !t.endTime) continue;
+        const k = `${t.code}|${t.startTime}|${t.endTime}`;
+        if (vistos.has(k)) continue;
+        vistos.add(k);
+        out.push({ code: t.code, startTime: t.startTime, endTime: t.endTime });
+      }
+    }
+    return out;
+  }, [ctx.servicios]);
   const items = useMemo(() => (cuadro && grupo ? vistaPrevia({
     year: ctx.year,
     month: ctx.month,
@@ -291,7 +305,8 @@ export function ImportarExcelModal({ ctx, onCargar, onAplicar, onCancelar, puede
     turnos: grupo.turnos,
     actuales,
     diasCerrados: ctx.diasCerrados,
-  }) : []), [ctx, cuadro, grupo, reglas, cruceOk, actuales]);
+    catalogo: catalogoEmpresa,
+  }) : []), [ctx, cuadro, grupo, reglas, cruceOk, actuales, catalogoEmpresa]);
   const resumen = resumenPreview(items);
   const codigosSla = useMemo(() => [...new Set((grupo?.turnos || []).map((t) => t.code).filter(Boolean))], [grupo]);
   const importables = bloques.filter((b) => elecciones[b.key]?.importar);
@@ -315,8 +330,8 @@ export function ImportarExcelModal({ ctx, onCargar, onAplicar, onCancelar, puede
 
   useEffect(() => {
     if (!cuadro || !grupo || !cargado || cargado.clave !== grupo.clave) return;
-    setReglasPorClave((prev) => (prev[grupo.clave] ? prev : { ...prev, [grupo.clave]: ajustarReglasAlServicio(proponerReglas(cuadro, cargado.reglas), cuadro.referencias, grupo.turnos || []) }));
-  }, [cuadro, grupo, cargado]);
+    setReglasPorClave((prev) => (prev[grupo.clave] ? prev : { ...prev, [grupo.clave]: ajustarReglasAlServicio(proponerReglas(cuadro, cargado.reglas, catalogoEmpresa), cuadro.referencias, grupo.turnos || []) }));
+  }, [cuadro, grupo, cargado, catalogoEmpresa]);
 
   const leer = async (file: File) => {
     setError('');
@@ -360,7 +375,7 @@ export function ImportarExcelModal({ ctx, onCargar, onAplicar, onCancelar, puede
 
   const irACodigos = () => {
     if (!cuadro || !grupo) return;
-    setReglasPorClave((prev) => (prev[grupo.clave] ? prev : { ...prev, [grupo.clave]: ajustarReglasAlServicio(proponerReglas(cuadro, cargado?.reglas || []), cuadro.referencias, grupo.turnos || []) }));
+    setReglasPorClave((prev) => (prev[grupo.clave] ? prev : { ...prev, [grupo.clave]: ajustarReglasAlServicio(proponerReglas(cuadro, cargado?.reglas || [], catalogoEmpresa), cuadro.referencias, grupo.turnos || []) }));
     setPaso(5);
   };
 
@@ -562,6 +577,7 @@ export function ImportarExcelModal({ ctx, onCargar, onAplicar, onCancelar, puede
                 cuadro={cuadro}
                 empresaId={ctx.empresaId}
                 objectiveId={grupo.objectiveId}
+                catalogo={catalogoEmpresa}
                 year={ctx.year}
                 month={ctx.month}
                 mesLabel={ctx.mesLabel}
@@ -634,7 +650,7 @@ export function ImportarExcelModal({ ctx, onCargar, onAplicar, onCancelar, puede
                       return next;
                     });
                   }
-                  const base = proponerReglas(cuadro, []);
+                  const base = proponerReglas(cuadro, [], catalogoEmpresa);
                   setReglasPorClave((prev) => ({ ...prev, [`${grupo.objectiveId}|${accion === 'crear' ? res.id : grupo.servicioId}`]: reglasConEquivalencias(base, equivalencias) }));
                   onServicioGuardado();
                 }}

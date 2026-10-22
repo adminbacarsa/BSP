@@ -54,6 +54,24 @@ export function ServicioPlanillaModal(props: Props) {
   );
   const vigente = delMes.find((s) => s.id === servicioId)?.turnos || [];
   const cuadro = cuadros[indice] || null;
+  const catalogo = useMemo(() => {
+    const out: Array<{ code: string; startTime: string; endTime: string; puesto: string }> = [];
+    const vistos = new Set<string>();
+    const sumar = (puesto: string, code: string, startTime: string, endTime: string) => {
+      if (!code || !startTime || !endTime) return;
+      const k = `${code}|${startTime}|${endTime}`;
+      if (vistos.has(k)) return;
+      vistos.add(k);
+      out.push({ code, startTime, endTime, puesto });
+    };
+    for (const s of props.servicios) {
+      for (const t of s.turnos) sumar(t.puesto, t.code, t.startTime, t.endTime);
+    }
+    for (const lista of Object.values(props.anteriorPorObjetivo || {})) {
+      for (const t of lista) sumar(t.puesto, t.code, t.startTime, t.endTime);
+    }
+    return out;
+  }, [props.servicios, props.anteriorPorObjetivo]);
 
   const subir = async (file: File) => {
     setError('');
@@ -206,6 +224,7 @@ export function ServicioPlanillaModal(props: Props) {
               semilla={semilla}
               empresaId={props.empresaId}
               objectiveId={obj.id}
+              catalogo={catalogo}
               year={props.year}
               month={props.month}
               mesLabel={props.mesLabel}

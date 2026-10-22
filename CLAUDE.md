@@ -29,6 +29,7 @@ Períodos: Liquidación ciclo **26→25**; Prefactura/SLA mes calendario **1→f
 - Ext/adel de otro puesto del mismo objetivo tapa un hueco solo en las horas que se superponen, una sola vez, y no suma facturable sobre lo vendido. TURA sí se factura aparte (`extEntrePuestos.ts`). En la grilla se carga igual que la TURA: +1…+4 h antes o después, eligiendo Cobertura o TURA (`extCoberturaRapido.ts`).
 - Puesto M+T+N: cantidades iguales → `24hs` con `quantity` = ese PAX; distintas (1-2-2) → `custom` con `quantity` por banda (nunca 24 h × el máximo). `trabajaFeriados: false` (−F) saca los feriados de cobertura y de horas vendidas; sin el campo se trabaja (+F).
 - El servicio de un mes se copia solo desde el mes anterior (M-1) si ese SLA no está inactivo ni cerrado (`closed !== true`) y el cliente sigue activo. Se crea al abrir Planificación y al publicar (`lib/servicios/copiarSlaMes.ts`; espejo en functions). Hueco, origen cerrado/vencido o cliente inactivo no se crean solos: el botón confirma el mes origen y la copia masiva deja «con hueco: revisar». No duplica un mes que ya tiene SLA.
+- Servicio desde planilla: horario del código según catálogo de la empresa o el servicio del objetivo (NE/NO/NN/TT/MA incluidos). Sin horario conocido se pregunta; no se inventa M/T/N 8 h ni N12. `activeDays` = unión de los días de las franjas.
 
 ## Entorno
 `.env.local` en `apps/web2` (no commitear). Emuladores: Firestore 8080, Auth 9099, Functions 5001, UI 4000. `npm run emulators`, `npm run seed`, `npm run dev` (:3001). Mauro prueba en **prod pruebas_sa**.

@@ -747,7 +747,12 @@ function esOtroObjetivo(raw: string, refs: Referencia[]): boolean {
   return ['BANCO', 'MISE', 'NINOS', 'OBRADOR', 'TRANSITO'].some((o) => n.startsWith(o));
 }
 
-export function proponerRegla(raw: string, color: ColorCelda, refs: Referencia[]): Omit<ReglaMapeo, 'muestras' | 'clave'> {
+export function proponerRegla(
+  raw: string,
+  color: ColorCelda,
+  refs: Referencia[],
+  catalogo: readonly HorarioCatalogoPlanilla[] = [],
+): Omit<ReglaMapeo, 'muestras' | 'clave'> {
   const codigo = claveCodigo(raw);
   const col: ColorCelda = color === 'red' ? 'red' : 'none';
   const notaColor = col === 'red' ? ' · celda roja' : '';
@@ -776,7 +781,18 @@ export function proponerRegla(raw: string, color: ColorCelda, refs: Referencia[]
   if (ref?.inicio) return { ...base, accion: 'turno', code: codigo, nota: `${ref.desc || codigo} ${ref.inicio}–${ref.fin}`.trim() };
   if (['M', 'T', 'N', 'D12', 'N12'].includes(codigo)) return { ...base, accion: 'turno', code: codigo, nota: 'Banda del puesto' };
   if (horarioBanda(codigo) || ref) return { ...base, accion: 'turno', code: codigo, nota: ref?.desc || 'Turno del servicio' };
+  if (horarioCatalogo(catalogo, codigo)) return { ...base, accion: 'turno', code: codigo, nota: 'Horario del catálogo de la empresa' };
   return { ...base, accion: 'ignorar', code: '', nota: 'Sin referencia. Elegí un turno, una licencia o ignoralo.' };
+}
+
+export type HorarioCatalogoPlanilla = { code: string; startTime: string; endTime: string };
+
+function horarioCatalogo(catalogo: readonly HorarioCatalogoPlanilla[], code: string): { inicio: string; fin: string } | null {
+  const k = claveCodigo(code);
+  const hits = catalogo.filter((c) => claveCodigo(c.code) === k && c.startTime && c.endTime);
+  const firmas = new Set(hits.map((c) => `${c.startTime.slice(0, 5)}|${c.endTime.slice(0, 5)}`));
+  if (firmas.size !== 1) return null;
+  return { inicio: hits[0].startTime.slice(0, 5), fin: hits[0].endTime.slice(0, 5) };
 }
 
 /**
@@ -788,8 +804,20 @@ export function conDoceEn24h(turnos: TurnoServicio[]): TurnoServicio[] {
   for (const puesto of new Set(turnos.map((t) => t.positionName))) {
     const del = turnos.filter((t) => t.positionName === puesto);
     const banda = (c: string) => (claveCodigo(c).match(/^(?:P\d+|PL)?([MTN])\d*$/) || [])[1] || '';
+    const esBanda = (c: string) => {
+      const k = claveCodigo(c);
+      return ['M', 'T', 'N', 'D12', 'N12'].includes(k) || /^(?:P\d+|PL)(?:D12|N12|M|T|N)$/.test(k);
+    };
+    if (del.some((t) => t.code && !esBanda(t.code))) continue;
     const m = del.find((t) => banda(t.code) === 'M');
-    if (!m || !del.some((t) => banda(t.code) === 'T') || !del.some((t) => banda(t.code) === 'N')) continue;
+    const tarde = del.find((t) => banda(t.code) === 'T');
+    const noche = del.find((t) => banda(t.code) === 'N');
+    if (!m || !tarde || !noche) continue;
+    const ocho = (t: TurnoServicio) => {
+      const h = horasEntre(t.startTime, t.endTime);
+      return h >= 7.5 && h <= 8.5;
+    };
+    if (![m, tarde, noche].every(ocho)) continue;
     if (del.some((t) => ['D12', 'N12'].includes(claveCodigo(t.code)))) continue;
     const ini = m.startTime.slice(0, 5);
     const doce = `${String((Number(ini.slice(0, 2)) + 12) % 24).padStart(2, '0')}${ini.slice(2)}`;
@@ -835,7 +863,11 @@ export function ajustarReglasAlServicio(reglas: ReglaMapeo[], refs: Referencia[]
   });
 }
 
-export function proponerReglas(cuadro: CuadroPlanilla, guardadas: ReglaMapeo[] = []): ReglaMapeo[] {
+export function proponerReglas(
+  cuadro: CuadroPlanilla,
+  guardadas: ReglaMapeo[] = [],
+  catalogo: readonly HorarioCatalogoPlanilla[] = [],
+): ReglaMapeo[] {
   const cuenta = new Map<string, { raw: string; color: ColorCelda; n: number }>();
   for (const f of cuadro.filas) {
     for (const c of f.celdas) {
@@ -850,7 +882,7 @@ export function proponerReglas(cuadro: CuadroPlanilla, guardadas: ReglaMapeo[] =
   return [...cuenta.entries()].sort((a, b) => b[1].n - a[1].n).map(([clave, c]) => {
     const previa = porClave.get(clave);
     if (previa) return { ...previa, muestras: c.n, codigo: claveCodigo(c.raw), color: c.color };
-    const p = proponerRegla(c.raw, c.color, cuadro.referencias);
+    const p = proponerRegla(c.raw, c.color, cuadro.referencias, catalogo);
     return { clave, muestras: c.n, ...p };
   });
 }
@@ -905,7 +937,13 @@ function minutos(hm: string): number {
   return (h || 0) * 60 + (m || 0);
 }
 
-export function resolverDestino(regla: ReglaMapeo, puestoFila: string, turnosServicio: TurnoServicio[], refs: Referencia[]): DestinoCelda {
+export function resolverDestino(
+  regla: ReglaMapeo,
+  puestoFila: string,
+  turnosServicio: TurnoServicio[],
+  refs: Referencia[],
+  catalogo: readonly HorarioCatalogoPlanilla[] = [],
+): DestinoCelda {
   const turnos = conDoceEn24h(turnosServicio);
   const puesto = regla.puesto && turnos.some((t) => t.positionName === regla.puesto) ? regla.puesto : puestoFila;
   const vacio = { positionName: puesto, startTime: '', endTime: '', hours: 0, nombre: '' };
@@ -917,22 +955,40 @@ export function resolverDestino(regla: ReglaMapeo, puestoFila: string, turnosSer
     return { accion: 'licencia', code, ...vacio, nombre: LICENCIAS[code] || code, hours: 0, startTime: '00:00' };
   }
   if (regla.accion === 'doce') {
-    const t = doceDelPuesto(turnos, puesto, regla.code || 'M', refs);
-    const est = horarioBanda(regla.code === 'N' ? 'N12' : 'D12')!;
-    const code = t?.code || (regla.code === 'N' ? 'N12' : 'D12');
+    const base = claveCodigo(regla.code || 'M');
+    const t = doceDelPuesto(turnos, puesto, base, refs);
+    if (t && horasEntre(t.startTime, t.endTime) >= 11) {
+      return {
+        accion: 'turno', code: t.code, nombre: t.code,
+        positionName: t.positionName || puesto,
+        startTime: t.startTime, endTime: t.endTime,
+        hours: horasEntre(t.startTime, t.endTime),
+      };
+    }
+    const refRoja = refDe(refs, base, 'red');
+    if (refRoja?.inicio && refRoja.fin) {
+      const destino = base === 'N' ? 'N12' : 'D12';
+      return {
+        accion: 'turno', code: destino, nombre: destino, positionName: puesto,
+        startTime: refRoja.inicio, endTime: refRoja.fin, hours: horasEntre(refRoja.inicio, refRoja.fin),
+      };
+    }
+    const propio = turnos.find((x) => claveCodigo(x.code) === base && x.positionName === puesto && x.startTime)
+      || turnos.find((x) => claveCodigo(x.code) === base && x.startTime);
+    const cat = horarioCatalogo(catalogo, base);
+    const inicio = propio?.startTime || cat?.inicio || '';
+    const fin = propio?.endTime || cat?.fin || '';
     return {
-      accion: 'turno', code, nombre: code,
-      positionName: t?.positionName || puesto,
-      startTime: t?.startTime || est.inicio,
-      endTime: t?.endTime || est.fin,
-      hours: t ? horasEntre(t.startTime, t.endTime) : est.horas,
+      accion: 'turno', code: base, nombre: base, positionName: propio?.positionName || puesto,
+      startTime: inicio, endTime: fin, hours: inicio && fin ? horasEntre(inicio, fin) : 0,
     };
   }
   const t = turnoDeBanda(turnos, puesto, regla.code, refs, regla.color);
   const ref = refPorPuestoBanda(refs, puesto, regla.code, regla.color) || refDe(refs, regla.codigo, regla.color);
+  const cat = horarioCatalogo(catalogo, regla.code);
   const est = horarioBanda(regla.code);
-  const startTime = t?.startTime || ref?.inicio || est?.inicio || '';
-  const endTime = t?.endTime || ref?.fin || est?.fin || '';
+  const startTime = t?.startTime || cat?.inicio || ref?.inicio || est?.inicio || '';
+  const endTime = t?.endTime || cat?.fin || ref?.fin || est?.fin || '';
   return {
     accion: 'turno',
     code: t?.code || regla.code,
@@ -1013,6 +1069,7 @@ export function vistaPrevia(opts: {
   turnos: TurnoServicio[];
   actuales: CeldaActual[];
   diasCerrados?: string[];
+  catalogo?: readonly HorarioCatalogoPlanilla[];
 }): ItemPreview[] {
   const reglaDe = new Map(opts.reglas.map((r) => [r.clave, r]));
   const cruceDe = new Map(opts.cruce.map((c) => [c.fila, c]));
@@ -1027,7 +1084,7 @@ export function vistaPrevia(opts: {
     for (const cel of fila.celdas) {
       const regla = reglaDe.get(claveMapeo(cel.raw, cel.color));
       if (!regla) continue;
-      const destino = resolverDestino(regla, puesto, opts.turnos, opts.cuadro.referencias);
+      const destino = resolverDestino(regla, puesto, opts.turnos, opts.cuadro.referencias, opts.catalogo || []);
       const dateStr = `${opts.year}-${String(opts.month).padStart(2, '0')}-${String(cel.dia).padStart(2, '0')}`;
       const actual = actualDe.get(`${cr.employeeId}_${dateStr}`);
       let estado: ItemPreview['estado'] = 'nueva';

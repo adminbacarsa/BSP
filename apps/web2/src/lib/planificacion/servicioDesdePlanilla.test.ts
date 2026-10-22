@@ -501,6 +501,73 @@ describe('servicio desde la planilla · puestos de 24 h por conteo de bandas', (
   });
 });
 
+describe('Colegio Padre Claret · horario real del código', () => {
+  const horario = [
+    { puesto: 'Vigilancia', code: 'M', startTime: '07:00', endTime: '15:00' },
+    { puesto: 'Vigilancia', code: 'T', startTime: '15:00', endTime: '23:00' },
+    { puesto: 'Vigilancia', code: 'N', startTime: '23:00', endTime: '08:00' },
+    { puesto: 'Vigilancia', code: 'NE', startTime: '23:00', endTime: '08:00' },
+  ];
+  const finde = (letra: string) => letra === 'S' || letra === 'D';
+  function cuadroClaret() {
+    const sd = Array.from({ length: 31 }, (_, i) => (finde(letraDia(2026, 10, i + 1)) ? { raw: 'NE' } : { raw: 'F' }));
+    const [cuadro] = detectarCuadros(planilla([
+      { nombre: 'PEREZ JUAN', puesto: 'Vigilancia', celdas: mes('M', LV) },
+      { nombre: 'GOMEZ ANA', puesto: 'Vigilancia', celdas: mes('T', LV) },
+      { nombre: 'LOPEZ MARIO', puesto: 'Vigilancia', celdas: mes('N', LV) },
+      { nombre: 'DIAZ LUIS', puesto: 'Vigilancia', celdas: sd },
+    ]), 2026, 10);
+    return cuadro;
+  }
+
+  it('N queda en 9 h (23–08) y NE solo sábados y domingos; activeDays es la unión', () => {
+    const prop = proponerServicioDesdePlanilla(cuadroClaret(), 2026, 10, { vigente: horario, catalogo: horario });
+    const n = prop.franjas.find((f) => f.code === 'N');
+    const ne = prop.franjas.find((f) => f.code === 'NE');
+    assert.equal(n?.startTime, '23:00');
+    assert.equal(n?.endTime, '08:00');
+    assert.deepEqual(n?.dias, ['L', 'M', 'X', 'J', 'V']);
+    assert.equal(ne?.startTime, '23:00');
+    assert.equal(ne?.endTime, '08:00');
+    assert.deepEqual(ne?.dias, ['S', 'D']);
+    assert.equal(prop.franjas.some((f) => f.code === 'N12' || f.code === 'D12'), false);
+    const [pos] = posicionesDesdeFranjas(prop.franjas);
+    assert.equal(pos.coverageType, 'custom');
+    assert.deepEqual(pos.activeDays, ['L', 'M', 'X', 'J', 'V', 'S', 'D']);
+    const noche = pos.allowedShiftTypes.find((s) => s.code === 'N');
+    assert.equal(noche?.hours, 9);
+    assert.equal(noche?.endTime, '08:00');
+    assert.deepEqual(pos.allowedShiftTypes.find((s) => s.code === 'NE')?.days, ['S', 'D']);
+    assert.equal(pos.allowedShiftTypes.some((s) => s.code === 'N12'), false);
+  });
+
+  it('el catálogo de la empresa alcanza si el objetivo todavía no tiene ese servicio', () => {
+    const prop = proponerServicioDesdePlanilla(cuadroClaret(), 2026, 10, { catalogo: horario });
+    assert.equal(prop.franjas.find((f) => f.code === 'N')?.endTime, '08:00');
+    assert.equal(prop.franjas.find((f) => f.code === 'NE')?.endTime, '08:00');
+    assert.deepEqual(prop.franjas.find((f) => f.code === 'NE')?.dias, ['S', 'D']);
+    const [pos] = posicionesDesdeFranjas(prop.franjas);
+    assert.equal(pos.activeDays.length, 7);
+    assert.equal(pos.allowedShiftTypes.find((s) => s.code === 'N')?.hours, 9);
+  });
+
+  it('sin horario conocido pregunta y no inventa N 23–07 ni N12', () => {
+    const prop = proponerServicioDesdePlanilla(cuadroClaret(), 2026, 10, { catalogo: [], vigente: [] });
+    const n = prop.franjas.find((f) => f.code === 'N');
+    const ne = prop.franjas.find((f) => f.code === 'NE');
+    assert.equal(n?.definirHorario, true);
+    assert.equal(n?.startTime, '');
+    assert.equal(n?.endTime, '');
+    assert.deepEqual(n?.dias, ['L', 'M', 'X', 'J', 'V']);
+    assert.equal(ne?.definirHorario, true);
+    assert.deepEqual(ne?.dias, ['S', 'D']);
+    assert.equal(prop.franjas.some((f) => f.code === 'N12'), false);
+    const [pos] = posicionesDesdeFranjas(prop.franjas);
+    assert.deepEqual(pos.activeDays, ['L', 'M', 'X', 'J', 'V', 'S', 'D']);
+    assert.equal(pos.activeDays.length > 0, true);
+  });
+});
+
 describe('editar el servicio vigente desde Planificación', () => {
   it('conserva lo que el editor no muestra y aplica lo editado', () => {
     const previa = {

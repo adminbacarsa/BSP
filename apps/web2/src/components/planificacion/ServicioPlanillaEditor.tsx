@@ -16,6 +16,7 @@ import {
   lineasConfirmacion,
   proponerServicioDesdePlanilla,
   tipoPuestoPropuesto,
+  type HorarioCatalogo,
   separarPuesto,
   unirPuestos,
   renombrarPuesto,
@@ -40,19 +41,21 @@ type Props = {
   hayOtroServicio?: boolean;
   empresaId?: string;
   objectiveId?: string;
+  /** Catálogo de la empresa: horario real de cada código (NE, NO, NN, TT, MA…). */
+  catalogo?: readonly HorarioCatalogo[];
   /** Valor actual de «Exige cobertura» del servicio (si falta, sí). */
   exigeCoberturaInicial?: boolean;
   onGuardar: (accion: 'crear' | 'actualizar', franjas: FranjaServicioPlanilla[], equivalencias: EquivalenciaCodigo[], opciones: { exigeCobertura: boolean }) => Promise<void>;
 };
 
-export function ServicioPlanillaEditor({ cuadro, semilla, year, month, mesLabel, vigente, servicioId, puedeCrear, puedeActualizar, hayOtroServicio, empresaId, objectiveId, exigeCoberturaInicial, onGuardar }: Props) {
+export function ServicioPlanillaEditor({ cuadro, semilla, year, month, mesLabel, vigente, servicioId, puedeCrear, puedeActualizar, hayOtroServicio, empresaId, objectiveId, catalogo, exigeCoberturaInicial, onGuardar }: Props) {
   const [exigeCobertura, setExigeCobertura] = useState(exigeCoberturaInicial !== false);
   const propuesta = useMemo(() => {
-    const base = semilla || (cuadro ? proponerServicioDesdePlanilla(cuadro, year, month) : { franjas: [], equivalencias: [], lectura: '' });
+    const base = semilla || (cuadro ? proponerServicioDesdePlanilla(cuadro, year, month, { catalogo, vigente }) : { franjas: [], equivalencias: [], lectura: '' });
     const alineadas = alinearPuestos(base.franjas, vigente);
     const franjas = adoptarCodigoVigente(alineadas, vigente);
     return { ...base, franjas, equivalencias: equivalenciasAlCodigoServicio(base.equivalencias, alineadas, franjas) };
-  }, [cuadro, semilla, year, month, vigente]);
+  }, [cuadro, semilla, year, month, vigente, catalogo]);
   const [franjas, setFranjas] = useState<FranjaServicioPlanilla[]>(propuesta.franjas);
   const [equivalencias, setEquivalencias] = useState<EquivalenciaCodigo[]>(propuesta.equivalencias);
   const [funciones, setFunciones] = useState<string[]>(propuesta.funciones || []);
@@ -73,6 +76,7 @@ export function ServicioPlanillaEditor({ cuadro, semilla, year, month, mesLabel,
     setConfirmando(null);
   }
   const diff = useMemo(() => compararConVigente(franjas, vigente), [franjas, vigente]);
+  const sinHorario = franjas.filter((f) => f.definirHorario || !f.startTime || !f.endTime);
   const lineas = confirmando ? lineasConfirmacion(diff, confirmando, mesLabel) : [];
 
   const patch = (id: string, parcial: Partial<FranjaServicioPlanilla>) => {
@@ -160,9 +164,12 @@ export function ServicioPlanillaEditor({ cuadro, semilla, year, month, mesLabel,
           }}
         />
       )}
-      {franjas.some((f) => f.definirHorario) && (
-        <p className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-900" data-servicio-aviso-extra>
-          Hay turnos de más sobre los puestos de 24 h ({franjas.filter((f) => f.definirHorario).map((f) => `${f.code} ×${f.cantidad} ${etiquetaDias(f.dias)}`).join(', ')}). La planilla no dice su horario: definilo en la fila marcada (y el nombre del puesto si querés, por ejemplo EN o RO).
+      {sinHorario.length > 0 && (
+        <p className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-900" data-servicio-horario-pendiente data-servicio-aviso-extra={franjas.some((f) => f.id.startsWith('extra|')) ? '1' : undefined}>
+          {franjas.some((f) => f.id.startsWith('extra|')) && (
+            <span className="block">Hay turnos de más sobre los puestos de 24 h. La planilla no dice su horario: definilo en la fila marcada (y el nombre del puesto si querés, por ejemplo EN o RO).</span>
+          )}
+          <span className="block">{sinHorario.map((f) => `${f.code} · ${f.puesto}`).join(', ')} no tiene horario conocido. Definilo en la fila marcada. No se inventa un M/T/N de 8 h ni un N12.</span>
         </p>
       )}
       {franjas.length > 0 && (
@@ -239,8 +246,8 @@ export function ServicioPlanillaEditor({ cuadro, semilla, year, month, mesLabel,
                 <tr key={f.id} className="border-t border-slate-100" data-servicio-franja={f.code}>
                   <td className="px-2 py-1"><input value={f.puesto} onChange={(e) => patch(f.id, { puesto: e.target.value })} className="w-24 rounded-lg border border-slate-200 px-1 py-0.5" /></td>
                   <td><input value={f.code} onChange={(e) => patch(f.id, { code: e.target.value.toUpperCase() })} className="w-14 rounded-lg border border-slate-200 px-1 py-0.5 font-black" /></td>
-                  <td><input value={f.startTime} onChange={(e) => patch(f.id, { startTime: e.target.value, definirHorario: false })} className={`w-16 rounded-lg border px-1 py-0.5 ${f.definirHorario ? 'border-amber-400 bg-amber-50' : 'border-slate-200'}`} title={f.definirHorario ? 'La planilla no dice el horario de este turno extra: definilo' : undefined} data-servicio-definir-horario={f.definirHorario ? '1' : undefined} /></td>
-                  <td><input value={f.endTime} onChange={(e) => patch(f.id, { endTime: e.target.value, definirHorario: false })} className={`w-16 rounded-lg border px-1 py-0.5 ${f.definirHorario ? 'border-amber-400 bg-amber-50' : 'border-slate-200'}`} title={f.definirHorario ? 'La planilla no dice el horario de este turno extra: definilo' : undefined} /></td>
+                  <td><input value={f.startTime} onChange={(e) => patch(f.id, { startTime: e.target.value, definirHorario: false })} className={`w-16 rounded-lg border px-1 py-0.5 ${f.definirHorario ? 'border-amber-400 bg-amber-50' : 'border-slate-200'}`} title={f.definirHorario ? 'Este código no tiene horario conocido: definilo' : undefined} data-servicio-definir-horario={f.definirHorario ? '1' : undefined} /></td>
+                  <td><input value={f.endTime} onChange={(e) => patch(f.id, { endTime: e.target.value, definirHorario: false })} className={`w-16 rounded-lg border px-1 py-0.5 ${f.definirHorario ? 'border-amber-400 bg-amber-50' : 'border-slate-200'}`} title={f.definirHorario ? 'Este código no tiene horario conocido: definilo' : undefined} /></td>
                   <td><input type="number" min={1} value={f.cantidad} onChange={(e) => patch(f.id, { cantidad: Math.max(1, Number(e.target.value) || 1) })} className="w-12 rounded-lg border border-slate-200 px-1 py-0.5" /></td>
                   <td className="py-1" data-servicio-dias>
                     <div className="flex items-center gap-1">
@@ -380,13 +387,13 @@ export function ServicioPlanillaEditor({ cuadro, semilla, year, month, mesLabel,
       {!confirmando && (
         <div className="flex flex-wrap gap-2">
           {!servicioId && !hayOtroServicio && (
-            <button type="button" data-servicio-crear disabled={!puedeCrear || !franjas.length} onClick={() => { setError(''); setConfirmando('crear'); }} className="rounded-xl bg-indigo-600 px-3 py-2 text-[12px] font-black text-white disabled:opacity-40">Crear servicio</button>
+            <button type="button" data-servicio-crear disabled={!puedeCrear || !franjas.length || sinHorario.length > 0} onClick={() => { setError(''); setConfirmando('crear'); }} className="rounded-xl bg-indigo-600 px-3 py-2 text-[12px] font-black text-white disabled:opacity-40">Crear servicio</button>
           )}
           {!servicioId && !!hayOtroServicio && (
             <p className="text-[12px] font-bold text-amber-800">Este mes ya tiene servicio. Elegilo arriba para aplicar los cambios.</p>
           )}
           {!!servicioId && (
-            <button type="button" data-servicio-aplicar disabled={!puedeActualizar || !franjas.length} onClick={() => { setError(''); setConfirmando('actualizar'); }} className="rounded-xl bg-indigo-600 px-3 py-2 text-[12px] font-black text-white disabled:opacity-40">Aplicar cambios al servicio del mes</button>
+            <button type="button" data-servicio-aplicar disabled={!puedeActualizar || !franjas.length || sinHorario.length > 0} onClick={() => { setError(''); setConfirmando('actualizar'); }} className="rounded-xl bg-indigo-600 px-3 py-2 text-[12px] font-black text-white disabled:opacity-40">Aplicar cambios al servicio del mes</button>
           )}
           {!puedeCrear && !servicioId && <p className="text-[12px] text-slate-500">Sin permiso para crear servicios.</p>}
           {!!servicioId && !puedeActualizar && <p className="text-[12px] text-slate-500">Sin permiso para modificar el servicio.</p>}
