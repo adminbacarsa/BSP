@@ -20,6 +20,7 @@ import {
   type ViaC2,
 } from './continuarC2';
 import { findLctRestGaps, type LctShiftInput } from './lctRestGap';
+import { planificarBandaFija } from './bandaFijaVolante';
 import { correFeriado } from '@/lib/servicios/turnoFeriados';
 
 export type { CupoDia } from './continuarC2';
@@ -1973,6 +1974,8 @@ export function sinTresFrancosSeguidos(resultados: ResultadoGuardia[]): void {
 const MESES_TXT = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 
 export function proponerContinuacion(input: ContinuarInput): ResultadoGuardia[] {
+  const porBanda = planificarBandaFija(input);
+  if (porBanda) return porBanda;
   if (input.regla === 'anterior') {
     const resultados = input.guardias.map((g) => proponerGuardia(input, g));
     cortarRachas(input, resultados);

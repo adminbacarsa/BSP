@@ -11,6 +11,7 @@
  */
 import type { CeldaPropuesta, ContinuarInput, PuestoSla, ResultadoGuardia, SugerenciaNivelacion } from './continuarMesAnterior';
 import { codigoDeCiclo, diaIndex, sinTresFrancosSeguidos, turnoHabilitadoPorEstructura } from './continuarMesAnterior';
+import { planificarBandaFija } from './bandaFijaVolante';
 import { bandaDe } from './continuarC2';
 import { getEffectiveShiftQuantityOnDate } from '../slaPlanningMatch';
 
@@ -125,6 +126,8 @@ type Estado = {
  * menos huecos; entre esos, el que usa menos jornadas de 12 h (van al final); si empatan, el de la historia.
  */
 export function armarMesDesdeServicio(input: ArmarMesInput): ResultadoGuardia[] {
+  const porBanda = planificarBandaFija(input);
+  if (porBanda) return porBanda;
   let mejor: { res: ResultadoGuardia[]; huecos: number; doce: number } | null = null;
   for (const ritmo of ritmosCandidatos(input)) {
     const res = armarConRitmo(input, ritmo);
