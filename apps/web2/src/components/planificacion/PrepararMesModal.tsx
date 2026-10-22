@@ -190,7 +190,7 @@ export function PrepararMesModal(props: Props) {
       let origen = '';
       const no: string[] = [];
       for (const f of sinServicioMes) for (const o of f.objetivos) {
-        const cliente = clients.find((c: any) => String(c.id) === o.clientId);
+        const cliente = clients.find((c: any) => String(c.id) === o.clientId) ?? null;
         const plan = planServicioMes({
           matching: filterSlasForPlanningContext(allSla as any[], o.clientId, o.id, clients, slaIdToObjId) as any[],
           year,

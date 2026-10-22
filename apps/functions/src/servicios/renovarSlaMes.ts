@@ -4,7 +4,7 @@
  * Despublicar no borra. Idempotente. Solo copia M-1 si está abierto y el cliente sigue activo.
  * Un SLA cerrado, un hueco o un cliente inactivo no se renuevan.
  */
-import { decidirCopiaSlaMes } from './copiarSlaMes';
+import { decidirCopiaSlaMes, idCopiaSlaMes, slaCubreMes } from './copiarSlaMes';
 import * as admin from 'firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { onDocumentWritten } from 'firebase-functions/v2/firestore';
@@ -120,40 +120,63 @@ export async function renovarSlaAlPublicar(
   }
 
   const next = nextMonthOf(year, month);
-  const decision = decidirCopiaSlaMes(
+  const clienteDecision = clientId ? clienteDoc : undefined;
+  const previo = decidirCopiaSlaMes(
     rows.map((d) => ({ id: d.id, ...d.data() })),
     next.key,
-    { ahora: new Date().toISOString(), modo: 'automatico', cliente: clienteDoc },
+    { ahora: new Date().toISOString(), modo: 'automatico', cliente: clienteDecision },
   );
-  if (decision.accion === 'existe') return { action: 'skip', reason: 'ya_existe' };
-  if (decision.accion === 'omitir') return { action: 'skip', reason: decision.motivo };
-  if (decision.accion !== 'crear') return { action: 'skip', reason: 'sin_origen' };
+  if (previo.accion === 'existe') return { action: 'skip', reason: 'ya_existe' };
+  if (previo.accion === 'omitir') return { action: 'skip', reason: previo.motivo };
+  if (previo.accion !== 'crear') return { action: 'skip', reason: 'sin_origen' };
 
   const nombre = String(data.objectiveName || data.clientName || objectiveId);
-  if (decision.serieNuevaEnOrigen && !decision.origenCerrado) {
-    const origen = rows.find((d) => d.id === decision.origenId) || last;
-    await origen.ref.update({ slaSeriesId: decision.serieNuevaEnOrigen });
-  }
-  const copy: Record<string, unknown> = {
-    ...decision.doc,
-    empresaId: decision.doc.empresaId || empresaId || undefined,
-    createdAt: FieldValue.serverTimestamp(),
-    createdBy: 'RENOVACION_AUTOMATICA',
-  };
-  for (const key of Object.keys(copy)) {
-    if (copy[key] === undefined) delete copy[key];
-  }
-  const ref = await db.collection('servicios_sla').add(copy);
+  const slaId = idCopiaSlaMes(objectiveId, next.key);
+  const ref = db.collection('servicios_sla').doc(slaId);
+  const createdId = await db.runTransaction(async (tx) => {
+    const snapTx = await tx.get(db.collection('servicios_sla').where('objectiveId', '==', objectiveId));
+    const rowsTx = snapTx.docs.filter((d) => {
+      const x = d.data();
+      if (empresaId && String(x.empresaId || '') && String(x.empresaId) !== empresaId) return false;
+      return true;
+    });
+    const decision = decidirCopiaSlaMes(
+      rowsTx.map((d) => ({ id: d.id, ...d.data() })),
+      next.key,
+      { ahora: new Date().toISOString(), modo: 'automatico', cliente: clienteDecision },
+    );
+    if (decision.accion !== 'crear') return null;
+    if (snapTx.docs.some((d) => d.id === slaId)) return null;
+    if (rowsTx.some((d) => slaCubreMes({ id: d.id, ...d.data() }, next.key))) return null;
+    const uno = await tx.get(ref);
+    if (uno.exists) return null;
+    if (decision.serieNuevaEnOrigen && !decision.origenCerrado && decision.origenId) {
+      const origen = rowsTx.find((d) => d.id === decision.origenId);
+      if (origen) tx.update(origen.ref, { slaSeriesId: decision.serieNuevaEnOrigen });
+    }
+    const copy: Record<string, unknown> = {
+      ...decision.doc,
+      empresaId: decision.doc.empresaId || empresaId || undefined,
+      createdAt: FieldValue.serverTimestamp(),
+      createdBy: 'RENOVACION_AUTOMATICA',
+    };
+    for (const key of Object.keys(copy)) {
+      if (copy[key] === undefined) delete copy[key];
+    }
+    tx.create(ref, copy as admin.firestore.DocumentData);
+    return ref.id;
+  });
+  if (!createdId) return { action: 'skip', reason: 'ya_existe' };
   await registrar(db, {
     empresaId: String(data.empresaId || empresaId),
     objectiveId,
     objectiveName: nombre,
     clientId,
-    slaId: ref.id,
+    slaId: createdId,
     description: `Se creó el servicio de ${next.nombre} para ${nombre}`,
     extended: false,
   });
-  return { action: 'created', slaId: ref.id, reason: next.key };
+  return { action: 'created', slaId: createdId, reason: next.key };
 }
 
 function pickLastOfPublishedMonth(rows: SlaDoc[], publishedKey: string): SlaDoc | null {

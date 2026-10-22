@@ -20,6 +20,7 @@ export type PlanServicioMes =
 
 function clienteDe(input: { cliente?: ClienteCopiaSla | null; clienteActivo?: boolean }): ClienteCopiaSla | null | undefined {
   if (input.clienteActivo === false) return { ...(input.cliente || {}), status: 'INACTIVE' };
+  if (input.cliente === null) return null;
   if (input.cliente) return input.cliente;
   if (input.clienteActivo === true) return { status: 'ACTIVE' };
   return undefined;

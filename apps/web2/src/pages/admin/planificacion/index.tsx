@@ -522,7 +522,7 @@ import type { CandidatoFaltante } from '@/components/planificacion/BandasFaltant
 import { armarMesDesdeServicio, cubrirHuecosConDisponibles, type TipoGuardiaArmado } from '@/lib/planificacion/armarMesServicio';
 import { PrepararMesModal } from '@/components/planificacion/PrepararMesModal';
 import { planServicioMes } from '@/lib/planificacion/crearServicioMes';
-import { decidirCopiaSlaMes, nombreMesDeClave, partirCopiaMasiva } from '@/lib/servicios/copiarSlaMes';
+import { decidirCopiaSlaMes, nombreMesDeClave, partirCopiaMasiva, textoConfirmacionCopiaMasiva, type DecisionCopiaSla } from '@/lib/servicios/copiarSlaMes';
 import { persistirCopiaSlaMes } from '@/lib/servicios/copiarSlaMesCliente';
 import { unidadesDelMes } from '@/lib/planificacion/prepararMesTanda';
 import {
@@ -2213,6 +2213,7 @@ function PlanificacionDesktop() {
     /** Objetivos del grupo sin servicio activo en el mes (se llena al cargar los servicios; vacío mientras carga). */
     const [grupoSinServicioMes, setGrupoSinServicioMes] = useState<string[]>([]);
     const copiaAutoRef = useRef<Set<string>>(new Set());
+    const copiaGrupoTicketRef = useRef<object | null>(null);
     type AvisoCopiaMes = { aviso: string; puedeManual: boolean; mesOrigenNombre: string };
     const [avisosCopia, setAvisosCopia] = useState<Record<string, AvisoCopiaMes>>({});
     const copiaAvisoRef = useRef<Map<string, AvisoCopiaMes>>(new Map());
@@ -6809,21 +6810,28 @@ function PlanificacionDesktop() {
         });
     };
 
-    const asegurarCopiaSla = async (oid: string, matching: any[], mesKey: string, avisarSinOrigen: boolean) => {
-        if (!empresaId || sessionAuthLoading) return;
+    const asegurarCopiaSla = async (
+        oid: string,
+        matching: any[],
+        mesKey: string,
+        avisarSinOrigen: boolean,
+        opts?: { soloDecision?: boolean },
+    ): Promise<DecisionCopiaSla | undefined> => {
+        if (!empresaId || sessionAuthLoading) return undefined;
         const key = `${oid}|${mesKey}`;
         if (copiaAutoRef.current.has(key)) {
             const cached = copiaAvisoRef.current.get(key);
             if (cached) publicarAvisoCopia(key, cached);
-            return;
+            return undefined;
         }
-        const cid = String(clienteDeObjetivo(oid)?.id || selectedClient);
-        const cliente = clients.find((c: any) => c.id === cid);
+        const dueño = clienteDeObjetivo(oid);
+        if (!dueño && (clients as any[]).length === 0) return undefined;
+        const cliente = dueño ?? null;
         const objs = (cliente?.objetivos || cliente?.objectives || []) as Array<{ id?: string; status?: unknown; active?: unknown }>;
         const obj = objs.find((o) => String(o.id || '') === oid);
         if (obj && (String(obj.status || '').toUpperCase() === 'INACTIVE' || obj.active === false)) {
             copiaAutoRef.current.add(key);
-            return;
+            return undefined;
         }
         const decision = decidirCopiaSlaMes(matching, mesKey, {
             modo: 'automatico',
@@ -6844,7 +6852,7 @@ function PlanificacionDesktop() {
                 copiaAutoRef.current.add(pk);
                 toast.error('No tenés permiso de Servicios para copiar el servicio del mes.');
             }
-            return;
+            return undefined;
         }
         if (decision.accion !== 'crear') {
             copiaAutoRef.current.add(key);
@@ -6853,8 +6861,9 @@ function PlanificacionDesktop() {
             } else if (avisarSinOrigen && decision.accion === 'omitir') {
                 toast.message(decision.aviso);
             }
-            return;
+            return undefined;
         }
+        if (opts?.soloDecision) return decision;
         copiaAutoRef.current.add(key);
         try {
             await persistirCopiaSlaMes(decision, { empresaId, migracionCompleta, scopeEmpresa, via: 'PLANIFICACION_ABRIR_MES' });
@@ -6865,6 +6874,7 @@ function PlanificacionDesktop() {
             console.error('[copia sla mes]', err);
             toast.error('No se pudo copiar el servicio del mes.');
         }
+        return undefined;
     };
 
     const copiarServiciosDeLaEmpresa = async () => {
@@ -6882,7 +6892,7 @@ function PlanificacionDesktop() {
             for (const u of unidadesDelMes(clients, [])) {
                 if (u.fueraOperacion) continue;
                 for (const o of u.objetivos) {
-                    const cliente = clients.find((c: any) => c.id === o.clientId);
+                    const cliente = clients.find((c: any) => c.id === o.clientId) ?? null;
                     const matching = filterSlasForPlanningContext(allSla, o.clientId, o.id, clients, slaIdToObjId);
                     const decision = decidirCopiaSlaMes(matching, mesKey, {
                         modo: 'manual',
@@ -6894,6 +6904,14 @@ function PlanificacionDesktop() {
                 }
             }
             const partido = partirCopiaMasiva(items);
+            if (partido.aCrear.length) {
+                const ok = typeof window !== 'undefined' && window.confirm(textoConfirmacionCopiaMasiva(
+                    partido.aCrear.map((x) => x.nombre),
+                    nombreMesDeClave(mesKey),
+                    nombreMesDeClave(prevKey),
+                ));
+                if (!ok) return;
+            }
             let fallos = 0;
             let creados = 0;
             for (const item of partido.aCrear) {
@@ -7027,7 +7045,7 @@ function PlanificacionDesktop() {
                         ? resolvePlanningMonthSlaHours(srvForStructure, viewYear, viewMonth)
                         : 0,
                 );
-                if (!monthHasSla && !closedSla && selectedObjective) {
+                if (!monthHasSla && !closedSla && selectedObjective && !(selectedGrupo && grupoUnifiedMode)) {
                     void asegurarCopiaSla(selectedObjective, matching, mesVista, true);
                 }
             } catch (e) {
@@ -7180,6 +7198,7 @@ function PlanificacionDesktop() {
     // Carga SLA de todos los objetivos del grupo activo (para cobertura y modal en vista unificada)
     useEffect(() => {
         if (!selectedGrupo || !grupoUnifiedMode || !selectedClient) {
+            copiaGrupoTicketRef.current = null;
             setGrupoSlaMap({});
             setGrupoTotalVendidas(0);
             setGrupoVendidasByObjective({});
@@ -7187,6 +7206,8 @@ function PlanificacionDesktop() {
             return;
         }
         const fetchGroupSlas = async () => {
+            const ticket = {};
+            copiaGrupoTicketRef.current = ticket;
             let fin = () => {};
             try {
                 const rows = await leerServiciosSla();
@@ -7197,16 +7218,17 @@ function PlanificacionDesktop() {
                 );
                 const viewYear = currentDate.getFullYear();
                 const viewMonth = currentDate.getMonth();
+                const mesVistaG = `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}`;
                 const result: Record<string, any[]> = {};
                 const vendidasByObj: Record<string, number> = {};
                 const sinServicio: string[] = [];
+                const copiasGrupo: Array<{ objId: string; decision: Extract<DecisionCopiaSla, { accion: 'crear' }> }> = [];
                 let totalVendidas = 0;
                 for (const objId of selectedGrupo.objectiveIds) {
                     const matching = filterSlasForPlanningContext(allDocs, String(clienteDeObjetivo(objId)?.id || selectedClient), objId, clients, slaIdToObjId);
                     const { vigente: srv, hasExactMatch, fallback } = pickSlaForPlanningMonth(matching, viewYear, viewMonth);
                     const closedSlaG = srv ? null : pickClosedSlaForPlanningMonth(matching, viewYear, viewMonth);
                     // Servicio del mes que «Continuar» deja pendiente (se escribe al guardar): manda sobre el relleno.
-                    const mesVistaG = `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}`;
                     const pendG = serviciosPendientes.find((x) => x.objectiveId === objId && x.mesKey === mesVistaG)?.virtual;
                     const srvForStructure = pendG ?? srv ?? fallback ?? closedSlaG;
                     const monthHasSla = !!pendG || planningMonthHasActiveSla(matching, viewYear, viewMonth) || !!closedSlaG;
@@ -7217,15 +7239,46 @@ function PlanificacionDesktop() {
                     } else {
                         vendidasByObj[objId] = 0;
                         sinServicio.push(objId);
-                        void asegurarCopiaSla(objId, matching, mesVistaG, objId === selectedObjective);
+                        const decision = await asegurarCopiaSla(objId, matching, mesVistaG, objId === selectedObjective, { soloDecision: true });
+                        if (decision !== undefined && decision.accion === 'crear') copiasGrupo.push({ objId, decision });
                     }
                     const { structure } = buildPlanningPositionStructure(srvForStructure, { monthHasSla, hasExactMatch: !!hasExactMatch });
                     result[objId] = structure.length > 0 ? structure : [{ positionName: 'General', shifts: DEFAULT_PLANNING_SHIFTS.map((s: any) => ({ ...s })), qty: 1, activeDays: ['L','M','X','J','V','S','D'], coverageType: '24hs' }];
                 }
+                if (copiaGrupoTicketRef.current !== ticket) return;
                 setGrupoSlaMap(result);
                 setGrupoTotalVendidas(totalVendidas);
                 setGrupoVendidasByObjective(vendidasByObj);
                 setGrupoSinServicioMes(sinServicio);
+                if (copiasGrupo.length && empresaId) {
+                    const nombres = copiasGrupo.map((x) => getObjectiveName(x.objId) || x.objId);
+                    const ok = typeof window !== 'undefined' && window.confirm(textoConfirmacionCopiaMasiva(nombres, copiasGrupo[0].decision.mesNombre));
+                    if (copiaGrupoTicketRef.current !== ticket) return;
+                    if (!ok) {
+                        for (const x of copiasGrupo) copiaAutoRef.current.add(`${x.objId}|${mesVistaG}`);
+                    } else {
+                        for (const x of copiasGrupo) copiaAutoRef.current.add(`${x.objId}|${mesVistaG}`);
+                        let creados = 0;
+                        let fallos = 0;
+                        for (const x of copiasGrupo) {
+                            try {
+                                await persistirCopiaSlaMes(x.decision, { empresaId, migracionCompleta, scopeEmpresa, via: 'PLANIFICACION_ABRIR_GRUPO' });
+                                creados += 1;
+                            } catch (err) {
+                                fallos += 1;
+                                copiaAutoRef.current.delete(`${x.objId}|${mesVistaG}`);
+                                console.error('[copia sla grupo]', x.objId, err);
+                            }
+                        }
+                        if (creados) {
+                            const mes = copiasGrupo[0].decision.mesNombre;
+                            const origen = copiasGrupo[0].decision.mesOrigenNombre;
+                            toast.success(creados === 1 ? `Servicio de ${mes} copiado de ${origen}` : `${creados} servicios de ${mes} copiados`);
+                            setDataRefreshNonce((n) => n + 1);
+                        }
+                        if (fallos) toast.error(`No se pudieron copiar ${fallos} servicio(s).`);
+                    }
+                }
             } catch (e) {
                 console.error('GRUPO SLA ERROR:', e);
                 setGrupoSlaMap({});
@@ -7233,9 +7286,11 @@ function PlanificacionDesktop() {
                 setGrupoVendidasByObjective({});
                 setGrupoSinServicioMes([]);
             } finally {
-                slaNonceGrupoRef.current = dataRefreshNonce;
-                slaGrupoKeyRef.current = `${selectedGrupo?.id || ''}|${currentDate.getFullYear()}-${currentDate.getMonth()}|${dataRefreshNonce}`;
-                setSlaLoadGen((n) => n + 1);
+                if (copiaGrupoTicketRef.current === ticket) {
+                    slaNonceGrupoRef.current = dataRefreshNonce;
+                    slaGrupoKeyRef.current = `${selectedGrupo?.id || ''}|${currentDate.getFullYear()}-${currentDate.getMonth()}|${dataRefreshNonce}`;
+                    setSlaLoadGen((n) => n + 1);
+                }
                 fin();
             }
         };
@@ -12823,8 +12878,9 @@ function PlanificacionDesktop() {
             const errores: string[] = [];
             let cancelado = false;
             for (const oid of objIds) {
-                const cid = String(clienteDeObjetivo(oid)?.id || selectedClient);
-                const cliente = clients.find((c: any) => c.id === cid);
+                const dueño = clienteDeObjetivo(oid);
+                const cliente = dueño ?? null;
+                const cid = String(dueño?.id || '');
                 const plan = planServicioMes({
                     matching: filterSlasForPlanningContext(allSla, cid, oid, clients, slaIdToObjId) as any[],
                     year: currentDate.getFullYear(),

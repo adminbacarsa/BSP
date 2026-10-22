@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { calculateSlaHoursForMonth } from './slaHoursCalculator';
-import { clasePrepararServicio, decidirCopiaSlaMes, partirCopiaMasiva, resumirCopias, type SlaParaCopiar } from './copiarSlaMes';
+import { clasePrepararServicio, decidirCopiaSlaMes, idCopiaSlaMes, partirCopiaMasiva, resumirCopias, textoConfirmacionCopiaMasiva, type SlaParaCopiar } from './copiarSlaMes';
 
 /** Colegio-like: N 23–08 son 9 h y el fin de semana es NE, no un N12 de 8 h. */
 function puestoJe4v() {
@@ -211,5 +211,27 @@ describe('copia del servicio al mes siguiente', () => {
     assert.equal(clasePrepararServicio([octubre], '2026-11', { status: 'ACTIVE' }).clase, 'copiable');
     const octCerrado = sla({ id: 'oct-c', startDate: '2026-10-01', endDate: '2026-10-31', closed: true });
     assert.equal(clasePrepararServicio([octCerrado], '2026-11', { status: 'ACTIVE' }).clase, 'sin');
+  });
+
+  it('sin endDate el mes ya está cubierto; sin cliente no se copia; el id es objetivo+mes', () => {
+    const abierto = sla({ id: 'ab', startDate: '2026-10-01', endDate: '' });
+    assert.equal(decidirCopiaSlaMes([abierto], '2026-11', { cliente: { status: 'ACTIVE' } }).accion, 'existe');
+    assert.equal(decidirCopiaSlaMes([abierto], '2026-10').accion, 'existe');
+    const sinFechas = sla({ id: 'vacio', startDate: '', endDate: '' });
+    const octubre = sla({ id: 'oct', startDate: '2026-10-01', endDate: '2026-10-31' });
+    assert.equal(decidirCopiaSlaMes([sinFechas, octubre], '2026-11').accion, 'crear');
+    const ausente = decidirCopiaSlaMes([octubre], '2026-11', { modo: 'automatico', cliente: null });
+    assert.equal(ausente.accion, 'omitir');
+    if (ausente.accion === 'omitir') assert.equal(ausente.motivo, 'cliente_inactivo');
+    assert.equal(clasePrepararServicio([octubre], '2026-11', null).clase, 'fuera');
+    assert.equal(decidirCopiaSlaMes([octubre], '2026-11').accion, 'crear');
+    assert.equal(idCopiaSlaMes('obj-claret', '2026-11'), 'sla_obj-claret_2026-11');
+    assert.equal(idCopiaSlaMes('a/b c', '2026-11'), 'sla_a_b_c_2026-11');
+    const texto = textoConfirmacionCopiaMasiva(['Peaje', 'Vifood'], 'noviembre', 'octubre');
+    assert.match(texto, /Copiar 2 servicios de octubre a noviembre/);
+    assert.match(texto, /Peaje/);
+    assert.match(texto, /Vifood/);
+    assert.match(texto, /¿Continuar\?/);
+    assert.match(textoConfirmacionCopiaMasiva(['Peaje'], 'noviembre'), /Crear 1 servicio de noviembre/);
   });
 });

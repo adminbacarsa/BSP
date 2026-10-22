@@ -78,6 +78,13 @@ export function mesAnterior(mesKey: string): string {
   return `${y}-${pad(m)}`;
 }
 
+/** Id fijo de la copia. Espejo de web2: dos vías concurrentes no crean dos docs. */
+export function idCopiaSlaMes(objectiveId: string, mesKey: string): string {
+  const oid = String(objectiveId || '').trim().replace(/[/\s]/g, '_').slice(0, 700);
+  const mes = String(mesKey || '').trim().slice(0, 7);
+  return `sla_${oid}_${mes}`;
+}
+
 export function ymdSla(value: unknown): string {
   if (value == null || value === '') return '';
   const t = value as { toDate?: () => Date; seconds?: number };
@@ -98,7 +105,8 @@ export function slaInactivo(status: unknown): boolean {
 }
 
 export function clienteInactivoParaCopia(cliente: ClienteCopiaSla | null | undefined): boolean {
-  if (cliente == null) return false;
+  if (cliente === undefined) return false;
+  if (cliente === null) return true;
   if (cliente.active === false || cliente.isActive === false) return true;
   const u = String(cliente.status ?? '').trim().toUpperCase();
   return u === 'INACTIVE' || u === 'INACTIVO' || u === 'SUSPENDED' || u === 'SUSPENDIDO';
@@ -119,8 +127,10 @@ export function slaCubreMes(sla: SlaParaCopiar, mesKey: string): boolean {
   const { start, end } = limitesMes(mesKey);
   const s = ymdSla(sla.startDate);
   const e = ymdSla(sla.endDate);
-  if (!s || !e) return false;
-  return s <= end && e >= start;
+  if (!s && !e) return false;
+  const desde = s || '1970-01-01';
+  const hasta = e || '2099-12-31';
+  return desde <= end && hasta >= start;
 }
 
 function porFinDesc(a: SlaParaCopiar, b: SlaParaCopiar): number {

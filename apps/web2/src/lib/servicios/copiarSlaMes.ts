@@ -87,7 +87,7 @@ export type OpcionesCopiaSla = {
   actor?: { uid?: string; name?: string };
   /** `automatico` (default): solo M-1 abierto y cliente activo. `manual`: último SLA, con confirmación si hay hueco o está cerrado. */
   modo?: 'automatico' | 'manual';
-  /** Documento de `clients`. Sin dato no se trata como inactivo. */
+  /** Documento de `clients`. `null` = no está (no copiar). Sin el campo, no se trata como inactivo. */
   cliente?: ClienteCopiaSla | null;
 };
 
@@ -119,6 +119,13 @@ export function mesAnterior(mesKey: string): string {
   return `${y}-${pad(m)}`;
 }
 
+/** Id fijo de la copia: dos vías concurrentes chocan en el mismo doc y la segunda no crea otro. */
+export function idCopiaSlaMes(objectiveId: string, mesKey: string): string {
+  const oid = String(objectiveId || '').trim().replace(/[/\s]/g, '_').slice(0, 700);
+  const mes = String(mesKey || '').trim().slice(0, 7);
+  return `sla_${oid}_${mes}`;
+}
+
 export function ymdSla(value: unknown): string {
   if (value == null || value === '') return '';
   const t = value as { toDate?: () => Date; seconds?: number };
@@ -138,9 +145,10 @@ export function slaInactivo(status: unknown): boolean {
   return st === 'inactive' || st === 'inactivo' || st === 'cancelled' || st === 'cancelado';
 }
 
-/** Cliente fuera de operación: status inactivo o flags active / isActive en false. */
+/** Cliente fuera de operación. `null` = se buscó y no está. `undefined` = no se informó. */
 export function clienteInactivoParaCopia(cliente: ClienteCopiaSla | null | undefined): boolean {
-  if (cliente == null) return false;
+  if (cliente === undefined) return false;
+  if (cliente === null) return true;
   if (cliente.active === false || cliente.isActive === false) return true;
   const u = String(cliente.status ?? '').trim().toUpperCase();
   return u === 'INACTIVE' || u === 'INACTIVO' || u === 'SUSPENDED' || u === 'SUSPENDIDO';
@@ -159,6 +167,7 @@ export function avisoUltimoServicio(mesNombre: string, mesOrigenNombre: string, 
 
 /**
  * Un SLA no inactivo cuyas fechas tocan M ya ocupa el mes.
+ * `endDate` vacío es vigente (igual que la grilla). Sin inicio ni fin, no cubre.
  * Uno viejo que sigue `status: active` con `closed` / VENCIDO también cuenta: no se duplica.
  */
 export function slaCubreMes(sla: SlaParaCopiar, mesKey: string): boolean {
@@ -166,8 +175,10 @@ export function slaCubreMes(sla: SlaParaCopiar, mesKey: string): boolean {
   const { start, end } = limitesMes(mesKey);
   const s = ymdSla(sla.startDate);
   const e = ymdSla(sla.endDate);
-  if (!s || !e) return false;
-  return s <= end && e >= start;
+  if (!s && !e) return false;
+  const desde = s || '1970-01-01';
+  const hasta = e || '2099-12-31';
+  return desde <= end && hasta >= start;
 }
 
 function porFinDesc(a: SlaParaCopiar, b: SlaParaCopiar): number {
@@ -399,6 +410,22 @@ export function partirCopiaMasiva(items: readonly ItemCopiaMasiva[]): {
     else aCrear.push(item as ItemCopiaMasiva & { decision: Extract<DecisionCopiaSla, { accion: 'crear' }> });
   }
   return { aCrear, yaExistian, sinOrigen, conHueco, inactivos, cerrados };
+}
+
+/** Resumen para confirmar antes de crear varios servicios. */
+export function textoConfirmacionCopiaMasiva(
+  nombres: readonly string[],
+  mesNombre: string,
+  mesOrigenNombre?: string,
+): string {
+  const lista = nombres.map((n) => String(n || '').trim()).filter(Boolean);
+  const unidad = lista.length === 1 ? 'servicio' : 'servicios';
+  const encabezado = mesOrigenNombre
+    ? `Copiar ${lista.length} ${unidad} de ${mesOrigenNombre} a ${mesNombre}:`
+    : `Crear ${lista.length} ${unidad} de ${mesNombre}:`;
+  const visibles = lista.slice(0, 30).join('\n');
+  const resto = lista.length > 30 ? `\n… y ${lista.length - 30} más` : '';
+  return `${encabezado}\n${visibles}${resto}\n\n¿Continuar?`;
 }
 
 export function resumirCopias(decisiones: readonly DecisionCopiaSla[]): { creados: number; yaExistian: number; sinOrigen: number } {
