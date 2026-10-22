@@ -76,7 +76,7 @@ export function mismosNumeros(a: readonly number[], b: readonly number[]): boole
   return true;
 }
 
-const FLAGS_QUE_REEMPLAZA_EL_BORRADOR = ['isExtended', 'isReten', 'isEarlyStart', 'isTura'] as const;
+const FLAGS_QUE_REEMPLAZA_EL_BORRADOR = ['isExtended', 'isReten', 'isEarlyStart', 'isTura', 'extExtraHours'] as const;
 
 /**
  * El borrador pisa el doc: si no trae extensión, retén, TURA ni tramo, esos campos
