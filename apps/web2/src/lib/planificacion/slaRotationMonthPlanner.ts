@@ -1,4 +1,5 @@
 import type { ServiceRotation } from '@/services/slaService';
+import { puestoSalteaFeriado } from '@/lib/servicios/slaHoursCalculator';
 import { isPlanningPositionExcludedOnDate } from '@/lib/slaPlanningMatch';
 import {
     getAllDatesInMonth,
@@ -17,6 +18,7 @@ type PlannerPositionDef = {
     activeDays?: string[];
     coverageType?: string;
     excludedDates?: string[];
+    trabajaFeriados?: boolean;
 };
 
 function isFrancoCode(code: string | undefined): boolean {
@@ -30,6 +32,7 @@ function is24hsCoverage(pos: PlannerPositionDef): boolean {
 
 function positionIsActiveOnPlanner(pos: PlannerPositionDef, dayLetter: string, dateStr?: string): boolean {
     if (dateStr && pos.excludedDates?.includes(dateStr)) return false;
+    if (puestoSalteaFeriado(pos, dateStr)) return false;
     if (is24hsCoverage(pos)) return true;
 
     const shifts = pos.shifts || [];
