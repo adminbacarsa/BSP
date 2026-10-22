@@ -5,14 +5,19 @@
  * al continuar y al armar. Quien no tiene banda dominante es volante y cubre el franco
  * del fijo en esa banda. Los turnos que solo existen sábado y domingo (NE) se reparten
  * por horas del ciclo 26→25, primero a quien menos tiene, para que nadie pase de 200 h.
+ * La racha mira hacia atrás y adelante, en todos los objetivos: máx. 6 de 8 h o 4 de 12 h.
+ * Descanso < 8 h no se asigna; 8–12 h se deja para revisar si no hay alternativa con >= 12 h.
+ * Una licencia (V, L, E, A, PG, ART…) no suma horas trabajadas a ese ciclo.
  */
 import type {
   CeldaPropuesta,
   ContinuarInput,
   PuestoSla,
   ResultadoGuardia,
+  SugerenciaNivelacion,
   TurnoPrevio,
 } from './continuarMesAnterior';
+import { LICENCIA_CODES } from './bandaLicencia';
 import { bandaDe } from './continuarC2';
 import { cctClosingMonthForDate, cctPayrollPeriodForClosingMonth } from '@/lib/cctPayrollPeriod';
 import { getEffectiveShiftQuantityOnDate } from '../slaPlanningMatch';
@@ -29,7 +34,8 @@ const MIN_COBERTURAS = 6;
 const CORRELACION_MIN = 0.6;
 const TOPE_CICLO = 200;
 const TOPE_JORNADA = 12 + 59 / 60;
-const DESCANSO_MS = 8 * 3600e3;
+const DESCANSO_MIN_H = 8;
+const DESCANSO_COMODO_H = 12;
 const H = 3600e3;
 
 export type Banda = 'M' | 'T' | 'N';
@@ -44,10 +50,7 @@ export type RolBanda = {
   period: number;
 };
 
-export type EntradaBandaFija = ContinuarInput & {
-  ocupadoFuera?: (employeeId: string, dateStr: string) => { startTime: unknown; endTime: unknown; hours?: number } | null;
-  francoFuera?: (employeeId: string, dateStr: string) => boolean;
-};
+export type EntradaBandaFija = ContinuarInput;
 
 type Slot = {
   pos: string;
@@ -81,6 +84,15 @@ const RITMOS: Array<[number, number]> = [[6, 8], [5, 6], [6, 7], [4, 6]];
 
 function up(v: unknown): string {
   return String(v ?? '').trim().toUpperCase().replace(/\s+/g, '');
+}
+
+function esLicenciaCodigo(code: unknown): boolean {
+  const c = up(code);
+  return LICENCIA_CODES.has(c) || c === 'AVISO';
+}
+
+function esJornada12(hours: number, code: string): boolean {
+  return hours >= 12 - 1e-6 || /12$/.test(up(code));
 }
 
 function horasEntre(a: string, b: string): number {
@@ -342,7 +354,7 @@ function slotsDelDia(
 export function planificarBandaFija(input: EntradaBandaFija): ResultadoGuardia[] | null {
   const roles = detectarRolesBanda(input);
   if (!roles) return null;
-  const { diaIndex, ymdDeIndex, turnoHabilitadoPorEstructura, sinTresFrancosSeguidos } = mes();
+  const { diaIndex, ymdDeIndex, turnoHabilitadoPorEstructura, sinTresFrancosSeguidos, codigoDeCiclo } = mes();
   const dias = input.dias;
   const primero = dias[0];
   const habilitado = input.turnoHabilitado
@@ -377,6 +389,7 @@ export function planificarBandaFija(input: EntradaBandaFija): ResultadoGuardia[]
     const diasT = turnoDelDia(g.previos, input.objectiveId);
     for (const [ds, cel] of diasT) {
       if (ds >= primero) continue;
+      if (esLicenciaCodigo(cel.turno.code)) continue;
       if (cel.code === 'F' || cel.code === 'RET') {
         if (ds >= desdeHist) poner(g.id, ds, { kind: cel.code === 'F' ? 'F' : 'RET' });
         continue;
@@ -409,38 +422,96 @@ export function planificarBandaFija(input: EntradaBandaFija): ResultadoGuardia[]
     }
   }
 
-  const puede = (id: string, ds: string, slot: Slot): boolean => {
+  const yaAjeno = new Set<string>();
+  for (const g of input.guardias) {
+    for (const t of g.previos || []) {
+      const ds = String(t.dateStr || '');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(ds)) continue;
+      if (!t.objectiveId || String(t.objectiveId) === String(input.objectiveId)) continue;
+      if (t.isDeleted === true || esLicenciaCodigo(t.code)) continue;
+      const code = codigoDeCiclo(t);
+      if (!code || code === 'F' || code === 'RET') continue;
+      const marca = `${g.id}|${ds}`;
+      if (trabajo(g.id, ds) || yaAjeno.has(marca)) continue;
+      yaAjeno.add(marca);
+      const hours = horasCodigo(code, t, input.estructura);
+      sumar(g.id, ds, hours);
+      if (ds < desdeHist) continue;
+      const win = horarioDe(code, t, input.estructura);
+      poner(g.id, ds, {
+        kind: 'W', code, name: code, pos: String(t.positionName || ''),
+        startTime: win.start, endTime: win.end, hours, banda: bandaDelCodigo(code, input.estructura),
+        finde: false, lv: false, externo: true,
+      });
+    }
+  }
+
+  const descansoDe = (id: string, ds: string, slot: Slot): { ant: number | null; sig: number | null } => {
+    const ini = inicioMs(ds, slot.startTime);
+    const fin = ini + slot.hours * H;
+    const ayerDs = ymdDeIndex(diaIndex(ds) - 1);
+    const ayer = trabajo(id, ayerDs);
+    const ant = ayer ? (ini - (inicioMs(ayerDs, ayer.startTime) + ayer.hours * H)) / H : null;
+    const manDs = ymdDeIndex(diaIndex(ds) + 1);
+    const man = trabajo(id, manDs);
+    const sig = man ? (inicioMs(manDs, man.startTime) - fin) / H : null;
+    return { ant, sig };
+  };
+
+  const rachaOk = (id: string, ds: string, slot: Slot): boolean => {
+    const idx = diaIndex(ds);
+    const atras: Trabajo[] = [];
+    for (let i = 1; i <= 8; i++) {
+      const prev = trabajo(id, ymdDeIndex(idx - i));
+      if (!prev) break;
+      atras.push(prev);
+    }
+    const adelante: Trabajo[] = [];
+    for (let i = 1; i <= 8; i++) {
+      const next = trabajo(id, ymdDeIndex(idx + i));
+      if (!next) break;
+      adelante.push(next);
+    }
+    const prop12 = esJornada12(slot.hours, slot.code);
+    let iguales = 1;
+    for (const t of atras) {
+      if (esJornada12(t.hours, t.code) !== prop12) break;
+      iguales += 1;
+    }
+    for (const t of adelante) {
+      if (esJornada12(t.hours, t.code) !== prop12) break;
+      iguales += 1;
+    }
+    if (iguales > (prop12 ? 4 : 6)) return false;
+    let horasRacha = slot.hours;
+    for (const t of atras) horasRacha += t.hours;
+    for (const t of adelante) horasRacha += t.hours;
+    if (horasRacha > (slot.lv ? 56 : 48) + 1e-6) return false;
+    return true;
+  };
+
+  const puede = (id: string, ds: string, slot: Slot, descansoMinH: number): boolean => {
     if (trabajo(id, ds)) return false;
     if (input.diaBloqueado?.(ds)) return false;
     if (input.estadoCelda(id, ds) !== null) return false;
     if (input.francoFuera?.(id, ds)) return false;
     if (slot.hours > TOPE_JORNADA) return false;
     if (horasEn(id, ds) + slot.hours > TOPE_CICLO + 1e-6) return false;
-    const ini = inicioMs(ds, slot.startTime);
-    const fin = ini + slot.hours * H;
-    const ayer = trabajo(id, ymdDeIndex(diaIndex(ds) - 1));
-    if (ayer) {
-      const finAyer = inicioMs(ymdDeIndex(diaIndex(ds) - 1), ayer.startTime) + ayer.hours * H;
-      if (ini - finAyer < DESCANSO_MS) return false;
+    const d = descansoDe(id, ds, slot);
+    for (const h of [d.ant, d.sig]) {
+      if (h == null) continue;
+      if (h < DESCANSO_MIN_H - 1e-6) return false;
+      if (h < descansoMinH - 1e-6) return false;
     }
-    const manDs = ymdDeIndex(diaIndex(ds) + 1);
-    const man = trabajo(id, manDs);
-    if (man) {
-      const iniMan = inicioMs(manDs, man.startTime);
-      if (iniMan - fin < DESCANSO_MS) return false;
-    }
-    let turnos = 0;
-    let acum = 0;
-    for (let i = 1; i <= 8; i++) {
-      const prev = trabajo(id, ymdDeIndex(diaIndex(ds) - i));
-      if (!prev) break;
-      turnos += 1;
-      acum += prev.hours;
-    }
-    if (turnos + 1 > 6) return false;
-    const tope = slot.lv ? 56 : 48;
-    if (acum + slot.hours > tope + 1e-6) return false;
-    return true;
+    return rachaOk(id, ds, slot);
+  };
+
+  const pendientesDescanso: Array<{ id: string; ds: string; slot: Slot; horas: number }> = [];
+  const anotarDescanso = (p: RolBanda, ds: string, slot: Slot) => {
+    const d = descansoDe(p.id, ds, slot);
+    const malos = [d.ant, d.sig].filter((h): h is number => h != null && h < DESCANSO_COMODO_H - 1e-6);
+    const peor = Math.round((malos.length ? Math.min(...malos) : DESCANSO_MIN_H) * 100) / 100;
+    pendientesDescanso.push({ id: p.id, ds, slot, horas: peor });
   };
 
   const porHoras = (ds: string) => (a: RolBanda, b: RolBanda) => {
@@ -464,6 +535,18 @@ export function planificarBandaFija(input: EntradaBandaFija): ResultadoGuardia[]
 
   const posOk = (p: RolBanda, slot: Slot) => !p.positionName || p.positionName === slot.pos;
 
+  const cubrir = (ds: string, slot: Slot, grupos: RolBanda[][]): boolean => {
+    for (const grupo of grupos) {
+      const comodo = grupo.find((p) => puede(p.id, ds, slot, DESCANSO_COMODO_H));
+      if (comodo) { asignar(comodo, ds, slot); return true; }
+    }
+    for (const grupo of grupos) {
+      const corto = grupo.find((p) => puede(p.id, ds, slot, DESCANSO_MIN_H));
+      if (corto) { anotarDescanso(corto, ds, slot); return true; }
+    }
+    return false;
+  };
+
   for (const ds of dias) {
     if (input.diaBloqueado?.(ds)) {
       for (const p of roles) omitidas.get(p.id)!.bloqueada += 1;
@@ -476,29 +559,23 @@ export function planificarBandaFija(input: EntradaBandaFija): ResultadoGuardia[]
       if (i >= 0) pendientes.splice(i, 1);
     };
     for (const slot of slots.filter((s) => !s.finde)) {
-      const propios = roles
-        .filter((p) => p.rol === 'fijo' && p.banda === slot.banda && posOk(p, slot) && enTrabajo(p, ds) && libre(p, ds) && puede(p.id, ds, slot))
-        .sort(porHoras(ds));
-      if (propios[0]) { asignar(propios[0], ds, slot); tomar(slot); continue; }
-      const vols = roles
-        .filter((p) => (p.rol === 'volante' || p.rol === 'ayuda') && libre(p, ds) && puede(p.id, ds, slot))
-        .sort((a, b) => Number(enTrabajo(b, ds)) - Number(enTrabajo(a, ds)) || porHoras(ds)(a, b));
-      if (vols[0]) { asignar(vols[0], ds, slot); tomar(slot); continue; }
-      const mismo = roles
-        .filter((p) => p.rol === 'fijo' && p.banda === slot.banda && posOk(p, slot) && libre(p, ds) && puede(p.id, ds, slot))
-        .sort(porHoras(ds));
-      if (mismo[0]) { asignar(mismo[0], ds, slot); tomar(slot); }
+      const grupos = [
+        roles.filter((p) => p.rol === 'fijo' && p.banda === slot.banda && posOk(p, slot) && enTrabajo(p, ds) && libre(p, ds)).sort(porHoras(ds)),
+        roles.filter((p) => (p.rol === 'volante' || p.rol === 'ayuda') && libre(p, ds))
+          .sort((a, b) => Number(enTrabajo(b, ds)) - Number(enTrabajo(a, ds)) || porHoras(ds)(a, b)),
+        roles.filter((p) => p.rol === 'fijo' && p.banda === slot.banda && posOk(p, slot) && libre(p, ds)).sort(porHoras(ds)),
+      ];
+      if (cubrir(ds, slot, grupos)) tomar(slot);
     }
     for (const slot of pendientes.filter((s) => s.finde)) {
       const franco = !!slot.banda && roles.some((p) => p.rol === 'fijo' && p.banda === slot.banda && !enTrabajo(p, ds));
-      if (franco) {
-        const vols = roles
-          .filter((p) => p.rol === 'volante' && libre(p, ds) && puede(p.id, ds, slot))
-          .sort(porHoras(ds));
-        if (vols[0]) { asignar(vols[0], ds, slot); continue; }
-      }
-      const cands = roles.filter((p) => libre(p, ds) && puede(p.id, ds, slot)).sort(porHoras(ds));
-      if (cands[0]) asignar(cands[0], ds, slot);
+      const grupos = franco
+        ? [
+          roles.filter((p) => p.rol === 'volante' && libre(p, ds)).sort(porHoras(ds)),
+          roles.filter((p) => libre(p, ds)).sort(porHoras(ds)),
+        ]
+        : [roles.filter((p) => libre(p, ds)).sort(porHoras(ds))];
+      cubrir(ds, slot, grupos);
     }
     for (const p of roles) {
       if (leer(p.id, ds)) continue;
@@ -543,7 +620,7 @@ export function planificarBandaFija(input: EntradaBandaFija): ResultadoGuardia[]
         hours: a.hours, banda: a.banda, finde: a.finde, lv: a.lv,
       };
       const receptores = roles
-        .filter((p) => p.id !== peor!.id && libre(p, ds) && puede(p.id, ds, slot))
+        .filter((p) => p.id !== peor!.id && libre(p, ds) && puede(p.id, ds, slot, DESCANSO_COMODO_H))
         .filter((p) => slot.finde || p.rol === 'volante' || p.rol === 'ayuda' || p.banda === slot.banda)
         .sort(porHoras(ds));
       if (receptores[0]) {
@@ -582,6 +659,33 @@ export function planificarBandaFija(input: EntradaBandaFija): ResultadoGuardia[]
       }
     }
     const etiqueta = p.rol === 'fijo' ? `${p.banda} fijo` : p.rol === 'volante' ? 'volante' : 'ayuda';
+    const propiosDesc = pendientesDescanso.filter((x) => x.id === g.id);
+    const revisarMap = new Map<string, { positionName: string; code: string; dias: string[]; motivo: string }>();
+    for (const x of propiosDesc) {
+      const motivo = `descanso de ${String(x.horas).replace('.', ',')} h (entre 8 y 12): no se asigna solo`;
+      const k = `${x.slot.pos}|${x.slot.code}|${motivo}`;
+      const item = revisarMap.get(k) || { positionName: x.slot.pos, code: x.slot.code, dias: [] as string[], motivo };
+      item.dias.push(x.ds);
+      revisarMap.set(k, item);
+    }
+    const sugerencias: SugerenciaNivelacion[] = propiosDesc.map((x) => ({
+      dateStr: x.ds,
+      de: x.slot.code,
+      a: x.slot.code,
+      tipo: 'nivelacion',
+      texto: `${g.nombre.split(',')[0].trim()}: ${x.slot.code} del ${x.ds.slice(8)}/${x.ds.slice(5, 7)} con ${String(x.horas).replace('.', ',')} h de descanso. No se asigna solo.`,
+      celda: {
+        employeeId: g.id,
+        dateStr: x.ds,
+        code: x.slot.code,
+        name: x.slot.name,
+        positionName: x.slot.pos,
+        startTime: x.slot.startTime,
+        endTime: x.slot.endTime,
+        hours: x.slot.hours,
+        isFranco: false,
+      },
+    }));
     return {
       employeeId: g.id,
       nombre: g.nombre,
@@ -600,10 +704,10 @@ export function planificarBandaFija(input: EntradaBandaFija): ResultadoGuardia[]
       motivoSinCiclo: propuestas.length ? null : 'Sin días para proponer',
       propuestas,
       omitidas: omitidas.get(g.id) || { licencia: 0, ocupada: 0, bloqueada: 0, sinDato: 0, excluida: 0 },
-      revisar: [],
+      revisar: [...revisarMap.values()],
       horasPropuestas: Math.round(horasMes * 100) / 100,
       plantilla: null,
-      sugerencias: [],
+      sugerencias,
     };
   });
   sinTresFrancosSeguidos(salida);

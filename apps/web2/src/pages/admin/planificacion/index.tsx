@@ -13356,6 +13356,17 @@ function PlanificacionDesktop() {
                 if (!t || t.isDeleted || objsGrupo.includes(String(t.objectiveId || ''))) return false;
                 return !!t.isFranco || ['F', 'FF', 'FP'].includes(String(t.code || '').toUpperCase());
             };
+            for (const [key, t] of Object.entries(turnosBorde) as Array<[string, any]>) {
+                const mm = key.match(/^(.*)_(\d{4}-\d{2}-\d{2})$/);
+                if (!mm || !t || t.isDeleted || !t.objectiveId || !ids.has(mm[1])) continue;
+                if (objsGrupo.includes(String(t.objectiveId))) continue;
+                const code = String(t.code || '').toUpperCase();
+                if (!code || ['F', 'FF', 'FP', 'RET'].includes(code) || t.isFranco || esCeldaLicencia({ code, tieneAusencia: false })) continue;
+                const list = previosPorEmp.get(mm[1]) || [];
+                if (list.some((x) => x.dateStr === mm[2] && String(x.objectiveId || '') === String(t.objectiveId || ''))) continue;
+                list.push({ ...t, dateStr: mm[2] });
+                previosPorEmp.set(mm[1], list);
+            }
             const resultados = modo === 'armar' ? armarMesDesdeServicio({
                 objectiveId: objContinuar,
                 dias,
@@ -13379,6 +13390,8 @@ function PlanificacionDesktop() {
                 cupoDia: (ds) => (!enGrupo && !extenderServicio && isOutsideServiceRange(ds) ? null : cupoDelServicio(estructuraContinuar, ds, turnoHabilitado)),
                 punteroPrevio: Array.isArray(punteroGuardado) ? punteroGuardado.map(String) : null,
                 cargado,
+                ocupadoFuera,
+                francoFuera,
             });
             calcularFrancoObj(resultados);
             // Lo que el mes anterior se cubrió suelto (VFM de domingo por alguien de Peaje): sugerir repetirlo, destildado.

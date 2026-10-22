@@ -10,7 +10,7 @@
  * Lógica pura: devuelve el mismo formato que «Continuar», así la vista previa y el borrador son los mismos.
  */
 import type { CeldaPropuesta, ContinuarInput, PuestoSla, ResultadoGuardia, SugerenciaNivelacion } from './continuarMesAnterior';
-import { codigoDeCiclo, diaIndex, sinTresFrancosSeguidos, turnoHabilitadoPorEstructura } from './continuarMesAnterior';
+import { codigoDeCiclo, cortarDescansos, cortarRachas, diaIndex, sinTresFrancosSeguidos, turnoHabilitadoPorEstructura } from './continuarMesAnterior';
 import { planificarBandaFija } from './bandaFijaVolante';
 import { bandaDe } from './continuarC2';
 import { getEffectiveShiftQuantityOnDate } from '../slaPlanningMatch';
@@ -20,10 +20,6 @@ export type TipoGuardiaArmado = 'propio' | 'volante' | 'otro';
 export type ArmarMesInput = ContinuarInput & {
   /** propio = del objetivo; volante = volante del objetivo; otro = de otro objetivo (ayuda). Default propio. */
   tipoDe?: (employeeId: string) => TipoGuardiaArmado;
-  /** Turno de trabajo en otro objetivo ese día (para descanso y choque). */
-  ocupadoFuera?: (employeeId: string, dateStr: string) => { startTime: unknown; endTime: unknown; hours?: number } | null;
-  /** Franco en su objetivo ese día: no se usa (sería franco trabajado, lo más caro). */
-  francoFuera?: (employeeId: string, dateStr: string) => boolean;
 };
 
 /** `lv` = franja solo de lunes a viernes: la racha puede llegar a 56 h (Rondín 5 × 10 h). */
@@ -127,7 +123,12 @@ type Estado = {
  */
 export function armarMesDesdeServicio(input: ArmarMesInput): ResultadoGuardia[] {
   const porBanda = planificarBandaFija(input);
-  if (porBanda) return porBanda;
+  if (porBanda) {
+    cortarRachas(input, porBanda);
+    cortarDescansos(input, porBanda);
+    sinTresFrancosSeguidos(porBanda);
+    return porBanda;
+  }
   let mejor: { res: ResultadoGuardia[]; huecos: number; doce: number } | null = null;
   for (const ritmo of ritmosCandidatos(input)) {
     const res = armarConRitmo(input, ritmo);

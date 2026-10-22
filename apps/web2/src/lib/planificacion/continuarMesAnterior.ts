@@ -202,6 +202,10 @@ export type ContinuarInput = {
   salientes?: Array<{ id: string; nombre: string; previos: TurnoPrevio[] }>;
   /** `anterior` = solo el ciclo de cada guardia (para comparar). Default `c2`. */
   regla?: 'c2' | 'anterior';
+  /** Turno de trabajo en otro objetivo ese día (racha, descanso y tope). */
+  ocupadoFuera?: (employeeId: string, dateStr: string) => { startTime: unknown; endTime: unknown; hours?: number } | null;
+  /** Franco en otro objetivo ese día. */
+  francoFuera?: (employeeId: string, dateStr: string) => boolean;
 };
 
 function up(v: unknown): string {
@@ -1690,7 +1694,7 @@ function horasDeCodigo(code: string, hours?: unknown): number {
 }
 
 /** El día que pasaría el tope queda de franco (y se anota para revisar). */
-function cortarRachas(input: ContinuarInput, resultados: ResultadoGuardia[]) {
+export function cortarRachas(input: ContinuarInput, resultados: ResultadoGuardia[]) {
   if (!input.dias.length) return;
   const primero = diaIndex(input.dias[0]);
   for (const r of resultados) {
@@ -1699,8 +1703,10 @@ function cortarRachas(input: ContinuarInput, resultados: ResultadoGuardia[]) {
     for (const t of g?.previos || []) {
       const idx = diaIndex(String(t.dateStr || ''));
       if (!(idx < primero && idx >= primero - 8)) continue;
+      const raw = up(t.code);
+      const licencia = LICENCIA_CODES.has(raw) || raw === 'AVISO';
       const code = codigoDeCiclo(t, input.objectiveId);
-      if (!code || code === 'F' || code === 'RET') { if (!antes.has(idx)) antes.set(idx, 0); continue; }
+      if (licencia || !code || code === 'F' || code === 'RET') { if (!antes.has(idx)) antes.set(idx, 0); continue; }
       antes.set(idx, Math.max(antes.get(idx) || 0, horasDeCodigo(code, t.hours)));
     }
     const porDia = new Map(r.propuestas.map((c, i) => [c.dateStr, i]));
@@ -1920,6 +1926,8 @@ export function cortarDescansos(input: ContinuarInput, resultados: ResultadoGuar
     for (const t of g?.previos || []) {
       const idx = diaIndex(String(t.dateStr || ''));
       if (idx !== primero - 1) continue;
+      const raw = up(t.code);
+      if (LICENCIA_CODES.has(raw) || raw === 'AVISO') continue;
       const code = codigoDeCiclo(t, input.objectiveId);
       if (!code || code === 'F' || code === 'RET') continue;
       const w = ventanaTrabajo(t.startTime, t.endTime);
@@ -1975,7 +1983,12 @@ const MESES_TXT = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio
 
 export function proponerContinuacion(input: ContinuarInput): ResultadoGuardia[] {
   const porBanda = planificarBandaFija(input);
-  if (porBanda) return porBanda;
+  if (porBanda) {
+    cortarRachas(input, porBanda);
+    cortarDescansos(input, porBanda);
+    sinTresFrancosSeguidos(porBanda);
+    return porBanda;
+  }
   if (input.regla === 'anterior') {
     const resultados = input.guardias.map((g) => proponerGuardia(input, g));
     cortarRachas(input, resultados);

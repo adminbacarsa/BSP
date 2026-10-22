@@ -248,3 +248,122 @@ test('Claret: cada fijo conserva la banda en noviembre, nadie pasa 200 h y el fi
     }
   }
 });
+
+function rachaMaxima(dias: string[]): number {
+  const orden = [...dias].sort();
+  let seg = 0;
+  let prev = '';
+  let max = 0;
+  for (const ds of orden) {
+    if (prev && diaIndex(ds) !== diaIndex(prev) + 1) seg = 0;
+    seg += 1;
+    prev = ds;
+    max = Math.max(max, seg);
+  }
+  return max;
+}
+
+test('racha hacia atrás y adelante, también en otro objetivo: no junta 8 seguidos', () => {
+  const oct = diasDelMes(2026, 10);
+  const nov = diasDelMes(2026, 11);
+  const fuera = ['2026-11-06', '2026-11-07', '2026-11-08', '2026-11-09'];
+  const input: ContinuarInput = {
+    ...entrada(nov, oct),
+    estadoCelda: (id, ds) => (id !== 'torre' && ds >= '2026-11-02' && ds <= '2026-11-05' ? 'ocupada' : null),
+    ocupadoFuera: (id, ds) => (id === 'torre' && fuera.includes(ds) ? { startTime: '07:00', endTime: '15:00', hours: 8 } : null),
+  };
+  const torre = proponerContinuacion(input).find((r) => r.employeeId === 'torre')!;
+  const diasTrabajo = new Set(fuera);
+  for (const c of torre.propuestas) {
+    if (!c.isFranco && c.code !== 'RET') diasTrabajo.add(c.dateStr);
+  }
+  assert.ok(rachaMaxima([...diasTrabajo]) <= 6, [...diasTrabajo].sort().join(' '));
+  assert.equal(diasTrabajo.has('2026-11-05'), false);
+  assert.ok(diasTrabajo.has('2026-11-02') || diasTrabajo.has('2026-11-03'));
+});
+
+test('la racha hacia atrás incluye el mes anterior en otro objetivo', () => {
+  const oct = diasDelMes(2026, 10);
+  const nov = diasDelMes(2026, 11);
+  const input = entrada(nov, oct);
+  const torre = input.guardias.find((g) => g.id === 'torre')!;
+  const ajenos = ['2026-10-26', '2026-10-27', '2026-10-28'];
+  torre.previos = torre.previos.map((t) => (
+    ajenos.includes(String(t.dateStr)) ? { ...t, code: 'F', hours: 0, positionName: 'General' } : t
+  ));
+  torre.previos.push(...ajenos.map((ds) => ({
+    dateStr: ds, code: 'M', hours: 8, startTime: '07:00', endTime: '15:00', objectiveId: 'otro', positionName: POS,
+  })));
+  assert.ok(detectarRolesBanda(input), 'sigue siendo banda fija');
+  const res = proponerContinuacion(input).find((r) => r.employeeId === 'torre')!;
+  const dias = new Set<string>([...ajenos, '2026-10-29', '2026-10-30', '2026-10-31']);
+  for (const c of res.propuestas) if (!c.isFranco && c.code !== 'RET') dias.add(c.dateStr);
+  assert.ok(rachaMaxima([...dias]) <= 6, [...dias].sort().join(' '));
+  const nov1 = res.propuestas.find((c) => c.dateStr === '2026-11-01');
+  assert.ok(!nov1 || nov1.isFranco || nov1.code === 'RET');
+});
+
+test('racha de 12 h: máximo 4 seguidos', () => {
+  const oct = diasDelMes(2026, 10);
+  const nov = diasDelMes(2026, 11);
+  const est: PuestoSla[] = [{
+    ...estructura[0],
+    shifts: estructura[0].shifts!.map((s) => (s.code === 'M' ? { ...s, hours: 12, endTime: '19:00' } : s)),
+  }];
+  const input = entrada(nov, oct);
+  input.estructura = est;
+  input.turnoHabilitado = (pos, code, ds) => turnoHabilitadoPorEstructura(est, pos, code, ds);
+  const res = proponerContinuacion(input);
+  for (const r of res) {
+    const doce = r.propuestas.filter((c) => !c.isFranco && c.code !== 'RET' && c.hours >= 12).map((c) => c.dateStr);
+    assert.ok(rachaMaxima(doce) <= 4, `${r.employeeId} ${doce.join(' ')}`);
+  }
+  const marquez = res.find((r) => r.employeeId === 'marquez')!;
+  assert.ok(marquez.propuestas.some((c) => c.code === 'M' && c.hours >= 12));
+});
+
+test('T 15–23 y M 07–15 al día siguiente no se graba con 8 h de descanso', () => {
+  const oct = diasDelMes(2026, 10);
+  const nov = diasDelMes(2026, 11);
+  const base = proponerContinuacion(entrada(nov, oct));
+  const diaM = base.find((r) => r.employeeId === 'marquez')!.propuestas.find((c) => c.code === 'M' && !finde(c.dateStr) && c.dateStr > nov[0]);
+  assert.ok(diaM);
+  const prev = ymdDeIndex(diaIndex(diaM!.dateStr) - 1);
+  const input: ContinuarInput = {
+    ...entrada(nov, oct),
+    ocupadoFuera: (id, ds) => (id === 'marquez' && ds === prev ? { startTime: '15:00', endTime: '23:00', hours: 8 } : null),
+  };
+  const res = proponerContinuacion(input);
+  const marquez = res.find((r) => r.employeeId === 'marquez')!;
+  const celdaM = marquez.propuestas.find((c) => c.dateStr === diaM!.dateStr);
+  assert.ok(!celdaM || celdaM.isFranco || celdaM.code === 'RET');
+  const finT = finMs(prev, '15:00', 8);
+  for (const r of res) {
+    const c = r.propuestas.find((x) => x.dateStr === diaM!.dateStr && !x.isFranco && x.code !== 'RET');
+    if (!c) continue;
+    const ini = new Date(`${c.dateStr}T${c.startTime}:00-03:00`).getTime();
+    if (r.employeeId === 'marquez') assert.ok((ini - finT) / 3600e3 >= 12);
+  }
+  const cubierto = res.some((r) => r.propuestas.some((c) => c.dateStr === diaM!.dateStr && c.code === 'M' && !c.isFranco));
+  const aviso = res.some((r) => r.revisar.some((x) => x.dias.includes(diaM!.dateStr) && /no se asigna solo/.test(x.motivo))
+    || r.sugerencias.some((s) => s.dateStr === diaM!.dateStr && /no se asigna solo/i.test(s.texto)));
+  assert.ok(cubierto || aviso, 'si nadie tiene 12 h de descanso, queda para revisar');
+});
+
+test('licencia con originalCode no suma horas al ciclo 26→25', () => {
+  const oct = diasDelMes(2026, 10);
+  const nov = diasDelMes(2026, 11);
+  const input = entrada(nov, oct);
+  const torre = input.guardias.find((g) => g.id === 'torre')!;
+  let convertidas = 0;
+  torre.previos = torre.previos.map((t) => {
+    if (t.dateStr < '2026-10-26' || t.dateStr > '2026-10-31') return t;
+    const code = String(t.code || '');
+    if (code === 'F' || code === 'RET') return t;
+    convertidas += 1;
+    return { ...t, code: 'V', originalCode: code, hours: 200 };
+  });
+  assert.ok(convertidas > 0);
+  const res = proponerContinuacion(input).find((r) => r.employeeId === 'torre')!;
+  assert.ok(res.propuestas.some((c) => c.code === 'NE'), 'con la licencia contada como 200 h no le quedaba lugar');
+});

@@ -251,6 +251,8 @@ export function simularUnidad(input: EntradaUnidad): SimulacionUnidad {
     cupoDia: (ds) => (input.diaBloqueado(ds) ? null : cupoDelServicio(input.estructura, ds, input.turnoHabilitado)),
     punteroPrevio: null,
     cargado,
+    ocupadoFuera,
+    francoFuera,
   });
   const sueltas = sugerenciasSueltas({
     dias: input.dias,
