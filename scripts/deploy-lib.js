@@ -53,7 +53,9 @@ function runCaptured(cmd, cwd, env = {}) {
 /** Nombres de functions que el CLI reportó como fallidas (aunque el exit code sea 0). */
 function failedFunctionNames(text) {
   const names = new Set();
-  for (const line of String(text || '').split(/\r?\n/)) {
+  // El CLI colorea los nombres; sin limpiar, el reintento recibía «default:22m».
+  text = String(text || '').replace(/\x1b\[[0-9;]*m/g, '');
+  for (const line of text.split(/\r?\n/)) {
     if (!/fail/i.test(line)) continue;
     const bracket = line.match(/functions\[([^\](]+)/i);
     const prose = line.match(/Failed to update function\s+([A-Za-z0-9_]+)/i);
