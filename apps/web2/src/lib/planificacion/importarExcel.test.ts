@@ -355,6 +355,28 @@ describe('importar planilla', () => {
     assert.equal(proponerRegla('NE', 'none', [], [{ code: 'NE', startTime: '23:00', endTime: '08:00' }]).accion, 'turno');
   });
 
+  it('Claret: N roja con leyenda 19–07 y servicio N 23–08 queda N de 9 h, no N12', () => {
+    const turnos: TurnoServicio[] = [
+      { positionName: 'Vigilancia', code: 'M', startTime: '07:00', endTime: '15:00' },
+      { positionName: 'Vigilancia', code: 'T', startTime: '15:00', endTime: '23:00' },
+      { positionName: 'Vigilancia', code: 'N', startTime: '23:00', endTime: '08:00' },
+    ];
+    const refs = [
+      { codigo: 'N', desc: '19 A 07', inicio: '19:00', fin: '07:00', horas: 12, color: 'red' as const },
+    ];
+    const red = { clave: 'N|red', codigo: 'N', color: 'red' as const, muestras: 4, accion: 'doce' as const, code: 'N', nota: '' };
+    const d = resolverDestino(red, 'Vigilancia', turnos, refs);
+    assert.equal(d.code, 'N');
+    assert.equal(d.startTime, '23:00');
+    assert.equal(d.endTime, '08:00');
+    assert.equal(d.hours, 9);
+    const soloCatalogo = resolverDestino(red, 'Vigilancia', [], refs, [{ code: 'N', startTime: '23:00', endTime: '08:00' }]);
+    assert.equal(soloCatalogo.code, 'N');
+    assert.equal(soloCatalogo.startTime, '23:00');
+    assert.equal(soloCatalogo.endTime, '08:00');
+    assert.equal(soloCatalogo.hours, 9);
+  });
+
   it('el orden de filas sigue la planilla y deja al final a quien no viene', () => {
     const fila = (n: number, nombre: string): FilaPlanilla => ({ fila: n, nombre, legajo: '', puesto: '', celdas: [] });
     const cruce: CruceFila[] = [

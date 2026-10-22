@@ -213,6 +213,27 @@ function horarioDe(
   return est ? { inicio: est.startTime, fin: est.endTime, code: k } : null;
 }
 
+/** Horario del código en el servicio del objetivo o, si ahí no está, en el catálogo. La leyenda no entra. */
+function horarioDeFuente(
+  code: string,
+  puesto: string,
+  fuentes?: FuentesHorarioPlanilla,
+): { inicio: string; fin: string; code: string } | null {
+  if (!fuentes) return null;
+  const k = claveCodigo(code);
+  const delObjetivo = horarioUnico(k, puesto, fuentes.vigente);
+  if (delObjetivo) return { ...delObjetivo, code: k };
+  const delCatalogo = horarioUnico(k, puesto, fuentes.catalogo);
+  if (delCatalogo) return { ...delCatalogo, code: k };
+  return null;
+}
+
+/** M/T/N de 8 h. Una N de 9 h (Claret 23–08) no es esta jornada. */
+function esJornadaOcho(inicio: string, fin: string): boolean {
+  const h = horasEntre(inicio, fin);
+  return h >= 7.5 && h <= 8.5;
+}
+
 function esCodigoBanda24(code: string): boolean {
   const c = claveCodigo(code);
   if (['M', 'T', 'N', 'D12', 'N12'].includes(c)) return true;
@@ -428,6 +449,12 @@ export function proponerServicioDesdePlanilla(
           const h8 = horarioDe(base, cuadro.referencias, 'none', puestoDestino, fuentes);
           if (h8) sumar(puestoDestino, h8.code, h8.inicio, h8.fin, c.dia, codigosCelda, 'none');
           else sumar(puestoDestino, base, '', '', c.dia, codigosCelda, 'none', true);
+          continue;
+        }
+        // El horario del código (servicio u catálogo) manda. La leyenda roja es 12 h solo si no hay otro horario (Casino: M/T/N de 8 h).
+        const propio = horarioDeFuente(base, puestoDestino, fuentes);
+        if (propio && !esJornadaOcho(propio.inicio, propio.fin)) {
+          sumar(puestoDestino, propio.code, propio.inicio, propio.fin, c.dia, codigosCelda, 'red');
           continue;
         }
         const destino = base === 'N' ? 'N12' : 'D12';
