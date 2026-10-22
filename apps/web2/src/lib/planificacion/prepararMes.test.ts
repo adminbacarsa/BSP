@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { elegirEstrategia, medirEstrategia, type EntradaUnidad, type Metricas } from './prepararMes';
 import type { CeldaPropuesta } from './continuarMesAnterior';
+import { objetivoPublicado, TEXTO_SIN_VERIFICAR_PUBLICACION } from './objetivoPublicado';
 import {
   aplicarPropuestasPreparar,
   correrTanda,
@@ -137,6 +138,57 @@ test('tanda: si no queda ningún objetivo sin publicar, el grupo queda publicado
   });
   assert.equal(filas[0].estado, 'publicado');
   assert.equal(filas[0].celdas, undefined);
+});
+
+test('objetivoPublicado sigue al legacy cuando el tenant no tiene publishedAt', async () => {
+  const vistos: string[] = [];
+  const publicado = await objetivoPublicado('bacar', 'obj1', 2026, 11, async (id) => {
+    vistos.push(id);
+    if (id === 'bacar_obj1_2026_11') return { publishedAt: undefined };
+    if (id === 'obj1_2026_11') return { publishedAt: '2026-11-02T00:00:00.000Z', publishedBy: 'ana' };
+    return null;
+  });
+  assert.equal(publicado, true);
+  assert.deepEqual(vistos, ['bacar_obj1_2026_11', 'obj1_2026_11']);
+
+  const abierto = await objetivoPublicado('bacar', 'obj1', 2026, 11, async (id) => (
+    id === 'bacar_obj1_2026_11' ? { publishedAt: '' } : null
+  ));
+  assert.equal(abierto, false);
+
+  const tenantManda = await objetivoPublicado('bacar', 'obj1', 2026, 11, async (id) => (
+    id === 'bacar_obj1_2026_11' ? { publishedAt: '2026-11-01T00:00:00.000Z' } : null
+  ));
+  assert.equal(tenantManda, true);
+});
+
+test('tanda: si no se puede leer la publicación, no se arma ni queda completo', async () => {
+  const clients = [{
+    id: 'c1',
+    name: 'Cliente',
+    status: 'ACTIVE',
+    objetivos: [{ id: 'obj-abierto', name: 'Vifood', status: 'ACTIVE' }],
+  }];
+  const unidades = unidadesDelMes(clients, []);
+  let armo = false;
+  const filas = await correrTanda({
+    unidades,
+    year: 2026,
+    month: 10,
+    modo: 'armar',
+    allSla: [puestoMes('obj-abierto')],
+    clients,
+    employees: [{ id: 'g2', name: 'Gomez', status: 'activo', preferredObjectiveId: 'obj-abierto' }],
+    slaIdToObjId: {},
+    shiftsMap: {},
+    absencesMap: {},
+    historia: async () => { armo = true; return []; },
+    publicado: async () => { throw new Error('red'); },
+  });
+  assert.equal(filas[0].estado, 'sin_verificar');
+  assert.equal(filas[0].celdas, undefined);
+  assert.equal(armo, false);
+  assert.ok(filas[0].notas.includes(TEXTO_SIN_VERIFICAR_PUBLICACION));
 });
 
 test('aplicar Preparar no toca celdas del objetivo publicado; la corrección manual sí se guarda', async () => {

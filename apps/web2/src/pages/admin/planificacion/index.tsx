@@ -525,6 +525,7 @@ import { PrepararMesModal } from '@/components/planificacion/PrepararMesModal';
 import { planServicioMes } from '@/lib/planificacion/crearServicioMes';
 import { decidirCopiaSlaMes, nombreMesDeClave, partirCopiaMasiva, textoConfirmacionCopiaMasiva, type DecisionCopiaSla } from '@/lib/servicios/copiarSlaMes';
 import { persistirCopiaSlaMes } from '@/lib/servicios/copiarSlaMesCliente';
+import { avisoCeldaObjetivoPublicado, avisoCeldaSinVerificarPublicado, objetivoPublicado } from '@/lib/planificacion/objetivoPublicado';
 import { avisoNoSePudoVerificarPublicado, avisoObjetivoYaPublicado, celdaPrepararBloqueada, DESDE_PREPARAR, leerObjetivosPublicados, quitarBorradorPrepararPublicado, unidadesDelMes } from '@/lib/planificacion/prepararMesTanda';
 import {
     clasificarSeleccionLicencia,
@@ -2467,6 +2468,7 @@ function PlanificacionDesktop() {
         return s;
     }, [shiftsMap]);
     const modoRapidoRef = useRef(false);
+    const colaEscrituraRapidaRef = useRef<Promise<unknown>>(Promise.resolve());
     const capaRapidaRef = useRef<CapaModoRapidoApi | null>(null);
     const grillaScrollRef = useRef<HTMLDivElement | null>(null);
     const [ventanaFilas, setVentanaFilas] = useState({ desde: 0, hasta: 48 });
@@ -9159,10 +9161,9 @@ function PlanificacionDesktop() {
                 const mesGuardar = currentDate.getMonth() + 1;
                 const lecturaGuardar = !empresaId
                     ? { publicados: new Set<string>(), sinLeer: new Set(idsPrep) }
-                    : await leerObjetivosPublicados(idsPrep, async (oid) => {
-                        const est = await fetchPlanificacionEstadoDoc(empresaId, oid, anioGuardar, mesGuardar);
-                        return (est?.data as { publishedAt?: unknown } | undefined) ?? null;
-                    });
+                    : await leerObjetivosPublicados(idsPrep, async (oid) => (
+                        (await objetivoPublicado(empresaId, oid, anioGuardar, mesGuardar)) ? { publishedAt: true } : null
+                    ));
                 const quitado = quitarBorradorPrepararPublicado(jobPending, lecturaGuardar.publicados, lecturaGuardar.sinLeer);
                 if (quitado.quitadas.length) {
                     for (const oid of quitado.bloqueados) toast.message(avisoObjetivoYaPublicado(getObjectiveName(oid) || oid));
@@ -13698,10 +13699,9 @@ function PlanificacionDesktop() {
         const mesEscribir = currentDate.getMonth() + 1;
         const lecturaPub = !empresaId
             ? { publicados: new Set<string>(), sinLeer: idsChequeo }
-            : await leerObjetivosPublicados([...idsChequeo], async (oid) => {
-                const est = await fetchPlanificacionEstadoDoc(empresaId, oid, anioEscribir, mesEscribir);
-                return (est?.data as { publishedAt?: unknown } | undefined) ?? null;
-            });
+            : await leerObjetivosPublicados([...idsChequeo], async (oid) => (
+                (await objetivoPublicado(empresaId, oid, anioEscribir, mesEscribir)) ? { publishedAt: true } : null
+            ));
         const avisadosPrep = new Set<string>();
         const avisarPrep = (oid: string, motivo: 'publicado' | 'sin_verificar') => {
             const clave = `${motivo}:${oid}`;
@@ -14079,6 +14079,16 @@ function PlanificacionDesktop() {
 
     const aplicarImportarExcel = async (payload: AplicarImportPayload): Promise<boolean> => {
         if (!empresaId) return false;
+        const nombreImport = payload.objectiveName || getObjectiveName(payload.objectiveId) || payload.objectiveId;
+        try {
+            if (await objetivoPublicado(empresaId, payload.objectiveId, currentDate.getFullYear(), currentDate.getMonth() + 1)) {
+                toast.message(avisoCeldaObjetivoPublicado(nombreImport));
+                return false;
+            }
+        } catch {
+            toast.message(avisoCeldaSinVerificarPublicado(nombreImport));
+            return false;
+        }
         const mismo = payload.objectiveId === selectedObjective && payload.clientId === selectedClient && !(selectedGrupo && grupoUnifiedMode);
         if (!mismo && Object.keys(pendingChangesRef.current).length > 0) {
             if (!confirm('Hay cambios sin guardar en el objetivo abierto. ¿Descartarlos e ir al de la planilla?')) return false;
@@ -16638,9 +16648,44 @@ function PlanificacionDesktop() {
         return n >= pax ? `Cupo ${code} de ${posName} completo (${pax}): lo de más va como refuerzo (RFZE o RFZF).` : null;
     };
 
-    const escribirRapido = (items: ItemRapido[]) => {
+    const escribirRapidoEncolado = async (entrada: ItemRapido[], opts?: { automatico?: boolean }): Promise<{ hechos: number }> => {
         const global = bloqueoGlobalRapido();
-        if (global) { toast.message(global); return; }
+        if (global) { toast.message(global); return { hechos: 0 }; }
+        const exento = (oid: string) => !opts?.automatico && correctionMode && oid === selectedObjective && isCronogramaPublicado;
+        const anioPub = currentDate.getFullYear();
+        const mesPub = currentDate.getMonth() + 1;
+        const conOid = entrada.map((it) => {
+            const { emp, ds, ctx } = ctxRapido(it.r, it.c, it.emp);
+            if (!emp) return { it, oid: '' };
+            if (it.borrar || !it.code) {
+                const celda = (ctx?.p && !ctx.p.isDeleted) ? ctx.p : ctx?.s;
+                return { it, oid: String(celda?.objectiveId || resolveObjectiveForEmp(emp.id) || selectedObjective || '').trim() };
+            }
+            const res = cambioRapido(emp, ds, normalizarCodigo(it.code), ctx, it.fuente);
+            if ('error' in res) return { it, oid: '' };
+            return { it, oid: String(res.change.objectiveId || selectedObjective || '').trim() };
+        });
+        const aLeer = [...new Set(conOid.map((x) => x.oid).filter((oid) => oid && !exento(oid)))];
+        const lectura = !aLeer.length
+            ? { publicados: new Set<string>(), sinLeer: new Set<string>() }
+            : !empresaId
+                ? { publicados: new Set<string>(), sinLeer: new Set(aLeer) }
+                : await leerObjetivosPublicados(aLeer, async (oid) => (
+                    (await objetivoPublicado(empresaId, oid, anioPub, mesPub)) ? { publishedAt: true } : null
+                ));
+        const avisadosPub = new Set<string>();
+        const items: ItemRapido[] = [];
+        for (const { it, oid } of conOid) {
+            if (!oid || exento(oid)) { items.push(it); continue; }
+            const motivo = celdaPrepararBloqueada(oid, lectura.publicados, lectura.sinLeer);
+            if (!motivo) { items.push(it); continue; }
+            const clave = `${motivo}:${oid}`;
+            if (avisadosPub.has(clave)) continue;
+            avisadosPub.add(clave);
+            const nombre = getObjectiveName(oid) || oid;
+            toast.message(motivo === 'publicado' ? avisoCeldaObjetivoPublicado(nombre) : avisoCeldaSinVerificarPublicado(nombre));
+        }
+        if (!items.length) return { hechos: 0 };
         const next = { ...pendingChangesRef.current };
         const novedades: Record<string, any> = {};
         const quitarNovedad = new Set<string>();
@@ -16755,6 +16800,17 @@ function PlanificacionDesktop() {
             const total = lista.reduce((a, [, n]) => a + n, 0);
             toast.message(total === 1 ? lista[0][0] : `${total} celda(s) sin cambiar: ${lista[0][0]}${lista.length > 1 ? ` · y ${lista.length - 1} motivo(s) más` : ''}`);
         }
+        return { hechos };
+    };
+    const escribirRapido = (items: ItemRapido[], opts?: { automatico?: boolean }): Promise<{ hechos: number }> => {
+        const run = () => escribirRapidoEncolado(items, opts).catch((err) => {
+            console.error('[modo rapido]', err);
+            toast.error('No se pudo escribir en la grilla.');
+            return { hechos: 0 };
+        });
+        const job = colaEscrituraRapidaRef.current.then(run, run);
+        colaEscrituraRapidaRef.current = job.then(() => undefined, () => undefined);
+        return job;
     };
 
     const copiarRapido = (rg: RangoRC, cortar: boolean): string => {
@@ -17591,6 +17647,20 @@ function PlanificacionDesktop() {
         const alcance: AlcanceDiaNoTrabaja = tipo === 'p' ? { tipo: 'puesto', puesto } : tipo === 'f' ? { tipo: 'franja', puesto, code } : { tipo: 'todo' };
         setDiaNoTrabaja({ ...e, guardando: true });
         try {
+            const nombreDia = getObjectiveName(selectedObjective) || selectedObjective;
+            let publicadoDia = false;
+            try {
+                publicadoDia = await objetivoPublicado(empresaId, selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1);
+            } catch {
+                toast.message(avisoCeldaSinVerificarPublicado(nombreDia));
+                setDiaNoTrabaja((prev) => (prev ? { ...prev, guardando: false } : prev));
+                return;
+            }
+            if (publicadoDia) {
+                toast.message(avisoCeldaObjetivoPublicado(nombreDia));
+                setDiaNoTrabaja((prev) => (prev ? { ...prev, guardando: false } : prev));
+                return;
+            }
             const texto = await excluirDiaServicio({ servicioId, empresaId, migracionCompleta, objectiveName: getObjectiveName(selectedObjective), ds: e.ds, alcance, motivo: e.motivo });
             // Los que tenían turno ese día quedan en RET: disponibles para asignarlos en otro objetivo.
             const col = diasRapido.indexOf(e.ds);
@@ -17620,8 +17690,8 @@ function PlanificacionDesktop() {
                     });
                 }
             }
-            if (items.length) escribirRapido(items);
-            toast.success(`No se trabaja el ${e.ds.slice(8, 10)}/${e.ds.slice(5, 7)} (${texto})${items.length ? ` · ${items.length} turno(s) pasan a RET: guardá el cronograma` : ''}`);
+            const escritos = items.length ? (await escribirRapido(items, { automatico: true })).hechos : 0;
+            toast.success(`No se trabaja el ${e.ds.slice(8, 10)}/${e.ds.slice(5, 7)} (${texto})${escritos ? ` · ${escritos} turno(s) pasan a RET: guardá el cronograma` : ''}`);
             setDiaNoTrabaja(null);
             setDataRefreshNonce((n) => n + 1);
         } catch (err: any) {
@@ -17721,7 +17791,7 @@ function PlanificacionDesktop() {
                     return false;
                 });
                 if (!celdasOk.length) { toast.message(`No se cargó: esos días ya tienen turno (${salteados.join(', ')}).`); setRfzEditor((prev) => (prev ? { ...prev, guardando: false } : prev)); return; }
-                if (borrar.length) escribirRapido(borrar);
+                if (borrar.length) await escribirRapido(borrar);
                 const porGuardia = new Map<string, { empName: string; fechas: string[] }>();
                 const extra = fechasDeTexto(e.fechasExtra || '', currentDate.getFullYear());
                 for (const c of celdasOk) {
@@ -17776,7 +17846,7 @@ function PlanificacionDesktop() {
                         items.push({ r: c.r, c: col, code: res.code, fuente: { code: res.code, name: res.code, startTime: inicio, endTime: fin, hours: horasEntre(inicio, fin), positionName: res.puesto, forzarPuesto: true } });
                     }
                 }
-                if (items.length) escribirRapido(items);
+                if (items.length) await escribirRapido(items);
                 if (e.pedido) toast.success(`${res.texto} · pedido de Supervisión aplicado. Asigná los guardias en la grilla.`);
                 else toast.success(`${res.texto} · ${items.length} turno(s) en borrador${salteados ? ` · ${salteados} día(s) salteados porque ya tienen turno` : ''}. Guardá el cronograma.`);
             }
@@ -19588,7 +19658,7 @@ function PlanificacionDesktop() {
         setSlaGapCloseModal({ dateStr, positionName: gap.positionName, gapBand, objectiveId: gap.objectiveId });
     }, []);
 
-    const cerrarBandasDesdePie = (
+    const cerrarBandasDesdePie = async (
         dateStr: string,
         gap: { positionName: string; code: string; gapBand?: string; missing: number; detail?: string; objectiveId?: string },
     ) => {
@@ -19602,6 +19672,20 @@ function PlanificacionDesktop() {
         if (bloqueoMesCerrado) { toast.error(AVISO_MES_CERRADO); return; }
         const faltante = Math.max(1, Math.floor(Number(gap.missing) || 1));
         const objectiveId = objectiveIdEscrituraCierre(gap.objectiveId || selectedObjective || '');
+        const nombreCierre = getObjectiveName(objectiveId) || objectiveId || 'el objetivo';
+        if (!empresaId || !objectiveId) {
+            toast.message(avisoCeldaSinVerificarPublicado(nombreCierre));
+            return;
+        }
+        try {
+            if (await objetivoPublicado(empresaId, objectiveId, currentDate.getFullYear(), currentDate.getMonth() + 1)) {
+                toast.message(avisoCeldaObjetivoPublicado(nombreCierre));
+                return;
+            }
+        } catch {
+            toast.message(avisoCeldaSinVerificarPublicado(nombreCierre));
+            return;
+        }
         const enGrilla = new Set(displayedEmployees.map((e: { id: string }) => e.id));
         const asignables = candidatosFaltante({ dateStr, positionName: gap.positionName, banda: gapBand, objectiveId })
             .filter((c) => enGrilla.has(c.empId));
@@ -20167,7 +20251,7 @@ function PlanificacionDesktop() {
                                         onClick={(e) => {
                                             e.preventDefault();
                                             e.stopPropagation();
-                                            cerrarBandasDesdePie(coverageTooltip.dateStr, g);
+                                            void cerrarBandasDesdePie(coverageTooltip.dateStr, g);
                                         }}
                                         onMouseDown={(e) => {
                                             e.preventDefault();

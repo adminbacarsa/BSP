@@ -20,6 +20,7 @@ import { esCeldaLicencia } from './seleccionLicencia';
 import type { CeldaPropuesta, PuestoSla, TurnoPrevio } from './continuarMesAnterior';
 import type { TipoGuardiaArmado } from './armarMesServicio';
 import { simularUnidad, turnoHabilitadoPorEstructura, type Estrategia, type Metricas, type TurnoMes } from './prepararMes';
+import { TEXTO_SIN_VERIFICAR_PUBLICACION } from './objetivoPublicado';
 
 export type ModoTanda = 'auto' | Estrategia;
 
@@ -35,7 +36,7 @@ export type UnidadTanda = {
 };
 
 export type FilaTanda = UnidadTanda & {
-  estado: 'ok' | 'publicado' | 'sin_servicio' | 'sin_guardias' | 'error' | 'fuera_operacion';
+  estado: 'ok' | 'publicado' | 'sin_servicio' | 'sin_guardias' | 'error' | 'fuera_operacion' | 'sin_verificar';
   notas: string[];
   continuar?: Metricas;
   armar?: Metricas;
@@ -303,7 +304,20 @@ export async function correrTanda(input: TandaInput): Promise<FilaTanda[]> {
         const p = String(pos || '');
         return u.grupo && p && p !== 'General' ? `${nombresGrupo.get(String(oid)) || nombreObj.get(String(oid)) || oid} · ${p}` : p;
       };
-      const publicados = await Promise.all(objIds.map((oid) => input.publicado(oid).catch(() => false)));
+      const lecturas = await Promise.all(objIds.map(async (oid) => {
+        try {
+          return { ok: true as const, publicado: await input.publicado(oid) };
+        } catch {
+          return { ok: false as const, publicado: false };
+        }
+      }));
+      if (lecturas.some((r) => !r.ok)) {
+        fila.estado = 'sin_verificar';
+        fila.notas.push(TEXTO_SIN_VERIFICAR_PUBLICACION);
+        cerrar();
+        continue;
+      }
+      const publicados = lecturas.map((r) => r.publicado);
       const idsPublicados = new Set(objIds.filter((_, i) => publicados[i]));
       const objetivosAbiertos = u.objetivos.filter((o) => !idsPublicados.has(o.id));
       if (objetivosAbiertos.length === 0) { fila.estado = 'publicado'; cerrar(); continue; }

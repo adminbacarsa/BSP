@@ -10,6 +10,7 @@ import {
 import { auth, db, getDb } from './firebase';
 import { objectiveMatchKeys } from './slaPlanningMatch';
 import { clientPhysicalDeleteBlockMessage, type ClientRelatedPresence } from './crm/clientLifecycle';
+import { docConPublishedAt, idPlanificacionEstado } from './planificacion/objetivoPublicado';
 import {
   shouldScopeQueriesToEmpresa,
   tenantEmpresaIdsMatch,
@@ -954,10 +955,7 @@ export function buildPlanificacionEstadoDocId(
   year: number,
   month: number,
 ): string {
-  const e = String(empresaId ?? '').trim();
-  const o = String(objectiveId ?? '').trim();
-  if (e) return `${e}_${o}_${year}_${month}`;
-  return `${o}_${year}_${month}`;
+  return idPlanificacionEstado(empresaId, objectiveId, year, month);
 }
 
 /** Clave interna para mapas UI (sin tenant): `${objectiveId}_${year}_${month}`. */
@@ -1070,11 +1068,8 @@ export async function fetchPlanificacionPublishStatus(
   for (const id of ids) {
     const snap = await getDoc(doc(db, 'planificacion_estados', id));
     if (!snap.exists()) continue;
-    const d = snap.data() as Record<string, unknown>;
-    const publishedAt = d.publishedAt;
-    if (publishedAt != null && publishedAt !== '') {
-      return { publishedAt, publishedBy: String(d.publishedBy ?? '') };
-    }
+    const elegido = docConPublishedAt([snap.data() as { publishedAt?: unknown; publishedBy?: unknown }]);
+    if (elegido) return elegido;
   }
   return null;
 }
