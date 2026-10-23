@@ -299,7 +299,7 @@ import { acreditarExtEntrePuestos, deltaCierreExtEntre, textoFacturableCliente, 
 import { crearRfzePlanificacion } from '@/lib/refuerzo/crearRfzePlanificacion';
 import { modifyRefuerzoPuntual } from '@/lib/refuerzo/modifyRefuerzoPuntual';
 import { cancelRefuerzoPuntual } from '@/lib/refuerzo/cancelRefuerzoPuntual';
-import { DIAS_SEMANA, fechasDeTexto, fechasRfzf, franjasParaMesSiguiente, horarioValido, letraDeFecha, normalizarHora, type DiaLetra } from '@/lib/planificacion/refuerzosRapido';
+import { accionCeldaRfze, DIAS_SEMANA, fechasDeTexto, fechasRfzf, franjasParaMesSiguiente, horarioValido, letraDeFecha, normalizarHora, type DiaLetra } from '@/lib/planificacion/refuerzosRapido';
 import { catalogoObjetivos, lugarDeGuardia, turnosLugarDeMapa } from '@/lib/planificacion/pegarPersonas';
 import {
     CANAL_PORTAPAPELES,
@@ -17781,16 +17781,16 @@ function PlanificacionDesktop() {
         const clientName = clients.find((c: any) => c.id === selectedClient)?.name || '';
         try {
             if (e.tipo === 'RFZE') {
-                // Sobre un RFZF lo reemplaza (el RFZF se quita como cambio del cronograma); sobre otro turno de trabajo no se pisa.
+                // Sobre un RFZF o un RET lo reemplaza (se quita como cambio del cronograma); el franco queda y el RFZE se suma aparte; otro turno de trabajo no se pisa.
                 const borrar: ItemRapido[] = [];
                 const salteados: string[] = [];
                 const celdasOk = e.celdas.filter((c) => {
                     const cx = ctxDeCelda(`${c.empId}_${c.ds}`);
                     const actual = cx?.p && !cx.p.isDeleted ? cx.p : cx?.s;
-                    const code = String(actual?.code || '').toUpperCase();
-                    if (!actual || !code || esCeldaFranco(actual)) return true;
-                    if (code.startsWith('RFZF')) { borrar.push({ r: c.r, c: c.c, borrar: true }); return true; }
-                    salteados.push(`${c.empName.split(',')[0]} ${c.ds.slice(8, 10)} (${code})`);
+                    const accion = accionCeldaRfze(actual);
+                    if (accion === 'reemplazar') { borrar.push({ r: c.r, c: c.c, borrar: true }); return true; }
+                    if (accion === 'crear') return true;
+                    salteados.push(`${c.empName.split(',')[0]} ${c.ds.slice(8, 10)} (${String(actual?.code || '').toUpperCase()})`);
                     return false;
                 });
                 if (!celdasOk.length) { toast.message(`No se cargó: esos días ya tienen turno (${salteados.join(', ')}).`); setRfzEditor((prev) => (prev ? { ...prev, guardando: false } : prev)); return; }
@@ -17816,7 +17816,7 @@ function PlanificacionDesktop() {
                         draftDe: (f) => (f.startsWith(mesVisto) ? !planPublicadoGrilla : true),
                     });
                 }
-                toast.success(`${(e.sigla || 'RFZE').toUpperCase()} ${inicio}–${fin}: ${n} día(s) cargados y aprobados (trazabilidad del servicio)${borrar.length ? ` · ${borrar.length} RFZF reemplazado(s): guardá el cronograma` : ''}${salteados.length ? ` · salteados: ${salteados.join(', ')}` : ''}`);
+                toast.success(`${(e.sigla || 'RFZE').toUpperCase()} ${inicio}–${fin}: ${n} día(s) cargados y aprobados (trazabilidad del servicio)${borrar.length ? ` · ${borrar.length} reemplazado(s) (RET o RFZF): guardá el cronograma` : ''}${salteados.length ? ` · salteados: ${salteados.join(', ')}` : ''}`);
                 void refreshCronogramaView();
             } else {
                 const id = String((activePlanningSlaRow as { id?: string } | null)?.id || '');

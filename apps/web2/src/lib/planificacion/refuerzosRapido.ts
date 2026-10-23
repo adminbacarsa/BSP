@@ -3,6 +3,7 @@
  * RFZF (fijo): cambio permanente del servicio desde una fecha (puesto/turno con su sigla y patrón).
  * RFZE (eventual): fechas puntuales con sigla propia, fuera del servicio, con pedido de refuerzo aprobado.
  */
+import { esCeldaFranco } from './francoTrabajadoRapido';
 
 export type DiaLetra = 'L' | 'M' | 'X' | 'J' | 'V' | 'S' | 'D';
 export const DIAS_SEMANA: DiaLetra[] = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
@@ -196,6 +197,21 @@ export function fechasDeTexto(texto: string, year: number): string[] {
     }
   }
   return [...out].sort();
+}
+
+export type AccionCeldaRfze = 'crear' | 'reemplazar' | 'saltear';
+
+/**
+ * RFZE sobre la celda del modo rápido.
+ * Vacía o franco: se crea el eventual y el franco queda.
+ * RFZF o RET: se borra el turno y se crea el RFZE.
+ * Otro turno de trabajo: no se pisa.
+ */
+export function accionCeldaRfze(celda: { code?: string; isFranco?: boolean; isFrancoTrabajado?: boolean; isDeleted?: boolean } | null | undefined): AccionCeldaRfze {
+  const code = String(celda?.code || '').toUpperCase();
+  if (!celda || !code || esCeldaFranco(celda)) return 'crear';
+  if (code.startsWith('RFZF') || code === 'RET') return 'reemplazar';
+  return 'saltear';
 }
 
 export function horarioValido(hm: string): boolean {

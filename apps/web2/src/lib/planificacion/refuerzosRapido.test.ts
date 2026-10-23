@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { agregarRfzfAPosiciones, fechasDeTexto, fechasRfzf, franjasParaMesSiguiente, normalizarHora } from './refuerzosRapido';
+import { accionCeldaRfze, agregarRfzfAPosiciones, fechasDeTexto, fechasRfzf, franjasParaMesSiguiente, normalizarHora } from './refuerzosRapido';
 
 describe('refuerzos desde el modo rápido', () => {
   it('RFZF V·S·D desde el 10 hasta fin de octubre', () => {
@@ -56,6 +56,18 @@ describe('refuerzos desde el modo rápido', () => {
     assert.deepEqual(fechasDeTexto('20/10, 21/10', 2026), ['2026-10-20', '2026-10-21']);
     assert.deepEqual(fechasDeTexto('28/10-2/11', 2026), ['2026-10-28', '2026-10-29', '2026-10-30', '2026-10-31', '2026-11-01', '2026-11-02']);
     assert.deepEqual(fechasDeTexto('30/12-2/1', 2026), ['2026-12-30', '2026-12-31', '2027-01-01', '2027-01-02']);
+  });
+
+  it('RFZE sobre RET borra y crea; franco y vacío no borran; RFZF sigue reemplazándose', () => {
+    assert.equal(accionCeldaRfze({ code: 'RET' }), 'reemplazar');
+    assert.equal(accionCeldaRfze({ code: 'ret' }), 'reemplazar');
+    assert.equal(accionCeldaRfze({ code: 'F' }), 'crear');
+    assert.equal(accionCeldaRfze({ code: 'FF', isFranco: true }), 'crear');
+    assert.equal(accionCeldaRfze({ code: 'RFZF' }), 'reemplazar');
+    assert.equal(accionCeldaRfze({ code: 'RFZF2' }), 'reemplazar');
+    assert.equal(accionCeldaRfze(null), 'crear');
+    assert.equal(accionCeldaRfze({ code: '' }), 'crear');
+    assert.equal(accionCeldaRfze({ code: 'M' }), 'saltear');
   });
 
   it('un pax más en una franja que ya existe desde el 15: ese mes resta el pax del 1 al 14; el mes siguiente queda ×3', () => {
