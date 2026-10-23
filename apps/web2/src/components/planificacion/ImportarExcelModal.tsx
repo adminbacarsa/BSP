@@ -107,6 +107,7 @@ type GrupoImport = {
 const LICENCIAS = ['V', 'E', 'A', 'L', 'AA', 'PG', 'SUS'];
 const FRANCOS = ['F', 'FF', 'FP'];
 const SIN_ACTUALES: CeldaActual[] = [];
+const SIN_REGLAS: ReglaMapeo[] = [];
 
 /** Un turno del servicio en la lista «Pasa a»: código y puesto («M@Guardia»). */
 const SEP_PUESTO = '@';
@@ -267,7 +268,7 @@ export function ImportarExcelModal({ ctx, onCargar, onAplicar, onCancelar, puede
 
   const grupo = grupos[grupoIdx] || null;
   const cuadro = useMemo(() => (grupo ? cuadroDelGrupo(grupo, cuadros) : null), [grupo, cuadros]);
-  const reglas = (grupo && reglasPorClave[grupo.clave]) || [];
+  const reglas = (grupo && reglasPorClave[grupo.clave]) || SIN_REGLAS;
   const actuales = cargado && grupo && cargado.clave === grupo.clave ? cargado.actuales : SIN_ACTUALES;
   const dotacion = useMemo(
     () => ctx.empleados.filter((e) => !!grupo && e.objetivoPreferido === grupo.objectiveId),
