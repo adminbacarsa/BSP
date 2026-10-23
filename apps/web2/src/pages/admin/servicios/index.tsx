@@ -34,10 +34,9 @@ import {
   analyzeShiftComposition,
   calculateMonthlyBreakdown,
   calculatePositionContractTotalHours,
-  computePositionDayComposition,
   parseYmdToLocalDate,
-  WEEK_DAY_CODES,
 } from '@/lib/servicios/slaHoursCalculator';
+import { formatPositionDailyCoverageLabel, formatPositionPaxLabel } from '@/lib/servicios/positionPaxLabel';
 import {
   defaultNewSlaDates,
   localTodayYmd,
@@ -591,28 +590,6 @@ export default function ServiciosSLAPage() {
       const ref = b ? base.find((y) => y.code === b) : null;
       return ref ? { ...x, startTime: ref.startTime, endTime: ref.endTime, hours: ref.hours } : x;
     });
-  };
-
-  const formatPositionPaxLabel = (pos: ServicePosition): string => {
-    if (isEventosPosition(pos)) return 'EXTRAS';
-    const shiftQtys = pos.allowedShiftTypes
-      .map((s) => s.quantity)
-      .filter((q): q is number => q != null);
-    if (shiftQtys.length === 0) return `${pos.quantity} PAX`;
-    const mn = Math.min(...shiftQtys);
-    const mx = Math.max(...shiftQtys);
-    return mn === mx ? `${mn} PAX` : `${mn}–${mx} PAX`;
-  };
-
-  const formatPositionDailyCoverageLabel = (pos: ServicePosition) => {
-    if (isEventosPosition(pos)) return '0 hs/día · extras TURA';
-    const totals = WEEK_DAY_CODES.map((d) => computePositionDayComposition(pos, d).dayTotal);
-    const min = Math.min(...totals);
-    const max = Math.max(...totals);
-    const r = (x: number) => Math.round(x * 10) / 10;
-    if (max < 1e-6) return '—';
-    if (Math.abs(min - max) < 1e-6) return `${r(max)} hs/día`;
-    return `${r(min)}–${r(max)} hs/día`;
   };
 
   const monthlyBreakdown = useMemo(

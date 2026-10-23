@@ -301,6 +301,47 @@ test('24 h con la misma cantidad por banda sigue en 24 × pax aunque tenga D12/N
   assert.equal(leerDia({ turnos: [], puestos }).horasVendidas, 48);
 });
 
+test('Casa Matriz justo: el volante sin puesto no marca turnos de más', () => {
+  const puestos: PuestoServicio[] = [
+    { positionName: 'Directorio', qty: 1, coverageType: '24hs', shifts: [{ code: 'M', hours: 8 }, { code: 'T', hours: 8 }, { code: 'N', hours: 8 }] },
+    {
+      positionName: 'Museo',
+      qty: 1,
+      coverageType: 'custom',
+      shifts: [
+        { code: 'MM', hours: 9, quantity: 3 },
+        { code: 'ME', hours: 12 },
+      ],
+    },
+  ];
+  const base: TurnoDia[] = [
+    t('a', 'A', 'M', 'Directorio'),
+    t('b', 'B', 'T', 'Directorio'),
+    t('c', 'C', 'N', 'Directorio'),
+    t('m1', 'M1', 'MM', 'Museo'),
+    t('m2', 'M2', 'MM', 'Museo'),
+    t('m3', 'M3', 'MM', 'Museo'),
+    { empId: 'me', nombre: 'ME', code: 'ME', positionName: 'Museo', hours: 12, startTime: '07:00' },
+  ];
+  const conVolante: TurnoDia[] = [
+    ...base,
+    { empId: 'v', nombre: 'VOLANTE', code: 'M', hours: 8 },
+    { empId: 'w', nombre: 'SUELTO', code: 'MM', hours: 9 },
+  ];
+  const justo = leerDia({ turnos: conVolante, puestos });
+  assert.equal(justo.horasTrabajadas, 24);
+  assert.equal(justo.horasVendidas, 24);
+  assert.equal(justo.sobranHoras, 0);
+  assert.equal(justo.turnosFuera, 0);
+  assert.equal(justo.sinPuesto.length, 1);
+  const deMas = leerDia({
+    turnos: [...base, t('x', 'EXTRA', 'M', 'Directorio')],
+    puestos,
+  });
+  assert.equal(deMas.turnosFuera, 1);
+  assert.equal(deMas.sobranHoras, 8);
+});
+
 test('P1M y P1T cierran la mañana y la tarde del puesto', () => {
   const compuesto: PuestoServicio[] = [{
     positionName: 'Puesto 1', qty: 1, coverageType: '24hs',

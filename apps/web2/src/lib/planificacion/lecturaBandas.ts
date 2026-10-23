@@ -398,8 +398,8 @@ export function leerDia(input: { turnos: readonly TurnoDia[]; puestos: readonly 
     customMap.set(banda, prev);
   }
   const custom = [...customMap.values()].map((g) => ({ ...g, cantidad: customTurnos.filter((t) => bandaDe(t) === g.banda).length }));
-  // Los custom (Rondín, Encargada…) cierran contra su propia franja: no suman contra los puestos de 24 h.
-  const horasTrabajadas = trabajo.filter((t) => !customTurnos.includes(t)).reduce((s, t) => s + horasDe(t), 0);
+  // Custom cierra en su franja. El volante sin puesto no suma: no infla el sobrante si cada puesto está justo.
+  const horasTrabajadas = estandar.reduce((s, t) => s + horasDe(t), 0);
   const horasVendidas = mostrar ? puestos24.reduce((s, p) => s + horasVendidasDePuesto(p), 0) : 0;
   const sobranHoras = mostrar ? Math.max(0, Math.round((horasTrabajadas - horasVendidas) * 100) / 100) : 0;
   const turnosFuera = sobranHoras > 0 ? Math.round(sobranHoras / 8) : 0;

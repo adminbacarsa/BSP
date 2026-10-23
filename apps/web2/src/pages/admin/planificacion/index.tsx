@@ -19522,7 +19522,9 @@ function PlanificacionDesktop() {
                         // «Cubierto entre puestos» vale para el objetivo leído: en el grupo no tapa lo que falta en otro (Vifood).
                         const cerradoMostrar = objetivoCubierto ? closedPax + Math.max(0, reqLectura - closedLectura) : closedPax;
                         const isCovered = requiredPax > 0 && cerradoMostrar >= requiredPax;
-                        const extra = lecturaDia?.mostrar && lecturaDia.turnosFuera > 0 ? lecturaDia.turnosFuera : 0;
+                        const extra = lecturaDia?.mostrar && lecturaDia.sobranHoras > 0 && lecturaDia.turnosFuera > 0
+                            ? lecturaDia.turnosFuera
+                            : 0;
                         const marcaDeMas = sobraPersonas > 0 || extra > 0;
                         const marcaHoras = marcaHorasFaltantes(avisosReloj.join(' · '));
                         const bandasGrupo = selectedGrupo && grupoUnifiedMode && !isCovered && requiredPax > 0
@@ -23633,8 +23635,11 @@ function PlanificacionDesktop() {
                                             const sobraDetalle = (coverageData as { sobraDetalle?: string[] }).sobraDetalle || [];
                                             const avisoHorasPuesto = (coverageData as { avisoHoras?: string }).avisoHoras || '';
                                             const marcaHorasModal = marcaHorasFaltantes(avisoHorasPuesto);
-                                            const unitsLabel = coverageData.isActiveDay && coverageData.requiredUnits > 0 && bandasPax?.length
+                                            const textoBandas = bandasPax?.length
                                                 ? bandasPax.map((b) => `${b.code} ${b.tiene}/${b.pide}`).join(' · ')
+                                                : '';
+                                            const unitsLabel = coverageData.isActiveDay && coverageData.requiredUnits > 0 && textoBandas
+                                                ? textoBandas
                                                 : coverageData.isActiveDay && coverageData.requiredUnits > 0
                                                 ? `${coverageData.closedUnits}/${coverageData.requiredUnits} puesto${coverageData.requiredUnits > 1 ? 's' : ''}`
                                                 : null;

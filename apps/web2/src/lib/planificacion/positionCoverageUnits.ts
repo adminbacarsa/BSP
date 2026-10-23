@@ -611,6 +611,7 @@ export type TurnoRelojCobertura = {
 
 const MINUTOS_DIA = 1440;
 const TOLERANCIA_HUECO_MIN = 60;
+const BANDAS_24 = new Set(['M', 'T', 'N', 'D12', 'N12']);
 
 function aMinuto(hm: string): number | null {
     const m = String(hm || '').match(/(\d{1,2}):(\d{2})/);
@@ -695,26 +696,67 @@ function ventanasHueco(oferta: number[], desde: number, hasta: number, pide: num
 
 type BandaPedida = { code: string; pide: number; desde: string; hasta: string; horas: number };
 
+type FranjaCobertura = {
+    code?: string;
+    hours?: number;
+    quantity?: number;
+    startTime?: string;
+    endTime?: string;
+    days?: string[];
+    specificDates?: string[];
+    feriados?: boolean;
+};
+
+function paxPropio(s: { quantity?: number }): number | null {
+    if (s.quantity == null) return null;
+    const n = Number(s.quantity);
+    return Number.isFinite(n) ? n : null;
+}
+
+function franjaCorreEsteDia(s: FranjaCobertura, dayLetter?: string, dateStr?: string): boolean {
+    const sd = s.specificDates;
+    if (Array.isArray(sd) && sd.length > 0) return !!dateStr && sd.includes(dateStr);
+    const days = s.days;
+    if (Array.isArray(days) && days.length > 0) {
+        if (dayLetter && days.includes(dayLetter)) return true;
+        return correFeriado(s, dateStr);
+    }
+    return true;
+}
+
 function bandasExplicitas(
-    allShifts: Array<{ code?: string; hours?: number; quantity?: number; startTime?: string; endTime?: string }>,
+    allShifts: FranjaCobertura[],
     effectiveBandQty: (code: string, shiftQty?: number) => number,
     fullSkip: Set<string>,
+    opts?: { custom?: boolean; posQty?: number; dayLetter?: string; dateStr?: string },
 ): BandaPedida[] {
+    const custom = opts?.custom === true;
+    const posQty = Math.max(0, Math.floor(Number(opts?.posQty) || 0));
+    const algunaExplicita = custom && allShifts.some((s) => {
+        const code = String(s.code || '').toUpperCase();
+        return !!code && !fullSkip.has(code) && (paxPropio(s) ?? 0) > 0;
+    });
     const explicitas = allShifts.filter((s) => {
         const code = String(s.code || '').toUpperCase();
-        return code && !fullSkip.has(code) && s.quantity != null && Number(s.quantity) > 0;
+        if (!code || fullSkip.has(code)) return false;
+        if (custom && !franjaCorreEsteDia(s, opts?.dayLetter, opts?.dateStr)) return false;
+        const propia = paxPropio(s);
+        if (custom && algunaExplicita) return (propia ?? posQty) > 0;
+        return propia != null && propia > 0;
     });
     if (!explicitas.length) return [];
     const ocho = explicitas.filter((s) => shiftBandHours(s) < 12);
     const doce = explicitas.filter((s) => shiftBandHours(s) >= 12);
-    const elegidas = ocho.length > 0 ? ocho : doce;
+    const elegidas = custom && algunaExplicita ? explicitas : (ocho.length > 0 ? ocho : doce);
     const vistas = new Set<string>();
     const out: BandaPedida[] = [];
     for (const s of elegidas) {
         const code = String(s.code || '').toUpperCase();
         if (!code || vistas.has(code)) continue;
         vistas.add(code);
-        const pide = effectiveBandQty(code, s.quantity);
+        const propia = paxPropio(s);
+        const shiftQty = custom && algunaExplicita && !(propia != null && propia > 0) ? posQty : (propia ?? undefined);
+        const pide = effectiveBandQty(code, shiftQty);
         if (pide <= 0) continue;
         const desde = String(s.startTime || '').slice(0, 5);
         const hasta = String(s.endTime || '').slice(0, 5) || (desde ? finDesdeInicio(desde, shiftBandHours(s)) || '' : '');
@@ -794,6 +836,7 @@ function cerrarPorCantidadDeBanda(
         for (const estado of estados) {
             const relleno = Math.min(acred[estado.code] || 0, estado.pide);
             estado.tiene = Math.max(estado.tiene, relleno);
+            if (!BANDAS_24.has(estado.code)) estado.tiene = Math.min(estado.tiene, acred[estado.code] || 0);
         }
         const sobraDetalle: string[] = [];
         let sobra = 0;
@@ -1060,7 +1103,7 @@ export function countPositionClosedUnitsFromShifts(
         positionName?: string;
         qty?: number;
         coverageType?: string;
-        shifts?: Array<{ code?: string; hours?: number; quantity?: number; startTime?: string; endTime?: string }>;
+        shifts?: FranjaCobertura[];
         activeDays?: string[];
         excludedShiftDates?: Record<string, string[]>;
         excludedShiftPaxDates?: Record<string, Record<string, number>>;
@@ -1112,9 +1155,21 @@ export function countPositionClosedUnitsFromShifts(
         return Math.max(0, base - (paxCuts[c] || 0) + boost);
     };
 
-    const pedidas = bandasExplicitas(allShifts, effectiveBandQty, fullSkip);
+    const pedidas = bandasExplicitas(allShifts, effectiveBandQty, fullSkip, {
+        custom: coverageType === 'custom',
+        posQty: qty,
+        dayLetter,
+        dateStr,
+    });
     if (pedidas.length > 0) {
         return cerrarPorCantidadDeBanda(String(pos.positionName || 'General'), schemeLabel, pedidas, codeCounts, turnos);
+    }
+    if (
+        coverageType === 'custom'
+        && allShifts.some((s) => (paxPropio(s) ?? 0) > 0)
+        && allShifts.some((s) => (Array.isArray(s.days) && s.days.length > 0) || (Array.isArray(s.specificDates) && s.specificDates.length > 0))
+    ) {
+        return { closed: 0, required: 0, schemeLabel };
     }
 
     if (coverageType === '24hs' || coverageType === '24' || coverageType === '24h') {
