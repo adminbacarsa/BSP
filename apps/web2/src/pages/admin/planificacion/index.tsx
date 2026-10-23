@@ -9903,7 +9903,7 @@ function PlanificacionDesktop() {
                 if (isPublished) {
                     setNeedsRepublishMap(prev => ({ ...prev, [publishLookupKey]: true }));
                 }
-                planToastSaved(jobCount);
+                planToastSaved(jobCount, { borrador: !isPublished });
 
                 // El historial nunca frena el guardado: addDoc tira sincrónico si un campo es undefined
                 // (cambios del menú rápido / coberturas con campos opcionales), así que va limpio y diferido.

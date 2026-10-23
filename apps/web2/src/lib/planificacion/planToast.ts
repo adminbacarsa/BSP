@@ -21,10 +21,11 @@ export function planToastSaving(count: number): string | number {
   });
 }
 
-export function planToastSaved(count: number): void {
-  toast.success(`${count} cambio${count === 1 ? '' : 's'} guardado${count === 1 ? '' : 's'}`, {
+export function planToastSaved(count: number, opts?: { borrador?: boolean }): void {
+  const base = `${count} cambio${count === 1 ? '' : 's'} guardado${count === 1 ? '' : 's'}`;
+  toast.success(opts?.borrador ? `${base} en borrador — falta publicar` : base, {
     id: PLAN_TOAST.save,
-    duration: 2800,
+    duration: opts?.borrador ? 4000 : 2800,
   });
 }
 

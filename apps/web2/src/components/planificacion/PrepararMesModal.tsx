@@ -109,6 +109,7 @@ export function PrepararMesModal(props: Props) {
   const [verFuera, setVerFuera] = useState(false);
   const cortar = useRef(false);
   const [simuladoAt, setSimuladoAt] = useState<number | null>(null);
+  const [minimizado, setMinimizado] = useState(false);
 
   // La vista previa se guarda por empresa y mes en la pestaña: entrar a un objetivo o recargar no la pierde.
   const clave = `cosp-preparar-mes:${empresaId}:${year}-${String(month + 1).padStart(2, '0')}`;
@@ -151,6 +152,7 @@ export function PrepararMesModal(props: Props) {
     setCorriendo(true);
     setFilas([]);
     setVista('revisar');
+    setMinimizado(false);
     const lista = unidades.filter(elegidas);
     setAvance({ hechos: 0, total: lista.length, actual: 'Cargando servicios…' });
     try {
@@ -250,6 +252,22 @@ export function PrepararMesModal(props: Props) {
   if (!open) {
     if (!filas.length || corriendo) return null;
     const mesCorto = new Date(year, month, 1).toLocaleDateString('es-AR', { month: 'long' });
+    const estadoTxt = conteo.n.revisar ? `${conteo.n.revisar} para revisar` : filas.some(faltaServicioDe) ? `${filas.filter(faltaServicioDe).length} sin servicio` : filas.some((f) => f.estado === 'sin_verificar') ? `${filas.filter((f) => f.estado === 'sin_verificar').length} sin verificar` : 'todo completo';
+    const estadoTono = conteo.n.revisar || filas.some(faltaServicioDe) || filas.some((f) => f.estado === 'sin_verificar') ? 'text-amber-600' : 'text-emerald-600';
+    if (minimizado) {
+      return createPortal(
+        <button
+          type="button"
+          onClick={() => setMinimizado(false)}
+          title={`Preparar ${mesCorto} · ${estadoTxt} — tocá para expandir`}
+          data-preparar-minimizado
+          className="fixed bottom-4 right-4 z-[2900] flex h-11 w-11 items-center justify-center rounded-full border border-slate-300 bg-white shadow-lg hover:bg-slate-50"
+        >
+          <CalendarRange size={18} className={estadoTono} />
+        </button>,
+        document.body,
+      );
+    }
     return createPortal(
       <div className="fixed bottom-4 left-1/2 z-[2900] flex -translate-x-1/2 items-center rounded-full border border-slate-300 bg-white shadow-lg">
       <button
@@ -259,9 +277,10 @@ export function PrepararMesModal(props: Props) {
         className="flex items-center gap-2 rounded-l-full px-4 py-2 text-[12px] font-bold text-slate-700 hover:bg-slate-50"
       >
         <CalendarRange size={15} /> Preparar {mesCorto}
-        <span className={conteo.n.revisar || filas.some(faltaServicioDe) || filas.some((f) => f.estado === 'sin_verificar') ? 'text-amber-600' : 'text-emerald-600'}>· {conteo.n.revisar ? `${conteo.n.revisar} para revisar` : filas.some(faltaServicioDe) ? `${filas.filter(faltaServicioDe).length} sin servicio` : filas.some((f) => f.estado === 'sin_verificar') ? `${filas.filter((f) => f.estado === 'sin_verificar').length} sin verificar` : 'todo completo'}</span>
+        <span className={estadoTono}>· {estadoTxt}</span>
         <span className="text-indigo-600">· Volver</span>
       </button>
+      <button type="button" onClick={() => setMinimizado(true)} title="Minimizar (no se pierde la vista previa)" aria-label="Minimizar" data-preparar-minimizar className="border-l border-slate-200 px-2 py-2 text-slate-400 hover:bg-slate-50 hover:text-slate-700">—</button>
       <button type="button" onClick={descartar} title="Descartar la vista previa" aria-label="Descartar la vista previa" data-preparar-descartar className="rounded-r-full border-l border-slate-200 px-2.5 py-2 text-slate-400 hover:bg-slate-50 hover:text-rose-600"><X size={14} /></button>
       </div>,
       document.body,
