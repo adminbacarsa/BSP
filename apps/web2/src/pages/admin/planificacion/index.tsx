@@ -296,10 +296,11 @@ import { liquidationCycleRange, ymdInRange } from '@/lib/hoursPeriod';
 import { crearTuraPlanificacion } from '@/lib/refuerzo/crearTuraPlanificacion';
 import { coberturaPorHoras, textoHoras, type PuestoHoras, type TramoHoras } from '@/lib/planificacion/coberturaHoras';
 import { acreditarExtEntrePuestos, deltaCierreExtEntre, textoFacturableCliente, turnoExtDelObjetivo, type TurnoExt } from '@/lib/planificacion/extEntrePuestos';
-import { crearRfzePlanificacion } from '@/lib/refuerzo/crearRfzePlanificacion';
+import { crearRfzesAtomicos } from '@/lib/refuerzo/crearRfzePlanificacion';
+import { docsRetDeCelda, prepararRfzeSobreCeldas } from '@/lib/refuerzo/rfzeSobreRet';
 import { modifyRefuerzoPuntual } from '@/lib/refuerzo/modifyRefuerzoPuntual';
 import { cancelRefuerzoPuntual } from '@/lib/refuerzo/cancelRefuerzoPuntual';
-import { accionCeldaRfze, DIAS_SEMANA, fechasDeTexto, fechasRfzf, franjasParaMesSiguiente, horarioValido, letraDeFecha, normalizarHora, type DiaLetra } from '@/lib/planificacion/refuerzosRapido';
+import { DIAS_SEMANA, fechasDeTexto, fechasRfzf, franjasParaMesSiguiente, horarioValido, letraDeFecha, normalizarHora, type DiaLetra } from '@/lib/planificacion/refuerzosRapido';
 import { catalogoObjetivos, lugarDeGuardia, turnosLugarDeMapa } from '@/lib/planificacion/pegarPersonas';
 import {
     CANAL_PORTAPAPELES,
@@ -17781,42 +17782,61 @@ function PlanificacionDesktop() {
         const clientName = clients.find((c: any) => c.id === selectedClient)?.name || '';
         try {
             if (e.tipo === 'RFZE') {
-                // Sobre un RFZF o un RET lo reemplaza (se quita como cambio del cronograma); el franco queda y el RFZE se suma aparte; otro turno de trabajo no se pisa.
-                const borrar: ItemRapido[] = [];
-                const salteados: string[] = [];
-                const celdasOk = e.celdas.filter((c) => {
-                    const cx = ctxDeCelda(`${c.empId}_${c.ds}`);
-                    const actual = cx?.p && !cx.p.isDeleted ? cx.p : cx?.s;
-                    const accion = accionCeldaRfze(actual);
-                    if (accion === 'reemplazar') { borrar.push({ r: c.r, c: c.c, borrar: true }); return true; }
-                    if (accion === 'crear') return true;
-                    salteados.push(`${c.empName.split(',')[0]} ${c.ds.slice(8, 10)} (${String(actual?.code || '').toUpperCase()})`);
-                    return false;
+                // Franco o vacío: el RFZE se suma y el franco queda. RFZF: se quita al guardar el cronograma.
+                // RET: se borra en el mismo batch que el RFZE (también si el RET es de otro objetivo).
+                const permitidosRfz = idsObjetivosDelCrono(selectedObjective, selectedGrupo?.objectiveIds, !!(selectedGrupo && grupoUnifiedMode));
+                const prep = prepararRfzeSobreCeldas({
+                    celdas: e.celdas.map((c) => {
+                        const key = `${c.empId}_${c.ds}`;
+                        const cx = ctxDeCelda(key);
+                        const actual = cx?.p && !cx.p.isDeleted ? cx.p : cx?.s;
+                        return {
+                            empId: c.empId, empName: c.empName, ds: c.ds, r: c.r, c: c.c,
+                            celda: actual || null,
+                            docs: docsRetDeCelda(cellTurnosMap[key], shiftsMap[key], actual),
+                        };
+                    }),
+                    permitidos: permitidosRfz,
+                    objetivoCrono: selectedObjective,
+                    volanteDe: (empId) => esVolanteDelCrono(employees.find((x: any) => x.id === empId)?.volante, permitidosRfz),
                 });
-                if (!celdasOk.length) { toast.message(`No se cargó: esos días ya tienen turno (${salteados.join(', ')}).`); setRfzEditor((prev) => (prev ? { ...prev, guardando: false } : prev)); return; }
-                if (borrar.length) await escribirRapido(borrar);
-                const porGuardia = new Map<string, { empName: string; fechas: string[] }>();
+                if (!prep.crear.length) {
+                    toast.message(prep.avisos[0] || (prep.salteados.length ? `No se cargó: esos días ya tienen turno (${prep.salteados.join(', ')}).` : 'No se cargó el RFZE.'));
+                    setRfzEditor((prev) => (prev ? { ...prev, guardando: false } : prev));
+                    return;
+                }
+                if (prep.rfzf.length) await escribirRapido(prep.rfzf.map((c) => ({ r: c.r, c: c.c, borrar: true })));
+                const porGuardia = new Map<string, { empName: string; fechas: string[]; borrarTurnoIds: string[] }>();
                 const extra = fechasDeTexto(e.fechasExtra || '', currentDate.getFullYear());
-                for (const c of celdasOk) {
-                    const g = porGuardia.get(c.empId) || { empName: c.empName, fechas: [] };
+                for (const c of prep.crear) {
+                    const g = porGuardia.get(c.empId) || { empName: c.empName, fechas: [], borrarTurnoIds: [] };
                     if (!g.fechas.includes(c.ds)) g.fechas.push(c.ds);
                     for (const f of extra) if (!g.fechas.includes(f)) g.fechas.push(f);
                     porGuardia.set(c.empId, g);
                 }
+                for (const b of prep.borrarRet) {
+                    const g = porGuardia.get(b.empId);
+                    if (g && !g.borrarTurnoIds.includes(b.id)) g.borrarTurnoIds.push(b.id);
+                }
                 const mesVisto = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
-                let n = 0;
-                for (const [empId, g] of porGuardia) {
-                    n += await crearRfzePlanificacion({
-                        empresaId, clientId: selectedClient || '', clientName,
-                        objectiveId: selectedObjective, objectiveName: getObjectiveName(selectedObjective),
-                        employeeId: empId, employeeName: g.empName, fechas: g.fechas.sort(),
-                        inicio, fin, pidio: e.pidio, motivo: e.motivo, draft: !planPublicadoGrilla,
-                        sigla: e.sigla,
-                        // Fechas de otro mes (28/10 → 5/11): en borrador hasta que se publique ese mes.
-                        draftDe: (f) => (f.startsWith(mesVisto) ? !planPublicadoGrilla : true),
+                const n = await crearRfzesAtomicos([...porGuardia.entries()].map(([empId, g]) => ({
+                    empresaId, clientId: selectedClient || '', clientName,
+                    objectiveId: selectedObjective, objectiveName: getObjectiveName(selectedObjective),
+                    employeeId: empId, employeeName: g.empName, fechas: g.fechas.sort(),
+                    inicio, fin, pidio: e.pidio, motivo: e.motivo, draft: !planPublicadoGrilla,
+                    sigla: e.sigla,
+                    borrarTurnoIds: g.borrarTurnoIds,
+                    // Fechas de otro mes (28/10 → 5/11): en borrador hasta que se publique ese mes.
+                    draftDe: (f: string) => (f.startsWith(mesVisto) ? !planPublicadoGrilla : true),
+                })));
+                if (prep.clavesPendienteRet.length) {
+                    setPendingChanges((prev) => {
+                        const next = { ...prev };
+                        for (const k of prep.clavesPendienteRet) delete next[k];
+                        return next;
                     });
                 }
-                toast.success(`${(e.sigla || 'RFZE').toUpperCase()} ${inicio}–${fin}: ${n} día(s) cargados y aprobados (trazabilidad del servicio)${borrar.length ? ` · ${borrar.length} reemplazado(s) (RET o RFZF): guardá el cronograma` : ''}${salteados.length ? ` · salteados: ${salteados.join(', ')}` : ''}`);
+                toast.success(`${(e.sigla || 'RFZE').toUpperCase()} ${inicio}–${fin}: ${n} día(s) cargados y aprobados (trazabilidad del servicio)${prep.borrarRet.length ? ` · ${prep.borrarRet.length} RET borrado(s)` : ''}${prep.rfzf.length ? ` · ${prep.rfzf.length} RFZF: guardá el cronograma` : ''}${prep.avisos.length ? ` · sin RFZE: ${prep.avisos.join(' · ')}` : ''}${prep.salteados.length ? ` · salteados: ${prep.salteados.join(', ')}` : ''}`);
                 void refreshCronogramaView();
             } else {
                 const id = String((activePlanningSlaRow as { id?: string } | null)?.id || '');
