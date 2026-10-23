@@ -6,7 +6,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { collection, getDocs, query, Timestamp, where } from 'firebase/firestore';
-import { CalendarRange, ChevronDown, ChevronRight, ExternalLink, Loader2, Wand2, X } from 'lucide-react';
+import { CalendarRange, ChevronDown, ChevronRight, ExternalLink, Loader2, Minus, Wand2, X } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import { readSessionJson, writeSessionJson } from '@/lib/persistSession';
 import { empresaCollectionQuery, fetchPlanificacionPublishStatus } from '@/lib/multiempresa';
@@ -310,7 +310,12 @@ export function PrepararMesModal(props: Props) {
             <div className="flex items-center gap-2 text-lg font-black text-slate-800"><CalendarRange size={20} /> Preparar {mesTxt}</div>
             <div className="mt-0.5 text-[12px] text-slate-500">Vista previa: compara la copia del mes anterior con el armado desde el servicio en cada objetivo. No escribe nada.</div>
           </div>
-          <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100" aria-label="Cerrar"><X size={18} /></button>
+          <div className="flex items-center gap-1">
+            {filas.length > 0 && !corriendo && (
+              <button type="button" onClick={() => { setMinimizado(true); onClose(); }} title="Minimizar (no se pierde la vista previa)" className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100" aria-label="Minimizar"><Minus size={18} /></button>
+            )}
+            <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100" aria-label="Cerrar"><X size={18} /></button>
+          </div>
         </div>
 
         <div className="flex flex-wrap items-end gap-3 border-b border-slate-200 bg-white px-5 py-3">
