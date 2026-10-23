@@ -15,22 +15,33 @@ export function planToastChangeApplied(_detail?: string): void {
   // Intencionalmente vacío: un toast por cada celda satura la UI.
 }
 
-export function planToastSaving(count: number): string | number {
-  return toast.loading(`Guardando ${count} cambio${count === 1 ? '' : 's'}…`, {
-    id: PLAN_TOAST.save,
+/** Objetivo del guardado: permite distinguir toasts cuando hay más de un guardado en vuelo (navegó mientras guardaba). */
+type ObjetivoToast = { id?: string | null; name?: string | null };
+
+function idGuardado(objetivo?: ObjetivoToast): string {
+  return objetivo?.id ? `${PLAN_TOAST.save}:${objetivo.id}` : PLAN_TOAST.save;
+}
+
+function prefijoGuardado(objetivo?: ObjetivoToast): string {
+  return objetivo?.name ? `${objetivo.name}: ` : '';
+}
+
+export function planToastSaving(count: number, objetivo?: ObjetivoToast): string | number {
+  return toast.loading(`${prefijoGuardado(objetivo)}Guardando ${count} cambio${count === 1 ? '' : 's'}…`, {
+    id: idGuardado(objetivo),
   });
 }
 
-export function planToastSaved(count: number, opts?: { borrador?: boolean }): void {
-  const base = `${count} cambio${count === 1 ? '' : 's'} guardado${count === 1 ? '' : 's'}`;
+export function planToastSaved(count: number, opts?: { borrador?: boolean; objetivo?: ObjetivoToast }): void {
+  const base = `${prefijoGuardado(opts?.objetivo)}${count} cambio${count === 1 ? '' : 's'} guardado${count === 1 ? '' : 's'}`;
   toast.success(opts?.borrador ? `${base} en borrador — falta publicar` : base, {
-    id: PLAN_TOAST.save,
+    id: idGuardado(opts?.objetivo),
     duration: opts?.borrador ? 4000 : 2800,
   });
 }
 
-export function planToastSaveError(message = 'Error al guardar — cambios restaurados en pendientes'): void {
-  toast.error(message, { id: PLAN_TOAST.save, duration: 5000 });
+export function planToastSaveError(message = 'Error al guardar — cambios restaurados en pendientes', objetivo?: ObjetivoToast): void {
+  toast.error(`${prefijoGuardado(objetivo)}${message}`, { id: idGuardado(objetivo), duration: 5000 });
 }
 
 export function planToastBulk(message: string): void {

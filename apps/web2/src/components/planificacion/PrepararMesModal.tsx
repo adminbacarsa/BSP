@@ -119,6 +119,7 @@ export function PrepararMesModal(props: Props) {
     setFilas(g?.filas || []);
     if (g) { setAlcance(g.alcance || 'todos'); setModo(g.modo || 'auto'); setVista(g.vista || 'revisar'); }
     setSimuladoAt(g?.at || null);
+    setMinimizado(false);
     cargada.current = clave;
   }, [clave]);
   useEffect(() => {

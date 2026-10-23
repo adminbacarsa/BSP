@@ -9278,7 +9278,7 @@ function PlanificacionDesktop() {
                 finGuardarEstado();
             }
 
-            planToastSaving(jobCount);
+            planToastSaving(jobCount, { id: selectedObjective, name: getObjectiveName(selectedObjective) });
 
             void (async () => {
             let batch = writeBatch(db);
@@ -9904,7 +9904,7 @@ function PlanificacionDesktop() {
                 if (isPublished) {
                     setNeedsRepublishMap(prev => ({ ...prev, [publishLookupKey]: true }));
                 }
-                planToastSaved(jobCount, { borrador: !isPublished });
+                planToastSaved(jobCount, { borrador: !isPublished, objetivo: { id: selectedObjective, name: getObjectiveName(selectedObjective) } });
 
                 // El historial nunca frena el guardado: addDoc tira sincrónico si un campo es undefined
                 // (cambios del menú rápido / coberturas con campos opcionales), así que va limpio y diferido.
@@ -10011,7 +10011,7 @@ function PlanificacionDesktop() {
                 const _det = String(_err?.code || _err?.message || '').slice(0, 160);
                 planToastSaveError(_det
                     ? `Error al guardar — cambios restaurados en pendientes. Detalle: ${_det}`
-                    : undefined);
+                    : undefined, { id: selectedObjective, name: getObjectiveName(selectedObjective) });
             } finally {
                 setBackgroundSaveCount((c) => Math.max(0, c - 1));
                 guardandoTurnosRef.current = Math.max(0, guardandoTurnosRef.current - 1);
