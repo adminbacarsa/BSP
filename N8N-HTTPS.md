@@ -137,6 +137,37 @@ O creá un acceso directo en Inicio que ejecute `caddy run` en esa carpeta.
 
 ---
 
+## 6. Arranque automático de la PC N8N (todo junto)
+
+`INSTALAR-ARRANQUE-SERVIDOR-N8N.cmd` (raíz del repo, clic derecho → **Ejecutar como administrador**) deja la PC así al encenderse:
+
+1. Windows inicia sesión solo con el usuario **Soporte** (pide la contraseña una vez).
+2. Al iniciar sesión, la tarea **COSP Servidor N8N** corre `scripts/start-n8n-server.ps1`:
+   - `pm2 resurrect`: restaura lo guardado con `pm2 save` en `C:\Users\Soporte\.pm2` (en la PC N8N son `caddy`, `n8n` y `ping-api`);
+   - si además existe un servicio Windows `n8n` (NSSM) lo arranca; espera el puerto 5678;
+   - Caddy: si PM2 ya lo levantó no hace nada; si existe el servicio `caddy` lo inicia; si no, corre `D:\APP\caddy\caddy.exe run` oculto con el `Caddyfile.n8n` del repo.
+
+Antes de instalarlo, dejá corriendo en PM2 lo que necesites y guardalo:
+
+```powershell
+pm2 list
+pm2 save
+```
+
+Log del arranque: `%ProgramData%\COSP\n8n-server-startup.log` (Caddy: `caddy.log` en la misma carpeta).
+
+| Comando (como administrador) | Qué hace |
+|------------------------------|----------|
+| `INSTALAR-ARRANQUE-SERVIDOR-N8N.cmd` | Tarea + inicio de sesión automático |
+| `INSTALAR-ARRANQUE-SERVIDOR-N8N.cmd sinautologon` | Solo la tarea |
+| `INSTALAR-ARRANQUE-SERVIDOR-N8N.cmd quitarautologon` | Desactiva el inicio de sesión automático |
+| `INSTALAR-ARRANQUE-SERVIDOR-N8N.cmd quitar` | Quita la tarea |
+| `schtasks /Run /TN "COSP Servidor N8N"` | Probar sin reiniciar |
+
+**Contraseña del inicio automático:** si está `D:\APP\autologon\Autologon64.exe` ([Sysinternals Autologon](https://learn.microsoft.com/sysinternals/downloads/autologon)), se guarda cifrada. Si no, queda en el registro (`Winlogon\DefaultPassword`) en texto plano: cualquiera con acceso de administrador a la PC la puede leer.
+
+---
+
 ## Si algo falla
 
 - **"Timeout during connect (likely firewall problem)"** al obtener el certificado: Let's Encrypt no puede llegar a tu PC. Tenés que **abrir en el router los puertos 80 y 443** y reenviarlos a la IP de esta PC (la misma donde corre Caddy). También en el **Firewall de Windows** permití entrada en **TCP 80** y **TCP 443**. Sin eso no se puede emitir el certificado.
