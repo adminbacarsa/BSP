@@ -62,6 +62,8 @@ export type ProformaPanelProps = {
   contractDetailMode?: 'planned' | 'executed';
   contractBillingMixed?: boolean;
   detailModeOverride?: boolean;
+  includeBorrador?: boolean;
+  onIncludeBorradorChange?: (v: boolean) => void;
 };
 
 function formatProformaHours(value: number | null | undefined, loading: boolean): string {
@@ -105,6 +107,8 @@ export default function ProformaPanel(props: ProformaPanelProps) {
     contractDetailMode = 'planned',
     contractBillingMixed = false,
     detailModeOverride = false,
+    includeBorrador = false,
+    onIncludeBorradorChange,
   } = props;
 
   const periodLabel = proformaBundle?.periodLabel || `${monthsEs[proformaMonth]?.toUpperCase()}/${proformaYear}`;
@@ -275,6 +279,23 @@ export default function ProformaPanel(props: ProformaPanelProps) {
                 <option value="employees">Solo empleados</option>
                 <option value="positions">Solo puestos</option>
               </select>
+            </div>
+            <div className="flex flex-col justify-end pb-0.5">
+              <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Cronos</label>
+              <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  className="rounded"
+                  checked={includeBorrador}
+                  onChange={(e) => onIncludeBorradorChange?.(e.target.checked)}
+                />
+                <span className={`text-[10px] font-bold ${includeBorrador ? 'text-amber-700' : 'text-slate-500'}`}>
+                  Incluir borrador
+                </span>
+              </label>
+              {includeBorrador && (
+                <p className="text-[9px] font-bold text-amber-600 mt-1">Solo para pruebas: incluye cronos no publicados.</p>
+              )}
             </div>
           </div>
           {billingRows.length > 0 && (

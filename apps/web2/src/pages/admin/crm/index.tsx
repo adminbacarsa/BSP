@@ -140,7 +140,7 @@ import type { ProformaExportBundle } from '@/lib/crm/proformaTypes';
 import { exportProformaCsv, exportProformaExcel, exportProformaPdf } from '@/lib/crm/proformaExport';
 import { lookupClientByCuitFromAfip, type AfipClientLookupResult } from '@/services/afipClientLookup';
 import { callableErrorText } from '@/lib/callableError';
-import { fetchHoursBalances, sumBalancesByClient, overlayLiveSlaOnBalanceRows } from '@/lib/hoursBalance';
+import { fetchHoursBalances, sumBalancesByClient, overlayLiveSlaOnBalanceRows, buildHoursBalanceMonth } from '@/lib/hoursBalance';
 import {
   byClientMetricsFromLedger,
   dailyTrendFromLedgerDays,
@@ -189,7 +189,7 @@ const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Ago
 /** Incrementar cuando cambia la fórmula de KPIs. v12: plan publicado solo de cronogramas publicados. */
 const CRM_DASHBOARD_METRICS_VERSION = 12;
 
-function latestBalanceUpdatedAt(rows: Array<{ updatedAt?: unknown }>): Date | null {
+function latestBalanceUpdatedAt(rows: any[]): Date | null {
   let latest: Date | null = null;
   for (const row of rows) {
     const d = toDateSafe(row.updatedAt);
@@ -406,6 +406,7 @@ export default function CRMPage() {
   const [proformaEndDate, setProformaEndDate] = useState('');
   const [proformaDetailMode, setProformaDetailMode] = useState<ProformaDetailMode>('auto');
   const [proformaLayoutMode, setProformaLayoutMode] = useState<ProformaLayoutMode>('both');
+  const [proformaIncludeBorrador, setProformaIncludeBorrador] = useState(false);
   const [proformaHourlyValue, setProformaHourlyValue] = useState('');
   const [proformaTotals, setProformaTotals] = useState<{
     planned: number | null;
@@ -727,7 +728,7 @@ export default function CRMPage() {
         snap.docs
           .map((x) => ({ ...x.data(), id: x.id }))
           .filter((c) => canManageClientInTenant(c, empresaId, migracionCompleta, tenantAccess)),
-      ).sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
+      ).sort((a: any, b: any) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
       if (gen !== clientsFetchGenRef.current) return;
       setClients(data);
     } catch (e) {
@@ -1084,7 +1085,7 @@ export default function CRMPage() {
             const cStart = c.startDate ? new Date(c.startDate) : null;
             const cEnd = c.endDate ? new Date(c.endDate) : null;
             const clamped = clampDateRange(cStart, cEnd, start, end);
-            if (!clamped && (cStart || cEnd) && rangeMode !== 'all') return;
+            if (!clamped && (cStart || cEnd)) return;
             contractedByClient[canonical] = (contractedByClient[canonical] || 0) + totalHours;
             if (c.type === 'cerrado') closedByClient[canonical] = (closedByClient[canonical] || 0) + totalHours;
           });
@@ -2277,12 +2278,16 @@ export default function CRMPage() {
         if (id) publishIds.add(id);
       }
       const publishedObjectiveIds = new Set<string>();
-      await Promise.all([...publishIds].map(async (oid) => {
-        const estado = await fetchPlanificacionEstadoDoc(empresaId, oid, proformaYearNum, proformaMonthIndex0 + 1);
-        if (!estado) return;
-        if (estado.data.publishedAt == null || estado.data.publishedAt === '') return;
-        publishedObjectiveIds.add(oid);
-      }));
+      if (proformaIncludeBorrador) {
+        for (const oid of publishIds) publishedObjectiveIds.add(oid);
+      } else {
+        await Promise.all([...publishIds].map(async (oid) => {
+          const estado = await fetchPlanificacionEstadoDoc(empresaId, oid, proformaYearNum, proformaMonthIndex0 + 1);
+          if (!estado) return;
+          if (estado.data.publishedAt == null || estado.data.publishedAt === '') return;
+          publishedObjectiveIds.add(oid);
+        }));
+      }
       const inOperation = buildInOperationObjectiveIds({
         slas: servicesForProforma as ProformaSlaRow[],
         year: proformaYearNum,
@@ -2689,7 +2694,7 @@ export default function CRMPage() {
     if (!proformaActive || !selectedClient?.id) return;
     calculateProformaTurnos();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [proformaActive, selectedClient?.id, clientPurchaseOrders, clientContracts, proformaMonth, proformaYear, proformaStartDate, proformaEndDate, proformaDetailMode]);
+  }, [proformaActive, selectedClient?.id, clientPurchaseOrders, clientContracts, proformaMonth, proformaYear, proformaStartDate, proformaEndDate, proformaDetailMode, proformaIncludeBorrador]);
 
   useEffect(() => {
     setProformaBundle((prev) => (prev ? { ...prev, layoutMode: proformaLayoutMode } : prev));
@@ -4394,6 +4399,8 @@ export default function CRMPage() {
                     contractDetailMode={proformaContractDetailMode}
                     contractBillingMixed={proformaContractBillingMixed}
                     detailModeOverride={proformaDetailModeOverride}
+                    includeBorrador={proformaIncludeBorrador}
+                    onIncludeBorradorChange={setProformaIncludeBorrador}
                   />
                   </>
                 )}
