@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
-import { collection } from 'firebase/firestore';
+import { collection, query, where } from 'firebase/firestore';
 import { Loader2 } from 'lucide-react';
 import { db, onSnapshotFresh } from '@/lib/firebase';
 import { useEmpresa } from '@/context/EmpresaContext';
@@ -24,7 +24,9 @@ export default function CronoPopoutPage() {
     const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
 
     const [clients, setClients] = useState<any[]>([]);
-    const [employees, setEmployees] = useState<any[]>([]);
+    const [propios, setPropios] = useState<any[]>([]);
+    const [habilitados, setHabilitados] = useState<any[]>([]);
+    const [employeesLoaded, setEmployeesLoaded] = useState(false);
     const [shiftsMap, setShiftsMap] = useState<Record<string, any>>({});
     const [absencesMap, setAbsencesMap] = useState<Record<string, any>>({});
     const [slaIdToObjId, setSlaIdToObjId] = useState<Record<string, string>>({});
@@ -71,21 +73,28 @@ export default function CronoPopoutPage() {
                 .filter((c) => isClientOperational((c as { status?: unknown }).status)));
         });
 
+        const toEmp = (id: string, data: Record<string, any>) => ({
+            id,
+            name: String(data.name || `${data.firstName || ''} ${data.lastName || ''}`.trim()),
+            preferredObjectiveId: data.preferredObjectiveId,
+            status: String(data.status || 'activo'),
+        });
+
         const unsubE = onSnapshotFresh(empleadosQ, (snap) => {
-            setEmployees(
+            setPropios(
                 snap.docs
                     .filter((d) => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
-                    .map((d) => {
-                        const data = d.data();
-                        return {
-                            id: d.id,
-                            name: data.name || `${data.firstName || ''} ${data.lastName || ''}`.trim(),
-                            preferredObjectiveId: data.preferredObjectiveId,
-                            status: data.status || 'activo',
-                        };
-                    }),
+                    .map((d) => toEmp(d.id, d.data() as Record<string, any>)),
             );
+            setEmployeesLoaded(true);
         });
+
+        const unsubHab = onSnapshotFresh(
+            query(collection(db, 'empleados'), where('habilitadoEn', 'array-contains', empresaId)),
+            (snap) => {
+                setHabilitados(snap.docs.map((d) => toEmp(d.id, d.data() as Record<string, any>)));
+            },
+        );
 
         const unsubS = onSnapshotFresh(turnosQ, (snap) => {
             const map: Record<string, any> = {};
@@ -127,11 +136,20 @@ export default function CronoPopoutPage() {
         return () => {
             unsubC();
             unsubE();
+            unsubHab();
             unsubS();
             unsubA();
             unsubSla();
         };
     }, [empresaId, migracionCompleta, scopeEmpresa]);
+
+    const employees = useMemo(() => {
+        const byId = new Map(propios.map((e) => [e.id, e]));
+        for (const h of habilitados) {
+            if (!byId.has(h.id)) byId.set(h.id, h);
+        }
+        return [...byId.values()];
+    }, [propios, habilitados]);
 
     const objectiveLabel = useMemo(() => {
         const client = clients.find((c) => c.id === clientId);
@@ -158,6 +176,7 @@ export default function CronoPopoutPage() {
                 <CronoComparePanel
                     clients={clients}
                     employees={employees}
+                    employeesLoaded={employeesLoaded}
                     shiftsMap={shiftsMap}
                     absencesMap={absencesMap}
                     slaIdToObjId={slaIdToObjId}

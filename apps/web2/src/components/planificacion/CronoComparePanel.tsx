@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-    CalendarCheck, ChevronDown, ChevronLeft, ChevronRight, Maximize2, Minimize2, Users, X,
+    CalendarCheck, ChevronDown, ChevronLeft, ChevronRight, Loader2, Maximize2, Minimize2, Users, X,
 } from 'lucide-react';
 import {
     CRONO_COMPARE_SHIFT_STYLES,
@@ -24,6 +24,8 @@ import {
 export type CronoComparePanelProps = {
     clients: any[];
     employees: any[];
+    /** true mientras Firestore no haya respondido al menos una vez con la lista de empleados */
+    employeesLoaded?: boolean;
     shiftsMap: Record<string, any>;
     absencesMap: Record<string, any>;
     slaIdToObjId: Record<string, string>;
@@ -64,6 +66,7 @@ function fuenteDeCelda(shift: any, absence: any): FuenteTurno | null {
 export function CronoComparePanel({
     clients,
     employees,
+    employeesLoaded = true,
     shiftsMap,
     absencesMap,
     slaIdToObjId,
@@ -381,6 +384,11 @@ export function CronoComparePanel({
                     <div className="flex items-center justify-center h-full text-slate-400 text-sm p-6">Abrí esta ventana desde el cronograma en el que estás trabajando.</div>
                 ) : ordenIds.length === 0 ? (
                     <div className="flex items-center justify-center h-full text-slate-400 text-sm p-6 text-center" data-ventana-esperando="1">Esperando el orden del cronograma principal.</div>
+                ) : !employeesLoaded ? (
+                    <div className="flex items-center justify-center h-full text-slate-400 text-sm p-6 gap-2">
+                        <Loader2 size={16} className="animate-spin shrink-0" />
+                        Cargando dotación…
+                    </div>
                 ) : conTurno.length === 0 && sinTurno.length === 0 ? (
                     <div className="flex items-center justify-center h-full text-slate-400 text-sm p-6">Nadie de ese cronograma está en este objetivo.</div>
                 ) : (
