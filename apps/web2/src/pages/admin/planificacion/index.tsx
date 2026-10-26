@@ -743,9 +743,19 @@ function computeFTCoveredBy(
         const empId = k.slice(0, k.length - suffix.length);
         if (empId === absentEmpId || seen.has(empId)) continue;
         const sh = raw as any;
-        if (sh?.isDeleted || !sh?.isFrancoTrabajado) continue;
+        if (sh?.isDeleted) continue;
         if (String(sh?.objectiveId || '') !== objectiveId) continue;
-        if (checkBand && String(sh?.code || '').toUpperCase() !== bandUp) continue;
+        const shCode = String(sh?.code || '').toUpperCase();
+        // FT: Franco → Trabajado
+        const isFT = sh?.isFrancoTrabajado === true;
+        // RET → Turno: original era RET/stand-by, pendingChange lo convirtió a turno real
+        const origShift = (shiftsMap as Record<string, any>)[k] as any;
+        const isRetToTurno = !isFT &&
+            WORK_BAND_CODES.has(shCode) &&
+            Object.prototype.hasOwnProperty.call(pendingChanges, k) &&
+            (origShift?.code === 'RET' || origShift?.isReten === true);
+        if (!isFT && !isRetToTurno) continue;
+        if (checkBand && shCode !== bandUp) continue;
         const name = empNameById(empId);
         if (name) { names.push(name); seen.add(empId); }
     }
