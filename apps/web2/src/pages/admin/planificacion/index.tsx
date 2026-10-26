@@ -683,6 +683,7 @@ import {
 } from '@/lib/planificacion/planningEmployeeCellHours';
 
 const LEAVE_CELL_CODES = new Set(['V', 'L', 'PG', 'A', 'ART', 'E', 'AA', 'LT', 'SGS', 'SUS']);
+const WORK_BAND_CODES = new Set(['M', 'T', 'N', 'D12', 'N12']);
 
 function resolveTitularCoverageName(
     titularEmpId: string,
@@ -719,6 +720,36 @@ function resolveTitularCoverageName(
         }
     }
     return null;
+}
+
+function computeFTCoveredBy(
+    absentEmpId: string,
+    dateStr: string,
+    objectiveId: string | null | undefined,
+    band: string | null | undefined,
+    shiftsMap: Record<string, any>,
+    pendingChanges: Record<string, any>,
+    empNameById: (id: string) => string | undefined,
+): string | null {
+    if (!objectiveId) return null;
+    const bandUp = band ? String(band).toUpperCase() : null;
+    const checkBand = bandUp && WORK_BAND_CODES.has(bandUp);
+    const suffix = `_${dateStr}`;
+    const allSources = { ...shiftsMap, ...pendingChanges };
+    const names: string[] = [];
+    const seen = new Set<string>();
+    for (const [k, raw] of Object.entries(allSources)) {
+        if (!k.endsWith(suffix)) continue;
+        const empId = k.slice(0, k.length - suffix.length);
+        if (empId === absentEmpId || seen.has(empId)) continue;
+        const sh = raw as any;
+        if (sh?.isDeleted || !sh?.isFrancoTrabajado) continue;
+        if (String(sh?.objectiveId || '') !== objectiveId) continue;
+        if (checkBand && String(sh?.code || '').toUpperCase() !== bandUp) continue;
+        const name = empNameById(empId);
+        if (name) { names.push(name); seen.add(empId); }
+    }
+    return names.length > 0 ? names.join(', ') : null;
 }
 
 function buildLeaveCellTooltipLabel(opts: {
@@ -16083,7 +16114,12 @@ function PlanificacionDesktop() {
             const absType = absence?.type || activeShift?.name || LEGEND_DESCRIPTIONS[leaveCellCode] || leaveCellCode;
             const reason = absence?.reason || activeShift?.comments || p?.comments || '';
             const cubierta12 = textoLicencia12(pendingChanges, shiftsMap, emp.id, c.dateStr, nombres12);
-            const covered = cubierta12 || resolveTitularCoverageName(emp.id, emp.name || '', c.dateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell, cellTurnosMap);
+            const _ftObjId = (c.s?.objectiveId || c.p?.objectiveId) as string | undefined;
+            const _sCode = String(c.s?.code || '').toUpperCase();
+            const _pCode = String(c.p?.code || '').toUpperCase();
+            const _absentBand = WORK_BAND_CODES.has(_sCode) ? _sCode : WORK_BAND_CODES.has(_pCode) ? _pCode : null;
+            const ftCovered = !cubierta12 ? computeFTCoveredBy(emp.id, c.dateStr, _ftObjId, _absentBand, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name) : null;
+            const covered = cubierta12 || ftCovered || resolveTitularCoverageName(emp.id, emp.name || '', c.dateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell, cellTurnosMap);
             return { label: sumarTope(buildLeaveCellTooltipLabel({ absenceType: absType, reason, coveredBy: covered })), pos: null, range: null, restHours: null };
         }
         if ((s || p || rfzOnCell || evOverlay) && !absence) {
