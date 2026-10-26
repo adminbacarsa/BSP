@@ -13375,6 +13375,8 @@ function PlanificacionDesktop() {
                 const pref = String(slaIdToObjId[emp.preferredObjectiveId] || emp.preferredObjectiveId || '');
                 if (objsGrupo.includes(pref)) return 'propio';
                 if (objsGrupo.some((o: string) => (emp.volante || []).includes(o))) return 'volante';
+                // Trabajó en el objetivo el mes anterior (venidos): recibe ciclo y francos igual que un asignado
+                if (venidos.has(id)) return 'propio';
                 return 'otro';
             };
             const ocupadoFuera = (id: string, ds: string) => {
