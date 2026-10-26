@@ -16132,8 +16132,9 @@ function PlanificacionDesktop() {
             const _pCode = String(c.p?.code || '').toUpperCase();
             const _absentBand = WORK_BAND_CODES.has(_sCode) ? _sCode : WORK_BAND_CODES.has(_pCode) ? _pCode : null;
             const ftCovered = computeFTCoveredBy(emp.id, c.dateStr, _ftObjId, _absentBand, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name);
-            const cubierta12 = !ftCovered ? textoLicencia12(pendingChanges, shiftsMap, emp.id, c.dateStr, nombres12) : null;
-            const covered = ftCovered || cubierta12 || resolveTitularCoverageName(emp.id, emp.name || '', c.dateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell, cellTurnosMap);
+            // Solo mostramos cobertura explícita (FT/RET→turno/EXT en pendingChanges).
+            // cubierta12 y coveredBy guardado se omiten: son teóricos o quedan desactualizados tras guardar.
+            const covered = ftCovered || null;
             return { label: sumarTope(buildLeaveCellTooltipLabel({ absenceType: absType, reason, coveredBy: covered })), pos: null, range: null, restHours: null };
         }
         if ((s || p || rfzOnCell || evOverlay) && !absence) {
