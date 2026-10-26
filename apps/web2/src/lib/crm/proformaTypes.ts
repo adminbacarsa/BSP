@@ -46,7 +46,7 @@ export type ProformaPositionObjectiveGrid = {
 };
 
 /** Qué páginas/secciones incluir en vista y PDF/CSV/Excel. */
-export type ProformaLayoutMode = 'both' | 'employees' | 'positions';
+export type ProformaLayoutMode = 'both' | 'employees' | 'positions' | 'day_night';
 
 export type ProformaSummaryRow = {
   objectiveName: string;

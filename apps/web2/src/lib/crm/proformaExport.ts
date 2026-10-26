@@ -10,11 +10,70 @@ const PDF_HEADER_Y = 19;
 const PDF_CONTENT_TOP = 28;
 
 function resolveLayoutMode(bundle: ProformaExportBundle): ProformaLayoutMode {
-  if (bundle.layoutMode === 'employees' || bundle.layoutMode === 'positions' || bundle.layoutMode === 'both') {
+  if (bundle.layoutMode === 'employees' || bundle.layoutMode === 'positions' || bundle.layoutMode === 'both' || bundle.layoutMode === 'day_night') {
     return bundle.layoutMode;
   }
   if (bundle.positionGrids && bundle.positionGrids.some((g) => g.positions.length > 0)) return 'both';
   return 'employees';
+}
+
+function findSlaHours(bundle: ProformaExportBundle, objectiveName: string): number | null {
+  const row = bundle.summary.find((s) => s.objectiveName === objectiveName);
+  return row?.slaHours != null ? row.slaHours : null;
+}
+
+function drawObjectiveSlaSubtitle(doc: jsPDF, bundle: ProformaExportBundle, objectiveName: string) {
+  const sla = findSlaHours(bundle, objectiveName);
+  if (sla == null) return;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.setTextColor(79, 70, 229);
+  doc.text(`SLA: ${formatHoursColonTotal(sla)} hs/mes`, PDF_PAGE_W - PDF_MARGIN_X - 6, 25, { align: 'right' });
+  doc.setTextColor(0, 0, 0);
+}
+
+function appendDayNightPages(doc: jsPDF, bundle: ProformaExportBundle, empresa: string, issued: string) {
+  bundle.objectives.forEach((grid) => {
+    doc.addPage();
+    drawPdfHeaderBar(doc, empresa, `HORAS DIURNAS/NOCTURNAS: ${grid.objectiveName}`, bundle.periodLabel);
+    drawObjectiveSlaSubtitle(doc, bundle, grid.objectiveName);
+
+    const pageW = PDF_PAGE_W - PDF_MARGIN_X * 2;
+    const nameW = 22;
+    const totalW = 14;
+    const dayCount = grid.dateColumns.length || 1;
+    const dayW = Math.max(4, (pageW - nameW - totalW) / dayCount);
+    const colStyles: Record<number, any> = {
+      0: { cellWidth: nameW, halign: 'left', fontStyle: 'bold' },
+    };
+    grid.dateColumns.forEach((_, i) => {
+      colStyles[1 + i] = { cellWidth: dayW, halign: 'center', overflow: 'hidden' };
+    });
+    colStyles[1 + dayCount] = { cellWidth: totalW, halign: 'center', fontStyle: 'bold' };
+
+    autoTable(doc, {
+      startY: PDF_CONTENT_TOP,
+      head: [
+        ['', ...grid.dateColumns.map((d) => pdfDayNumber(d)), 'Total'],
+        ['', ...grid.dateColumns.map((d) => pdfDayLetter(d)), ''],
+      ],
+      body: [
+        ['Totales', ...grid.dateColumns.map((d) => formatHoursColonTotal(grid.dailyTotals[d]?.total || 0)), formatHoursColonTotal(grid.grandTotal.total)],
+        ['Diurnas', ...grid.dateColumns.map((d) => formatHoursColonTotal(grid.dailyTotals[d]?.day || 0)), formatHoursColonTotal(grid.grandTotal.day)],
+        ['Nocturnas', ...grid.dateColumns.map((d) => formatHoursColonTotal(grid.dailyTotals[d]?.night || 0)), formatHoursColonTotal(grid.grandTotal.night)],
+      ],
+      styles: { fontSize: 6, cellPadding: 0.8, halign: 'center', overflow: 'hidden', minCellHeight: 5 },
+      headStyles: { fillColor: [51, 65, 85], textColor: 255, fontStyle: 'bold', fontSize: 6, cellPadding: 0.6 },
+      columnStyles: colStyles,
+      theme: 'grid',
+      margin: { left: PDF_MARGIN_X, right: PDF_MARGIN_X },
+    });
+
+    const y2 = (doc as any).lastAutoTable?.finalY || 60;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7);
+    doc.text(`${empresa}  ·  Fecha de emisión: ${issued.split(',')[0]}  ·  Hora: ${issued.split(',')[1]?.trim() || ''}`, PDF_MARGIN_X + 6, y2 + 6);
+  });
 }
 
 function downloadBlob(blob: Blob, filename: string) {
@@ -199,6 +258,7 @@ function appendPositionGridPages(doc: jsPDF, bundle: ProformaExportBundle, empre
       `REGISTRO MENSUAL DE HORAS: ${grid.objectiveName}`,
       bundle.periodLabel,
     );
+    drawObjectiveSlaSubtitle(doc, bundle, grid.objectiveName);
 
     autoTable(doc, {
       startY: PDF_CONTENT_TOP,
@@ -302,6 +362,7 @@ export function exportProformaPdf(bundle: ProformaExportBundle) {
     bundle.objectives.filter((grid) => grid.employees.length > 0).forEach((grid) => {
       doc.addPage();
       drawPdfHeaderBar(doc, empresa, grid.objectiveName, bundle.periodLabel);
+      drawObjectiveSlaSubtitle(doc, bundle, grid.objectiveName);
 
       autoTable(doc, {
         startY: PDF_CONTENT_TOP,
@@ -327,6 +388,10 @@ export function exportProformaPdf(bundle: ProformaExportBundle) {
 
   if (layout === 'positions' || layout === 'both') {
     appendPositionGridPages(doc, bundle, empresa, issued);
+  }
+
+  if (layout === 'day_night') {
+    appendDayNightPages(doc, bundle, empresa, issued);
   }
 
   if (bundle.eventos && bundle.eventos.length > 0) {
