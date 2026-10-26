@@ -754,8 +754,12 @@ function computeFTCoveredBy(
             WORK_BAND_CODES.has(shCode) &&
             Object.prototype.hasOwnProperty.call(pendingChanges, k) &&
             (origShift?.code === 'RET' || origShift?.isReten === true);
-        if (!isFT && !isRetToTurno) continue;
-        if (checkBand && shCode !== bandUp) continue;
+        // EXT: extensión de jornada (antes o después) para cubrir banda adyacente
+        const isExt = !isFT && !isRetToTurno &&
+            (sh?.isExtended === true || sh?.isEarlyStart === true);
+        if (!isFT && !isRetToTurno && !isExt) continue;
+        // EXT no filtra por banda (cubre horas cruzando bandas por definición)
+        if (!isExt && checkBand && shCode !== bandUp) continue;
         const name = empNameById(empId);
         if (name) { names.push(name); seen.add(empId); }
     }
