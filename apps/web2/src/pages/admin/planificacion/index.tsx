@@ -776,19 +776,18 @@ const GRUPO_COLOR_HEX = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
 /** Colores por puesto en la vista de un objetivo (8 bien distinguibles). */
 const COLOR_PUESTO_HEX = ['#0ea5e9', '#16a34a', '#d97706', '#db2777', '#7c3aed', '#0d9488', '#dc2626', '#4b5563'];
 
-/** Mantiene tooltips/modales del pie de cobertura dentro del viewport. */
-function clampPlanifFloatingPos(clientX: number, clientY: number, panelW = 320, panelH = 220): { left: number; top: number } {
-    if (typeof window === 'undefined') return { left: clientX, top: clientY };
+/** Mantiene tooltips/modales del pie de cobertura dentro del viewport. Siempre abre hacia arriba desde el click. */
+function clampPlanifFloatingPos(clientX: number, clientY: number, panelW = 320, panelH = 220): { left: number; top: number; maxH: number } {
+    if (typeof window === 'undefined') return { left: clientX, top: Math.max(24, clientY - panelH), maxH: panelH };
     const pad = 24;
     const vw = window.innerWidth;
-    const vh = window.innerHeight;
     let left = clientX + 12;
-    let top = clientY + 12;
     if (left + panelW > vw - pad) left = Math.max(pad, vw - panelW - pad);
     if (left < pad) left = pad;
-    if (top + panelH > vh - pad) top = Math.max(pad, clientY - panelH - 16);
-    if (top < pad) top = pad;
-    return { left, top };
+    // Siempre abre hacia arriba: bottom del modal queda en clientY
+    const maxH = Math.max(80, clientY - pad);
+    const top = Math.max(pad, clientY - Math.min(panelH, maxH));
+    return { left, top, maxH };
 }
 
 const LEGEND_DESCRIPTIONS: Record<string, string> = {
@@ -20264,11 +20263,14 @@ function PlanificacionDesktop() {
                     onClick={(e) => e.stopPropagation()}
                     onMouseDown={(e) => e.stopPropagation()}
                 >
-                    <div className="bg-slate-900 text-white text-[10px] font-black px-3 py-2 rounded-lg shadow-sm flex flex-col gap-1.5 min-w-[240px] max-w-[420px] max-h-[calc(100dvh-24px)] overflow-y-auto" data-puestos-sin-cerrar>
-                        <div className={`text-[9px] uppercase tracking-wide mb-0.5 ${coverageTooltip.gaps.length === 0 && coverageTooltip.cubiertoPor?.length ? 'text-emerald-300' : (coverageTooltip.deMas || coverageTooltip.horasFaltantes) && coverageTooltip.gaps.length === 0 ? 'text-amber-300' : 'text-rose-300'}`}>
-                            {coverageTooltip.gaps.length === 0
-                                ? (coverageTooltip.cubiertoPor?.length ? 'Cubierto por extensión' : coverageTooltip.horasFaltantes && !coverageTooltip.deMas ? 'Falta menos de un turno' : 'Puestos con de más')
-                                : 'Puestos sin cerrar'} · {coverageTooltip.dateStr.slice(8)}
+                    <div className="bg-slate-900 text-white text-[10px] font-black px-3 py-2 rounded-lg shadow-sm flex flex-col gap-1.5 min-w-[240px] max-w-[420px] overflow-y-auto" style={{ maxHeight: coverageTooltipLayout.maxH }} data-puestos-sin-cerrar>
+                        <div className="flex items-center justify-between gap-2 mb-0.5">
+                            <div className={`text-[9px] uppercase tracking-wide ${coverageTooltip.gaps.length === 0 && coverageTooltip.cubiertoPor?.length ? 'text-emerald-300' : (coverageTooltip.deMas || coverageTooltip.horasFaltantes) && coverageTooltip.gaps.length === 0 ? 'text-amber-300' : 'text-rose-300'}`}>
+                                {coverageTooltip.gaps.length === 0
+                                    ? (coverageTooltip.cubiertoPor?.length ? 'Cubierto por extensión' : coverageTooltip.horasFaltantes && !coverageTooltip.deMas ? 'Falta menos de un turno' : 'Puestos con de más')
+                                    : 'Puestos sin cerrar'} · {coverageTooltip.dateStr.slice(8)}
+                            </div>
+                            <button type="button" onClick={() => setCoverageTooltip(null)} className="shrink-0 text-slate-400 hover:text-white text-[14px] leading-none font-black" aria-label="Cerrar">×</button>
                         </div>
                         {!!coverageTooltip.cubiertoPor?.length && (
                             <div className="flex flex-col gap-0.5" data-cubierto-ext>
@@ -20332,13 +20334,6 @@ function PlanificacionDesktop() {
                                 })()}
                             </div>
                         ))}
-                        <button
-                            type="button"
-                            onClick={() => setCoverageTooltip(null)}
-                            className="text-slate-500 text-[8px] mt-1 text-left hover:text-slate-300"
-                        >
-                            Cerrar
-                        </button>
                     </div>
                 </div>,
                 document.body,
