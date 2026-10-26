@@ -3,7 +3,7 @@
  * objetivos (o los de un cliente o un grupo) y muestra cuál conviene en cada uno. Solo lectura: no escribe nada.
  * Va en un portal: la barra de la grilla no lo tapa.
  */
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { collection, getDocs, query, Timestamp, where } from 'firebase/firestore';
 import { CalendarRange, ChevronDown, ChevronRight, ExternalLink, Loader2, Minus, Wand2, X } from 'lucide-react';
@@ -110,15 +110,17 @@ export function PrepararMesModal(props: Props) {
   const cortar = useRef(false);
   const [simuladoAt, setSimuladoAt] = useState<number | null>(null);
   const [minimizado, setMinimizado] = useState(false);
+  const [preparados, setPreparados] = useState<Set<string>>(new Set());
 
   // La vista previa se guarda por empresa y mes en la pestaña: entrar a un objetivo o recargar no la pierde.
   const clave = `cosp-preparar-mes:${empresaId}:${year}-${String(month + 1).padStart(2, '0')}`;
   const cargada = useRef<string | null>(null);
   useEffect(() => {
-    const g = readSessionJson<{ filas: Fila[]; alcance: string; modo: ModoTanda; vista: Vista; at: number }>(clave);
+    const g = readSessionJson<{ filas: Fila[]; alcance: string; modo: ModoTanda; vista: Vista; at: number; preparados?: string[] }>(clave);
     setFilas(g?.filas || []);
     if (g) { setAlcance(g.alcance || 'todos'); setModo(g.modo || 'auto'); setVista(g.vista || 'revisar'); }
     setSimuladoAt(g?.at || null);
+    setPreparados(new Set(g?.preparados || []));
     setMinimizado(false);
     cargada.current = clave;
   }, [clave]);
@@ -131,9 +133,9 @@ export function PrepararMesModal(props: Props) {
         delete copia.celdas;
         return copia;
       });
-      writeSessionJson(clave, { filas: livianas, alcance, modo, vista, at: simuladoAt || Date.now() });
+      writeSessionJson(clave, { filas: livianas, alcance, modo, vista, at: simuladoAt || Date.now(), preparados: [...preparados] });
     }
-  }, [clave, filas, alcance, modo, vista, simuladoAt, corriendo]);
+  }, [clave, filas, alcance, modo, vista, simuladoAt, corriendo, preparados]);
 
   const mesTxt = new Date(year, month, 1).toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
   const unidades = useMemo(() => unidadesDelMes(clients, grupos), [clients, grupos]);
@@ -188,6 +190,7 @@ export function PrepararMesModal(props: Props) {
   const descartar = () => {
     try { sessionStorage.removeItem(clave); } catch { /* sin storage */ }
     setFilas([]);
+    setPreparados(new Set());
     setSimuladoAt(null);
     onClose();
   };
@@ -235,19 +238,21 @@ export function PrepararMesModal(props: Props) {
     }
   };
 
+  const vistaDeEfectiva = useCallback((f: Fila): Vista => preparados.has(f.key) ? 'cargado' : vistaDe(f), [preparados]);
+
   const conteo = useMemo(() => {
     const n: Record<Vista, number> = { revisar: 0, completo: 0, cargado: 0, fuera: 0 };
-    for (const f of filas) n[vistaDe(f)] += 1;
+    for (const f of filas) n[vistaDeEfectiva(f)] += 1;
     const ok = filas.filter((f) => f.estado === 'ok');
     const sum = (k: keyof Metricas) => ok.reduce((a, f) => a + Number(metricasDe(f)?.[k] || 0), 0);
     return { n, pedidas: sum('horasPedidas'), sinCubrir: sum('horasSinCubrir'), doce: sum('doce'), al50: sum('horasAl50'), ret: sum('ret') };
-  }, [filas]);
+  }, [filas, vistaDeEfectiva]);
 
   const visibles = useMemo(() => filas
-    .filter((f) => vistaDe(f) === vista)
-    .sort((x, y) => (metricasDe(y)?.horasSinCubrir || 0) - (metricasDe(x)?.horasSinCubrir || 0) || x.nombre.localeCompare(y.nombre)), [filas, vista]);
+    .filter((f) => vistaDeEfectiva(f) === vista)
+    .sort((x, y) => (metricasDe(y)?.horasSinCubrir || 0) - (metricasDe(x)?.horasSinCubrir || 0) || x.nombre.localeCompare(y.nombre)), [filas, vista, vistaDeEfectiva]);
   const fueraOp = useMemo(() => filas.filter((f) => f.estado === 'fuera_operacion'), [filas]);
-  const fuera = useMemo(() => filas.filter((f) => f.estado !== 'fuera_operacion' && vistaDe(f) === 'fuera'), [filas]);
+  const fuera = useMemo(() => filas.filter((f) => f.estado !== 'fuera_operacion' && vistaDeEfectiva(f) === 'fuera'), [filas, vistaDeEfectiva]);
 
   if (typeof document === 'undefined') return null;
   if (!open) {
@@ -427,7 +432,7 @@ export function PrepararMesModal(props: Props) {
                     <div className="text-right text-[12px]">{num(m?.horasAl50)}</div>
                     <div className="text-right text-[12px]">{num(m?.ret, false)}</div>
                     <div className="flex items-center justify-self-end gap-0.5">
-                      <button type="button" data-preparar-ir={f.key} title={`Abrir y ${f.elegida === 'armar' ? 'armar desde el servicio' : 'copiar el mes anterior'}: vista previa, después Aplicar y Guardar`} onClick={() => props.onAbrirObjetivo(f.objetivos[0].clientId, f.objetivos[0].id, f.grupo ? f.key : undefined, f.elegida)} className="rounded bg-indigo-600 px-2 py-1 text-[11px] font-bold text-white hover:bg-indigo-700">Preparar</button>
+                      <button type="button" data-preparar-ir={f.key} title={`Abrir y ${f.elegida === 'armar' ? 'armar desde el servicio' : 'copiar el mes anterior'}: vista previa, después Aplicar y Guardar`} onClick={() => { setPreparados((prev) => { const s = new Set(prev); s.add(f.key); return s; }); props.onAbrirObjetivo(f.objetivos[0].clientId, f.objetivos[0].id, f.grupo ? f.key : undefined, f.elegida); }} className="rounded bg-indigo-600 px-2 py-1 text-[11px] font-bold text-white hover:bg-indigo-700">Preparar</button>
                       <button type="button" title="Solo abrir la grilla" onClick={() => props.onAbrirObjetivo(f.objetivos[0].clientId, f.objetivos[0].id, f.grupo ? f.key : undefined)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"><ExternalLink size={14} /></button>
                     </div>
                   </div>
