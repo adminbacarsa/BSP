@@ -9904,6 +9904,29 @@ function PlanificacionDesktop() {
                     await flushBatchWhenFull();
                 }
 
+                // Escribir coveredBy en ausencias cubiertas por FT/RET→Turno/EXT al guardar
+                for (const [absKey, absData] of Object.entries(absencesMap)) {
+                    const absId = String((absData as any).id || '').trim();
+                    if (!absId) continue;
+                    const absEmpId = String((absData as any).employeeId || '').trim();
+                    if (!absEmpId) continue;
+                    const absDateKey = absKey.slice(absEmpId.length + 1);
+                    if (!absDateKey) continue;
+                    const absObjId = String((absData as any).objectiveId || '').trim() || null;
+                    const rawBand = (absData as any).band ?? (absData as any).type;
+                    const absband = rawBand ? String(rawBand).toUpperCase() : null;
+                    const covered = computeFTCoveredBy(
+                        absEmpId, absDateKey, absObjId, absband,
+                        shiftsAntesGuardar, savedPendingChanges,
+                        (id) => (employeesById[id] as any)?.name,
+                    );
+                    if (covered !== null) {
+                        batch.update(doc(db, 'ausencias', absId), { coveredBy: covered });
+                        bumpBatchOp();
+                        await flushBatchWhenFull();
+                    }
+                }
+
                 await flushBatch();
 
                 if (empresaId && selectedObjective) {
