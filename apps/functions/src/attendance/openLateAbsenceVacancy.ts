@@ -16,6 +16,7 @@ export async function openLateAbsenceVacancy(db: Firestore, shiftId: string): Pr
   const snap = await ref.get();
   if (!snap.exists) return false;
   const shift = snap.data() as Record<string, unknown>;
+  if (shift.draft === true) return false;
   if (isRetShift(shift) || isZeroDurationShift(shift)) return false;
   if (!lateVacancyDue(shift, Date.now())) return false;
 

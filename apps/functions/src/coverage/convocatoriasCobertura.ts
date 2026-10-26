@@ -1088,6 +1088,9 @@ export const crearConvocatoriaCobertura = functions
       throw new functions.https.HttpsError('not-found', 'Turno no encontrado.');
     }
     const shift = shiftSnap.data()!;
+    if (shift.draft === true) {
+      throw new functions.https.HttpsError('failed-precondition', 'No se puede convocar para un turno no publicado.');
+    }
 
     if (type === 'EVENTUAL') {
       const cuil = String((data as { bolsaCuil?: string }).bolsaCuil || candidateEmployeeId).trim();
