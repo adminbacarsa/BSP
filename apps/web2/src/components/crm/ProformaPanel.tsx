@@ -279,6 +279,7 @@ export default function ProformaPanel(props: ProformaPanelProps) {
                 <option value="employees">Solo empleados</option>
                 <option value="positions">Solo puestos</option>
                 <option value="day_night">Solo diurnas/nocturnas</option>
+                <option value="sla_card">Tarjetas SLA (hospitales)</option>
               </select>
             </div>
             <div className="flex flex-col justify-end pb-0.5">

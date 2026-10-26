@@ -677,6 +677,8 @@ export function buildProformaPositionGrids(opts: BuildProformaGridsOpts): Profor
 export function buildProformaSummary(
   objectives: ProformaObjectiveGrid[],
   slaHoursByObjectiveId?: Record<string, number>,
+  paxByObjectiveId?: Record<string, number>,
+  dailyCoverageHoursByObjectiveId?: Record<string, number>,
 ): ProformaSummaryRow[] {
   return objectives.map((o) => ({
     objectiveName: o.objectiveName,
@@ -684,6 +686,8 @@ export function buildProformaSummary(
     dayHours: o.grandTotal.day,
     nightHours: o.grandTotal.night,
     slaHours: slaHoursByObjectiveId?.[o.objectiveId],
+    pax: paxByObjectiveId?.[o.objectiveId],
+    dailyCoverageHours: dailyCoverageHoursByObjectiveId?.[o.objectiveId],
   }));
 }
 

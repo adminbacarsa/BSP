@@ -46,7 +46,7 @@ export type ProformaPositionObjectiveGrid = {
 };
 
 /** Qué páginas/secciones incluir en vista y PDF/CSV/Excel. */
-export type ProformaLayoutMode = 'both' | 'employees' | 'positions' | 'day_night';
+export type ProformaLayoutMode = 'both' | 'employees' | 'positions' | 'day_night' | 'sla_card';
 
 export type ProformaSummaryRow = {
   objectiveName: string;
@@ -55,6 +55,10 @@ export type ProformaSummaryRow = {
   nightHours: number;
   /** Horas SLA contratadas (vigente en el período); undefined si no se pudo resolver. */
   slaHours?: number;
+  /** Total de PAX (vigiladores por turno) del SLA: suma de quantity de todas las posiciones. */
+  pax?: number;
+  /** Horas de cobertura diaria del SLA (ej. 24 para servicio 24 hs, suma de turnos del puesto). */
+  dailyCoverageHours?: number;
 };
 
 export type ProformaEventoDia = {

@@ -2568,10 +2568,11 @@ export default function CRMPage() {
           if (Object.values(fromBook).some((n) => n > 0)) workedByObjectiveId = fromBook;
         } catch { /* si el libro no responde, se usa el SLA vivo de abajo */ }
       }
-      if (!Object.keys(slaHoursByObjectiveId).length) {
-        for (const srv of vigenteSlas) {
-          const oid = String((srv as any).objectiveId ?? '').trim();
-          if (oid) slaHoursByObjectiveId[oid] = (slaHoursByObjectiveId[oid] || 0) + slaHoursForServiceInRange(srv, start, end);
+      // Fallback al SLA vivo para objetivos sin valor en el libro (o si el libro estaba vacío)
+      for (const srv of vigenteSlas) {
+        const oid = String((srv as any).objectiveId ?? '').trim();
+        if (oid && !slaHoursByObjectiveId[oid]) {
+          slaHoursByObjectiveId[oid] = slaHoursForServiceInRange(srv, start, end);
         }
       }
       if (!workedByObjectiveId) workedByObjectiveId = { ...franja.byObjectiveId };
@@ -2590,7 +2591,22 @@ export default function CRMPage() {
         modeOverride: proformaDetailModeToBillingHint(proformaDetailMode),
       });
       setProformaBillingRows(billingRows);
-      const summary = buildProformaSummary(grids, slaHoursByObjectiveId);
+      // PAX y cobertura diaria por objetivo desde el SLA vigente
+      const paxByObjectiveId: Record<string, number> = {};
+      const dailyCoverageHoursByObjectiveId: Record<string, number> = {};
+      for (const srv of vigenteSlas) {
+        const oid = String((srv as any).objectiveId ?? '').trim();
+        if (!oid) continue;
+        let totalPax = 0;
+        let dailyCovHours = 0;
+        for (const pos of ((srv as any).positions || []) as import('@/services/slaService').ServicePosition[]) {
+          totalPax += Number(pos.quantity || 1);
+          dailyCovHours += (pos.allowedShiftTypes || []).reduce((s: number, sh: any) => s + Number(sh.hours || 0), 0);
+        }
+        paxByObjectiveId[oid] = (paxByObjectiveId[oid] || 0) + totalPax;
+        dailyCoverageHoursByObjectiveId[oid] = (dailyCoverageHoursByObjectiveId[oid] || 0) + dailyCovHours;
+      }
+      const summary = buildProformaSummary(grids, slaHoursByObjectiveId, paxByObjectiveId, dailyCoverageHoursByObjectiveId);
       const startKey = getDateKeyInTimezone(start);
       const endKey = getDateKeyInTimezone(end);
       const eventosDesde = new Date(start.getFullYear(), start.getMonth(), start.getDate() - 92);

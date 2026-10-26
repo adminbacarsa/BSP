@@ -10,7 +10,7 @@ const PDF_HEADER_Y = 19;
 const PDF_CONTENT_TOP = 28;
 
 function resolveLayoutMode(bundle: ProformaExportBundle): ProformaLayoutMode {
-  if (bundle.layoutMode === 'employees' || bundle.layoutMode === 'positions' || bundle.layoutMode === 'both' || bundle.layoutMode === 'day_night') {
+  if (bundle.layoutMode === 'employees' || bundle.layoutMode === 'positions' || bundle.layoutMode === 'both' || bundle.layoutMode === 'day_night' || bundle.layoutMode === 'sla_card') {
     return bundle.layoutMode;
   }
   if (bundle.positionGrids && bundle.positionGrids.some((g) => g.positions.length > 0)) return 'both';
@@ -96,6 +96,50 @@ function drawPdfHeaderBar(doc: jsPDF, left: string, center: string, right: strin
   doc.setFontSize(11);
   doc.text(left.toUpperCase(), PDF_MARGIN_X + 6, PDF_HEADER_Y);
   doc.text(center.toUpperCase(), PDF_PAGE_W / 2, PDF_HEADER_Y, { align: 'center' });
+  doc.text(right.toUpperCase(), PDF_PAGE_W - PDF_MARGIN_X - 6, PDF_HEADER_Y, { align: 'right' });
+}
+
+/** Encabezado de la primera página con el logo de BACAR a la izquierda. */
+function drawPdfLogoHeader(doc: jsPDF, center: string, right: string) {
+  // Barra gris de fondo
+  doc.setFillColor(240, 240, 240);
+  doc.rect(10, 10, 277, 14, 'F');
+
+  // Slab oscuro para el logo (43 mm)
+  const LOGO_W = 43;
+  doc.setFillColor(30, 41, 59);
+  doc.rect(10, 10, LOGO_W, 14, 'F');
+
+  // Icono B: barra vertical + dos D-shapes (dona = outer claro, inner oscuro)
+  const ix = 11.5;
+  const iy = 11;
+  doc.setFillColor(255, 255, 255);
+  doc.rect(ix, iy, 1.3, 12, 'F'); // barra izquierda
+  // bump superior
+  doc.roundedRect(ix + 1.3, iy, 6.5, 5.8, 1.8, 1.8, 'F');
+  doc.setFillColor(30, 41, 59);
+  doc.roundedRect(ix + 2.8, iy + 1.1, 3.8, 3.6, 1.1, 1.1, 'F');
+  // bump inferior (más ancho que el superior, igual que el SVG)
+  doc.setFillColor(255, 255, 255);
+  doc.roundedRect(ix + 1.3, iy + 6.2, 7.2, 5.8, 1.8, 1.8, 'F');
+  doc.setFillColor(30, 41, 59);
+  doc.roundedRect(ix + 2.8, iy + 7.3, 4.5, 3.6, 1.1, 1.1, 'F');
+
+  // Texto "Grupo" / "BACAR"
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(4.8);
+  doc.text('Grupo', ix + 9.5, iy + 3.5);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9.5);
+  doc.text('BACAR', ix + 8.5, iy + 10);
+  doc.setTextColor(0, 0, 0);
+
+  // Centro y derecha en el espacio gris
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
+  doc.text(center.toUpperCase(), PDF_PAGE_W / 2 + LOGO_W / 4, PDF_HEADER_Y, { align: 'center' });
+  doc.setFontSize(10);
   doc.text(right.toUpperCase(), PDF_PAGE_W - PDF_MARGIN_X - 6, PDF_HEADER_Y, { align: 'right' });
 }
 
@@ -285,6 +329,115 @@ function appendPositionGridPages(doc: jsPDF, bundle: ProformaExportBundle, empre
   });
 }
 
+/** Tarjeta por objetivo estilo hospitales: período, días, cobertura, vigiladores, total hs, OC. */
+function appendSlaCardPages(doc: jsPDF, bundle: ProformaExportBundle, empresa: string, issued: string) {
+  const CARD_W = 130;
+  const CARD_H = 56;
+  const COLS = 2;
+  const GAP = 8;
+  const START_Y = PDF_CONTENT_TOP + 2;
+  const PAGE_W = PDF_PAGE_W - PDF_MARGIN_X * 2;
+  // Centrar las dos columnas
+  const totalCardsW = COLS * CARD_W + (COLS - 1) * GAP;
+  const cardsOriginX = PDF_MARGIN_X + (PAGE_W - totalCardsW) / 2;
+
+  const periodDays = (() => {
+    try {
+      const s = new Date(bundle.startDate + 'T00:00:00');
+      const e = new Date(bundle.endDate + 'T00:00:00');
+      return Math.round((e.getTime() - s.getTime()) / 86400000) + 1;
+    } catch { return 0; }
+  })();
+
+  const billingByName = new Map<string, import('./proformaTypes').ProformaBillingRow>();
+  (bundle.billingSummary || []).forEach((r) => billingByName.set(r.objectiveName, r));
+
+  let col = 0;
+  let row = 0;
+  let firstCard = true;
+
+  bundle.summary.forEach((s) => {
+    const cardsPerPage = 3; // filas
+    const cardIndex = row * COLS + col;
+    if (!firstCard && col === 0 && row === 0) doc.addPage();
+    if (col === 0 && row === 0) {
+      // Encabezado de página
+      drawPdfLogoHeader(doc, `RESUMEN SLA — ${bundle.clientName}`, bundle.periodLabel);
+    }
+    firstCard = false;
+
+    const cx = cardsOriginX + col * (CARD_W + GAP);
+    const cy = START_Y + row * (CARD_H + 6);
+    void cardIndex;
+
+    // Título (barra oscura)
+    doc.setFillColor(30, 41, 59);
+    doc.rect(cx, cy, CARD_W, 9, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.5);
+    const titleText = doc.splitTextToSize(s.objectiveName.toUpperCase(), CARD_W - 4);
+    doc.text(titleText[0] || '', cx + CARD_W / 2, cy + 6, { align: 'center' });
+    doc.setTextColor(0, 0, 0);
+
+    const billing = billingByName.get(s.objectiveName);
+    const ocRef = billing?.ocNumber || '—';
+    const pax = s.pax != null ? String(s.pax) : '—';
+    const dailyCov = s.dailyCoverageHours != null ? `${s.dailyCoverageHours} hs/día` : '—';
+    const slaTotal = s.slaHours != null ? formatHoursColonTotal(s.slaHours) : '—';
+
+    const rows: [string, string][] = [
+      ['Período', bundle.periodLabel],
+      ['Días', periodDays > 0 ? String(periodDays) : '—'],
+      ['Cobertura', dailyCov],
+      ['Vigiladores (por turno)', pax],
+      ['Total hs contratadas', slaTotal],
+      ['Referencia OC', ocRef],
+    ];
+
+    autoTable(doc, {
+      startY: cy + 9,
+      head: [],
+      body: rows,
+      styles: { fontSize: 7, cellPadding: { top: 1.5, bottom: 1.5, left: 3, right: 3 }, overflow: 'hidden' },
+      columnStyles: {
+        0: { cellWidth: 52, fontStyle: 'bold', textColor: [71, 85, 105], halign: 'left' },
+        1: { cellWidth: CARD_W - 52, halign: 'right' },
+      },
+      theme: 'plain',
+      margin: { left: cx, right: PDF_PAGE_W - cx - CARD_W },
+      tableWidth: CARD_W,
+      didDrawCell: (data: any) => {
+        if (data.section === 'body' && data.row.index === rows.length - 1) {
+          // línea inferior de la última fila
+          doc.setDrawColor(200, 200, 200);
+          doc.line(cx, data.cell.y + data.cell.height, cx + CARD_W, data.cell.y + data.cell.height);
+        }
+      },
+    });
+
+    // Borde exterior de la tarjeta
+    const cardBottom = (doc as any).lastAutoTable?.finalY || cy + CARD_H;
+    doc.setDrawColor(148, 163, 184);
+    doc.rect(cx, cy, CARD_W, cardBottom - cy + 1);
+
+    // Avanzar posición
+    col++;
+    if (col >= COLS) {
+      col = 0;
+      row++;
+      if (row >= cardsPerPage) {
+        row = 0;
+      }
+    }
+  });
+
+  const issuedLine = `${empresa}  ·  Fecha de emisión: ${issued.split(',')[0]}  ·  Hora: ${issued.split(',')[1]?.trim() || ''}`;
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7);
+  doc.text(issuedLine, PDF_MARGIN_X + 6, 200);
+}
+
 function objectivePdfColumnStyles(grid: ProformaObjectiveGrid) {
   const pageW = PDF_PAGE_W - PDF_MARGIN_X * 2;
   const legajoW = 10;
@@ -328,7 +481,7 @@ export function exportProformaPdf(bundle: ProformaExportBundle) {
   const issued = bundle.issuedAt.toLocaleString('es-AR');
   const empresa = bundle.empresaName || 'COSP';
 
-  drawPdfHeaderBar(doc, empresa, `PRE-FACTURA — ${bundle.clientName}`, bundle.periodLabel);
+  drawPdfLogoHeader(doc, `PRE-FACTURA — ${bundle.clientName}`, bundle.periodLabel);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
   doc.text(`CUIT: ${bundle.taxId || '—'}  ·  ${bundle.legalName || ''}`, PDF_MARGIN_X + 6, 24);
@@ -392,6 +545,10 @@ export function exportProformaPdf(bundle: ProformaExportBundle) {
 
   if (layout === 'day_night') {
     appendDayNightPages(doc, bundle, empresa, issued);
+  }
+
+  if (layout === 'sla_card') {
+    appendSlaCardPages(doc, bundle, empresa, issued);
   }
 
   if (bundle.eventos && bundle.eventos.length > 0) {
