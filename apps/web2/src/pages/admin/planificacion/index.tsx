@@ -16113,13 +16113,13 @@ function PlanificacionDesktop() {
         if (c.isLeaveCell) {
             const absType = absence?.type || activeShift?.name || LEGEND_DESCRIPTIONS[leaveCellCode] || leaveCellCode;
             const reason = absence?.reason || activeShift?.comments || p?.comments || '';
-            const cubierta12 = textoLicencia12(pendingChanges, shiftsMap, emp.id, c.dateStr, nombres12);
             const _ftObjId = (c.s?.objectiveId || c.p?.objectiveId) as string | undefined;
             const _sCode = String(c.s?.code || '').toUpperCase();
             const _pCode = String(c.p?.code || '').toUpperCase();
             const _absentBand = WORK_BAND_CODES.has(_sCode) ? _sCode : WORK_BAND_CODES.has(_pCode) ? _pCode : null;
-            const ftCovered = !cubierta12 ? computeFTCoveredBy(emp.id, c.dateStr, _ftObjId, _absentBand, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name) : null;
-            const covered = cubierta12 || ftCovered || resolveTitularCoverageName(emp.id, emp.name || '', c.dateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell, cellTurnosMap);
+            const ftCovered = computeFTCoveredBy(emp.id, c.dateStr, _ftObjId, _absentBand, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name);
+            const cubierta12 = !ftCovered ? textoLicencia12(pendingChanges, shiftsMap, emp.id, c.dateStr, nombres12) : null;
+            const covered = ftCovered || cubierta12 || resolveTitularCoverageName(emp.id, emp.name || '', c.dateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell, cellTurnosMap);
             return { label: sumarTope(buildLeaveCellTooltipLabel({ absenceType: absType, reason, coveredBy: covered })), pos: null, range: null, restHours: null };
         }
         if ((s || p || rfzOnCell || evOverlay) && !absence) {
