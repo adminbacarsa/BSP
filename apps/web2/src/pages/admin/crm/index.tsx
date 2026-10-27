@@ -2719,15 +2719,10 @@ export default function CRMPage() {
   const handleExportProformaPdf = () => {
     if (!proformaBundle) return;
     setProformaExporting(true);
-    try {
-      exportProformaPdf({ ...proformaBundle, issuedAt: new Date() });
-      toast.success('PDF generado');
-    } catch (e) {
-      console.error(e);
-      toast.error('Error al generar PDF');
-    } finally {
-      setProformaExporting(false);
-    }
+    exportProformaPdf({ ...proformaBundle, issuedAt: new Date() })
+      .then(() => toast.success('PDF generado'))
+      .catch((e) => { console.error(e); toast.error('Error al generar PDF'); })
+      .finally(() => setProformaExporting(false));
   };
 
   const handleExportProformaCsv = () => {
@@ -3676,6 +3671,18 @@ export default function CRMPage() {
                     );
                   }
                   const sortedServices = [...clientServices].sort((a, b) => (b.startDate || '').localeCompare(a.startDate || ''));
+                  const _MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+                  const svcGroupedByMonth: Record<string, typeof sortedServices> = {};
+                  for (const _sv of sortedServices) {
+                    const _k = (_sv.startDate || '').slice(0, 7) || 'sin-fecha';
+                    if (!svcGroupedByMonth[_k]) svcGroupedByMonth[_k] = [];
+                    svcGroupedByMonth[_k].push(_sv);
+                  }
+                  const svcGroupKeys = Object.keys(svcGroupedByMonth).sort((a, b) => b.localeCompare(a));
+                  const svcMonthLabel = (ym: string) => {
+                    const p = ym.split('-');
+                    return p.length >= 2 ? `${_MONTHS_ES[parseInt(p[1]) - 1] || ''} ${p[0]}` : 'Sin fecha';
+                  };
                   const COVERAGE_LABELS: Record<string, string> = { '24hs': '24 hs', '12hs_diurno': '12 hs Diurno', '12hs_nocturno': '12 hs Nocturno', 'custom': 'Personalizado', 'encargado': 'Encargado' };
 
                   const StatusBadge = ({ s }: { s: any }) => {
@@ -3867,8 +3874,17 @@ export default function CRMPage() {
                           <p className="text-sm font-bold">Sin servicios configurados</p>
                         </div>
                       ) : (
-                        <div className="space-y-3">
-                          {sortedServices.map((s) => {
+                        <div className="max-h-[65vh] overflow-y-auto space-y-5 pr-0.5">
+                          {svcGroupKeys.map((ym) => (
+                            <div key={ym}>
+                              <div className="sticky top-0 z-10 bg-white pb-1 mb-2">
+                                <div className="flex items-center gap-2 border-b border-slate-100 pb-1.5">
+                                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{svcMonthLabel(ym)}</span>
+                                  <span className="bg-slate-100 text-slate-400 text-[9px] font-black px-1.5 py-0.5 rounded-full">{svcGroupedByMonth[ym].length}</span>
+                                </div>
+                              </div>
+                              <div className="space-y-3">
+                              {svcGroupedByMonth[ym].map((s) => {
                             const positions: any[] = Array.isArray(s.positions)
                               ? s.positions
                               : Object.values((s.positions as Record<string, unknown>) || {});
@@ -4088,7 +4104,10 @@ export default function CRMPage() {
                                 )}
                               </div>
                             );
-                          })}
+                              })}
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       )}
                     </div>

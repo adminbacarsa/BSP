@@ -406,7 +406,11 @@ export default function ProformaPanel(props: ProformaPanelProps) {
               ? 'resumen + puestos'
               : proformaLayoutMode === 'employees'
                 ? 'resumen + empleados'
-                : 'resumen + empleados + puestos'}
+                : proformaLayoutMode === 'day_night'
+                  ? 'diurnas / nocturnas'
+                  : proformaLayoutMode === 'sla_card'
+                    ? 'tarjetas SLA'
+                    : 'resumen + empleados + puestos'}
             )
           </button>
           <button

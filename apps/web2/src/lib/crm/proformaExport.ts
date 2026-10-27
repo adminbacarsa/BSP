@@ -99,47 +99,57 @@ function drawPdfHeaderBar(doc: jsPDF, left: string, center: string, right: strin
   doc.text(right.toUpperCase(), PDF_PAGE_W - PDF_MARGIN_X - 6, PDF_HEADER_Y, { align: 'right' });
 }
 
-/** Encabezado de la primera página con el logo de BACAR a la izquierda. */
-function drawPdfLogoHeader(doc: jsPDF, center: string, right: string) {
-  // Barra gris de fondo
+/**
+ * Carga el SVG del logo, reemplaza fill="white" por fillColor y devuelve un data URL PNG.
+ * bgColor: color de fondo del canvas (null = transparente).
+ */
+async function loadLogoDataUrl(
+  fillColor: string,
+  bgColor: string | null,
+  w = 480, h = 144,
+): Promise<string | null> {
+  try {
+    const res = await fetch('/logo-bacar-blanco.svg');
+    const svgText = (await res.text()).replace(/fill="white"/g, `fill="${fillColor}"`);
+    const blob = new Blob([svgText], { type: 'image/svg+xml' });
+    const blobUrl = URL.createObjectURL(blob);
+    try {
+      const img = new Image();
+      await new Promise<void>((ok, err) => { img.onload = () => ok(); img.onerror = () => err(); img.src = blobUrl; });
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext('2d')!;
+      if (bgColor) { ctx.fillStyle = bgColor; ctx.fillRect(0, 0, w, h); }
+      ctx.drawImage(img, 0, 0, w, h);
+      return canvas.toDataURL('image/png');
+    } finally { URL.revokeObjectURL(blobUrl); }
+  } catch { return null; }
+}
+
+/** Encabezado de la primera página con el logo BACAR (blanco sobre oscuro) a la izquierda. */
+function drawPdfLogoHeader(doc: jsPDF, center: string, right: string, logoWhiteDataUrl: string | null = null) {
+  const LOGO_W = 45;
   doc.setFillColor(240, 240, 240);
   doc.rect(10, 10, 277, 14, 'F');
-
-  // Slab oscuro para el logo (43 mm)
-  const LOGO_W = 43;
   doc.setFillColor(30, 41, 59);
   doc.rect(10, 10, LOGO_W, 14, 'F');
 
-  // Icono B: barra vertical + dos D-shapes (dona = outer claro, inner oscuro)
-  const ix = 11.5;
-  const iy = 11;
-  doc.setFillColor(255, 255, 255);
-  doc.rect(ix, iy, 1.3, 12, 'F'); // barra izquierda
-  // bump superior
-  doc.roundedRect(ix + 1.3, iy, 6.5, 5.8, 1.8, 1.8, 'F');
-  doc.setFillColor(30, 41, 59);
-  doc.roundedRect(ix + 2.8, iy + 1.1, 3.8, 3.6, 1.1, 1.1, 'F');
-  // bump inferior (más ancho que el superior, igual que el SVG)
-  doc.setFillColor(255, 255, 255);
-  doc.roundedRect(ix + 1.3, iy + 6.2, 7.2, 5.8, 1.8, 1.8, 'F');
-  doc.setFillColor(30, 41, 59);
-  doc.roundedRect(ix + 2.8, iy + 7.3, 4.5, 3.6, 1.1, 1.1, 'F');
+  if (logoWhiteDataUrl) {
+    // Logo real: ajustar al slab con margen
+    const lh = 10; // alto display
+    const lw = lh * (240 / 72); // mantener proporción 240:72
+    doc.addImage(logoWhiteDataUrl, 'PNG', 10 + (LOGO_W - lw) / 2, 10 + (14 - lh) / 2, lw, lh);
+  } else {
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.text('BACAR', 10 + LOGO_W / 2, PDF_HEADER_Y, { align: 'center' });
+    doc.setTextColor(0, 0, 0);
+  }
 
-  // Texto "Grupo" / "BACAR"
-  doc.setTextColor(255, 255, 255);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(4.8);
-  doc.text('Grupo', ix + 9.5, iy + 3.5);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(9.5);
-  doc.text('BACAR', ix + 8.5, iy + 10);
-  doc.setTextColor(0, 0, 0);
-
-  // Centro y derecha en el espacio gris
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(10);
   doc.text(center.toUpperCase(), PDF_PAGE_W / 2 + LOGO_W / 4, PDF_HEADER_Y, { align: 'center' });
-  doc.setFontSize(10);
   doc.text(right.toUpperCase(), PDF_PAGE_W - PDF_MARGIN_X - 6, PDF_HEADER_Y, { align: 'right' });
 }
 
@@ -329,17 +339,154 @@ function appendPositionGridPages(doc: jsPDF, bundle: ProformaExportBundle, empre
   });
 }
 
-/** Tarjeta por objetivo estilo hospitales: período, días, cobertura, vigiladores, total hs, OC. */
-function appendSlaCardPages(doc: jsPDF, bundle: ProformaExportBundle, empresa: string, issued: string) {
-  const CARD_W = 130;
-  const CARD_H = 56;
+function fmtDMY(ymd: string): string {
+  if (!ymd) return '—';
+  const [y, m, d] = ymd.split('-');
+  return `${parseInt(d, 10)}/${parseInt(m, 10)}/${y}`;
+}
+
+/** Dibuja el ícono B de BACAR en color oscuro sobre fondo blanco. */
+// (logo dibujado via doc.addImage con SVG convertido a PNG en loadLogoDataUrl)
+
+/** Dibuja una tarjeta SLA estilo hospitales. */
+function drawSlaCard(
+  doc: jsPDF,
+  cx: number, cy: number,
+  cw: number, ch: number,
+  data: {
+    name: string;
+    startDate: string; endDate: string;
+    days: number; dailyCovHours: number; pax: number;
+    totalHours: number; ocRef: string;
+  },
+  logoDarkDataUrl: string | null = null,
+) {
+  const TH = 8;    // title height
+  const DRH = 13;  // dates+logo row height
+  const DHH = 6;   // "Detalle" header height
+  const RH = 5.5;  // detail row height
+  const TOTH = ch - TH - DRH - DHH - 3 * RH; // Total row height (remaining)
+
+  const LOGO_W = cw * 0.37;
+  const DATE_COL_W = (cw - LOGO_W) / 2;
+  const LABEL_W = cw * 0.65;
+  const VAL_W = cw - LABEL_W;
+
+  doc.setDrawColor(190, 190, 190);
+  doc.setLineWidth(0.3);
+
+  // ── Título ──
+  doc.setTextColor(180, 100, 20);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  const titleLines: string[] = doc.splitTextToSize(data.name, cw - 6);
+  doc.text(titleLines[0] || '', cx + cw / 2, cy + TH - 2, { align: 'center' });
+  doc.line(cx, cy + TH, cx + cw, cy + TH);
+
+  // ── Logo (izquierda) ──
+  if (logoDarkDataUrl) {
+    // Logo real oscuro sobre fondo blanco, centrado en el área del logo
+    const lw = LOGO_W - 6;
+    const lh = lw * (72 / 240); // proporción 240:72
+    doc.addImage(logoDarkDataUrl, 'PNG', cx + 3, cy + TH + (DRH - lh) / 2, lw, lh);
+  } else {
+    // Fallback texto
+    doc.setTextColor(30, 41, 59);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.text('BACAR', cx + LOGO_W / 2, cy + TH + DRH / 2 + 2, { align: 'center' });
+  }
+
+  // línea vertical entre logo y fechas
+  doc.line(cx + LOGO_W, cy + TH, cx + LOGO_W, cy + TH + DRH);
+
+  // ── Fechas (derecha, encabezado) ──
+  const dhY = cy + TH;
+  const dateHeaderH = DRH * 0.48;
+  doc.setFillColor(30, 41, 59);
+  doc.rect(cx + LOGO_W, dhY, DATE_COL_W, dateHeaderH, 'F');
+  doc.rect(cx + LOGO_W + DATE_COL_W, dhY, DATE_COL_W, dateHeaderH, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(5.5);
+  doc.text('Fecha Inicio', cx + LOGO_W + DATE_COL_W / 2, dhY + dateHeaderH - 1.5, { align: 'center' });
+  doc.text('Fecha Fin', cx + LOGO_W + DATE_COL_W * 1.5, dhY + dateHeaderH - 1.5, { align: 'center' });
+
+  // línea vertical entre las dos columnas de fecha
+  doc.setDrawColor(100, 100, 100);
+  doc.line(cx + LOGO_W + DATE_COL_W, dhY, cx + LOGO_W + DATE_COL_W, dhY + DRH);
+  doc.setDrawColor(190, 190, 190);
+
+  // valores de fecha
+  const dateValY = dhY + dateHeaderH + (DRH - dateHeaderH) / 2 + 2;
+  doc.setTextColor(30, 41, 59);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7);
+  doc.text(fmtDMY(data.startDate), cx + LOGO_W + DATE_COL_W / 2, dateValY, { align: 'center' });
+  doc.text(fmtDMY(data.endDate), cx + LOGO_W + DATE_COL_W * 1.5, dateValY, { align: 'center' });
+
+  // ── Encabezado "Detalle" ──
+  const detY = cy + TH + DRH;
+  doc.setFillColor(210, 210, 210);
+  doc.rect(cx, detY, cw, DHH, 'F');
+  doc.setTextColor(50, 50, 50);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(6.5);
+  doc.text('Detalle', cx + cw / 2, detY + DHH - 1.5, { align: 'center' });
+  doc.line(cx, detY + DHH, cx + cw, detY + DHH);
+
+  // ── Filas de detalle ──
+  const detailItems = [
+    { label: 'Dias', value: data.days > 0 ? String(data.days) : '—' },
+    { label: `Cobertura (${data.dailyCovHours > 0 ? data.dailyCovHours + 'hs' : '—'})`, value: data.dailyCovHours > 0 ? String(data.dailyCovHours) : '—' },
+    { label: 'Vigiladores (Por turno)', value: data.pax > 0 ? String(data.pax) : '—' },
+  ];
+  detailItems.forEach((item, i) => {
+    const ry = detY + DHH + i * RH;
+    doc.setTextColor(50, 50, 50);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.5);
+    doc.text(item.label, cx + 3, ry + RH - 1.5);
+    doc.setFont('helvetica', 'bold');
+    doc.text(item.value, cx + LABEL_W + VAL_W / 2, ry + RH - 1.5, { align: 'center' });
+    doc.line(cx, ry + RH, cx + cw, ry + RH);
+    doc.line(cx + LABEL_W, ry, cx + LABEL_W, ry + RH);
+  });
+
+  // ── Fila Total ──
+  const totY = detY + DHH + 3 * RH;
+  doc.setFillColor(220, 38, 38);
+  doc.rect(cx, totY, LABEL_W, TOTH, 'F');
+  doc.setFillColor(241, 245, 249);
+  doc.rect(cx + LABEL_W, totY, VAL_W, TOTH, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.text('Total', cx + LABEL_W / 2, totY + TOTH - 2, { align: 'center' });
+  doc.setTextColor(30, 41, 59);
+  doc.setFontSize(8.5);
+  doc.text(
+    data.totalHours > 0 ? String(Math.round(data.totalHours)) : '—',
+    cx + LABEL_W + VAL_W / 2, totY + TOTH - 2, { align: 'center' },
+  );
+
+  // ── Borde exterior ──
+  doc.setDrawColor(160, 160, 160);
+  doc.setLineWidth(0.4);
+  doc.rect(cx, cy, cw, ch);
+  doc.setLineWidth(0.3);
+}
+
+/** Tarjeta por objetivo estilo hospitales: período, días, cobertura, vigiladores, total hs. */
+function appendSlaCardPages(doc: jsPDF, bundle: ProformaExportBundle, empresa: string, issued: string, logoWhiteDataUrl: string | null = null, logoDarkDataUrl: string | null = null) {
   const COLS = 2;
-  const GAP = 8;
-  const START_Y = PDF_CONTENT_TOP + 2;
+  const ROWS_PER_PAGE = 3;
+  const GAP_X = 9;
+  const GAP_Y = 7;
   const PAGE_W = PDF_PAGE_W - PDF_MARGIN_X * 2;
-  // Centrar las dos columnas
-  const totalCardsW = COLS * CARD_W + (COLS - 1) * GAP;
-  const cardsOriginX = PDF_MARGIN_X + (PAGE_W - totalCardsW) / 2;
+  const CARDS_AREA_H = 210 - PDF_CONTENT_TOP - PDF_MARGIN_X - 10;
+  const CARD_W = (PAGE_W - GAP_X * (COLS - 1)) / COLS;
+  const CARD_H = (CARDS_AREA_H - GAP_Y * (ROWS_PER_PAGE - 1)) / ROWS_PER_PAGE;
 
   const periodDays = (() => {
     try {
@@ -354,88 +501,43 @@ function appendSlaCardPages(doc: jsPDF, bundle: ProformaExportBundle, empresa: s
 
   let col = 0;
   let row = 0;
-  let firstCard = true;
+  let onPage = 0; // cards en la página actual
 
   bundle.summary.forEach((s) => {
-    const cardsPerPage = 3; // filas
-    const cardIndex = row * COLS + col;
-    if (!firstCard && col === 0 && row === 0) doc.addPage();
-    if (col === 0 && row === 0) {
-      // Encabezado de página
-      drawPdfLogoHeader(doc, `RESUMEN SLA — ${bundle.clientName}`, bundle.periodLabel);
+    if (onPage === 0) {
+      if (col !== 0 || row !== 0) doc.addPage();
+      drawPdfLogoHeader(doc, `RESUMEN SLA — ${bundle.clientName}`, bundle.periodLabel, logoWhiteDataUrl);
     }
-    firstCard = false;
 
-    const cx = cardsOriginX + col * (CARD_W + GAP);
-    const cy = START_Y + row * (CARD_H + 6);
-    void cardIndex;
-
-    // Título (barra oscura)
-    doc.setFillColor(30, 41, 59);
-    doc.rect(cx, cy, CARD_W, 9, 'F');
-    doc.setTextColor(255, 255, 255);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7.5);
-    const titleText = doc.splitTextToSize(s.objectiveName.toUpperCase(), CARD_W - 4);
-    doc.text(titleText[0] || '', cx + CARD_W / 2, cy + 6, { align: 'center' });
-    doc.setTextColor(0, 0, 0);
+    const cx = PDF_MARGIN_X + col * (CARD_W + GAP_X);
+    const cy = PDF_CONTENT_TOP + row * (CARD_H + GAP_Y);
 
     const billing = billingByName.get(s.objectiveName);
-    const ocRef = billing?.ocNumber || '—';
-    const pax = s.pax != null ? String(s.pax) : '—';
-    const dailyCov = s.dailyCoverageHours != null ? `${s.dailyCoverageHours} hs/día` : '—';
-    const slaTotal = s.slaHours != null ? formatHoursColonTotal(s.slaHours) : '—';
+    drawSlaCard(doc, cx, cy, CARD_W, CARD_H, {
+      name: s.objectiveName,
+      startDate: bundle.startDate,
+      endDate: bundle.endDate,
+      days: periodDays,
+      dailyCovHours: s.dailyCoverageHours ?? 0,
+      pax: s.pax ?? 0,
+      totalHours: s.slaHours ?? s.totalHours,
+      ocRef: billing?.ocNumber || '—',
+    }, logoDarkDataUrl);
 
-    const rows: [string, string][] = [
-      ['Período', bundle.periodLabel],
-      ['Días', periodDays > 0 ? String(periodDays) : '—'],
-      ['Cobertura', dailyCov],
-      ['Vigiladores (por turno)', pax],
-      ['Total hs contratadas', slaTotal],
-      ['Referencia OC', ocRef],
-    ];
-
-    autoTable(doc, {
-      startY: cy + 9,
-      head: [],
-      body: rows,
-      styles: { fontSize: 7, cellPadding: { top: 1.5, bottom: 1.5, left: 3, right: 3 }, overflow: 'hidden' },
-      columnStyles: {
-        0: { cellWidth: 52, fontStyle: 'bold', textColor: [71, 85, 105], halign: 'left' },
-        1: { cellWidth: CARD_W - 52, halign: 'right' },
-      },
-      theme: 'plain',
-      margin: { left: cx, right: PDF_PAGE_W - cx - CARD_W },
-      tableWidth: CARD_W,
-      didDrawCell: (data: any) => {
-        if (data.section === 'body' && data.row.index === rows.length - 1) {
-          // línea inferior de la última fila
-          doc.setDrawColor(200, 200, 200);
-          doc.line(cx, data.cell.y + data.cell.height, cx + CARD_W, data.cell.y + data.cell.height);
-        }
-      },
-    });
-
-    // Borde exterior de la tarjeta
-    const cardBottom = (doc as any).lastAutoTable?.finalY || cy + CARD_H;
-    doc.setDrawColor(148, 163, 184);
-    doc.rect(cx, cy, CARD_W, cardBottom - cy + 1);
-
-    // Avanzar posición
     col++;
-    if (col >= COLS) {
-      col = 0;
-      row++;
-      if (row >= cardsPerPage) {
-        row = 0;
-      }
-    }
+    onPage++;
+    if (col >= COLS) { col = 0; row++; }
+    if (row >= ROWS_PER_PAGE) { col = 0; row = 0; onPage = 0; }
   });
 
-  const issuedLine = `${empresa}  ·  Fecha de emisión: ${issued.split(',')[0]}  ·  Hora: ${issued.split(',')[1]?.trim() || ''}`;
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7);
-  doc.text(issuedLine, PDF_MARGIN_X + 6, 200);
+  doc.setTextColor(100, 100, 100);
+  doc.text(
+    `${empresa}  ·  Emisión: ${issued.split(',')[0]}`,
+    PDF_MARGIN_X + 6, 206,
+  );
+  doc.setTextColor(0, 0, 0);
 }
 
 function objectivePdfColumnStyles(grid: ProformaObjectiveGrid) {
@@ -476,12 +578,17 @@ function objectivePdfDidParseCell(grid: ProformaObjectiveGrid) {
   };
 }
 
-export function exportProformaPdf(bundle: ProformaExportBundle) {
+export async function exportProformaPdf(bundle: ProformaExportBundle) {
+  const [logoWhiteDataUrl, logoDarkDataUrl] = await Promise.all([
+    loadLogoDataUrl('white', '#1E2937'),       // logo blanco sobre fondo oscuro (encabezado)
+    loadLogoDataUrl('#1E2937', null),           // logo oscuro sobre transparente (tarjeta)
+  ]);
+
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
   const issued = bundle.issuedAt.toLocaleString('es-AR');
   const empresa = bundle.empresaName || 'COSP';
 
-  drawPdfLogoHeader(doc, `PRE-FACTURA — ${bundle.clientName}`, bundle.periodLabel);
+  drawPdfLogoHeader(doc, `PRE-FACTURA — ${bundle.clientName}`, bundle.periodLabel, logoWhiteDataUrl);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
   doc.text(`CUIT: ${bundle.taxId || '—'}  ·  ${bundle.legalName || ''}`, PDF_MARGIN_X + 6, 24);
@@ -548,7 +655,7 @@ export function exportProformaPdf(bundle: ProformaExportBundle) {
   }
 
   if (layout === 'sla_card') {
-    appendSlaCardPages(doc, bundle, empresa, issued);
+    appendSlaCardPages(doc, bundle, empresa, issued, logoWhiteDataUrl, logoDarkDataUrl);
   }
 
   if (bundle.eventos && bundle.eventos.length > 0) {
