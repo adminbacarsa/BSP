@@ -14997,7 +14997,7 @@ function PlanificacionDesktop() {
                 await bumpAutoV2Progress(100, 'Error al generar');
                 toast.error(planErr instanceof Error ? planErr.message : 'Error al generar cronograma', { duration: 12000 });
                 setAutoWizardStep('sla_open');
-                setAutoV2Running(false);
+                setAutoV2Generating(false);
                 return;
             }
 
@@ -15155,8 +15155,7 @@ function PlanificacionDesktop() {
                 coverageWisdom,
             } as any;
             let finalAssignments = gen.assignments;
-            let coverage = strictPipeline?.verification
-                ?? verifyScheduleCoverage(verifyCtx, finalAssignments, gen.stats);
+            let coverage = verifyScheduleCoverage(verifyCtx, finalAssignments, gen.stats);
 
             setAutoV2GenStats({
                 employeeMonthlyHours: gen.stats.employeeMonthlyHours,
