@@ -115,6 +115,8 @@ type Estado = {
   prev: string | null; plan: Array<Slot | null>;
   /** Último turno trabajado (sigue después de los francos) y su puesto y franja habitual del mes anterior. */
   ultimo: Slot | null; habitual: Map<string, number>;
+  /** Longitud del bloque completado antes del franco actual (para rotación M→N→T→M). */
+  runPrevBloque: number;
 };
 
 /**
@@ -232,13 +234,52 @@ function armarConRitmo(input: ArmarMesInput, ritmo: [number, number]): Resultado
         break;
       }
     }
-    est.set(g.id, { run, runH, run12: 0, fr, finMs, horas: horasFuera, prev: null, plan: [], ultimo: ultimoPrevio, habitual });
+    // runPrevBloque: longitud del bloque previo al estado actual del mes anterior.
+    // Si el mes terminó en medio de un bloque (run>0), ese es el bloque en curso, no el anterior terminado.
+    // Si terminó en franco (run=0), contamos cuánto duró el bloque que generó ese franco.
+    let runPrevBloque = 0;
+    if (!run && ultimoPrevio) {
+      for (let i = 1; i <= 10; i++) {
+        const ds = sumarDias(primero, -(fr + i));
+        if (!porDia.get(ds)?.trabaja) break;
+        runPrevBloque++;
+      }
+    }
+    est.set(g.id, { run, runH, run12: 0, fr, finMs, horas: horasFuera, prev: null, plan: [], ultimo: ultimoPrevio, habitual, runPrevBloque });
   }
 
   // Puesto preferido por guardia: domina sobre habitual y continuidad para no mezclar posiciones.
   const prefPos = new Map<string, string>();
   for (const g of input.guardias) {
     if (g.puestoPreferido) prefPos.set(g.id, g.puestoPreferido);
+  }
+
+  // Herencia de último bloque de salientes: guardias nuevos sin previos en este servicio heredan
+  // el último slot del saliente que ocupó su misma posición (para continuar la rotación de banda).
+  const ROTACION_BANDA: Record<string, string> = { M: 'N', N: 'T', T: 'M' };
+  const posicionesServicio = new Set((input.estructura || []).map((p) => String(p.positionName || '').trim()));
+  for (const g of input.guardias) {
+    const e = est.get(g.id)!;
+    if (e.ultimo) continue; // ya tiene historia en este servicio
+    const pref = prefPos.get(g.id);
+    if (!pref) continue;
+    const saliente = (input.salientes || []).find((s) => s.puestoPreferido === pref);
+    if (!saliente) continue;
+    // Buscar el último turno del saliente en este servicio
+    let ultimoSaliente: Slot | null = null;
+    for (let i = 1; i <= 10 && !ultimoSaliente; i++) {
+      const ds = sumarDias(primero, -i);
+      for (const t of saliente.previos || []) {
+        if (t.dateStr !== ds) continue;
+        const code = codigoDeCiclo(t);
+        if (!code || code === 'F' || code === 'RET') continue;
+        const pos = String(t.positionName || '').trim();
+        if (!posicionesServicio.has(pos)) continue;
+        ultimoSaliente = { pos, code, name: code, startTime: String(t.startTime || ''), endTime: String(t.endTime || ''), dur: Number(t.hours) || 8, doce: /D12$|N12$/.test(up(code)) };
+        break;
+      }
+    }
+    if (ultimoSaliente) e.ultimo = ultimoSaliente;
   }
 
   // Ritmo de los propios: 6+2 si alcanza la gente, si no 5+1. Francos escalonados para que cada día descanse parejo.
@@ -297,8 +338,18 @@ function armarConRitmo(input: ArmarMesInput, ritmo: [number, number]): Resultado
         if (ant && ant.pos === s.pos && up(ant.code) === up(s.code)) c -= 30;
         else if (ant && bandaDe(up(ant.code)) === bandaDe(up(s.code))) c -= 12;
         else if (ant) c += 10;
-        // Después de los francos vuelve a su turno del bloque anterior (bandas fijas).
-        if (!ant && e.ultimo && e.ultimo.pos === s.pos && up(e.ultimo.code) === up(s.code)) c -= 25;
+        // Al volver de los francos: si completó el bloque, rota de banda M→N→T→M; si no, repite la misma.
+        if (!ant && e.ultimo && e.ultimo.pos === s.pos) {
+          const bloqueCompleto = e.runPrevBloque >= trabaja && e.fr >= ciclo - trabaja;
+          const bandaUltimo = bandaDe(up(e.ultimo.code)) || up(e.ultimo.code);
+          const bandaS = bandaDe(up(s.code)) || up(s.code);
+          if (bloqueCompleto && bandaUltimo in ROTACION_BANDA) {
+            if (bandaS === ROTACION_BANDA[bandaUltimo]) c -= 25;
+            else if (bandaS === bandaUltimo) c += 15;
+          } else if (up(e.ultimo.code) === up(s.code)) {
+            c -= 25;
+          }
+        }
         // Su puesto y franja habitual del mes anterior.
         c -= Math.min(e.habitual.get(`${s.pos}|${up(FAMILIA_8[up(s.code)] || s.code)}`) || 0, 12) * 1.5;
         return c + e.horas / 20;
@@ -367,6 +418,7 @@ function armarConRitmo(input: ArmarMesInput, ritmo: [number, number]): Resultado
         const fuera = input.ocupadoFuera?.(g.id, ds);
         const vf = fuera ? ventana(fuera.startTime, fuera.endTime, ds) : null;
         if (vf) e.finMs = vf.fin;
+        if (!vf && e.run > 0) e.runPrevBloque = e.run; // guardar longitud del bloque recién completado
         e.run = vf ? e.run + 1 : 0; e.runH = 0; e.run12 = 0; e.fr = vf ? 0 : e.fr + 1; e.prev = null;
         e.plan.push(null);
       }

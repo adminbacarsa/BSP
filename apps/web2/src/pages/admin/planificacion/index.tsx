@@ -13470,10 +13470,17 @@ function PlanificacionDesktop() {
                 list.push({ ...t, dateStr: mm[2] });
                 previosPorEmp.set(mm[1], list);
             }
+            const salientesConPos = [...salientesPorEmp].map(([id, s]) => ({
+                id,
+                nombre: s.nombre,
+                previos: s.previos,
+                puestoPreferido: etiquetar(resolveObjectiveForEmp(id), getEmpDefaultPos(id) || '') || undefined,
+            }));
             const resultados = modo === 'armar' ? armarMesDesdeServicio({
                 objectiveId: objContinuar,
                 dias,
                 guardias: guardiasBase.map((e: any) => ({ id: e.id, nombre: e.name || e.id, previos: previosPorEmp.get(e.id) || [], puestoPreferido: etiquetar(resolveObjectiveForEmp(e.id), getEmpDefaultPos(e.id) || '') })),
+                salientes: salientesConPos,
                 estructura: estructuraContinuar,
                 estadoCelda,
                 diaBloqueado: (ds) => isPlanningDateLocked(ds) || (!enGrupo && !activarServicioRef.current && isOutsideServiceRange(ds)),
@@ -13485,7 +13492,7 @@ function PlanificacionDesktop() {
                 objectiveId: objContinuar,
                 dias,
                 guardias: guardiasBase.map((e: any) => ({ id: e.id, nombre: e.name || e.id, previos: previosPorEmp.get(e.id) || [], puestoPreferido: etiquetar(resolveObjectiveForEmp(e.id), getEmpDefaultPos(e.id) || '') })),
-                salientes: [...salientesPorEmp].map(([id, s]) => ({ id, nombre: s.nombre, previos: s.previos })),
+                salientes: salientesConPos,
                 estructura: estructuraContinuar,
                 estadoCelda,
                 diaBloqueado: (ds) => isPlanningDateLocked(ds) || (!enGrupo && !extenderServicio && isOutsideServiceRange(ds)),

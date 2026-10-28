@@ -199,7 +199,7 @@ export type ContinuarInput = {
   /** Código de trabajo ya cargado en el mes nuevo: cuenta para el cupo y no se mueve. */
   cargado?: ((employeeId: string, dateStr: string) => string | null) | null;
   /** Trabajaron el mes anterior y ya no están en la dotación: un alta puede heredar su fila. */
-  salientes?: Array<{ id: string; nombre: string; previos: TurnoPrevio[] }>;
+  salientes?: Array<{ id: string; nombre: string; previos: TurnoPrevio[]; puestoPreferido?: string }>;
   /** `anterior` = solo el ciclo de cada guardia (para comparar). Default `c2`. */
   regla?: 'c2' | 'anterior';
   /** Turno de trabajo en otro objetivo ese día (racha, descanso y tope). */
