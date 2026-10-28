@@ -219,7 +219,26 @@ function armarConRitmo(input: ArmarMesInput, ritmo: [number, number]): Resultado
       const k = `${String(t.positionName || '').trim()}|${up(FAMILIA_8[up(code)] || code)}`;
       habitual.set(k, (habitual.get(k) || 0) + 1);
     }
-    est.set(g.id, { run, runH, run12: 0, fr, finMs, horas: horasFuera, prev: null, plan: [], ultimo: null, habitual });
+    // Último turno trabajado (para continuar racha y banda al volver del primer franco de noviembre).
+    let ultimoPrevio: Slot | null = null;
+    for (let i = 1; i <= 10 && !ultimoPrevio; i++) {
+      const ds = sumarDias(primero, -i);
+      if (!porDia.get(ds)?.trabaja) continue;
+      for (const t of g.previos || []) {
+        if (t.dateStr !== ds) continue;
+        const code = codigoDeCiclo(t);
+        if (!code || code === 'F' || code === 'RET') continue;
+        ultimoPrevio = { pos: String(t.positionName || '').trim(), code, name: code, startTime: String(t.startTime || ''), endTime: String(t.endTime || ''), dur: Number(t.hours) || 8, doce: /D12$|N12$/.test(up(code)) };
+        break;
+      }
+    }
+    est.set(g.id, { run, runH, run12: 0, fr, finMs, horas: horasFuera, prev: null, plan: [], ultimo: ultimoPrevio, habitual });
+  }
+
+  // Puesto preferido por guardia: domina sobre habitual y continuidad para no mezclar posiciones.
+  const prefPos = new Map<string, string>();
+  for (const g of input.guardias) {
+    if (g.puestoPreferido) prefPos.set(g.id, g.puestoPreferido);
   }
 
   // Ritmo de los propios: 6+2 si alcanza la gente, si no 5+1. Francos escalonados para que cada día descanse parejo.
@@ -272,6 +291,9 @@ function armarConRitmo(input: ArmarMesInput, ritmo: [number, number]): Resultado
         const e = est.get(id)!;
         const ant = e.prev ? e.plan[e.plan.length - 1] : null;
         let c = 0;
+        // Puesto preferido: prioridad absoluta sobre cualquier otra heurística.
+        const pref = prefPos.get(id);
+        if (pref) c += pref === s.pos ? -200 : 200;
         if (ant && ant.pos === s.pos && up(ant.code) === up(s.code)) c -= 30;
         else if (ant && bandaDe(up(ant.code)) === bandaDe(up(s.code))) c -= 12;
         else if (ant) c += 10;
