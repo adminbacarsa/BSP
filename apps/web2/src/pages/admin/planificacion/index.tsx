@@ -13526,6 +13526,7 @@ function PlanificacionDesktop() {
                 cargado,
                 ocupadoFuera,
                 francoFuera,
+                rotacion: { M: 'T', T: 'N', N: 'M' },
             });
             calcularFrancoObj(resultados);
             // Lo que el mes anterior se cubrió suelto (VFM de domingo por alguien de Peaje): sugerir repetirlo, destildado.

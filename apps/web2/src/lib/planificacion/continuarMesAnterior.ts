@@ -200,6 +200,8 @@ export type ContinuarInput = {
   cargado?: ((employeeId: string, dateStr: string) => string | null) | null;
   /** Trabajaron el mes anterior y ya no están en la dotación: un alta puede heredar su fila. */
   salientes?: Array<{ id: string; nombre: string; previos: TurnoPrevio[]; puestoPreferido?: string }>;
+  /** Esquema de rotación de bandas: qué banda sigue a cada una (ej. M→T→N→M: { M: 'T', T: 'N', N: 'M' }). Fallback cuando el historial no muestra la transición. */
+  rotacion?: Record<string, string>;
   /** `anterior` = solo el ciclo de cada guardia (para comparar). Default `c2`. */
   regla?: 'c2' | 'anterior';
   /** Turno de trabajo en otro objetivo ese día (racha, descanso y tope). */
@@ -640,7 +642,7 @@ type ProyeccionBloques = {
  * Cuando ningún período fijo explica el historial: largo típico del bloque de trabajo,
  * largo del franco y el orden de bandas. Tolera bloques cortados en los bordes.
  */
-function detectarCicloPorBloques(obs: Obs[], desdeIdx: number, hastaIdx: number): ProyeccionBloques | null {
+function detectarCicloPorBloques(obs: Obs[], desdeIdx: number, hastaIdx: number, rotacion?: Record<string, string>): ProyeccionBloques | null {
   if (obs.length < 10 || hastaIdx < desdeIdx) return null;
   const runs = rachasDeCiclo(obs);
   const comp = runs.filter((r, i) => i > 0 && i < runs.length - 1
@@ -669,7 +671,8 @@ function detectarCicloPorBloques(obs: Obs[], desdeIdx: number, hastaIdx: number)
   const siguiente = (band: string) => {
     const m = sigue.get(band);
     const orden = sigueOrden.get(band) || [];
-    return m && orden.length ? masVisto(m, orden) : band;
+    if (m && orden.length) return masVisto(m, orden);
+    return rotacion?.[band] ?? band;
   };
   const cuentaCode = new Map<string, Map<string, number>>();
   const ordenCode = new Map<string, string[]>();
@@ -755,9 +758,30 @@ type CicloElegido = {
 };
 
 /** Período de todo el historial. Si no aparece, el tramo desde el último corte o las últimas semanas, y si tampoco, los bloques. */
-function elegirCiclo(obs: Obs[], desdeIdx: number, hastaIdx: number): CicloElegido | null {
+function elegirCiclo(obs: Obs[], desdeIdx: number, hastaIdx: number, rotacion?: Record<string, string>): CicloElegido | null {
   const fijo = detectarCiclo(obs);
   if (fijo) {
+    // Si hay rotación configurada, verificar si el ciclo detectado omite una rotación de banda.
+    // Cuando fijo dice "continúa M" pero la proyección por bloques dice "rota a T", preferir la rotación.
+    if (rotacion) {
+      const bloques = detectarCicloPorBloques(obs, desdeIdx, hastaIdx, rotacion);
+      if (bloques) {
+        const primerDia = ymdDeIndex(desdeIdx);
+        const diaFijo = diaDelCiclo(fijo, primerDia);
+        const diaBloques = bloques.porDia.get(primerDia);
+        if (diaFijo && diaBloques && diaFijo.code !== 'F' && diaBloques.code !== 'F'
+            && familia(diaFijo.code) !== familia(diaBloques.code)) {
+          return {
+            ciclo: bloques.ciclo,
+            origen: 'bloques',
+            estimado: true,
+            nota: null,
+            continuaEn: bloques.continuaEn,
+            diaDe: (d) => bloques.porDia.get(d) || null,
+          };
+        }
+      }
+    }
     return { ciclo: fijo, origen: 'fijo', estimado: false, nota: null, continuaEn: null, diaDe: (d) => diaDelCiclo(fijo, d) };
   }
   const intentos: Array<{ sub: Obs[]; nota: string }> = [];
@@ -775,7 +799,7 @@ function elegirCiclo(obs: Obs[], desdeIdx: number, hastaIdx: number): CicloElegi
     if (!c) continue;
     return { ciclo: c, origen: 'corte', estimado: true, nota: it.nota, continuaEn: null, diaDe: (d) => diaDelCiclo(c, d) };
   }
-  const bloques = detectarCicloPorBloques(obs, desdeIdx, hastaIdx);
+  const bloques = detectarCicloPorBloques(obs, desdeIdx, hastaIdx, rotacion);
   if (!bloques) return null;
   return {
     ciclo: bloques.ciclo,
@@ -999,7 +1023,7 @@ export function proponerGuardia(
   }
   const desdeIdx = input.dias.length ? diaIndex(input.dias[0]) : (obs[obs.length - 1]?.idx ?? 0) + 1;
   const hastaIdx = input.dias.length ? diaIndex(input.dias[input.dias.length - 1]) : desdeIdx;
-  const elegido = forzado || elegirCiclo(obs, desdeIdx, hastaIdx);
+  const elegido = forzado || elegirCiclo(obs, desdeIdx, hastaIdx, input.rotacion);
   if (!elegido) {
     res.motivoSinCiclo = obs.length < 6
       ? `Pocos días para leer el ciclo (${obs.length})`
