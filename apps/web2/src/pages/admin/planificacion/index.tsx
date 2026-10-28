@@ -2151,11 +2151,31 @@ function PlanificacionDesktop() {
     const grupoOrdenRef = useRef<string[]>([]);
     const planillaGrupoRef = useRef<string[]>([]);
     useEffect(() => { customOrderRef.current = customOrderMap; }, [customOrderMap]);
-    const persistirOrdenFilas = (next: Record<string, string[]>, sucias?: string[]) => {
+    const persistirOrdenFilas = (next: Record<string, string[]>, sucias?: string[], skipFirestore?: boolean) => {
         customOrderRef.current = next;
         if (sucias) ordenImportSucioRef.current = sucias;
         setCustomOrderMap(next);
         try { localStorage.setItem('planif_emp_order', JSON.stringify(next)); } catch { /* cuota */ }
+        if (!skipFirestore && selectedObjective && empresaId) {
+            const order = next[selectedObjective];
+            if (order?.length) {
+                const year = currentDate.getFullYear();
+                const month = currentDate.getMonth() + 1;
+                const stateKey = buildPlanificacionEstadoDocId(empresaId, selectedObjective, year, month);
+                updateDoc(doc(db, 'planificacion_estados', stateKey), { customOrderByEmp: order })
+                    .catch((e: any) => {
+                        if (e?.code === 'not-found') {
+                            setDoc(doc(db, 'planificacion_estados', stateKey), {
+                                customOrderByEmp: order,
+                                empresaId,
+                                objectiveId: selectedObjective,
+                                objetivoId: selectedObjective,
+                                year, month, año: year, mes: month,
+                            }, { merge: true }).catch(() => {});
+                        }
+                    });
+            }
+        }
     };
     const [dragOverVisual, setDragOverVisual] = useState<number | null>(null);
     const arrastreFilaRef = useRef<{ activo: boolean; clientY: number; raf: number; grilla: HTMLElement | null }>({
@@ -8018,6 +8038,10 @@ function PlanificacionDesktop() {
             return true;
         };
         fetchMergedPlanificacionEstadoData(empresaId, selectedObjective, year, month).then((d) => {
+            const firestoreOrder = Array.isArray(d.customOrderByEmp) ? d.customOrderByEmp as string[] : [];
+            if (firestoreOrder.length > 0) {
+                persistirOrdenFilas({ ...customOrderRef.current, [selectedObjective]: firestoreOrder }, undefined, true);
+            }
             if (applyOverlay(
                 (d.defaultPositionByEmp as Record<string, string>) || {},
                 (d.defaultShiftByEmp as Record<string, string>) || {},

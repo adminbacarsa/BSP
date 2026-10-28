@@ -1094,6 +1094,8 @@ export async function fetchMergedPlanificacionEstadoData(
   let primaryPublishedBy: unknown = undefined;
   let legacyPublishedAt: unknown = undefined;
   let legacyPublishedBy: unknown = undefined;
+  let primaryCustomOrderByEmp: unknown = undefined;
+  let legacyCustomOrderByEmp: unknown = undefined;
 
   for (const id of ids) {
     const snap = await getDoc(doc(db, 'planificacion_estados', id));
@@ -1104,9 +1106,11 @@ export async function fetchMergedPlanificacionEstadoData(
       primaryExists = true;
       primaryPublishedAt = d.publishedAt;
       primaryPublishedBy = d.publishedBy;
+      if (Array.isArray(d.customOrderByEmp)) primaryCustomOrderByEmp = d.customOrderByEmp;
     } else {
       legacyPublishedAt = d.publishedAt;
       legacyPublishedBy = d.publishedBy;
+      if (Array.isArray(d.customOrderByEmp)) legacyCustomOrderByEmp = d.customOrderByEmp;
     }
     merged = {
       ...merged,
@@ -1143,6 +1147,9 @@ export async function fetchMergedPlanificacionEstadoData(
       lastWorkBandBeforeRest: trailingFrom.lastWorkBandBeforeRest,
     };
   }
+
+  const resolvedOrder = primaryCustomOrderByEmp ?? legacyCustomOrderByEmp;
+  if (resolvedOrder) merged.customOrderByEmp = resolvedOrder;
 
   return merged;
 }
