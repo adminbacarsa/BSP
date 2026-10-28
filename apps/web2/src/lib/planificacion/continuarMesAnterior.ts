@@ -690,7 +690,8 @@ function detectarCicloPorBloques(obs: Obs[], desdeIdx: number, hastaIdx: number,
   const trabajos = (compWSimple.length >= 2 ? compWSimple : compW).slice(-6).map((r) => r.len);
   const francos = comp.filter((r) => r.kind === 'F').slice(-6).map((r) => r.len);
   if (trabajos.length < 2 || francos.length < 2) return null;
-  const largoTrabajo = modoLargo(trabajos);
+  // Si se fuerza una banda inicial y los datos son escasos, usar 6 como mínimo (ciclo M/T/N típico)
+  const largoTrabajo = bandaInicial && compWSimple.length < 4 ? Math.max(modoLargo(trabajos), 6) : modoLargo(trabajos);
   const largoFranco = modoLargo(francos);
   const conf = (xs: number[], modo: number) => xs.filter((x) => x === modo).length / xs.length;
   const confianza = Math.min(conf(trabajos, largoTrabajo), conf(francos, largoFranco));
@@ -800,6 +801,21 @@ type CicloElegido = {
 
 /** Período de todo el historial. Si no aparece, el tramo desde el último corte o las últimas semanas, y si tampoco, los bloques. */
 function elegirCiclo(obs: Obs[], desdeIdx: number, hastaIdx: number, rotacion?: Record<string, string>): CicloElegido | null {
+  // Rotura al final del mes anterior tiene prioridad sobre cualquier ciclo detectado
+  const rotInfoPrev = analizarRotura(obs, rotacion);
+  if (rotInfoPrev) {
+    const bloquesRot = detectarCicloPorBloques(obs, desdeIdx, hastaIdx, rotacion, rotInfoPrev.bandaForzada);
+    if (bloquesRot) {
+      return {
+        ciclo: bloquesRot.ciclo,
+        origen: 'bloques',
+        estimado: true,
+        nota: null,
+        continuaEn: bloquesRot.continuaEn,
+        diaDe: (d) => bloquesRot.porDia.get(d) || null,
+      };
+    }
+  }
   const fijo = detectarCiclo(obs);
   if (fijo) {
     // Si el ciclo fijo dice "continúa en banda X" pero la proyección por bloques dice "rota a Y",
