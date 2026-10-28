@@ -256,7 +256,7 @@ function armarConRitmo(input: ArmarMesInput, ritmo: [number, number]): Resultado
 
   // Herencia de último bloque de salientes: guardias nuevos sin previos en este servicio heredan
   // el último slot del saliente que ocupó su misma posición (para continuar la rotación de banda).
-  const ROTACION_BANDA: Record<string, string> = { M: 'N', N: 'T', T: 'M' };
+  const ROTACION_BANDA: Record<string, string> = { M: 'T', T: 'N', N: 'M' };
   const posicionesServicio = new Set((input.estructura || []).map((p) => String(p.positionName || '').trim()));
   for (const g of input.guardias) {
     const e = est.get(g.id)!;
