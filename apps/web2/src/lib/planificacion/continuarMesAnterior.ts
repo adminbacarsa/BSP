@@ -229,7 +229,11 @@ export function ymdDeIndex(idx: number): string {
 }
 
 function familia(code: string): string {
-  return FAMILIA[code] || code;
+  if (FAMILIA[code]) return FAMILIA[code];
+  // Códigos compuestos con sufijo de banda (P5M→M, P1T→T, PLN→N, etc.)
+  const suf = code[code.length - 1];
+  if (code.length >= 2 && (suf === 'M' || suf === 'T' || suf === 'N')) return suf;
+  return code;
 }
 
 function esCodigoPuesto(code: string): boolean {
@@ -761,25 +765,23 @@ type CicloElegido = {
 function elegirCiclo(obs: Obs[], desdeIdx: number, hastaIdx: number, rotacion?: Record<string, string>): CicloElegido | null {
   const fijo = detectarCiclo(obs);
   if (fijo) {
-    // Si hay rotación configurada, verificar si el ciclo detectado omite una rotación de banda.
-    // Cuando fijo dice "continúa M" pero la proyección por bloques dice "rota a T", preferir la rotación.
-    if (rotacion) {
-      const bloques = detectarCicloPorBloques(obs, desdeIdx, hastaIdx, rotacion);
-      if (bloques) {
-        const primerDia = ymdDeIndex(desdeIdx);
-        const diaFijo = diaDelCiclo(fijo, primerDia);
-        const diaBloques = bloques.porDia.get(primerDia);
-        if (diaFijo && diaBloques && diaFijo.code !== 'F' && diaBloques.code !== 'F'
-            && familia(diaFijo.code) !== familia(diaBloques.code)) {
-          return {
-            ciclo: bloques.ciclo,
-            origen: 'bloques',
-            estimado: true,
-            nota: null,
-            continuaEn: bloques.continuaEn,
-            diaDe: (d) => bloques.porDia.get(d) || null,
-          };
-        }
+    // Si el ciclo fijo dice "continúa en banda X" pero la proyección por bloques dice "rota a Y",
+    // preferir la rotación: el período se repite pero la banda ya cambió.
+    const bloques = detectarCicloPorBloques(obs, desdeIdx, hastaIdx, rotacion);
+    if (bloques) {
+      const primerDia = ymdDeIndex(desdeIdx);
+      const diaFijo = diaDelCiclo(fijo, primerDia);
+      const diaBloques = bloques.porDia.get(primerDia);
+      if (diaFijo && diaBloques && diaFijo.code !== 'F' && diaBloques.code !== 'F'
+          && familia(diaFijo.code) !== familia(diaBloques.code)) {
+        return {
+          ciclo: bloques.ciclo,
+          origen: 'bloques',
+          estimado: true,
+          nota: null,
+          continuaEn: bloques.continuaEn,
+          diaDe: (d) => bloques.porDia.get(d) || null,
+        };
       }
     }
     return { ciclo: fijo, origen: 'fijo', estimado: false, nota: null, continuaEn: null, diaDe: (d) => diaDelCiclo(fijo, d) };
