@@ -642,11 +642,40 @@ type ProyeccionBloques = {
   continuaEn: string;
 };
 
+const ROTACION_DEFAULT: Record<string, string> = { M: 'N', N: 'T', T: 'M' };
+
+/**
+ * Si el mes anterior terminó con un bloque de trabajo incompleto (ej: solo 2T de 6),
+ * devuelve la banda que debería arrancar en el mes nuevo y cuántos turnos llevaba.
+ */
+function analizarRotura(obs: Obs[], rotacion?: Record<string, string>): { bandaForzada: string; turnosEnBloque: number } | null {
+  if (obs.length < 10) return null;
+  const runs = rachasDeCiclo(obs);
+  const comp = runs.filter((r, i) => i > 0 && i < runs.length - 1
+    && runs[i - 1].end + 1 === r.start && r.end + 1 === runs[i + 1].start);
+  const trabajos = comp.filter((r) => r.kind === 'W').slice(-6).map((r) => r.len);
+  const francos = comp.filter((r) => r.kind === 'F').slice(-6).map((r) => r.len);
+  if (trabajos.length < 2 || francos.length < 2) return null;
+  const largoTrabajo = modoLargo(trabajos);
+  if (trabajos.filter((l) => l === largoTrabajo).length / trabajos.length < 0.6) return null;
+  const ultimo = runs[runs.length - 1];
+  if (ultimo.kind !== 'W' || ultimo.len >= largoTrabajo) return null;
+  const deTrabajo = runs.filter((r) => r.kind === 'W' && r.len >= 2);
+  const bandas = deTrabajo.map((r) => r.band);
+  const sigue = new Map<string, string>();
+  for (let i = 0; i < bandas.length - 1; i += 1) {
+    if (!sigue.has(bandas[i])) sigue.set(bandas[i], bandas[i + 1]);
+  }
+  const sig = (band: string) => sigue.get(band) ?? rotacion?.[band] ?? ROTACION_DEFAULT[band] ?? band;
+  return { bandaForzada: sig(ultimo.band), turnosEnBloque: ultimo.len };
+}
+
 /**
  * Cuando ningún período fijo explica el historial: largo típico del bloque de trabajo,
  * largo del franco y el orden de bandas. Tolera bloques cortados en los bordes.
+ * Si se pasa bandaInicial, arranca con bloque nuevo de esa banda (para corregir rotura).
  */
-function detectarCicloPorBloques(obs: Obs[], desdeIdx: number, hastaIdx: number, rotacion?: Record<string, string>): ProyeccionBloques | null {
+function detectarCicloPorBloques(obs: Obs[], desdeIdx: number, hastaIdx: number, rotacion?: Record<string, string>, bandaInicial?: string): ProyeccionBloques | null {
   if (obs.length < 10 || hastaIdx < desdeIdx) return null;
   const runs = rachasDeCiclo(obs);
   const comp = runs.filter((r, i) => i > 0 && i < runs.length - 1
@@ -699,6 +728,7 @@ function detectarCicloPorBloques(obs: Obs[], desdeIdx: number, hastaIdx: number,
   let llevo = ultimo.len;
   let banda = ultimo.band;
   if (kind === 'F' && deTrabajo.length) banda = deTrabajo[deTrabajo.length - 1].band;
+  if (bandaInicial) { kind = 'W'; llevo = 0; banda = bandaInicial; }
   const partes: string[] = [];
   const vistas = new Set<string>();
   let rotulo = kind === 'W' ? banda : siguiente(banda);
@@ -774,13 +804,17 @@ function elegirCiclo(obs: Obs[], desdeIdx: number, hastaIdx: number, rotacion?: 
       const diaBloques = bloques.porDia.get(primerDia);
       if (diaFijo && diaBloques && diaFijo.code !== 'F' && diaBloques.code !== 'F'
           && familia(diaFijo.code) !== familia(diaBloques.code)) {
+        const rotInfo = analizarRotura(obs, rotacion);
+        const fuente = rotInfo
+          ? (detectarCicloPorBloques(obs, desdeIdx, hastaIdx, rotacion, rotInfo.bandaForzada) || bloques)
+          : bloques;
         return {
-          ciclo: bloques.ciclo,
+          ciclo: fuente.ciclo,
           origen: 'bloques',
           estimado: true,
           nota: null,
-          continuaEn: bloques.continuaEn,
-          diaDe: (d) => bloques.porDia.get(d) || null,
+          continuaEn: fuente.continuaEn,
+          diaDe: (d) => fuente.porDia.get(d) || null,
         };
       }
     }
@@ -801,7 +835,11 @@ function elegirCiclo(obs: Obs[], desdeIdx: number, hastaIdx: number, rotacion?: 
     if (!c) continue;
     return { ciclo: c, origen: 'corte', estimado: true, nota: it.nota, continuaEn: null, diaDe: (d) => diaDelCiclo(c, d) };
   }
-  const bloques = detectarCicloPorBloques(obs, desdeIdx, hastaIdx, rotacion);
+  const rotInfoFinal = analizarRotura(obs, rotacion);
+  const bloques = rotInfoFinal
+    ? (detectarCicloPorBloques(obs, desdeIdx, hastaIdx, rotacion, rotInfoFinal.bandaForzada)
+       || detectarCicloPorBloques(obs, desdeIdx, hastaIdx, rotacion))
+    : detectarCicloPorBloques(obs, desdeIdx, hastaIdx, rotacion);
   if (!bloques) return null;
   return {
     ciclo: bloques.ciclo,
@@ -2032,9 +2070,62 @@ export function proponerContinuacion(input: ContinuarInput): ResultadoGuardia[] 
     salientes: (input.salientes || []).map((s) => s.id),
     dias: input.dias,
   });
+  // Redistribución: si dos guardias del mismo puesto tienen bloque incompleto y rotan a la misma banda,
+  // el que trabajó más turnos en el bloque roto conserva la banda natural; el otro toma la siguiente.
+  const bandaRedistrPorGuardia = new Map<string, string>();
+  if (input.dias.length) {
+    const porPuestoRotura = new Map<string, Array<{ id: string; bandaForzada: string; turnosEnBloque: number }>>();
+    for (const g of input.guardias) {
+      const obs = obsPor.get(g.id) || [];
+      const rotInfo = analizarRotura(obs, input.rotacion);
+      if (!rotInfo) continue;
+      const puesto = puestoPreferidoDe(g, input.estructura);
+      const key = puestoNorm(puesto || 'sin-puesto');
+      const arr = porPuestoRotura.get(key) || [];
+      arr.push({ id: g.id, ...rotInfo });
+      porPuestoRotura.set(key, arr);
+    }
+    for (const grupo of porPuestoRotura.values()) {
+      const porBanda = new Map<string, typeof grupo>();
+      for (const x of grupo) {
+        const arr = porBanda.get(x.bandaForzada) || [];
+        arr.push(x);
+        porBanda.set(x.bandaForzada, arr);
+      }
+      for (const [banda, conflicto] of porBanda) {
+        if (conflicto.length <= 1) continue;
+        conflicto.sort((a, b) => b.turnosEnBloque - a.turnosEnBloque);
+        let sig = ROTACION_DEFAULT[banda] ?? banda;
+        for (let i = 1; i < conflicto.length; i++) {
+          bandaRedistrPorGuardia.set(conflicto[i].id, sig);
+          sig = ROTACION_DEFAULT[sig] ?? sig;
+        }
+      }
+    }
+  }
   const resultados = input.guardias.map((g) => {
     const plan = planes.get(g.id);
-    if (!plan || !input.dias.length || plan.via === 'rachas') return proponerGuardia(input, g);
+    if (!plan || !input.dias.length || plan.via === 'rachas') {
+      const bandaRedist = bandaRedistrPorGuardia.get(g.id);
+      if (bandaRedist) {
+        const obs = obsPor.get(g.id) || [];
+        const desdeIdx = diaIndex(input.dias[0]);
+        const hastaIdx = diaIndex(input.dias[input.dias.length - 1]);
+        const bloquesRedist = detectarCicloPorBloques(obs, desdeIdx, hastaIdx, input.rotacion, bandaRedist);
+        if (bloquesRedist) {
+          const forzadoRedist: CicloElegido = {
+            ciclo: bloquesRedist.ciclo,
+            origen: 'bloques',
+            estimado: true,
+            nota: null,
+            continuaEn: bloquesRedist.continuaEn,
+            diaDe: (d) => bloquesRedist.porDia.get(d) || null,
+          };
+          return proponerGuardia(input, g, forzadoRedist);
+        }
+      }
+      return proponerGuardia(input, g);
+    }
     const fuente = obsPor.get(plan.copiaDeId || g.id) || [];
     const res = proponerGuardia(input, g, cicloDesdePlan(plan, fuente.length ? fuente : obsPor.get(g.id) || [], input.dias));
     const copiaDe = plan.copiaDeId ? nombres.get(plan.copiaDeId) || plan.copiaDeId : null;
