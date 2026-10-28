@@ -663,9 +663,15 @@ function analizarRotura(obs: Obs[], rotacion?: Record<string, string>): { bandaF
   const francos = comp.filter((r) => r.kind === 'F').slice(-6).map((r) => r.len);
   if (trabajos.length < 2 || francos.length < 2) return null;
   const largoTrabajo = modoLargo(trabajos);
-  if (trabajos.filter((l) => l === largoTrabajo).length / trabajos.length < 0.6) return null;
-  const ultimo = runs[runs.length - 1];
-  if (ultimo.kind !== 'W' || ultimo.len >= largoTrabajo) return null;
+  // Con pocos runs simples (historial mixto), relajar el umbral de confianza
+  const umbral = compWSimple.length < 4 ? 0.4 : 0.6;
+  if (trabajos.filter((l) => l === largoTrabajo).length / trabajos.length < umbral) return null;
+  // El bloque incompleto puede estar antes de los francos de fin de mes: buscar el último run de trabajo
+  const ultimoW = runs.slice().reverse().find((r) => r.kind === 'W');
+  if (!ultimoW) return null;
+  // Solo considerar rotura si el bloque incompleto es reciente (últimos 35 días)
+  if (ultimoW.end < obs[obs.length - 1].idx - 35) return null;
+  if (ultimoW.len >= largoTrabajo) return null;
   const deTrabajo = runs.filter((r) => r.kind === 'W' && r.len >= 2);
   const bandas = deTrabajo.map((r) => r.band);
   const sigue = new Map<string, string>();
@@ -673,7 +679,7 @@ function analizarRotura(obs: Obs[], rotacion?: Record<string, string>): { bandaF
     if (!sigue.has(bandas[i])) sigue.set(bandas[i], bandas[i + 1]);
   }
   const sig = (band: string) => sigue.get(band) ?? rotacion?.[band] ?? ROTACION_DEFAULT[band] ?? band;
-  return { bandaForzada: sig(ultimo.band), turnosEnBloque: ultimo.len };
+  return { bandaForzada: sig(ultimoW.band), turnosEnBloque: ultimoW.len };
 }
 
 /**
