@@ -17777,7 +17777,7 @@ function PlanificacionDesktop() {
                 setDiaNoTrabaja((prev) => (prev ? { ...prev, guardando: false } : prev));
                 return;
             }
-            if (publicadoDia) {
+            if (publicadoDia && !(correctionMode && canCorrectPlanning)) {
                 toast.message(avisoCeldaObjetivoPublicado(nombreDia));
                 setDiaNoTrabaja((prev) => (prev ? { ...prev, guardando: false } : prev));
                 return;
