@@ -648,12 +648,17 @@ const ROTACION_DEFAULT: Record<string, string> = { M: 'N', N: 'T', T: 'M' };
  * Si el mes anterior terminó con un bloque de trabajo incompleto (ej: solo 2T de 6),
  * devuelve la banda que debería arrancar en el mes nuevo y cuántos turnos llevaba.
  */
+function es12h(r: RunCiclo): boolean { return r.codes.some((c) => c === 'D12' || c === 'N12'); }
+
 function analizarRotura(obs: Obs[], rotacion?: Record<string, string>): { bandaForzada: string; turnosEnBloque: number } | null {
   if (obs.length < 10) return null;
   const runs = rachasDeCiclo(obs);
   const comp = runs.filter((r, i) => i > 0 && i < runs.length - 1
     && runs[i - 1].end + 1 === r.start && r.end + 1 === runs[i + 1].start);
-  const trabajos = comp.filter((r) => r.kind === 'W').slice(-6).map((r) => r.len);
+  const compW = comp.filter((r) => r.kind === 'W');
+  // Excluir runs D12/N12 para no contaminar largoTrabajo con el ciclo de 12 h
+  const compWSimple = compW.filter((r) => !es12h(r));
+  const trabajos = (compWSimple.length >= 2 ? compWSimple : compW).slice(-6).map((r) => r.len);
   const francos = comp.filter((r) => r.kind === 'F').slice(-6).map((r) => r.len);
   if (trabajos.length < 2 || francos.length < 2) return null;
   const largoTrabajo = modoLargo(trabajos);
@@ -680,7 +685,9 @@ function detectarCicloPorBloques(obs: Obs[], desdeIdx: number, hastaIdx: number,
   const runs = rachasDeCiclo(obs);
   const comp = runs.filter((r, i) => i > 0 && i < runs.length - 1
     && runs[i - 1].end + 1 === r.start && r.end + 1 === runs[i + 1].start);
-  const trabajos = comp.filter((r) => r.kind === 'W').slice(-6).map((r) => r.len);
+  const compW = comp.filter((r) => r.kind === 'W');
+  const compWSimple = compW.filter((r) => !es12h(r));
+  const trabajos = (compWSimple.length >= 2 ? compWSimple : compW).slice(-6).map((r) => r.len);
   const francos = comp.filter((r) => r.kind === 'F').slice(-6).map((r) => r.len);
   if (trabajos.length < 2 || francos.length < 2) return null;
   const largoTrabajo = modoLargo(trabajos);
@@ -710,7 +717,7 @@ function detectarCicloPorBloques(obs: Obs[], desdeIdx: number, hastaIdx: number,
   const cuentaCode = new Map<string, Map<string, number>>();
   const ordenCode = new Map<string, string[]>();
   for (const o of obs) {
-    if (o.code === 'F') continue;
+    if (o.code === 'F' || o.code === 'D12' || o.code === 'N12') continue;
     const b = familia(o.code);
     if (!cuentaCode.has(b)) { cuentaCode.set(b, new Map()); ordenCode.set(b, []); }
     const m = cuentaCode.get(b)!;
