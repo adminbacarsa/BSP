@@ -16427,8 +16427,16 @@ function PlanificacionDesktop() {
             const ps = ((grupoSlaMap[resolveObjectiveForEmp(empId) || ''] || []) as any[]).filter((p) => real(p.positionName));
             return ps.length === 1 ? String(ps[0].positionName) : null;
         };
+        // Grupo: getEmpDefaultPos busca bajo selectedObjective, pero cada guardia tiene el puesto
+        // guardado bajo SU objetivo (obj_B ≠ selectedObjective). Fallback al objetivo real del guardia.
+        const puestoEnSuObjetivo = () => {
+            if (!(selectedGrupo && grupoUnifiedMode)) return null;
+            const objId = resolveObjectiveForEmp(empId);
+            if (!objId || objId === selectedObjective) return null;
+            return real(empDefaultPos[`${empId}___${objId}`]);
+        };
         return real(c?.p?.positionName) || real(c?.s?.positionName) || real(getEmpDefaultPos(empId))
-            || unicoGrupo() || real(dominantPosition?.positionName) || 'General';
+            || puestoEnSuObjetivo() || unicoGrupo() || real(dominantPosition?.positionName) || 'General';
     };
     const puestosRapido = (r: number, c: number) => {
         const { emp, ctx } = ctxRapido(r, c);
