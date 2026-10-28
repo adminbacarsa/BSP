@@ -14168,7 +14168,11 @@ function PlanificacionDesktop() {
             toast.message(avisoCeldaSinVerificarPublicado(nombreImport));
             return false;
         }
-        const mismo = payload.objectiveId === selectedObjective && payload.clientId === selectedClient && !(selectedGrupo && grupoUnifiedMode);
+        // En vista agrupada, si el Excel pertenece a uno de los objetivos del grupo no se sale del grupo.
+        const enGrupoActivo = !!(selectedGrupo && grupoUnifiedMode);
+        const objsDelGrupoActivo = selectedGrupo?.objectiveIds?.map(String) || [];
+        const mismo = (enGrupoActivo && objsDelGrupoActivo.includes(String(payload.objectiveId)) && payload.clientId === selectedClient)
+            || (payload.objectiveId === selectedObjective && payload.clientId === selectedClient && !enGrupoActivo);
         if (!mismo && Object.keys(pendingChangesRef.current).length > 0) {
             if (!confirm('Hay cambios sin guardar en el objetivo abierto. ¿Descartarlos e ir al de la planilla?')) return false;
         }
