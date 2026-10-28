@@ -602,7 +602,8 @@ function modoLargo(xs: number[]): number {
 function rachasDeCiclo(obs: Obs[]): RunCiclo[] {
   const runs: RunCiclo[] = [];
   for (const o of obs) {
-    const kind: 'F' | 'W' = o.code === 'F' ? 'F' : 'W';
+    // RET es stand-by: no acumula horas de trabajo, se trata como franco para el ciclo
+    const kind: 'F' | 'W' = (o.code === 'F' || o.code === 'RET') ? 'F' : 'W';
     const prev = runs[runs.length - 1];
     if (prev && prev.kind === kind && o.idx === prev.end + 1) {
       prev.end = o.idx;
@@ -718,7 +719,7 @@ function detectarCicloPorBloques(obs: Obs[], desdeIdx: number, hastaIdx: number,
   const cuentaCode = new Map<string, Map<string, number>>();
   const ordenCode = new Map<string, string[]>();
   for (const o of obs) {
-    if (o.code === 'F' || o.code === 'D12' || o.code === 'N12') continue;
+    if (o.code === 'F' || o.code === 'D12' || o.code === 'N12' || o.code === 'RET') continue;
     const b = familia(o.code);
     if (!cuentaCode.has(b)) { cuentaCode.set(b, new Map()); ordenCode.set(b, []); }
     const m = cuentaCode.get(b)!;
