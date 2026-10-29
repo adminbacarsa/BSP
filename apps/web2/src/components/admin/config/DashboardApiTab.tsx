@@ -9,7 +9,7 @@ type TokenData = {
   hasToken: boolean;
   enabled: boolean;
   maskedKey: string;
-  createdAt: { toDate: () => Date } | null;
+  createdAt: { _seconds: number; _nanoseconds: number } | null;
   createdBy: string;
 };
 
@@ -166,7 +166,9 @@ export default function DashboardApiTab() {
             {tokenData?.createdBy && (
               <p className="text-xs text-slate-400 mt-1.5">
                 Generada el{' '}
-                {tokenData.createdAt?.toDate().toLocaleDateString('es-AR') ?? '—'}{' '}
+                {tokenData.createdAt
+                  ? new Date(tokenData.createdAt._seconds * 1000).toLocaleDateString('es-AR')
+                  : '—'}{' '}
                 por {tokenData.createdBy}
               </p>
             )}

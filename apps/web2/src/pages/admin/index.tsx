@@ -4,7 +4,7 @@ import {
   Shield, Users, Clock, AlertTriangle,
   CheckCircle, Briefcase, MapPin,
   Activity, ArrowRight, Calendar,
-  GraduationCap,
+  GraduationCap, AlertOctagon,
 } from 'lucide-react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { withAuthGuard } from '@/components/common/withAuthGuard';
