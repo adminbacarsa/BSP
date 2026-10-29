@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { httpsCallable } from 'firebase/functions';
-import { doc, getDoc } from 'firebase/firestore';
-import { functions, db } from '@/lib/firebase';
+import { functions } from '@/lib/firebase';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { Copy, Check, Link2, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -29,22 +28,15 @@ export default function DashboardApiTab() {
   useEffect(() => {
     if (!empresa?.id) return;
     setLoading(true);
-    getDoc(doc(db, 'dashboard_tokens', empresa.id))
-      .then(snap => {
-        if (snap.exists()) {
-          setTokenData(snap.data() as TokenData);
-        } else {
-          setTokenData({ hasToken: false, enabled: false, maskedKey: '', createdAt: null, createdBy: '' });
-        }
-      })
+    loadStatus(empresa.id)
       .catch(() => setTokenData({ hasToken: false, enabled: false, maskedKey: '', createdAt: null, createdBy: '' }))
       .finally(() => setLoading(false));
-  }, [empresa?.id]);
+  }, [empresa?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const refreshToken = async () => {
-    if (!empresa?.id) return;
-    const snap = await getDoc(doc(db, 'dashboard_tokens', empresa.id));
-    if (snap.exists()) setTokenData(snap.data() as TokenData);
+  const loadStatus = async (id: string) => {
+    const fn = httpsCallable<{ empresaId: string }, TokenData>(functions, 'getDashboardTokenStatus');
+    const result = await fn({ empresaId: id });
+    setTokenData(result.data);
   };
 
   const handleGenerate = async () => {
@@ -56,7 +48,7 @@ export default function DashboardApiTab() {
       );
       const result = await fn({ empresaId: empresa.id, empresaName: empresa.name });
       setFreshApiKey(result.data.apiKey);
-      await refreshToken();
+      await loadStatus(empresa.id);
       toast.success('Clave generada — guardala, no se volverá a mostrar');
     } catch (e: any) {
       toast.error(e?.message ?? 'Error al generar la clave');
@@ -72,7 +64,7 @@ export default function DashboardApiTab() {
       const fn = httpsCallable(functions, 'revokeDashboardToken');
       await fn({ empresaId: empresa.id });
       setFreshApiKey(null);
-      await refreshToken();
+      await loadStatus(empresa.id);
       toast.success('Acceso revocado');
     } catch (e: any) {
       toast.error(e?.message ?? 'Error al revocar');

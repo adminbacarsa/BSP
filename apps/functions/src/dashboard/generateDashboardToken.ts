@@ -54,15 +54,41 @@ export const generateDashboardToken = functions
     const ref = db.collection('dashboard_tokens').doc(empresaId);
     const prev = await ref.get();
     const apiKey = randomUUID();
+    const maskedKey = '••••' + apiKey.slice(-4);
+    const createdBy = String(
+      context.auth!.token?.email || context.auth!.token?.name || context.auth!.uid,
+    );
     const doc: Record<string, unknown> = {
       apiKey,
+      maskedKey,
       enabled: true,
       updatedAt: FieldValue.serverTimestamp(),
       empresaName: empresaName || String(prev.data()?.empresaName || empresaId),
+      createdBy,
     };
     if (!prev.exists) doc.createdAt = FieldValue.serverTimestamp();
     await ref.set(doc, { merge: true });
     return { apiKey };
+  });
+
+/** Devuelve el estado del token sin exponer apiKey — para la UI de Configuración. */
+export const getDashboardTokenStatus = functions
+  .region('us-central1')
+  .runWith({ timeoutSeconds: 15, memory: '256MB' })
+  .https.onCall(async (data, context) => {
+    const { empresaId, db } = await exigirAdminEmpresa((data || {}) as { empresaId?: string }, context);
+    const snap = await db.collection('dashboard_tokens').doc(empresaId).get();
+    if (!snap.exists) {
+      return { hasToken: false, enabled: false, maskedKey: '', createdAt: null, createdBy: '' };
+    }
+    const d = snap.data()!;
+    return {
+      hasToken: true,
+      enabled: d.enabled === true,
+      maskedKey: String(d.maskedKey || ''),
+      createdAt: d.createdAt ?? null,
+      createdBy: String(d.createdBy || ''),
+    };
   });
 
 export const revokeDashboardToken = functions
