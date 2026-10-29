@@ -4505,3 +4505,7 @@ export const processHoursLedgerJob = onDocumentWrittenV2(
 function db() {
   return admin.firestore();
 }
+
+export { generateDashboardToken, revokeDashboardToken } from './dashboard/generateDashboardToken';
+export { computeDashboardSnapshot } from './dashboard/computeDashboardSnapshot';
+export { getDashboardSnapshot } from './dashboard/getDashboardSnapshot';

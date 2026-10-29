@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
-import { Settings, Users, Shield, Database, Building2, HardDrive, Bot, Activity, Scale, Smartphone } from 'lucide-react';
+import { Settings, Users, Shield, Database, Building2, HardDrive, Bot, Activity, Scale, Smartphone, Link2 } from 'lucide-react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import UsersTab from '@/components/admin/config/UsersTab';
 import RolesTab from '@/components/admin/config/RolesTab';
@@ -12,12 +12,13 @@ import AssistantLogTab from '@/components/admin/config/AssistantLogTab';
 import PlatformHealthTab from '@/components/admin/config/PlatformHealthTab';
 import PlanningRulesTab from '@/components/admin/config/PlanningRulesTab';
 import MobileAppTab from '@/components/admin/config/MobileAppTab';
+import DashboardApiTab from '@/components/admin/config/DashboardApiTab';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { PageShell, PageHeader, TabBar } from '@/components/ui';
 
 export default function ConfigPage() {
-    const [activeTab, setActiveTab] = useState<'GENERAL' | 'MOBILE' | 'PLANNING' | 'USERS' | 'ROLES' | 'EMPRESAS' | 'BACKUP' | 'ASSISTANT' | 'HEALTH'>('GENERAL');
+    const [activeTab, setActiveTab] = useState<'GENERAL' | 'MOBILE' | 'PLANNING' | 'USERS' | 'ROLES' | 'EMPRESAS' | 'BACKUP' | 'ASSISTANT' | 'HEALTH' | 'DASHBOARD_API'>('GENERAL');
     const router = useRouter();
     const { loading, canReadModule, isSuperAdmin } = useAuth();
     const { empresa } = useEmpresa();
@@ -70,6 +71,7 @@ export default function ConfigPage() {
                             { id: 'BACKUP',    label: 'Backups',          icon: HardDrive },
                             { id: 'ASSISTANT', label: 'AI Asistente',     icon: Bot },
                             { id: 'HEALTH',    label: 'Salud',            icon: Activity },
+                            { id: 'DASHBOARD_API', label: 'API Externa',   icon: Link2 },
                         ]}
                         active={activeTab}
                         onChange={id => setActiveTab(id as typeof activeTab)}
@@ -83,7 +85,8 @@ export default function ConfigPage() {
                         {activeTab === 'EMPRESAS'  && <EmpresasTab />}
                         {activeTab === 'BACKUP'    && <BackupTab />}
                         {activeTab === 'ASSISTANT' && <AssistantLogTab />}
-                        {activeTab === 'HEALTH'    && <PlatformHealthTab />}
+                        {activeTab === 'HEALTH'        && <PlatformHealthTab />}
+                        {activeTab === 'DASHBOARD_API' && <DashboardApiTab />}
                     </div>
                 </div>
             </PageShell>

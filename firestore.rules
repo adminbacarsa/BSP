@@ -1132,5 +1132,13 @@ service cloud.firestore {
                            && sessionId == (resource.data.empresaId + '_' + request.auth.uid));
       allow delete: if tenantAdminDelete();
     }
+
+    match /dashboard_tokens/{empresaId} {
+      allow read, write: if false;
+    }
+
+    match /dashboard_snapshots/{empresaId} {
+      allow read, write: if false;
+    }
   }
 }
