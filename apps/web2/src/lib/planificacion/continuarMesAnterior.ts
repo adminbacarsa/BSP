@@ -784,7 +784,10 @@ function detectarCicloPorBloques(obs: Obs[], desdeIdx: number, hastaIdx: number,
   }
   const porDia = new Map<string, DiaCiclo>();
   let continuaEn = 'sin dato el primer día';
-  let day = ultimo.end + 1;
+  // Con bandaInicial el estado de arranque es conocido (llevaActual, banda): proyectar desde
+  // desdeIdx directamente, ignorando ultimo.end. Esto evita que datos existentes de noviembre
+  // (de un intento anterior de Continuar) hagan que day arranque pasado hastaIdx → porDia vacío.
+  let day = bandaInicial ? desdeIdx : (ultimo.end + 1);
   let guard = 0;
   while (day <= hastaIdx && guard < 400) {
     guard += 1;
