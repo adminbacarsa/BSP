@@ -867,9 +867,16 @@ function elegirCiclo(obs: Obs[], desdeIdx: number, hastaIdx: number, rotacion?: 
       const primerDia = ymdDeIndex(desdeIdx);
       const diaFijo = diaDelCiclo(fijo, primerDia);
       const diaBloques = bloques.porDia.get(primerDia);
-      if (diaFijo && diaBloques && diaFijo.code !== 'F' && diaBloques.code !== 'F'
-          && familia(diaFijo.code) !== familia(diaBloques.code)) {
-        const rotInfo = analizarRotura(obs, rotacion);
+      const rotInfo = analizarRotura(obs, rotacion);
+      // bandaFijo: familia del primer día según el ciclo fijo (null si es F)
+      const bandaFijo = diaFijo && diaFijo.code !== 'F' ? familia(diaFijo.code) : null;
+      // bandaRotacion: siguiente banda tras un bloque completo (solo si turnosEnBloque=0)
+      const bandaRotacion = rotInfo?.turnosEnBloque === 0 ? rotInfo.bandaForzada : null;
+      // diaBloques discrepa si da W distinto al fijo; bandaRotacion discrepa si analizarRotura da otra banda
+      // (cubre caso donde largoFranco>2 hace que diaBloques='F' pero el fijo igual está desalineado)
+      const bloquesDifiere = diaBloques && diaBloques.code !== 'F' && bandaFijo && familia(diaBloques.code) !== bandaFijo;
+      const rotacionDifiere = bandaRotacion && bandaFijo && bandaRotacion !== bandaFijo;
+      if (bandaFijo && (bloquesDifiere || rotacionDifiere)) {
         const fuente = rotInfo
           ? (detectarCicloPorBloques(obs, desdeIdx, hastaIdx, rotacion, rotInfo.bandaForzada, rotInfo.turnosEnBloque) || bloques)
           : bloques;
