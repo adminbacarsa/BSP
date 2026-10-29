@@ -679,7 +679,11 @@ function analizarRotura(obs: Obs[], rotacion?: Record<string, string>): { bandaF
   // Solo considerar rotura si el bloque incompleto es reciente (últimos 35 días)
   if (ultimoW.end < obs[obs.length - 1].idx - 35) return null;
   const deTrabajo = runs.filter((r) => r.kind === 'W' && r.len >= 2);
-  const bandas = deTrabajo.map((r) => r.band);
+  // Excluir D12/N12 del mapa de rotación: su band M/N contamina la secuencia real M→N→T→M
+  const deTrabajoParaSig = deTrabajo.filter((r) => !es12h(r)).length >= 2
+    ? deTrabajo.filter((r) => !es12h(r))
+    : deTrabajo;
+  const bandas = deTrabajoParaSig.map((r) => r.band);
   const sigue = new Map<string, string>();
   for (let i = 0; i < bandas.length - 1; i += 1) {
     if (!sigue.has(bandas[i])) sigue.set(bandas[i], bandas[i + 1]);
@@ -716,11 +720,12 @@ function detectarCicloPorBloques(obs: Obs[], desdeIdx: number, hastaIdx: number,
   const largoNaturalT = modoLargo(trabajos);
   const largoForzadoT = bandaInicial && compWSimple.length < 4 && largoNaturalT < 6;
   const largoTrabajo = largoForzadoT ? 6 : largoNaturalT;
-  const largoFranco = modoLargo(francos);
+  // Con historial mixto D12/N12: forzar franco estándar CCT (2) y omitir verificación de confianza
+  const largoFranco = largoForzadoT ? 2 : modoLargo(francos);
   const conf = (xs: number[], modo: number) => xs.filter((x) => x === modo).length / xs.length;
-  // Cuando el largo fue forzado (historial mixto D12/N12), solo verificar confianza del franco
-  const confianza = largoForzadoT ? conf(francos, largoFranco) : Math.min(conf(trabajos, largoTrabajo), conf(francos, largoFranco));
-  if (confianza < 0.6 || largoTrabajo > 9 || largoFranco > 4 || largoTrabajo < 1) return null;
+  const confianza = largoForzadoT ? 1 : Math.min(conf(trabajos, largoTrabajo), conf(francos, largoFranco));
+  if (largoTrabajo > 9 || largoTrabajo < 1) return null;
+  if (!largoForzadoT && (confianza < 0.6 || largoFranco > 4)) return null;
   // Excluir D12/N12 del mapa de rotación para no detectar M→N→M→N en vez de M→N→T→M
   const deTrabajoSimple = runs.filter((r) => r.kind === 'W' && r.len >= 2 && !es12h(r));
   const deTrabajo = deTrabajoSimple.length >= 2 ? deTrabajoSimple : runs.filter((r) => r.kind === 'W' && r.len >= 2);
