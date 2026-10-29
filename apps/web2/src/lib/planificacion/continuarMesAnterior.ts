@@ -662,16 +662,16 @@ function analizarRotura(obs: Obs[], rotacion?: Record<string, string>): { bandaF
   const trabajos = (compWSimple.length >= 2 ? compWSimple : compW).slice(-6).map((r) => r.len);
   const francos = comp.filter((r) => r.kind === 'F').slice(-6).map((r) => r.len);
   if (trabajos.length < 2 || francos.length < 2) return null;
-  const largoTrabajo = modoLargo(trabajos);
+  // Con historial mixto D12/N12+M/T/N hay pocos runs simples; usar mínimo 6 (ciclo típico CCT)
+  const largoTrabajo = compWSimple.length < 4 ? Math.max(modoLargo(trabajos), 6) : modoLargo(trabajos);
   // Con pocos runs simples (historial mixto), relajar el umbral de confianza
   const umbral = compWSimple.length < 4 ? 0.4 : 0.6;
   if (trabajos.filter((l) => l === largoTrabajo).length / trabajos.length < umbral) return null;
-  // El bloque incompleto puede estar antes de los francos de fin de mes: buscar el último run de trabajo
+  // Buscar el último run de trabajo (puede estar antes de francos de fin de mes)
   const ultimoW = runs.slice().reverse().find((r) => r.kind === 'W');
   if (!ultimoW) return null;
   // Solo considerar rotura si el bloque incompleto es reciente (últimos 35 días)
   if (ultimoW.end < obs[obs.length - 1].idx - 35) return null;
-  if (ultimoW.len >= largoTrabajo) return null;
   const deTrabajo = runs.filter((r) => r.kind === 'W' && r.len >= 2);
   const bandas = deTrabajo.map((r) => r.band);
   const sigue = new Map<string, string>();
@@ -679,7 +679,16 @@ function analizarRotura(obs: Obs[], rotacion?: Record<string, string>): { bandaF
     if (!sigue.has(bandas[i])) sigue.set(bandas[i], bandas[i + 1]);
   }
   const sig = (band: string) => sigue.get(band) ?? rotacion?.[band] ?? ROTACION_DEFAULT[band] ?? band;
-  return { bandaForzada: sig(ultimoW.band), turnosEnBloque: ultimoW.len };
+  const ultimo = runs[runs.length - 1];
+  if (ultimo.kind === 'F') {
+    // El mes terminó en franco: el bloque de trabajo anterior está "cerrado" aunque fuera incompleto.
+    // Noviembre arranca con un bloque nuevo de la siguiente banda.
+    if (ultimoW.len >= largoTrabajo) return null; // bloque completo → rotación normal, no hay rotura
+    return { bandaForzada: sig(ultimoW.band), turnosEnBloque: 0 };
+  }
+  // El mes terminó en trabajo: si el bloque está incompleto hay que completarlo en noviembre
+  if (ultimoW.len >= largoTrabajo) return null;
+  return { bandaForzada: ultimoW.band, turnosEnBloque: ultimoW.len };
 }
 
 /**
@@ -687,7 +696,7 @@ function analizarRotura(obs: Obs[], rotacion?: Record<string, string>): { bandaF
  * largo del franco y el orden de bandas. Tolera bloques cortados en los bordes.
  * Si se pasa bandaInicial, arranca con bloque nuevo de esa banda (para corregir rotura).
  */
-function detectarCicloPorBloques(obs: Obs[], desdeIdx: number, hastaIdx: number, rotacion?: Record<string, string>, bandaInicial?: string): ProyeccionBloques | null {
+function detectarCicloPorBloques(obs: Obs[], desdeIdx: number, hastaIdx: number, rotacion?: Record<string, string>, bandaInicial?: string, llevaActual?: number): ProyeccionBloques | null {
   if (obs.length < 10 || hastaIdx < desdeIdx) return null;
   const runs = rachasDeCiclo(obs);
   const comp = runs.filter((r, i) => i > 0 && i < runs.length - 1
@@ -743,7 +752,8 @@ function detectarCicloPorBloques(obs: Obs[], desdeIdx: number, hastaIdx: number,
   let llevo = ultimo.len;
   let banda = ultimo.band;
   if (kind === 'F' && deTrabajo.length) banda = deTrabajo[deTrabajo.length - 1].band;
-  if (bandaInicial) { kind = 'W'; llevo = 0; banda = bandaInicial; }
+  // llevaActual: turnos ya hechos del bloque incompleto (para completarlo en vez de reiniciar)
+  if (bandaInicial) { kind = 'W'; llevo = llevaActual ?? 0; banda = bandaInicial; }
   const partes: string[] = [];
   const vistas = new Set<string>();
   let rotulo = kind === 'W' ? banda : siguiente(banda);
@@ -811,7 +821,7 @@ function elegirCiclo(obs: Obs[], desdeIdx: number, hastaIdx: number, rotacion?: 
   // Rotura al final del mes anterior tiene prioridad sobre cualquier ciclo detectado
   const rotInfoPrev = analizarRotura(obs, rotacion);
   if (rotInfoPrev) {
-    const bloquesRot = detectarCicloPorBloques(obs, desdeIdx, hastaIdx, rotacion, rotInfoPrev.bandaForzada);
+    const bloquesRot = detectarCicloPorBloques(obs, desdeIdx, hastaIdx, rotacion, rotInfoPrev.bandaForzada, rotInfoPrev.turnosEnBloque);
     if (bloquesRot) {
       return {
         ciclo: bloquesRot.ciclo,
@@ -836,7 +846,7 @@ function elegirCiclo(obs: Obs[], desdeIdx: number, hastaIdx: number, rotacion?: 
           && familia(diaFijo.code) !== familia(diaBloques.code)) {
         const rotInfo = analizarRotura(obs, rotacion);
         const fuente = rotInfo
-          ? (detectarCicloPorBloques(obs, desdeIdx, hastaIdx, rotacion, rotInfo.bandaForzada) || bloques)
+          ? (detectarCicloPorBloques(obs, desdeIdx, hastaIdx, rotacion, rotInfo.bandaForzada, rotInfo.turnosEnBloque) || bloques)
           : bloques;
         return {
           ciclo: fuente.ciclo,
@@ -867,7 +877,7 @@ function elegirCiclo(obs: Obs[], desdeIdx: number, hastaIdx: number, rotacion?: 
   }
   const rotInfoFinal = analizarRotura(obs, rotacion);
   const bloques = rotInfoFinal
-    ? (detectarCicloPorBloques(obs, desdeIdx, hastaIdx, rotacion, rotInfoFinal.bandaForzada)
+    ? (detectarCicloPorBloques(obs, desdeIdx, hastaIdx, rotacion, rotInfoFinal.bandaForzada, rotInfoFinal.turnosEnBloque)
        || detectarCicloPorBloques(obs, desdeIdx, hastaIdx, rotacion))
     : detectarCicloPorBloques(obs, desdeIdx, hastaIdx, rotacion);
   if (!bloques) return null;
