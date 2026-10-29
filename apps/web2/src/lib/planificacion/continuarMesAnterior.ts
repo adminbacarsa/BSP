@@ -690,14 +690,9 @@ function analizarRotura(obs: Obs[], rotacion?: Record<string, string>): { bandaF
   }
   const sig = (band: string) => sigue.get(band) ?? rotacion?.[band] ?? ROTACION_DEFAULT[band] ?? band;
   const ultimo = runs[runs.length - 1];
-  if (ultimo.kind === 'F') {
-    // El mes terminó en franco: el bloque de trabajo anterior está "cerrado" aunque fuera incompleto.
-    // Noviembre arranca con un bloque nuevo de la siguiente banda.
-    if (ultimoW.len >= largoTrabajo) return null; // bloque completo → rotación normal, no hay rotura
-    return { bandaForzada: sig(ultimoW.band), turnosEnBloque: 0 };
-  }
-  // El mes terminó en trabajo: si el bloque está incompleto hay que completarlo en noviembre
-  if (ultimoW.len >= largoTrabajo) return null;
+  // Bloque de trabajo incompleto: completarlo en noviembre independientemente de si el mes
+  // terminó en franco o en trabajo (F×2 al final de mes es parte del ciclo, no cierra el bloque)
+  if (ultimoW.len >= largoTrabajo) return null; // bloque completo → rotación normal, no hay rotura
   return { bandaForzada: ultimoW.band, turnosEnBloque: ultimoW.len };
 }
 
