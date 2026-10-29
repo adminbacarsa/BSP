@@ -230,6 +230,7 @@ export function ymdDeIndex(idx: number): string {
 
 function familia(code: string): string {
   if (FAMILIA[code]) return FAMILIA[code];
+  if (code === 'RET') return code;
   // Códigos compuestos con sufijo de banda (P5M→M, P1T→T, PLN→N, etc.)
   const suf = code[code.length - 1];
   if (code.length >= 2 && (suf === 'M' || suf === 'T' || suf === 'N')) return suf;
@@ -663,10 +664,15 @@ function analizarRotura(obs: Obs[], rotacion?: Record<string, string>): { bandaF
   const francos = comp.filter((r) => r.kind === 'F').slice(-6).map((r) => r.len);
   if (trabajos.length < 2 || francos.length < 2) return null;
   // Con historial mixto D12/N12+M/T/N hay pocos runs simples; usar mínimo 6 (ciclo típico CCT)
-  const largoTrabajo = compWSimple.length < 4 ? Math.max(modoLargo(trabajos), 6) : modoLargo(trabajos);
-  // Con pocos runs simples (historial mixto), relajar el umbral de confianza
-  const umbral = compWSimple.length < 4 ? 0.4 : 0.6;
-  if (trabajos.filter((l) => l === largoTrabajo).length / trabajos.length < umbral) return null;
+  const largoNatural = modoLargo(trabajos);
+  const largoTrabajo = compWSimple.length < 4 ? Math.max(largoNatural, 6) : largoNatural;
+  // Cuando el largo fue forzado a 6 por historial mixto, los runs simples son pocos pero reales:
+  // no aplicar verificación de confianza (los valores son 2-3 porque D12/N12 acortó los bloques).
+  const largoForzado = compWSimple.length < 4 && largoNatural < 6;
+  if (!largoForzado) {
+    const umbral = compWSimple.length < 4 ? 0.4 : 0.6;
+    if (trabajos.filter((l) => l === largoTrabajo).length / trabajos.length < umbral) return null;
+  }
   // Buscar el último run de trabajo (puede estar antes de francos de fin de mes)
   const ultimoW = runs.slice().reverse().find((r) => r.kind === 'W');
   if (!ultimoW) return null;
@@ -707,10 +713,13 @@ function detectarCicloPorBloques(obs: Obs[], desdeIdx: number, hastaIdx: number,
   const francos = comp.filter((r) => r.kind === 'F').slice(-6).map((r) => r.len);
   if (trabajos.length < 2 || francos.length < 2) return null;
   // Si se fuerza una banda inicial y los datos son escasos, usar 6 como mínimo (ciclo M/T/N típico)
-  const largoTrabajo = bandaInicial && compWSimple.length < 4 ? Math.max(modoLargo(trabajos), 6) : modoLargo(trabajos);
+  const largoNaturalT = modoLargo(trabajos);
+  const largoForzadoT = bandaInicial && compWSimple.length < 4 && largoNaturalT < 6;
+  const largoTrabajo = largoForzadoT ? 6 : largoNaturalT;
   const largoFranco = modoLargo(francos);
   const conf = (xs: number[], modo: number) => xs.filter((x) => x === modo).length / xs.length;
-  const confianza = Math.min(conf(trabajos, largoTrabajo), conf(francos, largoFranco));
+  // Cuando el largo fue forzado (historial mixto D12/N12), solo verificar confianza del franco
+  const confianza = largoForzadoT ? conf(francos, largoFranco) : Math.min(conf(trabajos, largoTrabajo), conf(francos, largoFranco));
   if (confianza < 0.6 || largoTrabajo > 9 || largoFranco > 4 || largoTrabajo < 1) return null;
   // Excluir D12/N12 del mapa de rotación para no detectar M→N→M→N en vez de M→N→T→M
   const deTrabajoSimple = runs.filter((r) => r.kind === 'W' && r.len >= 2 && !es12h(r));
@@ -820,19 +829,23 @@ type CicloElegido = {
 
 /** Período de todo el historial. Si no aparece, el tramo desde el último corte o las últimas semanas, y si tampoco, los bloques. */
 function elegirCiclo(obs: Obs[], desdeIdx: number, hastaIdx: number, rotacion?: Record<string, string>): CicloElegido | null {
-  // Rotura al final del mes anterior tiene prioridad sobre cualquier ciclo detectado
-  const rotInfoPrev = analizarRotura(obs, rotacion);
-  if (rotInfoPrev) {
-    const bloquesRot = detectarCicloPorBloques(obs, desdeIdx, hastaIdx, rotacion, rotInfoPrev.bandaForzada, rotInfoPrev.turnosEnBloque);
-    if (bloquesRot) {
-      return {
-        ciclo: bloquesRot.ciclo,
-        origen: 'bloques',
-        estimado: true,
-        nota: null,
-        continuaEn: bloquesRot.continuaEn,
-        diaDe: (d) => bloquesRot.porDia.get(d) || null,
-      };
+  // Rotura al final del mes anterior solo tiene prioridad cuando hay D12/N12 en el historial
+  // (ciclos puros M/T/N no necesitan corrección: el ciclo fijo los maneja bien)
+  const tieneD12N12 = obs.some((o) => o.code === 'D12' || o.code === 'N12');
+  if (tieneD12N12) {
+    const rotInfoPrev = analizarRotura(obs, rotacion);
+    if (rotInfoPrev) {
+      const bloquesRot = detectarCicloPorBloques(obs, desdeIdx, hastaIdx, rotacion, rotInfoPrev.bandaForzada, rotInfoPrev.turnosEnBloque);
+      if (bloquesRot) {
+        return {
+          ciclo: bloquesRot.ciclo,
+          origen: 'bloques',
+          estimado: true,
+          nota: null,
+          continuaEn: bloquesRot.continuaEn,
+          diaDe: (d) => bloquesRot.porDia.get(d) || null,
+        };
+      }
     }
   }
   const fijo = detectarCiclo(obs);
