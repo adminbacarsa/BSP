@@ -712,7 +712,9 @@ function detectarCicloPorBloques(obs: Obs[], desdeIdx: number, hastaIdx: number,
   const conf = (xs: number[], modo: number) => xs.filter((x) => x === modo).length / xs.length;
   const confianza = Math.min(conf(trabajos, largoTrabajo), conf(francos, largoFranco));
   if (confianza < 0.6 || largoTrabajo > 9 || largoFranco > 4 || largoTrabajo < 1) return null;
-  const deTrabajo = runs.filter((r) => r.kind === 'W' && r.len >= 2);
+  // Excluir D12/N12 del mapa de rotación para no detectar M→N→M→N en vez de M→N→T→M
+  const deTrabajoSimple = runs.filter((r) => r.kind === 'W' && r.len >= 2 && !es12h(r));
+  const deTrabajo = deTrabajoSimple.length >= 2 ? deTrabajoSimple : runs.filter((r) => r.kind === 'W' && r.len >= 2);
   const bandas = deTrabajo.map((r) => r.band);
   const sigue = new Map<string, Map<string, number>>();
   const sigueOrden = new Map<string, string[]>();
@@ -729,7 +731,7 @@ function detectarCicloPorBloques(obs: Obs[], desdeIdx: number, hastaIdx: number,
     const m = sigue.get(band);
     const orden = sigueOrden.get(band) || [];
     if (m && orden.length) return masVisto(m, orden);
-    return rotacion?.[band] ?? band;
+    return rotacion?.[band] ?? ROTACION_DEFAULT[band] ?? band;
   };
   const cuentaCode = new Map<string, Map<string, number>>();
   const ordenCode = new Map<string, string[]>();
