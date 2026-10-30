@@ -26541,7 +26541,7 @@ function PlanificacionDesktop() {
                                                                     <td className="p-2 text-right font-mono">{colH}h</td>
                                                                     <td className="p-2 text-right font-mono">{(row.baseSla + (row.turaExtra ?? 0)).toFixed(1)}h</td>
                                                                     <td className="p-2 text-right font-mono text-amber-700">{(row.coverageExtra - (row.turaExtra ?? 0)) > 0 ? `+${(row.coverageExtra - (row.turaExtra ?? 0)).toFixed(1)}` : '—'}</td>
-                                                                    <td className="p-2 text-right font-mono text-indigo-600">{(row.turaExtra ?? 0) > 0 ? `+${(row.turaExtra ?? 0).toFixed(1)}` : '—'}</td>
+                                                                    <td className="p-2 text-right font-mono text-indigo-600">{((row.coverageExtra ?? 0) > 0 || (row.turaExtra ?? 0) > 0 || (row.licenseHours ?? 0) > 0) ? (row.gross + (row.licenseHours ?? 0)).toFixed(1) + 'h' : '—'}</td>
                                                                     <td className="p-2 text-right font-mono text-rose-600">{row.excludedBillable > 0 ? row.excludedBillable : '—'}</td>
                                                                 </tr>
                                                             );
@@ -26553,7 +26553,7 @@ function PlanificacionDesktop() {
                                                             <td className="p-2 text-right font-mono">{legajoSum}h</td>
                                                             <td className="p-2 text-right font-mono">{(b.baseSla + (b.turaExtra ?? 0)).toFixed(1)}h</td>
                                                             <td className="p-2 text-right font-mono text-amber-700">{(b.coverageExtra - (b.turaExtra ?? 0)) > 0 ? `+${(b.coverageExtra - (b.turaExtra ?? 0)).toFixed(1)}h` : '—'}</td>
-                                                            <td className="p-2 text-right font-mono text-indigo-600">{(b.turaExtra ?? 0) > 0 ? `+${(b.turaExtra ?? 0).toFixed(1)}h` : '—'}</td>
+                                                            <td className="p-2 text-right font-mono text-indigo-600">{((b.coverageExtra ?? 0) > 0 || (b.turaExtra ?? 0) > 0 || (b.licenseHours ?? 0) > 0) ? (b.gross + (b.licenseHours ?? 0)).toFixed(1) + 'h' : '—'}</td>
                                                             <td className="p-2 text-right font-mono text-rose-600">{b.excludedBillable || '—'}</td>
                                                         </tr>
                                                     </tfoot>

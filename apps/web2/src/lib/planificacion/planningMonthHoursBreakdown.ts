@@ -14,6 +14,7 @@ export type EmployeeMonthHoursRow = {
   baseSla: number;
   coverageExtra: number;
   turaExtra: number;
+  licenseHours: number;
   excludedBillable: number;
   legajoColumnGross: number;
 };
@@ -23,6 +24,7 @@ export type PlanningMonthHoursBreakdown = {
   baseSla: number;
   coverageExtra: number;
   turaExtra: number;
+  licenseHours: number;
   excludedBillable: number;
   byEmployee: EmployeeMonthHoursRow[];
   byCodeGross: Record<string, number>;
@@ -49,6 +51,7 @@ export function computePlanningMonthHoursBreakdown(params: {
   let baseSla = 0;
   let coverageExtra = 0;
   let turaExtra = 0;
+  let licenseHours = 0;
   let excludedBillable = 0;
 
   const ensureEmp = (emp: { id: string; name?: string }) => {
@@ -61,6 +64,7 @@ export function computePlanningMonthHoursBreakdown(params: {
         baseSla: 0,
         coverageExtra: 0,
         turaExtra: 0,
+        licenseHours: 0,
         excludedBillable: 0,
         legajoColumnGross: 0,
       };
@@ -76,7 +80,20 @@ export function computePlanningMonthHoursBreakdown(params: {
       const turnos = resolveCellTurnos(emp.id, dateStr);
       if (!turnos.length) return;
       // Licencia (V, E, A…) sobre un turno: el doc conserva la banda, pero no son horas del puesto ni facturables.
-      if (turnos.some((t) => esCeldaLicencia({ code: String(t?.code || '').toUpperCase(), tieneAusencia: false }) || t?.isNovedad === true)) return;
+      if (turnos.some((t) => esCeldaLicencia({ code: String(t?.code || '').toUpperCase(), tieneAusencia: false }) || t?.isNovedad === true)) {
+        const lh = turnos.reduce((sum: number, t: any) => {
+          if (esCeldaLicencia({ code: String(t?.code || '').toUpperCase(), tieneAusencia: false })) {
+            return sum + Math.max(0, Number(t.hours) || 0);
+          }
+          return sum;
+        }, 0);
+        if (lh > 0) {
+          const row = ensureEmp(emp);
+          licenseHours += lh;
+          row.licenseHours += lh;
+        }
+        return;
+      }
 
       const billable = billableHoursForPlanningCell(turnos, dateStr, emp.id, ctx);
       const row = ensureEmp(emp);
@@ -138,10 +155,11 @@ export function computePlanningMonthHoursBreakdown(params: {
       baseSla: round(r.baseSla),
       coverageExtra: round(r.coverageExtra),
       turaExtra: round(r.turaExtra),
+      licenseHours: round(r.licenseHours),
       excludedBillable: round(r.excludedBillable),
       legajoColumnGross: round(r.legajoColumnGross),
     }))
-    .filter((r) => r.gross > 0 || r.excludedBillable > 0)
+    .filter((r) => r.gross > 0 || r.excludedBillable > 0 || r.licenseHours > 0)
     .sort((a, b) => a.name.localeCompare(b.name, 'es'));
 
   return {
@@ -149,6 +167,7 @@ export function computePlanningMonthHoursBreakdown(params: {
     baseSla: round(baseSla),
     coverageExtra: round(coverageExtra),
     turaExtra: round(turaExtra),
+    licenseHours: round(licenseHours),
     excludedBillable: round(excludedBillable),
     byEmployee,
     byCodeGross,
