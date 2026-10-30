@@ -717,17 +717,23 @@ function detectarCicloPorBloques(obs: Obs[], desdeIdx: number, hastaIdx: number,
   const compWSimple = compW.filter((r) => !es12h(r));
   const trabajos = (compWSimple.length >= 2 ? compWSimple : compW).slice(-6).map((r) => r.len);
   const francos = comp.filter((r) => r.kind === 'F').slice(-6).map((r) => r.len);
-  if (trabajos.length < 2 || francos.length < 2) return null;
+  // Con bandaInicial (override o rotura), usar todas las rachas si las completas son pocas
+  const trabajosEf = trabajos.length >= 2 ? trabajos
+    : (bandaInicial ? runs.filter((r) => r.kind === 'W' && r.len >= 2 && !es12h(r)).slice(-6).map((r) => r.len) : trabajos);
+  const francosEf = francos.length >= 2 ? francos
+    : (bandaInicial ? runs.filter((r) => r.kind === 'F').slice(-6).map((r) => r.len) : francos);
+  if (trabajosEf.length < 2 || francosEf.length < 2) return null;
   // Si se fuerza una banda inicial y los datos son escasos, usar 6 como mínimo (ciclo M/T/N típico)
-  const largoNaturalT = modoLargo(trabajos);
+  const largoNaturalT = modoLargo(trabajosEf);
   const largoForzadoT = bandaInicial && compWSimple.length < 4 && largoNaturalT < 6;
   const largoTrabajo = largoForzadoT ? 6 : largoNaturalT;
   // Con historial mixto D12/N12: forzar franco estándar CCT (2) y omitir verificación de confianza
-  const largoFranco = largoForzadoT ? 2 : modoLargo(francos);
+  const largoFranco = largoForzadoT ? 2 : modoLargo(francosEf);
   const conf = (xs: number[], modo: number) => xs.filter((x) => x === modo).length / xs.length;
-  const confianza = largoForzadoT ? 1 : Math.min(conf(trabajos, largoTrabajo), conf(francos, largoFranco));
+  const confianza = largoForzadoT ? 1 : Math.min(conf(trabajosEf, largoTrabajo), conf(francosEf, largoFranco));
   if (largoTrabajo > 9 || largoTrabajo < 1) return null;
-  if (!largoForzadoT && (confianza < 0.6 || largoFranco > 4)) return null;
+  // Con bandaInicial (override explícito del usuario) no matar la proyección por baja confianza
+  if (!largoForzadoT && !bandaInicial && (confianza < 0.6 || largoFranco > 4)) return null;
   // Excluir D12/N12 del mapa de rotación para no detectar M→N→M→N en vez de M→N→T→M
   const deTrabajoSimple = runs.filter((r) => r.kind === 'W' && r.len >= 2 && !es12h(r));
   const deTrabajo = deTrabajoSimple.length >= 2 ? deTrabajoSimple : runs.filter((r) => r.kind === 'W' && r.len >= 2);
