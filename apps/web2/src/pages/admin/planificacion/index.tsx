@@ -26527,7 +26527,7 @@ function PlanificacionDesktop() {
                                                     <thead className="bg-slate-100 dark:bg-slate-800">
                                                         <tr>
                                                             <th className="text-left p-2 font-black">Guardia</th>
-                                                            <th className="text-right p-2 font-black">Fila (plan)</th>
+                                                            <th className="text-right p-2 font-black">Horas</th>
                                                             <th className="text-right p-2 font-black" title="Base SLA + TURA. Cobertura de hueco no suma sobre lo vendido.">Facturable</th>
                                                             <th className="text-right p-2 font-black" title="Extensión o adelanto de cobertura. Tapa un hueco sin facturar de más.">Ext/adel</th>
                                                             <th className="text-right p-2 font-black" title="Horas TURA facturadas aparte del SLA.">Costo</th>
@@ -26540,7 +26540,7 @@ function PlanificacionDesktop() {
                                                             return (
                                                                 <tr key={row.empId} className="border-t border-slate-100 hover:bg-slate-50/80">
                                                                     <td className="p-2 font-bold text-slate-800 truncate max-w-[200px]" title={row.name}>{row.name}</td>
-                                                                    <td className="p-2 text-right font-mono">{colH}h</td>
+                                                                    <td className="p-2 text-right font-mono">{Math.round(row.gross)}h</td>
                                                                     <td className="p-2 text-right font-mono">{(row.baseSla + (row.turaExtra ?? 0)).toFixed(1)}h</td>
                                                                     <td className="p-2 text-right font-mono text-amber-700">{(row.coverageExtra - (row.turaExtra ?? 0)) > 0 ? `+${(row.coverageExtra - (row.turaExtra ?? 0)).toFixed(1)}` : '—'}</td>
                                                                     <td className="p-2 text-right font-mono text-indigo-600">{((row.coverageExtra ?? 0) > 0 || (row.turaExtra ?? 0) > 0 || (row.licenseHours ?? 0) > 0) ? (row.gross + (row.licenseHours ?? 0)).toFixed(1) + 'h' : '—'}</td>
@@ -26552,7 +26552,7 @@ function PlanificacionDesktop() {
                                                     <tfoot className="bg-slate-50 font-black border-t-2">
                                                         <tr>
                                                             <td className="p-2">Total</td>
-                                                            <td className="p-2 text-right font-mono">{legajoSum}h</td>
+                                                            <td className="p-2 text-right font-mono">{Math.round(b.gross)}h</td>
                                                             <td className="p-2 text-right font-mono">{(b.baseSla + (b.turaExtra ?? 0)).toFixed(1)}h</td>
                                                             <td className="p-2 text-right font-mono text-amber-700">{(b.coverageExtra - (b.turaExtra ?? 0)) > 0 ? `+${(b.coverageExtra - (b.turaExtra ?? 0)).toFixed(1)}h` : '—'}</td>
                                                             <td className="p-2 text-right font-mono text-indigo-600">{((b.coverageExtra ?? 0) > 0 || (b.turaExtra ?? 0) > 0 || (b.licenseHours ?? 0) > 0) ? (b.gross + (b.licenseHours ?? 0)).toFixed(1) + 'h' : '—'}</td>
