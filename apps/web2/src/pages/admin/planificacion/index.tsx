@@ -24660,12 +24660,43 @@ function PlanificacionDesktop() {
                         <p className="font-black text-slate-800">
                             Agregar horas a {turaEditor.empName.split(',')[0]} · {turaEditor.code} {turaEditor.inicio}–{turaEditor.fin} · {turaEditor.ds.slice(8, 10)}/{turaEditor.ds.slice(5, 7)}
                         </p>
-                        <p className="text-[11px] text-slate-500">{turaEditor.modo === 'cobertura' ? 'Cobertura: acredita el hueco y no suma sobre lo vendido.' : 'Puesto que no es de 24 h: no pasa a D12/N12.'}</p>
+                        <p className="text-[11px] text-slate-500">{(turaEditor.modo === 'cobertura' || turaEditor.modo === 'porHorario') ? 'Cobertura: acredita el hueco y no suma sobre lo vendido.' : 'Puesto que no es de 24 h: no pasa a D12/N12.'}</p>
                         <div className="mt-1.5 flex gap-1" data-tura-modos>
-                            <button type="button" data-tura-modo="cobertura" onClick={() => setTuraEditor((prev) => (prev ? { ...prev, modo: 'cobertura', horas: Math.min(4, prev.horas) } : prev))} className={`rounded-lg px-2 py-1 text-[11px] font-black ${turaEditor.modo === 'cobertura' ? 'bg-emerald-700 text-white' : 'border border-slate-200 text-slate-700'}`}>Cobertura</button>
-                            <button type="button" data-tura-modo="tura" onClick={() => setTuraEditor((prev) => (prev ? { ...prev, modo: 'tura' } : prev))} className={`rounded-lg px-2 py-1 text-[11px] font-black ${turaEditor.modo === 'tura' ? 'bg-rose-700 text-white' : 'border border-slate-200 text-slate-700'}`}>TURA</button>
-                            <button type="button" data-tura-modo="porHorario" onClick={() => setTuraEditor((prev) => (prev ? { ...prev, modo: 'porHorario' } : prev))} className={`rounded-lg px-2 py-1 text-[11px] font-black ${turaEditor.modo === 'porHorario' ? 'bg-sky-700 text-white' : 'border border-slate-200 text-slate-700'}`}>Por Horario</button>
+                          <button
+                            type="button"
+                            data-tura-modo="cobertura"
+                            onClick={() => setTuraEditor((prev) => prev ? { ...prev, modo: 'cobertura' } : prev)}
+                            className={`rounded-lg px-2 py-1 text-[11px] font-black ${(turaEditor.modo === 'cobertura' || turaEditor.modo === 'porHorario') ? 'bg-emerald-700 text-white' : 'border border-slate-200 text-slate-700'}`}
+                          >
+                            Cobertura
+                          </button>
+                          <button
+                            type="button"
+                            data-tura-modo="tura"
+                            onClick={() => setTuraEditor((prev) => prev ? { ...prev, modo: 'tura' } : prev)}
+                            className={`rounded-lg px-2 py-1 text-[11px] font-black ${turaEditor.modo === 'tura' ? 'bg-rose-700 text-white' : 'border border-slate-200 text-slate-700'}`}
+                          >
+                            TURA
+                          </button>
                         </div>
+                        {(turaEditor.modo === 'cobertura' || turaEditor.modo === 'porHorario') && (
+                          <div className="mt-1 flex gap-1">
+                            <button
+                              type="button"
+                              onClick={() => setTuraEditor((prev) => prev ? { ...prev, modo: 'cobertura' } : prev)}
+                              className={`rounded-lg px-2 py-1 text-[10px] font-semibold ${turaEditor.modo === 'cobertura' ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'border border-slate-200 text-slate-500'}`}
+                            >
+                              EXT / ADEL
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setTuraEditor((prev) => prev ? { ...prev, modo: 'porHorario' } : prev)}
+                              className={`rounded-lg px-2 py-1 text-[10px] font-semibold ${turaEditor.modo === 'porHorario' ? 'bg-sky-100 text-sky-800 border border-sky-300' : 'border border-slate-200 text-slate-500'}`}
+                            >
+                              Por Horario
+                            </button>
+                          </div>
+                        )}
                         {turaEditor.cubrir && (
                             <button type="button" data-tura-modo="cubrir" onClick={() => setTuraEditor((prev) => (prev ? { ...prev, modo: 'cubrir' } : prev))} className={`mt-1.5 w-full rounded-lg px-2 py-1 text-left text-[11px] font-bold ${turaEditor.modo === 'cubrir' ? 'bg-indigo-600 text-white' : 'border border-slate-200 text-slate-700'}`}>
                                 Cubrir {turaEditor.cubrir.code} {turaEditor.cubrir.desde}–{turaEditor.cubrir.hasta} extendiendo la jornada: {turaEditor.cubrir.lado === 'despues' ? `${turaEditor.inicio}–${turaEditor.cubrir.hasta}` : `${turaEditor.cubrir.desde}–${turaEditor.fin}`} (cierra la franja)
