@@ -603,10 +603,14 @@ function modoLargo(xs: number[]): number {
 function rachasDeCiclo(obs: Obs[]): RunCiclo[] {
   const runs: RunCiclo[] = [];
   for (const o of obs) {
-    // RET es stand-by: no acumula horas de trabajo, se trata como franco para el ciclo
+    // RET es stand-by: no acumula horas de trabajo, se trata como franco para el ciclo.
+    // No se fusiona con días F adyacentes: F F RET → dos runs separados (F×2 + RET×1)
+    // para no inflar largoFranco de 2 a 3 y romper la detección del período.
     const kind: 'F' | 'W' = (o.code === 'F' || o.code === 'RET') ? 'F' : 'W';
+    const esRet = o.code === 'RET';
     const prev = runs[runs.length - 1];
-    if (prev && prev.kind === kind && o.idx === prev.end + 1) {
+    const prevEsRet = prev ? prev.codes.every((c) => c === 'RET') : false;
+    if (prev && prev.kind === kind && esRet === prevEsRet && o.idx === prev.end + 1) {
       prev.end = o.idx;
       prev.codes.push(o.code);
     } else {
@@ -661,7 +665,8 @@ function analizarRotura(obs: Obs[], rotacion?: Record<string, string>): { bandaF
   // Excluir runs D12/N12 para no contaminar largoTrabajo con el ciclo de 12 h
   const compWSimple = compW.filter((r) => !es12h(r));
   const trabajos = (compWSimple.length >= 2 ? compWSimple : compW).slice(-6).map((r) => r.len);
-  const francos = comp.filter((r) => r.kind === 'F').slice(-6).map((r) => r.len);
+  // Excluir runs de solo RET: no son francos reales y no deben inflar largoFranco
+  const francos = comp.filter((r) => r.kind === 'F' && !r.codes.every((c) => c === 'RET')).slice(-6).map((r) => r.len);
   if (trabajos.length < 2 || francos.length < 2) return null;
   // Con historial mixto D12/N12+M/T/N hay pocos runs simples; usar mínimo 6 (ciclo típico CCT)
   const largoNatural = modoLargo(trabajos);
@@ -716,12 +721,13 @@ function detectarCicloPorBloques(obs: Obs[], desdeIdx: number, hastaIdx: number,
   const compW = comp.filter((r) => r.kind === 'W');
   const compWSimple = compW.filter((r) => !es12h(r));
   const trabajos = (compWSimple.length >= 2 ? compWSimple : compW).slice(-6).map((r) => r.len);
-  const francos = comp.filter((r) => r.kind === 'F').slice(-6).map((r) => r.len);
+  // Excluir runs de solo RET: no son francos reales y no deben inflar largoFranco
+  const francos = comp.filter((r) => r.kind === 'F' && !r.codes.every((c) => c === 'RET')).slice(-6).map((r) => r.len);
   // Con bandaInicial (override o rotura), usar todas las rachas si las completas son pocas
   let trabajosEf = trabajos.length >= 2 ? trabajos
     : (bandaInicial ? runs.filter((r) => r.kind === 'W' && r.len >= 2 && !es12h(r)).slice(-6).map((r) => r.len) : trabajos);
   let francosEf = francos.length >= 2 ? francos
-    : (bandaInicial ? runs.filter((r) => r.kind === 'F').slice(-6).map((r) => r.len) : francos);
+    : (bandaInicial ? runs.filter((r) => r.kind === 'F' && !r.codes.every((c) => c === 'RET')).slice(-6).map((r) => r.len) : francos);
   if (trabajosEf.length < 2 || francosEf.length < 2) {
     if (!bandaInicial) return null;
     // Override explícito del usuario sin historial suficiente: usar defaults CCT (6+2)
