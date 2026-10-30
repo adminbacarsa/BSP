@@ -693,7 +693,10 @@ function analizarRotura(obs: Obs[], rotacion?: Record<string, string>): { bandaF
   if (ultimo.kind === 'F') {
     if (ultimoW.len >= largoTrabajo) {
       // Bloque completo + mes cierra en franco: noviembre arranca fresco con la siguiente banda
-      return { bandaForzada: sig(ultimoW.band), turnosEnBloque: 0 };
+      const bandaSig = sig(ultimoW.band);
+      // Sin sucesor conocido (banda exótica sin rotación): no es una rotura real
+      if (bandaSig === ultimoW.band) return null;
+      return { bandaForzada: bandaSig, turnosEnBloque: 0 };
     }
     // Bloque incompleto + mes cierra en franco: noviembre arranca fresco con la misma banda
     return { bandaForzada: ultimoW.band, turnosEnBloque: 0 };
@@ -718,11 +721,16 @@ function detectarCicloPorBloques(obs: Obs[], desdeIdx: number, hastaIdx: number,
   const trabajos = (compWSimple.length >= 2 ? compWSimple : compW).slice(-6).map((r) => r.len);
   const francos = comp.filter((r) => r.kind === 'F').slice(-6).map((r) => r.len);
   // Con bandaInicial (override o rotura), usar todas las rachas si las completas son pocas
-  const trabajosEf = trabajos.length >= 2 ? trabajos
+  let trabajosEf = trabajos.length >= 2 ? trabajos
     : (bandaInicial ? runs.filter((r) => r.kind === 'W' && r.len >= 2 && !es12h(r)).slice(-6).map((r) => r.len) : trabajos);
-  const francosEf = francos.length >= 2 ? francos
+  let francosEf = francos.length >= 2 ? francos
     : (bandaInicial ? runs.filter((r) => r.kind === 'F').slice(-6).map((r) => r.len) : francos);
-  if (trabajosEf.length < 2 || francosEf.length < 2) return null;
+  if (trabajosEf.length < 2 || francosEf.length < 2) {
+    if (!bandaInicial) return null;
+    // Override explícito del usuario sin historial suficiente: usar defaults CCT (6+2)
+    if (trabajosEf.length < 2) trabajosEf = [6, 6];
+    if (francosEf.length < 2) francosEf = [2, 2];
+  }
   // Si se fuerza una banda inicial y los datos son escasos, usar 6 como mínimo (ciclo M/T/N típico)
   const largoNaturalT = modoLargo(trabajosEf);
   const largoForzadoT = bandaInicial && compWSimple.length < 4 && largoNaturalT < 6;
