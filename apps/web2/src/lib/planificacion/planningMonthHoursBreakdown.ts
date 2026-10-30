@@ -13,6 +13,7 @@ export type EmployeeMonthHoursRow = {
   gross: number;
   baseSla: number;
   coverageExtra: number;
+  turaExtra: number;
   excludedBillable: number;
   legajoColumnGross: number;
 };
@@ -21,6 +22,7 @@ export type PlanningMonthHoursBreakdown = {
   gross: number;
   baseSla: number;
   coverageExtra: number;
+  turaExtra: number;
   excludedBillable: number;
   byEmployee: EmployeeMonthHoursRow[];
   byCodeGross: Record<string, number>;
@@ -46,6 +48,7 @@ export function computePlanningMonthHoursBreakdown(params: {
   let gross = 0;
   let baseSla = 0;
   let coverageExtra = 0;
+  let turaExtra = 0;
   let excludedBillable = 0;
 
   const ensureEmp = (emp: { id: string; name?: string }) => {
@@ -57,6 +60,7 @@ export function computePlanningMonthHoursBreakdown(params: {
         gross: 0,
         baseSla: 0,
         coverageExtra: 0,
+        turaExtra: 0,
         excludedBillable: 0,
         legajoColumnGross: 0,
       };
@@ -106,12 +110,20 @@ export function computePlanningMonthHoursBreakdown(params: {
       );
       const code = String(merged?.code || merged?.type || '').trim().toUpperCase() || '—';
 
+      const turaCellH = turnos.reduce((sum: number, t: any) => {
+        if (t.isTura !== true) return sum;
+        const explicit = Number(t.extExtraHours ?? t.extensionExtraHours);
+        return sum + (Number.isFinite(explicit) && explicit > 0 ? Math.min(explicit, 12) : 0);
+      }, 0);
+
       gross += billable;
       baseSla += base;
       coverageExtra += extra;
+      turaExtra += turaCellH;
       row.gross += billable;
       row.baseSla += base;
       row.coverageExtra += extra;
+      row.turaExtra += turaCellH;
       row.legajoColumnGross += billable;
       byCodeGross[code] = (byCodeGross[code] || 0) + billable;
     });
@@ -125,6 +137,7 @@ export function computePlanningMonthHoursBreakdown(params: {
       gross: round(r.gross),
       baseSla: round(r.baseSla),
       coverageExtra: round(r.coverageExtra),
+      turaExtra: round(r.turaExtra),
       excludedBillable: round(r.excludedBillable),
       legajoColumnGross: round(r.legajoColumnGross),
     }))
@@ -135,6 +148,7 @@ export function computePlanningMonthHoursBreakdown(params: {
     gross: round(gross),
     baseSla: round(baseSla),
     coverageExtra: round(coverageExtra),
+    turaExtra: round(turaExtra),
     excludedBillable: round(excludedBillable),
     byEmployee,
     byCodeGross,

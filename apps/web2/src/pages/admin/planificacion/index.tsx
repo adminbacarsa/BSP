@@ -26526,9 +26526,9 @@ function PlanificacionDesktop() {
                                                         <tr>
                                                             <th className="text-left p-2 font-black">Guardia</th>
                                                             <th className="text-right p-2 font-black">Fila (plan)</th>
-                                                            <th className="text-right p-2 font-black" title="Jornada del puesto. La extensión de cobertura no suma por encima de lo vendido; TURA sí.">Facturable</th>
-                                                            <th className="text-right p-2 font-black">Base SLA</th>
-                                                            <th className="text-right p-2 font-black" title="Extensión o adelanto. Si tapa un hueco, reemplaza esas horas y no se factura de más. TURA se factura aparte.">Ext/adel</th>
+                                                            <th className="text-right p-2 font-black" title="Base SLA + TURA. Cobertura de hueco no suma sobre lo vendido.">Facturable</th>
+                                                            <th className="text-right p-2 font-black" title="Extensión o adelanto de cobertura. Tapa un hueco sin facturar de más.">Ext/adel</th>
+                                                            <th className="text-right p-2 font-black" title="Horas TURA facturadas aparte del SLA.">Costo</th>
                                                             <th className="text-right p-2 font-black">Excl. 🚫</th>
                                                         </tr>
                                                     </thead>
@@ -26539,9 +26539,9 @@ function PlanificacionDesktop() {
                                                                 <tr key={row.empId} className="border-t border-slate-100 hover:bg-slate-50/80">
                                                                     <td className="p-2 font-bold text-slate-800 truncate max-w-[200px]" title={row.name}>{row.name}</td>
                                                                     <td className="p-2 text-right font-mono">{colH}h</td>
-                                                                    <td className="p-2 text-right font-mono">{row.gross}h</td>
-                                                                    <td className="p-2 text-right font-mono text-teal-700">{row.baseSla}h</td>
-                                                                    <td className="p-2 text-right font-mono text-amber-700">{row.coverageExtra > 0 ? `+${row.coverageExtra}` : '—'}</td>
+                                                                    <td className="p-2 text-right font-mono">{(row.baseSla + (row.turaExtra ?? 0)).toFixed(1)}h</td>
+                                                                    <td className="p-2 text-right font-mono text-amber-700">{(row.coverageExtra - (row.turaExtra ?? 0)) > 0 ? `+${(row.coverageExtra - (row.turaExtra ?? 0)).toFixed(1)}` : '—'}</td>
+                                                                    <td className="p-2 text-right font-mono text-indigo-600">{(row.turaExtra ?? 0) > 0 ? `+${(row.turaExtra ?? 0).toFixed(1)}` : '—'}</td>
                                                                     <td className="p-2 text-right font-mono text-rose-600">{row.excludedBillable > 0 ? row.excludedBillable : '—'}</td>
                                                                 </tr>
                                                             );
@@ -26551,9 +26551,9 @@ function PlanificacionDesktop() {
                                                         <tr>
                                                             <td className="p-2">Total</td>
                                                             <td className="p-2 text-right font-mono">{legajoSum}h</td>
-                                                            <td className="p-2 text-right font-mono">{b.gross}h</td>
-                                                            <td className="p-2 text-right font-mono text-teal-700">{b.baseSla}h</td>
-                                                            <td className="p-2 text-right font-mono text-amber-700">+{b.coverageExtra}h</td>
+                                                            <td className="p-2 text-right font-mono">{(b.baseSla + (b.turaExtra ?? 0)).toFixed(1)}h</td>
+                                                            <td className="p-2 text-right font-mono text-amber-700">{(b.coverageExtra - (b.turaExtra ?? 0)) > 0 ? `+${(b.coverageExtra - (b.turaExtra ?? 0)).toFixed(1)}h` : '—'}</td>
+                                                            <td className="p-2 text-right font-mono text-indigo-600">{(b.turaExtra ?? 0) > 0 ? `+${(b.turaExtra ?? 0).toFixed(1)}h` : '—'}</td>
                                                             <td className="p-2 text-right font-mono text-rose-600">{b.excludedBillable || '—'}</td>
                                                         </tr>
                                                     </tfoot>
