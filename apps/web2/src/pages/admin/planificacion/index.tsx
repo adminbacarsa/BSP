@@ -17682,9 +17682,51 @@ function PlanificacionDesktop() {
         if (!t || t.modo !== 'porHorario' || t.guardando) return;
         const ing = t.ingresoOverride ?? t.inicio;
         const egr = t.egresoOverride ?? t.fin;
-        if (ing === t.inicio && egr === t.fin) { toast.message('El horario es igual al original. Cambiá ingreso o egreso.'); return; }
+
+        const aMin = (hm: string): number => { const [h, m] = hm.split(':').map(Number); return h * 60 + (m || 0); };
+        const diffH = (a: string, b: string): number => Math.round((((aMin(b) - aMin(a) + 1440) % 1440) / 60) * 10) / 10;
+
+        const ingresoAnticipado = aMin(ing) !== aMin(t.inicio) && ((aMin(t.inicio) - aMin(ing) + 1440) % 1440) < 720;
+        const egresoExtendido = aMin(egr) !== aMin(t.fin) && ((aMin(egr) - aMin(t.fin) + 1440) % 1440) < 720;
+
+        if (!ingresoAnticipado && !egresoExtendido) { toast.message('El horario es igual al original. Cambiá ingreso o egreso.'); return; }
+
         const mensajeBloqueo = isPlanningDateLocked(t.ds) ? 'Día cerrado: no se cargan horas.' : (msgBloqueoEdicion || '');
         if (mensajeBloqueo) { toast.message(mensajeBloqueo); return; }
+
+        const camposCobertura: Record<string, unknown> = {
+            isTura: false,
+            coverageType: 'ABSENCE_COVERAGE' as const,
+            coverageNote: `Por Horario: ${ing}–${egr} (orig. ${t.code} ${t.inicio}–${t.fin})`,
+        };
+
+        if (ingresoAnticipado && !egresoExtendido) {
+            camposCobertura.isEarlyStart = true;
+            camposCobertura.isExtended = false;
+            camposCobertura.adjustedStartTime = `${ing}:00`;
+            camposCobertura.segmentFromTime = `${ing}:00`;
+            camposCobertura.segmentToTime = `${t.inicio}:00`;
+            camposCobertura.extExtraHours = diffH(ing, t.inicio);
+            camposCobertura.coverageSegmentRole = 'EARLY_START';
+        } else if (egresoExtendido && !ingresoAnticipado) {
+            camposCobertura.isExtended = true;
+            camposCobertura.isEarlyStart = false;
+            camposCobertura.adjustedEndTime = `${egr}:00`;
+            camposCobertura.segmentFromTime = `${t.fin}:00`;
+            camposCobertura.segmentToTime = `${egr}:00`;
+            camposCobertura.extExtraHours = diffH(t.fin, egr);
+            camposCobertura.coverageSegmentRole = 'EXTENSION';
+        } else {
+            camposCobertura.isEarlyStart = true;
+            camposCobertura.isExtended = true;
+            camposCobertura.adjustedStartTime = `${ing}:00`;
+            camposCobertura.adjustedEndTime = `${egr}:00`;
+            camposCobertura.segmentFromTime = `${ing}:00`;
+            camposCobertura.segmentToTime = `${egr}:00`;
+            camposCobertura.extExtraHours = Math.round((diffH(ing, t.inicio) + diffH(t.fin, egr)) * 10) / 10;
+            camposCobertura.coverageSegmentRole = 'EARLY_START';
+        }
+
         const key = `${t.empId}_${t.ds}`;
         const pend = pendingChanges[key];
         const base = pend && !pend.isDeleted ? pend : (shiftsMap[key] && !shiftsMap[key].isDeleted ? shiftsMap[key] : null);
@@ -17692,27 +17734,23 @@ function PlanificacionDesktop() {
             ...pendingChanges,
             [key]: {
                 ...(base || {}),
+                ...camposCobertura,
                 isTemp: true,
                 code: base?.code || t.code,
                 name: base?.name || base?.code || t.code,
-                startTime: `${ing}:00`,
-                endTime: `${egr}:00`,
+                startTime: base?.startTime || `${t.inicio}:00`,
+                endTime: base?.endTime || `${t.fin}:00`,
+                hours: base?.hours,
                 positionName: base?.positionName || t.positionName,
                 employeeId: t.empId,
                 employeeName: base?.employeeName || t.empName,
                 objectiveId: base?.objectiveId || selectedObjective,
                 clientId: base?.clientId || selectedClient || '',
-                coverageType: 'ABSENCE_COVERAGE' as const,
-                coverageNote: `Por Horario: ${ing}–${egr} (orig. ${t.code} ${t.inicio}–${t.fin})`,
-                isTura: false,
-                isExtended: false,
-                isEarlyStart: false,
             },
         });
         if (ok === false) return;
-        const aMin = (hm: string) => { const [h, m] = hm.split(':').map(Number); return h * 60 + (m || 0); };
-        const durH = Math.round(((aMin(egr) - aMin(ing) + 1440) % 1440) / 60 * 10) / 10;
-        toast.success(`Por Horario: ${ing}–${egr} (${durH} h) · ${t.empName.split(',')[0]}. Guardá el cronograma.`);
+        const totalH = diffH(ing, egr);
+        toast.success(`Por Horario (Cobertura): ${ing}–${egr} (${totalH} h) · ${t.empName.split(',')[0]}. Guardá el cronograma.`);
         setTuraEditor(null);
     };
     const confirmarTura = async () => {
@@ -24704,7 +24742,7 @@ function PlanificacionDesktop() {
                         )}
                         {turaEditor.modo === 'porHorario' && (
                             <div className="mt-1.5 space-y-1.5">
-                                <p className="text-[11px] text-slate-500">Reemplaza el horario del turno. Liquidación = horas reales; horas vendidas = SLA sin cambio.</p>
+                                <p className="text-[11px] text-slate-500">Cobertura con horario libre: acredita el hueco sin sumar sobre lo vendido.</p>
                                 <div className="grid grid-cols-2 gap-2">
                                     <label className="text-[10px] font-bold text-slate-500">Ingreso
                                         <input type="time" value={turaEditor.ingresoOverride ?? turaEditor.inicio} onChange={(e) => setTuraEditor((prev) => (prev ? { ...prev, ingresoOverride: e.target.value } : prev))} className="block w-full rounded-lg border border-slate-200 px-2 py-1 text-[11px] text-slate-800" data-ph-ingreso />
