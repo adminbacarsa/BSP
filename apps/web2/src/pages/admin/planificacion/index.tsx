@@ -2763,6 +2763,19 @@ function PlanificacionDesktop() {
 
     const [prevMonthLoading, setPrevMonthLoading] = useState(false);
     const [continuarVista, setContinuarVista] = useState<ContinuarMesVista | null>(null);
+    const continuarInputRef = React.useRef<Parameters<typeof proponerContinuacion>[0] | null>(null);
+    const handleFaseOverrideChange = React.useCallback((overrides: Map<string, string>) => {
+        if (!continuarInputRef.current) return;
+        const inputConOverrides = {
+            ...continuarInputRef.current,
+            guardias: continuarInputRef.current.guardias.map((g) => ({
+                ...g,
+                faseInicialOverride: overrides.get(g.id),
+            })),
+        };
+        const nuevosResultados = proponerContinuacion(inputConOverrides);
+        setContinuarVista((prev) => prev ? { ...prev, resultados: nuevosResultados } : prev);
+    }, []);
     const [imagenCrono, setImagenCrono] = useState<DatosImagen | null>(null);
     const activarServicioRef = useRef<{ services: SlaRow[]; last: SlaRow; plan: AppendMonthsPlan; newEndDate: string } | null>(null);
     /** «Continuar» con servicio ya cargado en el mes: se actualiza con el del mes que se copia. */
@@ -13512,21 +13525,25 @@ function PlanificacionDesktop() {
                 tipoDe: tipoArmado,
                 ocupadoFuera,
                 francoFuera,
-            }) : proponerContinuacion({
-                objectiveId: objContinuar,
-                dias,
-                guardias: guardiasBase.map((e: any) => ({ id: e.id, nombre: e.name || e.id, previos: previosPorEmp.get(e.id) || [], puestoPreferido: etiquetar(resolveObjectiveForEmp(e.id), getEmpDefaultPos(e.id) || '') })),
-                salientes: salientesConPos,
-                estructura: estructuraContinuar,
-                estadoCelda,
-                diaBloqueado: (ds) => isPlanningDateLocked(ds) || (!enGrupo && !extenderServicio && isOutsideServiceRange(ds)),
-                turnoHabilitado,
-                cupoDia: (ds) => (!enGrupo && !extenderServicio && isOutsideServiceRange(ds) ? null : cupoDelServicio(estructuraContinuar, ds, turnoHabilitado)),
-                punteroPrevio: Array.isArray(punteroGuardado) ? punteroGuardado.map(String) : null,
-                cargado,
-                ocupadoFuera,
-                francoFuera,
-            });
+            }) : (() => {
+                const continuarInput = {
+                    objectiveId: objContinuar,
+                    dias,
+                    guardias: guardiasBase.map((e: any) => ({ id: e.id, nombre: e.name || e.id, previos: previosPorEmp.get(e.id) || [], puestoPreferido: etiquetar(resolveObjectiveForEmp(e.id), getEmpDefaultPos(e.id) || '') })),
+                    salientes: salientesConPos,
+                    estructura: estructuraContinuar,
+                    estadoCelda,
+                    diaBloqueado: (ds: string) => isPlanningDateLocked(ds) || (!enGrupo && !extenderServicio && isOutsideServiceRange(ds)),
+                    turnoHabilitado,
+                    cupoDia: (ds: string) => (!enGrupo && !extenderServicio && isOutsideServiceRange(ds) ? null : cupoDelServicio(estructuraContinuar, ds, turnoHabilitado)),
+                    punteroPrevio: Array.isArray(punteroGuardado) ? punteroGuardado.map(String) : null,
+                    cargado,
+                    ocupadoFuera,
+                    francoFuera,
+                };
+                continuarInputRef.current = continuarInput;
+                return proponerContinuacion(continuarInput);
+            })();
             calcularFrancoObj(resultados);
             // Lo que el mes anterior se cubrió suelto (VFM de domingo por alguien de Peaje): sugerir repetirlo, destildado.
             // Los sueltos se miden sobre la copia con la rotación ordenada ya puesta: si no, un R1 «en el borde»
@@ -26864,7 +26881,8 @@ function PlanificacionDesktop() {
                     <ContinuarMesModal
                         vista={continuarVista}
                         onAplicar={aplicarContinuarMesAnterior}
-                        onCancelar={() => setContinuarVista(null)}
+                        onCancelar={() => { setContinuarVista(null); continuarInputRef.current = null; }}
+                        onOverrideChange={handleFaseOverrideChange}
                     />,
                     document.body,
                 )}

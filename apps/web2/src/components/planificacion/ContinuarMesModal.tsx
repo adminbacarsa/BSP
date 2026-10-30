@@ -45,6 +45,7 @@ type Props = {
   vista: ContinuarMesVista;
   onAplicar: (employeeIds: string[], sugerencias: SugerenciaNivelacion[], activarServicio: boolean) => void;
   onCancelar: () => void;
+  onOverrideChange?: (overrides: Map<string, string>) => void;
 };
 
 /** Un renglón con título y resumen; el detalle se abre con un clic. */
@@ -139,7 +140,20 @@ function textoOrigen(r: ResultadoGuardia): string {
   return 'su propio ciclo';
 }
 
-export function ContinuarMesModal({ vista, onAplicar, onCancelar }: Props) {
+function bandas(etiqueta: string): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const m of etiqueta.matchAll(/([A-Z][A-Z0-9]*)(?:×\d+)?/g)) {
+    const code = m[1];
+    if (!['F', 'FF', 'FP'].includes(code) && !seen.has(code)) {
+      seen.add(code);
+      result.push(code);
+    }
+  }
+  return result;
+}
+
+export function ContinuarMesModal({ vista, onAplicar, onCancelar, onOverrideChange }: Props) {
   const conCiclo = useMemo(() => vista.resultados.filter((r) => r.ciclo && r.propuestas.length > 0), [vista.resultados]);
   const sinCiclo = useMemo(() => vista.resultados.filter((r) => !r.ciclo), [vista.resultados]);
   const sinNada = useMemo(() => vista.resultados.filter((r) => r.ciclo && r.propuestas.length === 0), [vista.resultados]);
@@ -153,6 +167,29 @@ export function ContinuarMesModal({ vista, onAplicar, onCancelar }: Props) {
     ...(vista.disponibles || []).map(claveSugerencia),
   ]));
   const [activarMes, setActivarMes] = useState(() => !!(vista.activar?.marcado && vista.activar.puede && vista.activar.permiso));
+  const [faseOverrides, setFaseOverrides] = useState<Map<string, string>>(new Map());
+  const [dropdownOpen, setDropdownOpen] = useState<string | null>(null);
+
+  const handleFaseOverride = (employeeId: string, banda: string) => {
+    const next = new Map(faseOverrides);
+    if (next.get(employeeId) === banda) {
+      next.delete(employeeId);
+    } else {
+      next.set(employeeId, banda);
+    }
+    setFaseOverrides(next);
+    setDropdownOpen(null);
+    onOverrideChange?.(next);
+  };
+
+  React.useEffect(() => {
+    if (!dropdownOpen) return;
+    const close = (e: MouseEvent) => {
+      if (!(e.target as Element).closest('[data-fase-dropdown]')) setDropdownOpen(null);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [dropdownOpen]);
 
   const sugerencias = useMemo(
     () => conCiclo.flatMap((r) => r.sugerencias || []).sort((a, b) => a.dateStr.localeCompare(b.dateStr)),
@@ -356,7 +393,48 @@ export function ContinuarMesModal({ vista, onAplicar, onCancelar }: Props) {
                         <div className="text-[10px] font-sans font-bold text-amber-800" data-continuar-nota={r.notaEstimado}>{r.notaEstimado}</div>
                       ) : null}
                     </td>
-                    <td className="py-1.5 pr-2 font-bold text-teal-700">{r.continuaEn}</td>
+                    <td className="py-1.5 pr-2 relative" data-fase-dropdown>
+                      {(() => {
+                        const override = faseOverrides.get(r.employeeId);
+                        const opciones = r.ciclo?.etiqueta ? bandas(r.ciclo.etiqueta) : [];
+                        const texto = override ? r.continuaEn.replace(/^[A-Z0-9]+/, override) : r.continuaEn;
+                        return (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => opciones.length > 1 ? setDropdownOpen(dropdownOpen === r.employeeId ? null : r.employeeId) : undefined}
+                              className={`font-bold rounded px-1 py-0.5 text-left ${override ? 'bg-amber-100 text-amber-800 ring-1 ring-amber-300' : 'text-teal-700 hover:bg-teal-50'} ${opciones.length > 1 ? 'cursor-pointer' : 'cursor-default'}`}
+                              title={opciones.length > 1 ? 'Clic para cambiar la fase inicial' : undefined}
+                            >
+                              {texto}{override ? ' ✎' : ''}
+                            </button>
+                            {dropdownOpen === r.employeeId && (
+                              <div className="absolute z-50 mt-1 left-0 bg-white border border-slate-200 rounded-lg shadow-lg py-1 min-w-[80px]">
+                                {opciones.map((b) => (
+                                  <button
+                                    key={b}
+                                    type="button"
+                                    onClick={() => handleFaseOverride(r.employeeId, b)}
+                                    className={`block w-full text-left px-3 py-1 text-sm font-mono hover:bg-slate-100 ${(override || '') === b ? 'text-amber-700 font-bold' : 'text-slate-700'}`}
+                                  >
+                                    {b}
+                                  </button>
+                                ))}
+                                {override && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleFaseOverride(r.employeeId, override)}
+                                    className="block w-full text-left px-3 py-1 text-xs text-slate-400 hover:bg-slate-100 border-t border-slate-100 mt-1 pt-1"
+                                  >
+                                    Restablecer
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()}
+                    </td>
                     <td className="py-1.5 pr-2 text-right tabular-nums">{turnos} turnos · {francos} F</td>
                     <td className="py-1.5 text-slate-500">{noToca || '—'}</td>
                   </tr>

@@ -184,7 +184,7 @@ export type ContinuarInput = {
   objectiveId: string;
   /** Días del mes nuevo (YYYY-MM-DD), en orden. */
   dias: string[];
-  guardias: Array<{ id: string; nombre: string; previos: TurnoPrevio[]; puestoPreferido?: string }>;
+  guardias: Array<{ id: string; nombre: string; previos: TurnoPrevio[]; puestoPreferido?: string; faseInicialOverride?: string }>;
   estructura: PuestoSla[];
   /** Licencia cargada o celda con algo (turno, borrador). No se pisa. */
   estadoCelda: (employeeId: string, dateStr: string) => EstadoCelda;
@@ -1135,7 +1135,20 @@ export function proponerGuardia(
   }
   const desdeIdx = input.dias.length ? diaIndex(input.dias[0]) : (obs[obs.length - 1]?.idx ?? 0) + 1;
   const hastaIdx = input.dias.length ? diaIndex(input.dias[input.dias.length - 1]) : desdeIdx;
-  const elegido = forzado || elegirCiclo(obs, desdeIdx, hastaIdx, input.rotacion);
+  let elegido = forzado || elegirCiclo(obs, desdeIdx, hastaIdx, input.rotacion);
+  if (!forzado && g.faseInicialOverride && elegido && input.dias.length) {
+    const bloquesForzados = detectarCicloPorBloques(obs, desdeIdx, hastaIdx, input.rotacion, g.faseInicialOverride, 0);
+    if (bloquesForzados) {
+      elegido = {
+        ciclo: bloquesForzados.ciclo,
+        origen: 'bloques' as const,
+        estimado: true,
+        nota: `fase forzada: ${g.faseInicialOverride}`,
+        continuaEn: bloquesForzados.continuaEn,
+        diaDe: (d: string) => bloquesForzados.porDia.get(d) || null,
+      };
+    }
+  }
   if (!elegido) {
     res.motivoSinCiclo = obs.length < 6
       ? `Pocos días para leer el ciclo (${obs.length})`
