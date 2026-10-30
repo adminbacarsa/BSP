@@ -26361,7 +26361,9 @@ function PlanificacionDesktop() {
                                     const vend = (selectedGrupo && grupoUnifiedMode && grupoTotalVendidas > 0) ? grupoTotalVendidas : slaVendidas;
                                     const deltaBaseVsVend = vend > 0 ? Math.round(b.baseSla - vend) : 0;
                                     const mesPublicado = isCronogramaPublicado;
-                                    const horasCierreVs = mesPublicado ? publishedPlanMesh.hours : (plannerWorkingHours > 0 ? plannerWorkingHours : b.baseSla);
+                                    const horasBaseVs = mesPublicado ? publishedPlanMesh.hours : (plannerWorkingHours > 0 ? plannerWorkingHours : b.baseSla);
+                                    // La cobertura ext/adel (isTura:false) rellena huecos del SLA sin sumar por encima: cierre = min(base + cobertura, vendidas)
+                                    const horasCierreVs = (!mesPublicado && vend > 0) ? Math.min(horasBaseVs + b.coverageExtra, vend) : horasBaseVs;
                                     const deltaVsVend = vend > 0 ? Math.round(horasCierreVs - vend) : 0;
                                     const textoVs = !mesPublicado
                                         ? textoCierreContraVendidas({ mesPublicado: false, horasCierre: horasCierreVs, vendidas: vend })
