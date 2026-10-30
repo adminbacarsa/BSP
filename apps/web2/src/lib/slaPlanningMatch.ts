@@ -640,7 +640,7 @@ export function resolvePlanningMonthSlaHours(
       year,
       month,
     );
-    const calculated = Math.round(row.total);
+    const calculated = Math.round(row.total * 10) / 10;
     if (calculated > 0) return calculated;
   }
   return Math.round(Number(srv?.totalMonthlyHours) || 0);
