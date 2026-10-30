@@ -2574,7 +2574,9 @@ function PlanificacionDesktop() {
         destinoId: string;
         /** Franja pegada del mismo puesto sin nadie ese día: se puede cubrir extendiendo (no es TURA). */
         cubrir?: { code: string; desde: string; hasta: string; lado: 'antes' | 'despues' } | null;
-        modo: 'cubrir' | 'tura' | 'cobertura';
+        modo: 'cubrir' | 'tura' | 'cobertura' | 'porHorario';
+        ingresoOverride?: string;
+        egresoOverride?: string;
     } | null>(null);
     const [motivoVista12, setMotivoVista12] = useState('');
     const propuesta12Ref = useRef<Propuesta12h[] | null>(null);
@@ -17540,11 +17542,11 @@ function PlanificacionDesktop() {
         const sinTurno = !code0 || ['F', 'FF', 'FP', 'RET'].includes(code0) || esCeldaLicencia({ code: code0 }) || !ini0 || !fin0;
         if (tipoInicial === 'cobertura') {
             if (sinTurno) { toast.message('La cobertura va pegada a un turno de trabajo: ese día no tiene turno.'); return; }
-            setTuraEditor({ empId: emp.id, empName: String(emp.name || ''), ds, parentId: String(ctx?.s?.id || actual0?.id || ''), code: code0, inicio: ini0!, fin: fin0!, positionName: String(actual0.positionName || pos), lado: cubrir?.lado || 'despues', horas: 1, guardando: false, pidio: '', motivo: '', destinoId: '', cubrir, modo: 'cobertura' });
+            setTuraEditor({ empId: emp.id, empName: String(emp.name || ''), ds, parentId: String(ctx?.s?.id || actual0?.id || ''), code: code0, inicio: ini0!, fin: fin0!, positionName: String(actual0.positionName || pos), lado: cubrir?.lado || 'despues', horas: 1, guardando: false, pidio: '', motivo: '', destinoId: '', cubrir, modo: 'cobertura', ingresoOverride: ini0!, egresoOverride: fin0! });
             return;
         }
         if (cubrir && tipoInicial !== 'tura') {
-            setTuraEditor({ empId: emp.id, empName: String(emp.name || ''), ds, parentId: String(actual0.id || ''), code: code0, inicio: ini0!, fin: fin0!, positionName: String(actual0.positionName || pos), lado: cubrir.lado, horas: 1, guardando: false, pidio: '', motivo: '', destinoId: '', cubrir, modo: 'cubrir' });
+            setTuraEditor({ empId: emp.id, empName: String(emp.name || ''), ds, parentId: String(actual0.id || ''), code: code0, inicio: ini0!, fin: fin0!, positionName: String(actual0.positionName || pos), lado: cubrir.lado, horas: 1, guardando: false, pidio: '', motivo: '', destinoId: '', cubrir, modo: 'cubrir', ingresoOverride: ini0!, egresoOverride: fin0! });
             return;
         }
         if (ctx?.p && !ctx.p.isDeleted) { toast.message('Guardá el cronograma y después agregá las horas: el TURA va atado al turno guardado.'); return; }
@@ -17558,7 +17560,7 @@ function PlanificacionDesktop() {
         const fin = hhmmRapido(s0.endTime);
         if (!inicio || !fin) { toast.message('El turno no tiene horario: no se puede agregar el TURA.'); return; }
         if (turaMap[s0.id]) { toast.message('Ese turno ya tiene un TURA. Con − lo quitás y lo volvés a cargar.'); return; }
-        setTuraEditor({ empId: emp.id, empName: String(emp.name || ''), ds, parentId: s0.id, code, inicio, fin, positionName: String(s0.positionName || pos), lado: 'despues', horas: 1, guardando: false, pidio: '', motivo: '', destinoId: '', cubrir: null, modo: 'tura' });
+        setTuraEditor({ empId: emp.id, empName: String(emp.name || ''), ds, parentId: s0.id, code, inicio, fin, positionName: String(s0.positionName || pos), lado: 'despues', horas: 1, guardando: false, pidio: '', motivo: '', destinoId: '', cubrir: null, modo: 'tura', ingresoOverride: inicio, egresoOverride: fin });
     };
     const confirmarCubrirExtendiendo = () => {
         const t = turaEditor;
@@ -17675,8 +17677,47 @@ function PlanificacionDesktop() {
         toast.success(`${textoExtCobertura(t.code, t.inicio, t.fin, { lado: t.lado, horas: t.horas })} · ${t.empName.split(',')[0]}. Guardá el cronograma.`);
         setTuraEditor(null);
     };
+    const confirmarPorHorario = () => {
+        const t = turaEditor;
+        if (!t || t.modo !== 'porHorario' || t.guardando) return;
+        const ing = t.ingresoOverride ?? t.inicio;
+        const egr = t.egresoOverride ?? t.fin;
+        if (ing === t.inicio && egr === t.fin) { toast.message('El horario es igual al original. Cambiá ingreso o egreso.'); return; }
+        const mensajeBloqueo = isPlanningDateLocked(t.ds) ? 'Día cerrado: no se cargan horas.' : (msgBloqueoEdicion || '');
+        if (mensajeBloqueo) { toast.message(mensajeBloqueo); return; }
+        const key = `${t.empId}_${t.ds}`;
+        const pend = pendingChanges[key];
+        const base = pend && !pend.isDeleted ? pend : (shiftsMap[key] && !shiftsMap[key].isDeleted ? shiftsMap[key] : null);
+        const ok = commitPendingChanges({
+            ...pendingChanges,
+            [key]: {
+                ...(base || {}),
+                isTemp: true,
+                code: base?.code || t.code,
+                name: base?.name || base?.code || t.code,
+                startTime: `${ing}:00`,
+                endTime: `${egr}:00`,
+                positionName: base?.positionName || t.positionName,
+                employeeId: t.empId,
+                employeeName: base?.employeeName || t.empName,
+                objectiveId: base?.objectiveId || selectedObjective,
+                clientId: base?.clientId || selectedClient || '',
+                coverageType: 'ABSENCE_COVERAGE' as const,
+                coverageNote: `Por Horario: ${ing}–${egr} (orig. ${t.code} ${t.inicio}–${t.fin})`,
+                isTura: false,
+                isExtended: false,
+                isEarlyStart: false,
+            },
+        });
+        if (ok === false) return;
+        const aMin = (hm: string) => { const [h, m] = hm.split(':').map(Number); return h * 60 + (m || 0); };
+        const durH = Math.round(((aMin(egr) - aMin(ing) + 1440) % 1440) / 60 * 10) / 10;
+        toast.success(`Por Horario: ${ing}–${egr} (${durH} h) · ${t.empName.split(',')[0]}. Guardá el cronograma.`);
+        setTuraEditor(null);
+    };
     const confirmarTura = async () => {
         const t = turaEditor;
+        if (t?.modo === 'porHorario') { confirmarPorHorario(); return; }
         if (t?.modo === 'cubrir' && t.cubrir) { confirmarCubrirExtendiendo(); return; }
         if (t?.modo === 'cobertura') { confirmarCobertura(); return; }
         if (t && t.modo === 'tura') {
@@ -24623,11 +24664,33 @@ function PlanificacionDesktop() {
                         <div className="mt-1.5 flex gap-1" data-tura-modos>
                             <button type="button" data-tura-modo="cobertura" onClick={() => setTuraEditor((prev) => (prev ? { ...prev, modo: 'cobertura', horas: Math.min(4, prev.horas) } : prev))} className={`rounded-lg px-2 py-1 text-[11px] font-black ${turaEditor.modo === 'cobertura' ? 'bg-emerald-700 text-white' : 'border border-slate-200 text-slate-700'}`}>Cobertura</button>
                             <button type="button" data-tura-modo="tura" onClick={() => setTuraEditor((prev) => (prev ? { ...prev, modo: 'tura' } : prev))} className={`rounded-lg px-2 py-1 text-[11px] font-black ${turaEditor.modo === 'tura' ? 'bg-rose-700 text-white' : 'border border-slate-200 text-slate-700'}`}>TURA</button>
+                            <button type="button" data-tura-modo="porHorario" onClick={() => setTuraEditor((prev) => (prev ? { ...prev, modo: 'porHorario' } : prev))} className={`rounded-lg px-2 py-1 text-[11px] font-black ${turaEditor.modo === 'porHorario' ? 'bg-sky-700 text-white' : 'border border-slate-200 text-slate-700'}`}>Por Horario</button>
                         </div>
                         {turaEditor.cubrir && (
                             <button type="button" data-tura-modo="cubrir" onClick={() => setTuraEditor((prev) => (prev ? { ...prev, modo: 'cubrir' } : prev))} className={`mt-1.5 w-full rounded-lg px-2 py-1 text-left text-[11px] font-bold ${turaEditor.modo === 'cubrir' ? 'bg-indigo-600 text-white' : 'border border-slate-200 text-slate-700'}`}>
                                 Cubrir {turaEditor.cubrir.code} {turaEditor.cubrir.desde}–{turaEditor.cubrir.hasta} extendiendo la jornada: {turaEditor.cubrir.lado === 'despues' ? `${turaEditor.inicio}–${turaEditor.cubrir.hasta}` : `${turaEditor.cubrir.desde}–${turaEditor.fin}`} (cierra la franja)
                             </button>
+                        )}
+                        {turaEditor.modo === 'porHorario' && (
+                            <div className="mt-1.5 space-y-1.5">
+                                <p className="text-[11px] text-slate-500">Reemplaza el horario del turno. Liquidación = horas reales; horas vendidas = SLA sin cambio.</p>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <label className="text-[10px] font-bold text-slate-500">Ingreso
+                                        <input type="time" value={turaEditor.ingresoOverride ?? turaEditor.inicio} onChange={(e) => setTuraEditor((prev) => (prev ? { ...prev, ingresoOverride: e.target.value } : prev))} className="block w-full rounded-lg border border-slate-200 px-2 py-1 text-[11px] text-slate-800" data-ph-ingreso />
+                                    </label>
+                                    <label className="text-[10px] font-bold text-slate-500">Egreso
+                                        <input type="time" value={turaEditor.egresoOverride ?? turaEditor.fin} onChange={(e) => setTuraEditor((prev) => (prev ? { ...prev, egresoOverride: e.target.value } : prev))} className="block w-full rounded-lg border border-slate-200 px-2 py-1 text-[11px] text-slate-800" data-ph-egreso />
+                                    </label>
+                                </div>
+                                {(() => {
+                                    const ing = turaEditor.ingresoOverride ?? turaEditor.inicio;
+                                    const egr = turaEditor.egresoOverride ?? turaEditor.fin;
+                                    if (!ing || !egr) return null;
+                                    const aMin = (hm: string) => { const [h, m] = hm.split(':').map(Number); return h * 60 + (m || 0); };
+                                    const durH = Math.round(((aMin(egr) - aMin(ing) + 1440) % 1440) / 60 * 10) / 10;
+                                    return <p className="font-bold text-sky-800" data-ph-resumen>Por Horario: {ing}–{egr} ({durH} h reales) · orig. {turaEditor.code} {turaEditor.inicio}–{turaEditor.fin}</p>;
+                                })()}
+                            </div>
                         )}
                         {(turaEditor.modo === 'tura' || turaEditor.modo === 'cobertura') && (<>
                         {(['antes', 'despues'] as const).map((lado) => {
@@ -24683,7 +24746,7 @@ function PlanificacionDesktop() {
                             <span className="text-[10px] text-slate-400">{turaEditor.modo === 'cobertura' ? '1–4 horas' : '1–8 horas'} · ← antes · → después · Enter agrega · Esc cancela</span>
                             <div className="flex gap-2">
                                 <button type="button" onClick={() => setTuraEditor(null)} className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-bold text-slate-600">Cancelar</button>
-                                <button type="button" disabled={turaEditor.guardando} onClick={() => { void confirmarTura(); }} className={`rounded-lg px-2.5 py-1 text-[11px] font-black text-white disabled:opacity-40 ${turaEditor.modo === 'cobertura' ? 'bg-emerald-700' : turaEditor.modo === 'cubrir' ? 'bg-indigo-600' : 'bg-rose-700'}`} data-tura-confirmar>{turaEditor.guardando ? 'Guardando…' : turaEditor.modo === 'cobertura' ? 'Cargar cobertura' : turaEditor.modo === 'cubrir' ? 'Extender y cubrir' : 'Agregar TURA'}</button>
+                                <button type="button" disabled={turaEditor.guardando} onClick={() => { void confirmarTura(); }} className={`rounded-lg px-2.5 py-1 text-[11px] font-black text-white disabled:opacity-40 ${turaEditor.modo === 'cobertura' ? 'bg-emerald-700' : turaEditor.modo === 'porHorario' ? 'bg-sky-700' : turaEditor.modo === 'cubrir' ? 'bg-indigo-600' : 'bg-rose-700'}`} data-tura-confirmar>{turaEditor.guardando ? 'Guardando…' : turaEditor.modo === 'cobertura' ? 'Cargar cobertura' : turaEditor.modo === 'porHorario' ? 'Cargar Por Horario' : turaEditor.modo === 'cubrir' ? 'Extender y cubrir' : 'Agregar TURA'}</button>
                             </div>
                         </div>
                     </div>,
