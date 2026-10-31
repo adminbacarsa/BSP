@@ -26451,6 +26451,42 @@ function PlanificacionDesktop() {
                                                     )}
                                                 </div>
                                             </div>
+                                            {/* ── Diagnóstico: horas SLA por puesto ── */}
+                                            {activePlanningSlaRow && Array.isArray((activePlanningSlaRow as any).positions) && (activePlanningSlaRow as any).positions.length > 0 && (
+                                                <div className="border rounded-xl overflow-hidden">
+                                                    <p className="text-[10px] font-black uppercase text-slate-400 px-3 py-2 bg-slate-50 dark:bg-slate-800 border-b">
+                                                        Horas SLA por puesto · {vend}h total
+                                                    </p>
+                                                    <table className="w-full text-[11px]">
+                                                        <thead className="bg-slate-100 dark:bg-slate-800">
+                                                            <tr>
+                                                                <th className="text-left p-2 font-black">Puesto</th>
+                                                                <th className="text-right p-2 font-black">Vendidas</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {(() => {
+                                                                const srv = activePlanningSlaRow as any;
+                                                                const start = String(srv.startDate || '').slice(0, 10);
+                                                                const end = String(srv.endDate || '').slice(0, 10);
+                                                                const ex = srv.excludedDates as string[] | undefined;
+                                                                const y = currentDate.getFullYear();
+                                                                const m = currentDate.getMonth();
+                                                                return (srv.positions as any[]).map((pos: any, idx: number) => {
+                                                                    const h = calculatePositionMonthHours(pos, start, end, ex, y, m);
+                                                                    const rounded = Math.round(h * 10) / 10;
+                                                                    return (
+                                                                        <tr key={idx} className="border-t border-slate-100 hover:bg-slate-50/80">
+                                                                            <td className="p-2 text-slate-700">{String(pos.name || pos.positionName || `Puesto ${idx + 1}`)}</td>
+                                                                            <td className="p-2 text-right font-mono">{rounded > 0 ? `${rounded}h` : '—'}</td>
+                                                                        </tr>
+                                                                    );
+                                                                });
+                                                            })()}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            )}
                                             {selectedGrupo && grupoUnifiedMode && grupoObjectiveBillableHours && (
                                                 <div className="border rounded-xl overflow-hidden">
                                                     <p className="text-[10px] font-black uppercase text-slate-400 px-3 py-2 bg-slate-50 dark:bg-slate-800 border-b">
