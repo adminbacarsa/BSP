@@ -6086,7 +6086,7 @@ function PlanificacionDesktop() {
                         .filter((st) => st.startTime && st.endTime)
                         .filter((st) => (Array.isArray(st.specificDates) && st.specificDates.length
                             ? st.specificDates.includes(dateStr)
-                            : !Array.isArray(st.days) || !st.days.length || st.days.includes(letraHoras) || correFeriado(st, dateStr)))
+                            : !Array.isArray(st.days) || !st.days.length || st.days.includes(letraHoras) || correFeriado(st, dateStr) || ((st as any)?.feriados === true && _feriadosCustomRef.has(dateStr))))
                         .map((st) => ({ code: String(st.code || ''), startTime: String(st.startTime), endTime: String(st.endTime), qty: Number(st.quantity) || Number(p.qty) || 1 })),
                 }));
             for (const tura of Object.values(turaMap || {})) {
@@ -6286,7 +6286,7 @@ function PlanificacionDesktop() {
                     .filter((st) => st.startTime && st.endTime)
                     .filter((st) => (Array.isArray(st.specificDates) && st.specificDates.length
                         ? st.specificDates.includes(dateStr)
-                        : !Array.isArray(st.days) || !st.days.length || st.days.includes(dayLetter) || correFeriado(st, dateStr)))
+                        : !Array.isArray(st.days) || !st.days.length || st.days.includes(dayLetter) || correFeriado(st, dateStr) || ((st as any)?.feriados === true && _feriadosCustomRef.has(dateStr))))
                     .map((st) => ({
                         code: String(st.code || ''),
                         startTime: String(st.startTime),
