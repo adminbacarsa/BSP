@@ -196,7 +196,7 @@ export function analyzePositionDayGap(
                           return dateStr ? (s as any).specificDates.includes(dateStr) : false;
                       }
                       if (Array.isArray((s as any).days) && (s as any).days.length > 0) {
-                          return (s as any).days.includes(dayLetter) || correFeriado(s, dateStr);
+                          return (s as any).days.includes(dayLetter) || correFeriado(s, dateStr, customFeriados);
                       }
                       return true;
                   })

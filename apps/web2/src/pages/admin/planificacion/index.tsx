@@ -6098,7 +6098,7 @@ function PlanificacionDesktop() {
                         .filter((st) => st.startTime && st.endTime)
                         .filter((st) => (Array.isArray(st.specificDates) && st.specificDates.length
                             ? st.specificDates.includes(dateStr)
-                            : !Array.isArray(st.days) || !st.days.length || st.days.includes(letraHoras) || correFeriado(st, dateStr) || ((st as any)?.feriados === true && _feriadosCustomRef.has(dateStr))))
+                            : !Array.isArray(st.days) || !st.days.length || st.days.includes(letraHoras) || correFeriado(st, dateStr, _feriadosCustomRef)))
                         .map((st) => ({ code: String(st.code || ''), startTime: String(st.startTime), endTime: String(st.endTime), qty: Number(st.quantity) || Number(p.qty) || 1 })),
                 }));
             for (const tura of Object.values(turaMap || {})) {
@@ -6298,7 +6298,7 @@ function PlanificacionDesktop() {
                     .filter((st) => st.startTime && st.endTime)
                     .filter((st) => (Array.isArray(st.specificDates) && st.specificDates.length
                         ? st.specificDates.includes(dateStr)
-                        : !Array.isArray(st.days) || !st.days.length || st.days.includes(dayLetter) || correFeriado(st, dateStr) || ((st as any)?.feriados === true && _feriadosCustomRef.has(dateStr))))
+                        : !Array.isArray(st.days) || !st.days.length || st.days.includes(dayLetter) || correFeriado(st, dateStr, _feriadosCustomRef)))
                     .map((st) => ({
                         code: String(st.code || ''),
                         startTime: String(st.startTime),
@@ -7280,7 +7280,7 @@ function PlanificacionDesktop() {
                 setActiveSlaServiceRotations(_loadedRot);
                 setSlaVendidas(
                     monthHasSla && srvForStructure
-                        ? resolvePlanningMonthSlaHours(srvForStructure, viewYear, viewMonth)
+                        ? resolvePlanningMonthSlaHours(srvForStructure, viewYear, viewMonth, _feriadosCustomRef)
                         : 0,
                 );
                 if (!monthHasSla && !closedSla && selectedObjective && !(selectedGrupo && grupoUnifiedMode)) {
@@ -7471,7 +7471,7 @@ function PlanificacionDesktop() {
                     const srvForStructure = pendG ?? srv ?? fallback ?? closedSlaG;
                     const monthHasSla = !!pendG || planningMonthHasActiveSla(matching, viewYear, viewMonth) || !!closedSlaG;
                     if (monthHasSla && srvForStructure) {
-                        const objVend = resolvePlanningMonthSlaHours(srvForStructure, viewYear, viewMonth);
+                        const objVend = resolvePlanningMonthSlaHours(srvForStructure, viewYear, viewMonth, _feriadosCustomRef);
                         vendidasByObj[objId] = objVend;
                         totalVendidas += objVend;
                     } else {

@@ -627,6 +627,7 @@ export function resolvePlanningMonthSlaHours(
   } | null | undefined,
   year: number,
   month: number,
+  customFeriados?: ReadonlySet<string>,
 ): number {
   const positions = (Array.isArray(srv?.positions) ? srv.positions : []) as ServicePosition[];
   const startDate = toYyyyMmDd(srv?.startDate);
@@ -639,6 +640,7 @@ export function resolvePlanningMonthSlaHours(
       srv?.excludedDates,
       year,
       month,
+      customFeriados,
     );
     const calculated = Math.round(row.total * 10) / 10;
     if (calculated > 0) return calculated;

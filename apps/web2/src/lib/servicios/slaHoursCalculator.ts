@@ -76,9 +76,10 @@ export function isArgentineHoliday(dateStr: string): boolean {
 export function puestoSalteaFeriado(
   pos: { trabajaFeriados?: boolean } | null | undefined,
   dateStr?: string,
+  customFeriados?: ReadonlySet<string>,
 ): boolean {
   if (!dateStr || pos?.trabajaFeriados !== false) return false;
-  return isArgentineHoliday(dateStr);
+  return isArgentineHoliday(dateStr) || (customFeriados?.has(dateStr) ?? false);
 }
 
 import { isPositionActiveOnDate } from '@/lib/servicios/slaPositionActive';
@@ -154,18 +155,20 @@ export function computePositionDayComposition(
   dateStr?: string,
   skipShiftCodes?: Set<string> | string[],
   paxExcludeByCode?: Record<string, number>,
+  customFeriados?: ReadonlySet<string>,
 ) {
   let dayTotal = 0;
   let dayNight = 0;
   if (isEventosPosition(pos)) return { dayTotal: 0, dayNight: 0 };
-  if (puestoSalteaFeriado(pos, dateStr)) return { dayTotal: 0, dayNight: 0 };
+  if (puestoSalteaFeriado(pos, dateStr, customFeriados)) return { dayTotal: 0, dayNight: 0 };
   if (isEncargadoPosition(pos) && !positionIncludeInSlaTotals(pos)) return { dayTotal: 0, dayNight: 0 };
   if (isEncargadoPosition(pos) && resolveEncargadoScheduleMode(pos) === 'rotating') {
     return { dayTotal: 0, dayNight: 0 };
   }
   const activeDays = pos.activeDays?.length ? pos.activeDays : [...WEEK_DAY_CODES];
   // «+ feriados»: la franja corre el feriado aunque el puesto no tenga ese día de la semana (VFM domingos y feriados).
-  const correFeriadoHoy = !!dateStr && isArgentineHoliday(dateStr)
+  const esFeriadoHoy = !!dateStr && (isArgentineHoliday(dateStr) || (customFeriados?.has(dateStr) ?? false));
+  const correFeriadoHoy = esFeriadoHoy
     && (pos.allowedShiftTypes || []).some((s) => (s as { feriados?: boolean }).feriados === true);
   if (!activeDays.includes(dayCode) && !correFeriadoHoy) return { dayTotal: 0, dayNight: 0 };
 
@@ -229,12 +232,13 @@ export function computePositionDayComposition(
     (pos.allowedShiftTypes || []).forEach((shift) => {
       const sd: string[] | undefined = (shift as any).specificDates;
       if (Array.isArray(sd) && sd.length > 0) {
-        // Turno de fecha específica: sumar solo si dateStr coincide
-        if (dateStr && sd.includes(dateStr)) addVariant(shift);
+        // Turno de fecha específica: sumar si dateStr coincide, o si el turno es +F y hoy es feriado
+        const shiftCoreFeriado = (shift as { feriados?: boolean }).feriados === true;
+        if (dateStr && (sd.includes(dateStr) || (shiftCoreFeriado && esFeriadoHoy))) addVariant(shift);
         return;
       }
       if (shift.days?.length) {
-        if (shift.days.includes(dayCode) || ((shift as { feriados?: boolean }).feriados === true && !!dateStr && isArgentineHoliday(dateStr))) addVariant(shift);
+        if (shift.days.includes(dayCode) || ((shift as { feriados?: boolean }).feriados === true && esFeriadoHoy)) addVariant(shift);
       } else {
         addVariant(shift);
       }
@@ -248,6 +252,7 @@ export function calculateMonthlyBreakdown(
   startStr: string,
   endStr: string,
   excludedDates?: string[],
+  customFeriados?: ReadonlySet<string>,
 ): SlaHoursBreakdownRow[] {
   const startNorm = (startStr || '').trim().slice(0, 10);
   const endNorm = (endStr || '').trim().slice(0, 10);
@@ -270,7 +275,7 @@ export function calculateMonthlyBreakdown(
     const isWeekend = dayIdx === 0 || dayIdx === 6;
     const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(current.getDate()).padStart(2, '0')}`;
 
-    const isHoliday = isArgentineHoliday(dateStr);
+    const isHoliday = isArgentineHoliday(dateStr) || (customFeriados?.has(dateStr) ?? false);
 
     if (!monthAccumulator[monthKey]) {
       monthAccumulator[monthKey] = {
@@ -291,7 +296,7 @@ export function calculateMonthlyBreakdown(
         if (pos.excludedDates?.includes(dateStr)) return;
         const skipCodes = pos.excludedShiftDates?.[dateStr] || [];
         const paxCuts = pos.excludedShiftPaxDates?.[dateStr] || {};
-        const { dayTotal, dayNight } = computePositionDayComposition(pos, dayCode, dateStr, skipCodes, paxCuts);
+        const { dayTotal, dayNight } = computePositionDayComposition(pos, dayCode, dateStr, skipCodes, paxCuts, customFeriados);
         // Si algún turno tiene quantity propio (o hay corte de PAX), dayTotal ya incluye PAX → q=1.
         // Si no, aplicar el pos.quantity global como antes.
         const hasPerShiftQty = (pos.allowedShiftTypes || []).some((s) => s.quantity != null)
@@ -338,12 +343,13 @@ export function horasDelMesDestino(
   startStr: string,
   endStr: string,
   excludedDates?: string[],
+  customFeriados?: ReadonlySet<string>,
 ): number {
   const start = String(startStr || '').slice(0, 10);
   const year = Number(start.slice(0, 4));
   const month = Number(start.slice(5, 7));
   if (!year || !month) return 0;
-  return Math.round(calculateSlaHoursForMonth(positions, startStr, endStr, excludedDates, year, month - 1).total);
+  return Math.round(calculateSlaHoursForMonth(positions, startStr, endStr, excludedDates, year, month - 1, customFeriados).total);
 }
 
 export function calculateSlaHoursForMonth(
@@ -353,9 +359,10 @@ export function calculateSlaHoursForMonth(
   excludedDates: string[] | undefined,
   year: number,
   month: number,
+  customFeriados?: ReadonlySet<string>,
 ): { total: number; night: number; holiday: number; weekend: number } {
   const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
-  const breakdown = calculateMonthlyBreakdown(positions, startStr, endStr, excludedDates);
+  const breakdown = calculateMonthlyBreakdown(positions, startStr, endStr, excludedDates, customFeriados);
   const row = breakdown.find((m) => m.monthKey === monthKey);
   let total = row?.totalHours ?? 0;
 
@@ -381,11 +388,12 @@ export function calculatePositionMonthHours(
   excludedDates: string[] | undefined,
   year: number,
   month: number,
+  customFeriados?: ReadonlySet<string>,
 ): number {
   if (isEncargadoPosition(pos) && resolveEncargadoScheduleMode(pos) === 'rotating') {
     return encargadoRotatingPatternMonthHours(pos, startStr, endStr, year, month);
   }
-  const row = calculateSlaHoursForMonth([pos], startStr, endStr, excludedDates, year, month);
+  const row = calculateSlaHoursForMonth([pos], startStr, endStr, excludedDates, year, month, customFeriados);
   return row.total;
 }
 
@@ -396,6 +404,7 @@ export function calculateSlaHoursForDateRange(
   excludedDates: string[] | undefined,
   rangeStart: Date | null,
   rangeEnd: Date | null,
+  customFeriados?: ReadonlySet<string>,
 ): number {
   if (!positions?.length || !startStr || !endStr) return 0;
   const contractStart = parseYmdToLocalDate(startStr);
@@ -408,7 +417,7 @@ export function calculateSlaHoursForDateRange(
 
   const pad = (d: Date) =>
     `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  const breakdown = calculateMonthlyBreakdown(positions, pad(from), pad(to), excludedDates);
+  const breakdown = calculateMonthlyBreakdown(positions, pad(from), pad(to), excludedDates, customFeriados);
   return Math.round(breakdown.reduce((acc, m) => acc + m.totalHours, 0));
 }
 

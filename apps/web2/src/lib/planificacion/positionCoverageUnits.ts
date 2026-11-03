@@ -1228,7 +1228,7 @@ export function countPositionClosedUnitsFromShifts(
         if (Array.isArray((s as any).specificDates) && (s as any).specificDates.length > 0) {
             return dateStr ? (s as any).specificDates.includes(dateStr) : false;
         }
-        if (Array.isArray((s as any).days) && (s as any).days.length > 0) return (s as any).days.includes(dayLetter) || correFeriado(s, dateStr);
+        if (Array.isArray((s as any).days) && (s as any).days.length > 0) return (s as any).days.includes(dayLetter) || correFeriado(s, dateStr, customFeriados);
         return true;
     })).map(s => ({ code: String((s as any).code || '').toUpperCase(), quantity: (s as any).quantity }))
         .filter((b) => b.code && !fullSkip.has(b.code) && effectiveBandQty(b.code, b.quantity) > 0);
