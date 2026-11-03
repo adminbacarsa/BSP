@@ -1241,8 +1241,12 @@ const posAsEngineDef = (pos: any) => ({
     excludedShiftPaxDates: pos?.excludedShiftPaxDates,
 });
 
-const isPosActiveOnDay = (pos: any, dayLetter: string, dateStr?: string): boolean =>
-    positionIsActiveOn(posAsEngineDef(pos), dayLetter, dateStr);
+let _feriadosCustomRef: Set<string> = new Set();
+
+const isPosActiveOnDay = (pos: any, dayLetter: string, dateStr?: string): boolean => {
+    if (pos?.trabajaFeriados === false && dateStr && _feriadosCustomRef.has(dateStr)) return false;
+    return positionIsActiveOn(posAsEngineDef(pos), dayLetter, dateStr);
+};
 
 const PLANNING_REST_SHIFT_CODES = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET', 'REF', 'ESC']);
 
@@ -2631,7 +2635,9 @@ function PlanificacionDesktop() {
                 .filter((d) => { const e = String(d.data().empresaId ?? '').trim(); return !e || e === empresaId; })
                 .map((d) => String(d.data().date || '').slice(0, 10))
                 .filter(Boolean);
-            setFeriadosCustomSet(new Set(dates));
+            const s = new Set(dates);
+            setFeriadosCustomSet(s);
+            _feriadosCustomRef = s;
         });
     }, [empresaId]);
 
