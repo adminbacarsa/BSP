@@ -121,6 +121,7 @@ export function analyzePositionDayGap(
     cycles?: string[],
     isActiveOnDay = true,
     dateStr?: string,
+    customFeriados?: ReadonlySet<string>,
 ): PositionDayGap | null {
     const posName = String(pos.positionName || 'General');
     const qty = Math.max(1, Number(pos.qty) || 1);
@@ -128,7 +129,7 @@ export function analyzePositionDayGap(
 
     if (!isActiveOnDay) return null;
 
-    const units = countPositionClosedUnitsFromShifts(pos, dayLetter, codeCounts, cycles, true, dateStr);
+    const units = countPositionClosedUnitsFromShifts(pos, dayLetter, codeCounts, cycles, true, dateStr, undefined, customFeriados);
     if (units.closed >= units.required) return null;
 
     const missingUnits = units.required - units.closed;
@@ -255,6 +256,7 @@ export function analyzeDayCoverageGaps(
     codeCountsByPosition: Record<string, Record<string, number>>,
     cycles?: string[],
     isPosActiveOnDay?: PositionActiveOnDayFn,
+    customFeriados?: ReadonlySet<string>,
 ): DayCoverageGapReport {
     const checkActive = isPosActiveOnDay ?? ((pos, letter, ds) => {
         const days = pos.activeDays;
@@ -277,6 +279,8 @@ export function analyzeDayCoverageGaps(
             cycles,
             true,
             dateStr,
+            undefined,
+            customFeriados,
         );
         closed += units.closed;
         required += units.required;
@@ -288,6 +292,7 @@ export function analyzeDayCoverageGaps(
             cycles,
             true,
             dateStr,
+            customFeriados,
         );
         if (gap) positionGaps.push(gap);
     }
@@ -308,6 +313,7 @@ export function analyzeObjectiveCoverageGaps(
     codeCountsByDay: Record<string, Record<string, Record<string, number>>>,
     cycles?: string[],
     isPosActiveOnDay?: PositionActiveOnDayFn,
+    customFeriados?: ReadonlySet<string>,
 ): ObjectiveCoverageGapReport {
     const byDay: Record<string, DayCoverageGapReport> = {};
     const aggregateMissingPrimary: Record<string, number> = {};
@@ -325,6 +331,7 @@ export function analyzeObjectiveCoverageGaps(
             codeCountsByDay[dateStr] || {},
             cycles,
             isPosActiveOnDay,
+            customFeriados,
         );
         byDay[dateStr] = dayReport;
         closed += dayReport.closed;

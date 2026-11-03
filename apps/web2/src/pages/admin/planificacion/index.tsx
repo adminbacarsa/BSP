@@ -2646,8 +2646,6 @@ function PlanificacionDesktop() {
                 })
                 .filter(Boolean);
             const s = new Set(dates);
-            console.log('[feriados-diag] todos docs:', snap.docs.map(d => ({ id: d.id, date: d.data().date, emp: d.data().empresaId })));
-            console.log('[feriados-diag] Set resultante:', [...s]);
             setFeriadosCustomSet(s);
             _feriadosCustomRef = s;
         });
@@ -5923,6 +5921,7 @@ function PlanificacionDesktop() {
             codeCountsByDay,
             coverageCyclesForObjective,
             isPosActiveOnDay,
+            _feriadosCustomRef,
         );
     }), [selectedObjective, positionStructure, daysInMonth, dotacionBaseEmployees, pendingChanges, shiftsMap, coverageCyclesForObjective, dominantPosition, feriadosCustomSet]);
 

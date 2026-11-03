@@ -713,12 +713,13 @@ function paxPropio(s: { quantity?: number }): number | null {
     return Number.isFinite(n) ? n : null;
 }
 
-function franjaCorreEsteDia(s: FranjaCobertura, dayLetter?: string, dateStr?: string): boolean {
+function franjaCorreEsteDia(s: FranjaCobertura, dayLetter?: string, dateStr?: string, customFeriados?: ReadonlySet<string>): boolean {
     const sd = s.specificDates;
     if (Array.isArray(sd) && sd.length > 0) return !!dateStr && sd.includes(dateStr);
     const days = s.days;
     if (Array.isArray(days) && days.length > 0) {
         if (dayLetter && days.includes(dayLetter)) return true;
+        if (s.feriados === true && dateStr && customFeriados?.has(dateStr)) return true;
         return correFeriado(s, dateStr);
     }
     return true;
@@ -728,7 +729,7 @@ function bandasExplicitas(
     allShifts: FranjaCobertura[],
     effectiveBandQty: (code: string, shiftQty?: number) => number,
     fullSkip: Set<string>,
-    opts?: { custom?: boolean; posQty?: number; dayLetter?: string; dateStr?: string },
+    opts?: { custom?: boolean; posQty?: number; dayLetter?: string; dateStr?: string; customFeriados?: ReadonlySet<string> },
 ): BandaPedida[] {
     const custom = opts?.custom === true;
     const posQty = Math.max(0, Math.floor(Number(opts?.posQty) || 0));
@@ -739,7 +740,7 @@ function bandasExplicitas(
     const explicitas = allShifts.filter((s) => {
         const code = String(s.code || '').toUpperCase();
         if (!code || fullSkip.has(code)) return false;
-        if (custom && !franjaCorreEsteDia(s, opts?.dayLetter, opts?.dateStr)) return false;
+        if (custom && !franjaCorreEsteDia(s, opts?.dayLetter, opts?.dateStr, opts?.customFeriados)) return false;
         const propia = paxPropio(s);
         if (custom && algunaExplicita) return (propia ?? posQty) > 0;
         return propia != null && propia > 0;
@@ -1115,6 +1116,7 @@ export function countPositionClosedUnitsFromShifts(
     isActiveOnDay = true,
     dateStr?: string,
     turnos?: TurnoRelojCobertura[],
+    customFeriados?: ReadonlySet<string>,
 ): PositionCoverageUnitResult {
     const qty = Math.max(1, Number(pos.qty) || 1);
     const schemeLabel = positionSchemeLabelForDay(pos, dayLetter, cycles, dateStr);
@@ -1160,6 +1162,7 @@ export function countPositionClosedUnitsFromShifts(
         posQty: qty,
         dayLetter,
         dateStr,
+        customFeriados,
     });
     if (pedidas.length > 0) {
         return cerrarPorCantidadDeBanda(String(pos.positionName || 'General'), schemeLabel, pedidas, codeCounts, turnos);
