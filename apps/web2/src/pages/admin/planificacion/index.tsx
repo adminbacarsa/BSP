@@ -34,6 +34,7 @@ import { eventoService, eventosParaFecha, serviciosParaFecha, calcHorasEvento, t
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { collection, onSnapshot, addDoc, deleteDoc, doc, query, orderBy, limit, serverTimestamp, Timestamp, where, getDocs, getDoc, updateDoc, writeBatch, setDoc, deleteField } from 'firebase/firestore';
 import { correFeriado } from '@/lib/servicios/turnoFeriados';
+import { isArgentineHoliday } from '@/lib/servicios/slaHoursCalculator';
 
 type PlanificacionDotacionEntry = { positionName: string; shiftCode?: string };
 type PlanificacionDotacionMap = Record<string, PlanificacionDotacionEntry>;
@@ -2049,6 +2050,7 @@ function PlanificacionDesktop() {
     const [selectedClient, setSelectedClient] = useState('');
     const [selectedObjective, setSelectedObjective] = useState('');
     const [forceShowAll, setForceShowAll] = useState(false);
+    const [feriadosCustomSet, setFeriadosCustomSet] = useState<Set<string>>(new Set());
     const [dotacionPoolReady, setDotacionPoolReady] = useState(false);
     const [showVolantes, setShowVolantes] = useState(false);
     const [volanteBusqueda, setVolanteBusqueda] = useState('');
@@ -2622,6 +2624,17 @@ function PlanificacionDesktop() {
             return next;
         });
     };
+    useEffect(() => {
+        const q = query(collection(db, 'feriados'), orderBy('date', 'asc'));
+        return onSnapshot(q, (snap) => {
+            const dates = snap.docs
+                .filter((d) => { const e = String(d.data().empresaId ?? '').trim(); return !e || e === empresaId; })
+                .map((d) => String(d.data().date || '').slice(0, 10))
+                .filter(Boolean);
+            setFeriadosCustomSet(new Set(dates));
+        });
+    }, [empresaId]);
+
     useEffect(() => {
         if (!empresaId) return;
         const q = empresaCollectionQuery('tipos_novedad', empresaId, scopeEmpresa);
@@ -16477,7 +16490,10 @@ function PlanificacionDesktop() {
     const turnoValeEnFecha = (st: any, ds: string) => {
         if (!ds) return true;
         if (Array.isArray(st?.specificDates) && st.specificDates.length) return st.specificDates.includes(ds);
-        if (Array.isArray(st?.days) && st.days.length) return st.days.includes(getDayLetter(ds)) || correFeriado(st, ds);
+        if (Array.isArray(st?.days) && st.days.length) {
+            const esFeriado = isArgentineHoliday(ds) || feriadosCustomSet.has(ds);
+            return st.days.includes(getDayLetter(ds)) || ((st as any)?.feriados === true && esFeriado);
+        }
         return true;
     };
     const opcionesRapido = (r: number, c: number, puestoElegido?: string) => {
