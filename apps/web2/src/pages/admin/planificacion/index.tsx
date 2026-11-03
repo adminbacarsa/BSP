@@ -2634,7 +2634,16 @@ function PlanificacionDesktop() {
         return onSnapshot(q, (snap) => {
             const dates = snap.docs
                 .filter((d) => { const e = String(d.data().empresaId ?? '').trim(); return !e || e === empresaId; })
-                .map((d) => String(d.data().date || '').slice(0, 10))
+                .map((d) => {
+                    const raw = d.data().date;
+                    if (raw && typeof raw === 'object' && typeof (raw as any).toDate === 'function') {
+                        return (raw as any).toDate().toISOString().slice(0, 10);
+                    }
+                    const s = String(raw || '');
+                    const ddmm = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+                    if (ddmm) return `${ddmm[3]}-${ddmm[2].padStart(2, '0')}-${ddmm[1].padStart(2, '0')}`;
+                    return s.slice(0, 10);
+                })
                 .filter(Boolean);
             const s = new Set(dates);
             setFeriadosCustomSet(s);
@@ -5885,14 +5894,14 @@ function PlanificacionDesktop() {
             const dateStr = getDateKey(day);
             return { dateStr, dayLetter: getDayLetter(dateStr) };
         });
-        const firmaEstructura = `${selectedObjective}\0${dotacionBaseEmployees.map((e: any) => e.id).join(',')}\0${days.map((d) => d.dateStr).join(',')}\0${String(dominantPosition?.positionName || '')}\0${positionStructure.length}`;
+        const firmaEstructura = `${selectedObjective}\0${dotacionBaseEmployees.map((e: any) => e.id).join(',')}\0${days.map((d) => d.dateStr).join(',')}\0${String(dominantPosition?.positionName || '')}\0${positionStructure.length}\0f${feriadosCustomSet.size}`;
         if (gapDiaFirmaRef.current !== firmaEstructura) {
             gapDiaFirmaRef.current = firmaEstructura;
             gapDiaCacheRef.current = new Map();
         }
         const codeCountsByDay: Record<string, Record<string, Record<string, number>>> = {};
         for (const { dateStr } of days) {
-            const refs: unknown[] = [creditosDelMes[dateStr], positionStructure, coverageCyclesForObjective];
+            const refs: unknown[] = [creditosDelMes[dateStr], positionStructure, coverageCyclesForObjective, feriadosCustomSet];
             for (const emp of dotacionBaseEmployees) {
                 const key = `${emp.id}_${dateStr}`;
                 refs.push(pendingChanges[key], shiftsMap[key]);
@@ -5932,7 +5941,7 @@ function PlanificacionDesktop() {
             shifts: p.shifts,
         }));
         if (!selectedObjective || !puestos.length) return { porDia, sobraPorDia, faltantes, avisos, facturableCliente: 0, vendidasReloj: 0, turaHoras: 0, extEnHuecoHoras: 0 };
-        const firmaLectura = `${selectedObjective}|${exigeCoberturaGrilla ? 1 : 0}|${dotacionBaseEmployees.map((e: any) => e.id).join('|')}|${daysInMonth.length}|${positionStructure.length}`;
+        const firmaLectura = `${selectedObjective}|${exigeCoberturaGrilla ? 1 : 0}|${dotacionBaseEmployees.map((e: any) => e.id).join('|')}|${daysInMonth.length}|${positionStructure.length}|f${feriadosCustomSet.size}`;
         if (lecturaDiaFirmaRef.current !== firmaLectura) {
             lecturaDiaFirmaRef.current = firmaLectura;
             lecturaDiaCacheRef.current = new Map();
@@ -5950,6 +5959,7 @@ function PlanificacionDesktop() {
                 const isoT = String(filaT.startTime || '').slice(0, 10);
                 if (fechaT === dateStr || isoT === dateStr) refsDia.push(tura);
             }
+            refsDia.push(feriadosCustomSet);
             const horasDiaNum = dotacionBaseEmployees.map((emp: any) => Number(empMonthlyHours[emp.id]) || 0);
             const prevDia = lecturaDiaCacheRef.current.get(dateStr);
             if (prevDia && mismosRefs(prevDia.refs, refsDia)) {
