@@ -5913,7 +5913,7 @@ function PlanificacionDesktop() {
             coverageCyclesForObjective,
             isPosActiveOnDay,
         );
-    }), [selectedObjective, positionStructure, daysInMonth, dotacionBaseEmployees, pendingChanges, shiftsMap, coverageCyclesForObjective, dominantPosition]);
+    }), [selectedObjective, positionStructure, daysInMonth, dotacionBaseEmployees, pendingChanges, shiftsMap, coverageCyclesForObjective, dominantPosition, feriadosCustomSet]);
 
     const lecturaMes = useMemo(() => medirSeccion('cobertura', () => {
         const porDia: Record<string, ReturnType<typeof leerDia> & { cerradoPorHoras?: boolean; textoHoras?: string; extEntre?: ReturnType<typeof acreditarExtEntrePuestos> }> = {};
@@ -6158,7 +6158,7 @@ function PlanificacionDesktop() {
             });
         }
         return { porDia, sobraPorDia, faltantes, avisos, facturableCliente, vendidasReloj, turaHoras, extEnHuecoHoras };
-    }), [selectedObjective, positionStructure, daysInMonth, dotacionBaseEmployees, pendingChanges, shiftsMap, slaIdToObjId, absencesMap, empMonthlyHours, exigeCoberturaGrilla, turaMap, resolveNativeObjectiveInGrupo]);
+    }), [selectedObjective, positionStructure, daysInMonth, dotacionBaseEmployees, pendingChanges, shiftsMap, slaIdToObjId, absencesMap, empMonthlyHours, exigeCoberturaGrilla, turaMap, resolveNativeObjectiveInGrupo, feriadosCustomSet]);
 
     /** Días con huecos para publicar y el resumen: un día cerrado por horas (doble control) no cuenta. */
     const diasConHuecos = useMemo(() => {
@@ -6317,7 +6317,7 @@ function PlanificacionDesktop() {
             }
         }
         return { required, closed, required24, closed24, codeCountsCerrados };
-    }, [grupoSlaMap, dotacionBaseEmployees, pendingChanges, shiftsMap, absencesMap, resolveEffectiveShiftObjectiveId, resolveNativeObjectiveInGrupo, slaIdToObjId]);
+    }, [grupoSlaMap, dotacionBaseEmployees, pendingChanges, shiftsMap, absencesMap, resolveEffectiveShiftObjectiveId, resolveNativeObjectiveInGrupo, slaIdToObjId, feriadosCustomSet]);
 
     /** Misma cuenta, guardada hasta que cambian los turnos: la fila COBERTURA del grupo la pedía día × objetivo en cada render. */
     const grupoCoberturaCache = useMemo(
