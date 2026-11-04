@@ -221,7 +221,7 @@ export function canAssign(
 
   // ── REGLAS DE FRANCO ─────────────────────────────────────────────────────
   if (isFrancoCode) {
-    if (!streakQualifiesForFranco(state.streakWorkDays, state.streakHours)) {
+    if (state.consecutiveRestDays === 0 && !streakQualifiesForFranco(state.streakWorkDays, state.streakHours)) {
       violations.push({
         rule: 'franco_no_streak',
         severity: 'hard',
