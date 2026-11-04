@@ -45,10 +45,19 @@ export interface EmployeeMonthPattern {
    * Determinan cuánto margen queda en T1 del mes actual.
    */
   hoursCarriedOverT1: number;
+
+  /**
+   * Banda del tramo de trabajo inmediatamente ANTERIOR al trailing actual.
+   * null si no hay tramo previo identificable.
+   * Permite saber si el guardia "llegó" a su banda desde otra (reclamo débil)
+   * o si su historial es consistente con la banda actual (reclamo fuerte).
+   */
+  prevWorkBand: WorkBand | null;
 }
 
 /** Config del SLA para un empleado. */
 export interface SlaConfig {
+  empId?: string;
   rotation: string[];
   phase?: EmployeePhase;
 }
@@ -92,7 +101,7 @@ export function readMonthPattern(
 ): EmployeeMonthPattern {
   const cutoff = opts.cctCutoffDay ?? 25;
 
-  const empId = '';
+  const empId = slaConfig.empId ?? '';
 
   // ── 1. hoursCarriedOverT1: horas de trabajo en días > cutoff (tramo 26→fin) ──
   let hoursCarriedOverT1 = 0;
@@ -112,6 +121,7 @@ export function readMonthPattern(
 
   type ScanPhase = 'scanning_rest' | 'scanning_work' | 'done';
   let scanPhase: ScanPhase = 'scanning_rest';
+  let scanBreakIdx = -1;
 
   for (let i = assignments.length - 1; i >= 0; i--) {
     if (scanPhase === 'done') break;
@@ -136,9 +146,29 @@ export function readMonthPattern(
         lastWorkCode = a.shiftCode;
         lastWorkDateStr = a.dateStr;
       } else if (REST_CODES.has(code)) {
+        scanBreakIdx = i;
         scanPhase = 'done';
       }
       // NEUTRAL_CODES en medio de la racha: no interrumpe, no suma
+    }
+  }
+
+  // ── 2b. prevWorkBand: banda del tramo previo al trailing ───────────────────
+  let prevWorkBand: WorkBand | null = null;
+  if (trailingWorkDays > 0 && scanBreakIdx >= 0) {
+    let seenFranco = false;
+    for (let i = scanBreakIdx; i >= 0; i--) {
+      const code = assignments[i].shiftCode.toUpperCase();
+      if (REST_CODES.has(code)) {
+        seenFranco = true;
+      } else if (NEUTRAL_CODES.has(code)) {
+        // transparente
+      } else if (WORK_CODES.has(code)) {
+        if (seenFranco) {
+          const wb = toWorkBand(code);
+          if (wb !== null) { prevWorkBand = wb; break; }
+        }
+      }
     }
   }
 
@@ -163,5 +193,6 @@ export function readMonthPattern(
     lastWorkBand,
     rotation: slaConfig.rotation,
     hoursCarriedOverT1,
+    prevWorkBand,
   };
 }
