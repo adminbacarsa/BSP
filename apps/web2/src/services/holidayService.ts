@@ -62,10 +62,8 @@ export const holidayService = {
     return s.docs.map(d => ({ id: d.id, ...d.data() } as Holiday));
   },
 
-  add: async (data: Holiday, empresaId?: string) => {
-    const payload = empresaId && !data.empresaId
-      ? stampEmpresaId(data as Record<string, unknown>, empresaId)
-      : data;
+  add: async (data: Holiday, _empresaId?: string) => {
+    const { empresaId: _eid, ...payload } = data as any;
     return addDoc(collection(db, 'feriados'), payload);
   },
   

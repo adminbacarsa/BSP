@@ -1220,7 +1220,7 @@ export default function EmployeesPage() {
   };
   const openNew = () => { setForm(initialForm); setIsEditing(false); setView('form'); setSelectedEmp(null); setActiveFormTab('PERSONAL'); };
   const openEditFromDetail = () => { if (!selectedEmp) return; setForm({ ...initialForm, ...selectedEmp, id: selectedEmp.id }); setIsEditing(true); setView('form'); setSelectedEmp(null); setActiveFormTab('PERSONAL'); };
-  const handleSaveHoliday = async () => { if(!holidayForm.name) return; await holidayService.add(holidayForm, empresaId); await registrarAuditoria('CREATE_HOLIDAY', `Feriado: ${holidayForm.name}`); setHolidayForm({ date: '', name: '', type: 'Nacional' }); loadHolidays(); };
+  const handleSaveHoliday = async () => { if(!holidayForm.name) return; await holidayService.add(holidayForm); await registrarAuditoria('CREATE_HOLIDAY', `Feriado: ${holidayForm.name}`); setHolidayForm({ date: '', name: '', type: 'Nacional' }); loadHolidays(); };
   const handleDeleteHoliday = async (id: string) => { await holidayService.delete(id); await registrarAuditoria('DELETE_HOLIDAY', `Feriado ID: ${id}`); loadHolidays(); };
   const handleSyncHolidays = async () => {
     if (!String(empresaId ?? '').trim()) {

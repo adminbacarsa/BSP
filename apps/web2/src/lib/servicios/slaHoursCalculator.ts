@@ -169,7 +169,8 @@ export function computePositionDayComposition(
   // «+ feriados»: la franja corre el feriado aunque el puesto no tenga ese día de la semana (VFM domingos y feriados).
   const esFeriadoHoy = !!dateStr && (isArgentineHoliday(dateStr) || (customFeriados?.has(dateStr) ?? false));
   const correFeriadoHoy = esFeriadoHoy
-    && (pos.allowedShiftTypes || []).some((s) => (s as { feriados?: boolean }).feriados === true);
+    && ((pos as any).trabajaFeriados === true
+        || (pos.allowedShiftTypes || []).some((s) => (s as { feriados?: boolean }).feriados === true));
   if (!activeDays.includes(dayCode) && !correFeriadoHoy) return { dayTotal: 0, dayNight: 0 };
 
   const skip = skipShiftCodes instanceof Set
