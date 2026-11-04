@@ -13,6 +13,7 @@ import {
 
 import type { PlanningPositionLike, PositionActiveOnDayFn } from './objectiveCoverageDemand';
 import { correFeriado } from '@/lib/servicios/turnoFeriados';
+import { isArgentineHoliday } from '@/lib/servicios/slaHoursCalculator';
 
 export interface BandGap {
     code: string;
@@ -193,7 +194,12 @@ export function analyzePositionDayGap(
             : allShiftsForDay
                   .filter(s => {
                       if (Array.isArray((s as any).specificDates) && (s as any).specificDates.length > 0) {
-                          return dateStr ? (s as any).specificDates.includes(dateStr) : false;
+                          if (!dateStr) return false;
+                          if ((s as any).specificDates.includes(dateStr)) return true;
+                          if ((pos as any)?.trabajaFeriados === true) {
+                              return (customFeriados?.has(dateStr) ?? false) || isArgentineHoliday(dateStr);
+                          }
+                          return false;
                       }
                       if (Array.isArray((s as any).days) && (s as any).days.length > 0) {
                           return (s as any).days.includes(dayLetter) || correFeriado(s, dateStr, customFeriados);

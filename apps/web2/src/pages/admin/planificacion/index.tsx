@@ -1245,6 +1245,10 @@ let _feriadosCustomRef: Set<string> = new Set();
 
 const isPosActiveOnDay = (pos: any, dayLetter: string, dateStr?: string): boolean => {
     if (pos?.trabajaFeriados === false && dateStr && _feriadosCustomRef.has(dateStr)) return false;
+    if (dateStr && pos?.trabajaFeriados === true) {
+        const esFer = _feriadosCustomRef.has(dateStr) || isArgentineHoliday(dateStr);
+        if (esFer) return true;
+    }
     if (dateStr && _feriadosCustomRef.has(dateStr) && Array.isArray(pos?.shifts) && (pos.shifts as any[]).some((st: any) => st?.feriados === true)) return true;
     return positionIsActiveOn(posAsEngineDef(pos), dayLetter, dateStr);
 };

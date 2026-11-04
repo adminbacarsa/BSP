@@ -10,7 +10,7 @@ import { resolveTitularVacancyWorkShift } from './vacancyCoverage';
 import { paxBoostDeltaForDate } from '@/lib/servicios/paxBoostRanges';
 import { diaAcreditacionCobertura, sumarDiasCalendario } from './coberturaDiaHueco';
 import { correFeriado } from '@/lib/servicios/turnoFeriados';
-import { puestoSalteaFeriado } from '@/lib/servicios/slaHoursCalculator';
+import { isArgentineHoliday, puestoSalteaFeriado } from '@/lib/servicios/slaHoursCalculator';
 
 export const PLANNING_NON_BILLABLE_CODES = new Set([
     'F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET', 'REF', 'ESC', 'SUS', 'SGS', 'EV',
@@ -713,14 +713,22 @@ function paxPropio(s: { quantity?: number }): number | null {
     return Number.isFinite(n) ? n : null;
 }
 
-function franjaCorreEsteDia(s: FranjaCobertura, dayLetter?: string, dateStr?: string, customFeriados?: ReadonlySet<string>): boolean {
+function franjaCorreEsteDia(s: FranjaCobertura, dayLetter?: string, dateStr?: string, customFeriados?: ReadonlySet<string>, posTrabFeriados?: boolean): boolean {
     const sd = s.specificDates;
-    if (Array.isArray(sd) && sd.length > 0) return !!dateStr && sd.includes(dateStr);
+    if (Array.isArray(sd) && sd.length > 0) {
+        if (!dateStr) return false;
+        if (sd.includes(dateStr)) return true;
+        if (posTrabFeriados === true) {
+            const esFeriado = (customFeriados?.has(dateStr) ?? false) || isArgentineHoliday(dateStr);
+            if (esFeriado) return true;
+        }
+        return false;
+    }
     const days = s.days;
     if (Array.isArray(days) && days.length > 0) {
         if (dayLetter && days.includes(dayLetter)) return true;
         if (s.feriados === true && dateStr && customFeriados?.has(dateStr)) return true;
-        return correFeriado(s, dateStr);
+        return correFeriado(s, dateStr, customFeriados);
     }
     return true;
 }
@@ -729,7 +737,7 @@ function bandasExplicitas(
     allShifts: FranjaCobertura[],
     effectiveBandQty: (code: string, shiftQty?: number) => number,
     fullSkip: Set<string>,
-    opts?: { custom?: boolean; posQty?: number; dayLetter?: string; dateStr?: string; customFeriados?: ReadonlySet<string> },
+    opts?: { custom?: boolean; posQty?: number; dayLetter?: string; dateStr?: string; customFeriados?: ReadonlySet<string>; posTrabFeriados?: boolean },
 ): BandaPedida[] {
     const custom = opts?.custom === true;
     const posQty = Math.max(0, Math.floor(Number(opts?.posQty) || 0));
@@ -740,7 +748,7 @@ function bandasExplicitas(
     const explicitas = allShifts.filter((s) => {
         const code = String(s.code || '').toUpperCase();
         if (!code || fullSkip.has(code)) return false;
-        if (custom && !franjaCorreEsteDia(s, opts?.dayLetter, opts?.dateStr, opts?.customFeriados)) return false;
+        if (custom && !franjaCorreEsteDia(s, opts?.dayLetter, opts?.dateStr, opts?.customFeriados, opts?.posTrabFeriados)) return false;
         const propia = paxPropio(s);
         if (custom && algunaExplicita) return (propia ?? posQty) > 0;
         return propia != null && propia > 0;
@@ -1163,6 +1171,7 @@ export function countPositionClosedUnitsFromShifts(
         dayLetter,
         dateStr,
         customFeriados,
+        posTrabFeriados: (pos as any)?.trabajaFeriados === true,
     });
     if (pedidas.length > 0) {
         return cerrarPorCantidadDeBanda(String(pos.positionName || 'General'), schemeLabel, pedidas, codeCounts, turnos);
