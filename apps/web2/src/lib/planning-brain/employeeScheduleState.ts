@@ -108,6 +108,8 @@ export interface BuildInitialStateInput {
   lastDateStr: string | null;
   /** Última banda real trabajada. */
   lastWorkBand: WorkBand | null;
+  /** Horas trabajadas en la racha al cierre del mes anterior. Si no se conoce, se estima trailingWorkDays × 8. */
+  trailingWorkHours?: number;
   phase?: EmployeePhase;
   authorizedOver200?: boolean;
 }
@@ -124,7 +126,7 @@ export function buildInitialState(input: BuildInitialStateInput): EmployeeSchedu
     hoursT1: 0,
     hoursT2: 0,
     streakWorkDays: input.trailingWorkDays,
-    streakHours: 0,
+    streakHours: input.trailingWorkHours ?? input.trailingWorkDays * 8,
     consecutiveRestDays: input.trailingRestDays,
     currentBand: null,
     lastShiftEndISOCurrent: null,
