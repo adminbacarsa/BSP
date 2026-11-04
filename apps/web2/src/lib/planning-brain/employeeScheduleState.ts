@@ -68,6 +68,8 @@ const SHIFT_END_DEF: Record<string, { hour: number; nextDay: boolean }> = {
   N:   { hour:  7, nextDay: true  },   // 23:00–07:00 día siguiente
   D12: { hour: 19, nextDay: false },   // 07:00–19:00
   N12: { hour:  7, nextDay: true  },   // 19:00–07:00 día siguiente
+  EN:  { hour: 17, nextDay: false },   // Encubrimiento: 08:00–17:00
+  RO:  { hour: 18, nextDay: false },   // Rondín: 08:00–18:00
 };
 
 // ─── FUNCIONES ────────────────────────────────────────────────────────────────
