@@ -11,6 +11,7 @@ interface SlaShiftDateMultiSelectProps {
   onChange: (dates: string[]) => void;
   disabledDates?: Set<string>;
   maxHeightClass?: string;
+  customFeriados?: ReadonlySet<string>;
 }
 
 function monthKey(year: number, month: number): string {
@@ -24,6 +25,7 @@ export function SlaShiftDateMultiSelect({
   onChange,
   disabledDates,
   maxHeightClass = 'max-h-[280px]',
+  customFeriados,
 }: SlaShiftDateMultiSelectProps) {
   const months = useMemo(
     () => buildCalendarMonthsForService(serviceStartDate, serviceEndDate),
@@ -153,7 +155,7 @@ export function SlaShiftDateMultiSelect({
             }
             const selected = selectedSet.has(ds);
             const blocked = disabledDates?.has(ds);
-            const holiday = isArgentineHoliday(ds);
+            const holiday = isArgentineHoliday(ds) || (customFeriados?.has(ds) ?? false);
             const weekend = date.getDay() === 0 || date.getDay() === 6;
             return (
               <button

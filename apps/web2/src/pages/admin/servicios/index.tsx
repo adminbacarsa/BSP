@@ -5945,6 +5945,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                                 serviceEndDate={form.endDate}
                                                 selectedDates={newCustomShift.specificDates}
                                                 onChange={(dates) => setNewCustomShift((prev) => ({ ...prev, specificDates: dates }))}
+                                                customFeriados={feriadosCustomSet}
                                             />
                                             <div className="flex justify-end gap-1">
                                                 {editingShiftCode && <button onClick={cancelEditShift} className="bg-slate-200 text-slate-600 px-3 py-1.5 rounded-lg font-bold text-xs hover:bg-slate-300 flex items-center gap-1"><X size={12}/> Cancelar</button>}
