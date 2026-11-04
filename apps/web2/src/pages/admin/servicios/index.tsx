@@ -8,7 +8,7 @@ import { useToast } from '@/context/ToastContext';
 import { db, getDocsOnce } from '@/lib/firebase';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { FirebaseError } from 'firebase/app'; 
-import { collection, addDoc, serverTimestamp, query, orderBy, where, getDocs, getDoc, writeBatch, doc, Timestamp, limit, updateDoc } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, query, orderBy, where, getDocs, getDoc, writeBatch, doc, Timestamp, limit, updateDoc, onSnapshot } from 'firebase/firestore';
 import {
   Shield, Calendar, Users, Plus, Trash2, Edit2, Copy, Zap,
   Search, Save, X, MapPin, Briefcase, Table, Settings,
@@ -174,6 +174,26 @@ type SrvGroupItem = { key: string; clientName: string; objectiveName: string; se
 export default function ServiciosSLAPage() {
   const { addToast } = useToast();
   const { empresaId, empresa } = useEmpresa();
+  const [feriadosCustomSet, setFeriadosCustomSet] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    const q = query(collection(db, 'feriados'), orderBy('date', 'asc'));
+    return onSnapshot(q, (snap) => {
+        const dates = snap.docs
+            .filter((d) => { const e = String(d.data().empresaId ?? '').trim(); return !e || e === empresaId; })
+            .map((d) => {
+                const raw = d.data().date;
+                if (raw && typeof raw === 'object' && typeof (raw as any).toDate === 'function') {
+                    return (raw as any).toDate().toISOString().slice(0, 10);
+                }
+                const s = String(raw || '');
+                const ddmm = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+                if (ddmm) return `${ddmm[3]}-${ddmm[2].padStart(2, '0')}-${ddmm[1].padStart(2, '0')}`;
+                return s.slice(0, 10);
+            })
+            .filter(Boolean);
+        setFeriadosCustomSet(new Set(dates));
+    });
+  }, [empresaId]);
   const { isSuperAdmin, rolePermissions } = useAuth();
   const canDeleteService = isSuperAdmin || (rolePermissions['SERVICES'] || []).includes('delete');
   const canCreateService = isSuperAdmin || (rolePermissions['SERVICES'] || []).includes('create');
@@ -593,8 +613,8 @@ export default function ServiciosSLAPage() {
   };
 
   const monthlyBreakdown = useMemo(
-    () => calculateMonthlyBreakdown(form.positions, form.startDate, form.endDate, form.excludedDates),
-    [form.positions, form.startDate, form.endDate, form.excludedDates]
+    () => calculateMonthlyBreakdown(form.positions, form.startDate, form.endDate, form.excludedDates, feriadosCustomSet),
+    [form.positions, form.startDate, form.endDate, form.excludedDates, feriadosCustomSet]
   );
   const totalContractHours = useMemo(
     () => Math.round(monthlyBreakdown.reduce((acc, curr) => acc + curr.totalHours, 0)),
@@ -652,7 +672,7 @@ export default function ServiciosSLAPage() {
     services
       .filter(s => s.clientId === form.clientId && s.objectiveId === form.objectiveId && s.id !== form.id)
       .forEach(srv => {
-        calculateMonthlyBreakdown(srv.positions, srv.startDate, srv.endDate, srv.excludedDates).forEach((m) => {
+        calculateMonthlyBreakdown(srv.positions, srv.startDate, srv.endDate, srv.excludedDates, feriadosCustomSet).forEach((m) => {
           const sk = m.monthKey;
           if (!map[sk]) map[sk] = { ...m, isCurrent: false, sortKey: sk, serviceId: srv.id };
         });
@@ -670,7 +690,7 @@ export default function ServiciosSLAPage() {
   const serviceTotals = useMemo(() => {
     const map = new Map<string, number>();
     services.forEach((srv) => {
-      const breakdown = calculateMonthlyBreakdown(srv.positions, srv.startDate, srv.endDate, srv.excludedDates);
+      const breakdown = calculateMonthlyBreakdown(srv.positions, srv.startDate, srv.endDate, srv.excludedDates, feriadosCustomSet);
       const fromBreakdown = Math.round(breakdown.reduce((acc, curr) => acc + curr.totalHours, 0));
       const total = fromBreakdown > 0 ? fromBreakdown : Math.round(Number(srv.totalMonthlyHours) || 0);
       map.set(serviceSlaRowKey(srv), total);
@@ -2186,7 +2206,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
         // Guardias = suma de ceil(hs_mensuales_por_puesto / 200) — guardias en rotación reales
         (srv.positions || []).forEach(p => {
           if (isEncargadoPosition(p) || isEventosPosition(p)) return;
-          calculateMonthlyBreakdown([p], srv.startDate, srv.endDate, srv.excludedDates).forEach((mb) => {
+          calculateMonthlyBreakdown([p], srv.startDate, srv.endDate, srv.excludedDates, feriadosCustomSet).forEach((mb) => {
             if (mb.monthKey === sk) {
               const pax = p.quantity || 1;
               const minRot = p.coverageType === '24hs' ? pax * 2 : pax;
@@ -2194,7 +2214,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
             }
           });
         });
-        calculateMonthlyBreakdown(srv.positions, srv.startDate, srv.endDate, srv.excludedDates).forEach((mb) => {
+        calculateMonthlyBreakdown(srv.positions, srv.startDate, srv.endDate, srv.excludedDates, feriadosCustomSet).forEach((mb) => {
           if (mb.monthKey === sk) hours += mb.totalHours;
         });
       });
@@ -2236,7 +2256,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
       active++;
       positions += (srv.positions || []).length;
       (srv.positions || []).forEach((p) => {
-        calculateMonthlyBreakdown([p], srv.startDate, srv.endDate, srv.excludedDates).forEach((mb) => {
+        calculateMonthlyBreakdown([p], srv.startDate, srv.endDate, srv.excludedDates, feriadosCustomSet).forEach((mb) => {
           if (mb.monthKey === sk) {
             const pax = p.quantity || 1;
             const minRot = p.coverageType === '24hs' ? pax * 2 : pax;
@@ -2244,7 +2264,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
           }
         });
       });
-      calculateMonthlyBreakdown(srv.positions, srv.startDate, srv.endDate, srv.excludedDates).forEach((mb) => {
+      calculateMonthlyBreakdown(srv.positions, srv.startDate, srv.endDate, srv.excludedDates, feriadosCustomSet).forEach((mb) => {
         if (mb.monthKey === sk) hours += mb.totalHours;
       });
     });
@@ -2314,7 +2334,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
       if (sStart > mEnd || sEnd < mStart) return 0;
       const sk = `${y}-${String(m + 1).padStart(2, '0')}`;
       let hours = 0;
-      calculateMonthlyBreakdown(srv.positions, srv.startDate, srv.endDate, srv.excludedDates).forEach((mb) => {
+      calculateMonthlyBreakdown(srv.positions, srv.startDate, srv.endDate, srv.excludedDates, feriadosCustomSet).forEach((mb) => {
         if (mb.monthKey === sk) hours += mb.totalHours;
       });
       return Math.round(hours);
@@ -2326,7 +2346,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
     (srv: ServiceSLA & { id: string }) => {
       const kpiH = getServiceHoursForKpiMonth(srv);
       if (kpiH > 0) return { sla: kpiH, note: null as string | null };
-      const bd = calculateMonthlyBreakdown(srv.positions, srv.startDate, srv.endDate, srv.excludedDates);
+      const bd = calculateMonthlyBreakdown(srv.positions, srv.startDate, srv.endDate, srv.excludedDates, feriadosCustomSet);
       if (!bd.length) {
         const stored = Math.round(Number(srv.totalMonthlyHours) || 0);
         if (stored > 0) {
@@ -3327,7 +3347,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                 {/* Análisis Operativo */}
                 {srv.positions.length > 0 && (() => {
                   const viabilityBase = srv.positions.map(pos => {
-                    const bd = calculateMonthlyBreakdown([pos], srv.startDate, srv.endDate, srv.excludedDates);
+                    const bd = calculateMonthlyBreakdown([pos], srv.startDate, srv.endDate, srv.excludedDates, feriadosCustomSet);
                     const avgH = bd.length > 0 ? bd.reduce((a, m) => a + m.totalHours, 0) / bd.length : 0;
                     return { pos, avgH: Math.round(avgH) };
                   });
@@ -6055,7 +6075,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                     )}
                     {/* Estimación de guardias en rotación */}
                     {positionForm.coverageType !== 'encargado' && positionForm.coverageType !== 'eventos' && positionForm.allowedShiftTypes.length > 0 && (() => {
-                      const bd = calculateMonthlyBreakdown([positionForm], form.startDate, form.endDate);
+                      const bd = calculateMonthlyBreakdown([positionForm], form.startDate, form.endDate, undefined, feriadosCustomSet);
                       const avgH = bd.length > 0 ? bd.reduce((a, m) => a + m.totalHours, 0) / bd.length : 0;
                       const _pax = positionForm.quantity || 1;
                       const _minRot = positionForm.coverageType === '24hs' ? _pax * 2 : _pax;
