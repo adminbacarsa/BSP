@@ -509,6 +509,11 @@ service cloud.firestore {
       );
     }
 
+    match /empresas/{empresaId}/config/{configId} {
+      allow read: if isAdmin() && (isSuperAdmin() || empresaId == userEmpresaId());
+      allow write: if isAdmin() && (isSuperAdmin() || empresaId == userEmpresaId());
+    }
+
     // PEM AFIP: solo Cloud Functions (Admin SDK). Metadatos públicos en empresas.{afipConfigured,...}
     match /empresa_afip_credentials/{empresaId} {
       allow read, write: if false;
@@ -1140,5 +1145,6 @@ service cloud.firestore {
     match /dashboard_snapshots/{empresaId} {
       allow read, write: if false;
     }
+
   }
 }

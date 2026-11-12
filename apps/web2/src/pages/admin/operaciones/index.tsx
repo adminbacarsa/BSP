@@ -3966,6 +3966,7 @@ export default function OperacionesPage() {
                                     </span>
                                 )}
                                 {isExternalMap && <button onClick={handleRestoreMap} className="px-2 py-1 bg-indigo-50 text-indigo-700 font-bold text-[9px] rounded-lg border">Restaurar</button>}
+                                <button onClick={() => void router.push('/admin/operaciones/modo-rapido')} title="Modo Rápido — CC con WhatsApp" className="px-2 py-1 bg-emerald-500 text-white font-bold text-[10px] rounded-lg border border-emerald-600 hover:bg-emerald-600 transition-colors flex items-center gap-1"><Zap size={11}/>CC Rápido</button>
                                 {isSuperAdmin && <button onClick={() => setShowDebugPanel(true)} title="Panel de diagnóstico" className="px-2 py-1 bg-amber-50 text-amber-700 font-bold text-[9px] rounded-lg border border-amber-200 hover:bg-amber-100 transition-colors">🔍 Debug</button>}
                                 <button onClick={() => logic.setIsCompact(!logic.isCompact)} aria-label={logic.isCompact ? 'Expandir panel' : 'Compactar panel'} className="p-1 bg-slate-100 rounded-lg text-slate-600">{logic.isCompact ? <Maximize2 size={12} aria-hidden="true"/> : <Minimize2 size={12} aria-hidden="true"/>}</button>
                             </div>
