@@ -1,0 +1,2332 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CC Modo Rápido</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;500;600;700&display=swap">
+
+<style>
+:root {
+  --bg:    #0d1117; --s1: #161b22; --s2: #1c2129; --s3: #21262d;
+  --b1:    #30363d; --b2: #3d444d;
+  --fg:    #e6edf3; --f2: #8b949e; --f3: #6e7681;
+  --red:   #f85149; --ora: #fb8f44; --yel: #d29922;
+  --grn:   #3fb950; --blu: #58a6ff; --pur: #bc8cff;
+  --mono:  'IBM Plex Mono', monospace;
+  --sans:  'Inter', system-ui, sans-serif;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) {
+  --bg:#f0f2f5; --s1:#fff; --s2:#f6f8fa; --s3:#eaeef2;
+  --b1:#d0d7de; --b2:#c6cdd5; --fg:#1f2328; --f2:#59636e; --f3:#9198a1;
+  color-scheme: light;
+}}
+:root[data-theme="light"] {
+  --bg:#f0f2f5; --s1:#fff; --s2:#f6f8fa; --s3:#eaeef2;
+  --b1:#d0d7de; --b2:#c6cdd5; --fg:#1f2328; --f2:#59636e; --f3:#9198a1;
+  color-scheme: light;
+}
+
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:var(--bg); color:var(--fg); font-family:var(--sans);
+  font-size:13px; display:flex; flex-direction:column; height:100%;
+  overflow:hidden;
+  padding-left:max(0px,env(safe-area-inset-left,0px));
+  padding-right:max(0px,env(safe-area-inset-right,0px));
+}
+
+/* ── HEADER ─────────────────────────────────────────── */
+.hdr{
+  flex-shrink:0; background:var(--s1); border-bottom:1px solid var(--b1);
+  display:flex; align-items:center; gap:8px; height:46px;
+  padding:0 max(16px,env(safe-area-inset-left,16px));
+}
+.logo{
+  font-family:var(--mono); font-size:11px; font-weight:600; color:var(--blu);
+  letter-spacing:.06em;
+  background:color-mix(in srgb,var(--blu) 10%,transparent);
+  border:1px solid color-mix(in srgb,var(--blu) 22%,transparent);
+  border-radius:6px; padding:3px 8px; flex-shrink:0;
+}
+.view-seg{
+  display:flex; background:var(--s3); border:1px solid var(--b1);
+  border-radius:7px; overflow:hidden; flex-shrink:0;
+}
+.vbtn{
+  font-family:var(--sans); font-size:11px; font-weight:600; padding:4px 10px;
+  border:none; background:transparent; color:var(--f2); cursor:pointer;
+}
+.vbtn.on{background:var(--blu);color:#fff;}
+.srch{
+  flex:1; min-width:0; max-width:300px;
+  display:flex; align-items:center; gap:6px;
+  background:var(--s3); border:1px solid var(--b1); border-radius:7px;
+  padding:0 10px;
+}
+.srch input{
+  flex:1; min-width:0; background:transparent; border:none;
+  color:var(--fg); font-size:12px; outline:none; font-family:var(--sans);
+}
+.srch input::placeholder{color:var(--f3);}
+.hclock{
+  font-family:var(--mono); font-size:14px; font-weight:600; letter-spacing:.04em;
+  color:var(--fg); margin-left:auto; flex-shrink:0;
+}
+.hbtn{
+  flex-shrink:0; border:1px solid var(--b1); background:var(--s3); color:var(--f2);
+  border-radius:7px; padding:4px 10px; font-size:11px; font-weight:600;
+  cursor:pointer; font-family:var(--sans);
+}
+
+/* ── STAT CHIPS ──────────────────────────────────────── */
+.stats{
+  flex-shrink:0; background:var(--s2); border-bottom:1px solid var(--b1);
+  display:flex; align-items:center; gap:5px; overflow-x:auto; scrollbar-width:none;
+  padding:6px max(16px,env(safe-area-inset-left,16px));
+}
+.stats::-webkit-scrollbar{display:none}
+.chip{
+  display:inline-flex; align-items:center; gap:4px; font-size:11px; font-weight:700;
+  padding:3px 9px; border-radius:20px; border:1.5px solid; white-space:nowrap;
+  cursor:pointer; flex-shrink:0; transition:opacity .12s;
+}
+.chip:hover{opacity:.75}
+.chip.all{color:var(--f2);border-color:var(--b1)}
+.chip.all.on{color:var(--fg);border-color:var(--b2);background:var(--s3)}
+.chip.c{color:var(--red);border-color:var(--red);background:color-mix(in srgb,var(--red) 9%,transparent)}
+.chip.u{color:var(--ora);border-color:var(--ora);background:color-mix(in srgb,var(--ora) 9%,transparent)}
+.chip.a{color:var(--yel);border-color:var(--yel);background:color-mix(in srgb,var(--yel) 9%,transparent)}
+.chip.g{color:var(--grn);border-color:var(--grn);background:color-mix(in srgb,var(--grn) 9%,transparent)}
+.chip .dot{width:5px;height:5px;border-radius:50%;background:currentColor}
+.sep{width:1px;height:16px;background:var(--b1);flex-shrink:0}
+.bands{display:flex;background:var(--s3);border:1px solid var(--b1);border-radius:6px;overflow:hidden;flex-shrink:0}
+.bb{font-size:11px;font-weight:700;padding:3px 8px;border:none;background:transparent;color:var(--f2);cursor:pointer;font-family:var(--mono)}
+.bb.on{background:var(--s2);color:var(--fg)}
+
+/* ── TABLE HEADER (sticky) ───────────────────────────── */
+.tbl-wrap{
+  flex:1; overflow-y:auto; overflow-x:hidden;
+}
+.tbl-hdr{
+  position:sticky; top:0; z-index:10;
+  display:grid;
+  grid-template-columns: 3px 220px 90px 68px 72px 54px 88px 1fr;
+  gap:0 6px; align-items:center;
+  background:var(--s2); border-bottom:2px solid var(--b1);
+  padding:5px 16px 5px 0;
+  font-size:10px; font-weight:700; color:var(--f3); letter-spacing:.07em; text-transform:uppercase;
+}
+.tbl-hdr span:first-child{visibility:hidden}
+
+/* ── GROUP ───────────────────────────────────────────── */
+.grp{margin:0;}
+.grp-hdr{
+  display:flex; align-items:center; gap:8px;
+  padding:7px 16px 7px 10px;
+  background:var(--s2); border-bottom:1px solid var(--b1);
+  border-top:1px solid var(--b1);
+  cursor:pointer; user-select:none;
+}
+.grp-hdr:hover{background:var(--s3)}
+.grp-name{font-weight:700;font-size:12px;color:var(--fg);flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.grp-badges{display:flex;gap:4px;flex-shrink:0}
+.gbadge{font-size:9px;font-weight:800;padding:2px 5px;border-radius:4px;letter-spacing:.05em}
+.gbadge.c{background:color-mix(in srgb,var(--red) 15%,transparent);color:var(--red)}
+.gbadge.u{background:color-mix(in srgb,var(--ora) 15%,transparent);color:var(--ora)}
+.grp-cnt{font-size:11px;color:var(--f3);flex-shrink:0}
+.chev{font-size:10px;color:var(--f3);transition:transform .18s;flex-shrink:0}
+.grp.coll .chev{transform:rotate(-90deg)}
+.grp.coll .grp-rows{display:none}
+
+/* ── GUARD ROW ───────────────────────────────────────── */
+.row{
+  display:grid;
+  grid-template-columns: 3px 220px 90px 68px 72px 54px 88px 1fr;
+  gap:0 6px; align-items:center;
+  height:42px; padding-right:12px;
+  border-bottom:1px solid var(--b1);
+  cursor:pointer; transition:background .08s;
+  position:relative;
+}
+.row:last-child{border-bottom:none}
+.row:hover{background:color-mix(in srgb,var(--blu) 4%,transparent)}
+.row.sel{background:color-mix(in srgb,var(--blu) 7%,transparent);outline:none}
+.row:focus{outline:none}
+
+/* left priority bar */
+.rbar{height:100%;width:3px}
+.row.c .rbar{background:var(--red)}
+.row.u .rbar{background:var(--ora)}
+.row.a .rbar{background:var(--yel)}
+.row.g .rbar{background:var(--grn)}
+.row.i .rbar{background:transparent}
+
+/* name + site stacked */
+.rname-cell{display:flex;flex-direction:column;justify-content:center;gap:1px;min-width:0;padding-left:8px}
+.rname{font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--fg)}
+.rsite{font-size:10px;color:var(--f3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* shift */
+.rshift{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--f2);white-space:nowrap}
+
+/* time cells */
+.rtime{font-family:var(--mono);font-size:12px;font-weight:600;color:var(--fg);text-align:center}
+.rtime.na{color:var(--f3)}
+
+/* editable time — plain text, opens picker on click */
+.tedit{
+  font-family:var(--mono); font-size:12px; font-weight:600;
+  background:var(--s3); border:1px solid var(--b1);
+  border-radius:5px; color:var(--fg); padding:3px 0; width:66px;
+  text-align:center; cursor:text;
+  /* hide the native clock icon */
+  -webkit-appearance:none;
+}
+.tedit::-webkit-calendar-picker-indicator{display:none!important}
+.tedit::-webkit-inner-spin-button{display:none}
+.tedit:focus{outline:none;border-color:var(--blu);background:var(--s1)}
+
+/* diff */
+.rdiff{font-family:var(--mono);font-size:11px;font-weight:700;text-align:center;white-space:nowrap}
+.rdiff.neg{color:var(--red)}
+.rdiff.pos{color:var(--grn)}
+.rdiff.zero{color:var(--f3)}
+
+/* status pill */
+.stt{
+  font-size:9px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;
+  padding:2px 6px;border-radius:5px;text-align:center;white-space:nowrap;
+}
+.stt.c{background:color-mix(in srgb,var(--red) 15%,transparent);color:var(--red)}
+.stt.u{background:color-mix(in srgb,var(--ora) 15%,transparent);color:var(--ora)}
+.stt.a{background:color-mix(in srgb,var(--yel) 15%,transparent);color:var(--yel)}
+.stt.g{background:color-mix(in srgb,var(--grn) 15%,transparent);color:var(--grn)}
+.stt.i{background:color-mix(in srgb,var(--f3) 10%,transparent);color:var(--f3)}
+
+/* actions: 1 button + ••• */
+.racts{display:flex;gap:4px;align-items:center}
+.abtn{
+  font-size:11px;font-weight:700;padding:4px 10px;border-radius:6px;
+  border:1px solid transparent;cursor:pointer;white-space:nowrap;
+  font-family:var(--sans);transition:opacity .1s;
+}
+.abtn:hover{opacity:.8}
+.abtn.red{background:var(--red);color:#fff}
+.abtn.ora{background:var(--ora);color:#fff}
+.abtn.grn{background:var(--grn);color:#fff}
+.abtn.blu{background:var(--blu);color:#fff}
+.abtn.pur{background:var(--pur);color:#000}
+.abtn.gh{background:var(--s3);color:var(--f2);border-color:var(--b1)}
+.abtn.more{padding:4px 7px;font-size:13px;line-height:1}
+
+/* ── MODALS ──────────────────────────────────────────── */
+.ov{
+  position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:50;
+  display:flex;align-items:center;justify-content:center;padding:16px;
+}
+.ov[hidden]{display:none!important}
+.modal{
+  background:var(--s1);border:1.5px solid var(--b1);border-radius:14px;
+  padding:20px;width:100%;max-width:460px;
+  display:flex;flex-direction:column;gap:14px;
+  box-shadow:0 24px 72px rgba(0,0,0,.55);max-height:92vh;overflow-y:auto;
+}
+.modal.wide{max-width:520px}
+.mt{font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px}
+.ms{font-size:11px;color:var(--f2);margin-top:-8px}
+.mbtn{
+  font-family:var(--sans);font-size:12px;font-weight:700;
+  padding:8px 14px;border-radius:8px;border:none;cursor:pointer;
+  display:inline-flex;align-items:center;gap:5px;justify-content:center;
+  transition:opacity .12s;
+}
+.mbtn:hover{opacity:.85}
+.mbtn.red{background:var(--red);color:#fff}
+.mbtn.ora{background:var(--ora);color:#fff}
+.mbtn.grn{background:var(--grn);color:#fff}
+.mbtn.blu{background:var(--blu);color:#fff}
+.mbtn.pur{background:var(--pur);color:#000}
+.mbtn.gh{background:var(--s3);color:var(--fg);border:1px solid var(--b1)}
+.mbtn.full{flex:1;min-width:120px}
+.mrow{display:flex;gap:6px;flex-wrap:wrap}
+.igrid{display:flex;gap:5px;flex-wrap:wrap}
+.ip{background:var(--s3);border:1px solid var(--b1);border-radius:6px;padding:3px 8px;font-size:11px;color:var(--f2)}
+.ip strong{color:var(--fg);font-weight:700}
+.trow{
+  display:flex;align-items:center;gap:8px;
+  background:var(--s2);border:1px solid var(--b1);border-radius:8px;padding:8px 12px;
+}
+.trow label{font-size:11px;font-weight:600;color:var(--f2);min-width:120px}
+.tfield{
+  font-family:var(--mono);font-size:14px;font-weight:600;
+  background:var(--s1);border:1px solid var(--b1);border-radius:6px;
+  color:var(--fg);padding:4px 8px;width:82px;text-align:center;
+}
+.tfield::-webkit-calendar-picker-indicator{display:none!important}
+.tfield:focus{outline:none;border-color:var(--blu)}
+.tdiff{font-size:11px;font-weight:700;margin-left:auto}
+.tdiff.neg{color:var(--red)} .tdiff.pos{color:var(--grn)}
+.notice{
+  background:color-mix(in srgb,var(--yel) 7%,transparent);
+  border:1px solid color-mix(in srgb,var(--yel) 25%,transparent);
+  border-radius:8px;padding:8px 12px;font-size:11px;color:var(--f2);
+}
+.cand-list{border:1px solid var(--b1);border-radius:8px;overflow:hidden}
+.cand{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--b1)}
+.cand:last-child{border-bottom:none}
+.cavt{width:28px;height:28px;border-radius:50%;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0}
+.cinfo{flex:1;min-width:0}
+.cname{font-weight:700;font-size:12px}
+.cdet{font-size:10px;color:var(--f2)}
+.ceta{font-size:11px;font-weight:700;color:var(--yel);flex-shrink:0;margin-right:6px}
+
+/* exchange */
+.xsides{display:grid;grid-template-columns:1fr 28px 1fr;gap:8px;align-items:start}
+.xside{background:var(--s2);border:1.5px solid var(--b1);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:3px}
+.xside.sel{border-color:var(--blu)}
+.xlabel{font-size:9px;font-weight:800;letter-spacing:.08em;color:var(--f3);text-transform:uppercase}
+.xname{font-weight:700;font-size:13px}
+.xshift{font-size:11px;color:var(--f2)}
+.xarrow{font-size:18px;display:flex;align-items:center;padding-top:22px;justify-content:center;color:var(--f2)}
+.xsrch{
+  background:var(--s2);border:1px solid var(--b1);border-radius:8px;
+  padding:8px 12px;color:var(--fg);font-family:var(--sans);font-size:12px;width:100%;
+}
+.xsrch:focus{outline:none;border-color:var(--blu)}
+.compat{
+  background:color-mix(in srgb,var(--grn) 7%,transparent);
+  border:1px solid color-mix(in srgb,var(--grn) 25%,transparent);
+  border-radius:8px;padding:8px 12px;font-size:11px;color:var(--grn);font-weight:600;
+}
+.compat.warn{background:color-mix(in srgb,var(--yel) 7%,transparent);border-color:color-mix(in srgb,var(--yel) 25%,transparent);color:var(--yel)}
+
+/* absence opts */
+.olist{display:flex;flex-direction:column;gap:4px}
+.oitem{
+  display:flex;align-items:start;gap:10px;background:var(--s2);
+  border:1.5px solid var(--b1);border-radius:8px;padding:9px 12px;
+  cursor:pointer;transition:border-color .12s;
+}
+.oitem:hover{border-color:var(--b2)}
+.oitem.on{border-color:var(--blu);background:color-mix(in srgb,var(--blu) 5%,transparent)}
+.oitem input[type="radio"]{margin-top:2px;accent-color:var(--blu)}
+.otxt{flex:1}
+.otitle{font-weight:700;font-size:12px}
+.odesc{font-size:11px;color:var(--f2);margin-top:1px}
+
+/* ── LAYOUT DOS COLUMNAS ─────────────────────────────── */
+.app-body{
+  display:flex;flex-direction:row;flex:1;min-height:0;
+  overflow:hidden;
+}
+#main{flex:1;overflow-y:auto;min-width:0}
+
+/* ── SIDEBAR WA ──────────────────────────────────────── */
+.wa-sidebar{
+  width:300px;flex-shrink:0;
+  background:var(--s1);
+  border-left:1.5px solid color-mix(in srgb,#25d366 25%,var(--b1));
+  display:flex;flex-direction:column;overflow-x:hidden;overflow-y:auto;
+  transition:width .2s ease;
+  position:relative;
+}
+.wa-sidebar.sb-collapsed{width:44px;overflow:hidden}
+.wa-sidebar.sb-collapsed .wa-feed,
+.wa-sidebar.sb-collapsed .wa-sim-btn,
+.wa-sidebar.sb-collapsed #wa-log,
+.wa-sidebar.sb-collapsed #wa-conn-status,
+.wa-sidebar.sb-collapsed .wa-sb-title,
+.wa-sidebar.sb-collapsed .wa-sb-actions > .wa-sb-btn:not(#wa-collapse-btn){display:none}
+.wa-sidebar.sb-collapsed #wa-collapse-btn{transform:rotate(180deg)}
+.wa-sidebar.sb-collapsed .wa-sb-hdr{padding:10px 8px;justify-content:center}
+.wa-sb-hdr{
+  display:flex;align-items:center;gap:7px;padding:9px 12px;
+  background:color-mix(in srgb,#25d366 7%,var(--s2));
+  border-bottom:1px solid color-mix(in srgb,#25d366 20%,var(--b1));
+  flex-shrink:0;
+}
+.wa-sb-title{font-weight:700;font-size:12px;color:#25d366;flex:1;white-space:nowrap}
+.wa-sb-actions{display:flex;align-items:center;gap:2px;margin-left:auto}
+.wa-sb-btn{
+  background:transparent;border:none;cursor:pointer;
+  color:var(--f2);font-size:12px;padding:3px 5px;border-radius:4px;
+  transition:background .1s;
+}
+.wa-sb-btn:hover{background:var(--s3);color:var(--fg)}
+.wa-badge{
+  background:var(--red);color:#fff;border-radius:10px;
+  font-size:10px;font-weight:800;padding:1px 6px;min-width:18px;
+  text-align:center;flex-shrink:0;
+}
+.wa-feed{
+  flex:1;display:flex;flex-direction:column;gap:0;
+  overflow-y:auto;min-height:0;
+}
+.wa-msg{
+  display:flex;align-items:center;gap:10px;padding:8px 12px;
+  border-bottom:1px solid var(--b1);transition:background .08s;
+}
+.wa-msg:last-child{border-bottom:none}
+.wa-msg:hover{background:var(--s2)}
+.wa-photo{
+  width:38px;height:38px;border-radius:6px;object-fit:cover;
+  flex-shrink:0;background:var(--s3);display:flex;align-items:center;
+  justify-content:center;font-size:18px;overflow:hidden;border:1px solid var(--b1);
+}
+.wa-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.wa-name{font-weight:700;font-size:12px;color:var(--fg)}
+.wa-match{font-size:10px;color:var(--f2);display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+.wa-time{font-family:var(--mono);font-size:10px;color:var(--f3);flex-shrink:0}
+.wa-right{display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0}
+.wa-status{font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:.05em;white-space:nowrap}
+.wa-status.ok{background:color-mix(in srgb,#25d366 15%,transparent);color:#25d366}
+.wa-status.pend{background:color-mix(in srgb,var(--yel) 15%,transparent);color:var(--yel)}
+.wa-status.unk{background:color-mix(in srgb,var(--red) 12%,transparent);color:var(--red)}
+.wa-sim-btn{
+  width:100%;padding:7px;border:none;
+  background:color-mix(in srgb,#25d366 10%,transparent);
+  color:#25d366;font-size:11px;font-weight:700;cursor:pointer;
+  font-family:var(--sans);border-top:1px solid color-mix(in srgb,#25d366 20%,var(--b1));
+  transition:background .12s;flex-shrink:0;
+}
+.wa-sim-btn:hover{background:color-mix(in srgb,#25d366 16%,transparent)}
+.wa-empty{padding:14px;text-align:center;font-size:11px;color:var(--f3)}
+.wa-grp-chip{
+  padding:4px 10px;border-radius:12px;border:1.5px solid var(--b2);
+  background:var(--s3);color:var(--f2);font-size:11px;font-weight:600;
+  cursor:pointer;transition:all .12s;
+}
+.wa-grp-chip.on{border-color:#25d366;background:color-mix(in srgb,#25d366 15%,transparent);color:#25d366}
+
+/* log de confirmados */
+.wa-log-hdr{
+  display:flex;align-items:center;gap:5px;padding:5px 12px;
+  cursor:pointer;font-size:10px;color:var(--f3);user-select:none;
+  background:var(--s2);border-top:1px solid color-mix(in srgb,#25d366 12%,var(--b1));
+}
+.wa-log-hdr:hover{background:var(--s3)}
+.wa-log-cnt{
+  background:var(--grn);color:#fff;border-radius:8px;
+  padding:0 5px;font-size:9px;font-weight:700;line-height:1.6;
+}
+#wa-log-filter-wrap{padding:4px 10px;display:none;border-bottom:1px solid var(--b1)}
+#wa-log-filter{width:100%;background:var(--s3);border:1px solid var(--b1);border-radius:5px;
+  padding:3px 8px;font-size:11px;color:var(--fg);outline:none}
+#wa-log-more{display:none;margin:4px 10px 6px;width:calc(100% - 20px);font-size:10px;
+  background:var(--s3);border:1px solid var(--b1);border-radius:5px;color:var(--f2);
+  padding:3px 0;cursor:pointer;text-align:center}
+#wa-log-more:hover{background:var(--s2)}
+
+@media(max-width:700px){
+  .app-body{flex-direction:column}
+  .wa-sidebar{width:100%;border-left:none;border-top:1.5px solid color-mix(in srgb,#25d366 25%,var(--b1))}
+  .wa-sidebar.sb-collapsed{width:100%;height:40px}
+  .wa-sidebar.sb-collapsed .wa-sb-hdr{border-bottom:none}
+  #wa-collapse-btn{transform:rotate(90deg)}
+  .wa-sidebar.sb-collapsed #wa-collapse-btn{transform:rotate(-90deg)}
+}
+
+/* ── RET ROWS (special grid: nombre / zona / dist / horas / estado / acción) ── */
+.ret-row{
+  display:grid;
+  grid-template-columns: 3px 220px 90px 68px 72px 54px 88px 1fr;
+  gap:0 6px; align-items:center;
+  height:42px; padding-right:12px;
+  border-bottom:1px solid var(--b1);
+  cursor:pointer; transition:background .08s;
+}
+.ret-row:last-child{border-bottom:none}
+.ret-row:hover{background:color-mix(in srgb,var(--blu) 4%,transparent)}
+.ret-row.sel{background:color-mix(in srgb,var(--blu) 7%,transparent)}
+.ret-row:focus{outline:none}
+.ret-bar-g{background:var(--grn);height:100%;width:3px}
+.ret-bar-y{background:var(--yel);height:100%;width:3px}
+.ret-bar-b{background:var(--blu);height:100%;width:3px}
+.ret-bar-n{background:var(--f3);height:100%;width:3px}
+/* reuse .rname-cell, .rshift, .rdiff, .stt, .racts from guard rows */
+
+/* ── CONTEXT MENU ────────────────────────────────────── */
+.ctx{
+  position:fixed;background:var(--s1);border:1px solid var(--b2);
+  border-radius:10px;min-width:200px;z-index:100;
+  box-shadow:0 8px 32px rgba(0,0,0,.45);overflow:hidden;padding:4px 0;
+}
+.ctx[hidden]{display:none}
+.ci{
+  display:flex;align-items:center;gap:8px;padding:7px 14px;
+  font-size:12px;font-weight:500;color:var(--fg);cursor:pointer;
+  transition:background .08s;
+}
+.ci:hover{background:var(--s3)}
+.ci .ic{width:18px;text-align:center;flex-shrink:0}
+.ci .kk{margin-left:auto;font-family:var(--mono);font-size:9px;color:var(--f3)}
+.ci.red{color:var(--red)}
+.ctx-sep{height:1px;background:var(--b1);margin:4px 0}
+
+/* ── SHORTCUT TOAST ──────────────────────────────────── */
+.toast{
+  position:fixed;bottom:16px;left:50%;
+  transform:translateX(-50%) translateY(60px);
+  background:var(--s1);border:1.5px solid var(--b1);border-radius:10px;
+  padding:8px 16px;font-size:12px;font-weight:600;
+  display:flex;align-items:center;gap:6px;z-index:200;
+  transition:transform .2s cubic-bezier(.34,1.5,.64,1);
+  box-shadow:0 6px 24px rgba(0,0,0,.4);white-space:nowrap;
+}
+.toast.show{transform:translateX(-50%) translateY(0)}
+.toast.g{border-color:var(--grn)} .toast.b{border-color:var(--blu)}
+.toast.o{border-color:var(--ora)} .toast.p{border-color:var(--pur)}
+.toast.r{border-color:var(--red)}
+
+/* ── FOOTER SHORTCUTS ────────────────────────────────── */
+.foot{
+  flex-shrink:0;border-top:1px solid var(--b1);
+  background:var(--s2);
+  padding:5px max(16px,env(safe-area-inset-left,16px));
+  display:flex;gap:12px;flex-wrap:wrap;align-items:center;
+  font-size:10px;color:var(--f3);
+}
+.foot span{display:flex;align-items:center;gap:4px}
+kbd{
+  font-family:var(--mono);font-size:9px;font-weight:600;
+  background:var(--s3);border:1px solid var(--b1);border-radius:3px;
+  padding:1px 4px;color:var(--f2);
+}
+
+/* ── HELP OVERLAY ────────────────────────────────────── */
+#help-ov{
+  position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:80;
+  display:flex;align-items:center;justify-content:center;padding:16px;
+}
+#help-ov[hidden]{display:none!important}
+.help-box{
+  background:var(--s1);border:1.5px solid var(--b1);border-radius:14px;
+  padding:20px;width:100%;max-width:400px;
+  box-shadow:0 24px 72px rgba(0,0,0,.55);
+}
+.help-title{font-size:14px;font-weight:700;margin-bottom:14px;color:var(--fg)}
+.help-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 20px}
+.hk{display:flex;align-items:center;gap:8px;font-size:12px;padding:4px 0}
+.hk .keys{display:flex;gap:3px;flex-shrink:0}
+
+@media(max-width:620px){
+  .tbl-hdr{display:none}
+  .row{grid-template-columns:3px 1fr auto;height:auto;padding:8px 10px 8px 0}
+  .row>*:not(.rbar):not(.rname-cell):not(.racts){display:none}
+  .row .rsite{display:block}
+}
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="hdr">
+  <div class="logo">⚡ CC MODO RÁPIDO</div>
+  <div class="view-seg">
+    <button class="vbtn" onclick="setView('p')">Prioridad</button>
+    <button class="vbtn on" onclick="setView('o')">Por objetivo</button>
+    <button class="vbtn" onclick="setView('t')">Por turno</button>
+  </div>
+  <div class="srch">
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><circle cx="6.5" cy="6.5" r="5" stroke="#6e7681" stroke-width="1.5"/><path d="M10.5 10.5L14 14" stroke="#6e7681" stroke-width="1.5" stroke-linecap="round"/></svg>
+    <input id="srch" type="text" placeholder="Buscar guardia u objetivo…" oninput="doSearch()">
+  </div>
+  <div class="hclock" id="clk">06:14:33</div>
+  <button class="hbtn" onclick="toggleTheme()">◐</button>
+  <button class="hbtn" onclick="document.getElementById('help-ov').hidden=false" title="Atajos Ctrl+?">?</button>
+</div>
+
+<!-- STATS -->
+<div class="stats">
+  <div class="chip all on" onclick="filterSt('all',this)"><div class="dot"></div> Todos · 154</div>
+  <div class="chip c" onclick="filterSt('c',this)"><div class="dot"></div> Crítico · 3</div>
+  <div class="chip u" onclick="filterSt('u',this)"><div class="dot"></div> Tardanza · 7</div>
+  <div class="chip a" onclick="filterSt('a',this)"><div class="dot"></div> Sin relevo · 2</div>
+  <div class="chip g" onclick="filterSt('g',this)"><div class="dot"></div> OK · 142</div>
+  <div class="chip" style="color:var(--blu);border-color:var(--blu);background:color-mix(in srgb,var(--blu) 9%,transparent)" onclick="toggleRetPanel()"><div class="dot"></div> RET hoy · 3 disp.</div>
+  <div class="sep"></div>
+  <div class="bands">
+    <button class="bb on" onclick="filterBand('all',this)">Todos</button>
+    <button class="bb" onclick="filterBand('M',this)">M</button>
+    <button class="bb" onclick="filterBand('T',this)">T</button>
+    <button class="bb" onclick="filterBand('N',this)">N</button>
+    <button class="bb" onclick="filterBand('D12',this)">D12</button>
+    <button class="bb" onclick="filterBand('N12',this)">N12</button>
+  </div>
+</div>
+
+<!-- CUERPO: lista de guardias + sidebar WA -->
+<div class="app-body">
+  <!-- LISTA PRINCIPAL -->
+  <div id="main" class="tbl-wrap">
+
+  <!-- STICKY COL HEADER -->
+  <div class="tbl-hdr">
+    <span></span>
+    <span style="padding-left:8px">Guardia</span>
+    <span>Turno</span>
+    <span style="text-align:center">Esperado</span>
+    <span style="text-align:center">Real</span>
+    <span style="text-align:center">Dif.</span>
+    <span style="text-align:center">Estado</span>
+    <span>Acción</span>
+  </div>
+
+  <!-- RET HOY -->
+  <div class="grp" id="g-ret-hoy">
+    <div class="grp-hdr" onclick="toggleGrp('g-ret-hoy')" style="background:color-mix(in srgb,var(--blu) 5%,var(--s2));border-left:3px solid var(--blu)">
+      <span class="grp-name" style="color:var(--blu)">🛡 RETENES — HOY 06/11</span>
+      <div class="grp-badges">
+        <span class="gbadge" style="background:color-mix(in srgb,var(--grn) 15%,transparent);color:var(--grn)">3 DISP.</span>
+        <span class="gbadge" style="background:color-mix(in srgb,var(--yel) 15%,transparent);color:var(--yel)">1 EN TRÁNSITO</span>
+        <span class="gbadge" style="background:color-mix(in srgb,var(--f3) 12%,transparent);color:var(--f3)">1 OCUPADO</span>
+      </div>
+      <span class="grp-cnt">5 retenes</span>
+      <span class="chev">▾</span>
+    </div>
+    <div class="grp-rows">
+      <div class="tbl-hdr" style="position:static;font-size:9px">
+        <span></span>
+        <span style="padding-left:8px">Guardia</span>
+        <span>Zona / Base</span>
+        <span style="text-align:center">Distancia</span>
+        <span style="text-align:center">ETA</span>
+        <span style="text-align:center">Horas mes</span>
+        <span style="text-align:center">Estado</span>
+        <span>Acción</span>
+      </div>
+      <!-- DISPONIBLE -->
+      <div class="ret-row" tabindex="0" onclick="selRow(this)">
+        <div class="ret-bar-g"></div>
+        <div class="rname-cell"><div class="rname">Suárez, Juan</div><div class="rsite">Banda M · 190 h acum.</div></div>
+        <div class="rshift" style="font-size:11px;color:var(--f2)">Villa Allende</div>
+        <div class="rtime">2.3 km</div>
+        <div class="rtime" style="color:var(--grn)">~12 min</div>
+        <div class="rdiff zero">190 h</div>
+        <div class="stt g">DISPONIBLE</div>
+        <div class="racts">
+          <button class="abtn grn" onclick="convocarRet(event,'Suárez, Juan')">📞 Convocar</button>
+          <button class="abtn more gh" onclick="showCtx(event,'Suárez, Juan','M','')">•••</button>
+        </div>
+      </div>
+      <div class="ret-row" tabindex="0" onclick="selRow(this)">
+        <div class="ret-bar-g"></div>
+        <div class="rname-cell"><div class="rname">Medina, Carla</div><div class="rsite">Banda T · 185 h acum.</div></div>
+        <div class="rshift" style="font-size:11px;color:var(--f2)">Córdoba Centro</div>
+        <div class="rtime">5.1 km</div>
+        <div class="rtime" style="color:var(--grn)">~18 min</div>
+        <div class="rdiff zero">185 h</div>
+        <div class="stt g">DISPONIBLE</div>
+        <div class="racts">
+          <button class="abtn grn" onclick="convocarRet(event,'Medina, Carla')">📞 Convocar</button>
+          <button class="abtn more gh" onclick="showCtx(event,'Medina, Carla','T','')">•••</button>
+        </div>
+      </div>
+      <div class="ret-row" tabindex="0" onclick="selRow(this)">
+        <div class="ret-bar-g"></div>
+        <div class="rname-cell"><div class="rname">Paz, Roberto</div><div class="rsite">Banda M · 177 h acum.</div></div>
+        <div class="rshift" style="font-size:11px;color:var(--f2)">Argüello</div>
+        <div class="rtime">9.2 km</div>
+        <div class="rtime" style="color:var(--yel)">~28 min</div>
+        <div class="rdiff zero">177 h</div>
+        <div class="stt g">DISPONIBLE</div>
+        <div class="racts">
+          <button class="abtn grn" onclick="convocarRet(event,'Paz, Roberto')">📞 Convocar</button>
+          <button class="abtn more gh" onclick="showCtx(event,'Paz, Roberto','M','')">•••</button>
+        </div>
+      </div>
+      <!-- EN TRÁNSITO -->
+      <div class="ret-row" tabindex="0" onclick="selRow(this)">
+        <div class="ret-bar-y"></div>
+        <div class="rname-cell"><div class="rname">Benítez, Omar</div><div class="rsite">Banda M · En ruta</div></div>
+        <div class="rshift" style="font-size:11px;color:var(--f2)">→ Casino Centro</div>
+        <div class="rtime" style="color:var(--yel)">3.1 km</div>
+        <div class="rtime" style="color:var(--yel)">~8 min</div>
+        <div class="rdiff zero">181 h</div>
+        <div class="stt a">EN TRÁNSITO</div>
+        <div class="racts">
+          <button class="abtn gh" style="font-size:10px" onclick="toast_('📍 Benítez en ruta a Casino Centro — ETA 8 min','b')">📍 Rastrear</button>
+          <button class="abtn more gh" onclick="showCtx(event,'Benítez, Omar','M','')">•••</button>
+        </div>
+      </div>
+      <!-- OCUPADO (ya cubriendo turno) -->
+      <div class="ret-row" tabindex="0" onclick="selRow(this)" style="opacity:.65">
+        <div class="ret-bar-n"></div>
+        <div class="rname-cell"><div class="rname">Torres, Silvia</div><div class="rsite">Banda N · Cubriendo hasta 14:00</div></div>
+        <div class="rshift" style="font-size:11px;color:var(--f2)">Peaje E53</div>
+        <div class="rtime na">—</div>
+        <div class="rtime na">—</div>
+        <div class="rdiff zero">196 h</div>
+        <div class="stt i">OCUPADO</div>
+        <div class="racts">
+          <button class="abtn gh" style="font-size:10px;opacity:.5" disabled>No disponible</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RET MAÑANA -->
+  <div class="grp coll" id="g-ret-man">
+    <div class="grp-hdr" onclick="toggleGrp('g-ret-man')" style="background:color-mix(in srgb,var(--pur) 5%,var(--s2));border-left:3px solid var(--pur)">
+      <span class="grp-name" style="color:var(--pur)">🛡 RETENES — MAÑANA 07/11</span>
+      <div class="grp-badges">
+        <span class="gbadge" style="background:color-mix(in srgb,var(--grn) 15%,transparent);color:var(--grn)">4 DISP.</span>
+      </div>
+      <span class="grp-cnt">4 retenes · turnos 06:00 y 20:00</span>
+      <span class="chev">▾</span>
+    </div>
+    <div class="grp-rows">
+      <div class="tbl-hdr" style="position:static;font-size:9px">
+        <span></span>
+        <span style="padding-left:8px">Guardia</span>
+        <span>Zona / Base</span>
+        <span style="text-align:center">Distancia</span>
+        <span style="text-align:center">Turno RET</span>
+        <span style="text-align:center">Horas mes</span>
+        <span style="text-align:center">Estado</span>
+        <span>Acción</span>
+      </div>
+      <div class="ret-row" tabindex="0" onclick="selRow(this)">
+        <div class="ret-bar-g"></div>
+        <div class="rname-cell"><div class="rname">Nieto, Clara</div><div class="rsite">Banda M · preplanificada</div></div>
+        <div class="rshift" style="font-size:11px;color:var(--f2)">Jardín</div>
+        <div class="rtime">4.0 km</div>
+        <div class="rtime" style="font-family:var(--mono);font-size:11px;color:var(--f2)">06:00–14:00</div>
+        <div class="rdiff zero">179 h</div>
+        <div class="stt g">PLANIFICADO</div>
+        <div class="racts">
+          <button class="abtn gh" style="font-size:10px" onclick="toast_('Nieto, Clara — RET 07/11 06:00 asignado de antemano','b')">Ver turno</button>
+          <button class="abtn more gh" onclick="showCtx(event,'Nieto, Clara','M','06:00')">•••</button>
+        </div>
+      </div>
+      <div class="ret-row" tabindex="0" onclick="selRow(this)">
+        <div class="ret-bar-g"></div>
+        <div class="rname-cell"><div class="rname">Moreno, Héctor</div><div class="rsite">Banda M · preplanificado</div></div>
+        <div class="rshift" style="font-size:11px;color:var(--f2)">Urca</div>
+        <div class="rtime">6.5 km</div>
+        <div class="rtime" style="font-family:var(--mono);font-size:11px;color:var(--f2)">06:00–14:00</div>
+        <div class="rdiff zero">183 h</div>
+        <div class="stt g">PLANIFICADO</div>
+        <div class="racts">
+          <button class="abtn gh" style="font-size:10px" onclick="toast_('Moreno, Héctor — RET 07/11 06:00','b')">Ver turno</button>
+          <button class="abtn more gh" onclick="showCtx(event,'Moreno, Héctor','M','06:00')">•••</button>
+        </div>
+      </div>
+      <div class="ret-row" tabindex="0" onclick="selRow(this)">
+        <div class="ret-bar-g"></div>
+        <div class="rname-cell"><div class="rname">Leiva, Sandra</div><div class="rsite">Banda N · preplanificada</div></div>
+        <div class="rshift" style="font-size:11px;color:var(--f2)">Alta Córdoba</div>
+        <div class="rtime">3.8 km</div>
+        <div class="rtime" style="font-family:var(--mono);font-size:11px;color:var(--f2)">20:00–04:00</div>
+        <div class="rdiff zero">191 h</div>
+        <div class="stt g">PLANIFICADO</div>
+        <div class="racts">
+          <button class="abtn gh" style="font-size:10px" onclick="toast_('Leiva, Sandra — RET 07/11 20:00','b')">Ver turno</button>
+          <button class="abtn more gh" onclick="showCtx(event,'Leiva, Sandra','N','20:00')">•••</button>
+        </div>
+      </div>
+      <div class="ret-row" tabindex="0" onclick="selRow(this)">
+        <div class="ret-bar-g"></div>
+        <div class="rname-cell"><div class="rname">Flores, Marcos</div><div class="rsite">Banda N · preplanificado</div></div>
+        <div class="rshift" style="font-size:11px;color:var(--f2)">Güemes</div>
+        <div class="rtime">7.1 km</div>
+        <div class="rtime" style="font-family:var(--mono);font-size:11px;color:var(--f2)">20:00–04:00</div>
+        <div class="rdiff zero">187 h</div>
+        <div class="stt g">PLANIFICADO</div>
+        <div class="racts">
+          <button class="abtn gh" style="font-size:10px" onclick="toast_('Flores, Marcos — RET 07/11 20:00','b')">Ver turno</button>
+          <button class="abtn more gh" onclick="showCtx(event,'Flores, Marcos','N','20:00')">•••</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- GRP 1: PEAJE E53 -->
+  <div class="grp" id="g1">
+    <div class="grp-hdr" onclick="toggleGrp('g1')">
+      <span class="grp-name">🏢 PEAJE E53 — CASISA</span>
+      <div class="grp-badges"><span class="gbadge c">1 CRIT</span></div>
+      <span class="grp-cnt">3 guardias</span>
+      <span class="chev">▾</span>
+    </div>
+    <div class="grp-rows">
+      <div class="row c sel" tabindex="0" data-s="c" data-b="N" data-n="martínez carlos" onclick="selRow(this)">
+        <div class="rbar"></div>
+        <div class="rname-cell">
+          <div class="rname">Martínez, Carlos</div>
+          <div class="rsite">Caseta A</div>
+        </div>
+        <div class="rshift">N 20:00</div>
+        <div class="rtime">20:00</div>
+        <div class="rtime na">—</div>
+        <div class="rdiff neg">+78 m</div>
+        <div class="stt c">NO LLEGÓ</div>
+        <div class="racts">
+          <button class="abtn red" onclick="showCov(event,'Martínez, Carlos','Peaje E53','N 20:00')">🚨 Cobertura</button>
+          <button class="abtn more gh" onclick="showCtx(event,'Martínez, Carlos','N','20:00')">•••</button>
+        </div>
+      </div>
+      <div class="row g" tabindex="0" data-s="g" data-b="N" data-n="pereyra diego" onclick="selRow(this)">
+        <div class="rbar"></div>
+        <div class="rname-cell">
+          <div class="rname">Pereyra, Diego</div>
+          <div class="rsite">Caseta B</div>
+        </div>
+        <div class="rshift">N 20:00</div>
+        <div class="rtime">20:00</div>
+        <input class="tedit" type="time" value="20:03" data-p="20:00" onclick="sp(event)" oninput="calcDiff(this)">
+        <div class="rdiff neg">−3 m</div>
+        <div class="stt g">PRESENTE</div>
+        <div class="racts">
+          <button class="abtn gh" onclick="showXchg(event,'Pereyra, Diego','N 20:00–04:00','Peaje E53')">⇄ Intercambio</button>
+          <button class="abtn more gh" onclick="showCtx(event,'Pereyra, Diego','N','20:00')">•••</button>
+        </div>
+      </div>
+      <div class="row u" tabindex="0" data-s="u" data-b="M" data-n="castro maría" onclick="selRow(this)">
+        <div class="rbar"></div>
+        <div class="rname-cell">
+          <div class="rname">Castro, María</div>
+          <div class="rsite">Caseta C</div>
+        </div>
+        <div class="rshift">M 06:00</div>
+        <div class="rtime">06:00</div>
+        <input class="tedit" type="time" value="06:19" data-p="06:00" onclick="sp(event)" oninput="calcDiff(this)">
+        <div class="rdiff neg">−19 m</div>
+        <div class="stt u">TARDANZA</div>
+        <div class="racts">
+          <button class="abtn ora" onclick="showTC(event,'Castro, María','06:00','06:19')">🕐 Corregir</button>
+          <button class="abtn more gh" onclick="showCtx(event,'Castro, María','M','06:00')">•••</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- GRP 2: CASINO CENTRO -->
+  <div class="grp" id="g2">
+    <div class="grp-hdr" onclick="toggleGrp('g2')">
+      <span class="grp-name">🎰 CASINO CENTRO — SALA PRINCIPAL</span>
+      <div class="grp-badges"><span class="gbadge c">1 CRIT</span><span class="gbadge u">1 URG</span></div>
+      <span class="grp-cnt">5 guardias</span>
+      <span class="chev">▾</span>
+    </div>
+    <div class="grp-rows">
+      <div class="row c" tabindex="0" data-s="c" data-b="M" data-n="lópez ana" onclick="selRow(this)">
+        <div class="rbar"></div>
+        <div class="rname-cell"><div class="rname">López, Ana</div><div class="rsite">Acceso principal</div></div>
+        <div class="rshift">M 06:00</div>
+        <div class="rtime">06:00</div>
+        <div class="rtime na">—</div>
+        <div class="rdiff neg">+74 m</div>
+        <div class="stt c">NO LLEGÓ</div>
+        <div class="racts">
+          <button class="abtn red" onclick="showCov(event,'López, Ana','Casino Centro','M 06:00')">🚨 Cobertura</button>
+          <button class="abtn more gh" onclick="showCtx(event,'López, Ana','M','06:00')">•••</button>
+        </div>
+      </div>
+      <div class="row u" tabindex="0" data-s="u" data-b="N" data-n="gómez ernesto" onclick="selRow(this)">
+        <div class="rbar"></div>
+        <div class="rname-cell"><div class="rname">Gómez, Ernesto</div><div class="rsite">Sin relevo desde 06:00</div></div>
+        <div class="rshift">N 22:00</div>
+        <div class="rtime">06:00</div>
+        <div class="rtime">06:12</div>
+        <div class="rdiff neg" style="font-size:10px">+12m ext</div>
+        <div class="stt u">SIN RELEVO</div>
+        <div class="racts">
+          <button class="abtn ora" onclick="showRelevo(event,'Gómez, Ernesto')">🔄 Relevar</button>
+          <button class="abtn more gh" onclick="showCtx(event,'Gómez, Ernesto','N','22:00')">•••</button>
+        </div>
+      </div>
+      <div class="row g" tabindex="0" data-s="g" data-b="M" data-n="fernández silvia" onclick="selRow(this)">
+        <div class="rbar"></div>
+        <div class="rname-cell"><div class="rname">Fernández, Silvia</div><div class="rsite">Sala VIP</div></div>
+        <div class="rshift">M 06:00</div>
+        <div class="rtime">06:00</div>
+        <input class="tedit" type="time" value="05:58" data-p="06:00" onclick="sp(event)" oninput="calcDiff(this)">
+        <div class="rdiff pos">+2 m</div>
+        <div class="stt g">PRESENTE</div>
+        <div class="racts">
+          <button class="abtn gh" onclick="showXchg(event,'Fernández, Silvia','M 06:00–14:00','Casino Centro')">⇄ Intercambio</button>
+          <button class="abtn more gh" onclick="showCtx(event,'Fernández, Silvia','M','06:00')">•••</button>
+        </div>
+      </div>
+      <div class="row g" tabindex="0" data-s="g" data-b="M" data-n="díaz roberto" onclick="selRow(this)">
+        <div class="rbar"></div>
+        <div class="rname-cell"><div class="rname">Díaz, Roberto</div><div class="rsite">Estacionamiento</div></div>
+        <div class="rshift">M 06:00</div>
+        <div class="rtime">06:00</div>
+        <input class="tedit" type="time" value="06:01" data-p="06:00" onclick="sp(event)" oninput="calcDiff(this)">
+        <div class="rdiff zero">OK</div>
+        <div class="stt g">PRESENTE</div>
+        <div class="racts">
+          <button class="abtn gh" onclick="showXchg(event,'Díaz, Roberto','M 06:00–14:00','Casino Centro')">⇄ Intercambio</button>
+          <button class="abtn more gh" onclick="showCtx(event,'Díaz, Roberto','M','06:00')">•••</button>
+        </div>
+      </div>
+      <div class="row a" tabindex="0" data-s="a" data-b="M" data-n="ruiz patricia" onclick="selRow(this)">
+        <div class="rbar"></div>
+        <div class="rname-cell"><div class="rname">Ruiz, Patricia</div><div class="rsite">Recepción · turno 08:00</div></div>
+        <div class="rshift">M 08:00</div>
+        <div class="rtime">08:00</div>
+        <div class="rtime na">—</div>
+        <div class="rdiff zero" style="color:var(--f3)">30 min</div>
+        <div class="stt a">ESPERANDO</div>
+        <div class="racts">
+          <button class="abtn grn" onclick="markP(event,'Ruiz, Patricia')">✓ Llegó</button>
+          <button class="abtn more gh" onclick="showCtx(event,'Ruiz, Patricia','M','08:00')">•••</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- GRP 3: KEMPES -->
+  <div class="grp" id="g3">
+    <div class="grp-hdr" onclick="toggleGrp('g3')">
+      <span class="grp-name">🏟️ ESTADIO KEMPES — ACCESO NORTE</span>
+      <div class="grp-badges"><span class="gbadge u">2 URG</span></div>
+      <span class="grp-cnt">4 guardias</span>
+      <span class="chev">▾</span>
+    </div>
+    <div class="grp-rows">
+      <div class="row u" tabindex="0" data-s="u" data-b="M" data-n="rodríguez fabio" onclick="selRow(this)">
+        <div class="rbar"></div>
+        <div class="rname-cell"><div class="rname">Rodríguez, Fabio</div><div class="rsite">Puerta 1</div></div>
+        <div class="rshift">M 06:00</div>
+        <div class="rtime">06:00</div>
+        <input class="tedit" type="time" value="06:23" data-p="06:00" onclick="sp(event)" oninput="calcDiff(this)">
+        <div class="rdiff neg">−23 m</div>
+        <div class="stt u">TARDANZA</div>
+        <div class="racts">
+          <button class="abtn ora" onclick="showTC(event,'Rodríguez, Fabio','06:00','06:23')">🕐 Corregir</button>
+          <button class="abtn more gh" onclick="showCtx(event,'Rodríguez, Fabio','M','06:00')">•••</button>
+        </div>
+      </div>
+      <div class="row u" tabindex="0" data-s="u" data-b="M" data-n="soria jorge" onclick="selRow(this)">
+        <div class="rbar"></div>
+        <div class="rname-cell"><div class="rname">Soria, Jorge</div><div class="rsite">Puerta 2</div></div>
+        <div class="rshift">M 06:00</div>
+        <div class="rtime">06:00</div>
+        <input class="tedit" type="time" value="06:31" data-p="06:00" onclick="sp(event)" oninput="calcDiff(this)">
+        <div class="rdiff neg">−31 m</div>
+        <div class="stt u">TARDANZA</div>
+        <div class="racts">
+          <button class="abtn ora" onclick="showTC(event,'Soria, Jorge','06:00','06:31')">🕐 Corregir</button>
+          <button class="abtn more gh" onclick="showCtx(event,'Soria, Jorge','M','06:00')">•••</button>
+        </div>
+      </div>
+      <div class="row g" tabindex="0" data-s="g" data-b="M" data-n="vega rosa" onclick="selRow(this)">
+        <div class="rbar"></div>
+        <div class="rname-cell"><div class="rname">Vega, Rosa</div><div class="rsite">Puerta 3</div></div>
+        <div class="rshift">M 06:00</div>
+        <div class="rtime">06:00</div>
+        <input class="tedit" type="time" value="05:55" data-p="06:00" onclick="sp(event)" oninput="calcDiff(this)">
+        <div class="rdiff pos">+5 m</div>
+        <div class="stt g">PRESENTE</div>
+        <div class="racts">
+          <button class="abtn gh" onclick="showXchg(event,'Vega, Rosa','M 06:00–14:00','Kempes')">⇄ Intercambio</button>
+          <button class="abtn more gh" onclick="showCtx(event,'Vega, Rosa','M','06:00')">•••</button>
+        </div>
+      </div>
+      <div class="row g" tabindex="0" data-s="g" data-b="D12" data-n="herrera luis" onclick="selRow(this)">
+        <div class="rbar"></div>
+        <div class="rname-cell"><div class="rname">Herrera, Luis</div><div class="rsite">Supervisión</div></div>
+        <div class="rshift">D12 06:00</div>
+        <div class="rtime">06:00</div>
+        <input class="tedit" type="time" value="06:02" data-p="06:00" onclick="sp(event)" oninput="calcDiff(this)">
+        <div class="rdiff zero">OK</div>
+        <div class="stt g">PRESENTE</div>
+        <div class="racts">
+          <button class="abtn gh" onclick="showXchg(event,'Herrera, Luis','D12 06:00–18:00','Kempes')">⇄ Intercambio</button>
+          <button class="abtn more gh" onclick="showCtx(event,'Herrera, Luis','D12','06:00')">•••</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- GRP 4: CASA MATRIZ (collapsed, OK) -->
+  <div class="grp coll" id="g4">
+    <div class="grp-hdr" onclick="toggleGrp('g4')">
+      <span class="grp-name">🏛️ CASA MATRIZ — BERNAL</span>
+      <div class="grp-badges"></div>
+      <span class="grp-cnt">12 guardias · todos OK</span>
+      <span class="chev">▾</span>
+    </div>
+    <div class="grp-rows">
+      <div class="row g" tabindex="0" data-s="g" data-b="M" data-n="aguirre tomás" onclick="selRow(this)">
+        <div class="rbar"></div>
+        <div class="rname-cell"><div class="rname">Aguirre, Tomás</div><div class="rsite">Acceso principal</div></div>
+        <div class="rshift">M 06:00</div>
+        <div class="rtime">06:00</div>
+        <input class="tedit" type="time" value="06:00" data-p="06:00" onclick="sp(event)" oninput="calcDiff(this)">
+        <div class="rdiff zero">OK</div>
+        <div class="stt g">PRESENTE</div>
+        <div class="racts">
+          <button class="abtn gh" onclick="showXchg(event,'Aguirre, Tomás','M 06:00–14:00','Casa Matriz')">⇄ Intercambio</button>
+          <button class="abtn more gh" onclick="showCtx(event,'Aguirre, Tomás','M','06:00')">•••</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- GRP GUARDIA SP — PRUEBA REAL -->
+  <div class="grp" id="g-guardiasp">
+    <div class="grp-hdr" onclick="toggleGrp('g-guardiasp')" style="background:color-mix(in srgb,#25d366 5%,var(--s2));border-left:3px solid #25d366">
+      <span class="grp-name" style="color:#25d366">🛡 GUARDIA SP — Turno M 12:00–20:00</span>
+      <div class="grp-badges">
+        <span class="gbadge" id="gbadge-guardiasp" style="background:color-mix(in srgb,var(--yel) 15%,transparent);color:var(--yel)">3 ESPERANDO</span>
+      </div>
+      <span class="grp-cnt">3 guardias</span>
+      <span class="chev">▾</span>
+    </div>
+    <div class="grp-rows">
+      <!-- Sartori, Franco -->
+      <div class="row u" tabindex="0" data-s="u" data-b="M" data-n="sartori franco" id="row-franco" onclick="selRow(this)">
+        <div class="rbar"></div>
+        <div class="rname-cell">
+          <div class="rname">Sartori, Franco</div>
+          <div class="rsite">GuardiaSP</div>
+        </div>
+        <div class="rshift">M 12:00</div>
+        <div class="rtime">12:00</div>
+        <div class="rtime na" id="real-franco">—</div>
+        <div class="rdiff zero" id="dif-franco">—</div>
+        <div class="stt u" id="stt-franco">ESPERANDO</div>
+        <div class="racts">
+          <button class="abtn gh" style="font-size:10px" onclick="toast_('Sartori, Franco — M 12:00–20:00 GuardiaSP','b')">Ver</button>
+          <button class="abtn more gh" onclick="showCtx(event,'Sartori, Franco','M','12:00')">•••</button>
+        </div>
+      </div>
+      <!-- Quinteros, Debora -->
+      <div class="row u" tabindex="0" data-s="u" data-b="M" data-n="quinteros debora" id="row-debora" onclick="selRow(this)">
+        <div class="rbar"></div>
+        <div class="rname-cell">
+          <div class="rname">Quinteros, Debora</div>
+          <div class="rsite">GuardiaSP</div>
+        </div>
+        <div class="rshift">M 12:00</div>
+        <div class="rtime">12:00</div>
+        <div class="rtime na" id="real-debora">—</div>
+        <div class="rdiff zero" id="dif-debora">—</div>
+        <div class="stt u" id="stt-debora">ESPERANDO</div>
+        <div class="racts">
+          <button class="abtn gh" style="font-size:10px" onclick="toast_('Quinteros, Debora — M 12:00–20:00 GuardiaSP','b')">Ver</button>
+          <button class="abtn more gh" onclick="showCtx(event,'Quinteros, Debora','M','12:00')">•••</button>
+        </div>
+      </div>
+      <!-- Martinez, Mauro -->
+      <div class="row u" tabindex="0" data-s="u" data-b="M" data-n="martinez mauro" id="row-mauro" onclick="selRow(this)">
+        <div class="rbar"></div>
+        <div class="rname-cell">
+          <div class="rname">Martinez, Mauro</div>
+          <div class="rsite">GuardiaSP</div>
+        </div>
+        <div class="rshift">M 12:00</div>
+        <div class="rtime">12:00</div>
+        <div class="rtime na" id="real-mauro">—</div>
+        <div class="rdiff zero" id="dif-mauro">—</div>
+        <div class="stt u" id="stt-mauro">ESPERANDO</div>
+        <div class="racts">
+          <button class="abtn gh" style="font-size:10px" onclick="toast_('Martinez, Mauro — M 12:00–20:00 GuardiaSP','b')">Ver</button>
+          <button class="abtn more gh" onclick="showCtx(event,'Martinez, Mauro','M','12:00')">•••</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="text-align:center;padding:14px 16px;font-size:12px;color:var(--f3)">
+    5 de 18 objetivos · <span style="color:var(--blu);cursor:pointer">Ver todos →</span>
+  </div>
+  </div><!-- /#main -->
+
+  <!-- SIDEBAR WA -->
+  <div class="wa-sidebar" id="wa-sidebar">
+    <div class="wa-sb-hdr">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="#25d366"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M11.999 2C6.477 2 2 6.477 2 12c0 1.818.487 3.52 1.332 4.993L2 22l5.166-1.316A9.956 9.956 0 0012 22c5.523 0 10-4.477 10-10S17.523 2 12 2zm0 18a7.952 7.952 0 01-4.077-1.117l-.292-.173-3.067.782.812-2.985-.19-.307A7.964 7.964 0 014 12c0-4.411 3.589-8 8-8s8 3.589 8 8-3.589 8-8 8z"/></svg>
+      <span class="wa-sb-title">Check-ins</span>
+      <span class="wa-dot" id="wa-dot" style="width:7px;height:7px;border-radius:50%;background:var(--f3);flex-shrink:0"></span>
+      <span class="wa-badge" id="wa-badge" style="display:none">0</span>
+      <div class="wa-sb-actions">
+        <button class="wa-sb-btn" onclick="openGroupsModal()" title="Seleccionar grupos">≡</button>
+        <button class="wa-sb-btn" onclick="openWAConfig()" title="Configuracion servidor">⚙</button>
+        <button class="wa-sb-btn" id="wa-collapse-btn" onclick="toggleWASidebar()" title="Colapsar">◀</button>
+      </div>
+    </div>
+    <!-- Elementos hidden requeridos por el script antes de los modales -->
+    <input id="wa-url-inp" type="hidden" value="https://autbacar.dnsalias.com/wabridge">
+    <div id="wa-err" style="display:none;font-size:11px;color:var(--red);padding:4px 12px"></div>
+    <!-- Estado de conexion: solo linea de texto, sin config body -->
+    <div id="wa-conn-status" style="padding:5px 12px;font-size:10px;color:var(--f3);border-bottom:1px solid var(--b1);display:flex;align-items:center;gap:5px">
+      <span id="wa-cfg-status"></span>
+    </div>
+    <!-- FEED de mensajes pendientes -->
+    <div class="wa-feed" id="wa-feed">
+      <div class="wa-empty" id="wa-empty">Sin check-ins pendientes.</div>
+    </div>
+    <!-- LOG de confirmados -->
+    <div id="wa-log" style="display:none">
+      <div class="wa-log-hdr" onclick="toggleLog()">
+        <span id="wa-log-chev">▸</span>
+        <span>Confirmados hoy</span>
+        <span class="wa-log-cnt" id="wa-log-count" style="margin-left:4px">0</span>
+        <button onclick="event.stopPropagation();clearLog()"
+          style="margin-left:auto;background:transparent;border:1px solid var(--b1);border-radius:5px;
+                 color:var(--f3);font-size:9px;padding:1px 7px;cursor:pointer">
+          Limpiar
+        </button>
+      </div>
+      <div id="wa-log-filter-wrap">
+        <input id="wa-log-filter" type="text" placeholder="Filtrar por nombre…"
+          oninput="filterLog(this.value)" onclick="event.stopPropagation()">
+      </div>
+      <div id="wa-log-list" style="display:none;overflow-y:auto"></div>
+      <button id="wa-log-more" onclick="logPageMore()">Ver más ▾</button>
+    </div>
+    <!-- Simulacion (dev only) -->
+    <div style="border-top:1px solid var(--b1)">
+      <button class="wa-sim-btn" onclick="simWA()">▶ Demo sin conexion</button>
+    </div>
+  </div>
+</div><!-- /.app-body -->
+
+<!-- FOOTER -->
+<div class="foot">
+  <span><kbd>↑↓</kbd> navegar</span>
+  <span><kbd>Ctrl+P</kbd> presente</span>
+  <span><kbd>Ctrl+A</kbd> ausencia</span>
+  <span><kbd>Ctrl+I</kbd> intercambio</span>
+  <span><kbd>Ctrl+C</kbd> cobertura</span>
+  <span><kbd>Ctrl+T</kbd> corregir hora</span>
+  <span><kbd>Ctrl+R</kbd> relevar</span>
+  <span><kbd>?</kbd> todos los atajos</span>
+</div>
+
+<!-- HELP OVERLAY -->
+<div id="help-ov" hidden>
+  <div class="help-box">
+    <div class="help-title">⌨️ Atajos de teclado — CC Modo Rápido</div>
+    <div class="help-grid">
+      <div class="hk"><div class="keys"><kbd>Ctrl+P</kbd></div> Marcar presente</div>
+      <div class="hk"><div class="keys"><kbd>Ctrl+A</kbd></div> Ausencia (AA)</div>
+      <div class="hk"><div class="keys"><kbd>Ctrl+I</kbd></div> Intercambio</div>
+      <div class="hk"><div class="keys"><kbd>Ctrl+C</kbd></div> Cobertura</div>
+      <div class="hk"><div class="keys"><kbd>Ctrl+T</kbd></div> Corregir hora</div>
+      <div class="hk"><div class="keys"><kbd>Ctrl+R</kbd></div> Relevar</div>
+      <div class="hk"><div class="keys"><kbd>↑</kbd><kbd>↓</kbd></div> Navegar filas</div>
+      <div class="hk"><div class="keys"><kbd>Enter</kbd></div> Acción principal</div>
+      <div class="hk"><div class="keys"><kbd>/</kbd></div> Búsqueda</div>
+      <div class="hk"><div class="keys"><kbd>Esc</kbd></div> Cerrar / deselect</div>
+      <div class="hk"><div class="keys"><kbd>Ctrl+?</kbd></div> Esta ayuda</div>
+      <div class="hk"><div class="keys"><kbd>Ctrl+M</kbd></div> Menú contextual</div>
+    </div>
+    <div style="margin-top:14px">
+      <button class="mbtn gh" style="width:100%" onclick="document.getElementById('help-ov').hidden=true">Cerrar <kbd>Esc</kbd></button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL COBERTURA -->
+<div class="ov" id="m-cov" hidden>
+  <div class="modal">
+    <div class="mt">🚨 Iniciar cobertura</div>
+    <div class="ms" id="m-cov-sub">Martínez, Carlos — Peaje E53 — N 20:00</div>
+    <div class="igrid">
+      <div class="ip">Candidatos: <strong>4</strong></div>
+      <div class="ip">Sin cubrir: <strong>78 min</strong></div>
+    </div>
+    <div class="cand-list">
+      <div class="cand">
+        <div class="cavt">👤</div>
+        <div class="cinfo"><div class="cname">Suárez, Juan</div><div class="cdet">RET disponible · 2.3 km · 200 h mes</div></div>
+        <span class="ceta">~12 min</span>
+        <button class="mbtn grn" style="font-size:11px;padding:5px 10px" onclick="confirmCov('Suárez, Juan')">Convocar</button>
+      </div>
+      <div class="cand">
+        <div class="cavt">👤</div>
+        <div class="cinfo"><div class="cname">Medina, Carla</div><div class="cdet">FT · 5.1 km · 192 h mes</div></div>
+        <span class="ceta">~18 min</span>
+        <button class="mbtn gh" style="font-size:11px;padding:5px 10px" onclick="confirmCov('Medina, Carla')">Convocar</button>
+      </div>
+      <div class="cand">
+        <div class="cavt">👤</div>
+        <div class="cinfo"><div class="cname">Benítez, Omar</div><div class="cdet">D12 disponible · 8.4 km · 185 h mes</div></div>
+        <span class="ceta">~25 min</span>
+        <button class="mbtn gh" style="font-size:11px;padding:5px 10px" onclick="confirmCov('Benítez, Omar')">Convocar</button>
+      </div>
+      <div class="cand">
+        <div class="cavt">👤</div>
+        <div class="cinfo"><div class="cname">Torres, Silvia</div><div class="cdet">N12 mismo objetivo · 198 h mes</div></div>
+        <span class="ceta">~5 min</span>
+        <button class="mbtn gh" style="font-size:11px;padding:5px 10px" onclick="confirmCov('Torres, Silvia')">Ext. N12</button>
+      </div>
+    </div>
+    <div class="mrow">
+      <button class="mbtn gh full" onclick="close_('m-cov')">Cancelar <kbd>Esc</kbd></button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL CORRECCIÓN HORA -->
+<div class="ov" id="m-tc" hidden>
+  <div class="modal">
+    <div class="mt">🕐 Corregir horario</div>
+    <div class="ms" id="m-tc-sub">Castro, María — M 06:00</div>
+    <div class="trow">
+      <label>Horario planificado</label>
+      <input class="tfield" type="time" id="tc-p" value="06:00" readonly style="opacity:.5">
+    </div>
+    <div class="trow">
+      <label>Ingreso real</label>
+      <input class="tfield" type="time" id="tc-r" value="06:19" oninput="calcTC()">
+      <span class="tdiff neg" id="tc-d">−19 min</span>
+    </div>
+    <div class="trow">
+      <label>Egreso ajustado</label>
+      <input class="tfield" type="time" id="tc-o" value="14:19">
+      <span style="font-size:10px;color:var(--f3)">autocalc.</span>
+    </div>
+    <div class="notice">⚠ Tardanza descuenta del pago según CCT 422/05 cláusula B. Se registra en Banco de Horas.</div>
+    <div class="mrow">
+      <button class="mbtn ora full" onclick="saveTC()">💾 Guardar corrección <kbd>Enter</kbd></button>
+      <button class="mbtn gh" onclick="close_('m-tc')">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL INTERCAMBIO -->
+<div class="ov" id="m-xchg" hidden>
+  <div class="modal wide">
+    <div class="mt">⇄ Intercambio directo de turno</div>
+    <div class="xsides">
+      <div class="xside sel">
+        <div class="xlabel">Guardia A</div>
+        <div class="xname" id="xa-name">Rodríguez, Fabio</div>
+        <div class="xshift" id="xa-shift">M 06:00–14:00 · Kempes · Puerta 1</div>
+      </div>
+      <div class="xarrow">⇄</div>
+      <div class="xside" id="xb">
+        <div class="xlabel">Guardia B</div>
+        <div class="xname" id="xb-name" style="color:var(--f3)">Seleccionar…</div>
+        <div class="xshift" id="xb-shift" style="color:var(--f3)">Buscar abajo</div>
+      </div>
+    </div>
+    <input class="xsrch" type="text" placeholder="Buscar guardia por nombre, objetivo o puesto…" oninput="xSearch(this)">
+    <div class="cand-list" id="x-res">
+      <div class="cand" onclick="pickB('García, Ana','T 14:00–22:00 · Casino Centro · banda T')" style="cursor:pointer">
+        <div class="cavt">👤</div>
+        <div class="cinfo"><div class="cname">García, Ana</div><div class="cdet">T 14:00–22:00 · Casino Centro · banda T</div></div>
+        <span style="font-size:10px;color:var(--grn);font-weight:700">Compatible</span>
+      </div>
+      <div class="cand" onclick="pickB('Suárez, Pedro','M 06:00–14:00 · Casa Matriz · banda M')" style="cursor:pointer">
+        <div class="cavt">👤</div>
+        <div class="cinfo"><div class="cname">Suárez, Pedro</div><div class="cdet">M 06:00–14:00 · Casa Matriz · banda M</div></div>
+        <span style="font-size:10px;color:var(--grn);font-weight:700">Compatible</span>
+      </div>
+      <div class="cand" onclick="pickB('Morales, Luis','N12 20:00–08:00 · Aeropuerto · banda N')" style="cursor:pointer">
+        <div class="cavt">👤</div>
+        <div class="cinfo"><div class="cname">Morales, Luis</div><div class="cdet">N12 20:00–08:00 · Aeropuerto · banda N</div></div>
+        <span style="font-size:10px;color:var(--yel);font-weight:700">Revisar horas</span>
+      </div>
+    </div>
+    <div class="compat" id="x-compat" style="display:none">✓ Intercambio válido — mismo horario, dentro del tope CCT 422/05</div>
+    <div class="mrow">
+      <button class="mbtn pur full" id="x-ok" onclick="confirmX()" disabled style="opacity:.4">⇄ Confirmar intercambio <kbd>Enter</kbd></button>
+      <button class="mbtn gh" onclick="close_('m-xchg')">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL AUSENCIA -->
+<div class="ov" id="m-aa" hidden>
+  <div class="modal">
+    <div class="mt">📋 Registrar ausencia</div>
+    <div class="ms" id="m-aa-sub">García, Juan — M 06:00</div>
+    <div class="olist">
+      <label class="oitem on">
+        <input type="radio" name="aa" value="solo" checked onchange="pickOpt(this)">
+        <div class="otxt"><div class="otitle">Solo registrar AA</div><div class="odesc">Marca ausencia injustificada. Cobertura se gestiona después.</div></div>
+      </label>
+      <label class="oitem">
+        <input type="radio" name="aa" value="cob" onchange="pickOpt(this)">
+        <div class="otxt"><div class="otitle">AA + Iniciar cobertura ahora</div><div class="odesc">Registra AA y abre el buscador de candidatos.</div></div>
+      </label>
+      <label class="oitem">
+        <input type="radio" name="aa" value="ret" onchange="pickOpt(this)">
+        <div class="otxt"><div class="otitle">AA + Asignar RET disponible</div><div class="odesc">Registra AA y asigna automáticamente el RET más cercano.</div></div>
+      </label>
+      <label class="oitem">
+        <input type="radio" name="aa" value="lic" onchange="pickOpt(this)">
+        <div class="otxt"><div class="otitle">Cambiar a licencia (L/E/A/PG/ART)</div><div class="odesc">Si presentó documentación, registrar licencia en vez de AA.</div></div>
+      </label>
+    </div>
+    <div class="mrow">
+      <button class="mbtn red full" onclick="doAA()">Registrar <kbd>Enter</kbd></button>
+      <button class="mbtn gh" onclick="close_('m-aa')">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL RELEVO -->
+<div class="ov" id="m-rel" hidden>
+  <div class="modal">
+    <div class="mt">🔄 Registrar relevo</div>
+    <div class="ms" id="m-rel-sub">Gómez, Ernesto — saliente N · Casino Centro</div>
+    <div class="igrid">
+      <div class="ip">Turno saliente: <strong>N 22:00–06:00</strong></div>
+      <div class="ip">Exceso: <strong>12 min</strong></div>
+    </div>
+    <div class="trow">
+      <label>Hora real de relevo</label>
+      <input class="tfield" type="time" value="06:12">
+    </div>
+    <div class="cand-list">
+      <div class="cand">
+        <div class="cavt">👤</div>
+        <div class="cinfo"><div class="cname">Vásquez, Marcos</div><div class="cdet">M entrante · 06:00 · ya checkeado</div></div>
+        <button class="mbtn grn" style="font-size:11px;padding:5px 10px" onclick="confirmRel('Vásquez, Marcos')">Relevar</button>
+      </div>
+    </div>
+    <div class="mrow"><button class="mbtn gh full" onclick="close_('m-rel')">Cancelar</button></div>
+  </div>
+</div>
+
+<!-- CONTEXT MENU -->
+<div class="ctx" id="ctx" hidden>
+  <div class="ci" onclick="ctxDo('p')"><span class="ic">✓</span> Marcar presente<span class="kk">Ctrl+P</span></div>
+  <div class="ci" onclick="ctxDo('t')"><span class="ic">🕐</span> Corregir horario<span class="kk">Ctrl+T</span></div>
+  <div class="ci" onclick="ctxDo('i')"><span class="ic">⇄</span> Intercambio de turno<span class="kk">Ctrl+I</span></div>
+  <div class="ci" onclick="ctxDo('r')"><span class="ic">🔄</span> Relevar<span class="kk">Ctrl+R</span></div>
+  <div class="ci" onclick="ctxDo('c')"><span class="ic">🚨</span> Iniciar cobertura<span class="kk">Ctrl+C</span></div>
+  <div class="ci" onclick="ctxDo('rfzf')"><span class="ic">🔁</span> Cambio perm. (RFZF)</div>
+  <div class="ctx-sep"></div>
+  <div class="ci" onclick="ctxDo('a')"><span class="ic">📋</span> Registrar ausencia…<span class="kk">Ctrl+A</span></div>
+  <div class="ci red" onclick="ctxDo('rfze')"><span class="ic">⚠</span> Ausencia eventual (RFZE)</div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast">✓</div>
+
+<script>
+// ━━ WHATSAPP BRIDGE vars (antes de cualquier llamada) ━━
+let bridgeUrl    = '';
+let pollTimer    = null;
+let lastTs       = (()=>{ try{ const v=localStorage.getItem('wa-lastts-'+new Date().toISOString().slice(0,10)); return v?parseInt(v,10):0; }catch(_){return 0;} })();
+let bridgeStart  = 0;
+const seenIds        = new Set();
+const pendingRowIds   = new Set();
+
+// CLOCK
+const clkEl=document.getElementById('clk');
+function tick(){clkEl.textContent=new Date().toLocaleTimeString('es-AR',{hour12:false})}
+tick();setInterval(tick,1000);
+
+// Auto-conectar al bridge local
+connectBridge();
+
+// THEME
+let dark=true;
+function toggleTheme(){
+  dark=!dark;
+  document.documentElement.setAttribute('data-theme',dark?'dark':'light');
+}
+
+// VIEW
+function setView(v){
+  document.querySelectorAll('.vbtn').forEach((b,i)=>b.classList.toggle('on',(v==='p'&&i===0)||(v==='o'&&i===1)||(v==='t'&&i===2)));
+}
+
+// GROUP COLLAPSE
+function toggleGrp(id){
+  const el=document.getElementById(id);
+  el.classList.toggle('coll');
+  try{
+    const saved=JSON.parse(localStorage.getItem('grp-coll')||'[]');
+    const isColl=el.classList.contains('coll');
+    const updated=isColl?[...new Set([...saved,id])]:saved.filter(x=>x!==id);
+    localStorage.setItem('grp-coll',JSON.stringify(updated));
+  }catch(_){}
+}
+
+// ROW SELECTION
+let sel=null,ctxName='',ctxBand='',ctxTime='';
+let activeStatus='all', activeBand='all';
+function selRow(el){
+  if(sel&&sel!==el)sel.classList.remove('sel');
+  if(sel===el){sel=null;return;}
+  el.classList.add('sel');sel=el;
+}
+
+// INLINE DIFF
+function sp(e){e.stopPropagation()}
+function calcDiff(inp){
+  const[h,m]=inp.value.split(':').map(Number);
+  const[ph,pm]=(inp.dataset.p||'00:00').split(':').map(Number);
+  const d=(ph*60+pm)-(h*60+m);
+  const cell=inp.nextElementSibling;
+  if(!cell)return;
+  if(d>0){cell.textContent=`−${d} m`;cell.className='rdiff neg';}
+  else if(d<0){cell.textContent=`+${Math.abs(d)} m`;cell.className='rdiff pos';}
+  else{cell.textContent='OK';cell.className='rdiff zero';}
+}
+
+// SEARCH
+function doSearch(){
+  const q=document.getElementById('srch').value.toLowerCase().trim();
+  document.querySelectorAll('.row').forEach(r=>{
+    const n=r.dataset.n||'';
+    const s=r.querySelector('.rsite')?.textContent.toLowerCase()||'';
+    r.style.display=(!q||n.includes(q)||s.includes(q))?'':'none';
+  });
+}
+
+// FILTERS
+function applyFilters(){
+  document.querySelectorAll('.row').forEach(r=>{
+    const ms=activeStatus==='all'||r.dataset.s===activeStatus;
+    const mb=activeBand==='all'||r.dataset.b===activeBand;
+    r.style.display=(ms&&mb)?'':'none';
+  });
+}
+function filterSt(s,el){
+  document.querySelectorAll('.chip').forEach(c=>c.classList.remove('on'));
+  el.classList.add('on');
+  activeStatus=s;
+  applyFilters();
+}
+function filterBand(b,el){
+  document.querySelectorAll('.bb').forEach(c=>c.classList.remove('on'));
+  el.classList.add('on');
+  activeBand=b;
+  applyFilters();
+}
+
+// MODALS
+function close_(id){
+  const el=document.getElementById(id);
+  if(!el)return;
+  el.hidden=true;
+  if(el.style.display && el.style.display!=='none') el.style.display='none';
+}
+document.querySelectorAll('.ov').forEach(o=>o.addEventListener('click',e=>{if(e.target===o)o.hidden=true;}));
+document.getElementById('help-ov').addEventListener('click',e=>{if(e.target===document.getElementById('help-ov'))document.getElementById('help-ov').hidden=true;});
+
+function showCov(e,name,obj,shift){
+  e.stopPropagation();
+  document.getElementById('m-cov-sub').textContent=`${name} — ${obj} — ${shift}`;
+  document.getElementById('m-cov').hidden=false;
+}
+function confirmCov(who){
+  close_('m-cov');
+  toast_(`🚨 Convocatoria enviada a ${who}`,'b');
+  document.querySelectorAll('.ret-row').forEach(r=>{
+    if(r.querySelector('.rname')?.textContent.trim()!==who)return;
+    const stt=r.querySelector('.stt');
+    if(stt){stt.textContent='EN TRANSITO';stt.className='stt a';}
+    const bar=r.querySelector('.ret-bar-g,.ret-bar-y,.ret-bar-b,.ret-bar-n');
+    if(bar)bar.className='ret-bar-y';
+  });
+}
+
+function showTC(e,name,planned,real){
+  e.stopPropagation();
+  document.getElementById('m-tc-sub').textContent=name;
+  document.getElementById('tc-p').value=planned;
+  document.getElementById('tc-r').value=real;
+  calcTC();
+  document.getElementById('m-tc').hidden=false;
+}
+function calcTC(){
+  const r=document.getElementById('tc-r').value;
+  const p=document.getElementById('tc-p').value;
+  if(!r||!p)return;
+  const[rh,rm]=r.split(':').map(Number);
+  const[ph,pm]=p.split(':').map(Number);
+  const d=(ph*60+pm)-(rh*60+rm);
+  const sp=document.getElementById('tc-d');
+  sp.textContent=d>0?`−${d} min`:d<0?`+${Math.abs(d)} min`:'Puntual';
+  sp.className='tdiff '+(d>0?'neg':d<0?'pos':'');
+  document.getElementById('tc-o').value=`${String((rh+8)%24).padStart(2,'0')}:${String(rm).padStart(2,'0')}`;
+}
+function saveTC(){close_('m-tc');toast_('💾 Horario corregido y registrado en Banco de Horas','g');}
+
+function showXchg(e,name,shift,obj){
+  e.stopPropagation();
+  document.getElementById('xa-name').textContent=name;
+  document.getElementById('xa-shift').textContent=`${shift} · ${obj}`;
+  document.getElementById('xb-name').textContent='Seleccionar…';
+  document.getElementById('xb-name').style.color='var(--f3)';
+  document.getElementById('xb-shift').textContent='Buscar abajo';
+  document.getElementById('xb').classList.remove('sel');
+  document.getElementById('x-compat').style.display='none';
+  const btn=document.getElementById('x-ok');btn.disabled=true;btn.style.opacity='.4';
+  document.getElementById('m-xchg').hidden=false;
+}
+function xSearch(inp){
+  const q=inp.value.toLowerCase();
+  document.querySelectorAll('#x-res .cand').forEach(r=>{
+    r.style.display=(!q||r.querySelector('.cname').textContent.toLowerCase().includes(q))?'':'none';
+  });
+}
+function pickB(name,shift){
+  document.getElementById('xb-name').textContent=name;
+  document.getElementById('xb-name').style.color='';
+  document.getElementById('xb-shift').textContent=shift;
+  document.getElementById('xb').classList.add('sel');
+  document.getElementById('x-compat').style.display='';
+  const btn=document.getElementById('x-ok');btn.disabled=false;btn.style.opacity='1';
+}
+function confirmX(){close_('m-xchg');toast_('⇄ Intercambio registrado pendiente confirmación de ambas partes','p');}
+
+function showRelevo(e,name){
+  e.stopPropagation();
+  document.getElementById('m-rel-sub').textContent=`${name} — saliente N · Casino Centro`;
+  document.getElementById('m-rel').hidden=false;
+}
+function confirmRel(who){close_('m-rel');toast_(`🔄 Relevo confirmado — ${who} entrante`,'g');}
+
+function markP(e,name){if(e.stopPropagation)e.stopPropagation();toast_(`✓ ${name} registrado presente`,'g');}
+
+// CONTEXT MENU
+function showCtx(e,name,band,time){
+  e.stopPropagation();ctxName=name;ctxBand=band;ctxTime=time;
+  const c=document.getElementById('ctx');
+  c.style.left=Math.min(e.clientX,window.innerWidth-210)+'px';
+  c.style.top=Math.min(e.clientY,window.innerHeight-250)+'px';
+  c.hidden=false;
+}
+function ctxDo(a){
+  document.getElementById('ctx').hidden=true;
+  if(a==='p') markP({},ctxName);
+  else if(a==='a'){document.getElementById('m-aa-sub').textContent=ctxName;document.getElementById('m-aa').hidden=false;}
+  else if(a==='c') showCov({stopPropagation:()=>{}},ctxName,'—','—');
+  else if(a==='i') showXchg({stopPropagation:()=>{}},ctxName,'Turno','Objetivo');
+  else if(a==='t') showTC({stopPropagation:()=>{}},ctxName,ctxTime,ctxTime);
+  else if(a==='r') showRelevo({stopPropagation:()=>{}},ctxName);
+  else if(a==='rfzf') toast_('RFZF — apertura de cambio permanente desde hoy. Configurar patrón →','b');
+  else if(a==='rfze') toast_('RFZE — ausencia eventual registrada','o');
+}
+document.addEventListener('click',()=>document.getElementById('ctx').hidden=true);
+
+// ━━ WHATSAPP BRIDGE (same-origin polling) ━━
+const confirmedRowIds = new Set();
+// Restaurar confirmados de hoy desde localStorage
+try {
+  const todayKey = 'wa-confirmed-' + new Date().toISOString().slice(0,10);
+  JSON.parse(localStorage.getItem(todayKey)||'[]').forEach(id=>confirmedRowIds.add(id));
+} catch(_){}
+
+async function connectBridge(){
+  const inp = (document.getElementById('wa-url-inp')?.value || '').trim().replace(/\/$/,'');
+  bridgeUrl = inp || 'https://autbacar.dnsalias.com/wabridge';
+  const errEl = document.getElementById('wa-err');
+  if(errEl) errEl.style.display='none';
+  try {
+    const r = await fetch(bridgeUrl + '/status', { signal: AbortSignal.timeout(5000) });
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const data = await r.json();
+    setWAConnected(true);
+    // Restaurar grupos guardados en localStorage
+    let allMonitored = [...(data.monitored || [])];
+    try {
+      const saved = JSON.parse(localStorage.getItem('wa-monitored') || '[]');
+      const needActivate = saved.filter(gid => !allMonitored.includes(gid));
+      for (const gid of needActivate) {
+        try {
+          await fetch(bridgeUrl+'/monitor', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ groupId: gid, enable: true })
+          });
+          allMonitored.push(gid);
+        } catch(_){}
+      }
+    } catch(_){}
+    renderGroups(data.groups || [], allMonitored);
+    startPolling();
+    toast_('✅ Conectado al bridge de WhatsApp','g');
+    const nMon = allMonitored.length;
+    document.getElementById('wa-cfg-status').textContent=
+      `✓ conectado${nMon?' · '+nMon+' grupo'+(nMon>1?'s':''):''}`;
+  } catch(e){
+    showWAErr('No se pudo conectar: ' + e.message);
+  }
+}
+
+function showWAErr(msg){
+  const el=document.getElementById('wa-err');
+  el.textContent=msg; el.style.display='block';
+}
+
+function setWAConnected(ok){
+  const dot=document.getElementById('wa-dot');
+  dot.style.background = ok ? '#25d366' : 'var(--f3)';
+  dot.title = ok ? 'Conectado' : 'Desconectado';
+}
+
+function renderGroups(groups, monitored){
+  monitoredGroups.clear();
+  (monitored||[]).forEach(id=>monitoredGroups.add(id));
+  // UI de grupos vive en openGroupsModal(); aquí solo sincronizamos estado
+  void groups;
+}
+
+async function toggleGroup(btn){
+  const gid    = btn.dataset.gid;
+  const enable = btn.dataset.on !== '1';
+  try {
+    await fetch(bridgeUrl+'/monitor', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ groupId: gid, enable })
+    });
+    btn.dataset.on = enable ? '1' : '0';
+    btn.style.background  = enable ? 'color-mix(in srgb,#25d366 15%,transparent)' : 'var(--s3)';
+    btn.style.color       = enable ? '#25d366' : 'var(--f2)';
+    btn.style.borderColor = enable ? '#25d366' : 'var(--b1)';
+    try {
+      const saved = JSON.parse(localStorage.getItem('wa-monitored') || '[]');
+      const updated = enable ? [...new Set([...saved, gid])] : saved.filter(id => id !== gid);
+      localStorage.setItem('wa-monitored', JSON.stringify(updated));
+    } catch(_){}
+    toast_(enable ? `👂 Escuchando: ${btn.textContent}` : `✗ Dejé de escuchar: ${btn.textContent}`, 'b');
+  } catch(e){ toast_('Error al configurar grupo','r'); }
+}
+
+function startPolling(){
+  if(pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(poll, 2000);
+  poll();
+}
+
+async function poll(){
+  if(!bridgeUrl) return;
+  try {
+    const r = await fetch(`${bridgeUrl}/messages?since=${lastTs}`, { signal: AbortSignal.timeout(4000) });
+    if(!r.ok){ setWAConnected(false); return; }
+    setWAConnected(true);
+    const data = await r.json();
+    // Si el bridge reinició (nuevo startedAt) → limpiar cursor y volver a pedir todo
+    if(data.startedAt && data.startedAt !== bridgeStart){
+      if(bridgeStart > 0){
+        seenIds.clear();
+        lastTs = 0;
+        try{localStorage.removeItem('wa-lastts-'+new Date().toISOString().slice(0,10));}catch(_){}
+        bridgeStart = data.startedAt;
+        console.log('[poll] bridge reiniciado — próxima poll trae mensajes desde 0');
+        connectBridge(); // re-activa grupos del localStorage
+        return; // no actualizar lastTs: la siguiente poll enviará since=0
+      }
+      bridgeStart = data.startedAt;
+    }
+    if(data.ts){ lastTs = data.ts; try{localStorage.setItem('wa-lastts-'+new Date().toISOString().slice(0,10),lastTs);}catch(_){} }
+    const msgs = (data.messages||[]).filter(m=>!seenIds.has(m.id));
+    if(msgs.length) console.log('[poll] mensajes nuevos:', msgs.length, msgs.map(m=>({id:m.id,name:m.name,type:m.type})));
+    msgs.reverse().forEach(m=>{ seenIds.add(m.id); addWARealMsg(m); });
+  } catch(e){ setWAConnected(false); }
+}
+
+// Turnos del día — matching por pushName de WA (producción: consulta Firestore)
+const TURNOS_HOY = {
+  'Franco Sartori':   { shift:'M 12:00–20:00', obj:'GuardiaSP', rowId:'row-franco',  expected:'12:00' },
+  'Debora Quinteros': { shift:'M 12:00–20:00', obj:'GuardiaSP', rowId:'row-debora',  expected:'12:00' },
+  'Mauro':            { shift:'M 12:00–20:00', obj:'GuardiaSP', rowId:'row-mauro',   expected:'12:00' },
+  'Surly':            { shift:'M 12:00–20:00', obj:'GuardiaSP', rowId:'row-surly',   expected:'12:00' },
+};
+
+// Coordenadas de objetivos (en prod: desde Firestore clients[].objetivos[].coordinates)
+// AJUSTAR con las coords reales de cada objetivo
+const OBJETIVOS_COORDS = {
+  'GuardiaSP': { lat: -31.4151, lng: -64.1767 },
+};
+
+function haversine(lat1, lng1, lat2, lng2) {
+  const R = 6371000;
+  const φ1 = lat1 * Math.PI/180, φ2 = lat2 * Math.PI/180;
+  const Δφ = (lat2-lat1) * Math.PI/180, Δλ = (lng2-lng1) * Math.PI/180;
+  const a = Math.sin(Δφ/2)**2 + Math.cos(φ1)*Math.cos(φ2)*Math.sin(Δλ/2)**2;
+  return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)));
+}
+
+function addWARealMsg(m){
+  console.log('[addWARealMsg] procesando:', m.name, m.type, 'hasPhoto:', m.hasPhoto, 'hasLocation:', !!m.location);
+  if (m.type === 'protocol') {
+    const nombre = m.name || 'Guardia';
+    toast_(`Aviso: ${nombre} renovo su clave WA - pedirle que reenvie el check-in`, 'o');
+    return;
+  }
+  const pushName = m.name || '';
+  const normalPhone = (m.phone||'').replace(/^549/,'').replace(/^54/,'');
+
+  // Buscar turno: primero por nombre exacto, luego por coincidencia parcial
+  const turnoKey = Object.keys(TURNOS_HOY).find(k =>
+    pushName.toLowerCase().includes(k.toLowerCase()) ||
+    k.toLowerCase().includes(pushName.toLowerCase())
+  );
+  const turno = turnoKey ? TURNOS_HOY[turnoKey] : null;
+
+  // Si no hay turno: mostrar igual pero como "sin turno asignado"
+  if (!turno) {
+    const normalPhone2 = (m.phone||'').replace(/^549/,'').replace(/^54/,'');
+    addWAMsg({
+      name:      pushName || (normalPhone2 ? '+549'+normalPhone2 : 'Desconocido'),
+      phone:     normalPhone2 ? ('+549'+normalPhone2) : null,
+      text:      m.text,
+      emoji:     m.hasPhoto ? '📸' : m.hasLocation ? '📍' : '💬',
+      shift:     null,
+      obj:       m.group,
+      hora:      m.time,
+      match:     'Sin turno asignado hoy',
+      type:      'unk',
+      rowId:     null,
+      photoData: m.photo || null,
+      location:  m.location || null,
+      distM:     null,
+      distOk:    null,
+    });
+    return;
+  }
+
+  // Dedup: si ya hay card pendiente o ya fue confirmado hoy, descartar
+  if (turno.rowId && (pendingRowIds.has(turno.rowId) || confirmedRowIds.has(turno.rowId))) {
+    return;
+  }
+
+  // Distancia al objetivo si el guardia envió ubicación
+  let distM = null, distOk = null;
+  if (m.location && turno.obj && OBJETIVOS_COORDS[turno.obj]) {
+    const coords = OBJETIVOS_COORDS[turno.obj];
+    distM  = haversine(m.location.lat, m.location.lng, coords.lat, coords.lng);
+    distOk = distM <= 80;
+  }
+
+  const entry = {
+    name:      pushName || normalPhone,
+    phone:     normalPhone ? ('+549' + normalPhone) : null,
+    text:      m.text,
+    emoji:     m.hasPhoto ? '📸' : m.hasLocation ? '📍' : '💬',
+    shift:     turno.shift,
+    obj:       turno.obj || m.group,
+    hora:      m.time,
+    match: (()=>{
+      try{
+        if(!turno?.expected||!m.time) return turno?.shift||'Turno asignado';
+        const[eh,em]=turno.expected.split(':').map(Number);
+        const[ah,am]=m.time.split(':').map(Number);
+        if(isNaN(eh)||isNaN(em)||isNaN(ah)||isNaN(am)) return turno?.shift||'Turno asignado';
+        const diff=(ah*60+am)-(eh*60+em);
+        if(diff<=0) return `${turno.shift} · puntual`;
+        return `${turno.shift} · ${diff} min tarde`;
+      }catch(_){ return 'Turno asignado'; }
+    })(),
+    type:      'pend',
+    rowId:     turno.rowId || null,
+    photoData: m.photo || null,
+    location:  m.location || null,
+    distM,
+    distOk,
+  };
+  if (turno.rowId) pendingRowIds.add(turno.rowId);
+  addWAMsg(entry);
+}
+
+// ━━ WHATSAPP DEMO (sin bridge) ━━
+const WA_MSGS = [
+  { phone:'+5493515475372', name:'Alan Acevedo', text:'llegué', emoji:'🤳', shift:'M 06:00–14:00', obj:'Casino Centro', hora:'06:04', match:'AUTO', type:'ok' },
+  { phone:'+5493516234891', name:'Fabio Rodríguez', text:'presente jefe', emoji:'📸', shift:'M 06:00–14:00', obj:'Kempes P1', hora:'06:23', match:'AUTO — tardanza 23 min registrada', type:'pend' },
+  { phone:'+5493513398201', name:'Número desconocido', text:'avisen que llego tarde', emoji:'💬', shift:null, obj:null, hora:'06:31', match:'Número no registrado en empleados', type:'unk' },
+  { phone:'+5493517821043', name:'María Castro', text:'acá estoy', emoji:'🤳', shift:'M 06:00–14:00', obj:'Peaje E53 C', hora:'06:19', match:'AUTO — tardanza 19 min registrada', type:'pend' },
+  { phone:'+5493511123456', name:'Diego Pereyra', text:'buenas noches presente', emoji:'📸', shift:'N 20:00–04:00', obj:'Peaje E53 B', hora:'20:03', match:'AUTO', type:'ok' },
+  { phone:'+5493519988776', name:'Silvia Torres', text:'ya llegué al puesto', emoji:'🤳', shift:'N ext. hasta 14:00', obj:'Peaje E53 (cob)', hora:'06:12', match:'AUTO — cobertura activa', type:'ok' },
+];
+let waIdx=0, waBadge=0;
+let logOpen=false;
+const monitoredGroups = new Set();
+try{
+  JSON.parse(localStorage.getItem('wa-monitored')||'[]').forEach(id=>monitoredGroups.add(id));
+}catch(_){}
+
+function toggleWASidebar(){
+  const sb=document.getElementById('wa-sidebar');
+  const collapsed=sb.classList.toggle('sb-collapsed');
+  document.getElementById('wa-collapse-btn').title=collapsed?'Expandir':'Colapsar';
+  try{localStorage.setItem('wa-sb-collapsed',collapsed?'1':'0');}catch(_){}
+}
+
+function openGroupsModal(){
+  const modal=document.getElementById('m-wa-groups');
+  const list=document.getElementById('m-wa-groups-list');
+  const empty=document.getElementById('m-wa-groups-empty');
+  list.innerHTML='';
+  fetch((document.getElementById('wa-url-inp')?.value||'').replace(/\/$/,'')+'/status')
+    .then(r=>r.json())
+    .then(d=>{
+      const groups=d.groups||[];
+      const monitored=new Set(d.monitored||[]);
+      if(groups.length===0){empty.style.display='';list.style.display='none';return;}
+      empty.style.display='none';list.style.display='flex';
+      groups.forEach(g=>{
+        const on=monitored.has(g.id);
+        const btn=document.createElement('button');
+        btn.textContent=`${g.name} (${g.participants})`;
+        btn.className='wa-grp-chip'+(on?' on':'');
+        btn.onclick=()=>{
+          const ena=!btn.classList.contains('on');
+          fetch((document.getElementById('wa-url-inp')?.value||'').replace(/\/$/,'')+'/monitor',
+            {method:'POST',headers:{'Content-Type':'application/json'},
+             body:JSON.stringify({groupId:g.id,enable:ena})})
+            .then(()=>{
+              btn.classList.toggle('on',ena);
+              if(ena){monitoredGroups.add(g.id);}else{monitoredGroups.delete(g.id);}
+              try{localStorage.setItem('wa-monitored',JSON.stringify([...monitoredGroups]));}catch(_){}
+            }).catch(()=>{});
+        };
+        list.appendChild(btn);
+      });
+    })
+    .catch(()=>{empty.textContent='No se pudo conectar al servidor WA.';empty.style.display='';list.style.display='none';});
+  modal.hidden=false;
+  modal.style.display='flex';
+}
+
+function openWAConfig(){
+  const modal=document.getElementById('m-wa-config');
+  modal.hidden=false;
+  modal.style.display='flex';
+}
+
+const LOG_PAGE = 10;
+let logPage = 1;
+let logFilter = '';
+
+function toggleLog(){
+  logOpen=!logOpen;
+  const list=document.getElementById('wa-log-list');
+  list.style.display=logOpen?'':'none';
+  document.getElementById('wa-log-chev').textContent=logOpen?'▾':'▸';
+  if(logOpen){
+    renderLogPage();
+    // Mostrar filtro solo si hay más de 10
+    try{
+      const all=JSON.parse(localStorage.getItem('wa-confirmed-log-'+new Date().toISOString().slice(0,10))||'[]');
+      const wrap=document.getElementById('wa-log-filter-wrap');
+      if(wrap) wrap.style.display=(all.length>LOG_PAGE)?'':'none';
+    }catch(_){}
+  } else {
+    const wrap=document.getElementById('wa-log-filter-wrap');
+    if(wrap) wrap.style.display='none';
+  }
+}
+
+function filterLog(val){
+  logFilter=val.toLowerCase().trim();
+  logPage=1;
+  renderLogPage();
+}
+
+function logPageMore(){
+  logPage++;
+  renderLogPage();
+}
+
+function renderLogPage(){
+  try{
+    const logKey='wa-confirmed-log-'+new Date().toISOString().slice(0,10);
+    const all=JSON.parse(localStorage.getItem(logKey)||'[]');
+    const filtered=logFilter?all.filter(e=>e.name.toLowerCase().includes(logFilter)):all;
+    const total=filtered.length;
+    const slice=filtered.slice(0,logPage*LOG_PAGE);
+    const list=document.getElementById('wa-log-list');
+    const moreBtn=document.getElementById('wa-log-more');
+    if(!list)return;
+    list.innerHTML='';
+    slice.forEach(e=>{
+      const locHtml=e.lat&&e.lng
+        ?`<a href="https://www.google.com/maps?q=${e.lat},${e.lng}" target="_blank" rel="noopener"
+           style="width:32px;height:32px;border-radius:5px;border:1px solid var(--b1);flex-shrink:0;
+                  display:flex;align-items:center;justify-content:center;font-size:16px;
+                  background:color-mix(in srgb,var(--blu) 10%,var(--s3));text-decoration:none">📍</a>`
+        :`<div class="wa-photo" style="display:flex;align-items:center;justify-content:center;font-size:16px">✓</div>`;
+      const el=document.createElement('div');
+      el.className='wa-msg';
+      el.style.cssText='opacity:.6;font-size:11px';
+      el.innerHTML=`${locHtml}
+        <div class="wa-body">
+          <div class="wa-name">${e.name}</div>
+          <div class="wa-match">${e.shift||''}</div>
+        </div>
+        <div class="wa-time">${e.arrivedAt}</div>
+        <div class="wa-right"><div class="wa-status ok">✓ CONFIRMADO</div></div>`;
+      list.appendChild(el);
+    });
+    if(moreBtn){
+      const hasMore=total>logPage*LOG_PAGE;
+      moreBtn.style.display=hasMore?'':'none';
+      if(hasMore) moreBtn.textContent=`Ver más · ${total-logPage*LOG_PAGE} restantes ▾`;
+    }
+  }catch(_){}
+}
+
+function simWA(){
+  if(waIdx>=WA_MSGS.length){ toast_('Demo completado — todos los guardias simulados','b'); waIdx=0; return; }
+  const m=WA_MSGS[waIdx++];
+  addWAMsg(m);
+}
+
+function addWAMsg(m){
+  console.log('[addWAMsg] insertando en feed:', m.name, m.type);
+  const feed=document.getElementById('wa-feed');
+  if(!feed){ console.error('[addWAMsg] wa-feed no encontrado'); return; }
+  const empty=document.getElementById('wa-empty');
+  if(empty)empty.remove();
+
+  const now=new Date();
+  const timeStr=m.hora||now.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
+
+  const el=document.createElement('div');
+  el.className='wa-msg';
+  const statusHtml = m.type==='ok'
+    ? `<div class="wa-status ok">✓ MARCADO</div><button class="abtn gh" style="font-size:10px;padding:3px 7px" onclick="toast_('Turno de ${m.name} abierto','b')">Ver turno</button>`
+    : m.type==='pend'
+    ? `<div class="wa-status pend">⚠ REVISAR</div>
+       <div style="display:flex;gap:3px">
+         <button class="abtn grn" style="font-size:10px;padding:3px 7px" onclick="confirmWA(this,'${m.name}','${m.rowId||''}','${m.hora||''}')">✓ Confirmar</button>
+         <button class="abtn gh"  style="font-size:10px;padding:3px 7px" onclick="toast_('Corrección manual abierta','b')">✎</button>
+       </div>`
+    : `<div class="wa-status unk">DESCONOCIDO</div>
+       <button class="abtn gh" style="font-size:10px;padding:3px 7px" onclick="toast_('Buscar empleado por nombre para vincular número','b')">Vincular</button>`;
+
+  // Icono / miniatura
+  const mediaHtml = m.photoData
+    ? `<img src="${m.photoData}" style="width:38px;height:38px;border-radius:6px;object-fit:cover;border:1px solid var(--b1);flex-shrink:0">`
+    : m.location
+    ? `<a href="https://www.google.com/maps?q=${m.location.lat},${m.location.lng}" target="_blank" rel="noopener"
+         style="width:38px;height:38px;border-radius:6px;border:1px solid var(--b1);flex-shrink:0;
+                display:flex;align-items:center;justify-content:center;font-size:20px;
+                background:color-mix(in srgb,var(--blu) 10%,var(--s3));text-decoration:none">📍</a>`
+    : `<div class="wa-photo">${m.emoji}</div>`;
+
+  // Badge de distancia
+  const distHtml = m.distM !== null
+    ? `<span style="margin-left:4px;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;
+         background:${m.distOk?'color-mix(in srgb,var(--grn) 15%,transparent)':m.distM<=200?'color-mix(in srgb,var(--yel) 15%,transparent)':'color-mix(in srgb,var(--red) 15%,transparent)'};
+         color:${m.distOk?'var(--grn)':m.distM<=200?'var(--yel)':'var(--red)'}" title="${m.distM<=80?'Dentro del objetivo':'Fuera del objetivo'}">
+         ${m.distM<1000?m.distM+'m':(m.distM/1000).toFixed(1)+'km'} ${m.distOk?'✓':'⚠'}</span>`
+    : '';
+
+  el.innerHTML=`
+    ${mediaHtml}
+    <div class="wa-body">
+      <div class="wa-name">${m.name}${m.phone?` <span style="color:var(--f3);font-weight:400;font-size:10px">${m.phone}</span>`:''}</div>
+      <div class="wa-match">
+        ${m.shift?`<span style="color:var(--fg);font-weight:600">${m.shift}</span> · ${m.obj} · `:''}
+        <span>${m.match}</span>${distHtml}
+      </div>
+    </div>
+    <div class="wa-time">${timeStr}</div>
+    <div class="wa-right">${statusHtml}</div>
+  `;
+
+  feed.insertBefore(el,feed.firstChild);
+
+  // Update badge
+  if(m.type!=='ok'){
+    waBadge++;
+    const badgeEl=document.getElementById('wa-badge');
+    if(badgeEl){
+      badgeEl.textContent=waBadge;
+      badgeEl.style.background='var(--red)';
+      badgeEl.style.display='';
+    }
+    beepWA();
+    updateTitle();
+  }
+
+  // Flash the sidebar
+  const p=document.getElementById('wa-sidebar');
+  if(p){
+    p.style.boxShadow='inset 0 0 0 2px color-mix(in srgb,#25d366 40%,transparent)';
+    setTimeout(()=>{p.style.boxShadow='';},1200);
+    if(p.classList.contains('sb-collapsed')){
+      p.classList.remove('sb-collapsed');
+      document.getElementById('wa-collapse-btn').title='Colapsar';
+      try{localStorage.setItem('wa-sb-collapsed','0');}catch(_){}
+    }
+  }
+
+  // Auto-scroll feed to top (newest)
+  feed.scrollTop=0;
+
+  // Update matching row in table if auto
+  if(m.type==='ok'&&m.name){
+    const rows=[...document.querySelectorAll('.row,.ret-row')];
+    const r=rows.find(r=>r.querySelector('.rname')?.textContent.toLowerCase().includes(m.name.split(' ')[0].toLowerCase()));
+    if(r){ r.querySelector('.stt')?.classList.replace('u','g'); r.querySelector('.stt')?.classList.replace('c','g'); }
+  }
+}
+
+function confirmWA(btn,name,rowId,arrivedAt){
+  const msgEl=btn.closest('.wa-msg');
+  if(!msgEl)return;
+  btn.closest('.wa-right').innerHTML=`<div class="wa-status ok">✓ CONFIRMADO</div>`;
+  waBadge=Math.max(0,waBadge-1);
+  const badge=document.getElementById('wa-badge');
+  badge.textContent=waBadge||'0';
+  badge.style.display=waBadge>0?'':'none';
+  updateTitle();
+
+  // Marcar PRESENTE en la fila del CC
+  if(rowId){
+    const row=document.getElementById(rowId);
+    if(row){
+      const now=arrivedAt||new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
+      const realEl=document.getElementById('real-'+rowId.replace('row-',''));
+      const difEl =document.getElementById('dif-'+rowId.replace('row-',''));
+      const sttEl =document.getElementById('stt-'+rowId.replace('row-',''));
+      if(realEl)realEl.textContent=now;
+      if(sttEl){sttEl.className='stt g';sttEl.textContent='PRESENTE';}
+      row.classList.replace('u','g'); row.setAttribute('data-s','g');
+      // Calcular diferencia respecto al horario planificado de la fila
+      if(difEl){
+        const [hh,mm]=now.split(':').map(Number);
+        const plannedEl=row.querySelector('.rtime');
+        const plannedStr=plannedEl?.textContent?.trim()||'';
+        const [ph,pm]=(plannedStr.match(/^\d{2}:\d{2}$/)?plannedStr:'12:00').split(':').map(Number);
+        const mins=(hh*60+mm)-(ph*60+pm);
+        difEl.textContent=mins===0?'OK':(mins>0?`+${mins} min`:`${mins} min`);
+        difEl.className='rdiff '+(mins===0?'zero':mins<0?'pos':'neg');
+      }
+      // Actualizar badge del grupo
+      const remaining=document.querySelectorAll('#g-guardiasp .stt.u').length;
+      const gb=document.getElementById('gbadge-guardiasp');
+      if(gb)gb.textContent=remaining>0?`${remaining} ESPERANDO`:'✓ TODOS PRESENTES';
+    }
+  }
+
+  if (rowId) {
+    pendingRowIds.delete(rowId);
+    confirmedRowIds.add(rowId);
+    try {
+      const todayKey = 'wa-confirmed-' + new Date().toISOString().slice(0,10);
+      const saved = JSON.parse(localStorage.getItem(todayKey)||'[]');
+      if (!saved.includes(rowId)) { saved.push(rowId); localStorage.setItem(todayKey, JSON.stringify(saved)); }
+    } catch(_){}
+    // Guardar detalle para restaurar log tras recarga
+    try {
+      const logKey = 'wa-confirmed-log-' + new Date().toISOString().slice(0,10);
+      const locLink = msgEl.querySelector('a[href*="maps"]');
+      let lat=null, lng=null;
+      if(locLink){ const m=locLink.href.match(/q=([-\d.]+),([-\d.]+)/); if(m){lat=parseFloat(m[1]);lng=parseFloat(m[2]);} }
+      const shift = msgEl.querySelector('.rshift')?.textContent || msgEl.querySelector('.wa-match')?.textContent || '';
+      const existing = JSON.parse(localStorage.getItem(logKey)||'[]');
+      if(!existing.find(e=>e.rowId===rowId)){
+        existing.unshift({rowId, name, arrivedAt: arrivedAt||new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}), shift, lat, lng});
+        localStorage.setItem(logKey, JSON.stringify(existing));
+      }
+    } catch(_){}
+  }
+  toast_(`✓ ${name} — Presente confirmado`,'g');
+
+  // Mover al log después de 1.2s
+  setTimeout(()=>{
+    if(msgEl.parentNode) msgEl.remove();
+    const feed=document.getElementById('wa-feed');
+    if(feed&&!feed.querySelector('.wa-msg')){
+      const e=document.createElement('div');e.className='wa-empty';e.id='wa-empty';
+      e.textContent='Sin check-ins pendientes.';feed.appendChild(e);
+    }
+    const logSection=document.getElementById('wa-log');
+    if(logSection) logSection.style.display='';
+    // Actualizar count
+    try{
+      const all=JSON.parse(localStorage.getItem('wa-confirmed-log-'+new Date().toISOString().slice(0,10))||'[]');
+      const cnt=document.getElementById('wa-log-count');
+      if(cnt) cnt.textContent=all.length;
+    }catch(_){}
+    if(logOpen){ logPage=1; renderLogPage(); }
+    // Mostrar filtro si hay más de 10
+    try{
+      const all=JSON.parse(localStorage.getItem('wa-confirmed-log-'+new Date().toISOString().slice(0,10))||'[]');
+      const wrap=document.getElementById('wa-log-filter-wrap');
+      if(wrap&&all.length>LOG_PAGE) wrap.style.display=logOpen?'':'none';
+    }catch(_){}
+  },1200);
+}
+
+function clearLog(){
+  // Resetear log
+  document.getElementById('wa-log-list').innerHTML='';
+  document.getElementById('wa-log-count').textContent='0';
+  document.getElementById('wa-log').style.display='none';
+  seenIds.clear();
+  pendingRowIds.clear();
+  // Resetear filas GuardiaSP
+  [['franco'],['debora'],['mauro']].forEach(([k])=>{
+    const row=document.getElementById('row-'+k);if(!row)return;
+    row.className='row u';row.setAttribute('data-s','u');
+    const r=document.getElementById('real-'+k),d=document.getElementById('dif-'+k),s=document.getElementById('stt-'+k);
+    if(r)r.textContent='—';if(d){d.textContent='—';d.className='rdiff zero';}
+    if(s){s.className='stt u';s.textContent='ESPERANDO';}
+    const bar=row.querySelector('.rbar');if(bar)bar.className='rbar';
+  });
+  const gb=document.getElementById('gbadge-guardiasp');
+  if(gb)gb.textContent='3 ESPERANDO';
+  try {
+    const todayKey = 'wa-confirmed-' + new Date().toISOString().slice(0,10);
+    localStorage.removeItem(todayKey);
+    localStorage.removeItem('wa-confirmed-log-' + new Date().toISOString().slice(0,10));
+    localStorage.removeItem('wa-lastts-' + new Date().toISOString().slice(0,10));
+  } catch(_){}
+  confirmedRowIds.clear();
+  toast_('Log limpiado — podés volver a probar','b');
+}
+
+// Teléfonos de retenes para pruebas (en prod: desde Firestore empleados.telefono)
+const RET_PHONES = {
+  'Suárez, Juan':  '3516294882',
+  'Medina, Carla': '3515475372',
+  'Paz, Roberto':  '3513398201',
+};
+
+function convocarRet(e, name){
+  e.stopPropagation();
+  const phone = RET_PHONES[name] || '';
+  document.getElementById('wa-send-name').textContent  = name;
+  document.getElementById('wa-send-phone').value       = phone;
+  document.getElementById('wa-send-msg').value         =
+    `Hola ${name.split(',')[1]?.trim()||name}, te convocamos para cobertura hoy. ¿Podés ir? Respondé este mensaje para confirmar.`;
+  document.getElementById('wa-send-status').textContent = '';
+  document.getElementById('m-wa-send').hidden = false;
+}
+function toggleRetPanel(){
+  const g=document.getElementById('g-ret-hoy');
+  g.classList.toggle('coll');
+  g.scrollIntoView({block:'start',behavior:'smooth'});
+}
+
+function pickOpt(radio){
+  document.querySelectorAll('.oitem').forEach(o=>o.classList.remove('on'));
+  radio.closest('.oitem').classList.add('on');
+}
+function doAA(){
+  const v=document.querySelector('input[name="aa"]:checked')?.value;
+  close_('m-aa');
+  if(v==='cob') showCov({stopPropagation:()=>{}},ctxName,'—','—');
+  else toast_(`📋 Ausencia registrada — ${ctxName}`,'o');
+}
+
+// TOAST
+let tt;
+function toast_(msg,cls='g'){
+  const t=document.getElementById('toast');
+  t.textContent=msg;t.className=`toast ${cls} show`;
+  clearTimeout(tt);tt=setTimeout(()=>t.classList.remove('show'),3000);
+}
+
+function beepWA(){
+  try{
+    const ctx=new (window.AudioContext||window.webkitAudioContext)();
+    const o=ctx.createOscillator(), g=ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.frequency.value=880;
+    g.gain.setValueAtTime(0.3,ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.3);
+    o.start(); o.stop(ctx.currentTime+0.3);
+  }catch(_){}
+}
+
+function updateTitle(){
+  document.title = waBadge>0 ? `(${waBadge}) CC Modo Rapido` : 'CC Modo Rapido';
+}
+
+function tickCritical(){
+  const now=new Date();
+  const nowMins=now.getHours()*60+now.getMinutes();
+  document.querySelectorAll('.row.c').forEach(row=>{
+    const plannedEl=row.querySelector('.rtime');
+    const rdiff=row.querySelector('.rdiff');
+    if(!plannedEl||!rdiff)return;
+    const planned=plannedEl.textContent.trim();
+    if(!/^\d{2}:\d{2}$/.test(planned))return;
+    const[ph,pm]=planned.split(':').map(Number);
+    let diff=nowMins-(ph*60+pm);
+    if(diff<0)diff+=1440;
+    rdiff.textContent=`+${diff} m`;
+    rdiff.className='rdiff neg';
+  });
+}
+
+// KEYBOARD
+document.addEventListener('keydown',e=>{
+  const tag=e.target.tagName;
+  const inInput=['INPUT','TEXTAREA'].includes(tag);
+
+  if(e.key==='Escape'){
+    document.querySelectorAll('.ov').forEach(o=>o.hidden=true);
+    document.getElementById('help-ov').hidden=true;
+    document.getElementById('ctx').hidden=true;
+    close_('m-wa-groups');
+    close_('m-wa-config');
+    if(sel){sel.classList.remove('sel');sel=null;}
+    e.preventDefault(); return;
+  }
+  if(e.key==='/'&&!inInput){document.getElementById('srch').focus();e.preventDefault();return;}
+  if(e.key==='?'&&!inInput){document.getElementById('help-ov').hidden=false;e.preventDefault();return;}
+  if(inInput)return;
+
+  const rows=[...document.querySelectorAll('.row')].filter(r=>r.style.display!=='none');
+  const ci=rows.indexOf(sel);
+
+  if(e.key==='ArrowDown'||e.key==='j'){
+    const n=rows[ci+1]||rows[0];
+    if(n){selRow(n);n.scrollIntoView({block:'nearest',behavior:'smooth'});}
+    e.preventDefault();
+  }
+  if(e.key==='ArrowUp'||e.key==='k'){
+    const p=rows[ci>0?ci-1:rows.length-1];
+    if(p){selRow(p);p.scrollIntoView({block:'nearest',behavior:'smooth'});}
+    e.preventDefault();
+  }
+  if(e.key==='Enter'&&sel){
+    const btn=sel.querySelector('.abtn.red,.abtn.ora,.abtn.grn,.abtn.blu');
+    if(btn)btn.click();e.preventDefault();
+  }
+
+  // CTRL shortcuts
+  if(e.ctrlKey||e.metaKey){
+    const n=sel?.querySelector('.rname')?.textContent||ctxName||'—';
+    if(e.key==='p'){markP({},n);e.preventDefault();}
+    else if(e.key==='a'){ctxName=n;document.getElementById('m-aa-sub').textContent=n;document.getElementById('m-aa').hidden=false;e.preventDefault();}
+    else if(e.key==='i'){showXchg({stopPropagation:()=>{}},n,'Turno','Objetivo');e.preventDefault();}
+    else if(e.key==='c'){showCov({stopPropagation:()=>{}},n,'—','—');e.preventDefault();}
+    else if(e.key==='t'){showTC({stopPropagation:()=>{}},n,'06:00','06:00');e.preventDefault();}
+    else if(e.key==='r'){showRelevo({stopPropagation:()=>{}},n);e.preventDefault();}
+    else if(e.key==='m'&&sel){
+      const r=sel.getBoundingClientRect();
+      showCtx({stopPropagation:()=>{},clientX:r.right,clientY:r.top+20},
+        sel.querySelector('.rname')?.textContent||'',
+        sel.dataset.b||'',sel.dataset.t||'06:00');
+      e.preventDefault();
+    }
+    else if(e.key==='?'||e.key==='/'){document.getElementById('help-ov').hidden=false;e.preventDefault();}
+  }
+});
+
+// ── ENVIAR WA ───────────────────────────────────────────
+async function sendWA(){
+  const phone   = document.getElementById('wa-send-phone').value.trim();
+  const message = document.getElementById('wa-send-msg').value.trim();
+  const status  = document.getElementById('wa-send-status');
+  if(!phone||!message){ status.textContent='⚠ Ingresá el teléfono y el mensaje.'; return; }
+  status.textContent='Enviando…';
+  try {
+    const r = await fetch(`${bridgeUrl}/send`,{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({phone, message})
+    });
+    const d = await r.json();
+    if(d.ok){
+      status.textContent='✓ Enviado';
+      setTimeout(()=>{ document.getElementById('m-wa-send').hidden=true; },1200);
+      toast_(`✓ Mensaje enviado a ${document.getElementById('wa-send-name').textContent}`,'g');
+    } else {
+      status.textContent='✗ Error: '+(d.error||'desconocido');
+    }
+  } catch(e){ status.textContent='✗ Sin conexión al bridge'; }
+}
+
+tickCritical();
+setInterval(tickCritical, 60000);
+
+// Restaurar grupos colapsados
+try{
+  JSON.parse(localStorage.getItem('grp-coll')||'[]').forEach(id=>{
+    const el=document.getElementById(id);
+    if(el)el.classList.add('coll');
+  });
+}catch(_){}
+
+// Restaurar estado del sidebar WA
+try{
+  if(localStorage.getItem('wa-sb-collapsed')==='1'){
+    document.getElementById('wa-sidebar').classList.add('sb-collapsed');
+    document.getElementById('wa-collapse-btn').title='Expandir';
+  }
+}catch(_){}
+
+// Restaurar log "Confirmados hoy" desde localStorage
+try{
+  const logKey='wa-confirmed-log-'+new Date().toISOString().slice(0,10);
+  const entries=JSON.parse(localStorage.getItem(logKey)||'[]');
+  if(entries.length>0){
+    const logSection=document.getElementById('wa-log');
+    const logCount=document.getElementById('wa-log-count');
+    if(logSection){
+      logSection.style.display='';
+      if(logCount) logCount.textContent=entries.length;
+      // Mostrar filtro si hay más de 10
+      if(entries.length>LOG_PAGE){
+        const wrap=document.getElementById('wa-log-filter-wrap');
+        if(wrap) wrap.style.display='';
+      }
+    }
+  }
+}catch(_){}
+</script>
+
+<!-- MODAL ENVIAR WA -->
+<div class="ov" id="m-wa-send" hidden>
+  <div class="modal" style="max-width:420px">
+    <div class="mt">📲 Convocar por WhatsApp</div>
+    <div class="ms">
+      <strong id="wa-send-name"></strong>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-top:4px">
+      <div>
+        <div style="font-size:10px;color:var(--f3);font-weight:700;letter-spacing:.06em;text-transform:uppercase;margin-bottom:4px">Teléfono</div>
+        <input id="wa-send-phone" type="text" placeholder="3516294882"
+          style="width:100%;background:var(--s3);border:1px solid var(--b1);border-radius:7px;
+                 padding:7px 10px;color:var(--fg);font-size:12px;font-family:var(--mono);outline:none">
+      </div>
+      <div>
+        <div style="font-size:10px;color:var(--f3);font-weight:700;letter-spacing:.06em;text-transform:uppercase;margin-bottom:4px">Mensaje</div>
+        <textarea id="wa-send-msg" rows="3"
+          style="width:100%;background:var(--s3);border:1px solid var(--b1);border-radius:7px;
+                 padding:7px 10px;color:var(--fg);font-size:12px;resize:vertical;outline:none;font-family:var(--sans)"></textarea>
+      </div>
+      <div id="wa-send-status" style="font-size:11px;color:var(--grn);min-height:16px"></div>
+    </div>
+    <div class="mf">
+      <button class="abtn gh" onclick="document.getElementById('m-wa-send').hidden=true">Cancelar</button>
+      <button class="abtn grn" onclick="sendWA()">📲 Enviar por WhatsApp</button>
+    </div>
+  </div>
+</div>
+
+<div id="m-wa-groups" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:200;align-items:center;justify-content:center">
+  <div style="background:var(--s1);border-radius:12px;padding:18px 20px;min-width:280px;max-width:380px;width:90%;border:1px solid var(--b1)">
+    <div style="font-weight:700;font-size:13px;margin-bottom:12px;color:var(--fg)">Grupos WA a monitorear</div>
+    <div id="m-wa-groups-list" style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:14px"></div>
+    <div id="m-wa-groups-empty" style="font-size:11px;color:var(--f3);display:none">Sin grupos disponibles. Conecta primero el servidor.</div>
+    <button onclick="close_('m-wa-groups')" style="width:100%;padding:8px;background:var(--b1);border:none;border-radius:7px;color:var(--fg);font-size:12px;font-weight:600;cursor:pointer">Cerrar</button>
+  </div>
+</div>
+
+<div id="m-wa-config" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:200;align-items:center;justify-content:center">
+  <div style="background:var(--s1);border-radius:12px;padding:18px 20px;min-width:300px;max-width:420px;width:90%;border:1px solid var(--b1)">
+    <div style="font-weight:700;font-size:13px;margin-bottom:4px">Configuracion WA Bridge</div>
+    <div style="font-size:11px;color:var(--f2);margin-bottom:12px">URL del servidor local que corre wa-bridge.js</div>
+    <div style="display:flex;gap:6px;align-items:center;margin-bottom:10px">
+      <input id="wa-url-vis" type="text" placeholder="http://localhost:3001"
+        style="flex:1;background:var(--s3);border:1px solid var(--b1);border-radius:7px;padding:6px 10px;color:var(--fg);font-size:12px;font-family:var(--mono);outline:none"
+        value="https://autbacar.dnsalias.com/wabridge"
+        oninput="document.getElementById('wa-url-inp').value=this.value">
+      <button onclick="connectBridge()" style="background:#25d366;color:#fff;border:none;border-radius:7px;padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">
+        Conectar
+      </button>
+    </div>
+    <div id="wa-err-modal" style="display:none;font-size:11px;color:var(--red);margin-bottom:8px"></div>
+    <button onclick="close_('m-wa-config')" style="width:100%;padding:8px;background:var(--b1);border:none;border-radius:7px;color:var(--fg);font-size:12px;font-weight:600;cursor:pointer">Cerrar</button>
+  </div>
+</div>
+
+</body>
+</html>

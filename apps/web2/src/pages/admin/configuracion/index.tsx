@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
-import { Settings, Users, Shield, Database, Building2, HardDrive, Bot, Activity, Scale, Smartphone, Link2 } from 'lucide-react';
+import { Settings, Users, Shield, Database, Building2, HardDrive, Bot, Activity, Scale, Smartphone, Link2, MessageCircle } from 'lucide-react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import UsersTab from '@/components/admin/config/UsersTab';
 import RolesTab from '@/components/admin/config/RolesTab';
@@ -13,12 +13,13 @@ import PlatformHealthTab from '@/components/admin/config/PlatformHealthTab';
 import PlanningRulesTab from '@/components/admin/config/PlanningRulesTab';
 import MobileAppTab from '@/components/admin/config/MobileAppTab';
 import DashboardApiTab from '@/components/admin/config/DashboardApiTab';
+import WABridgeTab from '@/components/admin/config/WABridgeTab';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { PageShell, PageHeader, TabBar } from '@/components/ui';
 
 export default function ConfigPage() {
-    const [activeTab, setActiveTab] = useState<'GENERAL' | 'MOBILE' | 'PLANNING' | 'USERS' | 'ROLES' | 'EMPRESAS' | 'BACKUP' | 'ASSISTANT' | 'HEALTH' | 'DASHBOARD_API'>('GENERAL');
+    const [activeTab, setActiveTab] = useState<'GENERAL' | 'MOBILE' | 'PLANNING' | 'USERS' | 'ROLES' | 'EMPRESAS' | 'WABRIDGE' | 'BACKUP' | 'ASSISTANT' | 'HEALTH' | 'DASHBOARD_API'>('GENERAL');
     const router = useRouter();
     const { loading, canReadModule, isSuperAdmin } = useAuth();
     const { empresa } = useEmpresa();
@@ -68,6 +69,7 @@ export default function ConfigPage() {
                             { id: 'USERS',     label: 'Usuarios Admin',   icon: Users },
                             { id: 'ROLES',     label: 'Roles y Permisos', icon: Shield },
                             { id: 'EMPRESAS',  label: 'Empresas',         icon: Building2 },
+                            { id: 'WABRIDGE' as const, label: 'WA Bridge', icon: MessageCircle },
                             { id: 'BACKUP',    label: 'Backups',          icon: HardDrive },
                             { id: 'ASSISTANT', label: 'AI Asistente',     icon: Bot },
                             { id: 'HEALTH',    label: 'Salud',            icon: Activity },
@@ -83,6 +85,7 @@ export default function ConfigPage() {
                         {activeTab === 'USERS'     && <UsersTab />}
                         {activeTab === 'ROLES'     && <RolesTab />}
                         {activeTab === 'EMPRESAS'  && <EmpresasTab />}
+                        {activeTab === 'WABRIDGE'  && <WABridgeTab />}
                         {activeTab === 'BACKUP'    && <BackupTab />}
                         {activeTab === 'ASSISTANT' && <AssistantLogTab />}
                         {activeTab === 'HEALTH'        && <PlatformHealthTab />}
