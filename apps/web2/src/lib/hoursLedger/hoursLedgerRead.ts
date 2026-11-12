@@ -412,9 +412,9 @@ export function byClientMetricsFromLedger(
   clients?: OwnerClientLike[],
 ): Record<string, { sla: number; planned: number; real: number }> {
   const out: Record<string, { sla: number; planned: number; real: number }> = {};
-  const add = (cid: string, row: { slaActive?: number; planPublished?: number; planDraft?: number; worked?: number }) => {
+  const add = (cid: string, row: { slaActive?: number; slaWithoutPlan?: number; planPublished?: number; planDraft?: number; worked?: number }) => {
     const cur = out[cid] || { sla: 0, planned: 0, real: 0 };
-    cur.sla += Number(row.slaActive) || 0;
+    cur.sla += (Number(row.slaActive) || 0) + (Number(row.slaWithoutPlan) || 0);
     cur.planned += planHoursOf(planMode, row);
     cur.real += Number(row.worked) || 0;
     out[cid] = cur;
