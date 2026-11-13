@@ -18680,6 +18680,8 @@ function PlanificacionDesktop() {
                 }
                 // Turno de trabajo: permitir como segundo turno, seguir con la validación de decidirAsignacionOtroObjetivo
             }
+            // Si local existe acá, ya pasó el check de licencia/franco: es turno de trabajo → escribir como B2
+            const haySegundoBloque = !!local;
             if (!turnosEmp.has(ped.empId)) {
                 const snap = await getDocs(query(collection(db, 'turnos'), where('employeeId', '==', ped.empId), where('empresaId', '==', empresaId)));
                 const lista: TurnoDelGuardia[] = [];
@@ -18756,7 +18758,8 @@ function PlanificacionDesktop() {
                 positionName: ped.franja.positionName,
             });
             if ('error' in res) { out.avisos.push({ mensaje: `${ped.nombre}: ${res.error}` }); continue; }
-            next[key] = {
+            const writeKey = haySegundoBloque ? `${key}_B2` : key;
+            next[writeKey] = {
                 ...res.change,
                 objectiveId: ped.objetivo.id,
                 clientId: ped.objetivo.clientId,
@@ -18764,6 +18767,7 @@ function PlanificacionDesktop() {
                 draft: modo.draft,
                 menuRapidoVia: 'OTRO_OBJETIVO',
                 comments: `Asignado en ${ped.objetivo.name}`,
+                ...(haySegundoBloque ? { isSecondBlock: true } : {}),
             };
             horasLote.set(ped.empId, (horasLote.get(ped.empId) || 0) + ped.franja.hours);
             out.escritos += 1;
