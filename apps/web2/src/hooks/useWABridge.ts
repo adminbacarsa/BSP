@@ -13,6 +13,8 @@ export interface WAEntry {
   lat?: number;
   lng?: number;
   msgType: string;
+  /** Base64 data-URL de foto de check-in (si el bridge la envía). */
+  photo?: string;
 }
 
 export interface WAConfirmedEntry {
@@ -35,6 +37,8 @@ export interface TurnoHoy {
   realStartTime?: string;
   /** Teléfono normalizado del empleado (sin +549), para match WA. */
   phone?: string;
+  /** Nombre canónico del empleado en la plataforma (para mostrar en lugar del pushName WA). */
+  name?: string;
 }
 
 export type WABridgeStatus = 'idle' | 'connecting' | 'connected' | 'error';
@@ -63,6 +67,7 @@ interface BridgeMsg {
   type: 'location' | 'image' | 'text' | 'protocol' | string;
   location?: { latitude: number; longitude: number };
   hasPhoto?: boolean;
+  photo?: string | null;
 }
 
 interface BridgeMessagesResponse {
@@ -266,8 +271,13 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
         if (m.type === 'protocol') continue;
 
         const turno = findTurno(turnosRef.current, m.name, m.phone);
+        // Regla 1: sin turno planificado hoy → descartar
+        if (!turno) continue;
+        // Regla 2: ya presente en plataforma → descartar
+        if (turno.turnoStatus === 'PRESENT' || turno.turnoStatus === 'COMPLETED') continue;
+        // Regla 3: ya pendiente o confirmado en esta sesión → descartar (primer mensaje gana)
         if (
-          turno?.rowId &&
+          turno.rowId &&
           (pendingRowIdsRef.current.has(turno.rowId) ||
             confirmedRowIdsRef.current.has(turno.rowId))
         ) {
@@ -278,7 +288,7 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
         const entry: WAEntry = {
           id: m.id,
           rowId: turno?.rowId,
-          name: m.name,
+          name: turno?.name || m.name,
           phone: m.phone,
           arrivedAt,
           shift: turno?.shift,
@@ -288,6 +298,7 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
           lat: (m.location as { lat?: number; latitude?: number } | undefined)?.lat ?? m.location?.latitude,
           lng: (m.location as { lng?: number; longitude?: number } | undefined)?.lng ?? m.location?.longitude,
           msgType: m.type,
+          photo: typeof m.photo === 'string' && m.photo ? m.photo : undefined,
         };
 
         if (entry.rowId) pendingRowIdsRef.current.add(entry.rowId);
@@ -422,6 +433,7 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
       lat: partial?.lat,
       lng: partial?.lng,
       msgType: partial?.msgType || 'text',
+      photo: partial?.photo,
     };
     if (entry.rowId) pendingRowIdsRef.current.add(entry.rowId);
     setPending((prev) => [entry, ...prev]);
