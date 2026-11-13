@@ -8,12 +8,7 @@ import { SupervisorPinInput } from '@/components/ui';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { isSuperAdminRole } from '@/lib/roles';
-import {
-    ALL_EMPRESAS_VALUE,
-    isAllEmpresasUser,
-    empresaToFormValue,
-    empresaFromFormValue,
-} from '@/lib/systemUser';
+import { isAllEmpresasUser } from '@/lib/systemUser';
 
 export default function UsersTab() {
     const { isSuperAdmin } = useAuth();
@@ -29,7 +24,7 @@ export default function UsersTab() {
     const [isProcessing, setIsProcessing] = useState(false);
     const [editMode, setEditMode]         = useState(false);
 
-    const initialForm = { id: '', firstName: '', lastName: '', email: '', password: '', role: '', empresaId: '', supervisorPin: '', showPin: false, objetivosAsignados: [] as string[], requiresTraining: false };
+    const initialForm = { id: '', firstName: '', lastName: '', email: '', password: '', role: '', empresaId: '', empresaIds: [] as string[], allEmpresas: false, supervisorPin: '', showPin: false, objetivosAsignados: [] as string[], requiresTraining: false };
     const [formData, setFormData] = useState(initialForm);
 
     const empresasDropdown = isSuperAdmin
@@ -76,7 +71,7 @@ export default function UsersTab() {
 
     const handleOpenCreate = () => {
         setEditMode(false);
-        setFormData({ ...initialForm, empresaId: isSuperAdmin ? '' : myEmpresaId });
+        setFormData({ ...initialForm, empresaIds: isSuperAdmin ? [] : [myEmpresaId], allEmpresas: false });
         setObjetivosFilter('');
         setIsModalOpen(true);
     };
@@ -91,7 +86,13 @@ export default function UsersTab() {
             email: user.email,
             password: '',
             role: user.role,
-            empresaId: empresaToFormValue(user),
+            empresaId: '',
+            empresaIds: isAllEmpresasUser(user) && !isSuperAdminRole(user.role)
+              ? []
+              : Array.isArray(user.empresaIds) && user.empresaIds.length > 1
+                ? user.empresaIds as string[]
+                : user.empresaId ? [user.empresaId as string] : [],
+            allEmpresas: isAllEmpresasUser(user) && !isSuperAdminRole(user.role),
             supervisorPin: user.supervisorPin || '',
             showPin: false,
             objetivosAsignados: user.objetivosAsignados || [],
@@ -103,7 +104,13 @@ export default function UsersTab() {
     // Carga objetivos cuando se abre el modal (para asignación a supervisores)
     useEffect(() => {
         if (!isModalOpen) return;
-        const empId = formData.empresaId === ALL_EMPRESAS_VALUE ? '' : (formData.empresaId || myEmpresaId);
+        const empId = formData.allEmpresas
+          ? ''
+          : formData.empresaIds.length === 1
+            ? formData.empresaIds[0]
+            : formData.empresaIds.length > 1
+              ? formData.empresaIds[0] // primary
+              : myEmpresaId;
         if (!empId) { setObjetivosList([]); return; }
         getDocs(query(collection(db, 'clients'), where('empresaId', '==', empId))).then(snap => {
             const objs: {id: string; name: string; clientName: string}[] = [];
@@ -117,32 +124,58 @@ export default function UsersTab() {
             });
             setObjetivosList(objs.sort((a, b) => a.name.localeCompare(b.name, 'es')));
         }).catch(() => setObjetivosList([]));
-    }, [isModalOpen, formData.empresaId, myEmpresaId]);
+    }, [isModalOpen, formData.allEmpresas, formData.empresaIds, myEmpresaId]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (!isSuperAdminRole(formData.role) && !formData.allEmpresas && formData.empresaIds.length === 0) {
+          toast.error('Seleccioná al menos una empresa para el usuario.');
+          return;
+        }
         setIsProcessing(true);
 
         const promise = new Promise(async (resolve, reject) => {
             try {
                 const roleIsSuperAdmin = isSuperAdminRole(formData.role);
-                const { empresaId: efectivaEmpresaId, allEmpresas } = empresaFromFormValue(
-                    formData.empresaId,
-                    roleIsSuperAdmin,
-                );
+
+                // Calcular valores finales de empresa
+                let patchEmpresaId = '';
+                let patchAllEmpresas = false;
+                let patchEmpresaIds: string[] | null = null;
+
+                if (roleIsSuperAdmin) {
+                  patchEmpresaId = '';
+                  patchAllEmpresas = false;
+                  patchEmpresaIds = null;
+                } else if (formData.allEmpresas) {
+                  patchEmpresaId = '';
+                  patchAllEmpresas = true;
+                  patchEmpresaIds = null;
+                } else if (formData.empresaIds.length > 1) {
+                  patchEmpresaId = formData.empresaIds[0]; // primera como empresa primaria
+                  patchAllEmpresas = false;
+                  patchEmpresaIds = formData.empresaIds;
+                } else {
+                  patchEmpresaId = formData.empresaIds[0] || '';
+                  patchAllEmpresas = false;
+                  patchEmpresaIds = null;
+                }
 
                 if (editMode) {
                     const patch: Record<string, unknown> = {
                         firstName:           formData.firstName,
                         lastName:            formData.lastName,
                         role:                formData.role,
-                        empresaId:           efectivaEmpresaId,
+                        empresaId:           patchEmpresaId,
                         supervisorPin:       formData.supervisorPin || null,
                         objetivosAsignados:  formData.objetivosAsignados,
                         requiresTraining:    formData.requiresTraining,
                     };
-                    if (allEmpresas) patch.allEmpresas = true;
+                    if (patchAllEmpresas) patch.allEmpresas = true;
                     else patch.allEmpresas = deleteField();
+
+                    if (patchEmpresaIds !== null) patch.empresaIds = patchEmpresaIds;
+                    else patch.empresaIds = deleteField();
 
                     await updateDoc(doc(db, 'system_users', formData.id), patch);
                     const syncFn = httpsCallable(functions, 'syncSystemUserClaims');
@@ -156,8 +189,9 @@ export default function UsersTab() {
                         email:            formData.email,
                         password:         formData.password,
                         role:             formData.role,
-                        empresaId:        efectivaEmpresaId,
-                        allEmpresas,
+                        empresaId:        patchEmpresaId,
+                        allEmpresas:      patchAllEmpresas,
+                        empresaIds:       patchEmpresaIds,
                         supervisorPin:    formData.supervisorPin || null,
                         requiresTraining: formData.requiresTraining,
                     });
@@ -268,6 +302,13 @@ export default function UsersTab() {
                                         <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 text-xs font-bold">
                                             <Shield size={12}/> Todas las empresas
                                         </span>
+                                    ) : Array.isArray(u.empresaIds) && u.empresaIds.length > 1 ? (
+                                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-violet-50 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 text-xs font-bold flex-wrap gap-y-1">
+                                            <Building2 size={12}/>
+                                            {(u.empresaIds as string[]).map((id: string, i: number) => (
+                                              <span key={id}>{getEmpresaName(id)}{i < u.empresaIds.length - 1 ? ' · ' : ''}</span>
+                                            ))}
+                                        </span>
                                     ) : u.empresaId ? (
                                         <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 text-xs font-bold">
                                             <Building2 size={12}/>{getEmpresaName(u.empresaId)}
@@ -367,20 +408,56 @@ export default function UsersTab() {
                                 </div>
                             ) : (
                                 <div>
-                                    <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 ml-1 mb-1 block flex items-center gap-1">
+                                    <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 ml-1 mb-2 block flex items-center gap-1">
                                         <Building2 size={10}/> Empresa
                                         {!isSuperAdmin && <span className="font-normal normal-case text-slate-400">(asignada automáticamente)</span>}
                                     </label>
                                     {isSuperAdmin ? (
-                                        <select
-                                            required
-                                            className="w-full p-4 bg-slate-50 dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-700 focus:border-indigo-500 rounded-xl font-bold text-slate-700 dark:text-white outline-none"
-                                            value={formData.empresaId}
-                                            onChange={e => setFormData({ ...formData, empresaId: e.target.value })}>
-                                            <option value="">— Seleccionar empresa —</option>
-                                            <option value={ALL_EMPRESAS_VALUE}>🌐 Todas las empresas</option>
-                                            {empresasDropdown.map(e => <option key={e.id} value={e.id}>{e.name || e.id}</option>)}
-                                        </select>
+                                        <div className="border-2 border-indigo-200 dark:border-indigo-700 rounded-xl overflow-hidden">
+                                            {/* Toggle "Todas las empresas" */}
+                                            <label
+                                              className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer border-b border-slate-100 dark:border-slate-700 transition-colors ${formData.allEmpresas ? 'bg-amber-50 dark:bg-amber-900/30' : 'bg-white dark:bg-slate-800 hover:bg-amber-50/40'}`}
+                                              onClick={() => setFormData(f => ({ ...f, allEmpresas: !f.allEmpresas, empresaIds: [] }))}
+                                            >
+                                              <div className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${formData.allEmpresas ? 'bg-amber-500 border-amber-500' : 'border-slate-300 dark:border-slate-600'}`}>
+                                                {formData.allEmpresas && <Check size={11} className="text-white" strokeWidth={3}/>}
+                                              </div>
+                                              <span className={`text-xs font-bold flex items-center gap-1.5 ${formData.allEmpresas ? 'text-amber-700 dark:text-amber-300' : 'text-slate-700 dark:text-slate-300'}`}>
+                                                <Shield size={12}/> Todas las empresas
+                                              </span>
+                                            </label>
+                                            {/* Checklist de empresas (solo si no es "Todas") */}
+                                            {!formData.allEmpresas && (
+                                              <div className="max-h-36 overflow-y-auto">
+                                                {empresasDropdown.map(e => {
+                                                  const checked = formData.empresaIds.includes(e.id);
+                                                  return (
+                                                    <label key={e.id}
+                                                      className={`flex items-center gap-3 px-3 py-2 cursor-pointer border-b border-slate-100 dark:border-slate-700 last:border-0 transition-colors ${checked ? 'bg-indigo-50 dark:bg-indigo-900/40' : 'bg-white dark:bg-slate-800 hover:bg-indigo-50/50'}`}>
+                                                      <div className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${checked ? 'bg-indigo-500 border-indigo-500' : 'border-slate-300 dark:border-slate-600'}`}>
+                                                        {checked && <Check size={11} className="text-white" strokeWidth={3}/>}
+                                                      </div>
+                                                      <span className={`text-xs font-bold flex-1 ${checked ? 'text-indigo-800 dark:text-indigo-200' : 'text-slate-700 dark:text-slate-300'}`}>{e.name || e.id}</span>
+                                                      <input type="checkbox" className="sr-only" checked={checked} onChange={ev => {
+                                                        const updated = ev.target.checked
+                                                          ? [...formData.empresaIds, e.id]
+                                                          : formData.empresaIds.filter(x => x !== e.id);
+                                                        setFormData({ ...formData, empresaIds: updated });
+                                                      }}/>
+                                                    </label>
+                                                  );
+                                                })}
+                                              </div>
+                                            )}
+                                            {/* Aviso si no seleccionó ninguna */}
+                                            {!formData.allEmpresas && formData.empresaIds.length === 0 && (
+                                              <p className="text-[10px] text-rose-500 font-bold px-3 py-2 bg-rose-50 dark:bg-rose-900/20">Seleccioná al menos una empresa.</p>
+                                            )}
+                                            {/* Aviso para multi-empresa */}
+                                            {!formData.allEmpresas && formData.empresaIds.length > 1 && (
+                                              <p className="text-[10px] text-violet-600 dark:text-violet-400 font-bold px-3 py-2 bg-violet-50 dark:bg-violet-900/20">Multi-empresa: el usuario podrá cambiar entre estas empresas.</p>
+                                            )}
+                                        </div>
                                     ) : (
                                         <div className="w-full p-4 bg-slate-100 dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-700 rounded-xl font-bold text-slate-500 flex items-center gap-2">
                                             <Building2 size={14} className="text-indigo-400"/>

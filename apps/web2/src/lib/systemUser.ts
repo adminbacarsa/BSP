@@ -32,3 +32,14 @@ export function empresaFromFormValue(
   if (formEmpresaId === ALL_EMPRESAS_VALUE) return { empresaId: '', allEmpresas: true };
   return { empresaId: formEmpresaId.trim(), allEmpresas: false };
 }
+
+/** Usuario con acceso a un subconjunto explícito de empresas (ni allEmpresas ni una sola). */
+export function isMultiEmpresaUser(data: {
+  allEmpresas?: unknown;
+  empresaIds?: unknown;
+  role?: unknown;
+}): boolean {
+  if (isAllEmpresasUser(data)) return false;
+  const ids = data?.empresaIds;
+  return Array.isArray(ids) && ids.length > 1;
+}

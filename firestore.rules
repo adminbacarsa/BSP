@@ -128,6 +128,12 @@ service cloud.firestore {
         : '';
     }
 
+    function userEmpresaIds() {
+      return isSystemUserDoc()
+        ? get(/databases/$(database)/documents/system_users/$(request.auth.uid)).data.get('empresaIds', [])
+        : [];
+    }
+
     // Empresa del token Auth (empleados portal) o system_users (admins).
     function authEmpresaId() {
       return request.auth != null && request.auth.token.empresaId is string
@@ -178,6 +184,8 @@ service cloud.firestore {
           bacarsaTenantDocMatches(data) ||
           (bacarsaLegacyOpen() && userEmpresaId() == 'bacarsa' && docEmpresaId(data) == '')
         )
+      ) || (
+        !userEmpresaIds().isEmpty() && docEmpresaId(data) != '' && userEmpresaIds().hasAny([docEmpresaId(data)])
       );
     }
 

@@ -12,13 +12,20 @@ import { empresaColor, type MovilEmpresaItem } from '@/lib/movil/empresaSelector
  * en el acto (el snapshot del contexto lo confirma después).
  */
 export function useEmpresaSheet(): { onEmpresa: (() => void) | undefined; sheet: ReactNode; empresaName: string } {
-  const { isSuperAdmin, allEmpresas } = useAuth();
+  const { isSuperAdmin, allEmpresas, empresaIds } = useAuth();
   const { empresa, empresas, empresaId, switchEmpresa } = useEmpresa();
   const [open, setOpen] = useState(false);
-  const puedeCambiar = isSuperAdmin || allEmpresas;
+  const puedeCambiar = isSuperAdmin || allEmpresas || empresaIds.length > 1;
   const items = useMemo<MovilEmpresaItem[]>(
-    () => empresas.map((e) => ({ id: e.id, name: e.name || e.id, color: e.brandColor || e.primaryColor || null, active: e.active })),
-    [empresas],
+    () => {
+      const list = (isSuperAdmin || allEmpresas)
+        ? empresas
+        : empresaIds.length > 1
+          ? empresas.filter((e) => empresaIds.includes(e.id))
+          : empresas;
+      return list.map((e) => ({ id: e.id, name: e.name || e.id, color: e.brandColor || e.primaryColor || null, active: e.active }));
+    },
+    [empresas, isSuperAdmin, allEmpresas, empresaIds],
   );
   const elegir = useCallback((id: string) => {
     setOpen(false);

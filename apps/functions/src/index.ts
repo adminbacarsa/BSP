@@ -1168,27 +1168,34 @@ export const crearUsuarioSistema = functions.https.onCall(async (data, context) 
     throw new functions.https.HttpsError('permission-denied', 'Solo administradores pueden crear usuarios de sistema.');
   }
   
-  const { email, password, firstName, lastName, role, empresaId: rawEmpresaId, allEmpresas: rawAllEmpresas, requiresTraining } = data;
+  const { email, password, firstName, lastName, role, empresaId: rawEmpresaId, allEmpresas: rawAllEmpresas, empresaIds: rawEmpresaIds, requiresTraining } = data;
   const roleNorm = normalizeBackupRole(role);
   const roleIsSuper = isSuperAdminBackupRole(roleNorm);
   const multiEmpresa =
     !roleIsSuper &&
     (rawAllEmpresas === true || String(rawEmpresaId ?? '').trim() === ALL_EMPRESAS_SENTINEL);
 
-  if ((roleIsSuper || multiEmpresa) && !caller.isSuper) {
+  let targetEmpresaId = '';
+  let allEmpresas = false;
+  let targetEmpresaIds: string[] | null = null;
+
+  const isMultiEmpresaRequest = !roleIsSuper && !rawAllEmpresas && Array.isArray(rawEmpresaIds) && rawEmpresaIds.length > 1;
+  if ((roleIsSuper || multiEmpresa || isMultiEmpresaRequest) && !caller.isSuper) {
     throw new functions.https.HttpsError(
       'permission-denied',
-      'Solo superadmin puede crear usuarios SuperAdmin o multi-empresa.',
+      'Solo superadmin puede crear usuarios SuperAdmin, multi-empresa o con múltiples empresas.',
     );
   }
 
-  let targetEmpresaId = '';
-  let allEmpresas = false;
   if (roleIsSuper) {
     targetEmpresaId = '';
   } else if (multiEmpresa) {
     targetEmpresaId = '';
     allEmpresas = true;
+  } else if (isMultiEmpresaRequest) {
+    const ids = (rawEmpresaIds as string[]).map(s => String(s).trim()).filter(Boolean);
+    targetEmpresaId = ids[0]; // primera como primaria
+    targetEmpresaIds = ids;
   } else {
     targetEmpresaId = String(rawEmpresaId ?? caller.profileEmpresa ?? 'bacarsa').trim() || 'bacarsa';
     if (!caller.isSuper && caller.profileEmpresa && targetEmpresaId !== caller.profileEmpresa) {
@@ -1213,6 +1220,7 @@ export const crearUsuarioSistema = functions.https.onCall(async (data, context) 
       role: roleNorm,
       empresaId: targetEmpresaId,
       ...(allEmpresas ? { allEmpresas: true } : {}),
+      ...(targetEmpresaIds !== null ? { empresaIds: targetEmpresaIds } : {}),
       ...(requiresTraining ? { requiresTraining: true } : {}),
       status: 'ACTIVE',
       createdAt: admin.firestore.FieldValue.serverTimestamp()

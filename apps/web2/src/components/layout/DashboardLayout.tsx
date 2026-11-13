@@ -123,7 +123,7 @@ function BottomNav() {
 // ─── TOPBAR ──────────────────────────────────────────────────────────────────
 function DashboardHeader({ isSidebarOpen, onToggleSidebar, onLogout }: { isSidebarOpen: boolean; onToggleSidebar: () => void; onLogout: () => void }) {
   const router = useRouter();
-  const { user, assignedClientId, isSuperAdmin, allEmpresas, userRole: authUserRole } = useAuth();
+  const { user, assignedClientId, isSuperAdmin, allEmpresas, empresaIds, userRole: authUserRole } = useAuth();
   const { empresa, empresas, switchEmpresa, empresaId } = useEmpresa();
   const pageHeader = usePageHeader();
   const [isOnline, setIsOnline] = useState(true);
@@ -131,7 +131,12 @@ function DashboardHeader({ isSidebarOpen, onToggleSidebar, onLogout }: { isSideb
   const [showEmpresaDrop, setShowEmpresaDrop] = useState(false);
   const [empresaDropPos, setEmpresaDropPos] = useState<{ x: number; y: number } | null>(null);
   const empresaBtnRef = useRef<HTMLButtonElement>(null);
-  const canSwitchEmpresa = isSuperAdmin || allEmpresas;
+  const canSwitchEmpresa = isSuperAdmin || allEmpresas || empresaIds.length > 1;
+  const switchableEmpresas = (isSuperAdmin || allEmpresas)
+    ? empresas
+    : empresaIds.length > 1
+      ? empresas.filter(e => empresaIds.includes(e.id))
+      : empresas.filter(e => e.id === empresaId);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -281,7 +286,7 @@ function DashboardHeader({ isSidebarOpen, onToggleSidebar, onLogout }: { isSideb
                   style={{ left: empresaDropPos.x, top: empresaDropPos.y, backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}
                   onClick={e => e.stopPropagation()}
                 >
-                  {empresas.filter(e => e.active !== false).map(e => (
+                  {switchableEmpresas.filter(e => e.active !== false).map(e => (
                     <button
                       key={e.id}
                       onClick={() => { switchEmpresa(e.id); setShowEmpresaDrop(false); }}

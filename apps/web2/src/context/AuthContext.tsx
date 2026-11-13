@@ -39,6 +39,8 @@ interface AuthContextType {
   isSuperAdmin: boolean;
   /** Bypass tenant en permisos de rol (multi-empresa sin ser SuperAdmin). */
   allEmpresas: boolean;
+  /** Subconjunto explícito de empresas (cuando no es allEmpresas). */
+  empresaIds: string[];
   /** Lectura mínima sobre un módulo (clave SYSTEM_MODULES, ej. CONFIG, CLIENTS). */
   canReadModule: (moduleKey: string) => boolean;
   /** ID de la empresa a la que pertenece el usuario. Default: 'bacarsa' */
@@ -55,6 +57,7 @@ const AuthContext = createContext<AuthContextType>({
   rolePermissions: {},
   isSuperAdmin: false,
   allEmpresas: false,
+  empresaIds: [],
   canReadModule: () => false,
   empresaId: 'bacarsa',
 });
@@ -69,6 +72,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [rolePermissions, setRolePermissions] = useState<Record<string, string[]>>({});
   const [empresaId, setEmpresaId] = useState<string>('bacarsa');
   const [allEmpresas, setAllEmpresas] = useState(false);
+  const [empresaIds, setEmpresaIds] = useState<string[]>([]);
   const router = useRouter();
 
   useEffect(() => {
@@ -89,13 +93,19 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             const data = snap.data();
             const role = data.role || null;
             const multiEmpresa = data.allEmpresas === true;
+            const rawEmpresaIds = Array.isArray(data.empresaIds) ? (data.empresaIds as string[]) : [];
             setUserRole(role);
             setAssignedClientId(data.assignedClientId || null);
             setAllEmpresas(multiEmpresa);
+            setEmpresaIds(rawEmpresaIds);
             const isSuper = isSuperAdminRoleId(role) || isSuperAdminRoleId(tokenRole);
+            // Multi-empresa: usar primera de la lista como empresa activa inicial
+            const defaultEmpresa = rawEmpresaIds.length > 0 ? rawEmpresaIds[0] : (data.empresaId || '');
             setEmpresaId(isSuper || multiEmpresa
               ? (data.empresaId || '')
-              : (data.empresaId || 'bacarsa'));
+              : (rawEmpresaIds.length > 1
+                ? defaultEmpresa
+                : (data.empresaId || 'bacarsa')));
             if (isSuper) {
               setRolePermissions(fullSuperAdminPermissions());
             } else if (role) {
@@ -133,6 +143,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             setUserRole(tokenRole);
             setAssignedClientId(null);
             setAllEmpresas(false);
+            setEmpresaIds([]);
             const isSuper = isSuperAdminRoleId(tokenRole);
             setEmpresaId('bacarsa');
             if (isSuper) {
@@ -178,6 +189,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setRolePermissions({});
         setEmpresaId('bacarsa');
         setAllEmpresas(false);
+        setEmpresaIds([]);
       }
       setLoading(false);
     });
@@ -217,6 +229,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         rolePermissions,
         isSuperAdmin,
         allEmpresas,
+        empresaIds,
         canReadModule,
         empresaId,
       }}
