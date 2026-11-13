@@ -15,6 +15,8 @@ export interface WAEntry {
   msgType: string;
   /** Base64 data-URL de foto de check-in (si el bridge la envía). */
   photo?: string;
+  /** Nombre del objetivo/puesto donde trabaja el guardia. */
+  obj?: string;
 }
 
 export interface WAConfirmedEntry {
@@ -24,6 +26,8 @@ export interface WAConfirmedEntry {
   shift?: string;
   lat?: number;
   lng?: number;
+  obj?: string;
+  phone?: string;
 }
 
 export interface TurnoHoy {
@@ -194,6 +198,16 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
       /* ignore */
     }
 
+    try {
+      const raw = localStorage.getItem(lsKey('wa-seen'));
+      const ids = JSON.parse(raw || '[]') as unknown;
+      if (Array.isArray(ids)) {
+        ids.filter((x): x is string => typeof x === 'string').forEach((id) => seenIdsRef.current.add(id));
+      }
+    } catch {
+      /* ignore */
+    }
+
     return () => {
       if (pollTimerRef.current) {
         clearInterval(pollTimerRef.current);
@@ -299,6 +313,7 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
           lng: (m.location as { lng?: number; longitude?: number } | undefined)?.lng ?? m.location?.longitude,
           msgType: m.type,
           photo: typeof m.photo === 'string' && m.photo ? m.photo : undefined,
+          obj: turno?.obj,
         };
 
         if (entry.rowId) pendingRowIdsRef.current.add(entry.rowId);
@@ -325,6 +340,26 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
       }
       bridgeUrlRef.current = url;
       setStatus('connecting');
+      // Restaurar grupos seleccionados desde localStorage y re-aplicarlos al bridge
+      try {
+        const raw = localStorage.getItem(lsKey('wa-groups'));
+        const saved = JSON.parse(raw || '[]') as unknown;
+        if (Array.isArray(saved) && saved.length > 0) {
+          const groupIds = saved.filter((x): x is string => typeof x === 'string');
+          setMonitoredGroupIds(new Set(groupIds));
+          // Re-aplicar al bridge (puede haberse reiniciado)
+          groupIds.forEach((gid) => {
+            fetch(`${url}/monitor`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ groupId: gid, enable: true }),
+              signal: AbortSignal.timeout(4000),
+            }).catch(() => { /* ignore */ });
+          });
+        }
+      } catch {
+        /* ignore */
+      }
       void poll();
       void fetchStatus();
       pollTimerRef.current = setInterval(() => {
@@ -347,6 +382,12 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
       setMonitoredGroupIds((prev) => {
         const next = new Set(prev);
         enable ? next.add(groupId) : next.delete(groupId);
+        // Persistir en localStorage para sobrevivir recarga y reinicio del bridge
+        try {
+          localStorage.setItem(lsKey('wa-groups'), JSON.stringify([...next]));
+        } catch {
+          /* ignore */
+        }
         return next;
       });
     } catch {
@@ -379,6 +420,8 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
       shift: entry.shift,
       lat: entry.lat,
       lng: entry.lng,
+      obj: entry.obj,
+      phone: entry.phone,
     };
 
     setConfirmedEntries((prev) => {
@@ -390,6 +433,16 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
       }
       return next;
     });
+
+    // Persistir el id del mensaje como ya visto para sobrevivir recarga de página
+    try {
+      const key = lsKey('wa-seen');
+      const existing = JSON.parse(localStorage.getItem(key) || '[]') as string[];
+      const next = Array.from(new Set([...existing, entry.id])).slice(-500);
+      localStorage.setItem(key, JSON.stringify(next));
+    } catch {
+      /* ignore */
+    }
   }, []);
 
   const clearAll = useCallback(() => {
@@ -399,11 +452,14 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
     setConfirmedRowIds(new Set());
     pendingRowIdsRef.current.clear();
     seenIdsRef.current.clear();
+    setMonitoredGroupIds(new Set());
     lastTsRef.current = 0;
     try {
       localStorage.removeItem(lsKey('wa-lastts'));
       localStorage.removeItem(lsKey('wa-confirmed'));
       localStorage.removeItem(lsKey('wa-confirmed-log'));
+      localStorage.removeItem(lsKey('wa-seen'));
+      localStorage.removeItem(lsKey('wa-groups'));
     } catch {
       /* ignore */
     }
@@ -434,6 +490,7 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
       lng: partial?.lng,
       msgType: partial?.msgType || 'text',
       photo: partial?.photo,
+      obj: partial?.obj || turno?.obj,
     };
     if (entry.rowId) pendingRowIdsRef.current.add(entry.rowId);
     setPending((prev) => [entry, ...prev]);

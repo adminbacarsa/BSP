@@ -593,8 +593,16 @@ function WACard({
     <div className="flex items-start gap-2 p-3 border-b border-slate-100">
       {thumb}
       <div className="flex-1 min-w-0">
-        <div className="text-xs font-bold text-slate-800">{entry.name}</div>
-        <div className="text-[10px] text-slate-500">{entry.shift || entry.msgType}</div>
+        <div className="text-xs font-bold text-slate-800 leading-tight">{entry.name}</div>
+        {entry.obj && (
+          <div className="text-[10px] text-slate-500 truncate" title={entry.obj}>
+            📍 {entry.obj}
+          </div>
+        )}
+        <div className="text-[10px] text-slate-400 flex gap-2">
+          {entry.shift && <span className="font-medium text-slate-600">{entry.shift}</span>}
+          {entry.phone && <span className="font-mono">{entry.phone}</span>}
+        </div>
         {entry.tardanzaMins !== undefined && entry.tardanzaMins !== null && (
           <div
             className={`text-[10px] font-medium ${
@@ -637,7 +645,10 @@ function ConfirmedCard({ entry }: { entry: WAConfirmedEntry }) {
       )}
       <div className="flex-1 min-w-0">
         <div className="text-[11px] font-medium text-slate-700 truncate">{entry.name}</div>
-        <div className="text-[10px] text-slate-500 truncate">{entry.shift || ''}</div>
+        <div className="text-[10px] text-slate-500 truncate">
+          {entry.shift || ''}
+          {entry.obj ? ` · ${entry.obj}` : ''}
+        </div>
       </div>
       <span className="text-[10px] text-slate-400 font-mono flex-shrink-0">{entry.arrivedAt}</span>
     </div>
