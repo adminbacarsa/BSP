@@ -9603,7 +9603,6 @@ function PlanificacionDesktop() {
             };
 
             try {
-                const avisosTurnoAjeno: string[] = [];
                 for (const [key, change] of Object.entries(jobPending)) {
                     // key puede ser "empId_YYYY-MM-DD" o "empId_YYYY-MM-DD_B2" para bloques secundarios
                     const parts = key.split('_');
@@ -9633,12 +9632,6 @@ function PlanificacionDesktop() {
                         volante: esVolanteDelCrono(empObj?.volante, permitidosGuard),
                     });
                     if (!decisionAjeno.escribir) {
-                        const ajeno = docsGuard.find((d: any) => esTurnoAjenoAlCrono(d?.objectiveId, permitidosGuard) && !d?.isSecondBlock);
-                        if (change.menuRapidoVia) {
-                            avisosTurnoAjeno.push(decisionAjeno.motivo === 'franco'
-                                ? textoAvisoFrancoAjeno(empName, getObjectiveName(ajeno?.objectiveId))
-                                : textoAvisoTurnoAjeno(empName, getObjectiveName(ajeno?.objectiveId)));
-                        }
                         continue;
                     }
                     if (existing && esTurnoAjenoAlCrono(existing.objectiveId, permitidosGuard)) {
@@ -9922,11 +9915,6 @@ function PlanificacionDesktop() {
                     }
                     await flushBatchWhenFull();
                 }
-                if (avisosTurnoAjeno.length) {
-                    const unicos = [...new Set(avisosTurnoAjeno)];
-                    toast.message(unicos.length === 1 ? unicos[0] : `${unicos[0]} · y ${unicos.length - 1} más`);
-                }
-
                 if (isPublished && !correctionMode && logData.length > 0) {
                     if (logData.length >= AUDIT_CONSOLIDATE_MIN) {
                         batch.set(doc(collection(db, 'audit_logs')), stampEmpresaId({
