@@ -18236,6 +18236,10 @@ function PlanificacionDesktop() {
         if (puestoSinDoce(pos)) { abrirTura(emp, ds, ctx, pos); return; }
         const delPuesto = propuestas12De(ds, pos, emp.id);
         if (delPuesto.length) { setPropuesta12(delPuesto); return; }
+        const actualMas = ctx?.p && !(ctx.p as any).isDeleted ? ctx.p : ctx?.s;
+        const iniMas = hhmmRapido(actualMas?.startTime), finMas = hhmmRapido(actualMas?.endTime);
+        const c0Mas = String(actualMas?.code || '').toUpperCase();
+        if (c0Mas && iniMas && finMas && franjaPegadaLibre(pos, ds, c0Mas, iniMas, finMas)) { abrirTura(emp, ds, ctx, pos); return; }
         const code = bandaDeCodigoPuesto(codigoCtxRapido(ctx)) || codigoCtxRapido(ctx);
         if (code === 'T') { toast.message('La T pasa a 12 h solo si falta una banda de un lado.'); return; }
         if (code !== 'M' && code !== 'N') { toast.message('Solo M o N pasan a 12 h.'); return; }
