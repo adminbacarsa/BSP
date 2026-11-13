@@ -61,6 +61,8 @@ export interface UseWABridgeReturn {
   groups: { id: string; name: string; participants: number }[];
   monitoredGroupIds: ReadonlySet<string>;
   toggleGroup: (groupId: string, enable: boolean) => Promise<void>;
+  /** Envía lista de teléfonos al bridge para resolver LIDs automáticamente. */
+  syncPhones: (phones: string[]) => Promise<void>;
 }
 
 interface BridgeMsg {
@@ -303,7 +305,7 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
           id: m.id,
           rowId: turno?.rowId,
           name: turno?.name || m.name,
-          phone: m.phone,
+          phone: turno?.phone || m.phone,
           arrivedAt,
           shift: turno?.shift,
           expected: turno?.expected,
@@ -392,6 +394,21 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
       });
     } catch {
       /* ignore */
+    }
+  }, []);
+
+  const syncPhones = useCallback(async (phones: string[]) => {
+    const url = bridgeUrlRef.current;
+    if (!url || phones.length === 0) return;
+    try {
+      await fetch(`${url}/sync-phones`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phones }),
+        signal: AbortSignal.timeout(30000), // puede tardar si son muchos
+      });
+    } catch {
+      /* ignore — no crítico */
     }
   }, []);
 
@@ -510,5 +527,6 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
     groups,
     monitoredGroupIds,
     toggleGroup,
+    syncPhones,
   };
 }
