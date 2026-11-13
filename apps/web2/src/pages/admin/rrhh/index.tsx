@@ -66,6 +66,28 @@ import {
 
 // --- UTILIDADES ---
 
+/** Llama al bridge para actualizar el LID mapeado al teléfono viejo. Fire-and-forget. */
+async function remapBridgePhone(empresaId: string, oldPhone: string, newPhone: string): Promise<void> {
+  try {
+    const paths = empresaId
+      ? [`empresas/${empresaId}/config/wa-bridge`, 'config/wa-bridge']
+      : ['config/wa-bridge'];
+    let bridgeUrl = '';
+    for (const path of paths) {
+      const parts = path.split('/');
+      const snap = await getDoc(doc(db, ...parts as [string, ...string[]]));
+      if (snap.exists()) { bridgeUrl = String(snap.data()?.url || ''); break; }
+    }
+    if (!bridgeUrl) return;
+    await fetch(`${bridgeUrl}/remap-phone`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ oldPhone, newPhone }),
+      signal: AbortSignal.timeout(10000),
+    });
+  } catch { /* silencioso — no afecta el guardado del empleado */ }
+}
+
 const getArgentinaDate = (dateInput: unknown): string => {
     if (!dateInput) return '';
     const cal = toCalendarDateStr(dateInput);
@@ -1038,8 +1060,13 @@ export default function EmployeesPage() {
 
       try { 
           if (isEditing && form.id) { 
+              const prevPhone = (employees as any[]).find((e: any) => e.id === form.id)?.phone || '';
               await updateDocForEmpresa('empleados', form.id, dataToSave, empresaId, migracionCompleta);
               await registrarAuditoria('UPDATE_EMPLOYEE', `Modificó legajo: ${form.fileNumber} - ${form.lastName}`); 
+              const newPhone = form.phone || '';
+              if (prevPhone && newPhone && prevPhone !== newPhone) {
+                remapBridgePhone(empresaId, prevPhone, newPhone).catch(() => {});
+              }
           } else {
               if (form.dni && employees.some(e => e.id !== form.id && e.dni === form.dni))
                 return addToast('Ya existe un empleado con ese DNI', 'error');

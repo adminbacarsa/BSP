@@ -25,6 +25,28 @@ const AUTH_DIR  = process.env.WA_AUTH_DIR || path.join(__dirname, '.wa_auth');
 const MAX_MSGS  = 200;
 const PUBLIC    = path.join(__dirname, 'public');
 const STARTED_AT = Date.now();
+const LID_MAP_FILE = path.join(__dirname, 'lid-map.json');
+
+// Cargar mapa LID→teléfono persistido (sobrevive reinicios)
+function loadLidMap() {
+  try {
+    if (fs.existsSync(LID_MAP_FILE)) {
+      const data = JSON.parse(fs.readFileSync(LID_MAP_FILE, 'utf8'));
+      Object.assign(lidToPhone, data);
+      console.log(`[lid-map] Cargados ${Object.keys(data).length} mapeos LID→phone desde disco`);
+    }
+  } catch (e) {
+    console.warn('[lid-map] No se pudo cargar lid-map.json:', e.message);
+  }
+}
+
+function saveLidMap() {
+  try {
+    fs.writeFileSync(LID_MAP_FILE, JSON.stringify(lidToPhone, null, 2));
+  } catch (e) {
+    console.warn('[lid-map] No se pudo guardar lid-map.json:', e.message);
+  }
+}
 
 const messages        = [];
 let   availableGroups = [];
@@ -33,6 +55,7 @@ let   connected       = false;
 let   sock            = null; // instancia Baileys — compartida con los endpoints HTTP
 let   lastQR          = null; // último QR recibido (para el endpoint /qr del browser)
 const lidToPhone      = {};   // LID numérico → teléfono real (ej: "80629488218268" → "3516294882")
+loadLidMap(); // Cargar mapeos persistidos
 
 // ── Express ──────────────────────────────────────────────
 const app = express();
@@ -139,6 +162,93 @@ app.post('/monitor', (req, res) => {
   res.json({ ok: true, monitored: [...monitoredGroups] });
 });
 
+// Endpoint para registrar manualmente un mapeo LID→teléfono
+// cuando contacts.upsert no llega (contacto no está en la agenda del celular bridge)
+app.post('/lid-map', (req, res) => {
+  const { lid, phone } = req.body;
+  if (!lid || !phone) return res.status(400).json({ error: 'lid y phone requeridos' });
+  const normPhone = String(phone).replace(/\D/g, '').replace(/^549/, '');
+  lidToPhone[lid] = normPhone;
+  saveLidMap();
+  console.log(`[lid-map] Mapeo manual: LID ${lid} → ${normPhone}`);
+  res.json({ ok: true, lid, phone: normPhone });
+});
+
+// Endpoint para ver el mapa actual
+app.get('/lid-map', (req, res) => {
+  res.json({ count: Object.keys(lidToPhone).length, map: lidToPhone });
+});
+
+// Actualiza el teléfono en todos los LIDs que apuntaban al número viejo
+app.post('/remap-phone', (req, res) => {
+  const { oldPhone, newPhone } = req.body;
+  if (!oldPhone || !newPhone) return res.status(400).json({ error: 'oldPhone y newPhone requeridos' });
+  const normOld = String(oldPhone).replace(/\D/g, '').replace(/^549/, '');
+  const normNew = String(newPhone).replace(/\D/g, '').replace(/^549/, '');
+  if (normOld === normNew) return res.json({ ok: true, updated: 0 });
+  let updated = 0;
+  for (const [lid, ph] of Object.entries(lidToPhone)) {
+    if (ph === normOld) { lidToPhone[lid] = normNew; updated++; }
+  }
+  if (updated > 0) saveLidMap();
+  console.log(`[remap-phone] ${normOld} → ${normNew}: ${updated} LID(s) actualizados`);
+  res.json({ ok: true, updated, oldPhone: normOld, newPhone: normNew });
+});
+
+// Sincroniza teléfonos de empleados → LID vía onWhatsApp (sin agenda del celular)
+app.post('/sync-phones', async (req, res) => {
+  const { phones } = req.body;
+  if (!Array.isArray(phones) || phones.length === 0) {
+    return res.status(400).json({ error: 'phones[] requerido' });
+  }
+  if (!sock || !connected) {
+    return res.status(503).json({ error: 'WhatsApp no conectado aún' });
+  }
+
+  const stats = { resolved: 0, alreadyKnown: 0, notOnWA: 0, errors: 0 };
+
+  // Procesar en lotes de 10 para no saturar WA
+  const BATCH = 10;
+  for (let i = 0; i < phones.length; i += BATCH) {
+    const batch = phones.slice(i, i + BATCH);
+    for (const rawPhone of batch) {
+      try {
+        const norm = String(rawPhone).replace(/\D/g, '').replace(/^549/, '');
+        if (!norm || norm.length < 8) continue;
+        const waJid = '549' + norm + '@s.whatsapp.net';
+        const results = await sock.onWhatsApp(waJid);
+        const result = Array.isArray(results) ? results[0] : results;
+        if (!result?.exists) { stats.notOnWA++; continue; }
+        const jid = result.jid || '';
+        if (jid.includes('@lid')) {
+          const lidNum = jid.split('@')[0];
+          if (!lidToPhone[lidNum]) {
+            lidToPhone[lidNum] = norm;
+            stats.resolved++;
+            console.log(`  [sync] LID mapeado: ${lidNum} → ${norm}`);
+          } else {
+            stats.alreadyKnown++;
+          }
+        } else {
+          // Usa JID de teléfono normal (@s.whatsapp.net) — no necesita mapa LID
+          stats.alreadyKnown++;
+        }
+      } catch (e) {
+        stats.errors++;
+        console.warn(`  [sync] error para ${rawPhone}:`, e.message);
+      }
+    }
+    // Pausa entre lotes para no saturar WA
+    if (i + BATCH < phones.length) {
+      await new Promise(r => setTimeout(r, 300));
+    }
+  }
+
+  if (stats.resolved > 0) saveLidMap();
+  console.log(`[sync-phones] +${stats.resolved} LIDs nuevos, ${stats.alreadyKnown} ya conocidos, ${stats.notOnWA} sin WA, ${stats.errors} errores`);
+  res.json({ ok: true, ...stats });
+});
+
 // ── WhatsApp con Baileys ──────────────────────────────────
 async function startWA() {
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
@@ -165,6 +275,7 @@ async function startWA() {
         const phoneNum = c.id.split('@')[0].replace(/^549/, '');
         lidToPhone[lidNum] = phoneNum;
         console.log(`  📒 contacto: ${c.notify || c.id} → LID ${lidNum} = tel ${phoneNum}`);
+        saveLidMap();
       }
     }
   });

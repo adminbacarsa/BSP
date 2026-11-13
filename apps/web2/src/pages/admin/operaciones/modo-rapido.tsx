@@ -175,9 +175,10 @@ function useTurnosHoy({
 
       for (const d of docs) {
         const shift = d.data() as Record<string, unknown>;
-        // Excluir turnos de otra empresa (filtro en memoria para legacy bacarsa sin scope)
+        // Excluir turnos de otra empresa. Bacarsa devuelve la colección completa (sin WHERE en
+        // Firestore para incluir legacy sin empresaId), así que el filtro en memoria aplica siempre.
         if (
-          !scopeEmpresa &&
+          (!scopeEmpresa || (empresaId || '').toLowerCase() === 'bacarsa') &&
           shift.empresaId &&
           String(shift.empresaId).trim() !== '' &&
           String(shift.empresaId).trim().toLowerCase() !== (empresaId || '').toLowerCase()
