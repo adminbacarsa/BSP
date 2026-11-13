@@ -1,10 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/router';
 import {
   doc,
   getDoc,
   onSnapshot,
   query,
+  QueryDocumentSnapshot,
   Timestamp,
   where,
 } from 'firebase/firestore';
@@ -73,6 +74,7 @@ function useTurnosHoy({
 }): { turnos: Record<string, TurnoHoy>; loading: boolean } {
   const [turnos, setTurnos] = useState<Record<string, TurnoHoy>>({});
   const [loading, setLoading] = useState(true);
+  const objMapRef = useRef<Map<string, { name: string; clientName: string }>>(new Map());
 
   useEffect(() => {
     if (!empresaId) {
@@ -88,6 +90,27 @@ function useTurnosHoy({
     const end = new Date();
     end.setDate(end.getDate() + 1);
     end.setHours(23, 59, 59, 999);
+
+    const buildObjMap = (docs: QueryDocumentSnapshot[]) => {
+      const m = new Map<string, { name: string; clientName: string }>();
+      docs.forEach((d) => {
+        const data = d.data() as Record<string, unknown>;
+        const clientName = String(data.name || '');
+        const objs = Array.isArray(data.objetivos)
+          ? (data.objetivos as Record<string, unknown>[])
+          : [];
+        objs.forEach((o) => {
+          const key = String(o.id || o.objectiveId || '');
+          if (key) m.set(key, { name: String(o.name || ''), clientName });
+        });
+      });
+      return m;
+    };
+
+    const clientsQ = empresaCollectionQuery('clients', empresaId, scopeEmpresa);
+    const unsubClients = onSnapshot(clientsQ, (snap) => {
+      objMapRef.current = buildObjMap(snap.docs);
+    });
 
     const q = query(
       empresaCollectionQuery('turnos', empresaId, scopeEmpresa),
@@ -133,7 +156,9 @@ function useTurnosHoy({
 
           const mapped: TurnoHoy = {
             shift: `${code || '?'} ${formatHHMM(startTs)}–${formatHHMM(endTs)}`,
-            obj: String(shift.objectiveName || '—'),
+            obj:
+              objMapRef.current.get(String(shift.objectiveId || ''))?.name ||
+              String(shift.objectiveName || '—'),
             rowId: d.id,
             expected: formatHHMM(startTs),
             turnoStatus: String(shift.status || 'PENDING'),
@@ -165,7 +190,10 @@ function useTurnosHoy({
       },
     );
 
-    return () => unsub();
+    return () => {
+      unsubClients();
+      unsub();
+    };
   }, [empresaId, scopeEmpresa]);
 
   return { turnos, loading };
