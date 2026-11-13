@@ -17,6 +17,9 @@ export interface WAEntry {
   photo?: string;
   /** Nombre del objetivo/puesto donde trabaja el guardia. */
   obj?: string;
+  /** Coordenadas del objetivo (para badge de distancia). */
+  objLat?: number;
+  objLng?: number;
 }
 
 export interface WAConfirmedEntry {
@@ -43,6 +46,9 @@ export interface TurnoHoy {
   phone?: string;
   /** Nombre canónico del empleado en la plataforma (para mostrar en lugar del pushName WA). */
   name?: string;
+  /** Coordenadas del objetivo para calcular distancia al check-in. */
+  objLat?: number;
+  objLng?: number;
 }
 
 export type WABridgeStatus = 'idle' | 'connecting' | 'connected' | 'error';
@@ -316,6 +322,8 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
           msgType: m.type,
           photo: typeof m.photo === 'string' && m.photo ? m.photo : undefined,
           obj: turno?.obj,
+          objLat: turno?.objLat,
+          objLng: turno?.objLng,
         };
 
         if (entry.rowId) pendingRowIdsRef.current.add(entry.rowId);
@@ -508,6 +516,8 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
       msgType: partial?.msgType || 'text',
       photo: partial?.photo,
       obj: partial?.obj || turno?.obj,
+      objLat: partial?.objLat ?? turno?.objLat,
+      objLng: partial?.objLng ?? turno?.objLng,
     };
     if (entry.rowId) pendingRowIdsRef.current.add(entry.rowId);
     setPending((prev) => [entry, ...prev]);

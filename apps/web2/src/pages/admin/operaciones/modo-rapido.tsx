@@ -126,7 +126,7 @@ function useTurnosHoy({
   const [turnos, setTurnos] = useState<Record<string, TurnoHoy>>({});
   const [loading, setLoading] = useState(true);
   const [phones, setPhones] = useState<string[]>([]);
-  const objMapRef = useRef<Map<string, { name: string; clientName: string }>>(new Map());
+  const objMapRef = useRef<Map<string, { name: string; clientName: string; lat?: number; lng?: number }>>(new Map());
   const phoneMapRef = useRef<Map<string, string>>(new Map());
   const lastTurnosSnapRef = useRef<QueryDocumentSnapshot[] | null>(null);
 
@@ -147,7 +147,7 @@ function useTurnosHoy({
     end.setHours(23, 59, 59, 999);
 
     const buildObjMap = (docs: QueryDocumentSnapshot[]) => {
-      const m = new Map<string, { name: string; clientName: string }>();
+      const m = new Map<string, { name: string; clientName: string; lat?: number; lng?: number }>();
       docs.forEach((d) => {
         const data = d.data() as Record<string, unknown>;
         const clientName = String(data.name || '');
@@ -156,7 +156,14 @@ function useTurnosHoy({
           : [];
         objs.forEach((o) => {
           const key = String(o.id || o.objectiveId || '');
-          if (key) m.set(key, { name: String(o.name || ''), clientName });
+          const lat = o.lat != null ? Number(o.lat) : undefined;
+          const lng = o.lng != null ? Number(o.lng) : undefined;
+          if (key) m.set(key, {
+            name: String(o.name || ''),
+            clientName,
+            lat: lat && !isNaN(lat) ? lat : undefined,
+            lng: lng && !isNaN(lng) ? lng : undefined,
+          });
         });
       });
       return m;
@@ -221,6 +228,8 @@ function useTurnosHoy({
               .replace(/\D/g, '')
               .replace(/^549/, '') ||
             undefined,
+          objLat: objMapRef.current.get(String(shift.objectiveId || ''))?.lat,
+          objLng: objMapRef.current.get(String(shift.objectiveId || ''))?.lng,
         };
 
         const prev = byName.get(employeeName);
@@ -561,6 +570,16 @@ function ObjectiveGroup({
   );
 }
 
+function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000;
+  const φ1 = (lat1 * Math.PI) / 180;
+  const φ2 = (lat2 * Math.PI) / 180;
+  const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+  const Δλ = ((lng2 - lng1) * Math.PI) / 180;
+  const a = Math.sin(Δφ / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
+  return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+}
+
 function WACard({
   entry,
   onConfirm,
@@ -615,6 +634,16 @@ function WACard({
             {entry.tardanzaMins <= 0 ? 'Puntual' : `+${entry.tardanzaMins} min tarde`}
           </div>
         )}
+        {entry.lat != null && entry.lng != null && entry.objLat != null && entry.objLng != null && (() => {
+          const d = haversineM(entry.lat!, entry.lng!, entry.objLat!, entry.objLng!);
+          const ok = d <= 80;
+          const warn = d <= 300;
+          return (
+            <div className={`text-[10px] font-medium ${ok ? 'text-emerald-600' : warn ? 'text-amber-500' : 'text-red-500'}`}>
+              {ok ? '✓' : '⚠'} {d < 1000 ? `${d} m` : `${(d / 1000).toFixed(1)} km`} del objetivo
+            </div>
+          );
+        })()}
       </div>
       <div className="flex flex-col items-end gap-1 flex-shrink-0">
         <span className="text-[10px] text-slate-400 font-mono">{entry.arrivedAt}</span>
