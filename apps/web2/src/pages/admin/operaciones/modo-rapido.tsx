@@ -126,6 +126,15 @@ function useTurnosHoy({
 
         for (const d of snap.docs) {
           const shift = d.data() as Record<string, unknown>;
+          // Excluir turnos de otra empresa (filtro en memoria para legacy bacarsa sin scope)
+          if (
+            !scopeEmpresa &&
+            shift.empresaId &&
+            String(shift.empresaId).trim() !== '' &&
+            String(shift.empresaId).trim().toLowerCase() !== (empresaId || '').toLowerCase()
+          ) {
+            continue;
+          }
           if (shift.draft === true) continue;
 
           const employeeId = String(shift.employeeId ?? '');
@@ -457,6 +466,39 @@ function WASidebar({
           >
             ▶ Demo sin conexión
           </button>
+        </div>
+      )}
+
+      {wa.groups.length > 0 && (
+        <div className="border-t border-slate-200 flex-shrink-0">
+          <details className="group">
+            <summary className="px-3 py-2 text-[10px] font-bold text-slate-500 cursor-pointer hover:text-slate-700 flex items-center gap-1 list-none">
+              <span className="group-open:rotate-90 transition-transform inline-block">▶</span>
+              Grupos WA
+              {wa.monitoredGroupIds.size > 0 && (
+                <span className="ml-auto px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded-full text-[9px]">
+                  {wa.monitoredGroupIds.size} activos
+                </span>
+              )}
+            </summary>
+            <div className="max-h-48 overflow-y-auto">
+              {wa.groups.map((g) => (
+                <label
+                  key={g.id}
+                  className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={wa.monitoredGroupIds.has(g.id)}
+                    onChange={(e) => void wa.toggleGroup(g.id, e.target.checked)}
+                    className="accent-emerald-600 w-3 h-3 flex-shrink-0"
+                  />
+                  <span className="text-[10px] text-slate-700 truncate flex-1">{g.name}</span>
+                  <span className="text-[9px] text-slate-400 flex-shrink-0">{g.participants}</span>
+                </label>
+              ))}
+            </div>
+          </details>
         </div>
       )}
     </>

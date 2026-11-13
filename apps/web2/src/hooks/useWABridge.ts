@@ -48,6 +48,9 @@ export interface UseWABridgeReturn {
   connect: (url: string) => void;
   /** Solo pruebas / demo sin bridge. */
   addFakePending: (partial?: Partial<WAEntry>) => void;
+  groups: { id: string; name: string; participants: number }[];
+  monitoredGroupIds: ReadonlySet<string>;
+  toggleGroup: (groupId: string, enable: boolean) => Promise<void>;
 }
 
 interface BridgeMsg {
@@ -117,6 +120,8 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
   const [pending, setPending] = useState<WAEntry[]>([]);
   const [confirmedEntries, setConfirmedEntries] = useState<WAConfirmedEntry[]>([]);
   const [confirmedRowIds, setConfirmedRowIds] = useState<Set<string>>(() => new Set());
+  const [groups, setGroups] = useState<{ id: string; name: string; participants: number }[]>([]);
+  const [monitoredGroupIds, setMonitoredGroupIds] = useState<Set<string>>(new Set());
 
   const bridgeUrlRef = useRef('');
   const lastTsRef = useRef(0);
@@ -174,6 +179,23 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
     };
   }, []);
 
+  const fetchStatus = useCallback(async () => {
+    const url = bridgeUrlRef.current;
+    if (!url) return;
+    try {
+      const r = await fetch(`${url}/status`, { signal: AbortSignal.timeout(4000) });
+      if (!r.ok) return;
+      const d = (await r.json()) as {
+        groups?: { id: string; name: string; participants: number }[];
+        monitored?: string[];
+      };
+      if (Array.isArray(d.groups)) setGroups(d.groups);
+      if (Array.isArray(d.monitored)) setMonitoredGroupIds(new Set(d.monitored));
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   const poll = useCallback(async () => {
     const bridgeUrl = bridgeUrlRef.current;
     if (!bridgeUrl) return;
@@ -187,6 +209,7 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
         return;
       }
       setStatus('connected');
+      void fetchStatus();
       const data = (await r.json()) as BridgeMessagesResponse;
 
       if (data.startedAt && data.startedAt !== bridgeStartRef.current) {
@@ -263,7 +286,7 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
     } catch {
       setStatus('error');
     }
-  }, []);
+  }, [fetchStatus]);
 
   const connect = useCallback(
     (url: string) => {
@@ -274,12 +297,33 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
       bridgeUrlRef.current = url;
       setStatus('connecting');
       void poll();
+      void fetchStatus();
       pollTimerRef.current = setInterval(() => {
         void poll();
       }, 3000);
     },
-    [poll],
+    [poll, fetchStatus],
   );
+
+  const toggleGroup = useCallback(async (groupId: string, enable: boolean) => {
+    const url = bridgeUrlRef.current;
+    if (!url) return;
+    try {
+      await fetch(`${url}/monitor`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ groupId, enable }),
+        signal: AbortSignal.timeout(4000),
+      });
+      setMonitoredGroupIds((prev) => {
+        const next = new Set(prev);
+        enable ? next.add(groupId) : next.delete(groupId);
+        return next;
+      });
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   const confirmEntry = useCallback((entry: WAEntry) => {
     setPending((prev) => prev.filter((e) => e.id !== entry.id));
@@ -376,5 +420,8 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
     clearAll,
     connect,
     addFakePending,
+    groups,
+    monitoredGroupIds,
+    toggleGroup,
   };
 }

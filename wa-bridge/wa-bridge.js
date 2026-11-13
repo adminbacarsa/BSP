@@ -240,9 +240,10 @@ async function startWA() {
       const pushName  = msg.pushName || rawId;
       if (isLid && !phone) console.log(`  ⚠ LID sin mapa aún: ${rawId} (${pushName}) — esperando sync de contactos`);
 
-      const msgType     = Object.keys(msg.message || {})[0] || '';
-      const hasPhoto    = msgType === 'imageMessage';
-      const hasLocation = msgType === 'locationMessage' || msgType === 'liveLocationMessage';
+      const msgType         = Object.keys(msg.message || {})[0] || '';
+      const hasPhoto        = msgType === 'imageMessage';
+      const hasLiveLocation = msgType === 'liveLocationMessage';
+      const hasLocation     = msgType === 'locationMessage' || hasLiveLocation;
       let   photoBase64 = null;
       let   locationData = null;
 
@@ -274,10 +275,9 @@ async function startWA() {
                 || msg.message?.locationMessage?.name
                 || '';
 
-      // Filtro: solo check-ins (foto, ubicación o palabra clave)
-      const MAPS_RE = /maps\.google|goo\.gl\/maps|maps\.app\.goo\.gl/i;
-      const CHECKIN = ['presente', 'llegué', 'llegue', 'acá', 'aca', 'ya estoy', 'acá estoy'];
-      const isCheckin = hasPhoto || hasLocation || CHECKIN.some(w => text.toLowerCase().includes(w)) || MAPS_RE.test(text);
+      // Check-in válido = foto (prueba visual) o ubicación en vivo (GPS real).
+      // Texto solo, ubicación estática y ubicación guardada se ignoran.
+      const isCheckin = hasPhoto || hasLiveLocation;
       if (!isCheckin) {
         if (msgType === 'senderKeyDistributionMessage') {
           const proto = {
