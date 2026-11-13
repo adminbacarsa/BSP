@@ -177,7 +177,7 @@ export function validarContraTodos(input: {
         const b1 = (o.endMin <= o.startMin ? o.endMin + 24 * 60 : o.endMin) + o.dateOffset * 24 * 60;
         const solapa = a0 < b1 && b0 < a1;
         if (o.dateOffset === 0 && solapa) return { ok: false, mensaje: 'Se solapa con un turno que ya tiene ese día.' };
-        if (!solapa) {
+        if (!solapa && o.dateOffset !== 0) {
             const descanso = a0 >= b1 ? a0 - b1 : b0 - a1;
             if (descanso >= 0 && descanso < 8 * 60) return { ok: false, mensaje: 'Quedan menos de 8 h de descanso.' };
         }
