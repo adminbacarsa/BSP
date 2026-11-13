@@ -5,7 +5,6 @@ import {
     modoEscrituraOtroObjetivo,
     partirCodigoAjeno,
     resolverEquivalenciaOtro,
-    urlCronograma,
     validarContraTodos,
     type EquivalenciaOtro,
 } from './asignarOtroObjetivo';
@@ -20,18 +19,14 @@ test('sin turno ese día se puede asignar en otro objetivo', () => {
     assert.equal(d.ok, true);
 });
 
-test('si ya tiene turno, no escribe y ofrece abrir ese cronograma', () => {
+test('si ya tiene turno de trabajo, permite segundo turno (validarContraTodos verificará solapamiento)', () => {
     const d = decidirAsignacionOtroObjetivo({
         nombre: 'HERRERA',
         empId: 'h1',
         dateStr: '2026-10-12',
         turnos: [{ objectiveId: 'vifood', objectiveName: 'Vifood', clientId: 'cli', code: 'T' }],
     });
-    assert.equal(d.ok, false);
-    if (d.ok) return;
-    assert.equal(d.mensaje, 'HERRERA ya tiene T en Vifood el 12/10');
-    assert.equal(d.abrir?.objectiveId, 'vifood');
-    assert.equal(urlCronograma({ ...d.abrir!, year: d.abrir!.year, month: d.abrir!.month }), '/admin/planificacion/?objectiveId=vifood&year=2026&month=10&clientId=cli&dia=2026-10-12&empId=h1');
+    assert.equal(d.ok, true);
 });
 
 test('una licencia también bloquea', () => {
@@ -99,4 +94,26 @@ test('el solape y el tope se miran contra los turnos de todos los objetivos', ()
         otros: [{ startMin: 23 * 60, endMin: 7 * 60, dateOffset: -1 }],
     });
     assert.equal(ok.ok, true);
+});
+
+test('franco bloquea el segundo turno', () => {
+    const d = decidirAsignacionOtroObjetivo({
+        nombre: 'HERRERA',
+        empId: 'h1',
+        dateStr: '2026-10-12',
+        turnos: [{ objectiveId: 'obj', objectiveName: 'Planta', clientId: 'cli', code: 'F' }],
+    });
+    assert.equal(d.ok, false);
+    if (d.ok) return;
+    assert.ok(d.mensaje.includes('F'));
+});
+
+test('RET bloquea el segundo turno', () => {
+    const d = decidirAsignacionOtroObjetivo({
+        nombre: 'HERRERA',
+        empId: 'h1',
+        dateStr: '2026-10-12',
+        turnos: [{ objectiveId: 'obj', objectiveName: 'Planta', clientId: 'cli', code: 'RET' }],
+    });
+    assert.equal(d.ok, false);
 });

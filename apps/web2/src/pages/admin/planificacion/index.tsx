@@ -237,6 +237,7 @@ import {
     decidirAsignacionOtroObjetivo,
     esLicenciaCodigo,
     modoEscrituraOtroObjetivo,
+    NO_TRABAJO,
     urlCronograma,
     validarContraTodos,
     type EquivalenciaOtro,
@@ -10811,7 +10812,9 @@ function PlanificacionDesktop() {
         const shMenu = pendingChanges[keyTurno]?.isDeleted ? null : (pendingChanges[keyTurno] || shiftsMap[keyTurno]);
         const codeMenu = String(shMenu?.code || '').toUpperCase();
         const puedeLiberar = !bloqueoMesCerrado && puedeEditarDiaMenu(celda.dateStr) && !celda.isLeave && (codeMenu === 'M' || codeMenu === 'T' || codeMenu === 'N');
-        const puedeOtro = !bloqueoMesCerrado && puedeEditarDiaMenu(celda.dateStr) && !celda.isLeave && !celda.tieneTurno && !shMenu;
+        const esTurnoTrabajoCelda = !!shMenu && !esLicenciaCodigo(codeMenu) && !NO_TRABAJO.has(codeMenu);
+        const puedeOtro = !bloqueoMesCerrado && puedeEditarDiaMenu(celda.dateStr) && !celda.isLeave
+            && (!celda.tieneTurno && !shMenu || esTurnoTrabajoCelda);
         const work = celda.isLeave ? bandaTitularDelDia(celda.emp.id, celda.dateStr, posPreferida) : null;
         const huecosPuesto = !work && dayReport
             ? flattenDayGapsForUi(dayReport).filter((g) => !posPreferida || g.positionName === posPreferida)
@@ -10828,13 +10831,14 @@ function PlanificacionDesktop() {
         const permitidosMenu = idsObjetivosDelCrono(selectedObjective, selectedGrupo?.objectiveIds, !!(selectedGrupo && grupoUnifiedMode));
         const ajenoMenu = (cellTurnosMap[keyTurno] || []).find((d: any) => d && !d.isDeleted && esTurnoAjenoAlCrono(d.objectiveId, permitidosMenu))
             || (shMenu && esTurnoAjenoAlCrono(shMenu.objectiveId, permitidosMenu) ? shMenu : null);
-        if (ajenoMenu && !menuOpciones.visible) {
+        const ajenoEsBloqueante = ajenoMenu && (esLicenciaCodigo(String(ajenoMenu.code || '')) || NO_TRABAJO.has(String(ajenoMenu.code || '').trim().toUpperCase()));
+        if (ajenoEsBloqueante && !menuOpciones.visible) {
             const objAjeno = String(ajenoMenu.objectiveId || '');
             const nombreObj = getObjectiveName(objAjeno) || 'otro objetivo';
             avisarResultadoOtro({
                 escritos: 0,
                 avisos: [{
-                    mensaje: `${celda.emp.name || 'El guardia'} ya tiene ${String(ajenoMenu.code || 'turno').toUpperCase()} en ${nombreObj} el ${fechaCorta(celda.dateStr)}`,
+                    mensaje: `${celda.emp.name || 'El guardia'} tiene ${String(ajenoMenu.code || 'turno').toUpperCase()} en ${nombreObj} el ${fechaCorta(celda.dateStr)}`,
                     href: urlCronograma({
                         objectiveId: objAjeno,
                         clientId: String(ajenoMenu.clientId || clients.find((c) => (c.objetivos || []).some((o: any) => String(o.id) === objAjeno))?.id || ''),
@@ -18540,25 +18544,29 @@ function PlanificacionDesktop() {
         const aus = absencesMap[key];
         if (local || (aus && isActiveAbsence(aus))) {
             const code = String(local?.code || aus?.inferredCode || 'turno').toUpperCase();
-            const objId = String(local?.objectiveId || selectedObjective || '');
-            const obj = getObjectiveName(objId) || 'este objetivo';
-            const ajeno = !!local && esTurnoAjenoAlCrono(local.objectiveId, idsObjetivosDelCrono(selectedObjective, selectedGrupo?.objectiveIds, !!(selectedGrupo && grupoUnifiedMode)));
-            avisarResultadoOtro({
-                escritos: 0,
-                avisos: [{
-                    mensaje: `${nombre} ya tiene ${code} en ${obj} el ${fechaCorta(dateStr)}`,
-                    href: ajeno ? urlCronograma({
-                        objectiveId: objId,
-                        clientId: String(local?.clientId || clients.find((c) => (c.objetivos || []).some((o: any) => String(o.id) === objId))?.id || ''),
-                        year: Number(dateStr.slice(0, 4)),
-                        month: Number(dateStr.slice(5, 7)),
-                        dateStr,
-                        empId,
-                    }) : undefined,
-                    objetivoNombre: obj,
-                }],
-            });
-            return;
+            // Licencia o franco/RET: bloquear
+            if (esLicenciaCodigo(code) || NO_TRABAJO.has(code)) {
+                const objId = String(local?.objectiveId || selectedObjective || '');
+                const obj = getObjectiveName(objId) || 'este objetivo';
+                const ajeno = !!local && esTurnoAjenoAlCrono(local.objectiveId, idsObjetivosDelCrono(selectedObjective, selectedGrupo?.objectiveIds, !!(selectedGrupo && grupoUnifiedMode)));
+                avisarResultadoOtro({
+                    escritos: 0,
+                    avisos: [{
+                        mensaje: `${nombre} tiene ${code} en ${obj} el ${fechaCorta(dateStr)}`,
+                        href: ajeno ? urlCronograma({
+                            objectiveId: objId,
+                            clientId: String(local?.clientId || clients.find((c) => (c.objetivos || []).some((o: any) => String(o.id) === objId))?.id || ''),
+                            year: Number(dateStr.slice(0, 4)),
+                            month: Number(dateStr.slice(5, 7)),
+                            dateStr,
+                            empId,
+                        }) : undefined,
+                        objetivoNombre: obj,
+                    }],
+                });
+                return;
+            }
+            // Turno de trabajo: permitir como segundo turno, abrir modal sin bloquear
         }
         setFranjasOtro([]);
         setOtroObjetivo({ empId, nombre, dateStr });
@@ -18643,9 +18651,13 @@ function PlanificacionDesktop() {
             const aus = absencesMap[key];
             if (local || (aus && isActiveAbsence(aus))) {
                 const code = String(local?.code || aus?.inferredCode || 'turno').toUpperCase();
-                const obj = getObjectiveName(local?.objectiveId || selectedObjective) || 'este objetivo';
-                out.avisos.push({ mensaje: `${ped.nombre} ya tiene ${code} en ${obj} el ${fechaCorta(ped.dateStr)}` });
-                continue;
+                // Licencia o franco/RET: seguir bloqueando
+                if (esLicenciaCodigo(code) || NO_TRABAJO.has(code)) {
+                    const obj = getObjectiveName(local?.objectiveId || selectedObjective) || 'este objetivo';
+                    out.avisos.push({ mensaje: `${ped.nombre} tiene ${code} en ${obj} el ${fechaCorta(ped.dateStr)}` });
+                    continue;
+                }
+                // Turno de trabajo: permitir como segundo turno, seguir con la validación de decidirAsignacionOtroObjetivo
             }
             if (!turnosEmp.has(ped.empId)) {
                 const snap = await getDocs(query(collection(db, 'turnos'), where('employeeId', '==', ped.empId), where('empresaId', '==', empresaId)));
@@ -18688,12 +18700,19 @@ function PlanificacionDesktop() {
             const horasMes = todos.filter((t) => t.scheduleDate.startsWith(mesKey) && t.objectiveId !== String(selectedObjective || '')).reduce((s, t) => s + t.hours, 0)
                 + (Number(empMonthlyHours[ped.empId]) || 0)
                 + (horasLote.get(ped.empId) || 0);
+            const horasDia = todos.filter((t) => t.scheduleDate === ped.dateStr).reduce((s, t) => s + t.hours, 0);
+            if (horasDia + ped.franja.hours > 12 + 59 / 60) {
+                out.avisos.push({ mensaje: `${ped.nombre} ${fechaCorta(ped.dateStr)}: supera las 12:59 h diarias (ya tiene ${horasDia} h ese día).` });
+                continue;
+            }
             const hoy = diaAbs(ped.dateStr);
-            const otros = todos.filter((t) => t.start && t.end && Math.abs(diaAbs(t.scheduleDate) - hoy) === 1).map((t) => ({
-                startMin: aMin(t.start),
-                endMin: aMin(t.end),
-                dateOffset: (diaAbs(t.scheduleDate) < hoy ? -1 : 1) as -1 | 1,
-            }));
+            const otros = todos
+                .filter((t) => t.start && t.end && Math.abs(diaAbs(t.scheduleDate) - hoy) <= 1)
+                .map((t) => ({
+                    startMin: aMin(t.start),
+                    endMin: aMin(t.end),
+                    dateOffset: (diaAbs(t.scheduleDate) - hoy) as -1 | 0 | 1,
+                }));
             const val = validarContraTodos({
                 startMin: aMin(ped.franja.startTime),
                 endMin: aMin(ped.franja.endTime),

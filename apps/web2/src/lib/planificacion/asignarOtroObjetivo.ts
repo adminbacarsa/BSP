@@ -28,6 +28,7 @@ export type DecisionOtroObjetivo =
     };
 
 const LICENCIA = new Set(['V', 'L', 'E', 'A', 'AA', 'PG', 'ART', 'SGS', 'SUS', 'LT', 'MAVIC']);
+export const NO_TRABAJO = new Set(['F', 'FF', 'FP', 'RET', 'ESC', 'EV']);
 
 function up(v: unknown): string {
     return String(v || '').trim().toUpperCase();
@@ -75,24 +76,35 @@ export function decidirAsignacionOtroObjetivo(input: {
 }): DecisionOtroObjetivo {
     const anio = Number(input.dateStr.slice(0, 4));
     const mes = Number(input.dateStr.slice(5, 7));
-    const ocupado = input.turnos.find((t) => up(t.code) || t.esLicencia);
-    if (!ocupado) return { ok: true };
-    const codigo = up(ocupado.code) || (ocupado.esLicencia ? 'licencia' : 'turno');
-    const mensaje = `${input.nombre} ya tiene ${codigo} en ${ocupado.objectiveName || 'otro objetivo'} el ${fechaCorta(input.dateStr)}`;
-    return {
-        ok: false,
-        mensaje,
-        abrir: ocupado.objectiveId
-            ? {
-                objectiveId: ocupado.objectiveId,
-                clientId: ocupado.clientId || '',
-                year: anio,
-                month: mes,
-                dateStr: input.dateStr,
-                empId: input.empId,
-            }
-            : null,
-    };
+
+    // Licencia siempre bloquea
+    const licencia = input.turnos.find((t) => t.esLicencia || LICENCIA.has(up(t.code)));
+    if (licencia) {
+        const codigo = up(licencia.code) || 'licencia';
+        return {
+            ok: false,
+            mensaje: `${input.nombre} tiene ${codigo} en ${licencia.objectiveName || 'otro objetivo'} el ${fechaCorta(input.dateStr)}`,
+            abrir: licencia.objectiveId
+                ? { objectiveId: licencia.objectiveId, clientId: licencia.clientId || '', year: anio, month: mes, dateStr: input.dateStr, empId: input.empId }
+                : null,
+        };
+    }
+
+    // Franco/descanso/RET bloquea
+    const franco = input.turnos.find((t) => NO_TRABAJO.has(up(t.code)));
+    if (franco) {
+        const codigo = up(franco.code);
+        return {
+            ok: false,
+            mensaje: `${input.nombre} tiene ${codigo} en ${franco.objectiveName || 'otro objetivo'} el ${fechaCorta(input.dateStr)}`,
+            abrir: franco.objectiveId
+                ? { objectiveId: franco.objectiveId, clientId: franco.clientId || '', year: anio, month: mes, dateStr: input.dateStr, empId: input.empId }
+                : null,
+        };
+    }
+
+    // Turno de trabajo existente: permitir como segundo turno; validarContraTodos verificará solapamiento
+    return { ok: true };
 }
 
 export function esLicenciaCodigo(code: string): boolean {
