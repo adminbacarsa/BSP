@@ -106,6 +106,7 @@ function extractBand(shift: string): string {
     .trim()
     .split(/\s+/)[0]
     ?.toUpperCase() || '';
+  if (code === 'RET') return 'RET';
   if (BANDS.includes(code as (typeof BANDS)[number])) return code;
   if (code.startsWith('D12')) return 'D12';
   if (code.startsWith('N12')) return 'N12';
@@ -406,6 +407,226 @@ function estadoPill(estado: GuardEstado): { label: string; className: string } {
   }
 }
 
+function ModalCobertura({
+  absent,
+  candidates,
+  busy,
+  onClose,
+  onAssign,
+}: {
+  absent: GuardRowModel;
+  candidates: GuardRowModel[];
+  busy: boolean;
+  onClose: () => void;
+  onAssign: (candidate: GuardRowModel) => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-4 py-3 border-b border-slate-200 flex items-center gap-2">
+          <span className="text-base">🚨</span>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-black text-red-700">Cobertura urgente</div>
+            <div className="text-[11px] text-slate-500 truncate">
+              {absent.employeeName} · {absent.turno.obj}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1 rounded-lg hover:bg-slate-100 text-slate-400"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="px-4 py-3">
+          <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-2">
+            Turno faltante
+          </div>
+          <div className="bg-red-50 rounded-xl p-3 mb-4">
+            <div className="text-sm font-semibold text-slate-800">{absent.employeeName}</div>
+            <div className="text-[11px] text-slate-500">
+              {absent.turno.shift} · {absent.turno.obj}
+            </div>
+            <div className="text-[11px] text-red-600 font-medium mt-1">
+              No llegó · esperado {absent.turno.expected}
+            </div>
+          </div>
+
+          <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-2">
+            Candidatos disponibles ({candidates.length})
+          </div>
+          {candidates.length === 0 ? (
+            <div className="text-[11px] text-slate-400 text-center py-4">
+              Sin candidatos disponibles en este momento
+            </div>
+          ) : (
+            <div className="space-y-1 max-h-48 overflow-y-auto">
+              {candidates.map((c) => (
+                <div
+                  key={c.turno.rowId}
+                  className="flex items-center gap-3 p-2.5 rounded-xl border border-slate-200 hover:border-violet-300 hover:bg-violet-50"
+                >
+                  <span
+                    className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                      c.band === 'RET' ? 'bg-violet-500' : 'bg-amber-400'
+                    }`}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[12px] font-semibold text-slate-800 truncate">
+                      {c.employeeName}
+                    </div>
+                    <div className="text-[10px] text-slate-500">
+                      {c.band === 'RET' ? '🛡️ Retén' : c.turno.obj}
+                      {c.turno.phone ? ` · ${c.turno.phone}` : ''}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => onAssign(c)}
+                    className="px-2.5 py-1 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-[10px] font-bold disabled:opacity-50 flex-shrink-0"
+                  >
+                    Asignar
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="px-4 py-3 border-t border-slate-100 flex justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-1.5 rounded-xl text-[11px] font-bold text-slate-600 bg-slate-100 hover:bg-slate-200"
+          >
+            Cerrar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ModalAcciones({
+  row,
+  busy,
+  onClose,
+  onMarcarPresente,
+  onMarcarAusente,
+}: {
+  row: GuardRowModel;
+  busy: boolean;
+  onClose: () => void;
+  onMarcarPresente: (row: GuardRowModel) => void;
+  onMarcarAusente: (row: GuardRowModel) => void;
+}) {
+  const pill = estadoPill(row.estado);
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-4 py-3 border-b border-slate-200 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-sm font-black text-slate-600 flex-shrink-0">
+            {row.employeeName.split(' ')[0]?.[0]?.toUpperCase()}
+            {row.employeeName.split(' ')[1]?.[0]?.toUpperCase()}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-black text-slate-800 truncate">{row.employeeName}</div>
+            <div className="text-[11px] text-slate-500 truncate">{row.turno.obj}</div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1 rounded-lg hover:bg-slate-100 text-slate-400"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="px-4 py-3 space-y-2">
+          <div className="flex justify-between items-center text-[11px]">
+            <span className="text-slate-500">Turno</span>
+            <span className="font-mono text-slate-700">{row.turno.shift}</span>
+          </div>
+          <div className="flex justify-between items-center text-[11px]">
+            <span className="text-slate-500">Esperado</span>
+            <span className="font-mono text-slate-700">{row.turno.expected}</span>
+          </div>
+          {row.turno.phone && (
+            <div className="flex justify-between items-center text-[11px]">
+              <span className="text-slate-500">Teléfono</span>
+              <a
+                href={`tel:${row.turno.phone}`}
+                className="font-mono text-emerald-700 hover:underline"
+              >
+                {row.turno.phone}
+              </a>
+            </div>
+          )}
+          <div className="flex justify-between items-center text-[11px]">
+            <span className="text-slate-500">Estado</span>
+            <span className={`px-2 py-0.5 text-[9px] font-bold rounded-full ${pill.className}`}>
+              {pill.label}
+            </span>
+          </div>
+        </div>
+
+        <div className="px-4 pb-4 flex flex-col gap-2">
+          {row.estado !== 'PRESENTE_PLAT' &&
+            row.estado !== 'PRESENTE_WA' &&
+            row.estado !== 'AUSENTE' && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  onMarcarPresente(row);
+                  onClose();
+                }}
+                className="w-full py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[12px] font-bold disabled:opacity-50"
+              >
+                ✓ Marcar presente ahora
+              </button>
+            )}
+          {row.estado !== 'AUSENTE' && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                onMarcarAusente(row);
+                onClose();
+              }}
+              className="w-full py-2 rounded-xl bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-[12px] font-bold disabled:opacity-50"
+            >
+              Registrar ausencia (AA)
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-full py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-[12px] font-bold"
+          >
+            Cancelar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function GuardRow({
   row,
   busy,
@@ -418,8 +639,8 @@ function GuardRow({
   busy: boolean;
   onMarcarPresente: (row: GuardRowModel) => void;
   onConfirmarWA: (row: GuardRowModel) => void;
-  onCobertura: () => void;
-  onMore: () => void;
+  onCobertura: (row: GuardRowModel) => void;
+  onMore: (row: GuardRowModel) => void;
 }) {
   const pill = estadoPill(row.estado);
   const diffClass =
@@ -435,7 +656,7 @@ function GuardRow({
       <button
         type="button"
         disabled={busy}
-        onClick={onCobertura}
+        onClick={() => onCobertura(row)}
         className="px-2 py-1 rounded-lg bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold disabled:opacity-50"
       >
         🚨 Cobertura
@@ -496,13 +717,117 @@ function GuardRow({
         {primary}
         <button
           type="button"
-          onClick={onMore}
+          onClick={() => onMore(row)}
           className="px-1.5 py-1 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 text-[11px] font-bold"
           title="Más acciones"
         >
           ···
         </button>
       </div>
+    </div>
+  );
+}
+
+function RetenePanel({
+  rows,
+  busy,
+  onMarcarPresente,
+  onConfirmarWA,
+}: {
+  rows: GuardRowModel[];
+  busy: boolean;
+  onMarcarPresente: (row: GuardRowModel) => void;
+  onConfirmarWA: (row: GuardRowModel) => void;
+}) {
+  const [open, setOpen] = useState(true);
+  if (rows.length === 0) return null;
+  const disponibles = rows.filter(
+    (r) => r.estado !== 'AUSENTE' && r.estado !== 'NO_LLEGO',
+  ).length;
+
+  return (
+    <div className="border-b-2 border-violet-200 bg-violet-50/60">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-violet-100/60 text-left"
+      >
+        {open ? (
+          <ChevronDown size={14} className="text-violet-500" />
+        ) : (
+          <ChevronRight size={14} className="text-violet-500" />
+        )}
+        <span className="text-xs font-black text-violet-800 tracking-wide">
+          🛡️ RETENES HOY
+        </span>
+        <span className="ml-1 px-1.5 py-0.5 rounded-full bg-violet-200 text-violet-700 text-[9px] font-bold">
+          {disponibles} disp. / {rows.length}
+        </span>
+      </button>
+      {open && (
+        <div>
+          {rows.map((row) => {
+            const pill = estadoPill(row.estado);
+            let action: React.ReactNode = null;
+            if (row.estado === 'PENDIENTE_WA') {
+              action = (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => onConfirmarWA(row)}
+                  className="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold disabled:opacity-50"
+                >
+                  ✓ Confirmar
+                </button>
+              );
+            } else if (row.estado === 'ESPERANDO' || row.estado === 'TARDANZA') {
+              action = (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => onMarcarPresente(row)}
+                  className="px-2 py-1 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-[10px] font-bold disabled:opacity-50"
+                >
+                  ✓ Disponible
+                </button>
+              );
+            }
+            return (
+              <div
+                key={row.turno.rowId}
+                className="flex items-center gap-3 px-4 py-2 border-b border-violet-100 hover:bg-violet-50"
+              >
+                <span
+                  className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                    row.estado === 'PRESENTE_WA' || row.estado === 'PRESENTE_PLAT'
+                      ? 'bg-emerald-500'
+                      : row.estado === 'ESPERANDO' || row.estado === 'PENDIENTE_WA'
+                        ? 'bg-violet-400 animate-pulse'
+                        : row.estado === 'AUSENTE' || row.estado === 'NO_LLEGO'
+                          ? 'bg-red-400'
+                          : 'bg-slate-300'
+                  }`}
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-semibold text-slate-800 truncate">
+                    {row.employeeName}
+                  </div>
+                  <div className="text-[10px] text-slate-500">
+                    {row.turno.expected}
+                    {row.turno.phone ? ` · ${row.turno.phone}` : ''}
+                  </div>
+                </div>
+                <span
+                  className={`px-2 py-0.5 text-[9px] font-bold rounded-full whitespace-nowrap ${pill.className}`}
+                >
+                  {pill.label}
+                </span>
+                {action}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -525,8 +850,8 @@ function ObjectiveGroup({
   busy: boolean;
   onMarcarPresente: (row: GuardRowModel) => void;
   onConfirmarWA: (row: GuardRowModel) => void;
-  onCobertura: () => void;
-  onMore: () => void;
+  onCobertura: (row: GuardRowModel) => void;
+  onMore: (row: GuardRowModel) => void;
 }) {
   const hasNoLlego = rows.some((r) => r.estado === 'NO_LLEGO');
   const hasTardanza = rows.some((r) => r.estado === 'TARDANZA');
@@ -907,6 +1232,8 @@ export default function ModoRapidoPage() {
   const [groupInitDone, setGroupInitDone] = useState(false);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<{ msg: string; color: string } | null>(null);
+  const [coberturaModal, setCoberturaModal] = useState<GuardRowModel | null>(null);
+  const [accionesModal, setAccionesModal] = useState<GuardRowModel | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const showToast = useCallback((msg: string, color = 'bg-slate-800') => {
@@ -1076,13 +1403,18 @@ export default function ModoRapidoPage() {
     let tardanza = 0;
     let sinConfirmar = 0;
     let ok = 0;
+    let retenes = 0;
     for (const r of classifiedRows) {
+      if (r.band === 'RET') {
+        retenes += 1;
+        continue;
+      }
       if (r.estado === 'NO_LLEGO') critico += 1;
       else if (r.estado === 'TARDANZA') tardanza += 1;
       else if (r.estado === 'PENDIENTE_WA') sinConfirmar += 1;
       else if (r.estado === 'PRESENTE_WA' || r.estado === 'PRESENTE_PLAT') ok += 1;
     }
-    return { total: classifiedRows.length, critico, tardanza, sinConfirmar, ok };
+    return { total: classifiedRows.length, critico, tardanza, sinConfirmar, ok, retenes };
   }, [classifiedRows]);
 
   const filteredRows = useMemo(() => {
@@ -1120,6 +1452,19 @@ export default function ModoRapidoPage() {
     return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
   }, [filteredRows]);
 
+  const nonReteGroups = useMemo(
+    () =>
+      groups
+        .map(([k, rows]) => [k, rows.filter((r) => r.band !== 'RET')] as [string, GuardRowModel[]])
+        .filter(([, rows]) => rows.length > 0),
+    [groups],
+  );
+
+  const reteneRows = useMemo(
+    () => filteredRows.filter((r) => r.band === 'RET'),
+    [filteredRows],
+  );
+
   useEffect(() => {
     if (groupInitDone || classifiedRows.length === 0) return;
     const init: Record<string, boolean> = {};
@@ -1140,6 +1485,18 @@ export default function ModoRapidoPage() {
     setGroupInitDone(true);
   }, [classifiedRows, groupInitDone]);
 
+  const coberturaCandidates = useMemo((): GuardRowModel[] => {
+    if (!coberturaModal) return [];
+    return classifiedRows.filter(
+      (r) =>
+        r.turno.rowId !== coberturaModal.turno.rowId &&
+        (r.band === 'RET' ||
+          r.estado === 'ESPERANDO' ||
+          r.estado === 'PRESENTE_PLAT' ||
+          r.estado === 'PRESENTE_WA'),
+    );
+  }, [coberturaModal, classifiedRows]);
+
   const handleMarcarPresente = async (row: GuardRowModel) => {
     if (busy) return;
     setBusy(true);
@@ -1156,6 +1513,41 @@ export default function ModoRapidoPage() {
       showToast('Error al registrar presencia', 'bg-red-600');
     } finally {
       setBusy(false);
+    }
+  };
+
+  const handleRegistrarAusencia = async (row: GuardRowModel) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await registrarAusencia(row.turno.rowId, { name: row.employeeName });
+      showToast(`Ausencia registrada · ${row.employeeName}`, 'bg-red-700');
+    } catch {
+      showToast('Error al registrar ausencia', 'bg-red-600');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleAsignarCobertura = async (candidate: GuardRowModel) => {
+    if (!coberturaModal) return;
+    try {
+      await addDoc(collection(db, 'novedades'), {
+        type: 'COBERTURA_ASIGNADA',
+        turnoAusenteId: coberturaModal.turno.rowId,
+        turnoAusenteEmpleado: coberturaModal.employeeName,
+        turnoAusenteObj: coberturaModal.turno.obj,
+        candidatoId: candidate.turno.rowId,
+        candidatoEmpleado: candidate.employeeName,
+        empresaId,
+        operatorId: user?.uid ?? 'cc-modo-rapido',
+        createdAt: serverTimestamp(),
+      });
+      showToast(`Cobertura registrada · ${candidate.employeeName}`, 'bg-violet-700');
+    } catch {
+      showToast('Error al registrar cobertura', 'bg-red-600');
+    } finally {
+      setCoberturaModal(null);
     }
   };
 
@@ -1333,6 +1725,19 @@ export default function ModoRapidoPage() {
             🟢 OK · {stats.ok}
           </button>
 
+          {stats.retenes > 0 && (
+            <button
+              type="button"
+              onClick={() => setBandFilter(bandFilter === 'RET' ? 'all' : 'RET')}
+              className={chipClass(
+                bandFilter === 'RET',
+                'bg-violet-100 text-violet-700 border-violet-300',
+              )}
+            >
+              🛡️ RET · {stats.retenes}
+            </button>
+          )}
+
           <div className="w-px h-5 bg-slate-200 mx-1 flex-shrink-0" />
 
           <button
@@ -1400,7 +1805,13 @@ export default function ModoRapidoPage() {
                   <span className="text-center">Estado</span>
                   <span className="text-right pr-1">Acción</span>
                 </div>
-                {groups.map(([objName, rows]) => (
+                <RetenePanel
+                  rows={reteneRows}
+                  busy={busy}
+                  onMarcarPresente={(r) => void handleMarcarPresente(r)}
+                  onConfirmarWA={(r) => void handleConfirmarWA(r)}
+                />
+                {nonReteGroups.map(([objName, rows]) => (
                   <ObjectiveGroup
                     key={objName}
                     objName={objName}
@@ -1415,8 +1826,8 @@ export default function ModoRapidoPage() {
                     busy={busy}
                     onMarcarPresente={(r) => void handleMarcarPresente(r)}
                     onConfirmarWA={(r) => void handleConfirmarWA(r)}
-                    onCobertura={() => showToast('Próximamente', 'bg-slate-800')}
-                    onMore={() => showToast('Próximamente', 'bg-slate-800')}
+                    onCobertura={(r) => setCoberturaModal(r)}
+                    onMore={(r) => setAccionesModal(r)}
                   />
                 ))}
               </>
@@ -1439,6 +1850,26 @@ export default function ModoRapidoPage() {
             onConfirmEntry={(e) => void handleConfirmEntrySidebar(e)}
           />
         </div>
+
+        {coberturaModal && (
+          <ModalCobertura
+            absent={coberturaModal}
+            candidates={coberturaCandidates}
+            busy={busy}
+            onClose={() => setCoberturaModal(null)}
+            onAssign={(c) => void handleAsignarCobertura(c)}
+          />
+        )}
+
+        {accionesModal && (
+          <ModalAcciones
+            row={accionesModal}
+            busy={busy}
+            onClose={() => setAccionesModal(null)}
+            onMarcarPresente={(r) => void handleMarcarPresente(r)}
+            onMarcarAusente={(r) => void handleRegistrarAusencia(r)}
+          />
+        )}
 
         {toast && (
           <div
