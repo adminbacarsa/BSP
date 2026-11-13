@@ -122,9 +122,10 @@ function useTurnosHoy({
 }: {
   empresaId: string | null;
   scopeEmpresa: boolean;
-}): { turnos: Record<string, TurnoHoy>; loading: boolean } {
+}): { turnos: Record<string, TurnoHoy>; loading: boolean; phones: string[] } {
   const [turnos, setTurnos] = useState<Record<string, TurnoHoy>>({});
   const [loading, setLoading] = useState(true);
+  const [phones, setPhones] = useState<string[]>([]);
   const objMapRef = useRef<Map<string, { name: string; clientName: string }>>(new Map());
   const phoneMapRef = useRef<Map<string, string>>(new Map());
   const lastTurnosSnapRef = useRef<QueryDocumentSnapshot[] | null>(null);
@@ -132,6 +133,7 @@ function useTurnosHoy({
   useEffect(() => {
     if (!empresaId) {
       setTurnos({});
+      setPhones([]);
       setLoading(false);
       return;
     }
@@ -258,6 +260,7 @@ function useTurnosHoy({
         if (norm) m.set(d.id, norm);
       });
       phoneMapRef.current = m;
+      setPhones(Array.from(m.values()).filter(Boolean));
       if (lastTurnosSnapRef.current) applyTurnos(lastTurnosSnapRef.current);
     });
 
@@ -287,7 +290,7 @@ function useTurnosHoy({
     };
   }, [empresaId, scopeEmpresa]);
 
-  return { turnos, loading };
+  return { turnos, loading, phones };
 }
 
 type GuardEstado =
@@ -854,10 +857,11 @@ export default function ModoRapidoPage() {
     [empresaId, migracionCompleta],
   );
 
-  const { turnos, loading } = useTurnosHoy({
+  const turnosData = useTurnosHoy({
     empresaId: empresaId || null,
     scopeEmpresa,
   });
+  const { turnos, loading } = turnosData;
   const wa = useWABridge(turnos, empresaId);
 
   const [bridgeUrl, setBridgeUrl] = useState(DEFAULT_BRIDGE_URL);
@@ -936,6 +940,14 @@ export default function ModoRapidoPage() {
     if (bridgeUrl) wa.connect(bridgeUrl);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- connect al cambiar URL; wa estable por refs internas
   }, [bridgeUrl]);
+
+  const syncedRef = useRef(false);
+  useEffect(() => {
+    if (wa.status === 'connected' && !syncedRef.current && turnosData.phones.length > 0) {
+      syncedRef.current = true;
+      void wa.syncPhones(turnosData.phones);
+    }
+  }, [wa.status, turnosData.phones, wa]);
 
   const setSidebar = useCallback((collapsed: boolean) => {
     setSidebarCollapsed(collapsed);
