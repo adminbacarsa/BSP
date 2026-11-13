@@ -18726,7 +18726,7 @@ function PlanificacionDesktop() {
             }
             const hoy = diaAbs(ped.dateStr);
             const otros = todos
-                .filter((t) => t.start && t.end && Math.abs(diaAbs(t.scheduleDate) - hoy) <= 1)
+                .filter((t) => t.start && t.end && (t.hours ?? 0) > 0 && Math.abs(diaAbs(t.scheduleDate) - hoy) <= 1)
                 .map((t) => ({
                     startMin: aMin(t.start),
                     endMin: aMin(t.end),
