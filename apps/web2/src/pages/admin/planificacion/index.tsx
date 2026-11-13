@@ -18242,7 +18242,7 @@ function PlanificacionDesktop() {
         if (c0Mas && iniMas && finMas && franjaPegadaLibre(pos, ds, c0Mas, iniMas, finMas)) { abrirTura(emp, ds, ctx, pos); return; }
         const code = bandaDeCodigoPuesto(codigoCtxRapido(ctx)) || codigoCtxRapido(ctx);
         if (code === 'T') { toast.message('La T pasa a 12 h solo si falta una banda de un lado.'); return; }
-        if (code !== 'M' && code !== 'N') { abrirTura(emp, ds, ctx, pos); return; }
+        if (code !== 'M' && code !== 'N') { abrirAsignarOtro(emp.id, String(emp.name || emp.id), ds); return; }
         const doce = horarioDoce(code === 'M' ? 'D12' : 'N12', getShiftsForPosition(pos, resolveObjectiveForEmp(emp.id)) as TurnoSla[]);
         escribirRapido([{
             r, c, code: doce.code,
