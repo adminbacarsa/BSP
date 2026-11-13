@@ -9634,9 +9634,11 @@ function PlanificacionDesktop() {
                     });
                     if (!decisionAjeno.escribir) {
                         const ajeno = docsGuard.find((d: any) => esTurnoAjenoAlCrono(d?.objectiveId, permitidosGuard) && !d?.isSecondBlock);
-                        avisosTurnoAjeno.push(decisionAjeno.motivo === 'franco'
-                            ? textoAvisoFrancoAjeno(empName, getObjectiveName(ajeno?.objectiveId))
-                            : textoAvisoTurnoAjeno(empName, getObjectiveName(ajeno?.objectiveId)));
+                        if (change.menuRapidoVia) {
+                            avisosTurnoAjeno.push(decisionAjeno.motivo === 'franco'
+                                ? textoAvisoFrancoAjeno(empName, getObjectiveName(ajeno?.objectiveId))
+                                : textoAvisoTurnoAjeno(empName, getObjectiveName(ajeno?.objectiveId)));
+                        }
                         continue;
                     }
                     if (existing && esTurnoAjenoAlCrono(existing.objectiveId, permitidosGuard)) {
@@ -18726,7 +18728,8 @@ function PlanificacionDesktop() {
             }
             const hoy = diaAbs(ped.dateStr);
             const otros = todos
-                .filter((t) => t.start && t.end && Math.abs(diaAbs(t.scheduleDate) - hoy) <= 1)
+                .filter((t) => t.start && t.end && Math.abs(diaAbs(t.scheduleDate) - hoy) <= 1
+                    && (diaAbs(t.scheduleDate) === hoy || (t.hours ?? 0) > 0))
                 .map((t) => ({
                     startMin: aMin(t.start),
                     endMin: aMin(t.end),
