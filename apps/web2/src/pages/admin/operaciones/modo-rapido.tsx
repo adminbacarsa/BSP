@@ -75,6 +75,8 @@ function useTurnosHoy({
   const [turnos, setTurnos] = useState<Record<string, TurnoHoy>>({});
   const [loading, setLoading] = useState(true);
   const objMapRef = useRef<Map<string, { name: string; clientName: string }>>(new Map());
+  const phoneMapRef = useRef<Map<string, string>>(new Map());
+  const lastTurnosSnapRef = useRef<QueryDocumentSnapshot[] | null>(null);
 
   useEffect(() => {
     if (!empresaId) {
@@ -107,9 +109,104 @@ function useTurnosHoy({
       return m;
     };
 
+    const applyTurnos = (docs: QueryDocumentSnapshot[]) => {
+      const now = Date.now();
+      const byName = new Map<string, { turno: TurnoHoy; startMs: number }>();
+
+      for (const d of docs) {
+        const shift = d.data() as Record<string, unknown>;
+        // Excluir turnos de otra empresa (filtro en memoria para legacy bacarsa sin scope)
+        if (
+          !scopeEmpresa &&
+          shift.empresaId &&
+          String(shift.empresaId).trim() !== '' &&
+          String(shift.empresaId).trim().toLowerCase() !== (empresaId || '').toLowerCase()
+        ) {
+          continue;
+        }
+        if (shift.draft === true) continue;
+
+        const employeeId = String(shift.employeeId ?? '');
+        const employeeName = String(shift.employeeName ?? '').trim();
+        if (employeeId === 'VACANTE' || !employeeName) continue;
+
+        const code = String(shift.code || '').toUpperCase();
+        if (
+          isRestFrancoShift({
+            code,
+            isFranco: shift.isFranco,
+            isFrancoTrabajado: shift.isFrancoTrabajado,
+            isFrancoCompensatorio: shift.isFrancoCompensatorio,
+            objectiveName: shift.objectiveName,
+            type: shift.type,
+          })
+        ) {
+          continue;
+        }
+        if (SKIP_CODES.has(code)) continue;
+
+        const startMs = toStartMs(shift.startTime);
+        if (Number.isNaN(startMs)) continue;
+
+        const endTs = shift.endTime as Timestamp | undefined;
+        const startTs = shift.startTime as Timestamp;
+        const realTs = shift.realStartTime as Timestamp | undefined;
+
+        const mapped: TurnoHoy = {
+          shift: `${code || '?'} ${formatHHMM(startTs)}–${formatHHMM(endTs)}`,
+          obj:
+            objMapRef.current.get(String(shift.objectiveId || ''))?.name ||
+            String(shift.objectiveName || '—'),
+          rowId: d.id,
+          expected: formatHHMM(startTs),
+          turnoStatus: String(shift.status || 'PENDING'),
+          realStartTime: realTs ? formatHHMM(realTs) : undefined,
+          phone:
+            phoneMapRef.current.get(employeeId) ||
+            String(shift.employeePhone || shift.phone || '')
+              .replace(/\D/g, '')
+              .replace(/^549/, '') ||
+            undefined,
+        };
+
+        const prev = byName.get(employeeName);
+        if (!prev) {
+          byName.set(employeeName, { turno: mapped, startMs });
+        } else {
+          const prevDist = Math.abs(prev.startMs - now);
+          const nextDist = Math.abs(startMs - now);
+          if (nextDist < prevDist) {
+            byName.set(employeeName, { turno: mapped, startMs });
+          }
+        }
+      }
+
+      const next: Record<string, TurnoHoy> = {};
+      byName.forEach((v, name) => {
+        next[name] = v.turno;
+      });
+      setTurnos(next);
+      setLoading(false);
+    };
+
     const clientsQ = empresaCollectionQuery('clients', empresaId, scopeEmpresa);
     const unsubClients = onSnapshot(clientsQ, (snap) => {
       objMapRef.current = buildObjMap(snap.docs);
+      if (lastTurnosSnapRef.current) applyTurnos(lastTurnosSnapRef.current);
+    });
+
+    // Mapa employeeId → phone normalizado (turnos no traen employeePhone)
+    const empQ = empresaCollectionQuery('empleados', empresaId, scopeEmpresa);
+    const unsubEmps = onSnapshot(empQ, (snap) => {
+      const m = new Map<string, string>();
+      snap.docs.forEach((d) => {
+        const data = d.data() as Record<string, unknown>;
+        const raw = String(data.telefono || data.phone || '').replace(/\D/g, '');
+        const norm = raw.replace(/^549/, '');
+        if (norm) m.set(d.id, norm);
+      });
+      phoneMapRef.current = m;
+      if (lastTurnosSnapRef.current) applyTurnos(lastTurnosSnapRef.current);
     });
 
     const q = query(
@@ -121,77 +218,8 @@ function useTurnosHoy({
     const unsub = onSnapshot(
       q,
       (snap) => {
-        const now = Date.now();
-        const byName = new Map<string, { turno: TurnoHoy; startMs: number }>();
-
-        for (const d of snap.docs) {
-          const shift = d.data() as Record<string, unknown>;
-          // Excluir turnos de otra empresa (filtro en memoria para legacy bacarsa sin scope)
-          if (
-            !scopeEmpresa &&
-            shift.empresaId &&
-            String(shift.empresaId).trim() !== '' &&
-            String(shift.empresaId).trim().toLowerCase() !== (empresaId || '').toLowerCase()
-          ) {
-            continue;
-          }
-          if (shift.draft === true) continue;
-
-          const employeeId = String(shift.employeeId ?? '');
-          const employeeName = String(shift.employeeName ?? '').trim();
-          if (employeeId === 'VACANTE' || !employeeName) continue;
-
-          const code = String(shift.code || '').toUpperCase();
-          if (
-            isRestFrancoShift({
-              code,
-              isFranco: shift.isFranco,
-              isFrancoTrabajado: shift.isFrancoTrabajado,
-              isFrancoCompensatorio: shift.isFrancoCompensatorio,
-              objectiveName: shift.objectiveName,
-              type: shift.type,
-            })
-          ) {
-            continue;
-          }
-          if (SKIP_CODES.has(code)) continue;
-
-          const startMs = toStartMs(shift.startTime);
-          if (Number.isNaN(startMs)) continue;
-
-          const endTs = shift.endTime as Timestamp | undefined;
-          const startTs = shift.startTime as Timestamp;
-          const realTs = shift.realStartTime as Timestamp | undefined;
-
-          const mapped: TurnoHoy = {
-            shift: `${code || '?'} ${formatHHMM(startTs)}–${formatHHMM(endTs)}`,
-            obj:
-              objMapRef.current.get(String(shift.objectiveId || ''))?.name ||
-              String(shift.objectiveName || '—'),
-            rowId: d.id,
-            expected: formatHHMM(startTs),
-            turnoStatus: String(shift.status || 'PENDING'),
-            realStartTime: realTs ? formatHHMM(realTs) : undefined,
-          };
-
-          const prev = byName.get(employeeName);
-          if (!prev) {
-            byName.set(employeeName, { turno: mapped, startMs });
-          } else {
-            const prevDist = Math.abs(prev.startMs - now);
-            const nextDist = Math.abs(startMs - now);
-            if (nextDist < prevDist) {
-              byName.set(employeeName, { turno: mapped, startMs });
-            }
-          }
-        }
-
-        const next: Record<string, TurnoHoy> = {};
-        byName.forEach((v, name) => {
-          next[name] = v.turno;
-        });
-        setTurnos(next);
-        setLoading(false);
+        lastTurnosSnapRef.current = snap.docs;
+        applyTurnos(snap.docs);
       },
       (err) => {
         console.warn('[modo-rapido] turnos listener error:', err);
@@ -201,7 +229,9 @@ function useTurnosHoy({
 
     return () => {
       unsubClients();
+      unsubEmps();
       unsub();
+      lastTurnosSnapRef.current = null;
     };
   }, [empresaId, scopeEmpresa]);
 
@@ -531,12 +561,22 @@ export default function ModoRapidoPage() {
     let cancelled = false;
     (async () => {
       try {
-        const snap = await getDoc(doc(db, 'config', 'wa-bridge'));
-        if (cancelled) return;
-        if (snap.exists()) {
-          const data = snap.data() as { url?: string };
-          if (typeof data.url === 'string' && data.url.trim()) {
-            setBridgeUrl(data.url.trim());
+        // URL por empresa (Configuración → WA Bridge); fallback al doc global legacy
+        const paths = empresaId
+          ? [
+              doc(db, 'empresas', empresaId, 'config', 'wa-bridge'),
+              doc(db, 'config', 'wa-bridge'),
+            ]
+          : [doc(db, 'config', 'wa-bridge')];
+        for (const ref of paths) {
+          const snap = await getDoc(ref);
+          if (cancelled) return;
+          if (snap.exists()) {
+            const data = snap.data() as { url?: string };
+            if (typeof data.url === 'string' && data.url.trim()) {
+              setBridgeUrl(data.url.trim());
+              break;
+            }
           }
         }
       } catch {
@@ -555,7 +595,7 @@ export default function ModoRapidoPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [empresaId]);
 
   useEffect(() => {
     if (bridgeUrl) wa.connect(bridgeUrl);

@@ -33,6 +33,8 @@ export interface TurnoHoy {
   turnoStatus?: 'PENDING' | 'PRESENT' | 'ABSENT' | 'COMPLETED' | 'CANCELED' | string;
   /** Hora real de entrada ya registrada en plataforma (HH:MM). */
   realStartTime?: string;
+  /** Teléfono normalizado del empleado (sin +549), para match WA. */
+  phone?: string;
 }
 
 export type WABridgeStatus = 'idle' | 'connecting' | 'connected' | 'error';
@@ -103,7 +105,23 @@ function calcTardanzaMins(arrivedAt: string, expected?: string): number | undefi
   }
 }
 
-function findTurno(turnos: Record<string, TurnoHoy>, name: string): TurnoHoy | undefined {
+function findTurno(
+  turnos: Record<string, TurnoHoy>,
+  name: string,
+  phone?: string | null,
+): TurnoHoy | undefined {
+  // 1. Match por teléfono (más confiable — el nombre WA puede diferir)
+  if (phone) {
+    const normPhone = String(phone).replace(/\D/g, '').replace(/^549/, '');
+    if (normPhone) {
+      const byPhone = Object.values(turnos).find(
+        (t) => t.phone && t.phone.replace(/\D/g, '') === normPhone,
+      );
+      if (byPhone) return byPhone;
+    }
+  }
+
+  // 2. Fallback: match por nombre (fuzzy)
   const pushName = (name || '').toLowerCase();
   if (!pushName) return undefined;
   const key = Object.keys(turnos).find((k) => {
@@ -247,7 +265,7 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
 
         if (m.type === 'protocol') continue;
 
-        const turno = findTurno(turnosRef.current, m.name);
+        const turno = findTurno(turnosRef.current, m.name, m.phone);
         if (
           turno?.rowId &&
           (pendingRowIdsRef.current.has(turno.rowId) ||
@@ -267,8 +285,8 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
           expected: turno?.expected,
           tardanzaMins: calcTardanzaMins(arrivedAt, turno?.expected),
           hasLocation: !!m.location,
-          lat: m.location?.latitude,
-          lng: m.location?.longitude,
+          lat: (m.location as { lat?: number; latitude?: number } | undefined)?.lat ?? m.location?.latitude,
+          lng: (m.location as { lng?: number; longitude?: number } | undefined)?.lng ?? m.location?.longitude,
           msgType: m.type,
         };
 
@@ -385,7 +403,7 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
     const name =
       partial?.name ||
       (names.length > 0 ? names[Math.floor(Math.random() * names.length)] : 'Demo Guardia');
-    const turno = findTurno(turnosRef.current, name);
+    const turno = findTurno(turnosRef.current, name, partial?.phone);
     const arrivedAt = partial?.arrivedAt || nowHHMM();
     const expected = partial?.expected || turno?.expected;
     const entry: WAEntry = {
