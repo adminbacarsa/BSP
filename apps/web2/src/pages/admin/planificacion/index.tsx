@@ -18522,9 +18522,24 @@ function PlanificacionDesktop() {
         for (const c of clients || []) {
             for (const o of (c.objetivos || []) as Array<{ id?: string; name?: string; status?: string }>) {
                 const id = String(o.id || '').trim();
-                if (!id || id === String(selectedObjective || '')) continue;
+                if (!id || (!(selectedGrupo && grupoUnifiedMode) && id === String(selectedObjective || ''))) continue;
                 if (String(o.status || 'ACTIVE').toUpperCase() === 'INACTIVE') continue;
                 out.push({ id, clientId: c.id, clientName: String(c.name || c.businessName || 'Cliente'), name: String(o.name || id) });
+            }
+        }
+        if (selectedGrupo && grupoUnifiedMode) {
+            const miembros = selectedGrupo.miembros;
+            if (miembros && miembros.length) {
+                for (const m of miembros) {
+                    if (!m.objectiveId || out.some(x => x.id === m.objectiveId)) continue;
+                    out.push({ id: m.objectiveId, clientId: m.clientId, clientName: m.clientName, name: m.objectiveName });
+                }
+            } else {
+                for (let i = 0; i < selectedGrupo.objectiveIds.length; i++) {
+                    const id = selectedGrupo.objectiveIds[i];
+                    if (!id || out.some(x => x.id === id)) continue;
+                    out.push({ id, clientId: selectedGrupo.clientId || '', clientName: selectedGrupo.clientName || '', name: String(selectedGrupo.objectiveNames[i] || id) });
+                }
             }
         }
         return out.sort((a, b) => `${a.clientName} ${a.name}`.localeCompare(`${b.clientName} ${b.name}`, 'es'));
