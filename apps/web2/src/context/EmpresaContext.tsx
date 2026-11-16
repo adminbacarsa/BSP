@@ -43,9 +43,9 @@ interface EmpresaContextType {
   empresaId: string;
   /** Datos de la empresa activa */
   empresa: Empresa | null;
-  /** Lista de todas las empresas (solo disponible para superadmin) */
+  /** Lista de empresas cargadas para el selector (superadmin / allEmpresas / multi-empresa) */
   empresas: Empresa[];
-  /** Permite al superadmin cambiar de empresa sin cerrar sesión */
+  /** Cambia de empresa sin cerrar sesión (solo si el usuario puede cambiar) */
   switchEmpresa: (id: string) => void;
   loadingEmpresa: boolean;
 }
@@ -61,8 +61,12 @@ const EmpresaContext = createContext<EmpresaContextType>({
 export const useEmpresa = () => useContext(EmpresaContext);
 
 export const EmpresaProvider = ({ children }: { children: React.ReactNode }) => {
-  const { empresaId: authEmpresaId, isSuperAdmin, allEmpresas } = useAuth();
-  const canSwitchEmpresa = isSuperAdmin || allEmpresas;
+  const { empresaId: authEmpresaId, isSuperAdmin, allEmpresas, empresaIds } = useAuth();
+  // SuperAdmin / allEmpresas / subconjunto explícito (empresaIds.length > 1).
+  // Antes solo SuperAdmin||allEmpresas: el usuario multi-empresa veía Bacar y el
+  // selector no listaba el resto (empresas=[] y switchEmpresa era no-op).
+  const canSwitchEmpresa = isSuperAdmin || allEmpresas || empresaIds.length > 1;
+  const canPickAnyEmpresa = isSuperAdmin || allEmpresas;
   const [empresaId, setEmpresaId] = useState<string>(() => {
     // Leer localStorage en el initializer evita el render inicial con la empresa
     // del auth ('bacarsa') cuando el superadmin tiene otra empresa guardada.
@@ -76,27 +80,42 @@ export const EmpresaProvider = ({ children }: { children: React.ReactNode }) => 
   const [empresas, setEmpresas] = useState<Empresa[]>([]);
   const [loadingEmpresa, setLoadingEmpresa] = useState(true);
 
-  // Cuando el auth carga el empresaId del usuario, sincronizamos (superadmin conserva selección en sesión)
+  const isAllowedEmpresa = (id: string): boolean => {
+    if (!id) return false;
+    if (canPickAnyEmpresa) return true;
+    if (empresaIds.length > 1) return empresaIds.includes(id);
+    return id === (authEmpresaId || 'bacarsa');
+  };
+
+  // Cuando el auth carga el empresaId del usuario, sincronizamos (quien puede cambiar conserva selección en sesión)
   useEffect(() => {
     if (authEmpresaId === undefined) return;
     if (canSwitchEmpresa) {
       const saved =
         typeof localStorage !== 'undefined' ? localStorage.getItem(SUPERADMIN_EMPRESA_STORAGE_KEY) : null;
-      setEmpresaId(saved || authEmpresaId || '');
+      if (saved && isAllowedEmpresa(saved)) {
+        setEmpresaId(saved);
+      } else {
+        setEmpresaId(authEmpresaId || (empresaIds[0] || ''));
+      }
     } else {
       setEmpresaId(authEmpresaId || 'bacarsa');
     }
-  }, [authEmpresaId, canSwitchEmpresa]);
+  }, [authEmpresaId, canSwitchEmpresa, canPickAnyEmpresa, empresaIds.join('|')]);
 
-  // Superadmin sin empresa seleccionada → auto-seleccionar la primera de la lista y persistir
+  // Sin empresa seleccionada → auto-seleccionar la primera permitida y persistir
   useEffect(() => {
     if (!canSwitchEmpresa || empresaId || empresas.length === 0) return;
     const saved =
       typeof localStorage !== 'undefined' ? localStorage.getItem(SUPERADMIN_EMPRESA_STORAGE_KEY) : null;
-    const pick = saved && empresas.some(e => e.id === saved) ? saved : empresas[0].id;
+    const allowed = canPickAnyEmpresa
+      ? empresas
+      : empresas.filter((e) => empresaIds.includes(e.id));
+    if (allowed.length === 0) return;
+    const pick = saved && allowed.some((e) => e.id === saved) ? saved : allowed[0].id;
     setEmpresaId(pick);
     try { localStorage.setItem(SUPERADMIN_EMPRESA_STORAGE_KEY, pick); } catch { /* ignore */ }
-  }, [canSwitchEmpresa, empresaId, empresas]);
+  }, [canSwitchEmpresa, canPickAnyEmpresa, empresaId, empresas, empresaIds.join('|')]);
 
   // Suscripción al documento de la empresa activa.
   // Usamos onSnapshot regular (no onSnapshotFresh) para que loadingEmpresa resuelva
@@ -145,9 +164,12 @@ export const EmpresaProvider = ({ children }: { children: React.ReactNode }) => 
     return () => unsub();
   }, [empresaId]);
 
-  // Superadmin: carga todas las empresas para el selector
+  // Carga el catálogo de empresas para el selector (superadmin / allEmpresas / multi-empresa)
   useEffect(() => {
-    if (!canSwitchEmpresa) return;
+    if (!canSwitchEmpresa) {
+      setEmpresas([]);
+      return;
+    }
     const unsub = onSnapshotFresh(
       collection(db, 'empresas'),
       snap => setEmpresas(snap.docs.map(d => ({ id: d.id, ...(d.data() as Omit<Empresa, 'id'>) }))),
@@ -158,6 +180,7 @@ export const EmpresaProvider = ({ children }: { children: React.ReactNode }) => 
 
   const switchEmpresa = (id: string) => {
     if (!canSwitchEmpresa) return;
+    if (!isAllowedEmpresa(id)) return;
     setEmpresaId(id);
     try {
       localStorage.setItem(SUPERADMIN_EMPRESA_STORAGE_KEY, id);
