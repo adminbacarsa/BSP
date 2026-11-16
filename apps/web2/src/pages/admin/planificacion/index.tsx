@@ -1381,8 +1381,20 @@ const isPosExcludedOnDate = (pos: any, dateStr: string): boolean =>
 
 interface Coords { r: number; c: number; }
 
+/** Segundo bloque (_B2) copiado junto al turno primario (sobre turno). */
+type FuenteRapidaB2 = {
+    code: string;
+    startTime?: string;
+    endTime?: string;
+    hours?: number;
+    name?: string;
+    positionName?: string;
+    objectiveId?: string;
+    clientId?: string;
+    comments?: string;
+};
 /** Lo que se copia de una celda en modo rápido: código, puesto y horario. */
-type FuenteRapida = { code: string; startTime?: string; endTime?: string; hours?: number; name?: string; positionName?: string; copiarPuesto?: boolean; deploymentBand?: string; /** Escribe ese puesto aunque el servicio todavía no lo muestre (RFZF recién creado). */ forzarPuesto?: boolean; /** Vista agrupada: objetivo del puesto elegido. */ objectiveId?: string };
+type FuenteRapida = { code: string; startTime?: string; endTime?: string; hours?: number; name?: string; positionName?: string; copiarPuesto?: boolean; deploymentBand?: string; /** Escribe ese puesto aunque el servicio todavía no lo muestre (RFZF recién creado). */ forzarPuesto?: boolean; /** Vista agrupada: objetivo del puesto elegido. */ objectiveId?: string; /** Sobre turno independiente del mismo día. */ segundoBloque?: FuenteRapidaB2 };
 
 const hhmmRapido = (v: any): string | null => {
     if (!v) return null;
@@ -5126,14 +5138,9 @@ function PlanificacionDesktop() {
                 }
                 const codeCounts: Record<string, number> = {};
                 const assigned: { code: string; hours: number }[] = [];
-                displayedEmployees.forEach((e: any) => {
-                    const key = `${e.id}_${dateStr}`;
-                    const absence = absencesMap[key];
-                    if (isEmployeeOnLeave({ shiftCode: pendingChanges[key]?.code || shiftsMap[key]?.code, absence })) return;
-                    const pending = pendingChanges[key];
-                    const shift = pending ? (pending.isDeleted ? null : pending) : shiftsMap[key];
+                const sumarCupoMono = (e: any, shift: any, shiftKey: string) => {
                     if (!shift) return;
-                    const effectiveObjId = resolveEffectiveShiftObjectiveId(e, shift, key);
+                    const effectiveObjId = resolveEffectiveShiftObjectiveId(e, shift, shiftKey);
                     if (String(effectiveObjId || '') !== String(scopeObj)) return;
                     const sc = String(shift.code || '').toUpperCase();
                     if (OBJECTIVE_NON_BILLABLE_CODES.has(sc)) return;
@@ -5141,6 +5148,20 @@ function PlanificacionDesktop() {
                     if (shiftPos !== evalPosName) return;
                     codeCounts[sc] = (codeCounts[sc] || 0) + 1;
                     assigned.push({ code: sc, hours: resolveBandHours(sc, shift, posCfg.shifts || []) });
+                };
+                displayedEmployees.forEach((e: any) => {
+                    const key = `${e.id}_${dateStr}`;
+                    const absence = absencesMap[key];
+                    if (isEmployeeOnLeave({ shiftCode: pendingChanges[key]?.code || shiftsMap[key]?.code, absence })) return;
+                    const pending = pendingChanges[key];
+                    const shift = pending ? (pending.isDeleted ? null : pending) : shiftsMap[key];
+                    sumarCupoMono(e, shift, key);
+                    const keyB2 = `${key}_B2`;
+                    const pendingB2 = pendingChanges[keyB2];
+                    const shiftB2 = pendingB2
+                        ? (pendingB2.isDeleted ? null : pendingB2)
+                        : (shiftsMap[keyB2] || (cellTurnosMap[key] || []).find((d: any) => d && d.isDeleted !== true && d.isSecondBlock === true) || null);
+                    sumarCupoMono(e, shiftB2, keyB2);
                 });
 
                 const units = countPositionClosedUnitsFromShifts(posCfg, dayLetter, codeCounts, cycles, true, dateStr);
@@ -5193,7 +5214,7 @@ function PlanificacionDesktop() {
     }, [
         selection.start, selection.end, selectedObjective, bulkPerEmpMode, bulkBarScopeObjectiveId,
         bulkMonoPositionInfo, bulkEffectiveStructure, positionStructure, bulkMonoShifts, daysInMonth,
-        displayedEmployees, filasGrilla, pendingChanges, shiftsMap, absencesMap, autoCycles, resolveEffectiveShiftObjectiveId,
+        displayedEmployees, filasGrilla, pendingChanges, shiftsMap, cellTurnosMap, absencesMap, autoCycles, resolveEffectiveShiftObjectiveId,
         activeSlaPositionAssignments,
     ]);
 
@@ -5443,19 +5464,28 @@ function PlanificacionDesktop() {
             ? cellPlanningObjectiveId
             : selectedObjective;
         const _empsForDisabled = displayedEmployees;
-        _empsForDisabled.forEach((emp: any) => {
-            const key = `${emp.id}_${dateStr}`;
-            const shift = pendingChanges[key] ? (pendingChanges[key].isDeleted ? null : pendingChanges[key]) : shiftsMap[key];
+        const sumarAssignedDisabled = (emp: any, shift: any, shiftKey: string) => {
             if (!shift) return;
             const shiftPos = String(shift.positionName || '').trim();
             if (!shiftPos || shiftPos !== posName) return;
             if (!isWorking(shift.code)) return;
             // Cupo por objetivo: un M en Ville no cierra el M de María (ni ningún otro del grupo).
-            const effectiveObjId = resolveEffectiveShiftObjectiveId(emp, shift, key);
+            const effectiveObjId = resolveEffectiveShiftObjectiveId(emp, shift, shiftKey);
             if (String(effectiveObjId || '') !== String(covObjIdForDisable)) return;
             const code = String(shift.code || shift.type || '').toUpperCase();
             const hours = resolveBandHours(code, shift, posShiftsForBand);
             assigned.push({ code, hours });
+        };
+        _empsForDisabled.forEach((emp: any) => {
+            const key = `${emp.id}_${dateStr}`;
+            const shift = pendingChanges[key] ? (pendingChanges[key].isDeleted ? null : pendingChanges[key]) : shiftsMap[key];
+            sumarAssignedDisabled(emp, shift, key);
+            const keyB2 = `${key}_B2`;
+            const pendingB2 = pendingChanges[keyB2];
+            const shiftB2 = pendingB2
+                ? (pendingB2.isDeleted ? null : pendingB2)
+                : (shiftsMap[keyB2] || (cellTurnosMap[key] || []).find((d: any) => d && d.isDeleted !== true && d.isSecondBlock === true) || null);
+            sumarAssignedDisabled(emp, shiftB2, keyB2);
         });
 
         const is24hPos = is24hCoverageType(posConfig);
@@ -5507,7 +5537,7 @@ function PlanificacionDesktop() {
             }
         });
         return disabled;
-    }, [selectedCell?.dateStr, selectedCell?.empId, selectedObjective, activePosition, effectivePosStructure, positionStructure, displayedEmployees, pendingChanges, shiftsMap, uniqueSLAShifts, autoCycles, selectedGrupo, grupoUnifiedMode, slaIdToObjId, cellPlanningObjectiveId, resolveEffectiveShiftObjectiveId, activeSlaPositionAssignments, activeSlaServiceRules]);
+    }, [selectedCell?.dateStr, selectedCell?.empId, selectedObjective, activePosition, effectivePosStructure, positionStructure, displayedEmployees, pendingChanges, shiftsMap, cellTurnosMap, uniqueSLAShifts, autoCycles, selectedGrupo, grupoUnifiedMode, slaIdToObjId, cellPlanningObjectiveId, resolveEffectiveShiftObjectiveId, activeSlaPositionAssignments, activeSlaServiceRules]);
 
     // 🛑 RESTAURADO: swapCandidates
     const swapCandidates = useMemo(() => { 
@@ -5770,13 +5800,8 @@ function PlanificacionDesktop() {
             const hm = hhmmRapido(v);
             return hm || (typeof v === 'string' && /^\d{1,2}:\d{2}/.test(v) ? v.slice(0, 5) : undefined);
         };
-        employeesList.forEach((emp: any) => {
-            const key = `${emp.id}_${dateStr}`;
-            const absence = absencesMap[key];
-            if (isEmployeeOnLeave({ shiftCode: changes[key]?.code || existing[key]?.code, absence })) return;
-            const shift = changes[key] ? (changes[key].isDeleted ? null : changes[key]) : existing[key];
+        const acreditaTurnoCobertura = (emp: any, shift: any, pending: any) => {
             if (!shift) return;
-            const pending = changes[key];
             const explicitObj = pending?.objectiveId ?? shift.objectiveId;
             const effectiveObjId = explicitObj
                 ? String(explicitObj)
@@ -5806,6 +5831,19 @@ function PlanificacionDesktop() {
                     endTime: relojDe(shift.segmentToTime),
                 });
             }
+        };
+        employeesList.forEach((emp: any) => {
+            const key = `${emp.id}_${dateStr}`;
+            const absence = absencesMap[key];
+            if (isEmployeeOnLeave({ shiftCode: changes[key]?.code || existing[key]?.code, absence })) return;
+            const shift = changes[key] ? (changes[key].isDeleted ? null : changes[key]) : existing[key];
+            acreditaTurnoCobertura(emp, shift, changes[key]);
+            // Segundo bloque (_B2): cuenta para cobertura del objetivo/puesto del B2 (no del primario).
+            const keyB2 = `${key}_B2`;
+            const shiftB2 = changes[keyB2]
+                ? (changes[keyB2].isDeleted ? null : changes[keyB2])
+                : (existing[keyB2] || (cellTurnosMap[key] || []).find((d: any) => d && d.isDeleted !== true && d.isSecondBlock === true) || null);
+            acreditaTurnoCobertura(emp, shiftB2, changes[keyB2]);
         });
 
         const precomputado = (!objectiveId || String(objectiveId) === String(selectedObjective))
@@ -6223,15 +6261,9 @@ function PlanificacionDesktop() {
             return m ? `${m[1].padStart(2, '0')}:${m[2]}` : '';
         };
 
-        for (const emp of dotacionBaseEmployees) {
-            const key = `${emp.id}_${dateStr}`;
-            const absence = absencesMap[key];
-            if (isEmployeeOnLeave({ shiftCode: pendingChanges[key]?.code || shiftsMap[key]?.code, absence })) continue;
-            const shift = pendingChanges[key]
-                ? (pendingChanges[key].isDeleted ? null : pendingChanges[key])
-                : shiftsMap[key];
-            if (!shift) continue;
-            const explicit = pendingChanges[key]?.objectiveId ?? shift.objectiveId;
+        const sumarGrupoEmpShift = (emp: any, shift: any, shiftKey: string, pending: any) => {
+            if (!shift) return;
+            const explicit = pending?.objectiveId ?? shift.objectiveId;
             const obj = explicit ? String(slaIdToObjId[explicit] || explicit) : '';
             const cubreId = shift.coversObjectiveId ? String(slaIdToObjId[shift.coversObjectiveId] || shift.coversObjectiveId) : '';
             const prefId = emp.preferredObjectiveId ? String(slaIdToObjId[emp.preferredObjectiveId] || emp.preferredObjectiveId) : '';
@@ -6263,13 +6295,28 @@ function PlanificacionDesktop() {
                     });
                 }
             }
-            const effectiveObjId = resolveEffectiveShiftObjectiveId(emp, shift, key);
-            if (String(effectiveObjId || '') !== String(objId)) continue;
+            const effectiveObjId = resolveEffectiveShiftObjectiveId(emp, shift, shiftKey);
+            if (String(effectiveObjId || '') !== String(objId)) return;
             const code = String(shift.code || '').toUpperCase();
-            if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) continue;
+            if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) return;
             const shiftPos = String(shift.positionName || '').trim() || 'sin puesto';
             if (!codeCountsByPos[shiftPos]) codeCountsByPos[shiftPos] = {};
             codeCountsByPos[shiftPos][code] = (codeCountsByPos[shiftPos][code] || 0) + 1;
+        };
+        for (const emp of dotacionBaseEmployees) {
+            const key = `${emp.id}_${dateStr}`;
+            const absence = absencesMap[key];
+            if (isEmployeeOnLeave({ shiftCode: pendingChanges[key]?.code || shiftsMap[key]?.code, absence })) continue;
+            const shift = pendingChanges[key]
+                ? (pendingChanges[key].isDeleted ? null : pendingChanges[key])
+                : shiftsMap[key];
+            sumarGrupoEmpShift(emp, shift, key, pendingChanges[key]);
+            const keyB2 = `${key}_B2`;
+            const pendingB2 = pendingChanges[keyB2];
+            const shiftB2 = pendingB2
+                ? (pendingB2.isDeleted ? null : pendingB2)
+                : (shiftsMap[keyB2] || (cellTurnosMap[key] || []).find((d: any) => d && d.isDeleted !== true && d.isSecondBlock === true) || null);
+            sumarGrupoEmpShift(emp, shiftB2, keyB2, pendingB2);
         }
 
         const splitCredits = collectSplitBandCreditsForDay(
@@ -6337,7 +6384,7 @@ function PlanificacionDesktop() {
             }
         }
         return { required, closed, required24, closed24, codeCountsCerrados };
-    }, [grupoSlaMap, dotacionBaseEmployees, pendingChanges, shiftsMap, absencesMap, resolveEffectiveShiftObjectiveId, resolveNativeObjectiveInGrupo, slaIdToObjId, feriadosCustomSet]);
+    }, [grupoSlaMap, dotacionBaseEmployees, pendingChanges, shiftsMap, cellTurnosMap, absencesMap, resolveEffectiveShiftObjectiveId, resolveNativeObjectiveInGrupo, slaIdToObjId, feriadosCustomSet]);
 
     /** Misma cuenta, guardada hasta que cambian los turnos: la fila COBERTURA del grupo la pedía día × objetivo en cada render. */
     const grupoCoberturaCache = useMemo(
@@ -11704,12 +11751,7 @@ function PlanificacionDesktop() {
                 const posShifts = ((empStructure || []).find((p: any) => p.positionName === posName)?.shifts || []) as any[];
                 const codeCounts: Record<string, number> = {};
                 const assigned: { code: string; hours: number }[] = [];
-                displayedEmployees.forEach((e: any) => {
-                    const key = `${e.id}_${dateStr}`;
-                    const absence = absencesMap[key];
-                    if (isEmployeeOnLeave({ shiftCode: changes[key]?.code || shiftsMap[key]?.code, absence })) return;
-                    const pending = changes[key];
-                    const shift = pending ? (pending.isDeleted ? null : pending) : shiftsMap[key];
+                const sumarCollect = (e: any, shift: any, pending: any) => {
                     if (!shift) return;
                     const explicitObj = pending?.objectiveId ?? shift.objectiveId;
                     const effectiveObjId = explicitObj
@@ -11722,6 +11764,20 @@ function PlanificacionDesktop() {
                     if (shiftPos !== posName) return;
                     codeCounts[code] = (codeCounts[code] || 0) + 1;
                     assigned.push({ code, hours: resolveBandHours(code, shift, posShifts) });
+                };
+                displayedEmployees.forEach((e: any) => {
+                    const key = `${e.id}_${dateStr}`;
+                    const absence = absencesMap[key];
+                    if (isEmployeeOnLeave({ shiftCode: changes[key]?.code || shiftsMap[key]?.code, absence })) return;
+                    const pending = changes[key];
+                    const shift = pending ? (pending.isDeleted ? null : pending) : shiftsMap[key];
+                    sumarCollect(e, shift, pending);
+                    const keyB2 = `${key}_B2`;
+                    const pendingB2 = changes[keyB2];
+                    const shiftB2 = pendingB2
+                        ? (pendingB2.isDeleted ? null : pendingB2)
+                        : (shiftsMap[keyB2] || (cellTurnosMap[key] || []).find((d: any) => d && d.isDeleted !== true && d.isSecondBlock === true) || null);
+                    sumarCollect(e, shiftB2, pendingB2);
                 });
                 return { codeCounts, assigned };
             };
@@ -12063,12 +12119,7 @@ function PlanificacionDesktop() {
             const collectCodeCounts = (dateStr: string, changes: Record<string, any>) => {
                 const codeCounts: Record<string, number> = {};
                 const assigned: { code: string; hours: number }[] = [];
-                displayedEmployees.forEach((e: any) => {
-                    const key = `${e.id}_${dateStr}`;
-                    const absence = absencesMap[key];
-                    if (isEmployeeOnLeave({ shiftCode: changes[key]?.code || shiftsMap[key]?.code, absence })) return;
-                    const pending = changes[key];
-                    const shift = pending ? (pending.isDeleted ? null : pending) : shiftsMap[key];
+                const sumarCollect = (e: any, shift: any, pending: any) => {
                     if (!shift) return;
                     const explicitObj = pending?.objectiveId ?? shift.objectiveId;
                     const effectiveObjId = explicitObj
@@ -12081,6 +12132,20 @@ function PlanificacionDesktop() {
                     if (shiftPos !== posName) return;
                     codeCounts[code] = (codeCounts[code] || 0) + 1;
                     assigned.push({ code, hours: resolveBandHours(code, shift, posShifts) });
+                };
+                displayedEmployees.forEach((e: any) => {
+                    const key = `${e.id}_${dateStr}`;
+                    const absence = absencesMap[key];
+                    if (isEmployeeOnLeave({ shiftCode: changes[key]?.code || shiftsMap[key]?.code, absence })) return;
+                    const pending = changes[key];
+                    const shift = pending ? (pending.isDeleted ? null : pending) : shiftsMap[key];
+                    sumarCollect(e, shift, pending);
+                    const keyB2 = `${key}_B2`;
+                    const pendingB2 = changes[keyB2];
+                    const shiftB2 = pendingB2
+                        ? (pendingB2.isDeleted ? null : pendingB2)
+                        : (shiftsMap[keyB2] || (cellTurnosMap[key] || []).find((d: any) => d && d.isDeleted !== true && d.isSecondBlock === true) || null);
+                    sumarCollect(e, shiftB2, pendingB2);
                 });
                 return { codeCounts, assigned };
             };
@@ -16459,10 +16524,32 @@ function PlanificacionDesktop() {
         return { emp, ds, key, ctx: ctxDeCelda(key) };
     };
     const fuenteRapida = (r: number, c: number): FuenteRapida | null => {
-        const { ctx } = ctxRapido(r, c);
+        const { ctx, key } = ctxRapido(r, c);
         const code = codigoCtxRapido(ctx);
         if (!code) return null;
         const base = ctx?.p && !ctx.p.isDeleted ? ctx.p : ctx?.s;
+        const keyB2 = key ? `${key}_B2` : '';
+        const pendB2 = keyB2 ? pendingChanges[keyB2] : undefined;
+        const docB2 = key
+            ? (cellTurnosMap[key] || []).find((d: any) => d && d.isDeleted !== true && d.isSecondBlock === true)
+            : undefined;
+        const rawB2 = pendB2
+            ? (pendB2.isDeleted ? null : pendB2)
+            : (docB2 || null);
+        const codeB2 = rawB2 ? String(rawB2.code || '').toUpperCase().trim() : '';
+        const segundoBloque: FuenteRapidaB2 | undefined = rawB2 && codeB2
+            ? {
+                code: codeB2,
+                startTime: hhmmRapido(rawB2.startTime) || undefined,
+                endTime: hhmmRapido(rawB2.endTime) || undefined,
+                hours: Number(rawB2.hours) || undefined,
+                name: rawB2.name || rawB2.type || codeB2,
+                positionName: rawB2.positionName ? String(rawB2.positionName) : undefined,
+                objectiveId: rawB2.objectiveId ? String(rawB2.objectiveId) : undefined,
+                clientId: rawB2.clientId ? String(rawB2.clientId) : undefined,
+                comments: rawB2.comments ? String(rawB2.comments) : undefined,
+            }
+            : undefined;
         return {
             code,
             startTime: hhmmRapido(base?.startTime) || undefined,
@@ -16471,6 +16558,7 @@ function PlanificacionDesktop() {
             name: base?.name || base?.type,
             positionName: base?.positionName,
             deploymentBand: base?.deploymentBand ? String(base.deploymentBand) : undefined,
+            ...(segundoBloque ? { segundoBloque } : {}),
         };
     };
     const puestoFilaRapido = (empId: string, c?: CtxCeldaGrilla): string => {
@@ -16936,6 +17024,12 @@ function PlanificacionDesktop() {
                 const guardado = !!(shiftsMap[key] && !shiftsMap[key].isDeleted);
                 if (next[key] && !guardado) { delete next[key]; hechos++; fechasToco.add(ds); if (esNovedadCelda(ctx, key)) fechasAtrib.push(ds); }
                 else if (guardado && !next[key]?.isDeleted) { next[key] = { isDeleted: true }; hechos++; fechasToco.add(ds); if (esNovedadCelda(ctx, key)) fechasAtrib.push(ds); }
+                // Cortar/borrar también limpia el segundo bloque del día.
+                const keyB2Del = `${key}_B2`;
+                const hayB2Pend = !!(next[keyB2Del] && !next[keyB2Del].isDeleted);
+                const hayB2Doc = !!(cellTurnosMap[key] || []).some((d: any) => d && d.isDeleted !== true && d.isSecondBlock === true);
+                if (hayB2Pend && !hayB2Doc) delete next[keyB2Del];
+                else if (hayB2Doc && !next[keyB2Del]?.isDeleted) next[keyB2Del] = { isDeleted: true, isSecondBlock: true };
                 continue;
             }
             const code = normalizarCodigo(it.code);
@@ -16952,6 +17046,33 @@ function PlanificacionDesktop() {
             const anterior = String((ctx?.p && !ctx.p.isDeleted ? ctx.p.code : ctx?.s?.code) || '').toUpperCase();
             if (res.novedad && (anterior === 'M' || anterior === 'T' || anterior === 'N')) licenciasNuevas.push(key);
             hechos++;
+            // Pegar también el sobre turno (B2) si la fuente interna lo traía.
+            const b2 = it.fuente?.segundoBloque;
+            const keyB2 = `${key}_B2`;
+            if (b2?.code) {
+                next[keyB2] = {
+                    isTemp: true,
+                    code: normalizarCodigo(b2.code),
+                    name: b2.name || b2.code,
+                    hours: Number(b2.hours) || 0,
+                    startTime: b2.startTime || '00:00',
+                    ...(b2.endTime ? { endTime: b2.endTime } : {}),
+                    positionName: b2.positionName || res.change.positionName,
+                    objectiveId: b2.objectiveId || res.change.objectiveId,
+                    ...(b2.clientId ? { clientId: b2.clientId } : {}),
+                    isSecondBlock: true,
+                    menuRapidoVia: 'OTRO_OBJETIVO',
+                    draft: !planPublicadoGrilla,
+                    comments: b2.comments || `Sobre turno pegado (${normalizarCodigo(b2.code)})`,
+                    countsForCoverage: true,
+                };
+            } else if (it.fuente) {
+                // Copia interna sin B2: limpia un B2 previo del destino. Pegado Excel (sin fuente) no toca el B2.
+                const hayB2Pend = !!(next[keyB2] && !next[keyB2].isDeleted);
+                const hayB2Doc = !!(cellTurnosMap[key] || []).some((d: any) => d && d.isDeleted !== true && d.isSecondBlock === true);
+                if (hayB2Pend && !hayB2Doc) delete next[keyB2];
+                else if (hayB2Doc && !next[keyB2]?.isDeleted) next[keyB2] = { isDeleted: true, isSecondBlock: true };
+            }
         }
         if (sinMarcaEvento.length) {
             guardarAfectadoEvento((prev) => {
@@ -24786,7 +24907,7 @@ function PlanificacionDesktop() {
                             Agregar horas a {turaEditor.empName.split(',')[0]} · {turaEditor.code} {turaEditor.inicio}–{turaEditor.fin} · {turaEditor.ds.slice(8, 10)}/{turaEditor.ds.slice(5, 7)}
                         </p>
                         <p className="text-[11px] text-slate-500">{(turaEditor.modo === 'cobertura' || turaEditor.modo === 'porHorario') ? 'Cobertura: acredita el hueco y no suma sobre lo vendido.' : 'Puesto que no es de 24 h: no pasa a D12/N12.'}</p>
-                        <div className="mt-1.5 flex gap-1" data-tura-modos>
+                        <div className="mt-1.5 flex flex-wrap gap-1" data-tura-modos>
                           <button
                             type="button"
                             data-tura-modo="cobertura"
@@ -24802,6 +24923,19 @@ function PlanificacionDesktop() {
                             className={`rounded-lg px-2 py-1 text-[11px] font-black ${turaEditor.modo === 'tura' ? 'bg-rose-700 text-white' : 'border border-slate-200 text-slate-700'}`}
                           >
                             TURA
+                          </button>
+                          <button
+                            type="button"
+                            data-tura-modo="turno-aparte"
+                            onClick={() => {
+                                const t = turaEditor;
+                                setTuraEditor(null);
+                                abrirAsignarOtro(t.empId, t.empName, t.ds);
+                            }}
+                            className="rounded-lg border border-indigo-200 px-2 py-1 text-[11px] font-black text-indigo-700 hover:bg-indigo-50"
+                            title="Segundo turno independiente (sobre turno / B2), no extiende la jornada"
+                          >
+                            Turno aparte
                           </button>
                         </div>
                         {(turaEditor.modo === 'cobertura' || turaEditor.modo === 'porHorario') && (
