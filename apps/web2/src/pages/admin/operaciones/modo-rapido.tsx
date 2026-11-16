@@ -123,18 +123,26 @@ function useTurnosHoy({
 }: {
   empresaId: string | null;
   scopeEmpresa: boolean;
-}): { turnos: Record<string, TurnoHoy>; loading: boolean; phones: string[] } {
+}): {
+  turnos: Record<string, TurnoHoy>;
+  loading: boolean;
+  phones: string[];
+  francos: TurnoHoy[];
+} {
   const [turnos, setTurnos] = useState<Record<string, TurnoHoy>>({});
   const [loading, setLoading] = useState(true);
   const [phones, setPhones] = useState<string[]>([]);
+  const [francos, setFrancos] = useState<TurnoHoy[]>([]);
   const objMapRef = useRef<Map<string, { name: string; clientName: string; lat?: number; lng?: number }>>(new Map());
   const phoneMapRef = useRef<Map<string, string>>(new Map());
   const lastTurnosSnapRef = useRef<QueryDocumentSnapshot[] | null>(null);
+  const francosHoyRef = useRef<TurnoHoy[]>([]);
 
   useEffect(() => {
     if (!empresaId) {
       setTurnos({});
       setPhones([]);
+      setFrancos([]);
       setLoading(false);
       return;
     }
@@ -171,6 +179,7 @@ function useTurnosHoy({
     };
 
     const applyTurnos = (docs: QueryDocumentSnapshot[]) => {
+      francosHoyRef.current = [];
       const now = Date.now();
       const byName = new Map<string, { turno: TurnoHoy; startMs: number }>();
 
@@ -193,6 +202,30 @@ function useTurnosHoy({
         if (employeeId === 'VACANTE' || !employeeName) continue;
 
         const code = String(shift.code || '').toUpperCase();
+        const pushFranco = () => {
+          francosHoyRef.current.push({
+            shift: `${code} (franco)`,
+            obj:
+              objMapRef.current.get(String(shift.objectiveId || ''))?.name ||
+              String(shift.objectiveName || '—'),
+            rowId: d.id,
+            expected: '—',
+            turnoStatus: String(shift.status || 'PENDING'),
+            name: employeeName,
+            phone:
+              phoneMapRef.current.get(employeeId) ||
+              String(shift.employeePhone || shift.phone || '')
+                .replace(/\D/g, '')
+                .replace(/^549/, '') ||
+              undefined,
+            employeeId,
+            objectiveId: String(shift.objectiveId || ''),
+            positionName: String(shift.positionName || ''),
+            code,
+            empresaId: String(shift.empresaId || ''),
+          });
+        };
+        // F/FF/FP salen acá (isRestFrancoShift) antes de SKIP_CODES; hay que capturarlos para FT.
         if (
           isRestFrancoShift({
             code,
@@ -203,9 +236,13 @@ function useTurnosHoy({
             type: shift.type,
           })
         ) {
+          if (code === 'F' || code === 'FF' || code === 'FP') pushFranco();
           continue;
         }
-        if (SKIP_CODES.has(code)) continue;
+        if (SKIP_CODES.has(code)) {
+          if (code === 'F' || code === 'FF' || code === 'FP') pushFranco();
+          continue;
+        }
 
         const startMs = toStartMs(shift.startTime);
         if (Number.isNaN(startMs)) continue;
@@ -232,6 +269,13 @@ function useTurnosHoy({
             undefined,
           objLat: objMapRef.current.get(String(shift.objectiveId || ''))?.lat,
           objLng: objMapRef.current.get(String(shift.objectiveId || ''))?.lng,
+          employeeId,
+          objectiveId: String(shift.objectiveId || ''),
+          positionName: String(shift.positionName || ''),
+          code,
+          startTimeRaw: startTs,
+          endTimeRaw: endTs,
+          empresaId: String(shift.empresaId || ''),
         };
 
         const prev = byName.get(employeeName);
@@ -251,6 +295,7 @@ function useTurnosHoy({
         next[name] = v.turno;
       });
       setTurnos(next);
+      setFrancos(francosHoyRef.current);
       setLoading(false);
     };
 
@@ -301,7 +346,7 @@ function useTurnosHoy({
     };
   }, [empresaId, scopeEmpresa]);
 
-  return { turnos, loading, phones };
+  return { turnos, loading, phones, francos };
 }
 
 type GuardEstado =
@@ -409,32 +454,46 @@ function estadoPill(estado: GuardEstado): { label: string; className: string } {
 
 function ModalCobertura({
   absent,
-  candidates,
+  retCandidates,
+  extCandidates,
+  intercambioCandidates,
+  francoCandidates,
   busy,
   onClose,
-  onAssign,
+  onAsignarRet,
+  onExtender,
+  onIntercambiar,
+  onConvocarFt,
 }: {
   absent: GuardRowModel;
-  candidates: GuardRowModel[];
+  retCandidates: GuardRowModel[];
+  extCandidates: GuardRowModel[];
+  intercambioCandidates: GuardRowModel[];
+  francoCandidates: GuardRowModel[];
   busy: boolean;
   onClose: () => void;
-  onAssign: (candidate: GuardRowModel) => void;
+  onAsignarRet: (c: GuardRowModel) => void;
+  onExtender: (c: GuardRowModel, code: 'D12' | 'N12') => void;
+  onIntercambiar: (c: GuardRowModel) => void;
+  onConvocarFt: (c: GuardRowModel) => void;
 }) {
+  const esPuesto24h = ['M', 'T', 'N'].includes(absent.band);
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden"
+        className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden max-h-[90vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="px-4 py-3 border-b border-slate-200 flex items-center gap-2">
+        <div className="px-4 py-3 border-b border-slate-200 flex items-center gap-2 flex-shrink-0">
           <span className="text-base">🚨</span>
           <div className="flex-1 min-w-0">
             <div className="text-sm font-black text-red-700">Cobertura urgente</div>
             <div className="text-[11px] text-slate-500 truncate">
-              {absent.employeeName} · {absent.turno.obj}
+              {absent.employeeName} · {absent.turno.obj} · {absent.turno.shift}
             </div>
           </div>
           <button
@@ -446,63 +505,155 @@ function ModalCobertura({
           </button>
         </div>
 
-        <div className="px-4 py-3">
-          <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-2">
-            Turno faltante
-          </div>
-          <div className="bg-red-50 rounded-xl p-3 mb-4">
-            <div className="text-sm font-semibold text-slate-800">{absent.employeeName}</div>
-            <div className="text-[11px] text-slate-500">
-              {absent.turno.shift} · {absent.turno.obj}
+        <div className="px-4 py-3 overflow-y-auto">
+          {/* 1. RET disponible */}
+          <div className="mb-4">
+            <div className="text-[11px] font-bold text-violet-700 uppercase tracking-wide mb-2">
+              🛡️ 1. RET disponible ({retCandidates.length})
             </div>
-            <div className="text-[11px] text-red-600 font-medium mt-1">
-              No llegó · esperado {absent.turno.expected}
-            </div>
-          </div>
-
-          <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-2">
-            Candidatos disponibles ({candidates.length})
-          </div>
-          {candidates.length === 0 ? (
-            <div className="text-[11px] text-slate-400 text-center py-4">
-              Sin candidatos disponibles en este momento
-            </div>
-          ) : (
-            <div className="space-y-1 max-h-48 overflow-y-auto">
-              {candidates.map((c) => (
-                <div
-                  key={c.turno.rowId}
-                  className="flex items-center gap-3 p-2.5 rounded-xl border border-slate-200 hover:border-violet-300 hover:bg-violet-50"
-                >
-                  <span
-                    className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                      c.band === 'RET' ? 'bg-violet-500' : 'bg-amber-400'
-                    }`}
-                  />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[12px] font-semibold text-slate-800 truncate">
+            {retCandidates.length === 0 ? (
+              <div className="text-[11px] text-slate-400 py-2">Sin retenes disponibles</div>
+            ) : (
+              <div className="space-y-1">
+                {retCandidates.map((c) => (
+                  <div
+                    key={c.turno.rowId}
+                    className="flex items-center gap-2 p-2 rounded-xl border border-violet-200 bg-violet-50"
+                  >
+                    <div className="flex-1 min-w-0 text-[12px] font-semibold text-slate-800 truncate">
                       {c.employeeName}
                     </div>
-                    <div className="text-[10px] text-slate-500">
-                      {c.band === 'RET' ? '🛡️ Retén' : c.turno.obj}
-                      {c.turno.phone ? ` · ${c.turno.phone}` : ''}
-                    </div>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => onAsignarRet(c)}
+                      className="px-2.5 py-1 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-[10px] font-bold disabled:opacity-50"
+                    >
+                      Asignar RET
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => onAssign(c)}
-                    className="px-2.5 py-1 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-[10px] font-bold disabled:opacity-50 flex-shrink-0"
-                  >
-                    Asignar
-                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* 2. Extender a 12h — solo si el puesto es 24hs */}
+          {esPuesto24h && (
+            <div className="mb-4">
+              <div className="text-[11px] font-bold text-amber-700 uppercase tracking-wide mb-2">
+                ⏱ 2. Extender a 12 h ({extCandidates.length})
+              </div>
+              {extCandidates.length === 0 ? (
+                <div className="text-[11px] text-slate-400 py-2">
+                  Sin guardias del mismo objetivo para extender
                 </div>
-              ))}
+              ) : (
+                <div className="space-y-1">
+                  {extCandidates.map((c) => (
+                    <div
+                      key={c.turno.rowId}
+                      className="flex items-center gap-2 p-2 rounded-xl border border-amber-200 bg-amber-50"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[12px] font-semibold text-slate-800 truncate">
+                          {c.employeeName}
+                        </div>
+                        <div className="text-[10px] text-slate-500">
+                          {c.band} · {c.turno.expected}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => onExtender(c, 'D12')}
+                        className="px-2 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-[10px] font-bold disabled:opacity-50"
+                      >
+                        → D12
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => onExtender(c, 'N12')}
+                        className="px-2 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold disabled:opacity-50"
+                      >
+                        → N12
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
+
+          {/* 3. Intercambio */}
+          <div className="mb-4">
+            <div className="text-[11px] font-bold text-blue-700 uppercase tracking-wide mb-2">
+              🔄 3. Intercambio con otro turno ({intercambioCandidates.length})
+            </div>
+            {intercambioCandidates.length === 0 ? (
+              <div className="text-[11px] text-slate-400 py-2">Sin candidatos para intercambiar</div>
+            ) : (
+              <div className="space-y-1 max-h-32 overflow-y-auto">
+                {intercambioCandidates.map((c) => (
+                  <div
+                    key={c.turno.rowId}
+                    className="flex items-center gap-2 p-2 rounded-xl border border-blue-200 bg-blue-50"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[12px] font-semibold text-slate-800 truncate">
+                        {c.employeeName}
+                      </div>
+                      <div className="text-[10px] text-slate-500 truncate">
+                        {c.turno.obj} · {c.turno.shift}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => onIntercambiar(c)}
+                      className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-bold disabled:opacity-50"
+                    >
+                      Intercambiar
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* 4. FT — último recurso */}
+          <div>
+            <div className="text-[11px] font-bold text-red-700 uppercase tracking-wide mb-2">
+              💰 4. Franco trabajado — último recurso ({francoCandidates.length})
+            </div>
+            {francoCandidates.length === 0 ? (
+              <div className="text-[11px] text-slate-400 py-2">Sin guardias de franco hoy</div>
+            ) : (
+              <div className="space-y-1 max-h-32 overflow-y-auto">
+                {francoCandidates.map((c) => (
+                  <div
+                    key={c.turno.rowId}
+                    className="flex items-center gap-2 p-2 rounded-xl border border-red-200 bg-red-50"
+                  >
+                    <div className="flex-1 min-w-0 text-[12px] font-semibold text-slate-800 truncate">
+                      {c.employeeName}
+                    </div>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => onConvocarFt(c)}
+                      className="px-2.5 py-1 rounded-lg bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold disabled:opacity-50"
+                    >
+                      Convocar FT
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
-        <div className="px-4 py-3 border-t border-slate-100 flex justify-end">
+        <div className="px-4 py-3 border-t border-slate-100 flex justify-end flex-shrink-0">
           <button
             type="button"
             onClick={onClose}
@@ -698,22 +849,22 @@ function GuardRow({
   }
 
   return (
-    <div className="grid grid-cols-[3px_minmax(0,1.6fr)_minmax(0,0.9fr)_64px_64px_72px_88px_minmax(96px,auto)] items-center gap-x-2 px-2 py-2 border-b border-slate-100 hover:bg-slate-50/80">
+    <div className="grid grid-cols-[3px_minmax(0,1.6fr)_minmax(0,0.9fr)_64px_64px_72px_88px_minmax(96px,auto)] items-center gap-x-2 px-2 py-2 border-b border-slate-100 odd:bg-white even:bg-slate-50/40 hover:bg-slate-50/80 [&>*:not(:first-child)]:border-r [&>*:not(:first-child)]:border-slate-100 [&>*:last-child]:border-r-0">
       <div className={`self-stretch rounded-full ${barClass(row.estado)}`} />
       <div className="min-w-0 pl-1">
         <div className="text-sm font-medium text-slate-800 truncate">{row.employeeName}</div>
         <div className="text-[10px] text-slate-500 truncate">{row.turno.obj}</div>
       </div>
       <div className="text-[11px] text-slate-600 font-mono truncate">{row.turno.shift}</div>
-      <div className="text-[11px] text-slate-500 font-mono text-center">{row.turno.expected}</div>
-      <div className="text-[11px] text-slate-700 font-mono text-center">{row.realDisplay}</div>
-      <div className={`text-[10px] font-semibold text-center ${diffClass}`}>{row.diffLabel}</div>
-      <div className="flex justify-center">
+      <div className="text-[11px] text-slate-500 font-mono text-left">{row.turno.expected}</div>
+      <div className="text-[11px] text-slate-700 font-mono text-left">{row.realDisplay}</div>
+      <div className={`text-[10px] font-semibold text-left ${diffClass}`}>{row.diffLabel}</div>
+      <div className="flex justify-start">
         <span className={`px-2 py-0.5 text-[9px] font-bold rounded-full whitespace-nowrap ${pill.className}`}>
           {pill.label}
         </span>
       </div>
-      <div className="flex items-center justify-end gap-1 pr-1">
+      <div className="flex items-center justify-start gap-1 pr-1">
         {primary}
         <button
           type="button"
@@ -1216,7 +1367,7 @@ export default function ModoRapidoPage() {
     empresaId: empresaId || null,
     scopeEmpresa,
   });
-  const { turnos, loading } = turnosData;
+  const { turnos, loading, francos } = turnosData;
   const wa = useWABridge(turnos, empresaId);
 
   const [bridgeUrl, setBridgeUrl] = useState(DEFAULT_BRIDGE_URL);
@@ -1485,17 +1636,46 @@ export default function ModoRapidoPage() {
     setGroupInitDone(true);
   }, [classifiedRows, groupInitDone]);
 
-  const coberturaCandidates = useMemo((): GuardRowModel[] => {
+  const retCandidates = useMemo((): GuardRowModel[] => {
+    if (!coberturaModal) return [];
+    return classifiedRows.filter(
+      (r) => r.band === 'RET' && r.turno.rowId !== coberturaModal.turno.rowId,
+    );
+  }, [coberturaModal, classifiedRows]);
+
+  const extCandidates = useMemo((): GuardRowModel[] => {
     if (!coberturaModal) return [];
     return classifiedRows.filter(
       (r) =>
         r.turno.rowId !== coberturaModal.turno.rowId &&
-        (r.band === 'RET' ||
-          r.estado === 'ESPERANDO' ||
-          r.estado === 'PRESENTE_PLAT' ||
-          r.estado === 'PRESENTE_WA'),
+        r.turno.objectiveId &&
+        r.turno.objectiveId === coberturaModal.turno.objectiveId &&
+        (r.band === 'M' || r.band === 'T' || r.band === 'N') &&
+        (r.estado === 'ESPERANDO' || r.estado === 'PRESENTE_PLAT' || r.estado === 'PRESENTE_WA'),
     );
   }, [coberturaModal, classifiedRows]);
+
+  const intercambioCandidates = useMemo((): GuardRowModel[] => {
+    if (!coberturaModal) return [];
+    return classifiedRows.filter(
+      (r) =>
+        r.turno.rowId !== coberturaModal.turno.rowId &&
+        r.band !== 'RET' &&
+        (r.estado === 'ESPERANDO' || r.estado === 'PRESENTE_PLAT' || r.estado === 'PRESENTE_WA'),
+    );
+  }, [coberturaModal, classifiedRows]);
+
+  const francoCandidates = useMemo((): GuardRowModel[] => {
+    return francos.map((turno) => ({
+      employeeName: turno.name || '—',
+      turno,
+      estado: 'ESPERANDO' as GuardEstado,
+      realDisplay: '—',
+      diffLabel: '—',
+      diffTone: 'neutral' as const,
+      band: 'FRANCO',
+    }));
+  }, [francos]);
 
   const handleMarcarPresente = async (row: GuardRowModel) => {
     if (busy) return;
@@ -1529,24 +1709,145 @@ export default function ModoRapidoPage() {
     }
   };
 
-  const handleAsignarCobertura = async (candidate: GuardRowModel) => {
-    if (!coberturaModal) return;
+  const handleAsignarRet = async (candidate: GuardRowModel) => {
+    if (!coberturaModal || busy) return;
+    setBusy(true);
     try {
+      await updateDoc(doc(db, 'turnos', coberturaModal.turno.rowId), {
+        employeeId: candidate.turno.employeeId,
+        employeeName: candidate.employeeName,
+        origin: 'RET_COBERTURA',
+        coberturaDesdeTurnoId: candidate.turno.rowId,
+      });
+      await updateDoc(doc(db, 'turnos', candidate.turno.rowId), {
+        coverageAssignedTo: coberturaModal.turno.rowId,
+      });
       await addDoc(collection(db, 'novedades'), {
-        type: 'COBERTURA_ASIGNADA',
+        type: 'COBERTURA_RET',
         turnoAusenteId: coberturaModal.turno.rowId,
         turnoAusenteEmpleado: coberturaModal.employeeName,
         turnoAusenteObj: coberturaModal.turno.obj,
-        candidatoId: candidate.turno.rowId,
-        candidatoEmpleado: candidate.employeeName,
+        retEmpleado: candidate.employeeName,
         empresaId,
         operatorId: user?.uid ?? 'cc-modo-rapido',
         createdAt: serverTimestamp(),
       });
-      showToast(`Cobertura registrada · ${candidate.employeeName}`, 'bg-violet-700');
+      showToast(`RET asignado · ${candidate.employeeName}`, 'bg-violet-700');
     } catch {
-      showToast('Error al registrar cobertura', 'bg-red-600');
+      showToast('Error al asignar RET', 'bg-red-600');
     } finally {
+      setBusy(false);
+      setCoberturaModal(null);
+    }
+  };
+
+  const handleExtender = async (candidate: GuardRowModel, code: 'D12' | 'N12') => {
+    if (!coberturaModal || busy) return;
+    setBusy(true);
+    try {
+      const startMs =
+        candidate.turno.startTimeRaw &&
+        typeof (candidate.turno.startTimeRaw as Timestamp).toMillis === 'function'
+          ? (candidate.turno.startTimeRaw as Timestamp).toMillis()
+          : Date.now();
+      const newEndTime = Timestamp.fromMillis(startMs + 12 * 3600000);
+      await updateDoc(doc(db, 'turnos', candidate.turno.rowId), {
+        code,
+        endTime: newEndTime,
+      });
+      await addDoc(collection(db, 'novedades'), {
+        type: 'EXTENSION_12H',
+        code,
+        turnoAusenteId: coberturaModal.turno.rowId,
+        turnoAusenteEmpleado: coberturaModal.employeeName,
+        turnoAusenteObj: coberturaModal.turno.obj,
+        extendidoEmpleado: candidate.employeeName,
+        empresaId,
+        operatorId: user?.uid ?? 'cc-modo-rapido',
+        createdAt: serverTimestamp(),
+      });
+      showToast(`${candidate.employeeName} extendido a ${code}`, 'bg-amber-700');
+    } catch {
+      showToast('Error al extender turno', 'bg-red-600');
+    } finally {
+      setBusy(false);
+      setCoberturaModal(null);
+    }
+  };
+
+  const handleIntercambiarCobertura = async (candidate: GuardRowModel) => {
+    if (!coberturaModal || busy) return;
+    setBusy(true);
+    try {
+      const absentEmployeeId = String(
+        coberturaModal.turno.employeeId ||
+          (turnos[coberturaModal.employeeName] as TurnoHoy | undefined)?.employeeId ||
+          '',
+      );
+      await updateDoc(doc(db, 'turnos', coberturaModal.turno.rowId), {
+        employeeId: candidate.turno.employeeId,
+        employeeName: candidate.employeeName,
+        origin: 'INTERCAMBIO',
+        intercambioConTurnoId: candidate.turno.rowId,
+      });
+      await updateDoc(doc(db, 'turnos', candidate.turno.rowId), {
+        employeeId: absentEmployeeId,
+        employeeName: coberturaModal.employeeName,
+        origin: 'INTERCAMBIO',
+        intercambioConTurnoId: coberturaModal.turno.rowId,
+      });
+      await addDoc(collection(db, 'novedades'), {
+        type: 'INTERCAMBIO_TURNO',
+        turnoAusenteId: coberturaModal.turno.rowId,
+        turnoAusenteEmpleado: coberturaModal.employeeName,
+        turnoAusenteObj: coberturaModal.turno.obj,
+        intercambioEmpleado: candidate.employeeName,
+        intercambioObj: candidate.turno.obj,
+        empresaId,
+        operatorId: user?.uid ?? 'cc-modo-rapido',
+        createdAt: serverTimestamp(),
+      });
+      showToast(
+        `Intercambio · ${candidate.employeeName} ↔ ${coberturaModal.employeeName}`,
+        'bg-blue-700',
+      );
+    } catch {
+      showToast('Error al intercambiar turnos', 'bg-red-600');
+    } finally {
+      setBusy(false);
+      setCoberturaModal(null);
+    }
+  };
+
+  const handleConvocarFt = async (candidate: GuardRowModel) => {
+    if (!coberturaModal || busy) return;
+    setBusy(true);
+    try {
+      await updateDoc(doc(db, 'turnos', candidate.turno.rowId), {
+        code: 'FT',
+        objectiveId: coberturaModal.turno.objectiveId,
+        objectiveName: coberturaModal.turno.obj,
+        startTime: coberturaModal.turno.startTimeRaw,
+        endTime: coberturaModal.turno.endTimeRaw,
+        status: 'PENDING',
+        origin: 'FT_COBERTURA',
+        coberturaDesdeTurnoId: coberturaModal.turno.rowId,
+      });
+      await addDoc(collection(db, 'novedades'), {
+        type: 'FRANCO_TRABAJADO',
+        turnoAusenteId: coberturaModal.turno.rowId,
+        turnoAusenteEmpleado: coberturaModal.employeeName,
+        turnoAusenteObj: coberturaModal.turno.obj,
+        ftEmpleado: candidate.employeeName,
+        empresaId,
+        operatorId: user?.uid ?? 'cc-modo-rapido',
+        createdAt: serverTimestamp(),
+      });
+      showToast(`FT convocado · ${candidate.employeeName}`, 'bg-red-700');
+    } catch {
+      showToast('Error al convocar FT', 'bg-red-600');
+    } finally {
+      setBusy(false);
       setCoberturaModal(null);
     }
   };
@@ -1795,15 +2096,15 @@ export default function ModoRapidoPage() {
               </div>
             ) : (
               <>
-                <div className="hidden md:grid grid-cols-[3px_minmax(0,1.6fr)_minmax(0,0.9fr)_64px_64px_72px_88px_minmax(96px,auto)] gap-x-2 px-2 py-1.5 bg-slate-50 border-b border-slate-200 sticky top-0 z-10 text-[9px] font-bold uppercase tracking-wide text-slate-400">
+                <div className="hidden md:grid grid-cols-[3px_minmax(0,1.6fr)_minmax(0,0.9fr)_64px_64px_72px_88px_minmax(96px,auto)] gap-x-2 px-2 py-1.5 bg-slate-50 border-b border-slate-200 sticky top-0 z-10 text-[9px] font-bold uppercase tracking-wide text-slate-400 [&>*:not(:first-child)]:border-r [&>*:not(:first-child)]:border-slate-200 [&>*:last-child]:border-r-0">
                   <span />
                   <span className="pl-1">Guardia</span>
                   <span>Turno</span>
-                  <span className="text-center">Esperado</span>
-                  <span className="text-center">Real</span>
-                  <span className="text-center">Dif.</span>
-                  <span className="text-center">Estado</span>
-                  <span className="text-right pr-1">Acción</span>
+                  <span className="text-left">Esperado</span>
+                  <span className="text-left">Real</span>
+                  <span className="text-left">Dif.</span>
+                  <span className="text-left">Estado</span>
+                  <span className="text-left pr-1">Acción</span>
                 </div>
                 <RetenePanel
                   rows={reteneRows}
@@ -1854,10 +2155,16 @@ export default function ModoRapidoPage() {
         {coberturaModal && (
           <ModalCobertura
             absent={coberturaModal}
-            candidates={coberturaCandidates}
+            retCandidates={retCandidates}
+            extCandidates={extCandidates}
+            intercambioCandidates={intercambioCandidates}
+            francoCandidates={francoCandidates}
             busy={busy}
             onClose={() => setCoberturaModal(null)}
-            onAssign={(c) => void handleAsignarCobertura(c)}
+            onAsignarRet={(c) => void handleAsignarRet(c)}
+            onExtender={(c, code) => void handleExtender(c, code)}
+            onIntercambiar={(c) => void handleIntercambiarCobertura(c)}
+            onConvocarFt={(c) => void handleConvocarFt(c)}
           />
         )}
 

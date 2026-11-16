@@ -49,6 +49,14 @@ export interface TurnoHoy {
   /** Coordenadas del objetivo para calcular distancia al check-in. */
   objLat?: number;
   objLng?: number;
+  /** Datos crudos del turno, necesarios para escrituras de cobertura (RET/D12-N12/Intercambio/FT). */
+  employeeId?: string;
+  objectiveId?: string;
+  positionName?: string;
+  code?: string;
+  startTimeRaw?: unknown;
+  endTimeRaw?: unknown;
+  empresaId?: string;
 }
 
 export type WABridgeStatus = 'idle' | 'connecting' | 'connected' | 'error';
