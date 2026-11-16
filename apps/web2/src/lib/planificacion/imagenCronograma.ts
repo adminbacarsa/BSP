@@ -189,10 +189,11 @@ export function dibujarCronograma(datos: DatosImagen, escala = 2): HTMLCanvasEle
       if (segundo) {
         const tam = c.code.length > 4 ? 8 : c.code.length > 2 ? 10 : 12;
         ctx.font = fuente(800, tam);
-        ctx.fillText(c.code, bx + bw / 2, by + bh / 2 - 1);
+        ctx.fillText(c.code, bx + bw / 2, by + bh * 0.38);
         ctx.fillStyle = '#047857';
-        ctx.font = fuente(800, 7);
-        ctx.fillText(`+${segundo}`, bx + bw / 2, by + bh - 3);
+        const tamSeg = segundo.length > 3 ? 8 : 9;
+        ctx.font = fuente(800, tamSeg);
+        ctx.fillText(`+${segundo}`, bx + bw / 2, by + bh * 0.8);
       } else {
         const tam = c.code.length > 4 ? 9 : c.code.length > 2 ? 11 : 13;
         ctx.font = fuente(800, tam);
