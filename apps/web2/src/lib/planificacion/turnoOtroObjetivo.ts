@@ -193,6 +193,11 @@ export function decisionGuardadoTurnoAjeno(input: {
   const ids = (lista: TurnoGuardadoMin[]) => lista.map((d) => d.id).filter((id): id is string => !!id);
 
   if (!ajenosPrimarios.length) {
+    if (input.cambio?.isSecondBlock === true && input.cambio?.isDeleted !== true) {
+      // Segundo bloque sobre un turno primario propio: coexisten. No borrar el primario;
+      // si ya había otro B2 propio (edición del segundo bloque), reemplazarlo a él.
+      return { escribir: true, borrarIds: ids(propios.filter((d) => d.isSecondBlock)), rechazado: false };
+    }
     return { escribir: true, borrarIds: ids(propios), rechazado: false };
   }
 

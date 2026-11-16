@@ -98,6 +98,38 @@ describe('turno de otro objetivo', () => {
     assert.equal(decision.escribir, true);
     assert.deepEqual(decision.borrarIds, ['doc-ninos']);
   });
+
+  it('B2 en grupo unificado no borra el primario propio (mismo grupo = no ajeno)', () => {
+    // Catedral + Embozadora en el mismo grupo: el CA existente es "propio", no ajeno.
+    const permitidos = idsObjetivosDelCrono(NINOS, [NINOS, CASA], true);
+    const primario = { id: 'doc-ca', objectiveId: NINOS, code: 'CA', isSecondBlock: false };
+    const b2prev = { id: 'doc-b2-old', objectiveId: CASA, code: 'EM2', isSecondBlock: true };
+
+    const altaB2 = decisionGuardadoTurnoAjeno({
+      cambio: { isSecondBlock: true, code: 'EM2' },
+      docs: [primario],
+      permitidos,
+    });
+    assert.equal(altaB2.escribir, true);
+    assert.equal(altaB2.rechazado, false);
+    assert.deepEqual(altaB2.borrarIds, []);
+
+    const editaB2 = decisionGuardadoTurnoAjeno({
+      cambio: { isSecondBlock: true, code: 'EM2' },
+      docs: [primario, b2prev],
+      permitidos,
+    });
+    assert.equal(editaB2.escribir, true);
+    assert.deepEqual(editaB2.borrarIds, ['doc-b2-old']);
+
+    const reemplazoNormal = decisionGuardadoTurnoAjeno({
+      cambio: { isSecondBlock: false, code: 'T' },
+      docs: [primario],
+      permitidos,
+    });
+    assert.equal(reemplazoNormal.escribir, true);
+    assert.deepEqual(reemplazoNormal.borrarIds, ['doc-ca']);
+  });
 });
 
 it('F y RET de otro objetivo: F ↔ RET queda en su objetivo; al RET se le asigna un turno de acá; sobre el F no', () => {
