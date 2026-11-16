@@ -18580,7 +18580,7 @@ function PlanificacionDesktop() {
         setFranjasOtro([]);
         setOtroObjetivo({ empId, nombre, dateStr });
     };
-    const leerFranjasDe = async (objectiveId: string): Promise<FranjaOpcion[]> => {
+    const leerFranjasDe = async (objectiveId: string, dateStr: string): Promise<FranjaOpcion[]> => {
         const snap = await getDocs(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa));
         const allDocs = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
         const cliente = clients.find((c) => (c.objetivos || []).some((o: any) => String(o.id) === objectiveId));
@@ -18590,11 +18590,35 @@ function PlanificacionDesktop() {
         const pick = pickSlaForPlanningMonth(matching, year, month);
         const srv = pick.vigente ?? pickClosedSlaForPlanningMonth(matching, year, month) ?? pick.fallback;
         const { structure } = buildPlanningPositionStructure(srv, { monthHasSla: !!srv, hasExactMatch: pick.hasExactMatch });
+
+        // Cuántos ya están asignados a ese objetivo ese día, por código (para descartar franjas ya cubiertas).
+        const asignadosPorCodigo: Record<string, number> = {};
+        try {
+            const snapDia = await getDocs(query(
+                collection(db, 'turnos'),
+                where('objectiveId', '==', objectiveId),
+                where('scheduleDate', '==', dateStr),
+                where('empresaId', '==', empresaId),
+            ));
+            snapDia.forEach((d) => {
+                const data = d.data() as any;
+                if (data.isDeleted) return;
+                const code = String(data.code || '').toUpperCase();
+                if (!code || PLANNING_NON_BILLABLE_CODES.has(code) || esLicenciaCodigo(code)) return;
+                asignadosPorCodigo[code] = (asignadosPorCodigo[code] || 0) + 1;
+            });
+        } catch {
+            // Si falla la consulta, no filtramos nada (mejor mostrar de más que bloquear el modal).
+        }
+
         const franjas: FranjaOpcion[] = [];
         for (const pos of structure || []) {
             for (const sh of pos.shifts || []) {
                 const code = String(sh.code || '').toUpperCase();
                 if (!code || code === 'F' || code === 'RET') continue;
+                const requerido = Number((sh as any).quantity ?? (pos as any).qty ?? 1) || 1;
+                const yaAsignados = asignadosPorCodigo[code] || 0;
+                if (yaAsignados >= requerido) continue;
                 franjas.push({
                     positionName: String(pos.positionName || 'General'),
                     code,
@@ -18606,11 +18630,11 @@ function PlanificacionDesktop() {
         }
         return franjas;
     };
-    const cargarFranjasOtro = async (objectiveId: string) => {
+    const cargarFranjasOtro = async (objectiveId: string, dateStr: string) => {
         setCargandoFranjasOtro(true);
         setFranjasOtro([]);
         try {
-            setFranjasOtro(await leerFranjasDe(objectiveId));
+            setFranjasOtro(await leerFranjasDe(objectiveId, dateStr));
         } catch {
             toast.error('No se pudo leer el servicio de ese objetivo.');
         } finally {
@@ -20389,7 +20413,7 @@ function PlanificacionDesktop() {
                     objetivos={objetivosParaOtro()}
                     franjas={franjasOtro}
                     cargando={cargandoFranjasOtro}
-                    onElegirObjetivo={(id) => { void cargarFranjasOtro(id); }}
+                    onElegirObjetivo={(id) => { void cargarFranjasOtro(id, otroObjetivo.dateStr); }}
                     onCerrar={() => setOtroObjetivo(null)}
                     onConfirmar={(sel) => { void confirmarOtroObjetivo(sel); }}
                 />
@@ -24433,7 +24457,7 @@ function PlanificacionDesktop() {
                         })}
                         onAplicar={aplicarPegadoExcel}
                         objetivosAjenos={objetivosBuscadorPegado(objetivoActualPegado(), objetivosParaOtro())}
-                        franjasAjeno={leerFranjasDe}
+                        franjasAjeno={(id) => leerFranjasDe(id, '')}
                         onAplicarAjenos={(items) => { void aplicarAjenosPegado(items); }}
                         puedeAlta={isSuperAdmin || (rolePermissions['RRHH'] || []).includes('create')}
                         plataforma={(() => {
