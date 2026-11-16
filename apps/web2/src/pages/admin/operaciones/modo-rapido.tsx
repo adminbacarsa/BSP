@@ -369,6 +369,8 @@ type GuardRowModel = {
   diffLabel: string;
   diffTone: 'late' | 'early' | 'countdown' | 'neutral';
   band: string;
+  /** Nombre de quien ya cubrió este turno (mismo objetivo+puesto+horario), si aplica. */
+  coveredByName?: string;
 };
 
 function classifyEstado(
@@ -802,7 +804,13 @@ function GuardRow({
         : 'text-slate-500';
 
   let primary: React.ReactNode = null;
-  if (row.estado === 'NO_LLEGO') {
+  if (row.estado === 'NO_LLEGO' && row.coveredByName) {
+    primary = (
+      <span className="px-2 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold whitespace-nowrap">
+        ✓ Cubierto por {row.coveredByName}
+      </span>
+    );
+  } else if (row.estado === 'NO_LLEGO') {
     primary = (
       <button
         type="button"
@@ -1004,7 +1012,7 @@ function ObjectiveGroup({
   onCobertura: (row: GuardRowModel) => void;
   onMore: (row: GuardRowModel) => void;
 }) {
-  const hasNoLlego = rows.some((r) => r.estado === 'NO_LLEGO');
+  const hasNoLlego = rows.some((r) => r.estado === 'NO_LLEGO' && !r.coveredByName);
   const hasTardanza = rows.some((r) => r.estado === 'TARDANZA');
 
   return (
@@ -1515,7 +1523,7 @@ export default function ModoRapidoPage() {
   }
 
   const classifiedRows = useMemo((): GuardRowModel[] => {
-    return Object.entries(turnos)
+    const base = Object.entries(turnos)
       .map(([employeeName, turno]) => {
         const { estado, pendingEntry } = classifyEstado(turno, wa, nowMs);
         let realDisplay = '—';
@@ -1547,6 +1555,28 @@ export default function ModoRapidoPage() {
         };
       })
       .sort((a, b) => String(a.turno.expected).localeCompare(String(b.turno.expected)));
+
+    // Segunda pasada: un turno NO_LLEGO/AUSENTE puede ya estar cubierto por otro turno
+    // real de hoy, mismo objetivo + mismo puesto + mismo horario de inicio, asignado a
+    // otro empleado que sí está presente/esperando (no ausente/no-llegó él mismo).
+    return base.map((row) => {
+      if (row.estado !== 'NO_LLEGO' && row.estado !== 'AUSENTE') return row;
+      const cover = base.find((other) => {
+        if (other === row) return false;
+        if (other.estado === 'NO_LLEGO' || other.estado === 'AUSENTE') return false;
+        if (!other.turno.objectiveId || other.turno.objectiveId !== row.turno.objectiveId) return false;
+        if (other.turno.expected !== row.turno.expected) return false;
+        if (
+          row.turno.positionName &&
+          other.turno.positionName &&
+          row.turno.positionName !== other.turno.positionName
+        ) {
+          return false;
+        }
+        return true;
+      });
+      return cover ? { ...row, coveredByName: cover.employeeName } : row;
+    });
   }, [turnos, wa, nowMs]);
 
   const stats = useMemo(() => {
@@ -1560,7 +1590,7 @@ export default function ModoRapidoPage() {
         retenes += 1;
         continue;
       }
-      if (r.estado === 'NO_LLEGO') critico += 1;
+      if (r.estado === 'NO_LLEGO' && !r.coveredByName) critico += 1;
       else if (r.estado === 'TARDANZA') tardanza += 1;
       else if (r.estado === 'PENDIENTE_WA') sinConfirmar += 1;
       else if (r.estado === 'PRESENTE_WA' || r.estado === 'PRESENTE_PLAT') ok += 1;
@@ -1636,10 +1666,20 @@ export default function ModoRapidoPage() {
     setGroupInitDone(true);
   }, [classifiedRows, groupInitDone]);
 
+  const esCandidatoValido = (c: GuardRowModel, absent: GuardRowModel): boolean => {
+    if (c.turno.rowId === absent.turno.rowId) return false;
+    const mismoObjetivoYHorario =
+      !!c.turno.objectiveId &&
+      c.turno.objectiveId === absent.turno.objectiveId &&
+      c.turno.expected === absent.turno.expected &&
+      (!c.turno.positionName || !absent.turno.positionName || c.turno.positionName === absent.turno.positionName);
+    return !mismoObjetivoYHorario;
+  };
+
   const retCandidates = useMemo((): GuardRowModel[] => {
     if (!coberturaModal) return [];
     return classifiedRows.filter(
-      (r) => r.band === 'RET' && r.turno.rowId !== coberturaModal.turno.rowId,
+      (r) => r.band === 'RET' && esCandidatoValido(r, coberturaModal),
     );
   }, [coberturaModal, classifiedRows]);
 
@@ -1647,7 +1687,7 @@ export default function ModoRapidoPage() {
     if (!coberturaModal) return [];
     return classifiedRows.filter(
       (r) =>
-        r.turno.rowId !== coberturaModal.turno.rowId &&
+        esCandidatoValido(r, coberturaModal) &&
         r.turno.objectiveId &&
         r.turno.objectiveId === coberturaModal.turno.objectiveId &&
         (r.band === 'M' || r.band === 'T' || r.band === 'N') &&
@@ -1659,7 +1699,7 @@ export default function ModoRapidoPage() {
     if (!coberturaModal) return [];
     return classifiedRows.filter(
       (r) =>
-        r.turno.rowId !== coberturaModal.turno.rowId &&
+        esCandidatoValido(r, coberturaModal) &&
         r.band !== 'RET' &&
         (r.estado === 'ESPERANDO' || r.estado === 'PRESENTE_PLAT' || r.estado === 'PRESENTE_WA'),
     );
