@@ -233,6 +233,15 @@
       ]
     },
     {
+      "collectionGroup": "turnos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "employeeId",   "order": "ASCENDING" },
+        { "fieldPath": "empresaId",    "order": "ASCENDING" },
+        { "fieldPath": "scheduleDate", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "user_notifications",
       "queryScope": "COLLECTION",
       "fields": [
