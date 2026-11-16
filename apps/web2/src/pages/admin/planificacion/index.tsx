@@ -551,7 +551,7 @@ import {
     resolveEffectiveVacancyGapTitular,
     buildTitularVacancyFromGapOption,
 } from '@/lib/planificacion/vacancyGapBands';
-import { resolveCellSecondBlock, slaBlocksForPositionShift } from '@/lib/planificacion/splitShiftDisplay';
+import { codigoSegundoBloqueCelda, resolveCellSecondBlock, slaBlocksForPositionShift } from '@/lib/planificacion/splitShiftDisplay';
 import {
     listExtensionCandidates,
     listEarlyStartCandidates,
@@ -1696,6 +1696,9 @@ function calcularCeldaGrilla(e: EntradaCeldaGrilla, emp: any, isGuest: boolean, 
                 : undefined;
     const borrado = content === CELDA_BORRADA;
     const texto12 = isLeaveCell ? textoLicencia12(e.pendingChanges, e.shiftsMap, emp.id, cellDateStr, { indice: e.indice12() }) : '';
+    const segundoCodigo = (!absence && content != null && !borrado)
+        ? (codigoSegundoBloqueCelda(key, e.pendingChanges, e.cellTurnosMap) || undefined)
+        : undefined;
     const vista: VistaCelda = {
         key,
         contenido: borrado ? null : content,
@@ -1720,6 +1723,7 @@ function calcularCeldaGrilla(e: EntradaCeldaGrilla, emp: any, isGuest: boolean, 
         marcaAgregado: isCoverageSplitCell
             ? (siglaAgregado({ isExtended: !!isExtended, isEarlyStart: !!isEarly }) || undefined)
             : (activeShift?.id && e.turaMap[activeShift.id] ? 'TURA' : undefined),
+        segundoCodigo,
         liberado: covRole === 'LIBERATED',
         usado: isCoverageSourceUsed,
         descansoReducido: !!cellShift?.descansoReducido,
@@ -16005,10 +16009,12 @@ function PlanificacionDesktop() {
                     : enGrupo
                         ? (iObj >= 0 ? GRUPO_COLOR_HEX[iObj % GRUPO_COLOR_HEX.length] : undefined)
                         : colorPuestoGrilla[String(sh.positionName || '')]?.color;
+                const segundoCodigo = franco ? null : codigoSegundoBloqueCelda(key, pendingChanges, cellTurnosMap);
                 celdas[d.dateStr] = {
                     code: sh.isFrancoTrabajado ? `FT·${code}` : code,
                     ...(!franco && ini && fin && ini !== fin ? { horario: `${ini}–${fin}` } : {}),
                     ...(!franco && colorPos ? { color: colorPos } : {}),
+                    ...(segundoCodigo ? { segundoCodigo } : {}),
                 };
             }
             return { nombre: String(e.name || e.id), celdas };
@@ -18509,10 +18515,18 @@ function PlanificacionDesktop() {
 
     const objetivosParaOtro = (): ObjetivoOpcion[] => {
         const out: ObjetivoOpcion[] = [];
+        const keyDestino = otroObjetivo ? `${otroObjetivo.empId}_${otroObjetivo.dateStr}` : '';
+        const localDestino = keyDestino
+            ? (pendingChanges[keyDestino]?.isDeleted ? null : (pendingChanges[keyDestino] || shiftsMap[keyDestino]))
+            : null;
+        const esSobreTurno = !!localDestino
+            && !esLicenciaCodigo(String(localDestino.code || '').toUpperCase())
+            && !NO_TRABAJO.has(String(localDestino.code || '').toUpperCase());
+        const incluirActual = (selectedGrupo && grupoUnifiedMode) || esSobreTurno;
         for (const c of clients || []) {
             for (const o of (c.objetivos || []) as Array<{ id?: string; name?: string; status?: string }>) {
                 const id = String(o.id || '').trim();
-                if (!id || (!(selectedGrupo && grupoUnifiedMode) && id === String(selectedObjective || ''))) continue;
+                if (!id || (!incluirActual && id === String(selectedObjective || ''))) continue;
                 if (String(o.status || 'ACTIVE').toUpperCase() === 'INACTIVE') continue;
                 out.push({ id, clientId: c.id, clientName: String(c.name || c.businessName || 'Cliente'), name: String(o.name || id) });
             }
@@ -18590,35 +18604,13 @@ function PlanificacionDesktop() {
         const pick = pickSlaForPlanningMonth(matching, year, month);
         const srv = pick.vigente ?? pickClosedSlaForPlanningMonth(matching, year, month) ?? pick.fallback;
         const { structure } = buildPlanningPositionStructure(srv, { monthHasSla: !!srv, hasExactMatch: pick.hasExactMatch });
-
-        // Cuántos ya están asignados a ese objetivo ese día, por código (para descartar franjas ya cubiertas).
-        const asignadosPorCodigo: Record<string, number> = {};
-        try {
-            const snapDia = await getDocs(query(
-                collection(db, 'turnos'),
-                where('objectiveId', '==', objectiveId),
-                where('scheduleDate', '==', dateStr),
-                where('empresaId', '==', empresaId),
-            ));
-            snapDia.forEach((d) => {
-                const data = d.data() as any;
-                if (data.isDeleted) return;
-                const code = String(data.code || '').toUpperCase();
-                if (!code || PLANNING_NON_BILLABLE_CODES.has(code) || esLicenciaCodigo(code)) return;
-                asignadosPorCodigo[code] = (asignadosPorCodigo[code] || 0) + 1;
-            });
-        } catch {
-            // Si falla la consulta, no filtramos nada (mejor mostrar de más que bloquear el modal).
-        }
+        void dateStr;
 
         const franjas: FranjaOpcion[] = [];
         for (const pos of structure || []) {
             for (const sh of pos.shifts || []) {
                 const code = String(sh.code || '').toUpperCase();
                 if (!code || code === 'F' || code === 'RET') continue;
-                const requerido = Number((sh as any).quantity ?? (pos as any).qty ?? 1) || 1;
-                const yaAsignados = asignadosPorCodigo[code] || 0;
-                if (yaAsignados >= requerido) continue;
                 franjas.push({
                     positionName: String(pos.positionName || 'General'),
                     code,

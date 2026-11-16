@@ -36,6 +36,29 @@ export function resolveCellSecondBlock(
   return null;
 }
 
+/**
+ * Código del segundo turno del día (`isSecondBlock` / clave `_B2`), para pintar `+EM2` en la celda.
+ * No usa bloques SLA del mismo puesto: solo docs/pending con segundo bloque real.
+ */
+export function codigoSegundoBloqueCelda(
+  cellKey: string,
+  pendingChanges: Record<string, { isDeleted?: boolean; code?: string } | undefined>,
+  cellTurnosMap: Record<string, Array<{ isDeleted?: boolean; isSecondBlock?: boolean; code?: string }> | undefined>,
+): string | null {
+  const pend = pendingChanges[`${cellKey}_B2`];
+  if (pend?.isDeleted === true) return null;
+  if (pend) {
+    const fromPend = String(pend.code || '').toUpperCase().trim();
+    if (fromPend) return fromPend;
+  }
+  const b2 = (cellTurnosMap[cellKey] || []).find(
+    (d) => d && d.isDeleted !== true && d.isSecondBlock === true,
+  );
+  if (!b2) return null;
+  const fromDoc = String(b2.code || '').toUpperCase().trim();
+  return fromDoc || null;
+}
+
 export function formatSplitScheduleLabel(
   primaryStart: string | null | undefined,
   primaryEnd: string | null | undefined,

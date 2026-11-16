@@ -31,6 +31,8 @@ export type VistaCelda = {
     mas: boolean;
     /** EXT / ADEL acreditan cobertura; TURA se factura aparte. */
     marcaAgregado?: 'EXT' | 'ADEL' | 'TURA';
+    /** Código del segundo turno del día (ej. EM2) para mostrar `+EM2` en la esquina. */
+    segundoCodigo?: string;
     liberado: boolean;
     usado: boolean;
     descansoReducido: boolean;
@@ -130,7 +132,13 @@ function CeldaGrillaBase({ vista: v, fila, col, seleccionada, colElegir, elegirA
                 {v.swap && (
                     <div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${v.swap === 'S!' ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{v.swap}</div>
                 )}
-                {v.marcaAgregado ? (
+                {v.segundoCodigo ? (
+                    <div
+                        data-segundo-codigo={v.segundoCodigo}
+                        className="absolute -top-1 -right-1 text-[6px] font-black text-white px-0.5 rounded border border-white/50 bg-emerald-700"
+                        title={`Segundo turno: ${v.segundoCodigo}`}
+                    >+{v.segundoCodigo}</div>
+                ) : v.marcaAgregado ? (
                     <div
                         data-marca-agregado={v.marcaAgregado}
                         className={`absolute -top-1 -right-1 text-[6px] font-black text-white px-0.5 rounded border border-white/50 ${v.marcaAgregado === 'TURA' ? 'bg-rose-700' : v.marcaAgregado === 'ADEL' ? 'bg-indigo-700' : 'bg-emerald-700'}`}

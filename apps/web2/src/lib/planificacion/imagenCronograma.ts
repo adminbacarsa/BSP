@@ -3,7 +3,14 @@
  * Se dibuja desde los datos, no es una captura: nombre, días y código de cada celda, con la leyenda de horarios.
  */
 
-export type CeldaImagen = { code: string; horario?: string; /** Color del puesto (el borde de la grilla). */ color?: string };
+export type CeldaImagen = {
+  code: string;
+  horario?: string;
+  /** Color del puesto (el borde de la grilla). */
+  color?: string;
+  /** Código del segundo turno del día (ej. EM2) → se dibuja como +EM2. */
+  segundoCodigo?: string;
+};
 /** Referencia por puesto, como la de abajo de la grilla: nombre en su color y sus turnos con horario. */
 export type PuestoImagen = { nombre: string; color?: string; franjas: Array<{ code: string; horario: string }> };
 export type DatosImagen = {
@@ -178,9 +185,19 @@ export function dibujarCronograma(datos: DatosImagen, escala = 2): HTMLCanvasEle
       ctx.stroke();
       ctx.fillStyle = col.fg;
       ctx.textAlign = 'center';
-      const tam = c.code.length > 4 ? 9 : c.code.length > 2 ? 11 : 13;
-      ctx.font = fuente(800, tam);
-      ctx.fillText(c.code, bx + bw / 2, by + bh / 2 + tam / 3);
+      const segundo = String(c.segundoCodigo || '').toUpperCase().trim();
+      if (segundo) {
+        const tam = c.code.length > 4 ? 8 : c.code.length > 2 ? 10 : 12;
+        ctx.font = fuente(800, tam);
+        ctx.fillText(c.code, bx + bw / 2, by + bh / 2 - 1);
+        ctx.fillStyle = '#047857';
+        ctx.font = fuente(800, 7);
+        ctx.fillText(`+${segundo}`, bx + bw / 2, by + bh - 3);
+      } else {
+        const tam = c.code.length > 4 ? 9 : c.code.length > 2 ? 11 : 13;
+        ctx.font = fuente(800, tam);
+        ctx.fillText(c.code, bx + bw / 2, by + bh / 2 + tam / 3);
+      }
     });
   });
   const yFin = y0 + DIAS_H + FILA_H * datos.filas.length;
