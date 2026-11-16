@@ -107,6 +107,9 @@ export type CambioConPuesto = {
   puestoObjetivoElegido?: string | null;
   /** Celda, fila o hueco donde el planificador escribió el turno. */
   objectiveIdLugar?: string | null;
+  /** 'OTRO_OBJETIVO': el objetivo ya fue elegido explicitamente por el usuario en el modal
+   *  Asignar en otro objetivo; no se re-calcula por puesto. */
+  menuRapidoVia?: string | null;
 };
 
 export type AmbiguoPuesto = {
@@ -149,6 +152,7 @@ export function aplicarObjetivosDePuesto<T extends CambioConPuesto>(
   const ambiguos: AmbiguoPuesto[] = [];
   for (const [key, change] of Object.entries(changes)) {
     if (!change || change.isDeleted) continue;
+    if (change.menuRapidoVia === 'OTRO_OBJETIVO') continue;
     const empId = empIdDeClaveTurno(key);
     const puesto = String(change.positionName || '').trim();
     const clave = clavePuestoGuardia(empId, puesto);

@@ -191,3 +191,27 @@ test('Retén (RET) no es un puesto del SLA: no frena el guardado y conserva su o
   assert.equal(aplicado.fuera.length, 0);
   assert.equal(aplicado.changes['emp_2026-10-17'].objectiveId, CASA);
 });
+
+test('OTRO_OBJETIVO conserva el objectiveId elegido en el modal aunque el puesto sea General', () => {
+  const EMBOZADORA = 'embozadora-id';
+  const CATEDRAL = 'catedral-id';
+  const aplicado = aplicarObjetivosDePuesto({
+    'torres_2026-11-10': {
+      positionName: 'General',
+      objectiveId: EMBOZADORA,
+      menuRapidoVia: 'OTRO_OBJETIVO',
+      code: 'EM2',
+    },
+  }, {
+    objetivos: [
+      { id: CATEDRAL, name: 'Catedral', puestos: ['Rondin'] },
+      { id: EMBOZADORA, name: 'Embozadora', puestos: ['Playa'] },
+    ],
+    preferidoDe: () => CATEDRAL,
+    objetivosDelMesDe: () => [CATEDRAL],
+    respaldoDe: () => CATEDRAL,
+  });
+  assert.equal(aplicado.fuera.length, 0);
+  assert.equal(aplicado.ambiguos.length, 0);
+  assert.equal(aplicado.changes['torres_2026-11-10'].objectiveId, EMBOZADORA);
+});
