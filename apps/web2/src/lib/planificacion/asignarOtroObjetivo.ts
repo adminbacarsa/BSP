@@ -1,7 +1,8 @@
 /**
- * Asignar, desde un cronograma, un turno que vive en otro objetivo.
- * La celda de origen queda como «Turno en {objetivo}». Solo si ese día
- * el guardia no tiene turno ni licencia en ningún objetivo.
+ * Asignar, desde un cronograma, un turno en un objetivo.
+ * Celda vacía: el turno vive en el objetivo elegido.
+ * Si ya tiene turno de trabajo, el nuevo queda como sobre turno y el primero no se pisa.
+ * Licencia, franco o RET bloquean.
  */
 
 export type TurnoEseDia = {

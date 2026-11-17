@@ -22,9 +22,15 @@ function hm(a?: string, b?: string): string {
   return `${corto(a)}–${corto(b)}`;
 }
 
+/** Pares de sobre turno que en la imagen se ven como EXT (ej. EM+EM2). */
+export function textoSumasExt(sumas: readonly string[]): string {
+  return [...new Set(sumas.map((s) => s.toUpperCase()).filter(Boolean))].sort().join(' · ');
+}
+
 export function armarLeyenda(
   puestos: readonly { name: string; shifts: readonly TurnoLeyenda[] }[],
   usados: ReadonlySet<string>,
+  sumas: readonly string[] = [],
 ): GrupoLeyenda[] {
   const grupos: GrupoLeyenda[] = [];
   const propios = new Set<string>();
@@ -42,10 +48,10 @@ export function armarLeyenda(
       });
     if (chips.length) grupos.push({ titulo: p.name, chips });
   }
-  grupos.push({
-    titulo: 'Otros',
-    chips: OTROS.filter((o) => !propios.has(o.code)).map((o) => ({ code: o.code, horario: o.horario, horas: o.horas })),
-  });
+  const otros: ChipLeyenda[] = OTROS.filter((o) => !propios.has(o.code)).map((o) => ({ code: o.code, horario: o.horario, horas: o.horas }));
+  const suma = textoSumasExt(sumas);
+  if (suma) otros.push({ code: 'EXT', horario: suma, horas: 0, detalle: 'Suma de los dos turnos' });
+  grupos.push({ titulo: 'Otros', chips: otros });
   const lic = [...usados].map((c) => c.toUpperCase()).filter((c) => LICENCIAS.has(c) && !propios.has(c));
   if (lic.length) grupos.push({ titulo: 'Licencias de este mes', chips: lic.map((code) => ({ code, horario: '', horas: 0 })) });
   return grupos.filter((g) => g.chips.length);

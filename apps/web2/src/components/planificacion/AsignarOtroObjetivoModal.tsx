@@ -13,12 +13,15 @@ export function AsignarOtroObjetivoModal({
     onElegirObjetivo,
     onCerrar,
     onConfirmar,
+    sobreTurno,
 }: {
     nombre: string;
     fecha: string;
     objetivos: ObjetivoOpcion[];
     franjas: FranjaOpcion[];
     cargando?: boolean;
+    /** El guardia ya tiene turno ese día: este alta no lo pisa. */
+    sobreTurno?: boolean;
     onElegirObjetivo: (id: string) => void;
     onCerrar: () => void;
     onConfirmar: (sel: { objetivo: ObjetivoOpcion; franja: FranjaOpcion }) => void;
@@ -38,10 +41,10 @@ export function AsignarOtroObjetivoModal({
             <div className="w-full max-w-lg rounded-3xl border border-slate-200 bg-white p-5 shadow-lg" onClick={(e) => e.stopPropagation()}>
                 <div className="mb-3 flex items-center gap-2">
                     <MapPin size={16} className="text-indigo-600" />
-                    <h3 className="text-sm font-black uppercase text-slate-800">Asignar en otro objetivo</h3>
+                    <h3 className="text-sm font-black uppercase text-slate-800">{sobreTurno ? 'Sobre turno' : 'Asignar en otro objetivo'}</h3>
                     <button type="button" onClick={onCerrar} className="ml-auto rounded-lg p-1 text-slate-400 hover:bg-slate-50" aria-label="Cerrar"><X size={14} /></button>
                 </div>
-                <p className="mb-3 text-[12px] text-slate-600">{nombre} · {fecha}. El turno se escribe en el cronograma del objetivo elegido.</p>
+                <p className="mb-3 text-[12px] text-slate-600">{nombre} · {fecha}. {sobreTurno ? 'El turno que ya tiene queda. Este se suma aparte, en el objetivo elegido.' : 'El turno se escribe en el cronograma del objetivo elegido.'}</p>
                 <input
                     value={q}
                     onChange={(e) => setQ(e.target.value)}
@@ -87,7 +90,7 @@ export function AsignarOtroObjetivoModal({
                         onClick={() => objetivo && franja && onConfirmar({ objetivo, franja })}
                         className="rounded-xl bg-indigo-600 px-3 py-1.5 text-xs font-black text-white shadow-sm hover:bg-indigo-700 disabled:border disabled:border-slate-200 disabled:bg-white disabled:text-slate-400"
                     >
-                        Asignar
+                        {sobreTurno ? 'Cargar sobre turno' : 'Asignar'}
                     </button>
                 </div>
             </div>

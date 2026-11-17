@@ -12,6 +12,8 @@ type MenuProps = {
   onClose: () => void;
   onLiberar?: () => void;
   onAsignarOtro?: () => void;
+  /** La celda ya tiene turno de trabajo: el alta es un sobre turno, no reemplaza. */
+  sobreTurno?: boolean;
 };
 
 function useEscape(onEscape: () => void, activo = true) {
@@ -30,7 +32,7 @@ function useEscape(onEscape: () => void, activo = true) {
 }
 
 /** Menú de clic derecho: dos acciones y, abajo, el modal completo. */
-export default function MenuRapidoCobertura({ x, y, opciones, onAsignar, onExtAdel, onAbrir, onClose, onLiberar, onAsignarOtro }: MenuProps) {
+export default function MenuRapidoCobertura({ x, y, opciones, onAsignar, onExtAdel, onAbrir, onClose, onLiberar, onAsignarOtro, sobreTurno }: MenuProps) {
   useEscape(onClose);
   const vw = typeof window !== 'undefined' ? window.innerWidth : 1440;
   const vh = typeof window !== 'undefined' ? window.innerHeight : 900;
@@ -59,7 +61,7 @@ export default function MenuRapidoCobertura({ x, y, opciones, onAsignar, onExtAd
       )}
       {onAsignarOtro && (
         <button type="button" role="menuitem" onClick={onAsignarOtro} className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-sm font-black text-slate-800 hover:bg-slate-50" data-menu-accion="otro-objetivo">
-          <MapPin size={15} className="text-indigo-600" /> Asignar en otro objetivo…
+          <MapPin size={15} className="text-indigo-600" /> {sobreTurno ? 'Sobre turno…' : 'Asignar en otro objetivo…'}
         </button>
       )}
       {onLiberar && (

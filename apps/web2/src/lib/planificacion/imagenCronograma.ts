@@ -8,8 +8,10 @@ export type CeldaImagen = {
   horario?: string;
   /** Color del puesto (el borde de la grilla). */
   color?: string;
-  /** Código del segundo turno del día (ej. EM2) → se dibuja como +EM2. */
+  /** Código del segundo turno del día (ej. EM2). Con el primario se pinta EXT. */
   segundoCodigo?: string;
+  /** Sobre turno o jornada extendida: la celda se pinta naranja y dice EXT. */
+  ext?: boolean;
 };
 /** Referencia por puesto, como la de abajo de la grilla: nombre en su color y sus turnos con horario. */
 export type PuestoImagen = { nombre: string; color?: string; franjas: Array<{ code: string; horario: string }> };
@@ -50,6 +52,7 @@ const COLORES: Record<string, Colores> = {
   RFZF: { bg: '#065f46', fg: '#ffffff', borde: '#065f46' },
   RFZE: { bg: '#c2410c', fg: '#ffffff', borde: '#c2410c' },
   TURA: { bg: '#881337', fg: '#ffffff', borde: '#881337' },
+  EXT: { bg: '#d97706', fg: '#ffffff', borde: '#92400e' },
 };
 const OTRO: Colores = { bg: '#ffffff', fg: '#334155', borde: '#94a3b8' };
 
@@ -73,6 +76,19 @@ export function leyendaHorarios(datos: DatosImagen): Array<{ code: string; horar
   return [...vistos.entries()]
     .sort((a, b) => a[0].localeCompare(b[0]))
     .map(([code, hs]) => ({ code, horario: [...hs].join(' / ') }));
+}
+
+/** Pares de sobre turno que la imagen pinta como EXT (ej. EM+EM2). */
+export function paresExt(datos: DatosImagen): string[] {
+  const vistos = new Set<string>();
+  for (const f of datos.filas) {
+    for (const c of Object.values(f.celdas)) {
+      const base = String(c.code || '').toUpperCase().replace(/^FT·/, '').trim();
+      const seg = String(c.segundoCodigo || '').toUpperCase().trim();
+      if (base && seg) vistos.add(`${base}+${seg}`);
+    }
+  }
+  return [...vistos].sort();
 }
 
 /** Lo que no es turno de un puesto (F, RET, licencias) y aparece en el mes. */
@@ -103,10 +119,13 @@ const DIAS_H = 44;
 export function dibujarCronograma(datos: DatosImagen, escala = 2): HTMLCanvasElement {
   const puestos = (datos.puestos || []).filter((p) => p.franjas.length);
   const otros = puestos.length ? otrosCodigos(datos) : [];
+  const pares = paresExt(datos);
+  const hayCeldaExt = pares.length > 0 || datos.filas.some((f) => Object.values(f.celdas).some((c) => c.ext));
   const leyenda = puestos.length ? [] : leyendaHorarios(datos);
   const porLinea = 4;
-  const leyendaH = puestos.length
-    ? 30 + (puestos.length + (otros.length ? 1 : 0)) * 26
+  const filasPuestos = puestos.length + (otros.length ? 1 : 0) + (hayCeldaExt ? 1 : 0);
+  const leyendaH = filasPuestos
+    ? 30 + filasPuestos * 26
     : leyenda.length ? 30 + Math.ceil(leyenda.length / porLinea) * 24 : 0;
   const ancho = NOMBRE_W + COL_W * datos.dias.length + 24;
   const alto = CAB_H + DIAS_H + FILA_H * datos.filas.length + leyendaH + 44;
@@ -176,24 +195,25 @@ export function dibujarCronograma(datos: DatosImagen, escala = 2): HTMLCanvasEle
       const by = y + 4;
       const bw = COL_W - 6;
       const bh = FILA_H - 8;
-      ctx.fillStyle = col.bg;
-      ctx.strokeStyle = col.borde;
-      ctx.lineWidth = c.color && col.borde === c.color ? 2.5 : 1.5;
+      const segundo = String(c.segundoCodigo || '').toUpperCase().trim();
+      const esExt = !!c.ext || !!segundo;
+      const colPintar = esExt ? COLORES.EXT : col;
+      ctx.fillStyle = colPintar.bg;
+      ctx.strokeStyle = colPintar.borde;
+      ctx.lineWidth = !esExt && c.color && col.borde === c.color ? 2.5 : 1.5;
       ctx.beginPath();
       ctx.roundRect(bx, by, bw, bh, 5);
       ctx.fill();
       ctx.stroke();
-      ctx.fillStyle = col.fg;
+      ctx.fillStyle = colPintar.fg;
       ctx.textAlign = 'center';
-      const segundo = String(c.segundoCodigo || '').toUpperCase().trim();
-      if (segundo) {
-        const tam = c.code.length > 4 ? 8 : c.code.length > 2 ? 10 : 12;
-        ctx.font = fuente(800, tam);
-        ctx.fillText(c.code, bx + bw / 2, by + bh * 0.38);
-        ctx.fillStyle = '#047857';
-        const tamSeg = segundo.length > 3 ? 8 : 9;
-        ctx.font = fuente(800, tamSeg);
-        ctx.fillText(`+${segundo}`, bx + bw / 2, by + bh * 0.8);
+      if (esExt) {
+        const base = String(c.code || '').toUpperCase().replace(/^FT·/, '');
+        const par = segundo ? `${base}+${segundo}` : base;
+        ctx.font = fuente(800, 11);
+        ctx.fillText('EXT', bx + bw / 2, by + bh * 0.42);
+        ctx.font = fuente(700, par.length > 7 ? 6 : 7);
+        ctx.fillText(par, bx + bw / 2, by + bh * 0.78);
       } else {
         const tam = c.code.length > 4 ? 9 : c.code.length > 2 ? 11 : 13;
         ctx.font = fuente(800, tam);
@@ -255,6 +275,10 @@ export function dibujarCronograma(datos: DatosImagen, escala = 2): HTMLCanvasEle
       }));
     });
     if (otros.length) fila(yFin + 30 + puestos.length * 26, 'OTROS', undefined, otros.map((code) => ({ code, col: coloresDe(code) })));
+    if (hayCeldaExt) {
+      const yExt = yFin + 30 + (puestos.length + (otros.length ? 1 : 0)) * 26;
+      fila(yExt, 'EXT', COLORES.EXT.bg, [{ code: 'EXT', horario: pares.length ? pares.join(' · ') : 'suma de los dos turnos', col: COLORES.EXT }]);
+    }
   } else if (leyenda.length) {
     ctx.fillStyle = '#0f172a';
     ctx.font = fuente(800, 12);

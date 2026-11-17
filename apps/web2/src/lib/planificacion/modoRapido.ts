@@ -1209,7 +1209,7 @@ export const ATAJOS_MODO_RAPIDO: Array<{ teclas: string; que: string }> = [
     { teclas: 'Shift + +', que: 'Cerrar todas las bandas faltantes de ese día' },
     { teclas: 'Ctrl + L  o  /', que: 'Cargar una novedad del catálogo en la selección (un registro por rango)' },
     { teclas: 'Alt + L', que: 'Liberar el turno a RET y cerrar la banda con 12 h' },
-    { teclas: 'Alt + O', que: 'Asignar en otro objetivo (solo celda vacía, sin turno ni licencia ese día)' },
+    { teclas: 'Alt + O', que: 'Asignar en otro objetivo. Si ya tiene turno de trabajo, carga un sobre turno y no pisa el primero. Licencia, franco o RET no.' },
     { teclas: 'Colores de Excel', que: 'Al pegar desde Excel la M y N rojas pasan a D12 y N12 y la E amarilla es evento. Desde otro lado sin color: escribí D12 y N12 o usá +, y la E se pregunta en el resumen. Un código que el servicio no tiene no se pega y queda en el resumen' },
     { teclas: 'Ctrl + D / Ctrl + R', que: 'Rellenar hacia abajo / a la derecha' },
     { teclas: 'Cuadradito de la esquina', que: 'Arrastrar para repetir el patrón (sigue ciclos: M M M M M M F F)' },

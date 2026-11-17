@@ -14,6 +14,8 @@ export function LeyendaModoRapido({
   colorPuesto,
   filtro,
   onFiltro,
+  /** Pares de sobre turno del mes (EM+EM2). Se muestran como EXT en la nomenclatura. */
+  sumas,
 }: {
   puestos: readonly { name: string; shifts: readonly TurnoLeyenda[] }[];
   usados: ReadonlySet<string>;
@@ -26,6 +28,7 @@ export function LeyendaModoRapido({
   /** Filtro activo: solo ese puesto (y ese turno). `puesto` vacío = un código de «Otros» (F, RET…). */
   filtro?: { puesto: string; code?: string } | null;
   onFiltro?: (f: { puesto: string; code?: string } | null) => void;
+  sumas?: readonly string[];
 }) {
   const esPuesto = (titulo: string) => !!puestos.find((p) => p.name.trim().toUpperCase() === titulo.trim().toUpperCase());
   const activo = (puesto: string, code?: string) => !!filtro
@@ -40,7 +43,7 @@ export function LeyendaModoRapido({
     const k = Object.keys(colorPuesto).find((n) => n.trim().toUpperCase() === titulo.trim().toUpperCase());
     return k ? colorPuesto[k].color : undefined;
   };
-  const grupos = armarLeyenda(puestos, usados);
+  const grupos = armarLeyenda(puestos, usados, sumas);
   if (!grupos.length) return null;
   const total = grupos.reduce((n, g) => n + g.chips.length, 0);
   return (
@@ -91,11 +94,11 @@ export function LeyendaModoRapido({
                 <span
                   key={`${g.titulo}-${c.code}`}
                   style={color && !ROJO.has(c.code) ? { backgroundColor: '#fff', color: '#0f172a', borderColor: color, borderWidth: 2, borderStyle: 'solid' } : undefined}
-                  className={`inline-flex items-center gap-1 rounded px-1 py-px text-[9px] font-black ${onFiltro ? 'cursor-pointer hover:opacity-80' : ''} ${activo(puesto, c.code) ? 'ring-2 ring-indigo-600 ring-offset-1' : ''} ${ROJO.has(c.code) ? 'bg-red-600 text-white' : color ? '' : estilo(c.code) || 'bg-slate-100 text-slate-700'}`}
-                  title={[c.code, c.detalle, c.horario, c.horas ? `${c.horas} h` : ''].filter(Boolean).join(' · ') + (onFiltro ? (activo(puesto, c.code) ? ' · clic: mostrar todos' : ' · clic: ver solo estos') : '')}
+                  className={`inline-flex items-center gap-1 rounded px-1 py-px text-[9px] font-black ${onFiltro && c.code !== 'EXT' ? 'cursor-pointer hover:opacity-80' : ''} ${activo(puesto, c.code) ? 'ring-2 ring-indigo-600 ring-offset-1' : ''} ${ROJO.has(c.code) ? 'bg-red-600 text-white' : color ? '' : estilo(c.code) || 'bg-slate-100 text-slate-700'}`}
+                  title={[c.code, c.detalle, c.horario, c.horas ? `${c.horas} h` : ''].filter(Boolean).join(' · ') + (onFiltro && c.code !== 'EXT' ? (activo(puesto, c.code) ? ' · clic: mostrar todos' : ' · clic: ver solo estos') : '')}
                   data-leyenda-chip={c.code}
-                  role={onFiltro ? 'button' : undefined}
-                  onClick={onFiltro ? () => alternar(puesto, c.code) : undefined}
+                  role={onFiltro && c.code !== 'EXT' ? 'button' : undefined}
+                  onClick={onFiltro && c.code !== 'EXT' ? () => alternar(puesto, c.code) : undefined}
                 >
                   {c.code}
                   {c.horario ? <span className="font-mono font-bold opacity-80">{c.horario.replace(/:00/g, '')}</span> : null}

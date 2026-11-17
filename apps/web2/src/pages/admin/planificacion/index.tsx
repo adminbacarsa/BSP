@@ -806,6 +806,7 @@ const SHIFT_STYLES: any = {
     'RFZE': 'bg-orange-700 text-white border-2 border-white font-black',
     'TURA': 'bg-rose-900 text-white border-2 border-white font-black',
     'EXTENDED': 'bg-amber-600 text-white border-amber-800 font-black shadow-sm',
+    'EXT': 'bg-amber-600 text-white border-amber-800 font-black shadow-sm',
     'ESC': 'bg-sky-100 text-sky-800 border-sky-500 font-black',
     'EV':  'bg-amber-500 text-amber-950 border-amber-700 font-black',
     'PG':  'bg-[#8064A2] text-black border-[#5F4A7A] font-black',
@@ -866,6 +867,7 @@ const LEGEND_DESCRIPTIONS: Record<string, string> = {
     'SWAP': 'Intercambio de Turno',
     'SWAP_PENDING': 'Intercambio pendiente de autorización',
     'EXTENDED': 'Turno extendido o adelantado (cobertura / horas extra)',
+    'EXT': 'Suma de los dos turnos (sobre turno)',
     'EV': 'Evento especial (recital, partido, operativo)',
 };
 
@@ -2562,6 +2564,20 @@ function PlanificacionDesktop() {
         }
         return s;
     }, [shiftsMap]);
+    const sumasExtLeyenda = useMemo(() => {
+        const pares = new Set<string>();
+        const claves = new Set<string>([...Object.keys(cellTurnosMap), ...Object.keys(pendingChanges).map((k) => (k.endsWith('_B2') ? k.slice(0, -3) : k))]);
+        for (const key of claves) {
+            const seg = codigoSegundoBloqueCelda(key, pendingChanges, cellTurnosMap);
+            if (!seg) continue;
+            const pend = pendingChanges[key];
+            const sh = pend && !pend.isDeleted ? pend : shiftsMap[key];
+            const base = String(sh?.code || '').toUpperCase().trim();
+            if (!base || base === 'F' || base === 'FF' || base === 'FP') continue;
+            pares.add(`${base}+${seg}`);
+        }
+        return [...pares].sort();
+    }, [cellTurnosMap, pendingChanges, shiftsMap]);
     const modoRapidoRef = useRef(false);
     const colaEscrituraRapidaRef = useRef<Promise<unknown>>(Promise.resolve());
     const capaRapidaRef = useRef<CapaModoRapidoApi | null>(null);
@@ -3075,8 +3091,9 @@ function PlanificacionDesktop() {
         diasLicencia: string[];
         liberar?: { code: string; positionName: string };
         asignarOtro?: boolean;
+        sobreTurno?: boolean;
     } | null>(null);
-    const [otroObjetivo, setOtroObjetivo] = useState<{ empId: string; nombre: string; dateStr: string } | null>(null);
+    const [otroObjetivo, setOtroObjetivo] = useState<{ empId: string; nombre: string; dateStr: string; sobreTurno?: boolean } | null>(null);
     const [franjasOtro, setFranjasOtro] = useState<FranjaOpcion[]>([]);
     const [cargandoFranjasOtro, setCargandoFranjasOtro] = useState(false);
     const [modoElegir, setModoElegir] = useState<{
@@ -10838,7 +10855,9 @@ function PlanificacionDesktop() {
         const codePre = String(shPre?.code || '').toUpperCase();
         const puedeLiberarPre = !bloqueoMesCerrado && puedeEditarDiaMenu(celda.dateStr) && !celda.isLeave && (codePre === 'M' || codePre === 'T' || codePre === 'N');
         const puedeOtroPre = !bloqueoMesCerrado && puedeEditarDiaMenu(celda.dateStr) && !celda.isLeave && !celda.tieneTurno && !shPre;
-        if (!opciones.visible && !puedeLiberarPre && !puedeOtroPre) return;
+        const puedeSobrePre = !bloqueoMesCerrado && puedeEditarDiaMenu(celda.dateStr) && !celda.isLeave
+            && !!shPre && !esLicenciaCodigo(codePre) && !NO_TRABAJO.has(codePre);
+        if (!opciones.visible && !puedeLiberarPre && !puedeOtroPre && !puedeSobrePre) return;
         ev.preventDefault();
         ev.stopPropagation();
         setModoElegir(null);
@@ -10897,11 +10916,12 @@ function PlanificacionDesktop() {
             x: ev.clientX,
             y: ev.clientY,
             opciones: (!menuOpciones.visible && (puedeLiberar || puedeOtro))
-                ? { ...menuOpciones, visible: true, titulo: puedeOtro && !puedeLiberar ? 'Celda vacía' : 'Liberar este turno' }
+                ? { ...menuOpciones, visible: true, titulo: esTurnoTrabajoCelda ? 'Sobre turno' : (puedeOtro && !puedeLiberar ? 'Celda vacía' : 'Liberar este turno') }
                 : menuOpciones,
             diasLicencia: diasLicencia.length > 1 && diasLicencia.includes(celda.dateStr) ? diasLicencia : [],
             liberar: puedeLiberar ? { code: codeMenu, positionName: String(shMenu?.positionName || posPreferida || '') } : undefined,
             asignarOtro: puedeOtro,
+            sobreTurno: esTurnoTrabajoCelda,
             ctx: {
                 clase: celda.isLeave ? 'ausente' : 'hueco',
                 empId: celda.emp.id,
@@ -16075,11 +16095,13 @@ function PlanificacionDesktop() {
                         ? (iObj >= 0 ? GRUPO_COLOR_HEX[iObj % GRUPO_COLOR_HEX.length] : undefined)
                         : colorPuestoGrilla[String(sh.positionName || '')]?.color;
                 const segundoCodigo = franco ? null : codigoSegundoBloqueCelda(key, pendingChanges, cellTurnosMap);
+                const extendido = !franco && (sh.isExtended === true || sh.isEarlyStart === true || sh.coverageSegmentRole === 'EXTENSION' || sh.coverageSegmentRole === 'EARLY_START');
                 celdas[d.dateStr] = {
                     code: sh.isFrancoTrabajado ? `FT·${code}` : code,
                     ...(!franco && ini && fin && ini !== fin ? { horario: `${ini}–${fin}` } : {}),
                     ...(!franco && colorPos ? { color: colorPos } : {}),
                     ...(segundoCodigo ? { segundoCodigo } : {}),
+                    ...(extendido || segundoCodigo ? { ext: true } : {}),
                 };
             }
             return { nombre: String(e.name || e.id), celdas };
@@ -18712,8 +18734,10 @@ function PlanificacionDesktop() {
             }
             // Turno de trabajo: permitir como segundo turno, abrir modal sin bloquear
         }
+        const codeLocal = String(local?.code || '').toUpperCase();
+        const sobreTurno = !!local && !esLicenciaCodigo(codeLocal) && !NO_TRABAJO.has(codeLocal);
         setFranjasOtro([]);
-        setOtroObjetivo({ empId, nombre, dateStr });
+        setOtroObjetivo({ empId, nombre, dateStr, sobreTurno });
     };
     const leerFranjasDe = async (objectiveId: string, dateStr: string): Promise<FranjaOpcion[]> => {
         const snap = await getDocs(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa));
@@ -18915,7 +18939,7 @@ function PlanificacionDesktop() {
         avisarResultadoOtro(r);
         if (r.escritos) {
             setOtroObjetivo(null);
-            toast.success(`Turno en ${sel.objetivo.name}. Se guarda con el cronograma.`);
+            toast.success(ctx.sobreTurno ? `Sobre turno en ${sel.objetivo.name}. El turno anterior queda. Se guarda con el cronograma.` : `Turno en ${sel.objetivo.name}. Se guarda con el cronograma.`);
         }
     };
     const aplicarAjenosPegado = async (items: Array<{ fila: number; col: number; objectiveId: string; clientId: string; objectiveName: string; positionName: string; code: string; startTime: string; endTime: string; hours: number; marca: string; banda: string; codigo?: string }>) => {
@@ -19147,27 +19171,32 @@ function PlanificacionDesktop() {
             if (!c) return;
             tooltipCeldaCtl.current.ocultar();
             if (c.soloLecturaAjena) {
-                ev.preventDefault();
-                ev.stopPropagation();
                 const ajeno = c.activeShift || c.s;
-                const objId = String(ajeno?.objectiveId || '');
-                const nombreObj = getObjectiveName(objId) || 'otro objetivo';
-                avisarResultadoOtro({
-                    escritos: 0,
-                    avisos: [{
-                        mensaje: `${c.emp?.name || 'El guardia'} ya tiene ${String(ajeno?.code || 'turno').toUpperCase()} en ${nombreObj} el ${fechaCorta(c.dateStr)}`,
-                        href: objId ? urlCronograma({
-                            objectiveId: objId,
-                            clientId: String(ajeno?.clientId || clients.find((cl) => (cl.objetivos || []).some((o: any) => String(o.id) === objId))?.id || ''),
-                            year: Number(c.dateStr.slice(0, 4)),
-                            month: Number(c.dateStr.slice(5, 7)),
-                            dateStr: c.dateStr,
-                            empId: c.emp?.id,
-                        }) : undefined,
-                        objetivoNombre: nombreObj,
-                    }],
-                });
-                return;
+                const codeAjeno = String(ajeno?.code || '').toUpperCase();
+                const puedeSobre = !bloqueoMesCerrado && puedeEditarDiaMenu(c.dateStr)
+                    && !!codeAjeno && !esLicenciaCodigo(codeAjeno) && !NO_TRABAJO.has(codeAjeno);
+                if (!puedeSobre) {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    const objId = String(ajeno?.objectiveId || '');
+                    const nombreObj = getObjectiveName(objId) || 'otro objetivo';
+                    avisarResultadoOtro({
+                        escritos: 0,
+                        avisos: [{
+                            mensaje: `${c.emp?.name || 'El guardia'} ya tiene ${codeAjeno || 'turno'} en ${nombreObj} el ${fechaCorta(c.dateStr)}`,
+                            href: objId ? urlCronograma({
+                                objectiveId: objId,
+                                clientId: String(ajeno?.clientId || clients.find((cl) => (cl.objetivos || []).some((o: any) => String(o.id) === objId))?.id || ''),
+                                year: Number(c.dateStr.slice(0, 4)),
+                                month: Number(c.dateStr.slice(5, 7)),
+                                dateStr: c.dateStr,
+                                empId: c.emp?.id,
+                            }) : undefined,
+                            objetivoNombre: nombreObj,
+                        }],
+                    });
+                    return;
+                }
             }
             abrirMenuRapidoCelda(ev, {
                 emp: c.emp,
@@ -20509,6 +20538,7 @@ function PlanificacionDesktop() {
                             cerrarMenuRapido();
                             if (lib) liberarGuardia(ctx.empId, ctx.dateStr, lib.code, lib.positionName);
                         } : undefined}
+                        sobreTurno={!!menuRapido.sobreTurno}
                         onAsignarOtro={menuRapido.asignarOtro ? () => {
                             const ctx = menuRapido.ctx;
                             cerrarMenuRapido();
@@ -20523,6 +20553,7 @@ function PlanificacionDesktop() {
                 <AsignarOtroObjetivoModal
                     nombre={otroObjetivo.nombre}
                     fecha={fechaCorta(otroObjetivo.dateStr)}
+                    sobreTurno={!!otroObjetivo.sobreTurno}
                     objetivos={objetivosParaOtro()}
                     franjas={franjasOtro}
                     cargando={cargandoFranjasOtro}
@@ -22384,10 +22415,8 @@ function PlanificacionDesktop() {
                                         if (!cel) return;
                                         const { emp, ctx } = ctxRapido(cel.r, cel.c);
                                         if (!emp) return;
-                                        const code = codigoCtxRapido(ctx);
                                         const ds = diasRapido[cel.c];
                                         if (!ds) return;
-                                        if (code) { toast.message('Asignar en otro objetivo es solo en una celda vacía.'); return; }
                                         abrirAsignarOtro(emp.id, String(emp.name || emp.id), ds);
                                     }}
                                 />
@@ -22869,6 +22898,7 @@ function PlanificacionDesktop() {
                             shifts: (p.shifts || []).map((s: any) => ({ code: String(s.code || ''), startTime: s.startTime, endTime: s.endTime, hours: Number(s.hours) || 0, name: s.name })),
                         }))}
                         usados={codigosUsadosLeyenda}
+                        sumas={sumasExtLeyenda}
                         abierta={leyendaAbierta}
                         onToggle={() => setLeyendaAbierta((v) => !v)}
                         filtro={filtroLeyenda}
@@ -22905,6 +22935,7 @@ function PlanificacionDesktop() {
                                             shifts: (p.shifts || []).map((sh: any) => ({ code: String(sh.code || ''), startTime: sh.startTime, endTime: sh.endTime, hours: Number(sh.hours) || 0, name: sh.name })),
                                         }))}
                                         usados={codigosUsadosLeyenda}
+                                        sumas={sumasExtLeyenda}
                                         abierta={leyendaAbierta}
                                         onToggle={() => setLeyendaAbierta((v) => !v)}
                                         filtro={filtroLeyenda}
