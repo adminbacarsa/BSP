@@ -888,8 +888,9 @@ export function empresaCollectionQuery(
 ): Query | CollectionReference {
   const col = collection(getDb(), String(colName ?? '').trim());
   const id = String(empresaId ?? '').trim();
+  // Con scope siempre filtrar por empresaId (incluye bacarsa). Sin filtro, un no-superadmin
+  // recibe permission-denied al chocar con docs de otras empresas.
   if (!scopeEmpresa || !id) return col;
-  if (id.toLowerCase() === 'bacarsa') return col;
   return query(col, where('empresaId', '==', id));
 }
 
@@ -913,7 +914,7 @@ export function buildAuditLogsRecentQuery(
 ): Query {
   const limitN = opts?.limit ?? 80;
   const id = String(empresaId ?? '').trim();
-  const tenantScoped = scopeEmpresa && !!id && id.toLowerCase() !== 'bacarsa';
+  const tenantScoped = scopeEmpresa && !!id;
 
   if (tenantScoped) {
     const base = empresaCollectionQuery('audit_logs', empresaId, true);

@@ -208,7 +208,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             });
 
             try {
-              if (roleDocId(role || '') !== roleDocId(tokenRole || '')) {
+              const tokenEmpIds = Array.isArray(token.claims.empresaIds)
+                ? (token.claims.empresaIds as unknown[]).map((x) => String(x ?? '').trim()).filter(Boolean)
+                : [];
+              const needsRoleSync = roleDocId(role || '') !== roleDocId(tokenRole || '');
+              const needsTenantClaims =
+                !isSuper &&
+                !multiEmpresa &&
+                rawEmpresaIds.length > 0 &&
+                (tokenEmpIds.length === 0 || rawEmpresaIds.some((id) => !tokenEmpIds.includes(id)));
+              if (needsRoleSync || needsTenantClaims) {
                 const syncFn = httpsCallable(functions, 'syncSystemUserClaims');
                 await syncFn({});
                 const refreshed = await u.getIdTokenResult(true);

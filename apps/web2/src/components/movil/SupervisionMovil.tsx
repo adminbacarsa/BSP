@@ -124,7 +124,7 @@ export function SupervisionMovil() {
     let cancel = false;
     const scope = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
     const col = collection(db, 'clients');
-    const q = scope && empresaId.toLowerCase() !== 'bacarsa' ? query(col, where('empresaId', '==', empresaId)) : query(col);
+    const q = scope ? query(col, where('empresaId', '==', empresaId)) : query(col);
     setLoading(true);
     getDocs(q).then((snap) => {
       if (cancel) return;
@@ -170,7 +170,7 @@ export function SupervisionMovil() {
     const desde = Timestamp.fromMillis(Date.now() - MENU_TURNOS_ATRAS_MS);
     const hasta = Timestamp.fromMillis(Date.now() + 2 * 60 * 60 * 1000);
     const col = collection(db, 'turnos');
-    const q = scope && empresaId.toLowerCase() !== 'bacarsa'
+    const q = scope
       ? query(col, where('empresaId', '==', empresaId), where('startTime', '>=', desde), where('startTime', '<=', hasta))
       : query(col, where('startTime', '>=', desde), where('startTime', '<=', hasta));
     return onSnapshot(q, (snap) => {

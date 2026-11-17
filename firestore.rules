@@ -134,11 +134,37 @@ service cloud.firestore {
         : [];
     }
 
-    // Empresa del token Auth (empleados portal) o system_users (admins).
-    function authEmpresaId() {
+    // Claims JWT (query-friendly). syncSystemUserClaims escribe empresaId / empresaIds / allEmpresas.
+    function claimEmpresaId() {
       return request.auth != null && request.auth.token.empresaId is string
         ? request.auth.token.empresaId
-        : userEmpresaId();
+        : '';
+    }
+
+    function claimEmpresaIds() {
+      return request.auth != null
+        && request.auth.token.keys().hasAny(['empresaIds'])
+        && request.auth.token.empresaIds is list
+        ? request.auth.token.empresaIds
+        : [];
+    }
+
+    function claimAllEmpresas() {
+      return request.auth != null && request.auth.token.allEmpresas == true;
+    }
+
+    function hasEmpresaAccess(empId) {
+      return empId != '' && (
+        claimEmpresaId() == empId ||
+        userEmpresaId() == empId ||
+        (!claimEmpresaIds().isEmpty() && claimEmpresaIds().hasAny([empId])) ||
+        (!userEmpresaIds().isEmpty() && userEmpresaIds().hasAny([empId]))
+      );
+    }
+
+    // Empresa del token Auth (empleados portal) o system_users (admins).
+    function authEmpresaId() {
+      return claimEmpresaId() != '' ? claimEmpresaId() : userEmpresaId();
     }
 
     // Tenant para portal guardia: claim empresaId en el JWT.
@@ -156,12 +182,14 @@ service cloud.firestore {
     }
 
     function systemUserHasAllEmpresas() {
-      return isSystemUserDoc() &&
-        get(/databases/$(database)/documents/system_users/$(request.auth.uid)).data.get('allEmpresas', false) == true;
+      return claimAllEmpresas() || (
+        isSystemUserDoc() &&
+        get(/databases/$(database)/documents/system_users/$(request.auth.uid)).data.get('allEmpresas', false) == true
+      );
     }
 
     function bacarsaLegacyOpen() {
-      return userEmpresaId() == 'bacarsa' &&
+      return hasEmpresaAccess('bacarsa') &&
         exists(/databases/$(database)/documents/empresas/bacarsa) &&
         get(/databases/$(database)/documents/empresas/bacarsa).data.get('migracionCompleta', false) != true;
     }
@@ -172,20 +200,18 @@ service cloud.firestore {
 
     // Bacarsa: docs sin empresaId o con empresaId=bacarsa (aunque migracionCompleta esté en true).
     function bacarsaTenantDocMatches(data) {
-      return userEmpresaId() == 'bacarsa' && (
+      return hasEmpresaAccess('bacarsa') && (
         docEmpresaId(data) == '' || docEmpresaId(data) == 'bacarsa'
       );
     }
 
     function tenantMatches(data) {
       return isSuperAdmin() || systemUserHasAllEmpresas() || (
-        userEmpresaId() != '' && (
-          docEmpresaId(data) == userEmpresaId() ||
-          bacarsaTenantDocMatches(data) ||
-          (bacarsaLegacyOpen() && userEmpresaId() == 'bacarsa' && docEmpresaId(data) == '')
-        )
+        hasEmpresaAccess(docEmpresaId(data))
       ) || (
-        !userEmpresaIds().isEmpty() && docEmpresaId(data) != '' && userEmpresaIds().hasAny([docEmpresaId(data)])
+        bacarsaTenantDocMatches(data)
+      ) || (
+        bacarsaLegacyOpen() && docEmpresaId(data) == ''
       );
     }
 
@@ -305,19 +331,12 @@ service cloud.firestore {
       return data.status == 'activo' || data.status == 'abierto' || data.status == 'en_curso';
     }
 
-    // Lectura de roles: SuperAdmin / allEmpresas / sin tenant / empresa primaria /
-    // o cualquier empresa del subconjunto (empresaIds). Sin esto, un usuario
-    // multiempresa no puede leer el rol de la 2ª empresa → menú lateral vacío.
+    // Lectura de roles: SuperAdmin / allEmpresas / sin tenant / empresas del usuario (claims o doc).
     function roleReadable(data) {
       return isSuperAdmin() ||
         systemUserHasAllEmpresas() ||
         docEmpresaId(data) == '' ||
-        docEmpresaId(data) == userEmpresaId() ||
-        (
-          !userEmpresaIds().isEmpty() &&
-          docEmpresaId(data) != '' &&
-          userEmpresaIds().hasAny([docEmpresaId(data)])
-        );
+        hasEmpresaAccess(docEmpresaId(data));
     }
 
     function roleWritable(data) {

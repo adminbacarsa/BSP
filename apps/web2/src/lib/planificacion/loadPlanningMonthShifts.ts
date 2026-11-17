@@ -29,7 +29,7 @@ export function buildPlanningMonthTurnosQuery(params: {
     const endTs = Timestamp.fromDate(lastDay);
     const col = collection(db, 'turnos');
     const id = String(empresaId ?? '').trim();
-    if (scopeEmpresa && id && id.toLowerCase() !== 'bacarsa') {
+    if (scopeEmpresa && id) {
         return query(
             col,
             where('empresaId', '==', id),
@@ -55,7 +55,7 @@ export function buildPlanningMonthRefuerzoQuery(params: {
     const monthEnd = `${year}-${monthStr}-${String(lastDay).padStart(2, '0')}`;
     const col = collection(db, 'turnos');
     const id = String(empresaId ?? '').trim();
-    if (scopeEmpresa && id && id.toLowerCase() !== 'bacarsa') {
+    if (scopeEmpresa && id) {
         return query(
             col,
             where('empresaId', '==', id),

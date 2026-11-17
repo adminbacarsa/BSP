@@ -1228,7 +1228,13 @@ export const crearUsuarioSistema = functions.https.onCall(async (data, context) 
       displayName: `${firstName} ${lastName}`
     });
 
-    await admin.auth().setCustomUserClaims(userRecord.uid, { role: roleNorm, type: 'SYSTEM' });
+    const claims = buildSystemUserClaims({
+      role: roleNorm,
+      empresaId: targetEmpresaId,
+      allEmpresas,
+      empresaIds: targetEmpresaIds,
+    });
+    await admin.auth().setCustomUserClaims(userRecord.uid, claims);
 
     await admin.firestore().collection("system_users").doc(userRecord.uid).set({
       uid: userRecord.uid,
@@ -1250,6 +1256,33 @@ export const crearUsuarioSistema = functions.https.onCall(async (data, context) 
     throw new functions.https.HttpsError("internal", error.message);
   }
 });
+
+/** Claims de panel: rol + tenant (empresaIds) para que las reglas validen list queries. */
+function buildSystemUserClaims(opts: {
+  role: string;
+  empresaId?: unknown;
+  allEmpresas?: unknown;
+  empresaIds?: unknown;
+}): Record<string, unknown> {
+  const role = normalizeBackupRole(opts.role);
+  const isSuper = isSuperAdminBackupRole(role);
+  const allEmpresas = isSuper || opts.allEmpresas === true;
+  const ids = Array.isArray(opts.empresaIds)
+    ? [...new Set((opts.empresaIds as unknown[]).map((x) => String(x ?? '').trim()).filter(Boolean))]
+    : [];
+  const primary = String(opts.empresaId ?? '').trim() || ids[0] || '';
+  const claims: Record<string, unknown> = {
+    role,
+    type: 'SYSTEM',
+    allEmpresas,
+  };
+  if (!allEmpresas) {
+    if (primary) claims.empresaId = primary;
+    if (ids.length > 0) claims.empresaIds = ids;
+    else if (primary) claims.empresaIds = [primary];
+  }
+  return claims;
+}
 
 /** Sincroniza custom claims de Auth con el rol en system_users (p. ej. tras editar rol en UI). */
 export const syncSystemUserClaims = functions.https.onCall(async (data, context) => {
@@ -1274,12 +1307,19 @@ export const syncSystemUserClaims = functions.https.onCall(async (data, context)
   if (!snap.exists) {
     throw new functions.https.HttpsError('not-found', 'Usuario de sistema no encontrado.');
   }
-  const role = normalizeBackupRole(snap.data()?.role);
+  const row = snap.data() || {};
+  const role = normalizeBackupRole(row.role);
   if (!role) {
     throw new functions.https.HttpsError('failed-precondition', 'El usuario no tiene rol asignado.');
   }
-  await admin.auth().setCustomUserClaims(targetUid, { role, type: 'SYSTEM' });
-  return { ok: true, uid: targetUid, role };
+  const claims = buildSystemUserClaims({
+    role,
+    empresaId: row.empresaId,
+    allEmpresas: row.allEmpresas,
+    empresaIds: row.empresaIds,
+  });
+  await admin.auth().setCustomUserClaims(targetUid, claims);
+  return { ok: true, uid: targetUid, role, empresaId: claims.empresaId || null, empresaIds: claims.empresaIds || [] };
 });
 
 /** Roles que pueden ejecutar limpieza masiva (coincide con ids en `roles` / `system_users.role`). */

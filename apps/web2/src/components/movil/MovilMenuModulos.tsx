@@ -71,7 +71,7 @@ export function MovilMenuModulos({ entrada = false }: { entrada?: boolean }) {
     const desde = Timestamp.fromMillis(now - MENU_TURNOS_ATRAS_MS);
     const hasta = Timestamp.fromMillis(now + MENU_TURNOS_ADELANTE_MS);
     const col = collection(db, 'turnos');
-    const q = scope && empresaId.toLowerCase() !== 'bacarsa'
+    const q = scope
       ? query(col, where('empresaId', '==', empresaId), where('startTime', '>=', desde), where('startTime', '<=', hasta))
       : query(col, where('startTime', '>=', desde), where('startTime', '<=', hasta));
     const unsub = onSnapshot(
