@@ -190,14 +190,26 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
               : Object.keys(mapRoles);
             const isSuper = isSuperAdminRoleId(role) || isSuperAdminRoleId(tokenRole);
 
-            // Siempre sincronizar claims de tenant ANTES de queries (list needs JWT empresaIds).
+            // Sync claims solo si hace falta (multiempresa sin empresaIds en JWT).
+            // No tocar SuperAdmin en cada login: evita desestabilizar la sesión.
             let tokenRoleAfter = tokenRole;
             try {
-              const syncFn = httpsCallable(functions, 'syncSystemUserClaims');
-              await syncFn({});
-              const refreshed = await u.getIdTokenResult(true);
-              tokenRoleAfter = String(refreshed.claims.role ?? '').trim() || null;
-              setClaimRole(tokenRoleAfter);
+              const tokenEmpIds = Array.isArray(token.claims.empresaIds)
+                ? (token.claims.empresaIds as unknown[]).map((x) => String(x ?? '').trim()).filter(Boolean)
+                : [];
+              const needsRoleSync = roleDocId(role || '') !== roleDocId(tokenRole || '');
+              const needsTenantClaims =
+                !isSuper &&
+                !multiEmpresa &&
+                rawEmpresaIds.length > 0 &&
+                (tokenEmpIds.length === 0 || rawEmpresaIds.some((id) => !tokenEmpIds.includes(id)));
+              if (needsRoleSync || needsTenantClaims) {
+                const syncFn = httpsCallable(functions, 'syncSystemUserClaims');
+                await syncFn({});
+                const refreshed = await u.getIdTokenResult(true);
+                tokenRoleAfter = String(refreshed.claims.role ?? '').trim() || null;
+                setClaimRole(tokenRoleAfter);
+              }
             } catch (syncErr) {
               console.warn('[auth] syncSystemUserClaims:', syncErr);
             }

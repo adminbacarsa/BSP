@@ -714,10 +714,11 @@ export default function CRMPage() {
     if (showBlockingLoader) setLoadingClients(true);
     try {
       const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
-      // No-superadmin: siempre filtrar por empresaId (query sin filtro → permission-denied).
-      const mustScope = scopeEmpresa || (!isSuperAdmin && !allEmpresas && !!empresaId);
       let snap;
-      if (mustScope) {
+      if (scopeEmpresa && empresaId.toLowerCase() !== 'bacarsa') {
+        snap = await getDocs(query(collection(db, 'clients'), where('empresaId', '==', empresaId)));
+      } else if (scopeEmpresa && !isSuperAdmin && !allEmpresas) {
+        // Bacar no-SA: equality (unscoped choca con docs de otras empresas).
         snap = await getDocs(query(collection(db, 'clients'), where('empresaId', '==', empresaId)));
       } else {
         try {

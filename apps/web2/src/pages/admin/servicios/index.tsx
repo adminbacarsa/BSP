@@ -194,7 +194,7 @@ export default function ServiciosSLAPage() {
         setFeriadosCustomSet(new Set(dates));
     });
   }, [empresaId]);
-  const { isSuperAdmin, rolePermissions } = useAuth();
+  const { isSuperAdmin, allEmpresas, rolePermissions } = useAuth();
   const canDeleteService = isSuperAdmin || (rolePermissions['SERVICES'] || []).includes('delete');
   const canCreateService = isSuperAdmin || (rolePermissions['SERVICES'] || []).includes('create');
   const canUpdateService = isSuperAdmin || (rolePermissions['SERVICES'] || []).includes('update');
@@ -456,21 +456,37 @@ export default function ServiciosSLAPage() {
     const reqId = ++loadServicesReq.current;
     setLoading(true);
     try {
-      const q = scopeEmpresa
-        ? query(collection(db, 'servicios_sla'), where('empresaId', '==', empresaId))
-        : query(collection(db, 'servicios_sla'), limit(500));
+      // Bacarsa: sin equality (legacy sin empresaId). Otras empresas: filtrar.
+      const q =
+        scopeEmpresa && empresaId.toLowerCase() !== 'bacarsa'
+          ? query(collection(db, 'servicios_sla'), where('empresaId', '==', empresaId))
+          : query(collection(db, 'servicios_sla'), limit(500));
 
       const planifQ = empresaCollectionQuery('planificacion_estados', empresaId, scopeEmpresa);
-      const [clientRows, snapshot, planifSnap] = await Promise.all([
-        slaService.getClients({ empresaId, scopeEmpresa }).catch((e) => {
-          console.error('Error cargando clientes:', e);
-          return [] as any[];
-        }),
+      // SA/Bacar: clientes legacy sin empresaId → sin equality. Multiempresa no-SA: equality.
+      const clientsScope =
+        scopeEmpresa &&
+        (empresaId.toLowerCase() !== 'bacarsa' || (!isSuperAdmin && !allEmpresas));
+      const [clientsRes, slaRes, planifRes] = await Promise.allSettled([
+        slaService.getClients({ empresaId, scopeEmpresa: clientsScope }),
         getDocsOnce(q),
         getDocsOnce(planifQ),
       ]);
 
       if (reqId !== loadServicesReq.current) return;
+
+      const clientRows =
+        clientsRes.status === 'fulfilled'
+          ? clientsRes.value
+          : ([] as any[]);
+      if (clientsRes.status === 'rejected') console.error('Error cargando clientes:', clientsRes.reason);
+
+      if (slaRes.status === 'rejected') {
+        console.error('Error cargando servicios:', slaRes.reason);
+        setDbStatus('offline');
+        return;
+      }
+      const snapshot = slaRes.value;
       setClients(clientRows);
       const clientIds = new Set(clientRows.map((c: any) => c.id));
 
@@ -489,10 +505,14 @@ export default function ServiciosSLAPage() {
         (a.clientName || a.objectiveName || '').localeCompare(b.clientName || b.objectiveName || '', 'es'),
       );
       setServices(adaptedData);
+      const planifSnap = planifRes.status === 'fulfilled' ? planifRes.value : null;
+      if (planifRes.status === 'rejected') console.error('Error planificacion_estados:', planifRes.reason);
       setPublishStatusMap(
-        buildPlanificacionPublishStatusMap(planifSnap.docs, (data) =>
-          belongsToEmpresaView(data, empresaId, migracionCompleta),
-        ),
+        planifSnap
+          ? buildPlanificacionPublishStatusMap(planifSnap.docs, (data) =>
+              belongsToEmpresaView(data, empresaId, migracionCompleta),
+            )
+          : {},
       );
       setDbStatus('online');
     } catch (error) {
@@ -501,7 +521,7 @@ export default function ServiciosSLAPage() {
     } finally {
       setLoading(false);
     }
-  }, [empresaId, scopeEmpresa, migracionCompleta]);
+  }, [empresaId, scopeEmpresa, migracionCompleta, isSuperAdmin, allEmpresas]);
 
   useEffect(() => {
     void loadServices();
