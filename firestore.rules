@@ -135,6 +135,7 @@ service cloud.firestore {
     }
 
     // Claims JWT (query-friendly). syncSystemUserClaims escribe empresaId / empresaIds / allEmpresas.
+    // Importante: las list queries validan mejor contra request.auth.token que contra get(system_users).
     function claimEmpresaId() {
       return request.auth != null && request.auth.token.empresaId is string
         ? request.auth.token.empresaId
@@ -142,9 +143,7 @@ service cloud.firestore {
     }
 
     function claimEmpresaIds() {
-      return request.auth != null
-        && request.auth.token.keys().hasAny(['empresaIds'])
-        && request.auth.token.empresaIds is list
+      return request.auth != null && request.auth.token.empresaIds is list
         ? request.auth.token.empresaIds
         : [];
     }
@@ -156,8 +155,8 @@ service cloud.firestore {
     function hasEmpresaAccess(empId) {
       return empId != '' && (
         claimEmpresaId() == empId ||
+        (request.auth.token.empresaIds is list && request.auth.token.empresaIds.hasAny([empId])) ||
         userEmpresaId() == empId ||
-        (!claimEmpresaIds().isEmpty() && claimEmpresaIds().hasAny([empId])) ||
         (!userEmpresaIds().isEmpty() && userEmpresaIds().hasAny([empId]))
       );
     }
@@ -205,14 +204,18 @@ service cloud.firestore {
       );
     }
 
+    // Primero ramas solo-JWT (permiten where empresaId == X en multiempresa).
     function tenantMatches(data) {
-      return isSuperAdmin() || systemUserHasAllEmpresas() || (
-        hasEmpresaAccess(docEmpresaId(data))
-      ) || (
-        bacarsaTenantDocMatches(data)
-      ) || (
-        bacarsaLegacyOpen() && docEmpresaId(data) == ''
-      );
+      return isSuperAdmin()
+        || claimAllEmpresas()
+        || systemUserHasAllEmpresas()
+        || (docEmpresaId(data) != '' && claimEmpresaId() == docEmpresaId(data))
+        || (docEmpresaId(data) != ''
+            && request.auth.token.empresaIds is list
+            && request.auth.token.empresaIds.hasAny([docEmpresaId(data)]))
+        || hasEmpresaAccess(docEmpresaId(data))
+        || bacarsaTenantDocMatches(data)
+        || (bacarsaLegacyOpen() && docEmpresaId(data) == '');
     }
 
     function systemUserVisibleToAdmin(data) {

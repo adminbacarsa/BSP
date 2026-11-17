@@ -714,8 +714,10 @@ export default function CRMPage() {
     if (showBlockingLoader) setLoadingClients(true);
     try {
       const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
+      // No-superadmin: siempre filtrar por empresaId (query sin filtro → permission-denied).
+      const mustScope = scopeEmpresa || (!isSuperAdmin && !allEmpresas && !!empresaId);
       let snap;
-      if (scopeEmpresa) {
+      if (mustScope) {
         snap = await getDocs(query(collection(db, 'clients'), where('empresaId', '==', empresaId)));
       } else {
         try {
@@ -4388,6 +4390,8 @@ export default function CRMPage() {
                     objectives={(selectedClient?.objetivos || []).map((o: any) => normalizeClientObjetivo(o)).filter((o: { id: string }) => o.id)}
                     billingRows={proformaBillingRows}
                     periodLabel={proformaStartDate && proformaEndDate ? `${proformaStartDate.split('-').reverse().join('/')} → ${proformaEndDate.split('-').reverse().join('/')}` : 'del período'}
+                    periodStart={proformaStartDate || ''}
+                    periodEnd={proformaEndDate || ''}
                     consumptionLoading={proformaTotals.loading}
                     actorName={currentUserName}
                     onRefresh={async () => {

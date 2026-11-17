@@ -1263,13 +1263,19 @@ function buildSystemUserClaims(opts: {
   empresaId?: unknown;
   allEmpresas?: unknown;
   empresaIds?: unknown;
+  rolesByEmpresa?: unknown;
 }): Record<string, unknown> {
   const role = normalizeBackupRole(opts.role);
   const isSuper = isSuperAdminBackupRole(role);
   const allEmpresas = isSuper || opts.allEmpresas === true;
-  const ids = Array.isArray(opts.empresaIds)
-    ? [...new Set((opts.empresaIds as unknown[]).map((x) => String(x ?? '').trim()).filter(Boolean))]
+  const fromArr = Array.isArray(opts.empresaIds)
+    ? (opts.empresaIds as unknown[]).map((x) => String(x ?? '').trim()).filter(Boolean)
     : [];
+  const fromMap =
+    opts.rolesByEmpresa && typeof opts.rolesByEmpresa === 'object' && !Array.isArray(opts.rolesByEmpresa)
+      ? Object.keys(opts.rolesByEmpresa as Record<string, unknown>).map((k) => String(k || '').trim()).filter(Boolean)
+      : [];
+  const ids = [...new Set(fromArr.length > 0 ? fromArr : fromMap)];
   const primary = String(opts.empresaId ?? '').trim() || ids[0] || '';
   const claims: Record<string, unknown> = {
     role,
@@ -1317,6 +1323,7 @@ export const syncSystemUserClaims = functions.https.onCall(async (data, context)
     empresaId: row.empresaId,
     allEmpresas: row.allEmpresas,
     empresaIds: row.empresaIds,
+    rolesByEmpresa: row.rolesByEmpresa,
   });
   await admin.auth().setCustomUserClaims(targetUid, claims);
   return { ok: true, uid: targetUid, role, empresaId: claims.empresaId || null, empresaIds: claims.empresaIds || [] };

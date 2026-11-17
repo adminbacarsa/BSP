@@ -180,9 +180,28 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             const data = snap.data();
             const role = (data.role as string) || null;
             const multiEmpresa = data.allEmpresas === true;
-            const rawEmpresaIds = Array.isArray(data.empresaIds) ? (data.empresaIds as string[]) : [];
             const mapRoles = parseRolesByEmpresa(data.rolesByEmpresa);
+            const fromDocIds = Array.isArray(data.empresaIds)
+              ? (data.empresaIds as string[]).map((x) => String(x || '').trim()).filter(Boolean)
+              : [];
+            // Si falta empresaIds pero hay rolesByEmpresa, usar esas claves (multiempresa).
+            const rawEmpresaIds = fromDocIds.length > 0
+              ? fromDocIds
+              : Object.keys(mapRoles);
             const isSuper = isSuperAdminRoleId(role) || isSuperAdminRoleId(tokenRole);
+
+            // Siempre sincronizar claims de tenant ANTES de queries (list needs JWT empresaIds).
+            let tokenRoleAfter = tokenRole;
+            try {
+              const syncFn = httpsCallable(functions, 'syncSystemUserClaims');
+              await syncFn({});
+              const refreshed = await u.getIdTokenResult(true);
+              tokenRoleAfter = String(refreshed.claims.role ?? '').trim() || null;
+              setClaimRole(tokenRoleAfter);
+            } catch (syncErr) {
+              console.warn('[auth] syncSystemUserClaims:', syncErr);
+            }
+
             const defaultEmpresa = rawEmpresaIds.length > 0 ? rawEmpresaIds[0] : (data.empresaId || '');
             const authEmpresa = isSuper || multiEmpresa
               ? (data.empresaId || '')
@@ -207,34 +226,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
             const effectiveRole = resolveRoleForEmpresa(nextProfile, nextProfile.empresaId);
             setUserRole(effectiveRole || null);
-            await loadPermissionsForRole(effectiveRole || null, {
-              allEmpresas: multiEmpresa,
-              activeEmpresaId: nextProfile.empresaId,
-              tokenRole,
-            });
-
-            try {
-              const tokenEmpIds = Array.isArray(token.claims.empresaIds)
-                ? (token.claims.empresaIds as unknown[]).map((x) => String(x ?? '').trim()).filter(Boolean)
-                : [];
-              const needsRoleSync = roleDocId(role || '') !== roleDocId(tokenRole || '');
-              const needsTenantClaims =
-                !isSuper &&
-                !multiEmpresa &&
-                rawEmpresaIds.length > 0 &&
-                (tokenEmpIds.length === 0 || rawEmpresaIds.some((id) => !tokenEmpIds.includes(id)));
-              if (needsRoleSync || needsTenantClaims) {
-                const syncFn = httpsCallable(functions, 'syncSystemUserClaims');
-                await syncFn({});
-                const refreshed = await u.getIdTokenResult(true);
-                const syncedRole = String(refreshed.claims.role ?? '').trim() || null;
-                setClaimRole(syncedRole);
-                if (isSuperAdminRoleId(role) || isSuperAdminRoleId(syncedRole)) {
-                  setRolePermissions(fullSuperAdminPermissions());
-                }
-              }
-            } catch {
-              /* sync opcional */
+            if (isSuperAdminRoleId(role) || isSuperAdminRoleId(tokenRoleAfter)) {
+              setRolePermissions(fullSuperAdminPermissions());
+            } else {
+              await loadPermissionsForRole(effectiveRole || null, {
+                allEmpresas: multiEmpresa,
+                activeEmpresaId: nextProfile.empresaId,
+                tokenRole: tokenRoleAfter,
+              });
             }
           } else {
             setProfile(null);
