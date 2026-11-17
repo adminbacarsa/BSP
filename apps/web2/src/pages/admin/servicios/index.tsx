@@ -194,7 +194,7 @@ export default function ServiciosSLAPage() {
         setFeriadosCustomSet(new Set(dates));
     });
   }, [empresaId]);
-  const { isSuperAdmin, allEmpresas, rolePermissions } = useAuth();
+  const { isSuperAdmin, allEmpresas, rolePermissions, user, loading: authLoading } = useAuth();
   const canDeleteService = isSuperAdmin || (rolePermissions['SERVICES'] || []).includes('delete');
   const canCreateService = isSuperAdmin || (rolePermissions['SERVICES'] || []).includes('create');
   const canUpdateService = isSuperAdmin || (rolePermissions['SERVICES'] || []).includes('update');
@@ -447,20 +447,24 @@ export default function ServiciosSLAPage() {
   }, [view, empresaId, scopeEmpresa, migracionCompleta, hasEncargadoPos]);
 
   const loadServicesReq = useRef(0);
-  // Carga única de servicios_sla + clientes en paralelo (sin listener persistente).
-  // Las mutaciones (create/edit/delete) actualizan el estado local directamente.
+  const kpiPeriodRef = useRef({ year: new Date().getFullYear(), month: new Date().getMonth() });
+  // Un mes por visita. Clientes y publicación van en la misma tanda. El mes sale de kpiPeriodRef
+  // para no recrear el callback antes de que existan kpiYear y kpiMonth.
   const loadServices = useCallback(async () => {
-    if (!empresaId) return;
+    if (!empresaId || authLoading || !user) return;
+    const { year, month } = kpiPeriodRef.current;
+    const { start, end } = monthBoundsYmd(year, month);
     // Al entrar, el SA pasa un instante por su empresa del auth (bacarsa) antes de la elegida:
     // la carga vieja (más lenta) no debe pisar a la nueva.
     const reqId = ++loadServicesReq.current;
     setLoading(true);
     try {
-      // Bacarsa: sin equality (legacy sin empresaId). Otras empresas: filtrar.
-      const q =
-        scopeEmpresa && empresaId.toLowerCase() !== 'bacarsa'
-          ? query(collection(db, 'servicios_sla'), where('empresaId', '==', empresaId))
-          : query(collection(db, 'servicios_sla'), limit(500));
+      const q = query(
+        collection(db, 'servicios_sla'),
+        where('empresaId', '==', empresaId),
+        where('startDate', '>=', start),
+        where('startDate', '<=', end),
+      );
 
       const planifQ = empresaCollectionQuery('planificacion_estados', empresaId, scopeEmpresa);
       // SA/Bacar: clientes legacy sin empresaId → sin equality. Multiempresa no-SA: equality.
@@ -469,7 +473,7 @@ export default function ServiciosSLAPage() {
         (empresaId.toLowerCase() !== 'bacarsa' || (!isSuperAdmin && !allEmpresas));
       const [clientsRes, slaRes, planifRes] = await Promise.allSettled([
         slaService.getClients({ empresaId, scopeEmpresa: clientsScope }),
-        getDocsOnce(q),
+        getDocs(q),
         getDocsOnce(planifQ),
       ]);
 
@@ -501,6 +505,10 @@ export default function ServiciosSLAPage() {
         } as ServiceSLA;
       });
       adaptedData = filterSlaRowsByEmpresa(adaptedData, empresaId, scopeEmpresa, clientIds);
+      adaptedData = adaptedData.filter((s) => {
+        const sd = String(s.startDate || '').slice(0, 10);
+        return sd >= start && sd <= end;
+      });
       adaptedData.sort((a, b) =>
         (a.clientName || a.objectiveName || '').localeCompare(b.clientName || b.objectiveName || '', 'es'),
       );
@@ -521,7 +529,7 @@ export default function ServiciosSLAPage() {
     } finally {
       setLoading(false);
     }
-  }, [empresaId, scopeEmpresa, migracionCompleta, isSuperAdmin, allEmpresas]);
+  }, [empresaId, scopeEmpresa, migracionCompleta, isSuperAdmin, allEmpresas, authLoading, user]);
 
   useEffect(() => {
     void loadServices();
@@ -2106,6 +2114,27 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
 
   const [kpiMonth, setKpiMonth] = useState(new Date().getMonth());
   const [kpiYear, setKpiYear]   = useState(new Date().getFullYear());
+
+  useEffect(() => {
+    const prev = kpiPeriodRef.current;
+    const same = prev.year === kpiYear && prev.month === kpiMonth;
+    kpiPeriodRef.current = { year: kpiYear, month: kpiMonth };
+    if (!same) void loadServices();
+  }, [kpiYear, kpiMonth, loadServices]);
+
+  const mesesAnteriores = useMemo(() => {
+    const nombres = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+    const cards: { year: number; month: number; label: string }[] = [];
+    for (let i = 4; i >= 1; i--) {
+      const d = new Date(kpiYear, kpiMonth - i, 1);
+      cards.push({
+        year: d.getFullYear(),
+        month: d.getMonth(),
+        label: `${nombres[d.getMonth()]} ${d.getFullYear()}`,
+      });
+    }
+    return cards;
+  }, [kpiYear, kpiMonth]);
   const [ledgerMonth, setLedgerMonth] = useState<HoursLedgerMonth | null>(null);
   const [ledgerBusy, setLedgerBusy] = useState(false);
   const [ledgerFailed, setLedgerFailed] = useState(false);
@@ -2640,6 +2669,20 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                 <span className="text-[9px] font-bold text-slate-400 normal-case">{kpiHoursHint}</span>
                 <button onClick={kpiNextMonth} className="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-400 font-black text-sm transition-colors">›</button>
               </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Meses anteriores</span>
+              {mesesAnteriores.map((m) => (
+                <button
+                  key={`${m.year}-${m.month}`}
+                  type="button"
+                  data-mes-anterior={`${m.year}-${String(m.month + 1).padStart(2, '0')}`}
+                  onClick={() => { setKpiYear(m.year); setKpiMonth(m.month); }}
+                  className="px-3 py-2 rounded-2xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-[10px] font-black uppercase tracking-wide text-slate-500 shadow-sm hover:bg-slate-50 dark:hover:bg-slate-700"
+                >
+                  {m.label}
+                </button>
+              ))}
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               {([

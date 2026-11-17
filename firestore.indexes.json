@@ -318,6 +318,14 @@
       ]
     },
     {
+      "collectionGroup": "servicios_sla",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "empresaId", "order": "ASCENDING" },
+        { "fieldPath": "startDate", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "ausencias",
       "queryScope": "COLLECTION",
       "fields": [
