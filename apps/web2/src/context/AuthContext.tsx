@@ -114,21 +114,32 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       return;
     }
     try {
-      const roleSnap = await getDoc(doc(db, 'roles', roleDocId(role)));
-      if (!roleSnap.exists()) {
+      // Probar id normalizado y el crudo (roles viejos / PLAN+OPER, etc.).
+      const candidates = [...new Set([roleDocId(role), String(role).trim()].filter(Boolean))];
+      let roleData: Record<string, unknown> | null = null;
+      for (const id of candidates) {
+        const roleSnap = await getDoc(doc(db, 'roles', id));
+        if (roleSnap.exists()) {
+          roleData = roleSnap.data() as Record<string, unknown>;
+          break;
+        }
+      }
+      if (!roleData) {
+        console.warn('[auth] Rol no encontrado en roles/', candidates.join(' | '));
         setRolePermissions({});
         return;
       }
-      const roleData = roleSnap.data();
       const roleEmp = String(roleData?.empresaId ?? '').trim();
       const activeEmp = String(opts.activeEmpresaId || '').trim();
       // Rol de otra empresa: solo se acepta si el usuario es allEmpresas (legado).
       if (!opts.allEmpresas && roleEmp && activeEmp && roleEmp.toLowerCase() !== activeEmp.toLowerCase()) {
+        console.warn('[auth] Rol de otra empresa bloqueado', { role, roleEmp, activeEmp });
         setRolePermissions({});
         return;
       }
       setRolePermissions((roleData?.permissions || {}) as Record<string, string[]>);
-    } catch {
+    } catch (err) {
+      console.warn('[auth] No se pudieron leer permisos del rol (¿reglas roles?):', role, err);
       setRolePermissions({});
     }
   }, []);

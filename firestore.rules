@@ -305,8 +305,19 @@ service cloud.firestore {
       return data.status == 'activo' || data.status == 'abierto' || data.status == 'en_curso';
     }
 
+    // Lectura de roles: SuperAdmin / allEmpresas / sin tenant / empresa primaria /
+    // o cualquier empresa del subconjunto (empresaIds). Sin esto, un usuario
+    // multiempresa no puede leer el rol de la 2ª empresa → menú lateral vacío.
     function roleReadable(data) {
-      return isSuperAdmin() || docEmpresaId(data) == '' || docEmpresaId(data) == userEmpresaId();
+      return isSuperAdmin() ||
+        systemUserHasAllEmpresas() ||
+        docEmpresaId(data) == '' ||
+        docEmpresaId(data) == userEmpresaId() ||
+        (
+          !userEmpresaIds().isEmpty() &&
+          docEmpresaId(data) != '' &&
+          userEmpresaIds().hasAny([docEmpresaId(data)])
+        );
     }
 
     function roleWritable(data) {

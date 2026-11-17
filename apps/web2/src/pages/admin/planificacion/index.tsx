@@ -17,7 +17,7 @@ import {
     FastForward, Rewind, AlertOctagon, Siren, FileText, Fingerprint, CalendarCheck, HelpCircle, MousePointerClick, Check, Database, Activity,
     PowerOff, LockKeyhole, Ghost, Maximize2, Maximize, Minimize2, Copy, ClipboardPaste, Keyboard, Scissors, Wand2, BarChart3, BarChart2, PanelLeft, LayoutList,
     ChevronsUp, ChevronsDown, MoreHorizontal, FlaskConical, Shuffle, Timer, Repeat, UnfoldHorizontal, FileSpreadsheet, Share2,
-    ClipboardList, ListFilter
+    ClipboardList, ListFilter, Pin
 } from 'lucide-react';
 
 import { PlanificacionMovil } from '@/components/movil/PlanificacionMovil';
@@ -25,6 +25,7 @@ import { PuntajeChip } from '@/components/desempeno/PuntajeChip';
 import { useMovilMode } from '@/lib/movil/useMovilMode';
 import { canAccessAutoLab } from '@/lib/planificacion/autoLabAccess';
 import { canAssignFrancoTrabajado } from '@/lib/planificacion/francoTrabajadoAccess';
+import { readPreferPlanifModoRapido, writePreferPlanifModoRapido } from '@/lib/panelViewPrefs';
 import { SwapSupervisorQueue } from '@/components/planificacion/SwapSupervisorQueue';
 import { ToolbarFloatMenu } from '@/components/planificacion/ToolbarFloatMenu';
 import { placeToolbarMenu } from '@/lib/planificacion/toolbarFloatMenu';
@@ -2721,11 +2722,9 @@ function PlanificacionDesktop() {
             if (rows.length) setCatalogoNovedad(rows.map((d) => ({ code: String(d.code), label: String(d.label) })));
         }, () => {});
     }, [empresaId, scopeEmpresa]);
-    const modoRapidoStorageKey = `cosp-planif-modo-rapido:${authUser?.uid || 'anon'}`;
     useEffect(() => {
-        if (typeof window === 'undefined') return;
-        setModoRapido(localStorage.getItem(modoRapidoStorageKey) === '1');
-    }, [modoRapidoStorageKey]);
+        setModoRapido(readPreferPlanifModoRapido(authUser?.uid));
+    }, [authUser?.uid]);
     const pendingChangesRef = useRef(pendingChanges);
     pendingChangesRef.current = pendingChanges;
     const exigeCoberturaGrilla = slaExigeCobertura(activePlanningSlaRow as { exigeCobertura?: boolean } | null);
@@ -14405,7 +14404,7 @@ function PlanificacionDesktop() {
         }
         if (!modoRapido) {
             setModoRapido(true);
-            if (typeof window !== 'undefined') localStorage.setItem(modoRapidoStorageKey, '1');
+            writePreferPlanifModoRapido(authUser?.uid, true);
         }
         if (n > 0 && !origenArranqueRef.current && !armadoGuardado?.iniciadoAt) origenArranqueRef.current = 'IMPORTAR_EXCEL';
         if (payload.ordenIds?.length) {
@@ -17588,11 +17587,13 @@ function PlanificacionDesktop() {
     const toggleModoRapido = () => {
         setModoRapido((v) => {
             const next = !v;
-            if (typeof window !== 'undefined') localStorage.setItem(modoRapidoStorageKey, next ? '1' : '0');
+            writePreferPlanifModoRapido(authUser?.uid, next);
             if (next) {
                 setSelection({ start: null, end: null });
                 setIsDragging(false);
-                toast.message('Modo rápido: flechas o clic para elegir la celda y escribí el código. «?» muestra los atajos.');
+                toast.message('Modo rápido (preferencia): al volver a Planificación queda activo. Flechas o clic + código. «?» atajos.');
+            } else {
+                toast.message('Modo rápido desactivado: al entrar a Planificación se abre en modo clásico.');
             }
             return next;
         });
@@ -21900,20 +21901,31 @@ function PlanificacionDesktop() {
                                 {/* ASIGNAR — siempre visible */}
                                 <button onClick={() => { setAddSearchTerm(''); setShowAddModal(true); }} disabled={!selectedObjective || isServiceLocked} title="Asignar guardia al cronograma" aria-label="Asignar guardia" className="flex items-center justify-center w-8 h-8 bg-slate-900 text-white rounded-xl hover:bg-slate-800 disabled:opacity-50 shrink-0"><UserPlus size={16}/></button>
 
-                                {/* MODO RÁPIDO — la grilla como planilla */}
+                                {/* MODO RÁPIDO — la grilla como planilla (preferencia al entrar) */}
                                 {selectedObjective && (
                                     <div className="relative flex shrink-0 items-center gap-1">
                                         <button
                                             type="button"
                                             onClick={toggleModoRapido}
                                             data-modo-rapido-toggle={modoRapido ? '1' : '0'}
-                                            title={modoRapido ? 'Modo rápido (teclado): prendido · clic para salir' : 'Modo rápido (teclado): cargar la grilla como una planilla'}
-                                            aria-label="Modo rápido (teclado)"
+                                            title={modoRapido
+                                                ? 'Modo rápido por preferencia: activo al entrar · clic para salir y volver al clásico por defecto'
+                                                : 'Modo rápido por preferencia: al activarlo queda por defecto al entrar a Planificación'}
+                                            aria-label="Modo rápido (preferencia al entrar)"
                                             aria-pressed={modoRapido}
                                             className={`flex items-center justify-center w-8 h-8 rounded-xl border transition-colors shrink-0 ${modoRapido ? 'border-indigo-700 bg-indigo-600 text-white shadow-sm' : 'border-slate-200 bg-white text-slate-600 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700'}`}
                                         >
                                             <Keyboard size={16} aria-hidden/>
                                         </button>
+                                        {modoRapido && (
+                                            <span
+                                                title="Preferencia activa: Planificación abre en modo rápido"
+                                                className="hidden sm:inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 text-[9px] font-black uppercase tracking-wide"
+                                            >
+                                                <Pin size={10} className="fill-current" aria-hidden/>
+                                                Pref
+                                            </span>
+                                        )}
                                         {modoRapido && (
                                             <>
                                                 <button

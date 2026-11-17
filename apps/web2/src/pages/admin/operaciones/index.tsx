@@ -5,7 +5,7 @@ import Head from 'next/head';
 import dynamic from 'next/dynamic';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { OperacionMovil } from '@/components/movil/OperacionMovil';
-import { useMovilMode } from '@/lib/movil/useMovilMode';
+import { readMovilMode, useMovilMode } from '@/lib/movil/useMovilMode';
 import { CronogramaAvisoLinea } from '@/components/operaciones/CronogramaAvisoLinea';
 import { PuntajeChip } from '@/components/desempeno/PuntajeChip';
 import { useCronogramaSinPublicar } from '@/hooks/useCronogramaSinPublicar';
@@ -14,7 +14,7 @@ import {
     Clock, Siren, CheckCircle, LogOut, AlertTriangle, ClipboardList, Printer,
     Phone, MessageCircle, Calendar, ChevronDown, ChevronRight, ChevronUp,
     Filter, Send, PlayCircle, EyeOff, X, Briefcase, UserX, CornerUpLeft,
-    MapPin, Navigation, Users, ArrowLeftRight, BellRing, Bell, ChevronLeft, XCircle, Zap,
+    MapPin, Navigation, Users, ArrowLeftRight, BellRing, Bell, ChevronLeft, XCircle, Zap, Pin,
     FileText, Volume2, VolumeX, RefreshCw, AlarmClock, Loader2, Timer, GitBranch
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -25,6 +25,7 @@ import { useStaleBuild } from '@/hooks/useStaleBuild';
 import { useOperatorSession } from '@/hooks/useOperatorSession';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
+import { readPreferOpsModoRapido, writePreferOpsModoRapido } from '@/lib/panelViewPrefs';
 import { POPUP_STYLES } from '@/components/operaciones/mapStyles';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -1757,7 +1758,7 @@ const markAbsentInFlight = new Set<string>();
 
 export default function OperacionesPage() {
     const router = useRouter();
-    const { assignedClientId, userRole, isSuperAdmin } = useAuth();
+    const { user, assignedClientId, userRole, isSuperAdmin } = useAuth();
     const { empresaId, empresa } = useEmpresa();
     const migracionCompleta = !!(empresa as any)?.migracionCompleta;
     const centroControlEnabled = empresa?.centroControlEnabled !== false;
@@ -1775,7 +1776,20 @@ export default function OperacionesPage() {
     const manualGuardiaOn = !session.loading && session.inRoom;
     /** Demo | Auto | Manual — excluyentes a nivel SALA empresa. */
     const [manualAssist, setManualAssist] = useState(true);
+    const [preferOpsRapido, setPreferOpsRapido] = useState(false);
     useEffect(() => { setManualAssist(readManualAssistPreference()); }, []);
+    useEffect(() => {
+        setPreferOpsRapido(readPreferOpsModoRapido(user?.uid));
+    }, [user?.uid]);
+    // Preferencia: al abrir Operaciones (escritorio) ir directo a modo rápido, salvo ?classic=1.
+    // readMovilMode() sincrónico: useMovilMode arranca en false y redirigiría el celular por error.
+    useEffect(() => {
+        if (!router.isReady || movil || readMovilMode()) return;
+        if (router.query.classic === '1') return;
+        if (!readPreferOpsModoRapido(user?.uid)) return;
+        void router.replace('/admin/operaciones/modo-rapido');
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- solo al listo / preferencia / móvil
+    }, [router.isReady, router.query.classic, user?.uid, movil]);
     const opsMode = resolveOpsMode({
         modoDemoEnabled: modoDemoActivo,
         hasRoomManual,
@@ -3966,7 +3980,34 @@ export default function OperacionesPage() {
                                     </span>
                                 )}
                                 {isExternalMap && <button onClick={handleRestoreMap} className="px-2 py-1 bg-indigo-50 text-indigo-700 font-bold text-[9px] rounded-lg border">Restaurar</button>}
-                                <button onClick={() => void router.push('/admin/operaciones/modo-rapido')} title="Modo Rápido — CC con WhatsApp" className="px-2 py-1 bg-emerald-500 text-white font-bold text-[10px] rounded-lg border border-emerald-600 hover:bg-emerald-600 transition-colors flex items-center gap-1"><Zap size={11}/>CC Rápido</button>
+                                <div className="flex items-center gap-0.5">
+                                    <button
+                                        type="button"
+                                        onClick={() => void router.push('/admin/operaciones/modo-rapido')}
+                                        title="Modo Rápido — CC con WhatsApp"
+                                        className="px-2 py-1 bg-emerald-500 text-white font-bold text-[10px] rounded-l-lg border border-emerald-600 hover:bg-emerald-600 transition-colors flex items-center gap-1"
+                                    >
+                                        <Zap size={11}/>CC Rápido
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            const next = !preferOpsRapido;
+                                            writePreferOpsModoRapido(user?.uid, next);
+                                            setPreferOpsRapido(next);
+                                            toast.message(next
+                                                ? 'Preferencia: al entrar a Operaciones se abre el modo rápido'
+                                                : 'Preferencia quitada: al entrar se abre el Centro de Control clásico');
+                                        }}
+                                        title={preferOpsRapido
+                                            ? 'Preferencia activa: al entrar a Operaciones se abre el modo rápido (clic para quitar)'
+                                            : 'Fijar modo rápido por preferencia al entrar a Operaciones'}
+                                        aria-pressed={preferOpsRapido}
+                                        className={`px-1.5 py-1 font-bold text-[10px] rounded-r-lg border transition-colors flex items-center ${preferOpsRapido ? 'bg-emerald-700 text-white border-emerald-800' : 'bg-white text-emerald-700 border-emerald-600 hover:bg-emerald-50'}`}
+                                    >
+                                        <Pin size={11} className={preferOpsRapido ? 'fill-current' : ''}/>
+                                    </button>
+                                </div>
                                 {isSuperAdmin && <button onClick={() => setShowDebugPanel(true)} title="Panel de diagnóstico" className="px-2 py-1 bg-amber-50 text-amber-700 font-bold text-[9px] rounded-lg border border-amber-200 hover:bg-amber-100 transition-colors">🔍 Debug</button>}
                                 <button onClick={() => logic.setIsCompact(!logic.isCompact)} aria-label={logic.isCompact ? 'Expandir panel' : 'Compactar panel'} className="p-1 bg-slate-100 rounded-lg text-slate-600">{logic.isCompact ? <Maximize2 size={12} aria-hidden="true"/> : <Minimize2 size={12} aria-hidden="true"/>}</button>
                             </div>

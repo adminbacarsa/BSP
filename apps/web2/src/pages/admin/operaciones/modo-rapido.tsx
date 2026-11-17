@@ -19,6 +19,7 @@ import {
   ChevronRight,
   ChevronUp,
   MessageSquare,
+  Pin,
   Search,
   Zap,
 } from 'lucide-react';
@@ -27,6 +28,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { db } from '@/lib/firebase';
 import { empresaCollectionQuery, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
+import { readPreferOpsModoRapido, writePreferOpsModoRapido } from '@/lib/panelViewPrefs';
 import { isRestFrancoShift } from '@/hooks/useOperacionesMonitor';
 import {
   TurnoHoy,
@@ -51,7 +53,6 @@ const SKIP_CODES = new Set([
   'F',
   'FF',
   'FP',
-  'FT',
 ]);
 
 function formatHHMM(ts: Timestamp | { toDate: () => Date } | null | undefined): string {
@@ -92,8 +93,15 @@ function parseHHMMToMins(hhmm: string): number | null {
   return parts[0] * 60 + parts[1];
 }
 
-/** Minutos desde expected (HH:MM del día actual) hasta nowMs. Positivo = tarde. */
-function minutesSinceExpected(expected: string, nowMs: number): number | null {
+/** Minutos desde expected hasta nowMs. Positivo = tarde. Preferir startTimeRaw (fecha real). */
+function minutesSinceExpected(
+  expected: string,
+  nowMs: number,
+  startTimeRaw?: Timestamp,
+): number | null {
+  if (startTimeRaw && typeof startTimeRaw.toDate === 'function') {
+    return Math.floor((nowMs - startTimeRaw.toDate().getTime()) / 60000);
+  }
   const expMins = parseHHMMToMins(expected);
   if (expMins === null) return null;
   const d = new Date(nowMs);
@@ -247,6 +255,22 @@ function useTurnosHoy({
         const startMs = toStartMs(shift.startTime);
         if (Number.isNaN(startMs)) continue;
 
+        if (String(shift.status || '').toUpperCase() === 'COMPLETED') continue;
+
+        let endMs = toStartMs(shift.endTime);
+        if (Number.isNaN(endMs)) endMs = startMs;
+        if (endMs <= startMs) endMs += 24 * 3600000;
+        const nowMs = Date.now();
+        const startDate = new Date(startMs);
+        const nowDate = new Date(nowMs);
+        const sameCalendarDay =
+          startDate.getFullYear() === nowDate.getFullYear() &&
+          startDate.getMonth() === nowDate.getMonth() &&
+          startDate.getDate() === nowDate.getDate();
+        const inProgress = startMs <= nowMs && endMs > nowMs;
+        const startsSoon = startMs > nowMs && startMs - nowMs <= 4 * 3600000;
+        if (!inProgress && !sameCalendarDay && !startsSoon) continue;
+
         const endTs = shift.endTime as Timestamp | undefined;
         const startTs = shift.startTime as Timestamp;
         const realTs = shift.realStartTime as Timestamp | undefined;
@@ -384,7 +408,11 @@ function classifyEstado(
   if (pendingEntry) return { estado: 'PENDIENTE_WA', pendingEntry };
   if (turno.turnoStatus === 'ABSENT') return { estado: 'AUSENTE', pendingEntry };
 
-  const late = minutesSinceExpected(turno.expected, nowMs);
+  const late = minutesSinceExpected(
+    turno.expected,
+    nowMs,
+    turno.startTimeRaw as Timestamp | undefined,
+  );
   if (late !== null && late > 30) return { estado: 'NO_LLEGO', pendingEntry };
   if (late !== null && late > 10) return { estado: 'TARDANZA', pendingEntry };
   return { estado: 'ESPERANDO', pendingEntry };
@@ -394,6 +422,7 @@ function buildDiff(
   expected: string,
   real: string | undefined,
   nowMs: number,
+  startTimeRaw?: Timestamp,
 ): { label: string; tone: GuardRowModel['diffTone'] } {
   if (real) {
     const exp = parseHHMMToMins(expected);
@@ -405,7 +434,7 @@ function buildDiff(
     return { label: 'puntual', tone: 'early' };
   }
 
-  const late = minutesSinceExpected(expected, nowMs);
+  const late = minutesSinceExpected(expected, nowMs, startTimeRaw);
   if (late === null) return { label: '—', tone: 'neutral' };
   if (late < 0) return { label: `en ${Math.abs(late)} min`, tone: 'countdown' };
   if (late === 0) return { label: 'en 0 min', tone: 'countdown' };
@@ -1393,7 +1422,12 @@ export default function ModoRapidoPage() {
   const [toast, setToast] = useState<{ msg: string; color: string } | null>(null);
   const [coberturaModal, setCoberturaModal] = useState<GuardRowModel | null>(null);
   const [accionesModal, setAccionesModal] = useState<GuardRowModel | null>(null);
+  const [preferOpsRapido, setPreferOpsRapido] = useState(false);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    setPreferOpsRapido(readPreferOpsModoRapido(user?.uid));
+  }, [user?.uid]);
 
   const showToast = useCallback((msg: string, color = 'bg-slate-800') => {
     setToast({ msg, color });
@@ -1541,7 +1575,12 @@ export default function ModoRapidoPage() {
           realDisplay !== '—'
             ? realDisplay
             : undefined;
-        const diff = buildDiff(turno.expected, realForDiff, nowMs);
+        const diff = buildDiff(
+          turno.expected,
+          realForDiff,
+          nowMs,
+          turno.startTimeRaw as Timestamp | undefined,
+        );
 
         return {
           employeeName,
@@ -1564,6 +1603,9 @@ export default function ModoRapidoPage() {
       const cover = base.find((other) => {
         if (other === row) return false;
         if (other.estado === 'NO_LLEGO' || other.estado === 'AUSENTE') return false;
+        // Solo un FT (franco trabajado) es evidencia real de cobertura: un compañero
+        // haciendo su M/T/N normal en el mismo horario no está cubriendo a nadie.
+        if (other.turno.code !== 'FT') return false;
         if (!other.turno.objectiveId || other.turno.objectiveId !== row.turno.objectiveId) return false;
         if (other.turno.expected !== row.turno.expected) return false;
         if (
@@ -1955,13 +1997,36 @@ export default function ModoRapidoPage() {
         <header className="flex items-center gap-2 px-4 py-2 bg-white border-b border-slate-200 flex-shrink-0 min-h-11">
           <button
             type="button"
-            onClick={() => void router.push('/admin/operaciones')}
+            onClick={() => void router.push('/admin/operaciones?classic=1')}
             className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500"
+            title="Volver al Centro de Control clásico"
           >
             <ArrowLeft size={15} />
           </button>
           <Zap size={14} className="text-emerald-600 ml-1" />
           <span className="text-sm font-black text-slate-800">CC Modo Rápido</span>
+          <button
+            type="button"
+            onClick={() => {
+              const next = !preferOpsRapido;
+              writePreferOpsModoRapido(user?.uid, next);
+              setPreferOpsRapido(next);
+              showToast(
+                next
+                  ? 'Preferencia: al entrar a Operaciones se abre el modo rápido'
+                  : 'Preferencia quitada: al entrar se abre el clásico',
+                next ? 'bg-emerald-700' : 'bg-slate-700',
+              );
+            }}
+            title={preferOpsRapido
+              ? 'Preferencia activa: al entrar a Operaciones se abre el modo rápido'
+              : 'Fijar modo rápido por preferencia al entrar'}
+            aria-pressed={preferOpsRapido}
+            className={`ml-1 px-1.5 py-1 rounded-lg border text-[10px] font-bold flex items-center gap-1 transition-colors ${preferOpsRapido ? 'border-emerald-700 bg-emerald-600 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-300 hover:text-emerald-700'}`}
+          >
+            <Pin size={11} className={preferOpsRapido ? 'fill-current' : ''} />
+            Por defecto
+          </button>
           {wa.badge > 0 && (
             <span className="px-1.5 py-0.5 bg-red-500 text-white text-[9px] font-bold rounded-full">
               {wa.badge}

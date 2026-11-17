@@ -32,6 +32,7 @@ import { useMovilMode } from '@/lib/movil/useMovilMode';
 import { GuardiaPuntajeProvider } from '@/context/GuardiaPuntajeContext';
 import { movilModuleForPath, movilRouteHasMobileVersion } from '@/lib/movil/navItems';
 import { useAusenciasPorRevisar } from '@/hooks/useAusenciasPorRevisar';
+import { opsLandingHref } from '@/lib/panelViewPrefs';
 
 /** Título del header según el módulo (ruta) actual */
 function getTitleByPath(pathname: string): string | null {
@@ -72,6 +73,7 @@ function BottomNav() {
   const { count: guardDevicePendingCount } = usePendingGuardDeviceCount();
   const { count: ausenciasPorRevisar } = useAusenciasPorRevisar(empresaId);
   const isActive = (href: string) => router.pathname.startsWith(href);
+  // Móvil siempre al CC clásico (OperacionMovil); la preferencia modo rápido es de escritorio.
   return (
     <nav
       className="fixed bottom-0 left-0 right-0 z-50 flex items-stretch border-t lg:hidden safe-area-bottom"
@@ -378,6 +380,10 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
   const isEmulatorMode = process.env.NEXT_PUBLIC_USE_EMULATOR === 'true';
   const { compactSidebar } = usePageHeader();
   const { empresa, empresaId } = useEmpresa();
+  const [opsNavHref, setOpsNavHref] = useState('/admin/operaciones');
+  useEffect(() => {
+    setOpsNavHref(opsLandingHref(user?.uid));
+  }, [user?.uid, router.pathname]);
   const isTraining = !!empresa?.isTrainingEmpresa;
   const { session: trainingSession } = useTrainingSession();
   // Módulos desbloqueados: completados + el módulo activo actual
@@ -666,7 +672,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
           )}
 
           {(canReadModule('OPERATIONS') || canReadModule('DASHBOARD') || canReadModule('PLANNING')) && (
-            <Link href="/admin/operaciones" prefetch={false} title="Centro Control"
+            <Link href={opsNavHref} prefetch={false} title="Centro Control"
               className={`${getLinkHoverClass('/admin/operaciones')} relative${isModuleLocked('OPERATIONS') ? ' opacity-40 pointer-events-none' : ''}`}
               style={getLinkStyle('/admin/operaciones', true)}>
               <Radio size={18} className="shrink-0" />
