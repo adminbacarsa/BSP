@@ -109,37 +109,43 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setRolePermissions(fullSuperAdminPermissions());
       return;
     }
+    // Preferir callable (Admin SDK): no depende de rules de `roles/` ni del empresaId del doc del rol.
+    try {
+      const fn = httpsCallable(functions, 'resolvePanelPermissions');
+      const res = await fn({ empresaId: opts.activeEmpresaId || '' });
+      const payload = (res.data || {}) as {
+        permissions?: Record<string, string[]>;
+        isSuperAdmin?: boolean;
+      };
+      if (payload.isSuperAdmin) {
+        setRolePermissions(fullSuperAdminPermissions());
+        return;
+      }
+      if (payload.permissions && typeof payload.permissions === 'object') {
+        setRolePermissions(payload.permissions);
+        return;
+      }
+    } catch (err) {
+      console.warn('[auth] resolvePanelPermissions falló, fallback a roles/', err);
+    }
     if (!role) {
       setRolePermissions({});
       return;
     }
     try {
-      // Probar id normalizado y el crudo (roles viejos / PLAN+OPER, etc.).
-      const candidates = [...new Set([roleDocId(role), String(role).trim()].filter(Boolean))];
-      let roleData: Record<string, unknown> | null = null;
+      const candidates = [...new Set([roleDocId(role), String(role).trim(), String(role).trim().toUpperCase()].filter(Boolean))];
       for (const id of candidates) {
         const roleSnap = await getDoc(doc(db, 'roles', id));
         if (roleSnap.exists()) {
-          roleData = roleSnap.data() as Record<string, unknown>;
-          break;
+          // Rol ya resuelto por empresa activa: no anular por empresaId del documento.
+          setRolePermissions((roleSnap.data()?.permissions || {}) as Record<string, string[]>);
+          return;
         }
       }
-      if (!roleData) {
-        console.warn('[auth] Rol no encontrado en roles/', candidates.join(' | '));
-        setRolePermissions({});
-        return;
-      }
-      const roleEmp = String(roleData?.empresaId ?? '').trim();
-      const activeEmp = String(opts.activeEmpresaId || '').trim();
-      // Rol de otra empresa: solo se acepta si el usuario es allEmpresas (legado).
-      if (!opts.allEmpresas && roleEmp && activeEmp && roleEmp.toLowerCase() !== activeEmp.toLowerCase()) {
-        console.warn('[auth] Rol de otra empresa bloqueado', { role, roleEmp, activeEmp });
-        setRolePermissions({});
-        return;
-      }
-      setRolePermissions((roleData?.permissions || {}) as Record<string, string[]>);
+      console.warn('[auth] Rol no encontrado en roles/', candidates.join(' | '));
+      setRolePermissions({});
     } catch (err) {
-      console.warn('[auth] No se pudieron leer permisos del rol (¿reglas roles?):', role, err);
+      console.warn('[auth] No se pudieron leer permisos del rol:', role, err);
       setRolePermissions({});
     }
   }, []);

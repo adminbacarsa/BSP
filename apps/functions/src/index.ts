@@ -50,7 +50,7 @@ import { revertirAusenciaShift } from './attendance/revertirAusencia';
 import { loadPositionHasContinuity, positionHasContinuityFromSlaDoc } from './coverage/positionHasContinuity';
 import { isEmpresaManualMode } from './ops/opsManualMode';
 import { sesionOperadorCallable } from './ops/sesionOperadorHandler';
-import { resolveStaffProfileCallable } from './ops/resolveStaffProfileHandler';
+import { resolvePanelPermissionsCallable, resolveStaffProfileCallable } from './ops/resolveStaffProfileHandler';
 import { runAutoCompletarTurnosPass } from './scheduling/autoCompletarTurnosCore';
 import { processEarlyWithdrawal } from './coverage/earlyWithdrawalCore';
 import { runSlaUnplannedGapPass } from './coverage/slaUnplannedGapPass';
@@ -1490,6 +1490,7 @@ export const cerrarTurnoPortal = functions.https.onCall(async (data, context) =>
 
 export const sesionOperador = sesionOperadorCallable;
 export const resolveStaffProfile = resolveStaffProfileCallable;
+export const resolvePanelPermissions = resolvePanelPermissionsCallable;
 export { scheduledCerrarContratosVencidos, reabrirContratoSla, cerrarContratoSla } from './servicios/contratoCierre';
 export { onPlanificacionPublicadaRenovarSla } from './servicios/renovarSlaMes';
 

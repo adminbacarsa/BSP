@@ -33,6 +33,7 @@ import { GuardiaPuntajeProvider } from '@/context/GuardiaPuntajeContext';
 import { movilModuleForPath, movilRouteHasMobileVersion } from '@/lib/movil/navItems';
 import { useAusenciasPorRevisar } from '@/hooks/useAusenciasPorRevisar';
 import { opsLandingHref } from '@/lib/panelViewPrefs';
+import { firstAllowedAdminPath, moduleKeyForAdminPath } from '@/lib/moduleAccess';
 
 /** Título del header según el módulo (ruta) actual */
 function getTitleByPath(pathname: string): string | null {
@@ -375,7 +376,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const movil = useMovilMode();
   const isSupervisionApp = router.pathname.startsWith('/admin/supervision');
-  const { canReadModule, user, isSuperAdmin, rolePermissions } = useAuth();
+  const { canReadModule, user, isSuperAdmin, rolePermissions, loading: authLoading } = useAuth();
   const showAutoLabNav = canReadModule('PLANNING') && canAccessAutoLab(isSuperAdmin, rolePermissions);
   const isEmulatorMode = process.env.NEXT_PUBLIC_USE_EMULATOR === 'true';
   const { compactSidebar } = usePageHeader();
@@ -384,6 +385,23 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     setOpsNavHref(opsLandingHref(user?.uid));
   }, [user?.uid, router.pathname]);
+  // Sin permiso de DASHBOARD (u otro módulo): no dejar la URL abierta; ir al primer módulo con VER.
+  useEffect(() => {
+    if (authLoading || isSuperAdmin || !user) return;
+    if (!router.pathname.startsWith('/admin')) return;
+    const mod = moduleKeyForAdminPath(router.pathname);
+    if (!mod) return;
+    if (canReadModule(mod)) return;
+    const dest = firstAllowedAdminPath(rolePermissions);
+    if (dest && dest !== router.pathname) {
+      void router.replace(dest);
+      return;
+    }
+    if (mod === 'DASHBOARD' && !canReadModule('DASHBOARD')) {
+      const fallback = firstAllowedAdminPath(rolePermissions);
+      if (fallback) void router.replace(fallback);
+    }
+  }, [authLoading, isSuperAdmin, user, router.pathname, canReadModule, rolePermissions, router]);
   const isTraining = !!empresa?.isTrainingEmpresa;
   const { session: trainingSession } = useTrainingSession();
   // Módulos desbloqueados: completados + el módulo activo actual
@@ -671,7 +689,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
             </Link>
           )}
 
-          {(canReadModule('OPERATIONS') || canReadModule('DASHBOARD') || canReadModule('PLANNING')) && (
+          {canReadModule('OPERATIONS') && (
             <Link href={opsNavHref} prefetch={false} title="Centro Control"
               className={`${getLinkHoverClass('/admin/operaciones')} relative${isModuleLocked('OPERATIONS') ? ' opacity-40 pointer-events-none' : ''}`}
               style={getLinkStyle('/admin/operaciones', true)}>

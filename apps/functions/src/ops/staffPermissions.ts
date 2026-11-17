@@ -129,14 +129,18 @@ export async function resolvePanelUserForUid(
     permissions.PLANNING = [...BASE_ACTIONS, ...MODULE_ONLY_ACTIONS.PLANNING];
     permissions.RRHH = [...BASE_ACTIONS, ...MODULE_ONLY_ACTIONS.RRHH];
   } else if (role) {
-    const roleSnap = await db.collection('roles').doc(normalizeRoleId(role)).get();
-    if (roleSnap.exists) {
-      const roleData = roleSnap.data() ?? {};
-      const roleEmp = String(roleData.empresaId ?? '').trim();
-      if (!allEmpresas && roleEmp && activeEmp && roleEmp.toLowerCase() !== activeEmp.toLowerCase()) {
-        permissions = {};
-      } else {
-        permissions = (roleData.permissions ?? {}) as Record<string, string[]>;
+    // El rol ya viene de resolveRoleForEmpresa(activeEmp): no bloquear por empresaId
+    // del doc del rol (roles reutilizados / ids distintos). Probar id normalizado y crudo.
+    const candidates = [...new Set([
+      normalizeRoleId(role),
+      String(role || '').trim(),
+      String(role || '').trim().toUpperCase(),
+    ].filter(Boolean))];
+    for (const id of candidates) {
+      const roleSnap = await db.collection('roles').doc(id).get();
+      if (roleSnap.exists) {
+        permissions = (roleSnap.data()?.permissions ?? {}) as Record<string, string[]>;
+        break;
       }
     }
   }

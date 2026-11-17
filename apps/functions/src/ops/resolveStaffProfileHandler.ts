@@ -104,3 +104,26 @@ export const resolveStaffProfileCallable = functions.https.onCall(async (_data, 
   }
   return resolveStaffProfileForUid(admin.firestore(), context.auth.uid, context.auth.token?.role);
 });
+
+/** Permisos del rol efectivo para la empresa activa (Admin SDK; no depende de rules de `roles/`). */
+export const resolvePanelPermissionsCallable = functions.https.onCall(async (data, context) => {
+  if (!context.auth?.uid) {
+    throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');
+  }
+  const empresaId = String((data as { empresaId?: string })?.empresaId ?? '').trim();
+  const panel = await resolvePanelUserForUid(
+    admin.firestore(),
+    context.auth.uid,
+    context.auth.token?.role,
+    'Operador',
+    empresaId || undefined,
+  );
+  if (!panel) {
+    return { permissions: {} as Record<string, string[]>, roleName: null, isSuperAdmin: false };
+  }
+  return {
+    permissions: panel.permissions || {},
+    roleName: panel.roleName || null,
+    isSuperAdmin: panel.isSuperAdmin === true,
+  };
+});
