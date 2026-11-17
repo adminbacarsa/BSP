@@ -595,7 +595,7 @@ import {
 import { ContinuarMesModal, type ContinuarMesVista, type DiaCorto } from '@/components/planificacion/ContinuarMesModal';
 import { sugerenciasSueltas } from '@/lib/planificacion/continuarSueltos';
 import { CompartirCronogramaModal } from '@/components/planificacion/CompartirCronogramaModal';
-import type { DatosImagen } from '@/lib/planificacion/imagenCronograma';
+import { parExtMismoObjetivo, type DatosImagen, type FranjaExt } from '@/lib/planificacion/imagenCronograma';
 import { AltaDesdePadronModal, type PedidoAlta } from '@/components/planificacion/AltaDesdePadronModal';
 import { AltaMasivaBoton } from '@/components/planificacion/AltaMasivaBoton';
 import { decidirActivarServicio, decidirActualizarServicio } from '@/lib/planificacion/activarServicioMes';
@@ -2565,19 +2565,42 @@ function PlanificacionDesktop() {
         return s;
     }, [shiftsMap]);
     const sumasExtLeyenda = useMemo(() => {
+        const franjasDe = (positionName: string | undefined): FranjaExt[] => {
+            const nombre = String(positionName || '');
+            const out: FranjaExt[] = [];
+            const tomar = (shifts: any[]) => {
+                for (const st of shifts || []) {
+                    if (!st?.code) continue;
+                    out.push({ code: String(st.code), startTime: st.startTime, endTime: st.endTime });
+                }
+            };
+            if (selectedGrupo && grupoUnifiedMode) {
+                for (const objId of (selectedGrupo.objectiveIds as string[])) {
+                    for (const pos of (grupoSlaMap[objId] || []) as any[]) {
+                        if (nombre && String(pos.positionName || '') !== nombre) continue;
+                        tomar(pos.shifts);
+                    }
+                }
+            } else {
+                for (const pos of positionStructure as any[]) {
+                    if (nombre && String(pos.positionName || '') !== nombre) continue;
+                    tomar(pos.shifts);
+                }
+            }
+            return out;
+        };
         const pares = new Set<string>();
-        const claves = new Set<string>([...Object.keys(cellTurnosMap), ...Object.keys(pendingChanges).map((k) => (k.endsWith('_B2') ? k.slice(0, -3) : k))]);
+        const claves = new Set<string>([...Object.keys(shiftsMap), ...Object.keys(pendingChanges)]);
         for (const key of claves) {
-            const seg = codigoSegundoBloqueCelda(key, pendingChanges, cellTurnosMap);
-            if (!seg) continue;
+            if (key.endsWith('_B2')) continue;
             const pend = pendingChanges[key];
             const sh = pend && !pend.isDeleted ? pend : shiftsMap[key];
-            const base = String(sh?.code || '').toUpperCase().trim();
-            if (!base || base === 'F' || base === 'FF' || base === 'FP') continue;
-            pares.add(`${base}+${seg}`);
+            if (!sh || sh.isDeleted) continue;
+            const par = parExtMismoObjetivo(sh, franjasDe(sh.positionName));
+            if (par) pares.add(par);
         }
         return [...pares].sort();
-    }, [cellTurnosMap, pendingChanges, shiftsMap]);
+    }, [pendingChanges, shiftsMap, positionStructure, selectedGrupo, grupoUnifiedMode, grupoSlaMap]);
     const modoRapidoRef = useRef(false);
     const colaEscrituraRapidaRef = useRef<Promise<unknown>>(Promise.resolve());
     const capaRapidaRef = useRef<CapaModoRapidoApi | null>(null);
@@ -16095,13 +16118,36 @@ function PlanificacionDesktop() {
                         ? (iObj >= 0 ? GRUPO_COLOR_HEX[iObj % GRUPO_COLOR_HEX.length] : undefined)
                         : colorPuestoGrilla[String(sh.positionName || '')]?.color;
                 const segundoCodigo = franco ? null : codigoSegundoBloqueCelda(key, pendingChanges, cellTurnosMap);
-                const extendido = !franco && (sh.isExtended === true || sh.isEarlyStart === true || sh.coverageSegmentRole === 'EXTENSION' || sh.coverageSegmentRole === 'EARLY_START');
+                const extendido = !franco && (sh.isExtended === true || sh.coverageSegmentRole === 'EXTENSION');
+                const franjasExt: FranjaExt[] = [];
+                if (extendido) {
+                    const posNombre = String(sh.positionName || '');
+                    const tomar = (shifts: any[]) => {
+                        for (const st of shifts || []) {
+                            if (st?.code) franjasExt.push({ code: String(st.code), startTime: st.startTime, endTime: st.endTime });
+                        }
+                    };
+                    if (enGrupo) {
+                        for (const objId of (selectedGrupo!.objectiveIds as string[])) {
+                            for (const pos of (grupoSlaMap[objId] || []) as any[]) {
+                                if (posNombre && String(pos.positionName || '') !== posNombre) continue;
+                                tomar(pos.shifts);
+                            }
+                        }
+                    } else {
+                        for (const pos of positionStructure as any[]) {
+                            if (posNombre && String(pos.positionName || '') !== posNombre) continue;
+                            tomar(pos.shifts);
+                        }
+                    }
+                }
+                const par = extendido ? parExtMismoObjetivo(sh, franjasExt) : null;
                 celdas[d.dateStr] = {
                     code: sh.isFrancoTrabajado ? `FT·${code}` : code,
                     ...(!franco && ini && fin && ini !== fin ? { horario: `${ini}–${fin}` } : {}),
                     ...(!franco && colorPos ? { color: colorPos } : {}),
                     ...(segundoCodigo ? { segundoCodigo } : {}),
-                    ...(extendido || segundoCodigo ? { ext: true } : {}),
+                    ...(extendido ? { ext: true, ...(par ? { par } : {}) } : {}),
                 };
             }
             return { nombre: String(e.name || e.id), celdas };

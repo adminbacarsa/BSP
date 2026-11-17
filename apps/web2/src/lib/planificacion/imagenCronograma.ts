@@ -8,10 +8,12 @@ export type CeldaImagen = {
   horario?: string;
   /** Color del puesto (el borde de la grilla). */
   color?: string;
-  /** Código del segundo turno del día (ej. EM2). Con el primario se pinta EXT. */
+  /** Segundo turno de otro objetivo (ej. CA y encima EM2). Se dibuja +EM2, no EXT. */
   segundoCodigo?: string;
-  /** Sobre turno o jornada extendida: la celda se pinta naranja y dice EXT. */
+  /** Extensión del mismo objetivo: la celda se pinta naranja y dice EXT. */
   ext?: boolean;
+  /** Par de esa extensión (ej. EM+EM2). No incluye CA+EM2. */
+  par?: string;
 };
 /** Referencia por puesto, como la de abajo de la grilla: nombre en su color y sus turnos con horario. */
 export type PuestoImagen = { nombre: string; color?: string; franjas: Array<{ code: string; horario: string }> };
@@ -78,14 +80,87 @@ export function leyendaHorarios(datos: DatosImagen): Array<{ code: string; horar
     .map(([code, hs]) => ({ code, horario: [...hs].join(' / ') }));
 }
 
-/** Pares de sobre turno que la imagen pinta como EXT (ej. EM+EM2). */
+export type FranjaExt = { code: string; startTime?: string; endTime?: string };
+
+export type TurnoExtRef = {
+  code?: string;
+  isExtended?: boolean;
+  isEarlyStart?: boolean;
+  coverageSegmentRole?: string;
+  coversBandCode?: string;
+  coversObjectiveId?: string;
+  objectiveId?: string;
+  segmentFromTime?: string;
+  segmentToTime?: string;
+  adjustedEndTime?: string;
+  extensionEndTime?: string;
+  endTime?: string;
+};
+
+function hhmmCorto(v: unknown): string {
+  const s = String(v || '').trim().slice(0, 5);
+  return /^\d{1,2}:\d{2}$/.test(s) ? s.padStart(5, '0') : '';
+}
+
+function aMinutos(v: unknown): number | null {
+  const s = hhmmCorto(v);
+  if (!s) return null;
+  const [h, m] = s.split(':').map(Number);
+  return h * 60 + m;
+}
+
+function minutosSolape(a0: number, a1: number, b0: number, b1: number): number {
+  const trozos = (x: number, y: number): Array<[number, number]> => {
+    if (y > x) return [[x, y]];
+    if (y === x) return [];
+    return [[x, 1440], [0, y]];
+  };
+  let n = 0;
+  for (const [x0, x1] of trozos(a0, a1)) {
+    for (const [y0, y1] of trozos(b0, b1)) n += Math.max(0, Math.min(x1, y1) - Math.max(x0, y0));
+  }
+  return n;
+}
+
+/**
+ * Par de una extensión del mismo objetivo (EM que cubre EM2 → EM+EM2).
+ * Un turno de otro objetivo (CA + EM2) no entra: ese se ve como +EM2.
+ */
+export function parExtMismoObjetivo(sh: TurnoExtRef, franjas: readonly FranjaExt[] = []): string | null {
+  const rol = String(sh.coverageSegmentRole || '').toUpperCase();
+  const esExt = sh.isExtended === true || rol === 'EXTENSION';
+  if (!esExt) return null;
+  if (sh.coversObjectiveId && sh.objectiveId && String(sh.coversObjectiveId) !== String(sh.objectiveId)) return null;
+  const base = String(sh.code || '').toUpperCase().replace(/^FT·/, '').trim();
+  if (!base || base === 'F' || base === 'FF' || base === 'FP') return null;
+  const banda = String(sh.coversBandCode || '').toUpperCase().trim();
+  if (banda && banda !== base) return `${base}+${banda}`;
+  const catalogo = franjas.find((f) => String(f.code || '').toUpperCase().trim() === base);
+  const desde = aMinutos(sh.segmentFromTime) ?? aMinutos(catalogo?.endTime);
+  const hasta = aMinutos(sh.segmentToTime) ?? aMinutos(sh.adjustedEndTime) ?? aMinutos(sh.extensionEndTime) ?? aMinutos(sh.endTime);
+  if (desde == null || hasta == null || desde === hasta) return null;
+  let mejor: { code: string; min: number } | null = null;
+  for (const f of franjas) {
+    const code = String(f.code || '').toUpperCase().trim();
+    if (!code || code === base) continue;
+    const a = aMinutos(f.startTime);
+    const b = aMinutos(f.endTime);
+    if (a == null || b == null) continue;
+    const sol = minutosSolape(desde, hasta, a, b);
+    if (sol < 30) continue;
+    if (!mejor || sol > mejor.min) mejor = { code, min: sol };
+  }
+  return mejor ? `${base}+${mejor.code}` : null;
+}
+
+/** Pares EXT del mismo objetivo que aparecen en la imagen (ej. EM+EM2). */
 export function paresExt(datos: DatosImagen): string[] {
   const vistos = new Set<string>();
   for (const f of datos.filas) {
     for (const c of Object.values(f.celdas)) {
-      const base = String(c.code || '').toUpperCase().replace(/^FT·/, '').trim();
-      const seg = String(c.segundoCodigo || '').toUpperCase().trim();
-      if (base && seg) vistos.add(`${base}+${seg}`);
+      if (!c.ext) continue;
+      const par = String(c.par || '').toUpperCase().trim();
+      if (par) vistos.add(par);
     }
   }
   return [...vistos].sort();
@@ -196,7 +271,7 @@ export function dibujarCronograma(datos: DatosImagen, escala = 2): HTMLCanvasEle
       const bw = COL_W - 6;
       const bh = FILA_H - 8;
       const segundo = String(c.segundoCodigo || '').toUpperCase().trim();
-      const esExt = !!c.ext || !!segundo;
+      const esExt = !!c.ext;
       const colPintar = esExt ? COLORES.EXT : col;
       ctx.fillStyle = colPintar.bg;
       ctx.strokeStyle = colPintar.borde;
@@ -208,12 +283,21 @@ export function dibujarCronograma(datos: DatosImagen, escala = 2): HTMLCanvasEle
       ctx.fillStyle = colPintar.fg;
       ctx.textAlign = 'center';
       if (esExt) {
-        const base = String(c.code || '').toUpperCase().replace(/^FT·/, '');
-        const par = segundo ? `${base}+${segundo}` : base;
-        ctx.font = fuente(800, 11);
-        ctx.fillText('EXT', bx + bw / 2, by + bh * 0.42);
-        ctx.font = fuente(700, par.length > 7 ? 6 : 7);
-        ctx.fillText(par, bx + bw / 2, by + bh * 0.78);
+        const par = String(c.par || '').toUpperCase().trim();
+        ctx.font = fuente(800, par ? 11 : 12);
+        ctx.fillText('EXT', bx + bw / 2, by + (par ? bh * 0.42 : bh / 2 + 4));
+        if (par) {
+          ctx.font = fuente(700, par.length > 7 ? 6 : 7);
+          ctx.fillText(par, bx + bw / 2, by + bh * 0.78);
+        }
+      } else if (segundo) {
+        const tam = c.code.length > 4 ? 8 : c.code.length > 2 ? 10 : 12;
+        ctx.font = fuente(800, tam);
+        ctx.fillText(c.code, bx + bw / 2, by + bh * 0.38);
+        ctx.fillStyle = '#047857';
+        const tamSeg = segundo.length > 3 ? 8 : 9;
+        ctx.font = fuente(800, tamSeg);
+        ctx.fillText(`+${segundo}`, bx + bw / 2, by + bh * 0.8);
       } else {
         const tam = c.code.length > 4 ? 9 : c.code.length > 2 ? 11 : 13;
         ctx.font = fuente(800, tam);

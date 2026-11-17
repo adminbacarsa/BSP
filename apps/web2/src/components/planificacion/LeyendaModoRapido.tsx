@@ -14,7 +14,7 @@ export function LeyendaModoRapido({
   colorPuesto,
   filtro,
   onFiltro,
-  /** Pares de sobre turno del mes (EM+EM2). Se muestran como EXT en la nomenclatura. */
+  /** Extensiones del mismo objetivo (EM+EM2). CA+EM2 no entra. */
   sumas,
 }: {
   puestos: readonly { name: string; shifts: readonly TurnoLeyenda[] }[];
