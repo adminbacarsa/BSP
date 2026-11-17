@@ -42,10 +42,42 @@ export function buildStaffModulesPayload(
   return out;
 }
 
+function parseRolesByEmpresa(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    const emp = String(k || '').trim();
+    const role = String(v ?? '').trim();
+    if (emp && role) out[emp] = role;
+  }
+  return out;
+}
+
+function listUserEmpresaIds(data: Record<string, unknown>): string[] {
+  if (Array.isArray(data.empresaIds) && data.empresaIds.length > 0) {
+    return [...new Set(data.empresaIds.map((x) => String(x || '').trim()).filter(Boolean))];
+  }
+  const one = String(data.empresaId ?? '').trim();
+  return one ? [one] : [];
+}
+
+function resolveRoleForEmpresa(
+  data: Record<string, unknown>,
+  activeEmpresaId: string,
+): string {
+  const primary = String(data.role || '').trim();
+  if (isSuperAdminRole(primary)) return primary;
+  const map = parseRolesByEmpresa(data.rolesByEmpresa);
+  const eid = String(activeEmpresaId || '').trim();
+  if (eid && map[eid]) return map[eid];
+  return primary;
+}
+
 export type ResolvedPanelUser = {
   isSuperAdmin: boolean;
   allEmpresas: boolean;
   empresaId: string;
+  empresaIds: string[];
   roleName: string;
   permissions: Record<string, string[]>;
   operatorName: string;
@@ -56,6 +88,7 @@ export async function resolvePanelUserForUid(
   uid: string,
   tokenRoleRaw?: unknown,
   operatorNameFallback = 'Operador',
+  activeEmpresaId?: string,
 ): Promise<ResolvedPanelUser | null> {
   const tokenRole = String(tokenRoleRaw ?? '').trim();
   const sys = await db.collection('system_users').doc(uid).get();
@@ -66,15 +99,19 @@ export async function resolvePanelUserForUid(
       isSuperAdmin: true,
       allEmpresas: true,
       empresaId: '',
+      empresaIds: [],
       roleName: tokenRole,
       permissions: fullStaffModulePermissions() as unknown as Record<string, string[]>,
       operatorName: operatorNameFallback,
     };
   }
 
-  const data = sys.data() ?? {};
-  const role = String(data.role || '').trim();
+  const data = (sys.data() ?? {}) as Record<string, unknown>;
   const allEmpresas = data.allEmpresas === true;
+  const empresaIds = listUserEmpresaIds(data);
+  const primaryEmpresa = String(data.empresaId || (empresaIds[0] || 'bacarsa')).trim();
+  const activeEmp = String(activeEmpresaId || primaryEmpresa).trim();
+  const role = resolveRoleForEmpresa(data, activeEmp);
   let isSuper = isSuperAdminRole(role) || isSuperAdminRole(tokenRole);
   let permissions: Record<string, string[]> = {};
 
@@ -96,8 +133,7 @@ export async function resolvePanelUserForUid(
     if (roleSnap.exists) {
       const roleData = roleSnap.data() ?? {};
       const roleEmp = String(roleData.empresaId ?? '').trim();
-      const userEmp = String(data.empresaId || 'bacarsa').trim();
-      if (!allEmpresas && roleEmp && userEmp && roleEmp.toLowerCase() !== userEmp.toLowerCase()) {
+      if (!allEmpresas && roleEmp && activeEmp && roleEmp.toLowerCase() !== activeEmp.toLowerCase()) {
         permissions = {};
       } else {
         permissions = (roleData.permissions ?? {}) as Record<string, string[]>;
@@ -117,12 +153,13 @@ export async function resolvePanelUserForUid(
 
   const empresaId = isSuper || allEmpresas
     ? String(data.empresaId ?? '').trim()
-    : String(data.empresaId || 'bacarsa').trim();
+    : primaryEmpresa;
 
   return {
     isSuperAdmin: isSuper,
     allEmpresas,
     empresaId,
+    empresaIds,
     roleName: role || tokenRole,
     permissions,
     operatorName,
@@ -136,17 +173,19 @@ export async function assertOperationsUpdatePermission(
   tokenRoleRaw?: unknown,
   operatorNameFallback?: string,
 ): Promise<ResolvedPanelUser> {
-  const panel = await resolvePanelUserForUid(db, uid, tokenRoleRaw, operatorNameFallback);
-  if (!panel) {
-    throw new functions.https.HttpsError('permission-denied', 'Usuario no autorizado en el panel.');
-  }
   const eid = String(empresaId || '').trim();
   if (!eid) {
     throw new functions.https.HttpsError('invalid-argument', 'empresaId requerido.');
   }
+  const panel = await resolvePanelUserForUid(db, uid, tokenRoleRaw, operatorNameFallback, eid);
+  if (!panel) {
+    throw new functions.https.HttpsError('permission-denied', 'Usuario no autorizado en el panel.');
+  }
   if (!panel.isSuperAdmin && !panel.allEmpresas) {
-    const userEmp = String(panel.empresaId || 'bacarsa').trim();
-    if (userEmp && eid.toLowerCase() !== userEmp.toLowerCase()) {
+    const allowed = panel.empresaIds.length > 0
+      ? panel.empresaIds
+      : [String(panel.empresaId || 'bacarsa').trim()];
+    if (!allowed.map((x) => x.toLowerCase()).includes(eid.toLowerCase())) {
       throw new functions.https.HttpsError('permission-denied', 'Empresa no permitida para este usuario.');
     }
   }

@@ -24,10 +24,11 @@ async function loadEmpresasForUser(
     isSuperAdmin: boolean;
     allEmpresas: boolean;
     empresaId: string;
+    empresaIds?: string[];
     guardEmpresaId?: string;
   },
 ): Promise<{ id: string; name: string }[]> {
-  const { isSuperAdmin, allEmpresas, empresaId, guardEmpresaId } = opts;
+  const { isSuperAdmin, allEmpresas, empresaId, empresaIds, guardEmpresaId } = opts;
   if (isSuperAdmin || allEmpresas) {
     const snap = await db.collection('empresas').limit(200).get();
     if (!snap.empty) {
@@ -37,11 +38,16 @@ async function loadEmpresasForUser(
       }));
     }
   }
-  const primary = String(empresaId || guardEmpresaId || '').trim();
-  if (!primary) return [];
-  const doc = await db.collection('empresas').doc(primary).get();
-  const name = doc.exists ? String(doc.data()?.name || primary) : primary;
-  return [{ id: primary, name }];
+  const ids = (empresaIds && empresaIds.length > 0)
+    ? [...new Set(empresaIds.map((x) => String(x || '').trim()).filter(Boolean))]
+    : [String(empresaId || guardEmpresaId || '').trim()].filter(Boolean);
+  if (ids.length === 0) return [];
+  const out: { id: string; name: string }[] = [];
+  for (const id of ids) {
+    const doc = await db.collection('empresas').doc(id).get();
+    out.push({ id, name: doc.exists ? String(doc.data()?.name || id) : id });
+  }
+  return out;
 }
 
 export async function resolveStaffProfileForUid(
@@ -78,6 +84,7 @@ export async function resolveStaffProfileForUid(
     isSuperAdmin,
     allEmpresas: panel?.allEmpresas === true,
     empresaId: panel?.empresaId || '',
+    empresaIds: panel?.empresaIds,
     guardEmpresaId,
   });
 

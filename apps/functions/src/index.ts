@@ -1168,7 +1168,14 @@ export const crearUsuarioSistema = functions.https.onCall(async (data, context) 
     throw new functions.https.HttpsError('permission-denied', 'Solo administradores pueden crear usuarios de sistema.');
   }
   
-  const { email, password, firstName, lastName, role, empresaId: rawEmpresaId, allEmpresas: rawAllEmpresas, empresaIds: rawEmpresaIds, requiresTraining } = data;
+  const {
+    email, password, firstName, lastName, role,
+    empresaId: rawEmpresaId,
+    allEmpresas: rawAllEmpresas,
+    empresaIds: rawEmpresaIds,
+    rolesByEmpresa: rawRolesByEmpresa,
+    requiresTraining,
+  } = data;
   const roleNorm = normalizeBackupRole(role);
   const roleIsSuper = isSuperAdminBackupRole(roleNorm);
   const multiEmpresa =
@@ -1178,6 +1185,7 @@ export const crearUsuarioSistema = functions.https.onCall(async (data, context) 
   let targetEmpresaId = '';
   let allEmpresas = false;
   let targetEmpresaIds: string[] | null = null;
+  let targetRolesByEmpresa: Record<string, string> | null = null;
 
   const isMultiEmpresaRequest = !roleIsSuper && !rawAllEmpresas && Array.isArray(rawEmpresaIds) && rawEmpresaIds.length > 1;
   if ((roleIsSuper || multiEmpresa || isMultiEmpresaRequest) && !caller.isSuper) {
@@ -1203,6 +1211,16 @@ export const crearUsuarioSistema = functions.https.onCall(async (data, context) 
     }
   }
 
+  if (!roleIsSuper && !allEmpresas && rawRolesByEmpresa && typeof rawRolesByEmpresa === 'object' && !Array.isArray(rawRolesByEmpresa)) {
+    const map: Record<string, string> = {};
+    for (const [k, v] of Object.entries(rawRolesByEmpresa as Record<string, unknown>)) {
+      const emp = String(k || '').trim();
+      const r = normalizeBackupRole(v);
+      if (emp && r) map[emp] = r;
+    }
+    if (Object.keys(map).length > 0) targetRolesByEmpresa = map;
+  }
+
   try {
     const userRecord = await admin.auth().createUser({
       email,
@@ -1221,6 +1239,7 @@ export const crearUsuarioSistema = functions.https.onCall(async (data, context) 
       empresaId: targetEmpresaId,
       ...(allEmpresas ? { allEmpresas: true } : {}),
       ...(targetEmpresaIds !== null ? { empresaIds: targetEmpresaIds } : {}),
+      ...(targetRolesByEmpresa ? { rolesByEmpresa: targetRolesByEmpresa } : {}),
       ...(requiresTraining ? { requiresTraining: true } : {}),
       status: 'ACTIVE',
       createdAt: admin.firestore.FieldValue.serverTimestamp()

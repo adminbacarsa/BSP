@@ -61,7 +61,7 @@ const EmpresaContext = createContext<EmpresaContextType>({
 export const useEmpresa = () => useContext(EmpresaContext);
 
 export const EmpresaProvider = ({ children }: { children: React.ReactNode }) => {
-  const { empresaId: authEmpresaId, isSuperAdmin, allEmpresas, empresaIds } = useAuth();
+  const { empresaId: authEmpresaId, isSuperAdmin, allEmpresas, empresaIds, applyEmpresaContext } = useAuth();
   // SuperAdmin / allEmpresas / subconjunto explícito (empresaIds.length > 1).
   // Antes solo SuperAdmin||allEmpresas: el usuario multi-empresa veía Bacar y el
   // selector no listaba el resto (empresas=[] y switchEmpresa era no-op).
@@ -188,6 +188,12 @@ export const EmpresaProvider = ({ children }: { children: React.ReactNode }) => 
       /* ignore */
     }
   };
+
+  // Al cambiar de empresa, recargar el rol/permisos de esa empresa (rolesByEmpresa).
+  useEffect(() => {
+    if (!empresaId) return;
+    void applyEmpresaContext(empresaId);
+  }, [empresaId, applyEmpresaContext]);
 
   return (
     <EmpresaContext.Provider value={{ empresaId, empresa, empresas, switchEmpresa, loadingEmpresa }}>

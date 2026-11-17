@@ -8,7 +8,7 @@ import { SupervisorPinInput } from '@/components/ui';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { isSuperAdminRole } from '@/lib/roles';
-import { isAllEmpresasUser } from '@/lib/systemUser';
+import { isAllEmpresasUser, parseRolesByEmpresa, type RolesByEmpresa } from '@/lib/systemUser';
 
 export default function UsersTab() {
     const { isSuperAdmin } = useAuth();
@@ -24,8 +24,29 @@ export default function UsersTab() {
     const [isProcessing, setIsProcessing] = useState(false);
     const [editMode, setEditMode]         = useState(false);
 
-    const initialForm = { id: '', firstName: '', lastName: '', email: '', password: '', role: '', empresaId: '', empresaIds: [] as string[], allEmpresas: false, supervisorPin: '', showPin: false, objetivosAsignados: [] as string[], requiresTraining: false };
+    const initialForm = {
+      id: '',
+      firstName: '',
+      lastName: '',
+      email: '',
+      password: '',
+      role: '',
+      empresaId: '',
+      empresaIds: [] as string[],
+      rolesByEmpresa: {} as RolesByEmpresa,
+      allEmpresas: false,
+      supervisorPin: '',
+      showPin: false,
+      objetivosAsignados: [] as string[],
+      requiresTraining: false,
+    };
     const [formData, setFormData] = useState(initialForm);
+
+    const rolesForEmpresa = (empresaId: string) =>
+      rolesList.filter((r) =>
+        !isSuperAdminRole(r.id) &&
+        (!r.empresaId || normId(r.empresaId) === normId(empresaId))
+      );
 
     const empresasDropdown = isSuperAdmin
         ? empresas
@@ -56,7 +77,8 @@ export default function UsersTab() {
                 : allUsers.filter(u =>
                     isSuperAdminRole(u.role) ||
                     isAllEmpresasUser(u) ||
-                    (u.empresaId || 'bacarsa') === myEmpresaId
+                    (u.empresaId || 'bacarsa') === myEmpresaId ||
+                    (Array.isArray(u.empresaIds) && u.empresaIds.includes(myEmpresaId))
                 );
 
             setUsers(filtered);
@@ -71,7 +93,13 @@ export default function UsersTab() {
 
     const handleOpenCreate = () => {
         setEditMode(false);
-        setFormData({ ...initialForm, empresaIds: isSuperAdmin ? [] : [myEmpresaId], allEmpresas: false });
+        const empIds = isSuperAdmin ? [] : (myEmpresaId ? [myEmpresaId] : []);
+        setFormData({
+          ...initialForm,
+          empresaIds: empIds,
+          rolesByEmpresa: empIds.length === 1 ? { [empIds[0]]: '' } : {},
+          allEmpresas: false,
+        });
         setObjetivosFilter('');
         setIsModalOpen(true);
     };
@@ -79,6 +107,17 @@ export default function UsersTab() {
     const handleOpenEdit = (user: any) => {
         setEditMode(true);
         setObjetivosFilter('');
+        const empIds = isAllEmpresasUser(user) && !isSuperAdminRole(user.role)
+          ? []
+          : Array.isArray(user.empresaIds) && user.empresaIds.length > 0
+            ? user.empresaIds as string[]
+            : user.empresaId ? [user.empresaId as string] : [];
+        const savedMap = parseRolesByEmpresa(user.rolesByEmpresa);
+        // Migración suave: si no hay mapa, el rol único aplica a cada empresa asignada.
+        const rolesMap: RolesByEmpresa = { ...savedMap };
+        if (Object.keys(rolesMap).length === 0 && user.role && !isSuperAdminRole(user.role)) {
+          for (const id of empIds) rolesMap[id] = String(user.role);
+        }
         setFormData({
             id: user.id,
             firstName: user.firstName,
@@ -87,11 +126,8 @@ export default function UsersTab() {
             password: '',
             role: user.role,
             empresaId: '',
-            empresaIds: isAllEmpresasUser(user) && !isSuperAdminRole(user.role)
-              ? []
-              : Array.isArray(user.empresaIds) && user.empresaIds.length > 1
-                ? user.empresaIds as string[]
-                : user.empresaId ? [user.empresaId as string] : [],
+            empresaIds: empIds,
+            rolesByEmpresa: rolesMap,
             allEmpresas: isAllEmpresasUser(user) && !isSuperAdminRole(user.role),
             supervisorPin: user.supervisorPin || '',
             showPin: false,
@@ -128,44 +164,62 @@ export default function UsersTab() {
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!isSuperAdminRole(formData.role) && !formData.allEmpresas && formData.empresaIds.length === 0) {
+        const roleIsSuperAdmin = isSuperAdminRole(formData.role);
+        if (!roleIsSuperAdmin && !formData.allEmpresas && formData.empresaIds.length === 0) {
           toast.error('Seleccioná al menos una empresa para el usuario.');
           return;
+        }
+        if (!roleIsSuperAdmin && formData.allEmpresas && !formData.role) {
+          toast.error('Seleccioná un rol para el acceso a todas las empresas.');
+          return;
+        }
+        if (!roleIsSuperAdmin && !formData.allEmpresas) {
+          const missing = formData.empresaIds.filter((id) => !String(formData.rolesByEmpresa[id] || '').trim());
+          if (missing.length > 0) {
+            toast.error(`Falta el rol para: ${missing.map(getEmpresaName).join(', ')}`);
+            return;
+          }
         }
         setIsProcessing(true);
 
         const promise = new Promise(async (resolve, reject) => {
             try {
-                const roleIsSuperAdmin = isSuperAdminRole(formData.role);
-
-                // Calcular valores finales de empresa
+                // Calcular valores finales de empresa + rol primario
                 let patchEmpresaId = '';
                 let patchAllEmpresas = false;
                 let patchEmpresaIds: string[] | null = null;
+                let patchRolesByEmpresa: RolesByEmpresa | null = null;
+                let patchRole = formData.role;
 
                 if (roleIsSuperAdmin) {
                   patchEmpresaId = '';
                   patchAllEmpresas = false;
                   patchEmpresaIds = null;
+                  patchRolesByEmpresa = null;
+                  patchRole = formData.role;
                 } else if (formData.allEmpresas) {
                   patchEmpresaId = '';
                   patchAllEmpresas = true;
                   patchEmpresaIds = null;
-                } else if (formData.empresaIds.length > 1) {
-                  patchEmpresaId = formData.empresaIds[0]; // primera como empresa primaria
-                  patchAllEmpresas = false;
-                  patchEmpresaIds = formData.empresaIds;
+                  patchRolesByEmpresa = null;
+                  patchRole = formData.role;
                 } else {
                   patchEmpresaId = formData.empresaIds[0] || '';
                   patchAllEmpresas = false;
-                  patchEmpresaIds = null;
+                  patchEmpresaIds = formData.empresaIds.length > 1 ? formData.empresaIds : null;
+                  patchRolesByEmpresa = {};
+                  for (const id of formData.empresaIds) {
+                    const r = String(formData.rolesByEmpresa[id] || '').trim();
+                    if (r) patchRolesByEmpresa[id] = r;
+                  }
+                  patchRole = patchRolesByEmpresa[patchEmpresaId] || formData.role;
                 }
 
                 if (editMode) {
                     const patch: Record<string, unknown> = {
                         firstName:           formData.firstName,
                         lastName:            formData.lastName,
-                        role:                formData.role,
+                        role:                patchRole,
                         empresaId:           patchEmpresaId,
                         supervisorPin:       formData.supervisorPin || null,
                         objetivosAsignados:  formData.objetivosAsignados,
@@ -176,6 +230,12 @@ export default function UsersTab() {
 
                     if (patchEmpresaIds !== null) patch.empresaIds = patchEmpresaIds;
                     else patch.empresaIds = deleteField();
+
+                    if (patchRolesByEmpresa !== null && Object.keys(patchRolesByEmpresa).length > 0) {
+                      patch.rolesByEmpresa = patchRolesByEmpresa;
+                    } else {
+                      patch.rolesByEmpresa = deleteField();
+                    }
 
                     await updateDoc(doc(db, 'system_users', formData.id), patch);
                     const syncFn = httpsCallable(functions, 'syncSystemUserClaims');
@@ -188,10 +248,11 @@ export default function UsersTab() {
                         lastName:         formData.lastName,
                         email:            formData.email,
                         password:         formData.password,
-                        role:             formData.role,
+                        role:             patchRole,
                         empresaId:        patchEmpresaId,
                         allEmpresas:      patchAllEmpresas,
                         empresaIds:       patchEmpresaIds,
+                        rolesByEmpresa:   patchRolesByEmpresa,
                         supervisorPin:    formData.supervisorPin || null,
                         requiresTraining: formData.requiresTraining,
                     });
@@ -231,8 +292,16 @@ export default function UsersTab() {
 
     const getEmpresaName = (id: string) =>
         empresas.find(e => e.id === id)?.name || id || '—';
+    const getRoleName = (roleId: string) =>
+        isSuperAdminRole(roleId) ? 'SuperAdmin' : (rolesList.find((r) => r.id === roleId)?.name || roleId || '—');
 
     const formRoleIsSuperAdmin = isSuperAdminRole(formData.role);
+    // SuperAdmin multi/single: un selector de rol por empresa. Admin local: un solo rol (bloque aparte).
+    const showPerEmpresaRoles =
+      isSuperAdmin
+      && !formRoleIsSuperAdmin
+      && !formData.allEmpresas
+      && formData.empresaIds.length > 0;
 
     return (
         <div className="space-y-6 animate-in fade-in">
@@ -283,13 +352,26 @@ export default function UsersTab() {
                                     </div>
                                 </td>
                                 <td className="p-5">
-                                    <span className={`px-3 py-1 rounded-lg text-xs font-bold uppercase ${
-                                      isSuperAdminRole(u.role)
-                                        ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200'
-                                        : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
-                                    }`}>
-                                        {isSuperAdminRole(u.role) ? '⭐ SuperAdmin' : (rolesList.find(r => r.id === u.role)?.name || u.role)}
-                                    </span>
+                                    {isSuperAdminRole(u.role) ? (
+                                      <span className="px-3 py-1 rounded-lg text-xs font-bold uppercase bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200">
+                                        ⭐ SuperAdmin
+                                      </span>
+                                    ) : Array.isArray(u.empresaIds) && u.empresaIds.length > 1 && parseRolesByEmpresa(u.rolesByEmpresa) && Object.keys(parseRolesByEmpresa(u.rolesByEmpresa)).length > 0 ? (
+                                      <div className="flex flex-col gap-1">
+                                        {(u.empresaIds as string[]).map((eid: string) => {
+                                          const rid = parseRolesByEmpresa(u.rolesByEmpresa)[eid] || u.role;
+                                          return (
+                                            <span key={eid} className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300">
+                                              {getEmpresaName(eid)}: {getRoleName(rid)}
+                                            </span>
+                                          );
+                                        })}
+                                      </div>
+                                    ) : (
+                                      <span className="px-3 py-1 rounded-lg text-xs font-bold uppercase bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300">
+                                        {getRoleName(u.role)}
+                                      </span>
+                                    )}
                                     {u.supervisorPin && (
                                         <span className="ml-1 text-[9px] bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded font-black border border-indigo-100">🔒 PIN</span>
                                     )}
@@ -381,26 +463,25 @@ export default function UsersTab() {
                                 </div>
                             )}
 
-                            <div>
-                                <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 ml-1 mb-1 block">Rol</label>
-                                <select required
-                                    className="w-full p-4 bg-slate-50 dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-700 focus:border-indigo-500 rounded-xl font-bold text-indigo-600 outline-none"
-                                    value={formData.role} onChange={e => setFormData({ ...formData, role: e.target.value })}>
-                                    <option value="">Seleccionar Rol...</option>
-                                    {isSuperAdmin && (
-                                        <option value="SUPERADMIN">⭐ Superadmin</option>
-                                    )}
-                                    {rolesList
-                                        .filter(r =>
-                                            !isSuperAdminRole(r.id) &&
-                                            (!r.empresaId || normId(r.empresaId) === normId(myEmpresaId))
-                                        )
-                                        .map(r => (
-                                            <option key={r.id} value={r.id}>{r.name || r.id}</option>
-                                        ))
+                            {isSuperAdmin && (
+                              <div>
+                                <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 ml-1 mb-1 block">Tipo de acceso</label>
+                                <select
+                                  className="w-full p-4 bg-slate-50 dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-700 focus:border-indigo-500 rounded-xl font-bold text-indigo-600 outline-none"
+                                  value={formRoleIsSuperAdmin ? 'SUPERADMIN' : 'NORMAL'}
+                                  onChange={(e) => {
+                                    if (e.target.value === 'SUPERADMIN') {
+                                      setFormData({ ...formData, role: 'SUPERADMIN', allEmpresas: false, empresaIds: [], rolesByEmpresa: {} });
+                                    } else {
+                                      setFormData({ ...formData, role: formRoleIsSuperAdmin ? '' : formData.role });
                                     }
+                                  }}
+                                >
+                                  <option value="NORMAL">Usuario con empresas / roles</option>
+                                  <option value="SUPERADMIN">⭐ Superadmin (todas las empresas)</option>
                                 </select>
-                            </div>
+                              </div>
+                            )}
 
                             {formRoleIsSuperAdmin ? (
                                 <div className="p-4 bg-amber-50 dark:bg-amber-900/20 border-2 border-amber-200 dark:border-amber-800 rounded-xl text-amber-700 dark:text-amber-300 text-xs font-bold flex items-center gap-2">
@@ -414,10 +495,9 @@ export default function UsersTab() {
                                     </label>
                                     {isSuperAdmin ? (
                                         <div className="border-2 border-indigo-200 dark:border-indigo-700 rounded-xl overflow-hidden">
-                                            {/* Toggle "Todas las empresas" */}
                                             <label
                                               className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer border-b border-slate-100 dark:border-slate-700 transition-colors ${formData.allEmpresas ? 'bg-amber-50 dark:bg-amber-900/30' : 'bg-white dark:bg-slate-800 hover:bg-amber-50/40'}`}
-                                              onClick={() => setFormData(f => ({ ...f, allEmpresas: !f.allEmpresas, empresaIds: [] }))}
+                                              onClick={() => setFormData(f => ({ ...f, allEmpresas: !f.allEmpresas, empresaIds: [], rolesByEmpresa: {} }))}
                                             >
                                               <div className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${formData.allEmpresas ? 'bg-amber-500 border-amber-500' : 'border-slate-300 dark:border-slate-600'}`}>
                                                 {formData.allEmpresas && <Check size={11} className="text-white" strokeWidth={3}/>}
@@ -426,7 +506,6 @@ export default function UsersTab() {
                                                 <Shield size={12}/> Todas las empresas
                                               </span>
                                             </label>
-                                            {/* Checklist de empresas (solo si no es "Todas") */}
                                             {!formData.allEmpresas && (
                                               <div className="max-h-36 overflow-y-auto">
                                                 {empresasDropdown.map(e => {
@@ -442,20 +521,24 @@ export default function UsersTab() {
                                                         const updated = ev.target.checked
                                                           ? [...formData.empresaIds, e.id]
                                                           : formData.empresaIds.filter(x => x !== e.id);
-                                                        setFormData({ ...formData, empresaIds: updated });
+                                                        const nextRoles = { ...formData.rolesByEmpresa };
+                                                        if (ev.target.checked) {
+                                                          if (!nextRoles[e.id]) nextRoles[e.id] = '';
+                                                        } else {
+                                                          delete nextRoles[e.id];
+                                                        }
+                                                        setFormData({ ...formData, empresaIds: updated, rolesByEmpresa: nextRoles, role: '' });
                                                       }}/>
                                                     </label>
                                                   );
                                                 })}
                                               </div>
                                             )}
-                                            {/* Aviso si no seleccionó ninguna */}
                                             {!formData.allEmpresas && formData.empresaIds.length === 0 && (
                                               <p className="text-[10px] text-rose-500 font-bold px-3 py-2 bg-rose-50 dark:bg-rose-900/20">Seleccioná al menos una empresa.</p>
                                             )}
-                                            {/* Aviso para multi-empresa */}
                                             {!formData.allEmpresas && formData.empresaIds.length > 1 && (
-                                              <p className="text-[10px] text-violet-600 dark:text-violet-400 font-bold px-3 py-2 bg-violet-50 dark:bg-violet-900/20">Multi-empresa: el usuario podrá cambiar entre estas empresas.</p>
+                                              <p className="text-[10px] text-violet-600 dark:text-violet-400 font-bold px-3 py-2 bg-violet-50 dark:bg-violet-900/20">Multi-empresa: asigná un rol distinto por cada empresa abajo.</p>
                                             )}
                                         </div>
                                     ) : (
@@ -465,6 +548,86 @@ export default function UsersTab() {
                                         </div>
                                     )}
                                 </div>
+                            )}
+
+                            {/* Rol único: allEmpresas o admin de empresa única sin superadmin editor */}
+                            {!formRoleIsSuperAdmin && formData.allEmpresas && (
+                              <div>
+                                <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 ml-1 mb-1 block">Rol (todas las empresas)</label>
+                                <select required
+                                  className="w-full p-4 bg-slate-50 dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-700 focus:border-indigo-500 rounded-xl font-bold text-indigo-600 outline-none"
+                                  value={formData.role}
+                                  onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+                                >
+                                  <option value="">Seleccionar Rol...</option>
+                                  {rolesList.filter((r) => !isSuperAdminRole(r.id)).map((r) => (
+                                    <option key={r.id} value={r.id}>{r.name || r.id}{r.empresaId ? ` (${getEmpresaName(r.empresaId)})` : ''}</option>
+                                  ))}
+                                </select>
+                              </div>
+                            )}
+
+                            {/* Rol por empresa (obligatorio en multi / single tenant) */}
+                            {showPerEmpresaRoles && (
+                              <div className="border-2 border-violet-200 dark:border-violet-800 rounded-2xl overflow-hidden">
+                                <div className="px-3 py-2 bg-violet-50 dark:bg-violet-900/30 text-[10px] font-black uppercase text-violet-700 dark:text-violet-300 tracking-wider">
+                                  Rol por empresa
+                                </div>
+                                <div className="divide-y divide-slate-100 dark:divide-slate-700">
+                                  {formData.empresaIds.map((eid) => (
+                                    <div key={eid} className="px-3 py-3 flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-3">
+                                      <div className="sm:w-40 shrink-0 text-xs font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
+                                        <Building2 size={12} className="text-violet-500"/>
+                                        {getEmpresaName(eid)}
+                                      </div>
+                                      <select
+                                        required
+                                        className="flex-1 p-2.5 bg-slate-50 dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-700 focus:border-violet-500 rounded-xl font-bold text-sm text-violet-700 dark:text-violet-300 outline-none"
+                                        value={formData.rolesByEmpresa[eid] || ''}
+                                        onChange={(e) => {
+                                          const roleId = e.target.value;
+                                          const nextRoles = { ...formData.rolesByEmpresa, [eid]: roleId };
+                                          const primary = formData.empresaIds[0];
+                                          setFormData({
+                                            ...formData,
+                                            rolesByEmpresa: nextRoles,
+                                            role: primary === eid ? roleId : (nextRoles[primary] || formData.role),
+                                          });
+                                        }}
+                                      >
+                                        <option value="">Seleccionar rol...</option>
+                                        {rolesForEmpresa(eid).map((r) => (
+                                          <option key={r.id} value={r.id}>{r.name || r.id}</option>
+                                        ))}
+                                      </select>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Admin no-super de una sola empresa: un rol de su tenant */}
+                            {!isSuperAdmin && !formRoleIsSuperAdmin && formData.empresaIds.length === 1 && (
+                              <div>
+                                <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 ml-1 mb-1 block">Rol</label>
+                                <select required
+                                  className="w-full p-4 bg-slate-50 dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-700 focus:border-indigo-500 rounded-xl font-bold text-indigo-600 outline-none"
+                                  value={formData.rolesByEmpresa[formData.empresaIds[0]] || formData.role}
+                                  onChange={(e) => {
+                                    const eid = formData.empresaIds[0];
+                                    setFormData({
+                                      ...formData,
+                                      role: e.target.value,
+                                      rolesByEmpresa: { ...formData.rolesByEmpresa, [eid]: e.target.value },
+                                    });
+                                  }}
+                                >
+                                  <option value="">Seleccionar Rol...</option>
+                                  {rolesForEmpresa(formData.empresaIds[0] || myEmpresaId).map((r) => (
+                                    <option key={r.id} value={r.id}>{r.name || r.id}</option>
+                                  ))}
+                                </select>
+                              </div>
                             )}
 
                             <div className="p-4 bg-indigo-50 dark:bg-indigo-900/20 border-2 border-indigo-100 dark:border-indigo-800 rounded-xl">

@@ -43,3 +43,68 @@ export function isMultiEmpresaUser(data: {
   const ids = data?.empresaIds;
   return Array.isArray(ids) && ids.length > 1;
 }
+
+/** Mapa empresaId → roleId (multi-empresa con rol distinto por tenant). */
+export type RolesByEmpresa = Record<string, string>;
+
+export function parseRolesByEmpresa(raw: unknown): RolesByEmpresa {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out: RolesByEmpresa = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    const emp = String(k || '').trim();
+    const role = String(v ?? '').trim();
+    if (emp && role) out[emp] = role;
+  }
+  return out;
+}
+
+/** Empresas a las que el usuario puede entrar (subconjunto o primaria). */
+export function listUserEmpresaIds(data: {
+  allEmpresas?: unknown;
+  empresaIds?: unknown;
+  empresaId?: unknown;
+  role?: unknown;
+}): string[] {
+  if (isAllEmpresasUser(data) || isSuperAdminRole(data?.role)) return [];
+  if (Array.isArray(data?.empresaIds) && data.empresaIds.length > 0) {
+    return [...new Set(data.empresaIds.map((x) => String(x || '').trim()).filter(Boolean))];
+  }
+  const one = String(data?.empresaId ?? '').trim();
+  return one ? [one] : [];
+}
+
+export function userCanAccessEmpresa(
+  data: {
+    allEmpresas?: unknown;
+    empresaIds?: unknown;
+    empresaId?: unknown;
+    role?: unknown;
+  },
+  empresaId: string,
+): boolean {
+  const eid = String(empresaId || '').trim();
+  if (!eid) return false;
+  if (isSuperAdminRole(data?.role) || data?.allEmpresas === true) return true;
+  const ids = listUserEmpresaIds(data);
+  if (ids.length > 0) return ids.includes(eid);
+  return String(data?.empresaId || 'bacarsa').trim() === eid;
+}
+
+/**
+ * Rol efectivo para una empresa activa.
+ * Prioridad: rolesByEmpresa[empresa] → role (primario / legacy).
+ */
+export function resolveRoleForEmpresa(
+  data: {
+    role?: unknown;
+    rolesByEmpresa?: unknown;
+    empresaId?: unknown;
+  },
+  activeEmpresaId: string,
+): string {
+  if (isSuperAdminRole(data?.role)) return String(data.role || '').trim();
+  const map = parseRolesByEmpresa(data?.rolesByEmpresa);
+  const eid = String(activeEmpresaId || '').trim();
+  if (eid && map[eid]) return map[eid];
+  return String(data?.role || '').trim();
+}

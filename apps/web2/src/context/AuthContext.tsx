@@ -8,6 +8,11 @@ import { httpsCallable } from 'firebase/functions';
 import { useRouter } from 'next/router';
 
 import { isSuperAdminRole, normalizeRoleId as roleDocId } from '@/lib/roles';
+import {
+  parseRolesByEmpresa,
+  resolveRoleForEmpresa,
+  type RolesByEmpresa,
+} from '@/lib/systemUser';
 
 function isSuperAdminRoleId(role: unknown): boolean {
   return isSuperAdminRole(role);
@@ -34,17 +39,24 @@ interface AuthContextType {
   assignedClientId: string | null;
   /** true si no tiene empresa fija (vista multi-cliente). No confundir con permisos de rol. */
   isAdmin: boolean;
-  /** Permisos del rol en Firestore `roles/{id}.permissions` */
+  /** Permisos del rol en Firestore `roles/{id}.permissions` (según empresa activa). */
   rolePermissions: Record<string, string[]>;
   isSuperAdmin: boolean;
   /** Bypass tenant en permisos de rol (multi-empresa sin ser SuperAdmin). */
   allEmpresas: boolean;
   /** Subconjunto explícito de empresas (cuando no es allEmpresas). */
   empresaIds: string[];
+  /** Rol por empresa (`system_users.rolesByEmpresa`). */
+  rolesByEmpresa: RolesByEmpresa;
   /** Lectura mínima sobre un módulo (clave SYSTEM_MODULES, ej. CONFIG, CLIENTS). */
   canReadModule: (moduleKey: string) => boolean;
   /** ID de la empresa a la que pertenece el usuario. Default: 'bacarsa' */
   empresaId: string;
+  /**
+   * Recalcula rol/permisos al cambiar la empresa activa (lo llama EmpresaContext).
+   * No cambia el tenant de datos: solo el rol efectivo de esa empresa.
+   */
+  applyEmpresaContext: (activeEmpresaId: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -58,10 +70,21 @@ const AuthContext = createContext<AuthContextType>({
   isSuperAdmin: false,
   allEmpresas: false,
   empresaIds: [],
+  rolesByEmpresa: {},
   canReadModule: () => false,
   empresaId: 'bacarsa',
+  applyEmpresaContext: async () => {},
 });
 export const useAuth = () => useContext(AuthContext);
+
+type SystemUserProfile = {
+  role: string | null;
+  assignedClientId: string | null;
+  empresaId: string;
+  allEmpresas: boolean;
+  empresaIds: string[];
+  rolesByEmpresa: RolesByEmpresa;
+};
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
@@ -73,7 +96,54 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [empresaId, setEmpresaId] = useState<string>('bacarsa');
   const [allEmpresas, setAllEmpresas] = useState(false);
   const [empresaIds, setEmpresaIds] = useState<string[]>([]);
+  const [rolesByEmpresa, setRolesByEmpresa] = useState<RolesByEmpresa>({});
+  const [profile, setProfile] = useState<SystemUserProfile | null>(null);
   const router = useRouter();
+
+  const loadPermissionsForRole = useCallback(async (
+    role: string | null,
+    opts: { allEmpresas: boolean; activeEmpresaId: string; tokenRole: string | null },
+  ) => {
+    const isSuper = isSuperAdminRoleId(role) || isSuperAdminRoleId(opts.tokenRole);
+    if (isSuper) {
+      setRolePermissions(fullSuperAdminPermissions());
+      return;
+    }
+    if (!role) {
+      setRolePermissions({});
+      return;
+    }
+    try {
+      const roleSnap = await getDoc(doc(db, 'roles', roleDocId(role)));
+      if (!roleSnap.exists()) {
+        setRolePermissions({});
+        return;
+      }
+      const roleData = roleSnap.data();
+      const roleEmp = String(roleData?.empresaId ?? '').trim();
+      const activeEmp = String(opts.activeEmpresaId || '').trim();
+      // Rol de otra empresa: solo se acepta si el usuario es allEmpresas (legado).
+      if (!opts.allEmpresas && roleEmp && activeEmp && roleEmp.toLowerCase() !== activeEmp.toLowerCase()) {
+        setRolePermissions({});
+        return;
+      }
+      setRolePermissions((roleData?.permissions || {}) as Record<string, string[]>);
+    } catch {
+      setRolePermissions({});
+    }
+  }, []);
+
+  const applyEmpresaContext = useCallback(async (activeEmpresaId: string) => {
+    if (!profile) return;
+    const eid = String(activeEmpresaId || '').trim();
+    const effectiveRole = resolveRoleForEmpresa(profile, eid || profile.empresaId);
+    setUserRole(effectiveRole || null);
+    await loadPermissionsForRole(effectiveRole || null, {
+      allEmpresas: profile.allEmpresas,
+      activeEmpresaId: eid || profile.empresaId,
+      tokenRole: claimRole,
+    });
+  }, [profile, claimRole, loadPermissionsForRole]);
 
   useEffect(() => {
     if (USE_EMULATOR) ensureFirebaseEmulatorsConnected();
@@ -91,40 +161,41 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           const snap = await getDoc(doc(db, 'system_users', u.uid));
           if (snap.exists()) {
             const data = snap.data();
-            const role = data.role || null;
+            const role = (data.role as string) || null;
             const multiEmpresa = data.allEmpresas === true;
             const rawEmpresaIds = Array.isArray(data.empresaIds) ? (data.empresaIds as string[]) : [];
-            setUserRole(role);
-            setAssignedClientId(data.assignedClientId || null);
-            setAllEmpresas(multiEmpresa);
-            setEmpresaIds(rawEmpresaIds);
+            const mapRoles = parseRolesByEmpresa(data.rolesByEmpresa);
             const isSuper = isSuperAdminRoleId(role) || isSuperAdminRoleId(tokenRole);
-            // Multi-empresa: usar primera de la lista como empresa activa inicial
             const defaultEmpresa = rawEmpresaIds.length > 0 ? rawEmpresaIds[0] : (data.empresaId || '');
-            setEmpresaId(isSuper || multiEmpresa
+            const authEmpresa = isSuper || multiEmpresa
               ? (data.empresaId || '')
               : (rawEmpresaIds.length > 1
                 ? defaultEmpresa
-                : (data.empresaId || 'bacarsa')));
-            if (isSuper) {
-              setRolePermissions(fullSuperAdminPermissions());
-            } else if (role) {
-              const roleSnap = await getDoc(doc(db, 'roles', roleDocId(role)));
-              if (roleSnap.exists()) {
-                const roleData = roleSnap.data();
-                const roleEmp = String(roleData?.empresaId ?? '').trim();
-                const userEmp = String(data.empresaId || 'bacarsa').trim();
-                if (!multiEmpresa && roleEmp && userEmp && roleEmp.toLowerCase() !== userEmp.toLowerCase()) {
-                  setRolePermissions({});
-                } else {
-                  setRolePermissions((roleData?.permissions || {}) as Record<string, string[]>);
-                }
-              } else {
-                setRolePermissions({});
-              }
-            } else {
-              setRolePermissions({});
-            }
+                : (data.empresaId || 'bacarsa'));
+
+            const nextProfile: SystemUserProfile = {
+              role,
+              assignedClientId: data.assignedClientId || null,
+              empresaId: String(authEmpresa || data.empresaId || 'bacarsa'),
+              allEmpresas: multiEmpresa,
+              empresaIds: rawEmpresaIds,
+              rolesByEmpresa: mapRoles,
+            };
+            setProfile(nextProfile);
+            setAssignedClientId(nextProfile.assignedClientId);
+            setAllEmpresas(multiEmpresa);
+            setEmpresaIds(rawEmpresaIds);
+            setRolesByEmpresa(mapRoles);
+            setEmpresaId(nextProfile.empresaId);
+
+            const effectiveRole = resolveRoleForEmpresa(nextProfile, nextProfile.empresaId);
+            setUserRole(effectiveRole || null);
+            await loadPermissionsForRole(effectiveRole || null, {
+              allEmpresas: multiEmpresa,
+              activeEmpresaId: nextProfile.empresaId,
+              tokenRole,
+            });
+
             try {
               if (roleDocId(role || '') !== roleDocId(tokenRole || '')) {
                 const syncFn = httpsCallable(functions, 'syncSystemUserClaims');
@@ -140,28 +211,22 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
               /* sync opcional */
             }
           } else {
+            setProfile(null);
             setUserRole(tokenRole);
             setAssignedClientId(null);
             setAllEmpresas(false);
             setEmpresaIds([]);
+            setRolesByEmpresa({});
             const isSuper = isSuperAdminRoleId(tokenRole);
             setEmpresaId('bacarsa');
             if (isSuper) {
               setRolePermissions(fullSuperAdminPermissions());
             } else if (tokenRole) {
-              const roleSnap = await getDoc(doc(db, 'roles', roleDocId(tokenRole)));
-              if (roleSnap.exists()) {
-                const roleData = roleSnap.data();
-                const roleEmp = String(roleData?.empresaId ?? '').trim();
-                const userEmp = 'bacarsa';
-                if (roleEmp && userEmp && roleEmp.toLowerCase() !== userEmp.toLowerCase()) {
-                  setRolePermissions({});
-                } else {
-                  setRolePermissions((roleData?.permissions || {}) as Record<string, string[]>);
-                }
-              } else {
-                setRolePermissions({});
-              }
+              await loadPermissionsForRole(tokenRole, {
+                allEmpresas: false,
+                activeEmpresaId: 'bacarsa',
+                tokenRole,
+              });
             } else {
               setRolePermissions({});
             }
@@ -190,11 +255,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setEmpresaId('bacarsa');
         setAllEmpresas(false);
         setEmpresaIds([]);
+        setRolesByEmpresa({});
+        setProfile(null);
       }
       setLoading(false);
     });
     return () => unsub();
-  }, []);
+  }, [loadPermissionsForRole]);
 
   const logout = async () => {
     await signOut(auth);
@@ -230,8 +297,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         isSuperAdmin,
         allEmpresas,
         empresaIds,
+        rolesByEmpresa,
         canReadModule,
         empresaId,
+        applyEmpresaContext,
       }}
     >
       {children}
