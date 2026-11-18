@@ -20,6 +20,8 @@ export type TurnoServicio = {
   endTime: string;
   quantity?: number | null;
   dias?: string[];
+  /** Turno cortado: dos horarios del mismo turno. */
+  blocks?: Array<{ startTime: string; endTime: string }>;
   /** −F del puesto: el feriado no exige cobertura ni suma horas vendidas. Ausente = +F. */
   trabajaFeriados?: boolean;
 };

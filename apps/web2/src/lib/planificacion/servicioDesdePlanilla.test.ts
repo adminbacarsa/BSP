@@ -17,6 +17,9 @@ import {
   etiquetaDias,
   etiquetaFechas,
   franjasDesdeVigente,
+  horasDeFranja,
+  horasMesDeFranjas,
+  textoHorarioFranja,
   cubre24Horas,
   tipoPuestoPropuesto,
   separarPuesto,
@@ -610,5 +613,36 @@ describe('editar el servicio vigente desde Planificación', () => {
     assert.equal(st.blocks.length, 2);
     assert.equal(st.feriados, true);
     assert.deepEqual(st.days, ['D']);
+  });
+
+  it('turno cortado: se muestra con los dos horarios y se guarda con las horas sumadas', () => {
+    const vigente = [{
+      puesto: 'GP', code: 'GP', startTime: '09:00', endTime: '14:00', cantidad: 1, dias: ['L', 'M', 'X', 'J', 'V'],
+      blocks: [{ startTime: '09:00', endTime: '14:00' }, { startTime: '18:00', endTime: '22:00' }],
+    }];
+    assert.equal(textoHorarioFranja(vigente[0]), '09:00–14:00 + 18:00–22:00');
+    assert.equal(horasDeFranja(vigente[0]), 9);
+    const franjas = franjasDesdeVigente(vigente);
+    assert.equal(franjas[0].blocks?.length, 2);
+    const [pos] = posicionesDesdeFranjas(franjas);
+    const st = pos.allowedShiftTypes[0] as any;
+    assert.equal(st.blocks.length, 2);
+    assert.equal(st.hours, 9);
+    assert.equal(horasMesDeFranjas([{ ...franjas[0], dias: ['L'] }], 2026, 11), 9 * 5);
+  });
+
+  it('turno cortado: una planilla con el mismo horario del primer bloque no pierde el segundo', () => {
+    const previa = {
+      id: 'p1', name: 'GP', coverageType: 'custom', quantity: 1, activeDays: ['L'], status: 'ACTIVE',
+      allowedShiftTypes: [{ code: 'GP', name: 'GP', startTime: '09:00', endTime: '14:00', hours: 9, quantity: 1, days: ['L'], blocks: [{ startTime: '09:00', endTime: '14:00' }, { startTime: '18:00', endTime: '22:00' }] }],
+    };
+    const [pos] = posicionesDesdeFranjas([{ id: 'x', puesto: 'GP', code: 'GP', startTime: '09:00', endTime: '14:00', cantidad: 1, dias: ['L'] }], [previa as any]);
+    const st = pos.allowedShiftTypes[0] as any;
+    assert.equal(st.blocks.length, 2);
+    assert.equal(st.hours, 9);
+    const [otro] = posicionesDesdeFranjas([{ id: 'x', puesto: 'GP', code: 'GP', startTime: '08:00', endTime: '12:00', cantidad: 1, dias: ['L'] }], [previa as any]);
+    const st2 = otro.allowedShiftTypes[0] as any;
+    assert.equal(st2.blocks, undefined);
+    assert.equal(st2.hours, 4);
   });
 });

@@ -16,7 +16,7 @@ import {
 } from './importarExcel';
 import { codigoEnBloque } from './codigoPuestoPlanilla';
 import { claveEquivalencia, type EquivalenciaCodigo } from './equivalenciaCodigo';
-import { HORARIO_ESTANDAR, horasEntre, type AvisoRapido } from './modoRapido';
+import { HORARIO_ESTANDAR, horasDeBloques, horasEntre, type AvisoRapido } from './modoRapido';
 import { LICENCIA_CODES } from './bandaLicencia';
 import { textoLecturaFranjas } from './lecturaBandas';
 import { isArgentineHoliday } from '../servicios/slaHoursCalculator';
@@ -44,6 +44,8 @@ export type FranjaServicioPlanilla = {
   trabajaFeriados?: boolean;
   /** Código que traía la planilla, cuando se conservó el del servicio. */
   codigoPlanilla?: string;
+  /** Turno cortado: dos horarios del mismo turno. startTime/endTime son los del primer bloque. */
+  blocks?: Array<{ startTime: string; endTime: string }>;
 };
 
 export type FranjaVigente = {
@@ -51,12 +53,37 @@ export type FranjaVigente = {
   code: string;
   startTime: string;
   endTime: string;
+  /** Turno cortado: dos horarios del mismo turno. */
+  blocks?: Array<{ startTime: string; endTime: string }>;
   cantidad: number;
   dias: string[];
   fechas?: string[];
   feriados?: boolean;
   trabajaFeriados?: boolean;
 };
+
+type BloqueFranja = { startTime: string; endTime: string };
+
+/** Dos o más horarios válidos del mismo turno (turno cortado); null si el turno es de un solo horario. */
+export function bloquesDeFranja(blocks: unknown): BloqueFranja[] | null {
+  if (!Array.isArray(blocks) || blocks.length < 2) return null;
+  const limpios = blocks
+    .map((b) => ({ startTime: String((b as BloqueFranja)?.startTime || '').slice(0, 5), endTime: String((b as BloqueFranja)?.endTime || '').slice(0, 5) }))
+    .filter((b) => b.startTime && b.endTime);
+  return limpios.length >= 2 ? limpios : null;
+}
+
+/** «09:00–14:00 + 18:00–22:00» para un turno cortado, «09:00–14:00» para uno común. */
+export function textoHorarioFranja(f: { startTime: string; endTime: string; blocks?: unknown }): string {
+  const bloques = bloquesDeFranja(f.blocks);
+  return bloques ? bloques.map((b) => `${b.startTime}–${b.endTime}`).join(' + ') : `${f.startTime}–${f.endTime}`;
+}
+
+/** Horas del turno: la suma de los bloques si es cortado. */
+export function horasDeFranja(f: { startTime: string; endTime: string; blocks?: unknown }): number {
+  const bloques = bloquesDeFranja(f.blocks);
+  return bloques ? horasDeBloques(bloques) : horasEntre(f.startTime, f.endTime);
+}
 
 export type EstadoDiff = 'coincide' | 'distinto' | 'falta' | 'sobra';
 
@@ -997,14 +1024,20 @@ export function posicionesDesdeFranjas(
     const shifts: TurnoServicioDoc[] = list.map((f) => {
       // Conserva lo que el editor no muestra del turno (turno cortado, nombre, etc.) y pisa lo editado.
       const prevTurno = previasTurnos.find((t) => normPlanilla(String(t.code || '')) === normPlanilla(f.code)) || {};
-      const { days: _d, specificDates: _sd, feriados: _fe, ...resto } = prevTurno as Record<string, unknown>;
+      const { days: _d, specificDates: _sd, feriados: _fe, blocks: bloquesPrevios, ...resto } = prevTurno as Record<string, unknown>;
+      // Turno cortado: los bloques de la franja mandan; los del servicio se conservan solo si el horario no cambió.
+      const previos = bloquesDeFranja(bloquesPrevios);
+      const conservaPrevios = !!previos && f.startTime === previos[0].startTime
+        && (f.endTime === previos[0].endTime || f.endTime === previos[previos.length - 1].endTime);
+      const bloques = bloquesDeFranja(f.blocks) || (conservaPrevios ? previos : null);
       return {
         ...(resto as object),
         code: f.code,
         name: String((prevTurno as { name?: unknown }).name || f.code),
         startTime: f.startTime,
         endTime: f.endTime,
-        hours: horasEntre(f.startTime, f.endTime),
+        ...(bloques ? { blocks: bloques } : {}),
+        hours: bloques ? horasDeBloques(bloques) : horasEntre(f.startTime, f.endTime),
         quantity: Math.max(1, Math.round(f.cantidad) || 1),
         ...(f.fechas?.length ? { specificDates: [...f.fechas].sort() } : f.dias.length ? { days: f.dias } : {}),
         ...(f.feriados && !f.fechas?.length ? { feriados: true } : {}),
@@ -1065,7 +1098,7 @@ export function horasMesDeFranjas(franjas: FranjaServicioPlanilla[], year: numbe
   const ultimo = diasDelMes(year, month);
   let total = 0;
   for (const f of franjas) {
-    const horas = horasEntre(f.startTime, f.endTime);
+    const horas = horasDeFranja(f);
     const set = new Set(f.dias);
     const mm = `${year}-${String(month).padStart(2, '0')}-`;
     const fechas = new Set((f.fechas || []).filter((x) => x.startsWith(mm)));
@@ -1228,6 +1261,7 @@ export function franjasDesdeVigente(vigente: readonly FranjaVigente[]): FranjaSe
     code: f.code,
     startTime: f.startTime,
     endTime: f.endTime,
+    ...(bloquesDeFranja(f.blocks) ? { blocks: bloquesDeFranja(f.blocks) as BloqueFranja[] } : {}),
     cantidad: f.cantidad || 1,
     dias: ORDEN_DIAS.filter((d) => (f.dias || []).map((x) => x.toUpperCase()).includes(d)),
     ...(f.fechas?.length ? { fechas: [...f.fechas] } : {}),

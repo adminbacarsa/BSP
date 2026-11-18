@@ -5,7 +5,7 @@ import { celdasDesdeArrayBuffer } from '@/lib/planificacion/importarExcelXlsx';
 import { detectarCuadros, sugerirCuadros, type CuadroPlanilla } from '@/lib/planificacion/importarExcel';
 import { aplicarServicioPlanilla, type SlaRango } from '@/lib/servicios/aplicarServicioPlanilla';
 import { ServicioPlanillaEditor } from './ServicioPlanillaEditor';
-import { franjasDesdeVigente, proponerServicioDesdeTurnos, type FranjaVigente, type PropuestaServicio, type TurnoServicioIn } from '@/lib/planificacion/servicioDesdePlanilla';
+import { franjasDesdeVigente, proponerServicioDesdeTurnos, textoHorarioFranja, type FranjaVigente, type PropuestaServicio, type TurnoServicioIn } from '@/lib/planificacion/servicioDesdePlanilla';
 
 export type ObjetivoServicioPlanilla = {
   id: string;
@@ -188,7 +188,7 @@ export function ServicioPlanillaModal(props: Props) {
                       <tr key={`${f.puesto}-${f.code}-${i}`} className="border-t border-slate-100">
                         <td className="py-1 pr-2 font-bold">{f.puesto}</td>
                         <td className="py-1 pr-2">{f.code}</td>
-                        <td className="py-1 pr-2">{f.startTime}–{f.endTime}</td>
+                        <td className="py-1 pr-2" data-servicio-horario={f.code}>{textoHorarioFranja(f)}</td>
                         <td className="py-1 pr-2">{f.cantidad}</td>
                         <td className="py-1">{f.dias?.length ? f.dias.join(' ') : 'todos'}</td>
                       </tr>

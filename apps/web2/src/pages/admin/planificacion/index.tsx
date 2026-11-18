@@ -14192,7 +14192,10 @@ function PlanificacionDesktop() {
                             const a = hm(st.startTime);
                             const b = hm(st.endTime);
                             if (!a || !b) return [];
-                            return [`${st.code} ${a}–${b}`];
+                            const cortado = Array.isArray((st as any).blocks) && (st as any).blocks.length >= 2
+                                ? (st as any).blocks.map((bl: any) => `${hm(bl.startTime)}–${hm(bl.endTime)}`).join(' + ')
+                                : '';
+                            return [`${st.code} ${cortado || `${a}–${b}`}`];
                         }).join(' · '),
                     })),
                     turnos: structure.flatMap((p) => (p.shifts || []).map((st) => ({
@@ -14200,6 +14203,7 @@ function PlanificacionDesktop() {
                         code: String(st.code || ''),
                         startTime: hm(st.startTime),
                         endTime: hm(st.endTime),
+                        ...(Array.isArray((st as any).blocks) && (st as any).blocks.length >= 2 ? { blocks: (st as any).blocks.map((b: any) => ({ startTime: hm(b.startTime), endTime: hm(b.endTime) })) } : {}),
                         quantity: st.quantity ?? p.qty ?? null,
                         dias: Array.isArray(st.days) ? st.days.map((d) => String(d)) : [], ...(Array.isArray((st as any).specificDates) && (st as any).specificDates.length ? { fechas: (st as any).specificDates.map((d: unknown) => String(d)) } : {}), ...((st as any).feriados === true ? { feriados: true } : {}), ...(p.trabajaFeriados === false ? { trabajaFeriados: false as const } : {}),
                     }))),
@@ -14253,6 +14257,7 @@ function PlanificacionDesktop() {
                 code: t.code,
                 startTime: t.startTime,
                 endTime: t.endTime,
+                ...(t.blocks?.length ? { blocks: t.blocks } : {}),
                 cantidad: t.quantity || 1,
                 dias: t.dias || [],
                 ...(t.trabajaFeriados === false ? { trabajaFeriados: false as const } : {}),
@@ -14306,6 +14311,7 @@ function PlanificacionDesktop() {
                         code: t.code,
                         startTime: t.startTime,
                         endTime: t.endTime,
+                        ...(t.blocks?.length ? { blocks: t.blocks } : {}),
                         cantidad: t.quantity || 1,
                         dias: t.dias || [],
                         ...(t.trabajaFeriados === false ? { trabajaFeriados: false as const } : {}),

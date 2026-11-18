@@ -6,6 +6,9 @@ import type { CuadroPlanilla } from '@/lib/planificacion/importarExcel';
 import {
   adoptarCodigoVigente,
   alinearPuestos,
+  bloquesDeFranja,
+  horasDeFranja,
+  textoHorarioFranja,
   compararConVigente,
   equivalenciasAlCodigoServicio,
   diasDeFechas,
@@ -246,8 +249,18 @@ export function ServicioPlanillaEditor({ cuadro, semilla, year, month, mesLabel,
                 <tr key={f.id} className="border-t border-slate-100" data-servicio-franja={f.code}>
                   <td className="px-2 py-1"><input value={f.puesto} onChange={(e) => patch(f.id, { puesto: e.target.value })} className="w-24 rounded-lg border border-slate-200 px-1 py-0.5" /></td>
                   <td><input value={f.code} onChange={(e) => patch(f.id, { code: e.target.value.toUpperCase() })} className="w-14 rounded-lg border border-slate-200 px-1 py-0.5 font-black" /></td>
-                  <td><input value={f.startTime} onChange={(e) => patch(f.id, { startTime: e.target.value, definirHorario: false })} className={`w-16 rounded-lg border px-1 py-0.5 ${f.definirHorario ? 'border-amber-400 bg-amber-50' : 'border-slate-200'}`} title={f.definirHorario ? 'Este código no tiene horario conocido: definilo' : undefined} data-servicio-definir-horario={f.definirHorario ? '1' : undefined} /></td>
-                  <td><input value={f.endTime} onChange={(e) => patch(f.id, { endTime: e.target.value, definirHorario: false })} className={`w-16 rounded-lg border px-1 py-0.5 ${f.definirHorario ? 'border-amber-400 bg-amber-50' : 'border-slate-200'}`} title={f.definirHorario ? 'Este código no tiene horario conocido: definilo' : undefined} /></td>
+                  {bloquesDeFranja(f.blocks) ? (
+                    <td colSpan={2} data-servicio-cortado={f.code}>
+                      <span className="inline-block rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-black text-indigo-800" title="Turno cortado: los horarios se editan en Servicios">
+                        {textoHorarioFranja(f)} · {horasDeFranja(f)} h
+                      </span>
+                    </td>
+                  ) : (
+                    <>
+                      <td><input value={f.startTime} onChange={(e) => patch(f.id, { startTime: e.target.value, definirHorario: false })} className={`w-16 rounded-lg border px-1 py-0.5 ${f.definirHorario ? 'border-amber-400 bg-amber-50' : 'border-slate-200'}`} title={f.definirHorario ? 'Este código no tiene horario conocido: definilo' : undefined} data-servicio-definir-horario={f.definirHorario ? '1' : undefined} /></td>
+                      <td><input value={f.endTime} onChange={(e) => patch(f.id, { endTime: e.target.value, definirHorario: false })} className={`w-16 rounded-lg border px-1 py-0.5 ${f.definirHorario ? 'border-amber-400 bg-amber-50' : 'border-slate-200'}`} title={f.definirHorario ? 'Este código no tiene horario conocido: definilo' : undefined} /></td>
+                    </>
+                  )}
                   <td><input type="number" min={1} value={f.cantidad} onChange={(e) => patch(f.id, { cantidad: Math.max(1, Number(e.target.value) || 1) })} className="w-12 rounded-lg border border-slate-200 px-1 py-0.5" /></td>
                   <td className="py-1" data-servicio-dias>
                     <div className="flex items-center gap-1">

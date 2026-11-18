@@ -252,6 +252,7 @@ export default function ServiciosSLAPage() {
               code: String(st.code),
               startTime: a,
               endTime: b,
+              ...(Array.isArray((st as any).blocks) && (st as any).blocks.length >= 2 ? { blocks: (st as any).blocks.map((bl: any) => ({ startTime: hm(bl.startTime), endTime: hm(bl.endTime) })) } : {}),
               cantidad: st.quantity ?? p.quantity ?? 1,
               dias: Array.isArray(st.days) ? st.days.map((d) => String(d)) : [], ...(Array.isArray((st as any).specificDates) && (st as any).specificDates.length ? { fechas: (st as any).specificDates.map((d: unknown) => String(d)) } : {}), ...((st as any).feriados === true ? { feriados: true } : {}),
             }];
