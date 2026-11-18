@@ -500,6 +500,7 @@ function useTurnosHoy({
           const docStatus = String(shift.status || 'PENDING').toUpperCase();
           const docEndMs = toStartMs(shift.realEndTime);
           const tramos = tramosDeTurno(startMs, bloquesCortado);
+          const abiertosDoc: Array<{ turno: TurnoHoy; startMs: number; endMs: number }> = [];
           tramos.forEach((tr, i) => {
             const n = i + 1;
             const p: PresenciaBloque = pb[`b${n}`] || {};
@@ -545,10 +546,15 @@ function useTurnosHoy({
             if (tramoCerrado) {
               cerradosMap.set(turnoTramo.rowId, turnoTramo);
             } else {
-              considerar(turnoTramo, tr.startMs);
+              abiertosDoc.push({ turno: turnoTramo, startMs: tr.startMs, endMs: tr.endMs });
               tramosAbiertos.push(turnoTramo);
             }
           });
+          // Cada tramo lleva su propia ubicación/WhatsApp: el mensaje del guardia cuenta para el tramo
+          // vigente (el primero abierto que todavía no terminó), no para el más cercano a la hora actual.
+          // El tramo 2 recién recibe WA cuando termina el 1 o éste se cierra.
+          const vigente = abiertosDoc.find((a) => a.endMs > now) ?? abiertosDoc[0];
+          if (vigente) considerar(vigente.turno, vigente.startMs);
           continue;
         }
 
