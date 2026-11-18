@@ -143,6 +143,7 @@ for (const doc of snap.docs) {
   if (t.isExtended === true || t.isEarlyStart === true || t.extExtraHours || t.adjustedStartTime || t.adjustedEndTime) { saltar('con extensión o adelanto'); continue; }
   if (t.coverageMode || t.coversEmployeeId || t.coveragePackageId || t.isReten === true) { saltar('cobertura o retén'); continue; }
   if (hhmmLocal(t.startTime) !== def.blocks[0].startTime) { saltar('el inicio no coincide con el primer tramo del servicio'); continue; }
+  if (horasDeBloques(def.blocks) > 12) { saltar('suma más de 12 h (no es un turno cortado: revisar el servicio)'); continue; }
   cambios.push({
     ref: doc.ref,
     objetivo: nombreObj.get(objId) || objId,
@@ -158,10 +159,16 @@ for (const doc of snap.docs) {
 console.log(`turnos revisados: ${snap.size} · ya con blocks: ${yaOk} · a completar: ${cambios.length}`);
 if (segundoDoc) console.log(`  aviso: ${segundoDoc} turno(s) con isSecondBlock (el motor viejo partía en dos documentos); no se tocan.`);
 for (const [m, n] of saltados) console.log(`  salteados ${n}: ${m}`);
-for (const c of cambios.slice(0, 40)) {
-  console.log(`  ${c.objetivo} · ${c.dia} · ${c.code} · ${c.empleado} · ${c.antes ?? 'reloj'} h → ${c.hours} h (${c.blocks.map((b) => `${b.startTime}–${b.endTime}`).join(' + ')})`);
+const grupos = new Map();
+for (const c of cambios) {
+  const k = `${c.objetivo} · ${c.code} · ${c.blocks.map((b) => `${b.startTime}–${b.endTime}`).join(' + ')} → ${c.hours} h · ${c.dia.slice(0, 7)}`;
+  const g = grupos.get(k) || { n: 0, desde: c.dia, hasta: c.dia };
+  g.n += 1;
+  if (c.dia < g.desde) g.desde = c.dia;
+  if (c.dia > g.hasta) g.hasta = c.dia;
+  grupos.set(k, g);
 }
-if (cambios.length > 40) console.log(`  … y ${cambios.length - 40} más`);
+for (const [k, g] of [...grupos.entries()].sort()) console.log(`  ${k}: ${g.n} turno(s) (${g.desde} → ${g.hasta})`);
 
 if (!APPLY) {
   console.log(`Sin --apply: no se escribió nada. Se actualizarían ${cambios.length} turno(s).`);
