@@ -2,6 +2,7 @@ import { Timestamp, type Firestore } from 'firebase-admin/firestore';
 import { isEventoShift } from '../eventos/eventoCoverage';
 import { isExcluidoDeOperacion } from '../common/excluirDeOperacion';
 import { isRetShift, isZeroDurationShift } from '../common/retShift';
+import { turnoCortadoConPresencia } from '../common/turnoCortado';
 
 export type ShiftAbsentReason =
   | 'AUTO_T30'
@@ -100,6 +101,10 @@ export async function markShiftAbsent(
   }
   // Un guardia que ya fichó no queda ausente por un proceso automático; solo el operador puede decidirlo.
   if ((shift.isPresent === true || shift.isCompleted === true) && !operador) {
+    return { applied: false };
+  }
+  // Turno cortado en el corte entre tramos (PENDING pero ya ingresó): tampoco es ausencia automática.
+  if (turnoCortadoConPresencia(shift) && !operador) {
     return { applied: false };
   }
 

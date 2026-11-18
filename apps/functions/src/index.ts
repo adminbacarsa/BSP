@@ -28,6 +28,7 @@ import { createNestApp } from './main';
 import { iniciarCascadaCobertura, simularRespuestasConvocatorias } from './coverage/convocatoriasCobertura';
 import { retainOutgoingForGap, releaseInvalidRetentionsRun, syncRetentionVinculoOnTurnoWrite } from './coverage/coverageRetention';
 import { skipAbsencePipelineForShift } from './coverage/coverageTraceShift';
+import { turnoCortadoConPresencia } from './common/turnoCortado';
 import { isEventoShift } from './eventos/eventoCoverage';
 import { ObjectiveOperationCache, simulableShiftSkipReasonResolved } from './common/simulableShift';
 import { loadObjectiveIdsExcluidos, turnoFueraDeCentroDeControl } from './common/excluirDeOperacion';
@@ -2698,6 +2699,8 @@ export const detectarAusencias = functions
       if (SKIP_STATUSES.has(shift.status || '')) continue;
       // Quien ya fichó (también llegada tarde sin aviso, T+5…T+30) queda isPresent: no AUTO_T30.
       if (shift.isPresent === true || shift.isCompleted === true) continue;
+      // Turno cortado: quien fichó un tramo y quedó PENDING en el corte no está ausente.
+      if (turnoCortadoConPresencia(shift)) continue;
       if (shift.isUnassigned === true) continue;         // vacante → no es ausencia
       if (shift.isReportedToPlanning === true) continue; // ya gestionado
       if (SKIP_CODES.has((shift.code || '').toUpperCase())) continue;

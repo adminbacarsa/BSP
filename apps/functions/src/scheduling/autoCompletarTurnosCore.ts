@@ -23,6 +23,7 @@ import { rosterIfSameSecond } from '../fichajes/relevoOutgoingMatch';
 import { escalarVacanteSinCobertura } from '../coverage/escalarVacanteSinCobertura';
 import { retentionPendingReason } from './retentionPendingReason';
 import { guardFirstName } from '../common/pushGreeting';
+import { finUltimoTramoMs } from '../common/turnoCortado';
 import { isEventoShift } from '../eventos/eventoCoverage';
 import {
   finTurnoCopy,
@@ -583,7 +584,14 @@ export async function runAutoCompletarTurnosPass(
       continue;
     }
 
-    const endTimeMs = shiftEndMs(shift);
+    // Turno cortado: el fin del primer tramo no es el fin del turno. Queda abierto hasta que termine
+    // el último tramo (el corte entre tramos no lo cierra ni busca relevo).
+    const finCortadoMs = finUltimoTramoMs(shift);
+    if (finCortadoMs > 0 && nowMs < finCortadoMs) {
+      actions.push(describe(docSnap.id, shift, 'WAIT', 'TURNO_CORTADO_EN_CURSO'));
+      continue;
+    }
+    const endTimeMs = finCortadoMs > 0 ? finCortadoMs : shiftEndMs(shift);
     if (!endTimeMs) continue;
 
     if (recentEndMs) {
