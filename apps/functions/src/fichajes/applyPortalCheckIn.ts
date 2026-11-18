@@ -6,6 +6,8 @@ import { isReversibleLateAbsence } from '../attendance/lateAbsenceWindow';
 import { evaluateServerCheckInWindow } from './checkInWindow';
 import { isOpsCoverageHoursOnSourceDoc } from '../coverage/coverageTraceShift';
 import { cerrarFuenteSiCorresponde, resolverDestinoFichada } from './fichadaSobreCobertura';
+import { planFichadaTramo } from '../common/turnoCortado';
+import { evaluarVentanaTramo, registrarPresenciaTramo } from './registrarPresenciaTramo';
 
 /**
  * Registra fichaje CHECK_IN idempotente y consolida en el documento turno
@@ -52,15 +54,25 @@ export async function processPortalCheckIn(
   const recordedMs = recordedAt ? new Date(recordedAt).getTime() : Date.now();
   const empSnap = empId ? await db.collection('empleados').doc(empId).get() : null;
   const fichadaRemota = empSnap?.data()?.fichadaRemota === true;
-  const windowEval = evaluateServerCheckInWindow(shiftData as Record<string, unknown>, recordedMs, {
-    source: 'PORTAL_GPS',
-    fichadaRemota,
-  });
+  // Turno cortado: desde 15 min antes del tramo 2+ la fichada es de ese tramo, no del turno.
+  const planTramo = planFichadaTramo(shiftData as Record<string, unknown>, recordedMs);
+  if (planTramo.tipo === 'ya') {
+    return { success: true, fichajeId: '', alreadyApplied: true };
+  }
+  const windowEval = planTramo.tipo === 'tramo'
+    ? evaluarVentanaTramo(shiftData as Record<string, unknown>, planTramo, recordedMs, {
+      source: 'PORTAL_GPS',
+      fichadaRemota,
+    })
+    : evaluateServerCheckInWindow(shiftData as Record<string, unknown>, recordedMs, {
+      source: 'PORTAL_GPS',
+      fichadaRemota,
+    });
   if (!windowEval.allowed) {
     throw new Error(windowEval.rejectCode || 'CHECKIN_WINDOW');
   }
 
-  if (shiftData.isPresent === true || shiftData.status === 'PRESENT') {
+  if (planTramo.tipo !== 'tramo' && (shiftData.isPresent === true || shiftData.status === 'PRESENT')) {
     return { success: true, fichajeId: '', alreadyApplied: true };
   }
 
@@ -97,14 +109,28 @@ export async function processPortalCheckIn(
   );
 
   try {
-    const result = await registrarPresencia(db, {
-      shiftId: targetId,
-      empId,
-      coords: coords || null,
-      recordedAt: recordedAt || null,
-      source: source === 'OPERATIONS' ? 'OPERATIONS' : 'PORTAL_GPS',
-      fichadaRemota,
-    });
+    const result = planTramo.tipo === 'tramo'
+      ? {
+        ...(await registrarPresenciaTramo(db, {
+          shiftId: targetId,
+          plan: planTramo,
+          empId,
+          coords: coords || null,
+          recordedAt: recordedAt || null,
+          source: source === 'OPERATIONS' ? 'OPERATIONS' : 'PORTAL_GPS',
+          fichadaRemota,
+          window: windowEval,
+        })),
+        relieved: null as { shiftId: string } | null,
+      }
+      : await registrarPresencia(db, {
+        shiftId: targetId,
+        empId,
+        coords: coords || null,
+        recordedAt: recordedAt || null,
+        source: source === 'OPERATIONS' ? 'OPERATIONS' : 'PORTAL_GPS',
+        fichadaRemota,
+      });
 
     if (destino.fuenteId) await cerrarFuenteSiCorresponde(db, destino);
     await fichajeRef.update({

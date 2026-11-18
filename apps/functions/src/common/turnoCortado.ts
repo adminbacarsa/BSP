@@ -89,6 +89,45 @@ export function turnoCortadoConPresencia(data: TurnoCortadoData | null | undefin
     .some((t) => !!t?.realStartTime);
 }
 
+/** Apertura de la fichada de cada tramo: 15 min antes de su inicio. */
+export const VENTANA_ANTES_TRAMO_MS = 15 * 60 * 1000;
+
+/**
+ * El tramo `n` (1-based) ya tiene ingreso. El tramo 1 usa los campos del turno
+ * (o `presenciaBloques.b1`); los demás viven en `presenciaBloques.bN`.
+ */
+export function tramoConPresencia(data: TurnoCortadoData | null | undefined, n: number): boolean {
+  const pb = data?.presenciaBloques as Record<string, { realStartTime?: unknown } | null | undefined> | undefined;
+  if (pb && typeof pb === 'object' && pb[`b${n}`]?.realStartTime) return true;
+  if (n === 1) return data?.isPresent === true || !!data?.realStartTime;
+  return false;
+}
+
+export type PlanFichadaTramo =
+  | { tipo: 'normal' }
+  | { tipo: 'ya'; tramo: number }
+  | { tipo: 'tramo'; tramo: number; startMs: number; endMs: number };
+
+/**
+ * Qué tramo corresponde fichar en `nowMs`. Turno de un solo horario, o cortado dentro del
+ * tramo 1: `normal`. Desde 15 min antes del tramo N (≥ 2): si ese tramo ya tiene ingreso,
+ * `ya`; si el anterior tiene ingreso, `tramo` (hay que fichar el N). Sin ingreso previo
+ * cae al flujo normal, que rechaza la fichada.
+ */
+export function planFichadaTramo(data: TurnoCortadoData | null | undefined, nowMs: number): PlanFichadaTramo {
+  const bloques = bloquesDeTurnoCortado(data);
+  const startMs = data?.startTime?.toMillis?.() ?? 0;
+  if (!bloques || !startMs) return { tipo: 'normal' };
+  const tramos = tramosDeTurnoCortado(startMs, bloques);
+  for (let n = tramos.length; n >= 2; n -= 1) {
+    const t = tramos[n - 1];
+    if (nowMs < t.startMs - VENTANA_ANTES_TRAMO_MS) continue;
+    if (tramoConPresencia(data, n)) return { tipo: 'ya', tramo: n };
+    if (tramoConPresencia(data, n - 1)) return { tipo: 'tramo', tramo: n, startMs: t.startMs, endMs: t.endMs };
+  }
+  return { tipo: 'normal' };
+}
+
 /** Sigue abierto: es un turno cortado y todavía no terminó su último tramo. */
 export function turnoCortadoEnCurso(data: TurnoCortadoData | null | undefined, nowMs: number): boolean {
   const fin = finUltimoTramoMs(data);

@@ -1,8 +1,9 @@
-import assert from 'node:assert/strict';
+﻿import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   bloquesDeTurnoCortado,
   finUltimoTramoMs,
+  planFichadaTramo,
   tramosDeTurnoCortado,
   turnoCortadoConPresencia,
   turnoCortadoEnCurso,
@@ -49,5 +50,31 @@ describe('turno cortado en functions', () => {
     assert.equal(turnoCortadoConPresencia({ ...TURNO, realStartTime: ts('2026-11-18T12:02:00Z') }), true);
     assert.equal(turnoCortadoConPresencia({ ...TURNO, presenciaBloques: { b2: { realStartTime: ts('2026-11-18T21:00:00Z') } } }), true);
     assert.equal(turnoCortadoConPresencia({ startTime: TURNO.startTime, isPresent: true }), false);
+  });
+
+  it('fichada por tramo: dentro del tramo 1 es el flujo normal', () => {
+    const t1 = { ...TURNO, isPresent: true, realStartTime: ts('2026-11-18T12:00:00Z') };
+    assert.deepEqual(planFichadaTramo(t1, new Date('2026-11-18T13:00:00Z').getTime()), { tipo: 'normal' });
+    assert.deepEqual(planFichadaTramo(t1, new Date('2026-11-18T20:44:00Z').getTime()), { tipo: 'normal' });
+  });
+
+  it('fichada por tramo: desde 15 min antes del tramo 2 y con el tramo 1 fichado, toca el tramo 2', () => {
+    const cerrado = { ...TURNO, isPresent: false, realStartTime: ts('2026-11-18T12:00:00Z'), presenciaBloques: { b1: { cerrado: true } } };
+    const plan = planFichadaTramo(cerrado, new Date('2026-11-18T20:50:00Z').getTime());
+    assert.equal(plan.tipo, 'tramo');
+    if (plan.tipo === 'tramo') {
+      assert.equal(plan.tramo, 2);
+      assert.equal(plan.startMs, new Date('2026-11-18T21:00:00Z').getTime());
+      assert.equal(plan.endMs, new Date('2026-11-19T01:00:00Z').getTime());
+    }
+  });
+
+  it('fichada por tramo: si el tramo 2 ya tiene ingreso, ya está aplicada', () => {
+    const t2 = { ...TURNO, isPresent: true, realStartTime: ts('2026-11-18T12:00:00Z'), presenciaBloques: { b2: { realStartTime: ts('2026-11-18T21:00:00Z') } } };
+    assert.deepEqual(planFichadaTramo(t2, new Date('2026-11-18T21:30:00Z').getTime()), { tipo: 'ya', tramo: 2 });
+  });
+
+  it('fichada por tramo: sin ingreso en el tramo 1 no se salta al tramo 2', () => {
+    assert.deepEqual(planFichadaTramo({ ...TURNO, isPresent: false }, new Date('2026-11-18T21:10:00Z').getTime()), { tipo: 'normal' });
   });
 });

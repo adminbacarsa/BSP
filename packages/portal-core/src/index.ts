@@ -143,6 +143,11 @@ export {
   shiftPlanificacionLookupKey,
 } from './shifts/employeeShiftVisibility';
 export type { EmployeeShiftVisibilityInput } from './shifts/employeeShiftVisibility';
+export {
+  hayTurnoCortado,
+  tramoActivoDeTurnoCortado,
+  vistaTurnoCortado,
+} from './shifts/turnoCortadoVista';
 export { isAbsentLikeShift, isActiveAbsenceRecord } from './shifts/isAbsentLikeShift';
 export { isFrancoCoverageOriginDoc, isCalendarFrancoSpan } from './shifts/francoCoverageOrigin';
 export {

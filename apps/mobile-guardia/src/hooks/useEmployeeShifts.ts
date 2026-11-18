@@ -17,6 +17,8 @@ import {
   isAbsentLikeShift,
   isActiveAbsenceRecord,
   isFrancoCoverageOriginDoc,
+  hayTurnoCortado,
+  vistaTurnoCortado,
 } from '@cosp/portal-core';
 import { getPortalFirebase } from '../lib/portal';
 import { sortShiftsByStart } from '../lib/shifts';
@@ -360,6 +362,17 @@ export function useEmployeeShifts(
     };
   }, [deviceVerified, rawShifts]);
 
+  // Turno cortado: el tramo que se muestra y ficha depende de la hora. Reloj cada minuto,
+  // solo si el legajo tiene algún turno cortado.
+  const hayCortado = useMemo(() => hayTurnoCortado(rawShifts), [rawShifts]);
+  const [ahoraMs, setAhoraMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (!hayCortado) return;
+    setAhoraMs(Date.now());
+    const id = setInterval(() => setAhoraMs(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, [hayCortado]);
+
   const shifts = useMemo(() => {
     const marked = rawShifts.map((s) => {
       if (!absentShiftIds.has(s.id)) return s;
@@ -367,9 +380,11 @@ export function useEmployeeShifts(
       return { ...s, isAbsent: true, status: s.status || 'ABSENT' } as Shift;
     });
     return sortShiftsByStart(
-      marked.filter((s) => isShiftVisibleToEmployee(s as never, publishedKeys)),
+      marked
+        .filter((s) => isShiftVisibleToEmployee(s as never, publishedKeys))
+        .map((s) => (hayCortado ? vistaTurnoCortado(s, ahoraMs) : s)),
     );
-  }, [rawShifts, publishedKeys, absentShiftIds]);
+  }, [rawShifts, publishedKeys, absentShiftIds, hayCortado, ahoraMs]);
 
   /** Incluye ausentes (para hero "Ausente" en Hoy). El franco origen de una cobertura no es un turno. */
   const allShifts = useMemo(() => {
@@ -380,9 +395,10 @@ export function useEmployeeShifts(
           absentShiftIds.has(s.id)
             ? ({ ...s, isAbsent: true, status: s.status || 'ABSENT' } as Shift)
             : s,
-        ),
+        )
+        .map((s) => (hayCortado ? vistaTurnoCortado(s, ahoraMs) : s)),
     );
-  }, [rawShifts, absentShiftIds]);
+  }, [rawShifts, absentShiftIds, hayCortado, ahoraMs]);
 
   return {
     shifts,
