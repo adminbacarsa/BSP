@@ -38,6 +38,19 @@ function horarioLeyenda(s: TurnoLeyenda): string {
   return hm(s.startTime, s.endTime);
 }
 
+/**
+ * El turno es de alguno de los objetivos que se están viendo. El mapa de turnos del mes trae
+ * a toda la empresa: sin este filtro la leyenda mostraba extensiones de otros cronogramas.
+ * Un turno sin `objectiveId` (recién cargado en la grilla) cuenta como de la vista actual.
+ */
+export function turnoDeObjetivos(
+  sh: { objectiveId?: string | null } | null | undefined,
+  objetivos: ReadonlySet<string>,
+): boolean {
+  const obj = String(sh?.objectiveId || '').trim();
+  return !obj || objetivos.has(obj);
+}
+
 /** Pares de extensión del mismo objetivo (ej. EM+EM2). No incluye +EM2 de otro objetivo. */
 export function textoSumasExt(sumas: readonly string[]): string {
   return [...new Set(sumas.map((s) => s.toUpperCase()).filter(Boolean))].sort().join(' · ');

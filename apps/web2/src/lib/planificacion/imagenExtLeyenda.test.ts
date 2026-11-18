@@ -1,7 +1,7 @@
-import assert from 'node:assert/strict';
+﻿import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { paresExt, parExtMismoObjetivo, type DatosImagen } from './imagenCronograma';
-import { armarLeyenda, textoSumasExt } from './leyendaModoRapido';
+import { armarLeyenda, textoSumasExt, turnoDeObjetivos } from './leyendaModoRapido';
 
 const base: DatosImagen = {
   titulo: 'Embozadora',
@@ -55,5 +55,13 @@ describe('EXT en la imagen y la nomenclatura', () => {
     const ext = otros?.chips.find((c) => c.code === 'EXT');
     assert.equal(ext?.horario, 'EM+EM2');
     assert.equal(ext?.detalle, 'Extensión del mismo objetivo');
+  });
+
+  it('la leyenda solo lee turnos de los objetivos que se ven, no los de toda la empresa', () => {
+    const vista = new Set(['catedral', 'palace']);
+    assert.equal(turnoDeObjetivos({ objectiveId: 'catedral' }, vista), true);
+    assert.equal(turnoDeObjetivos({ objectiveId: 'otro-objetivo' }, vista), false);
+    assert.equal(turnoDeObjetivos({}, vista), true);
+    assert.equal(turnoDeObjetivos(null, vista), true);
   });
 });

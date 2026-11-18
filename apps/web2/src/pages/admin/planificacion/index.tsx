@@ -255,6 +255,7 @@ import {
 } from '@/components/planificacion/GrillaCelda';
 import { ModoRapidoCapa, type CapaModoRapidoApi, type MarcaAviso } from '@/components/planificacion/ModoRapidoCapa';
 import { LeyendaModoRapido } from '@/components/planificacion/LeyendaModoRapido';
+import { turnoDeObjetivos } from '@/lib/planificacion/leyendaModoRapido';
 import { Cierre12Banner, Cobertura12RangoBanner, ModoRapidoAyuda, PegarExcelModal, SelectorNovedad, type DecisionDiaE, type DiaUi12, type PegarExcelEstado } from '@/components/planificacion/ModoRapidoPiezas';
 import { coloresParaTsv } from '@/lib/planificacion/pegadoExcelColor';
 import { asignarNominaAServicioEvento } from '@/services/eventoAssignService';
@@ -2560,12 +2561,19 @@ function PlanificacionDesktop() {
     }, [selectedGrupo, grupoUnifiedMode, grupoSlaMap]);
     const codigosUsadosLeyenda = useMemo(() => {
         const s = new Set<string>();
+        const objetivosVista = new Set<string>(
+            (selectedGrupo && grupoUnifiedMode
+                ? (selectedGrupo.objectiveIds as string[])
+                : [selectedObjective]
+            ).map((id) => String(id || '').trim()).filter(Boolean),
+        );
         for (const sh of Object.values(shiftsMap)) {
+            if (!turnoDeObjetivos(sh as { objectiveId?: string }, objetivosVista)) continue;
             const c = String((sh as { code?: string })?.code || '').toUpperCase();
             if (c) s.add(c);
         }
         return s;
-    }, [shiftsMap]);
+    }, [shiftsMap, selectedGrupo, grupoUnifiedMode, selectedObjective]);
     const sumasExtLeyenda = useMemo(() => {
         const franjasDe = (positionName: string | undefined): FranjaExt[] => {
             const nombre = String(positionName || '');
@@ -2592,17 +2600,24 @@ function PlanificacionDesktop() {
             return out;
         };
         const pares = new Set<string>();
+        const objetivosVista = new Set<string>(
+            (selectedGrupo && grupoUnifiedMode
+                ? (selectedGrupo.objectiveIds as string[])
+                : [selectedObjective]
+            ).map((id) => String(id || '').trim()).filter(Boolean),
+        );
         const claves = new Set<string>([...Object.keys(shiftsMap), ...Object.keys(pendingChanges)]);
         for (const key of claves) {
             if (key.endsWith('_B2')) continue;
             const pend = pendingChanges[key];
             const sh = pend && !pend.isDeleted ? pend : shiftsMap[key];
             if (!sh || sh.isDeleted) continue;
+            if (!turnoDeObjetivos(sh, objetivosVista)) continue;
             const par = parExtMismoObjetivo(sh, franjasDe(sh.positionName));
             if (par) pares.add(par);
         }
         return [...pares].sort();
-    }, [pendingChanges, shiftsMap, positionStructure, selectedGrupo, grupoUnifiedMode, grupoSlaMap]);
+    }, [pendingChanges, shiftsMap, positionStructure, selectedGrupo, grupoUnifiedMode, grupoSlaMap, selectedObjective]);
     const modoRapidoRef = useRef(false);
     const colaEscrituraRapidaRef = useRef<Promise<unknown>>(Promise.resolve());
     const capaRapidaRef = useRef<CapaModoRapidoApi | null>(null);
