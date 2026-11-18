@@ -3,8 +3,10 @@ import { useRouter } from 'next/router';
 import {
   addDoc,
   collection,
+  deleteField,
   doc,
   getDoc,
+  getDocFromCache,
   onSnapshot,
   query,
   QueryDocumentSnapshot,
@@ -33,6 +35,7 @@ import {
   Minimize2,
   Pin,
   Radio,
+  Scissors,
   Search,
   Shield,
   Siren,
@@ -100,6 +103,93 @@ function toStartMs(raw: unknown): number {
     return Number.isNaN(t) ? NaN : t;
   }
   return NaN;
+}
+
+/** Turno cortado: dos o más tramos HH:MM válidos; null si el turno es de un solo horario. */
+function bloquesDelTurno(raw: unknown): Array<{ startTime: string; endTime: string }> | null {
+  if (!Array.isArray(raw) || raw.length < 2) return null;
+  const out = raw
+    .map((b) => ({
+      startTime: String((b as { startTime?: unknown })?.startTime || '').slice(0, 5),
+      endTime: String((b as { endTime?: unknown })?.endTime || '').slice(0, 5),
+    }))
+    .filter((b) => /^\d{2}:\d{2}$/.test(b.startTime) && /^\d{2}:\d{2}$/.test(b.endTime));
+  return out.length >= 2 ? out : null;
+}
+
+/** Presencia de cada tramo de un turno cortado (`presenciaBloques.b1`, `.b2`…). El tramo 1 usa los campos del turno. */
+type PresenciaBloque = {
+  realStartTime?: unknown;
+  realEndTime?: unknown;
+  cerrado?: boolean;
+  checkInSource?: string;
+};
+
+/**
+ * Lee el turno desde la caché del listener (el CC ya lo tiene suscripto) y solo va al servidor
+ * si no está. Evita una ida y vuelta de red en cada marca.
+ */
+async function leerTurnoRapido(id: string) {
+  const ref = doc(db, 'turnos', id);
+  try {
+    const cached = await getDocFromCache(ref);
+    if (cached.exists()) return cached;
+  } catch {
+    /* sin caché: se lee del servidor */
+  }
+  return getDoc(ref);
+}
+
+/** El tramo 2+ de un turno cortado es una fila virtual con id `<idTurno>#b<N>`; el documento es uno solo. */
+function docIdDe(rowId: string): string {
+  return String(rowId || '').replace(/#b\d+$/, '');
+}
+
+function indiceTramoDe(rowId: string): number {
+  const m = /#b(\d+)$/.exec(String(rowId || ''));
+  return m ? Number(m[1]) - 1 : 0;
+}
+
+function esTramoCortado(t: Pick<TurnoHoy, 'bloquesTotal'>): boolean {
+  return (t.bloquesTotal ?? 0) > 1;
+}
+
+function esUltimoTramo(t: Pick<TurnoHoy, 'bloque' | 'bloquesTotal'>): boolean {
+  return !esTramoCortado(t) || (t.bloque ?? 1) >= (t.bloquesTotal ?? 1);
+}
+
+/** Campo del turno que guarda el ingreso/egreso real de ese tramo. */
+function campoHoraTurno(t: TurnoHoy, campo: 'ingreso' | 'salida'): string {
+  const n = t.bloque ?? 1;
+  const cortado = esTramoCortado(t);
+  if (campo === 'ingreso') return cortado && n > 1 ? `presenciaBloques.b${n}.realStartTime` : 'realStartTime';
+  return cortado ? `presenciaBloques.b${n}.realEndTime` : 'realEndTime';
+}
+
+/** Inicio y fin (ms) de cada tramo: el primero parte del inicio del turno, los demás son del mismo día o del siguiente. */
+function tramosDeTurno(
+  startMs: number,
+  blocks: Array<{ startTime: string; endTime: string }>,
+): Array<{ startMs: number; endMs: number }> {
+  const out: Array<{ startMs: number; endMs: number }> = [];
+  const base = new Date(startMs);
+  let prevEnd = startMs;
+  blocks.forEach((b, i) => {
+    const [sh, sm] = b.startTime.split(':').map(Number);
+    const [eh, em] = b.endTime.split(':').map(Number);
+    const durMin = (((eh * 60 + em) - (sh * 60 + sm) + 1440) % 1440) || 1440;
+    let s = startMs;
+    if (i > 0) {
+      const d = new Date(base);
+      d.setHours(sh, sm, 0, 0);
+      s = d.getTime();
+      while (s < prevEnd) s += 86400000;
+    }
+    const e = s + durMin * 60000;
+    out.push({ startMs: s, endMs: e });
+    prevEnd = e;
+  });
+  return out;
 }
 
 function nowHHMM(): string {
@@ -196,8 +286,11 @@ function useTurnosHoy({
   clientePorObj: Record<string, string>;
   /** Retenes del día siguiente (para cubrir una noche). No entran al dict del puente WA. */
   retenesManana: TurnoHoy[];
+  /** Tramos abiertos de turnos cortados que no entran al dict del puente WA (una fila por tramo). */
+  tramosExtra: TurnoHoy[];
 } {
   const [retenesManana, setRetenesManana] = useState<TurnoHoy[]>([]);
+  const [tramosExtra, setTramosExtra] = useState<TurnoHoy[]>([]);
   const [turnos, setTurnos] = useState<Record<string, TurnoHoy>>({});
   const [cerrados, setCerrados] = useState<Record<string, TurnoHoy>>({});
   const [presenciaMeta, setPresenciaMeta] = useState<Record<string, PresenciaMeta>>({});
@@ -214,6 +307,7 @@ function useTurnosHoy({
     if (!empresaId) {
       setTurnos({});
       setRetenesManana([]);
+      setTramosExtra([]);
       setPhones([]);
       setFrancos([]);
       setLoading(false);
@@ -257,6 +351,8 @@ function useTurnosHoy({
       const byName = new Map<string, { turno: TurnoHoy; startMs: number }>();
       const cerradosMap = new Map<string, TurnoHoy>();
       const retMananaList: TurnoHoy[] = [];
+      const tramosAbiertos: TurnoHoy[] = [];
+      const metaTramos: Record<string, PresenciaMeta> = {};
       const manana = new Date(now);
       manana.setDate(manana.getDate() + 1);
 
@@ -349,8 +445,10 @@ function useTurnosHoy({
         const startTs = shift.startTime as Timestamp;
         const realTs = shift.realStartTime as Timestamp | undefined;
 
+        const bloquesCortado = bloquesDelTurno(shift.blocks);
         const mapped: TurnoHoy = {
-          shift: `${code || '?'} ${formatHHMM(startTs)}–${formatHHMM(endTs)}`,
+          shift: `${code || '?'} ${bloquesCortado ? bloquesCortado.map((b) => `${b.startTime}–${b.endTime}`).join(' + ') : `${formatHHMM(startTs)}–${formatHHMM(endTs)}`}`,
+          ...(bloquesCortado ? { blocks: bloquesCortado } : {}),
           obj:
             objMapRef.current.get(String(shift.objectiveId || ''))?.name ||
             String(shift.objectiveName || '—'),
@@ -381,21 +479,85 @@ function useTurnosHoy({
           continue;
         }
 
+        const considerar = (turno: TurnoHoy, turnoStartMs: number) => {
+          const prev = byName.get(employeeName);
+          if (!prev) {
+            byName.set(employeeName, { turno, startMs: turnoStartMs });
+          } else {
+            const prevDist = Math.abs(prev.startMs - now);
+            const nextDist = Math.abs(turnoStartMs - now);
+            if (nextDist < prevDist) {
+              byName.set(employeeName, { turno, startMs: turnoStartMs });
+            }
+          }
+        };
+
+        // Turno cortado: un solo documento, una fila por tramo con su propia presencia.
+        if (bloquesCortado) {
+          const pb = (shift.presenciaBloques && typeof shift.presenciaBloques === 'object'
+            ? shift.presenciaBloques
+            : {}) as Record<string, PresenciaBloque | undefined>;
+          const docStatus = String(shift.status || 'PENDING').toUpperCase();
+          const docEndMs = toStartMs(shift.realEndTime);
+          const tramos = tramosDeTurno(startMs, bloquesCortado);
+          tramos.forEach((tr, i) => {
+            const n = i + 1;
+            const p: PresenciaBloque = pb[`b${n}`] || {};
+            const tsIni = Timestamp.fromMillis(tr.startMs);
+            const tsFin = Timestamp.fromMillis(tr.endMs);
+            const realIni = i === 0 ? realTs : (p.realStartTime as Timestamp | undefined);
+            const tramoCerrado =
+              p.cerrado === true ||
+              (cerrado && (i === 0 || Number.isNaN(docEndMs) || docEndMs >= tr.startMs));
+            let status: string;
+            if (tramoCerrado) status = 'COMPLETED';
+            else if (docStatus === 'ABSENT') status = 'ABSENT';
+            else if (i === 0) status = docStatus === 'PRESENT' && !realTs ? 'PENDING' : docStatus;
+            else status = realIni ? 'PRESENT' : 'PENDING';
+            const turnoTramo: TurnoHoy = {
+              ...mapped,
+              rowId: i === 0 ? d.id : `${d.id}#b${n}`,
+              docId: d.id,
+              bloque: n,
+              bloquesTotal: tramos.length,
+              shift: `${code || '?'} ${formatHHMM(tsIni)}–${formatHHMM(tsFin)}`,
+              expected: formatHHMM(tsIni),
+              turnoStatus: status,
+              realStartTime: realIni ? formatHHMM(realIni) : undefined,
+              startTimeRaw: tsIni,
+              endTimeRaw: tsFin,
+            };
+            const realFin = p.realEndTime as Timestamp | undefined;
+            const esUltimo = i === tramos.length - 1;
+            metaTramos[turnoTramo.rowId] = {
+              checkInSource: i === 0 ? String(shift.checkInSource || '') : String(p.checkInSource || ''),
+              presenciaSource: i === 0 ? String(shift.presenciaSource || '') : '',
+              checkInMethod: i === 0 ? String(shift.checkInMethod || '') : '',
+              isPresent: status === 'PRESENT',
+              isCompleted: tramoCerrado,
+              isRetention: false,
+              realEndLabel: realFin
+                ? formatHHMM(realFin)
+                : tramoCerrado && esUltimo && shift.realEndTime
+                  ? formatHHMM(shift.realEndTime as Timestamp)
+                  : '',
+            };
+            if (tramoCerrado) {
+              cerradosMap.set(turnoTramo.rowId, turnoTramo);
+            } else {
+              considerar(turnoTramo, tr.startMs);
+              tramosAbiertos.push(turnoTramo);
+            }
+          });
+          continue;
+        }
+
         if (cerrado) {
           cerradosMap.set(d.id, mapped);
           continue;
         }
 
-        const prev = byName.get(employeeName);
-        if (!prev) {
-          byName.set(employeeName, { turno: mapped, startMs });
-        } else {
-          const prevDist = Math.abs(prev.startMs - now);
-          const nextDist = Math.abs(startMs - now);
-          if (nextDist < prevDist) {
-            byName.set(employeeName, { turno: mapped, startMs });
-          }
-        }
+        considerar(mapped, startMs);
       }
 
       const next: Record<string, TurnoHoy> = {};
@@ -403,6 +565,8 @@ function useTurnosHoy({
       byName.forEach((v, name) => {
         next[name] = v.turno;
       });
+      const idsEnDict = new Set(Object.values(next).map((t) => t.rowId));
+      const extrasTramos = tramosAbiertos.filter((t) => !idsEnDict.has(t.rowId));
       for (const d of docs) {
         const shift = d.data() as Record<string, unknown>;
         const realEnd = shift.realEndTime as Timestamp | undefined;
@@ -416,11 +580,13 @@ function useTurnosHoy({
           realEndLabel: realEnd ? formatHHMM(realEnd) : '',
         };
       }
+      Object.assign(metaNext, metaTramos);
       const cerradosNext: Record<string, TurnoHoy> = {};
       cerradosMap.forEach((turno, id) => {
         cerradosNext[id] = turno;
       });
       setTurnos(next);
+      setTramosExtra(extrasTramos);
       setRetenesManana(retMananaList);
       setCerrados(cerradosNext);
       setPresenciaMeta(metaNext);
@@ -480,7 +646,7 @@ function useTurnosHoy({
     };
   }, [empresaId, scopeEmpresa]);
 
-  return { turnos, loading, phones, francos, presenciaMeta, cerrados, clientePorObj, retenesManana };
+  return { turnos, loading, phones, francos, presenciaMeta, cerrados, clientePorObj, retenesManana, tramosExtra };
 }
 
 type GuardEstado =
@@ -1291,17 +1457,35 @@ function GuardRow({
   return (
     <div
       data-rowid={row.turno.rowId}
+      style={{ scrollMarginTop: 72, scrollMarginBottom: 16 }}
       onClick={() => onSelect(row)}
       className={`mr-row grid ${SHEET_COLS} ${SHEET_ALIGN} items-center px-0 py-0 border-b border-slate-100 cursor-pointer [&>*]:py-1.5 [&>*:not(:first-child)]:border-r [&>*:not(:first-child)]:border-slate-100 [&>*:last-child]:border-r-0 ${
         active ? 'mr-row-active' : swapOrigin ? 'mr-row-swap' : ''
       }`}
     >
       <div className={`self-stretch rounded-full ${barClass(row.estado)}`} />
-      <div className="truncate text-sm font-medium text-slate-800">{row.employeeName}</div>
+      <div className="truncate text-sm font-medium text-slate-800">
+        {row.employeeName}
+        {esTramoCortado(row.turno) && (
+          <span
+            className="ml-1.5 inline-flex items-center gap-0.5 align-middle rounded-md bg-indigo-100 px-1 py-0.5 text-[9px] font-black text-indigo-700"
+            title={`Turno cortado, tramo ${row.turno.bloque} de ${row.turno.bloquesTotal}: ${(row.turno.blocks || []).map((b) => `${b.startTime}–${b.endTime}`).join(' + ')}`}
+          >
+            <Scissors size={9} aria-hidden />
+            {row.turno.bloque}/{row.turno.bloquesTotal}
+          </span>
+        )}
+      </div>
       <div className="truncate text-[11px] text-slate-600" title={row.turno.obj}>{row.turno.obj}</div>
       <div className="truncate text-[11px] text-slate-500" title={row.turno.positionName}>{row.turno.positionName || '—'}</div>
       <div className="truncate font-mono text-[11px] text-slate-700">{row.turno.code || row.band || '—'}</div>
-      <div className="mr-plan whitespace-nowrap font-mono text-[11px] tabular-nums" title="Ingreso planificado">{row.turno.expected}</div>
+      <div
+        className="mr-plan whitespace-nowrap font-mono text-[11px] tabular-nums"
+        title={row.turno.blocks?.length ? `Turno cortado: ${row.turno.blocks.map((b) => `${b.startTime}–${b.endTime}`).join(' + ')}` : 'Ingreso planificado'}
+        data-turno-cortado={row.turno.blocks?.length ? '1' : undefined}
+      >
+        {row.turno.expected}
+      </div>
       <div
         className="mr-real whitespace-nowrap font-mono text-[12px] font-black tabular-nums"
         title="Ingreso real"
@@ -1328,7 +1512,12 @@ function GuardRow({
           row.realDisplay
         )}
       </div>
-      <div className="mr-plan whitespace-nowrap font-mono text-[11px] tabular-nums" title="Egreso planificado">{row.salida || '—'}</div>
+      <div
+        className="mr-plan whitespace-nowrap font-mono text-[11px] tabular-nums"
+        title={row.turno.blocks?.length ? `Turno cortado: ${row.turno.blocks.map((b) => `${b.startTime}–${b.endTime}`).join(' + ')}` : 'Egreso planificado'}
+      >
+        {row.salida || '—'}
+      </div>
       <div
         className="mr-real whitespace-nowrap font-mono text-[12px] font-black tabular-nums"
         title={row.estado === 'CERRADO' ? 'Egreso real. Clic para corregir' : 'Egreso real'}
@@ -1935,7 +2124,7 @@ export default function ModoRapidoPage() {
     empresaId: empresaId || null,
     scopeEmpresa,
   });
-  const { turnos, loading, francos, presenciaMeta, cerrados, clientePorObj, retenesManana } = turnosData;
+  const { turnos, loading, francos, presenciaMeta, cerrados, clientePorObj, retenesManana, tramosExtra } = turnosData;
   const wa = useWABridge(turnos, empresaId);
 
   const [bridgeUrl, setBridgeUrl] = useState(DEFAULT_BRIDGE_URL);
@@ -2051,6 +2240,17 @@ export default function ModoRapidoPage() {
     }
   }, []);
 
+  /**
+   * Escritura sin esperar el ack del servidor: el listener ya muestra el cambio al instante
+   * (caché local) y la planilla no se traba. Si el servidor la rechaza, se avisa y la fila vuelve.
+   */
+  function escribir(p: Promise<unknown>, que: string) {
+    p.catch((err) => {
+      console.warn(`[modo-rapido] no se pudo guardar ${que}`, err);
+      showToast(`No se pudo guardar ${que}. Revisá la fila.`, 'bg-red-600');
+    });
+  }
+
   async function marcarPresente(
     turnoId: string,
     empleado: { name: string; expected: string },
@@ -2061,46 +2261,100 @@ export default function ModoRapidoPage() {
     const [hh, mm] = realTime.split(':').map(Number);
     today.setHours(hh, mm, 0, 0);
     const realTs = Timestamp.fromDate(today);
+    const docId = docIdDe(turnoId);
+    const tramo = indiceTramoDe(turnoId) + 1;
 
-    await updateDoc(doc(db, 'turnos', turnoId), {
-      status: 'PRESENT',
-      realStartTime: realTs,
-      checkInSource: source,
-      checkInAt: serverTimestamp(),
-    });
+    if (tramo === 1) {
+      escribir(
+        updateDoc(doc(db, 'turnos', docId), {
+          status: 'PRESENT',
+          realStartTime: realTs,
+          checkInSource: source,
+          checkInAt: serverTimestamp(),
+        }),
+        'la presencia',
+      );
+    } else {
+      // Tramo 2+ de un turno cortado: la presencia vive en `presenciaBloques.bN`. El turno pasa a
+      // PRESENT y su fin planificado se corre al fin de este tramo para que el cierre automático
+      // del servidor (que solo conoce el primer tramo) no lo cierre en el corte.
+      const snap = await leerTurnoRapido(docId);
+      const data = (snap.data() || {}) as Record<string, unknown>;
+      const bloques = bloquesDelTurno(data.blocks);
+      const baseMs = toStartMs(data.startTime);
+      const patch: Record<string, unknown> = {
+        status: 'PRESENT',
+        isPresent: true,
+        isCompleted: false,
+        [`presenciaBloques.b${tramo}.realStartTime`]: realTs,
+        [`presenciaBloques.b${tramo}.checkInSource`]: source,
+        [`presenciaBloques.b${tramo}.checkInAt`]: serverTimestamp(),
+      };
+      // Si el turno ya estaba cerrado por el corte, los tramos anteriores quedan cerrados.
+      const yaCerrado = String(data.status || '').toUpperCase() === 'COMPLETED' || data.isCompleted === true;
+      if (yaCerrado) {
+        for (let k = 1; k < tramo; k += 1) {
+          patch[`presenciaBloques.b${k}.cerrado`] = true;
+          if (k === 1 && data.realEndTime) patch['presenciaBloques.b1.realEndTime'] = data.realEndTime;
+        }
+      }
+      if (bloques && !Number.isNaN(baseMs)) {
+        const tr = tramosDeTurno(baseMs, bloques)[tramo - 1];
+        const finActual = toStartMs(data.endTime);
+        if (tr && (Number.isNaN(finActual) || tr.endMs > finActual)) {
+          patch.endTime = Timestamp.fromMillis(tr.endMs);
+        }
+      }
+      escribir(updateDoc(doc(db, 'turnos', docId), patch), 'la presencia del tramo');
+    }
 
-    await addDoc(collection(db, 'novedades'), {
-      type: source === 'WA' ? 'CHECK_IN_WA' : source === 'MANUAL_RADIO' ? 'CHECK_IN_RADIO' : 'CHECK_IN_MANUAL',
-      turnoId,
-      employeeName: empleado.name,
-      expected: empleado.expected,
-      realTime,
-      source,
-      empresaId,
-      operatorId: user?.uid ?? 'cc-modo-rapido',
-      createdAt: serverTimestamp(),
-    });
+    escribir(
+      addDoc(collection(db, 'novedades'), {
+        type: source === 'WA' ? 'CHECK_IN_WA' : source === 'MANUAL_RADIO' ? 'CHECK_IN_RADIO' : 'CHECK_IN_MANUAL',
+        turnoId: docId,
+        ...(tramo > 1 ? { bloque: tramo } : {}),
+        employeeName: empleado.name,
+        expected: empleado.expected,
+        realTime,
+        source,
+        empresaId,
+        operatorId: user?.uid ?? 'cc-modo-rapido',
+        createdAt: serverTimestamp(),
+      }),
+      'la novedad de ingreso',
+    );
   }
 
-  async function registrarAusencia(turnoId: string, empleado: { name: string }) {
-    await updateDoc(doc(db, 'turnos', turnoId), {
-      status: 'ABSENT',
-      absenceCode: 'AA',
-      absenceRegisteredAt: serverTimestamp(),
-    });
-    await addDoc(collection(db, 'novedades'), {
-      type: 'AUSENCIA_REGISTRADA',
-      turnoId,
-      employeeName: empleado.name,
-      code: 'AA',
-      empresaId,
-      operatorId: user?.uid ?? 'cc-modo-rapido',
-      createdAt: serverTimestamp(),
-    });
+  async function registrarAusencia(rowId: string, empleado: { name: string }) {
+    const turnoId = docIdDe(rowId);
+    escribir(
+      updateDoc(doc(db, 'turnos', turnoId), {
+        status: 'ABSENT',
+        absenceCode: 'AA',
+        absenceRegisteredAt: serverTimestamp(),
+      }),
+      'la ausencia',
+    );
+    escribir(
+      addDoc(collection(db, 'novedades'), {
+        type: 'AUSENCIA_REGISTRADA',
+        turnoId,
+        employeeName: empleado.name,
+        code: 'AA',
+        empresaId,
+        operatorId: user?.uid ?? 'cc-modo-rapido',
+        createdAt: serverTimestamp(),
+      }),
+      'la novedad de ausencia',
+    );
   }
 
   const classifiedRows = useMemo((): GuardRowModel[] => {
-    const base = Object.entries(turnos)
+    const entradas: Array<[string, TurnoHoy]> = [
+      ...Object.entries(turnos),
+      ...tramosExtra.map((t): [string, TurnoHoy] => [t.name || '—', t]),
+    ];
+    const base = entradas
       .map(([employeeName, turno]) => {
         const { estado, pendingEntry } = classifyEstado(turno, wa, nowMs);
         let realDisplay = '—';
@@ -2186,7 +2440,7 @@ export default function ModoRapidoPage() {
         };
       }),
     );
-  }, [turnos, wa, nowMs, presenciaMeta, cerrados]);
+  }, [turnos, tramosExtra, wa, nowMs, presenciaMeta, cerrados]);
 
   const stats = useMemo(() => {
     let critico = 0;
@@ -2356,6 +2610,7 @@ export default function ModoRapidoPage() {
 
   const esCandidatoValido = (c: GuardRowModel, absent: GuardRowModel): boolean => {
     if (c.turno.rowId === absent.turno.rowId) return false;
+    if (esTramoCortado(c.turno)) return false;
     const mismoObjetivoYHorario =
       !!c.turno.objectiveId &&
       c.turno.objectiveId === absent.turno.objectiveId &&
@@ -2466,12 +2721,15 @@ export default function ModoRapidoPage() {
     }
   };
 
-  async function recordarTurno(rowId: string) {
-    const snap = await getDoc(doc(db, 'turnos', rowId));
+  async function recordarTurno(rowIdVirtual: string) {
+    const rowId = docIdDe(rowIdVirtual);
+    const snap = await leerTurnoRapido(rowId);
     const d = snap.data() || {};
     undoRef.current.push({
       rowId,
       data: {
+        endTime: d.endTime ?? null,
+        presenciaBloques: d.presenciaBloques ?? null,
         status: d.status ?? 'PENDING',
         realStartTime: d.realStartTime ?? null,
         checkInSource: d.checkInSource ?? null,
@@ -2522,18 +2780,24 @@ export default function ModoRapidoPage() {
         await recordarTurno(row.turno.rowId);
         const base = campo === 'salida' ? row.turno.endTimeRaw : row.turno.startTimeRaw;
         const ts = horaSobre(base, hh, mm);
-        await updateDoc(doc(db, 'turnos', row.turno.rowId), campo === 'salida'
-          ? { realEndTime: ts }
-          : { realStartTime: ts });
-        await addDoc(collection(db, 'novedades'), {
-          type: campo === 'salida' ? 'CORRECCION_SALIDA' : 'CORRECCION_HORA',
-          turnoId: row.turno.rowId,
-          employeeName: row.employeeName,
-          realTime: normal,
-          empresaId,
-          operatorId: user?.uid ?? 'cc-modo-rapido',
-          createdAt: serverTimestamp(),
-        });
+        const patchHora: Record<string, unknown> = { [campoHoraTurno(row.turno, campo)]: ts };
+        if (campo === 'salida' && esTramoCortado(row.turno) && esUltimoTramo(row.turno)) {
+          patchHora.realEndTime = ts;
+        }
+        escribir(updateDoc(doc(db, 'turnos', docIdDe(row.turno.rowId)), patchHora), 'el horario');
+        escribir(
+          addDoc(collection(db, 'novedades'), {
+            type: campo === 'salida' ? 'CORRECCION_SALIDA' : 'CORRECCION_HORA',
+            turnoId: docIdDe(row.turno.rowId),
+            ...(esTramoCortado(row.turno) ? { bloque: row.turno.bloque ?? 1 } : {}),
+            employeeName: row.employeeName,
+            realTime: normal,
+            empresaId,
+            operatorId: user?.uid ?? 'cc-modo-rapido',
+            createdAt: serverTimestamp(),
+          }),
+          'la novedad de corrección',
+        );
         showToast(
           campo === 'salida'
             ? `Salida corregida · ${row.employeeName} ${normal}`
@@ -2565,16 +2829,25 @@ export default function ModoRapidoPage() {
       if (yaPresente && !comoRadio) {
         const today = new Date();
         today.setHours(hh, mm, 0, 0);
-        await updateDoc(doc(db, 'turnos', row.turno.rowId), { realStartTime: Timestamp.fromDate(today) });
-        await addDoc(collection(db, 'novedades'), {
-          type: 'CORRECCION_HORA',
-          turnoId: row.turno.rowId,
-          employeeName: row.employeeName,
-          realTime: normal,
-          empresaId,
-          operatorId: user?.uid ?? 'cc-modo-rapido',
-          createdAt: serverTimestamp(),
-        });
+        escribir(
+          updateDoc(doc(db, 'turnos', docIdDe(row.turno.rowId)), {
+            [campoHoraTurno(row.turno, 'ingreso')]: Timestamp.fromDate(today),
+          }),
+          'la hora',
+        );
+        escribir(
+          addDoc(collection(db, 'novedades'), {
+            type: 'CORRECCION_HORA',
+            turnoId: docIdDe(row.turno.rowId),
+            ...(esTramoCortado(row.turno) ? { bloque: row.turno.bloque ?? 1 } : {}),
+            employeeName: row.employeeName,
+            realTime: normal,
+            empresaId,
+            operatorId: user?.uid ?? 'cc-modo-rapido',
+            createdAt: serverTimestamp(),
+          }),
+          'la novedad de corrección',
+        );
         showToast(`Hora corregida · ${row.employeeName} ${normal}`, 'bg-indigo-700');
       } else {
         await marcarPresente(
@@ -2609,18 +2882,41 @@ export default function ModoRapidoPage() {
     setBusy(true);
     try {
       await recordarTurno(row.turno.rowId);
-      await updateDoc(doc(db, 'turnos', row.turno.rowId), {
-        status: 'PENDING',
-        isPresent: false,
-      });
-      await addDoc(collection(db, 'novedades'), {
-        type: 'PRESENCIA_REVERTIDA',
-        turnoId: row.turno.rowId,
-        employeeName: row.employeeName,
-        empresaId,
-        operatorId: user?.uid ?? 'cc-modo-rapido',
-        createdAt: serverTimestamp(),
-      });
+      const refTurno = doc(db, 'turnos', docIdDe(row.turno.rowId));
+      const tramoN = row.turno.bloque ?? 1;
+      if (esTramoCortado(row.turno) && tramoN > 1) {
+        const snapTurno = await leerTurnoRapido(docIdDe(row.turno.rowId));
+        const dataTurno = (snapTurno.data() || {}) as Record<string, unknown>;
+        const pbPrevio = (dataTurno.presenciaBloques || {}) as Record<string, PresenciaBloque | undefined>;
+        const primerTramoAbierto = !!dataTurno.realStartTime && pbPrevio.b1?.cerrado !== true;
+        escribir(
+          updateDoc(refTurno, {
+            [`presenciaBloques.b${tramoN}`]: deleteField(),
+            isPresent: false,
+            ...(primerTramoAbierto ? {} : { status: 'PENDING' }),
+          }),
+          'la presencia',
+        );
+      } else {
+        escribir(
+          updateDoc(refTurno, {
+            status: 'PENDING',
+            isPresent: false,
+          }),
+          'la presencia',
+        );
+      }
+      escribir(
+        addDoc(collection(db, 'novedades'), {
+          type: 'PRESENCIA_REVERTIDA',
+          turnoId: docIdDe(row.turno.rowId),
+          employeeName: row.employeeName,
+          empresaId,
+          operatorId: user?.uid ?? 'cc-modo-rapido',
+          createdAt: serverTimestamp(),
+        }),
+        'la novedad',
+      );
       showToast(`Presencia quitada · ${row.employeeName}`, 'bg-slate-700');
     } catch {
       showToast('Error al quitar la presencia', 'bg-red-600');
@@ -2642,7 +2938,7 @@ export default function ModoRapidoPage() {
     }
     setBusy(true);
     try {
-      await updateDoc(doc(db, 'turnos', last.rowId), last.data);
+      escribir(updateDoc(doc(db, 'turnos', last.rowId), last.data), 'el deshacer');
       showToast('Corrección deshecha', 'bg-slate-700');
     } catch {
       undoRef.current.push(last);
@@ -2652,7 +2948,15 @@ export default function ModoRapidoPage() {
     }
   }
 
+  /** Cobertura, cambio y retiro de un tramo de turno cortado todavía se hacen desde Operaciones. */
+  function bloqueaTramo(row: GuardRowModel): boolean {
+    if (!esTramoCortado(row.turno)) return false;
+    showToast('Turno cortado: cobertura, cambio y retiro se hacen desde Operaciones por ahora', 'bg-slate-700');
+    return true;
+  }
+
   function pedirRetiro(row: GuardRowModel) {
+    if (bloqueaTramo(row)) return;
     if (row.estado !== 'PRESENTE_PLAT' && row.estado !== 'PRESENTE_WA') {
       showToast('El retiro anticipado es de un guardia que ya está presente', 'bg-slate-700');
       return;
@@ -2726,31 +3030,63 @@ export default function ModoRapidoPage() {
     setBusy(true);
     try {
       await recordarTurno(row.turno.rowId);
-      const snap = await getDoc(doc(db, 'turnos', row.turno.rowId));
+      const refTurno = doc(db, 'turnos', docIdDe(row.turno.rowId));
+      const snap = await leerTurnoRapido(docIdDe(row.turno.rowId));
       const data = (snap.data() || {}) as Record<string, unknown>;
-      const close = computeShiftCloseTimes(data, Date.now());
+      const cortado = esTramoCortado(row.turno);
+      const tramoN = row.turno.bloque ?? 1;
+      const ultimoTramo = esUltimoTramo(row.turno);
+      let dataCierre = data;
+      if (cortado) {
+        const pbData = (data.presenciaBloques || {}) as Record<string, PresenciaBloque | undefined>;
+        dataCierre = {
+          ...data,
+          startTime: row.turno.startTimeRaw,
+          endTime: row.turno.endTimeRaw,
+          realStartTime: tramoN === 1 ? data.realStartTime : pbData[`b${tramoN}`]?.realStartTime,
+        };
+      }
+      const close = computeShiftCloseTimes(dataCierre, Date.now());
       const realEndTime = Timestamp.fromMillis(close.realEndMs);
-      const patch: Record<string, unknown> = {
-        status: 'COMPLETED',
-        isCompleted: true,
-        isPresent: false,
-        realEndTime,
-      };
-      if (data.isRetention === true) {
+      const patch: Record<string, unknown> = {};
+      if (cortado) {
+        patch[`presenciaBloques.b${tramoN}.realEndTime`] = realEndTime;
+        patch[`presenciaBloques.b${tramoN}.cerrado`] = true;
+        patch.isPresent = false;
+        if (ultimoTramo) {
+          patch.status = 'COMPLETED';
+          patch.isCompleted = true;
+          patch.realEndTime = realEndTime;
+        } else {
+          // Corte entre tramos: el turno sigue vivo, pero deja de figurar presente para que el
+          // cierre automático del servidor no lo complete en el corte.
+          patch.status = 'PENDING';
+        }
+      } else {
+        patch.status = 'COMPLETED';
+        patch.isCompleted = true;
+        patch.isPresent = false;
+        patch.realEndTime = realEndTime;
+      }
+      if (data.isRetention === true && (!cortado || ultimoTramo)) {
         patch.isRetention = false;
         patch.retentionEndedAt = realEndTime;
         if (close.retentionMinutes != null) patch.retentionMinutes = close.retentionMinutes;
       }
-      await updateDoc(doc(db, 'turnos', row.turno.rowId), patch);
-      await addDoc(collection(db, 'novedades'), {
-        type: 'CHECKOUT',
-        turnoId: row.turno.rowId,
-        employeeName: row.employeeName,
-        realTime: formatHHMM(realEndTime),
-        empresaId,
-        operatorId: user?.uid ?? 'cc-modo-rapido',
-        createdAt: serverTimestamp(),
-      });
+      escribir(updateDoc(refTurno, patch), 'el cierre');
+      escribir(
+        addDoc(collection(db, 'novedades'), {
+          type: 'CHECKOUT',
+          turnoId: docIdDe(row.turno.rowId),
+          ...(cortado ? { bloque: tramoN } : {}),
+          employeeName: row.employeeName,
+          realTime: formatHHMM(realEndTime),
+          empresaId,
+          operatorId: user?.uid ?? 'cc-modo-rapido',
+          createdAt: serverTimestamp(),
+        }),
+        'la novedad de cierre',
+      );
       showToast(`Turno cerrado · ${row.employeeName} ${formatHHMM(realEndTime)}`, 'bg-slate-800');
     } catch (err) {
       console.warn('[modo-rapido] cerrarTurno', err);
@@ -2905,6 +3241,10 @@ export default function ModoRapidoPage() {
 
   async function intercambiarFilas(origen: GuardRowModel, destino: GuardRowModel) {
     if (busy || origen.turno.rowId === destino.turno.rowId) return;
+    if (bloqueaTramo(origen) || bloqueaTramo(destino)) {
+      setSwapFromId(null);
+      return;
+    }
     setBusy(true);
     try {
       const origenEmployeeId = String(origen.turno.employeeId || '');
@@ -3100,6 +3440,21 @@ export default function ModoRapidoPage() {
     setActiveRowId(sheetRows[0]?.turno.rowId ?? null);
   }, [sheetRows, activeRowId]);
 
+  // Con las flechas la fila activa siempre queda a la vista (el grupo puede abrirse en el mismo paso).
+  useEffect(() => {
+    if (!activeRowId) return;
+    const id = window.requestAnimationFrame(() => {
+      const nodes = document.querySelectorAll<HTMLElement>('[data-rowid]');
+      for (const n of Array.from(nodes)) {
+        if (n.dataset.rowid === activeRowId && n.offsetParent !== null) {
+          n.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+          break;
+        }
+      }
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [activeRowId]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -3235,10 +3590,12 @@ export default function ModoRapidoPage() {
         return;
       }
       if (k === 'c' && (row.estado === 'NO_LLEGO' || row.estado === 'AUSENTE')) {
+        if (bloqueaTramo(row)) return;
         setCoberturaModal(row);
         return;
       }
       if (k === 'x') {
+        if (bloqueaTramo(row)) return;
         setArm(null);
         setSwapFromId(row.turno.rowId);
       }
@@ -3704,8 +4061,12 @@ export default function ModoRapidoPage() {
                     onCerrar={(r) => pedirCierre(r)}
                     onMarcarPresente={(r) => void handleMarcarPresente(r)}
                     onConfirmarWA={(r) => void handleConfirmarWA(r)}
-                    onCobertura={(r) => setCoberturaModal(r)}
+                    onCobertura={(r) => {
+                      if (bloqueaTramo(r)) return;
+                      setCoberturaModal(r);
+                    }}
                     onIntercambio={(r) => {
+                      if (bloqueaTramo(r)) return;
                       setHourEdit(null);
                       setArm(null);
                       setActiveRowId(r.turno.rowId);
@@ -3779,6 +4140,7 @@ export default function ModoRapidoPage() {
             onMarcarPresente={(r) => void handleMarcarPresente(r)}
             onMarcarAusente={(r) => void handleRegistrarAusencia(r)}
             onIntercambio={(r) => {
+              if (bloqueaTramo(r)) return;
               setHourEdit(null);
               setArm(null);
               setActiveRowId(r.turno.rowId);

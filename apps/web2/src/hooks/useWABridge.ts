@@ -57,6 +57,12 @@ export interface TurnoHoy {
   startTimeRaw?: unknown;
   endTimeRaw?: unknown;
   empresaId?: string;
+  /** Turno cortado: los dos horarios del mismo turno (HH:MM). startTimeRaw/endTimeRaw son los del primer tramo. */
+  blocks?: Array<{ startTime: string; endTime: string }>;
+  /** Turno cortado en CC: cada tramo es una fila. `rowId` del tramo 2+ es `<idTurno>#b<N>`. */
+  docId?: string;
+  bloque?: number;
+  bloquesTotal?: number;
 }
 
 export type WABridgeStatus = 'idle' | 'connecting' | 'connected' | 'error';
