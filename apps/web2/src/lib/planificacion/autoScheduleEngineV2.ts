@@ -267,7 +267,7 @@ export interface V2ShiftDef {
     endTime?: string;
     days?: string[]; // letras de día activas L M X J V S D
     specificDates?: string[]; // YYYY-MM-DD: fechas puntuales (refuerzos), no recurrentes
-    // Turno cortado: dos bloques separados en el día. El motor genera dos V2Assignment por empleado.
+    // Turno cortado: dos horarios del mismo turno. La asignación queda una sola y hours es la suma.
     blocks?: Array<{ startTime: string; endTime: string }>;
 }
 
@@ -816,9 +816,8 @@ function calcBlockHours(block: { startTime: string; endTime: string }): number {
 }
 
 /**
- * Expande asignaciones de turno cortado en dos V2Assignment independientes (uno por bloque).
- * El bloque primario mantiene la key normal; el secundario lleva isSecondBlock=true.
- * Ambos comparten shiftGroupId para que operaciones pueda vincularlos.
+ * Turno cortado: un solo turno con los dos horarios. Las horas son la suma
+ * (liquidación). start/end quedan en el primer bloque.
  */
 export function expandSplitShiftAssignments(
     assignments: V2Assignment[],
@@ -830,21 +829,14 @@ export function expandSplitShiftAssignments(
         const pos = posMap.get(a.positionName);
         const shiftDef = pos?.shifts?.find(s => s.code === a.code);
         if (shiftDef?.blocks && shiftDef.blocks.length >= 2) {
-            const groupId = `${a.empId}_${a.dateStr}_${a.code}`;
+            const blocks = shiftDef.blocks.map((b) => ({ startTime: b.startTime, endTime: b.endTime }));
+            const hours = blocks.reduce((sum, b) => sum + calcBlockHours(b), 0);
             result.push({
                 ...a,
-                startTime: shiftDef.blocks[0].startTime,
-                endTime: shiftDef.blocks[0].endTime,
-                hours: calcBlockHours(shiftDef.blocks[0]),
-                shiftGroupId: groupId,
-            });
-            result.push({
-                ...a,
-                startTime: shiftDef.blocks[1].startTime,
-                endTime: shiftDef.blocks[1].endTime,
-                hours: calcBlockHours(shiftDef.blocks[1]),
-                shiftGroupId: groupId,
-                isSecondBlock: true,
+                startTime: blocks[0].startTime,
+                endTime: blocks[0].endTime,
+                hours: hours > 0 ? Math.round(hours * 100) / 100 : a.hours,
+                blocks,
             });
         } else {
             result.push(a);
@@ -1377,9 +1369,10 @@ export interface V2Assignment {
     isReten?: boolean;
     /** RET CCT top-up en perfil custom L–D / 9h / 3 guardias / pax 2 (no consolidar a un solo designee). */
     balancedLdCctRet?: boolean;
-    // Turno cortado: ID común a ambos bloques del mismo turno
+    // Turno cortado: los dos horarios del mismo turno. hours es la suma.
+    blocks?: Array<{ startTime: string; endTime: string }>;
+    // Segundo turno del día con otro código (no es el cortado).
     shiftGroupId?: string;
-    // Turno cortado: true en el segundo bloque (oculto en grilla, visible en operaciones)
     isSecondBlock?: boolean;
 }
 

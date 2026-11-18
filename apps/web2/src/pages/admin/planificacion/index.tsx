@@ -286,6 +286,7 @@ import {
     resolverNovedad,
     tipoDeCodigo,
     horasEntre,
+    horasDeBloques,
     bandaDeCodigoPuesto,
     type TipoNovedadRapida,
 } from '@/lib/planificacion/modoRapido';
@@ -1397,7 +1398,7 @@ type FuenteRapidaB2 = {
     comments?: string;
 };
 /** Lo que se copia de una celda en modo rápido: código, puesto y horario. */
-type FuenteRapida = { code: string; startTime?: string; endTime?: string; hours?: number; name?: string; positionName?: string; copiarPuesto?: boolean; deploymentBand?: string; /** Escribe ese puesto aunque el servicio todavía no lo muestre (RFZF recién creado). */ forzarPuesto?: boolean; /** Vista agrupada: objetivo del puesto elegido. */ objectiveId?: string; /** Sobre turno independiente del mismo día. */ segundoBloque?: FuenteRapidaB2 };
+type FuenteRapida = { code: string; startTime?: string; endTime?: string; hours?: number; name?: string; positionName?: string; copiarPuesto?: boolean; deploymentBand?: string; /** Escribe ese puesto aunque el servicio todavía no lo muestre (RFZF recién creado). */ forzarPuesto?: boolean; /** Vista agrupada: objetivo del puesto elegido. */ objectiveId?: string; /** Sobre turno independiente del mismo día. */ segundoBloque?: FuenteRapidaB2; /** Dos horarios del mismo turno. */ blocks?: Array<{ startTime: string; endTime: string }> };
 
 const hhmmRapido = (v: any): string | null => {
     if (!v) return null;
@@ -2549,7 +2550,7 @@ function PlanificacionDesktop() {
                     const k = `${String(sh.code || '').toUpperCase()}|${sh.startTime}|${sh.endTime}`;
                     if (!sh.code || vistos.has(k)) continue;
                     vistos.add(k);
-                    shifts.push({ code: String(sh.code), startTime: sh.startTime, endTime: sh.endTime, hours: Number(sh.hours) || 0, name: sh.name });
+                    shifts.push({ code: String(sh.code), startTime: sh.startTime, endTime: sh.endTime, hours: Number(sh.hours) || 0, name: sh.name, blocks: sh.blocks });
                 }
             }
             puestos.push({ name: nombre, shifts });
@@ -3988,6 +3989,7 @@ function PlanificacionDesktop() {
             startTime: s.startTime,
             endTime: s.endTime,
             positionName: pos.positionName,
+            ...(Array.isArray(s.blocks) && s.blocks.length >= 2 ? { blocks: s.blocks } : {}),
             ...(Array.isArray(s.days) ? { days: s.days } : {}),
             ...(Array.isArray(s.specificDates) ? { specificDates: s.specificDates } : {}),
             ...(s.feriados ? { feriados: true } : {}),
@@ -9968,6 +9970,27 @@ function PlanificacionDesktop() {
                         if (change.extExtraHours != null && Number.isFinite(Number(change.extExtraHours))) {
                             turnoPayload.extExtraHours = Number(change.extExtraHours);
                         }
+                        // Turno cortado: los dos horarios van en el mismo turno y las horas son la suma.
+                        // Si el cambio no los trae (continuar mes, armar desde el servicio), salen del servicio del puesto.
+                        const bloquesCambio = Array.isArray(change.blocks) && change.blocks.length >= 2 ? change.blocks : null;
+                        const bloquesServicio = !bloquesCambio && !turnoPayload.isFranco && change.code && change.positionName
+                            ? slaBlocksForPositionShift(
+                                ((grupoSlaMap[String(turnoPayload.objectiveId || '')]?.length ? grupoSlaMap[String(turnoPayload.objectiveId || '')] : effectivePosStructure) || []) as any[],
+                                String(change.positionName),
+                                String(change.code),
+                            )
+                            : null;
+                        const bloquesGuardar = bloquesCambio || bloquesServicio;
+                        if (bloquesGuardar) {
+                            turnoPayload.blocks = bloquesGuardar.map((b: { startTime?: string; endTime?: string }) => ({
+                                startTime: String(b.startTime || '').slice(0, 5),
+                                endTime: String(b.endTime || '').slice(0, 5),
+                            }));
+                            const horasCortado = bloquesCambio && Number(change.hours) > 0
+                                ? Number(change.hours)
+                                : horasDeBloques(turnoPayload.blocks as { startTime: string; endTime: string }[]);
+                            if (horasCortado > 0) turnoPayload.hours = horasCortado;
+                        }
                         if (change.shiftGroupId) turnoPayload.shiftGroupId = change.shiftGroupId;
                         if (change.isSecondBlock) turnoPayload.isSecondBlock = true;
                         if (change.eventoId) {
@@ -15301,6 +15324,7 @@ function PlanificacionDesktop() {
                     hours: a.hours,
                     startTime: a.startTime,
                     ...(a.endTime ? { endTime: a.endTime } : {}),
+                    ...(a.blocks && a.blocks.length >= 2 ? { blocks: a.blocks } : {}),
                     ...(a.isFranco ? { isFranco: true } : {}),
                     ...(a.shiftGroupId ? { shiftGroupId: a.shiftGroupId } : {}),
                     ...(a.isSecondBlock ? { isSecondBlock: true } : {}),
@@ -15420,6 +15444,7 @@ function PlanificacionDesktop() {
                         hours: a.hours,
                         startTime: a.startTime,
                         ...(a.endTime ? { endTime: a.endTime } : {}),
+                        ...(a.blocks && a.blocks.length >= 2 ? { blocks: a.blocks } : {}),
                         ...(a.isFranco ? { isFranco: true } : {}),
                         ...(a.isReten ? { isReten: true } : {}),
                         ...(a.shiftGroupId ? { shiftGroupId: a.shiftGroupId } : {}),
@@ -16116,6 +16141,12 @@ function PlanificacionDesktop() {
                     : enGrupo
                         ? (iObj >= 0 ? GRUPO_COLOR_HEX[iObj % GRUPO_COLOR_HEX.length] : undefined)
                         : colorPuestoGrilla[String(sh.positionName || '')]?.color;
+                const bloques = !franco && Array.isArray(sh.blocks) && sh.blocks.length >= 2
+                    ? sh.blocks
+                    : (!franco ? slaBlocksForPositionShift(positionStructure, sh.positionName, code) : null);
+                const horarioCortado = Array.isArray(bloques) && bloques.length >= 2
+                    ? bloques.map((b: { startTime?: string; endTime?: string }) => `${hhmm(b.startTime)}–${hhmm(b.endTime)}`).filter((p: string) => !p.startsWith('–') && !p.endsWith('–')).join(' + ')
+                    : '';
                 const segundoCodigo = franco ? null : codigoSegundoBloqueCelda(key, pendingChanges, cellTurnosMap);
                 const extendido = !franco && (sh.isExtended === true || sh.coverageSegmentRole === 'EXTENSION');
                 const franjasExt: FranjaExt[] = [];
@@ -16143,7 +16174,7 @@ function PlanificacionDesktop() {
                 const par = extendido ? parExtMismoObjetivo(sh, franjasExt) : null;
                 celdas[d.dateStr] = {
                     code: sh.isFrancoTrabajado ? `FT·${code}` : code,
-                    ...(!franco && ini && fin && ini !== fin ? { horario: `${ini}–${fin}` } : {}),
+                    ...(!franco && (horarioCortado || (ini && fin && ini !== fin)) ? { horario: horarioCortado || `${ini}–${fin}` } : {}),
                     ...(!franco && colorPos ? { color: colorPos } : {}),
                     ...(segundoCodigo ? { segundoCodigo } : {}),
                     ...(extendido ? { ext: true, ...(par ? { par } : {}) } : {}),
@@ -16161,7 +16192,12 @@ function PlanificacionDesktop() {
             color: leyendaGrupo.colores[o.name]?.color,
             franjas: o.shifts
                 .filter((st: any) => st.code && st.startTime && st.endTime)
-                .map((st: any) => ({ code: String(st.code).toUpperCase(), horario: `${hhmm(st.startTime)}–${hhmm(st.endTime)}` })),
+                .map((st: any) => ({
+                    code: String(st.code).toUpperCase(),
+                    horario: Array.isArray(st.blocks) && st.blocks.length >= 2
+                        ? st.blocks.map((b: { startTime?: string; endTime?: string }) => `${hhmm(b.startTime)}–${hhmm(b.endTime)}`).join(' + ')
+                        : `${hhmm(st.startTime)}–${hhmm(st.endTime)}`,
+                })),
         })) : ((positionStructure || []) as any[])
             .filter((p: any) => p.positionName && p.positionName !== 'General')
             .map((p: any) => ({
@@ -16169,7 +16205,12 @@ function PlanificacionDesktop() {
                 color: colorPuestoGrilla[String(p.positionName)]?.color,
                 franjas: ((p.shifts || []) as any[])
                     .filter((st: any) => st.code && st.startTime && st.endTime)
-                    .map((st: any) => ({ code: String(st.code).toUpperCase(), horario: `${hhmm(st.startTime)}–${hhmm(st.endTime)}` })),
+                    .map((st: any) => ({
+                        code: String(st.code).toUpperCase(),
+                        horario: Array.isArray(st.blocks) && st.blocks.length >= 2
+                            ? st.blocks.map((b: { startTime?: string; endTime?: string }) => `${hhmm(b.startTime)}–${hhmm(b.endTime)}`).join(' + ')
+                            : `${hhmm(st.startTime)}–${hhmm(st.endTime)}`,
+                    })),
             }));
         setImagenCrono({
             puestos,
@@ -16545,7 +16586,7 @@ function PlanificacionDesktop() {
                 for (const p of (grupoSlaMap[objId] || []) as any[]) {
                     for (const s of (p.shifts || []) as any[]) {
                         if (!s.startTime || !s.endTime) continue;
-                        out.push({ code: s.code, name: s.name, hours: s.hours, startTime: s.startTime, endTime: s.endTime, positionName: etiquetaPuestoGrupo(objId, String(p.positionName || '')), ...(s.days ? { days: s.days } : {}), ...(s.specificDates ? { specificDates: s.specificDates } : {}), ...(s.feriados ? { feriados: true } : {}) } as TurnoSla);
+                        out.push({ code: s.code, name: s.name, hours: s.hours, startTime: s.startTime, endTime: s.endTime, positionName: etiquetaPuestoGrupo(objId, String(p.positionName || '')), ...(Array.isArray(s.blocks) && s.blocks.length >= 2 ? { blocks: s.blocks } : {}), ...(s.days ? { days: s.days } : {}), ...(s.specificDates ? { specificDates: s.specificDates } : {}), ...(s.feriados ? { feriados: true } : {}) } as TurnoSla);
                     }
                 }
             }
@@ -16553,7 +16594,7 @@ function PlanificacionDesktop() {
         }
         for (const p of (effectivePosStructure || []) as any[]) {
             for (const s of (p.shifts || []) as any[]) {
-                out.push({ code: s.code, name: s.name, hours: s.hours, startTime: s.startTime, endTime: s.endTime, positionName: p.positionName, ...(s.days ? { days: s.days } : {}), ...(s.specificDates ? { specificDates: s.specificDates } : {}), ...(s.feriados ? { feriados: true } : {}) } as TurnoSla);
+                out.push({ code: s.code, name: s.name, hours: s.hours, startTime: s.startTime, endTime: s.endTime, positionName: p.positionName, ...(Array.isArray(s.blocks) && s.blocks.length >= 2 ? { blocks: s.blocks } : {}), ...(s.days ? { days: s.days } : {}), ...(s.specificDates ? { specificDates: s.specificDates } : {}), ...(s.feriados ? { feriados: true } : {}) } as TurnoSla);
             }
         }
         return out;
@@ -16617,6 +16658,9 @@ function PlanificacionDesktop() {
                 comments: rawB2.comments ? String(rawB2.comments) : undefined,
             }
             : undefined;
+        const blocksCelda = (Array.isArray(base?.blocks) && base.blocks.length >= 2)
+            ? base.blocks
+            : slaBlocksForPositionShift(effectivePosStructure, base?.positionName, code);
         return {
             code,
             startTime: hhmmRapido(base?.startTime) || undefined,
@@ -16624,6 +16668,7 @@ function PlanificacionDesktop() {
             hours: Number(base?.hours) || undefined,
             name: base?.name || base?.type,
             positionName: base?.positionName,
+            ...(blocksCelda && blocksCelda.length >= 2 ? { blocks: blocksCelda.map((b) => ({ startTime: String(b.startTime).slice(0, 5), endTime: String(b.endTime).slice(0, 5) })) } : {}),
             deploymentBand: base?.deploymentBand ? String(base.deploymentBand) : undefined,
             ...(segundoBloque ? { segundoBloque } : {}),
         };
@@ -16683,7 +16728,8 @@ function PlanificacionDesktop() {
             .filter((st) => turnoValeEnFecha(st, ds))
             .map((st) => (enGrupoRapido ? { ...st, positionName: etiqueta } : st));
         const deTodos = slaTodosRapido.filter((st) => turnoValeEnFecha(st, ds));
-        const base = opcionesDeCodigo(delPuesto as TurnoSla[], deTodos, ultimoUsadoRapido, catalogoNovedad);
+        const cortadosDelServicio = slaTodosRapido.filter((st) => Array.isArray(st.blocks) && st.blocks.length >= 2).map((st) => st.code);
+        const base = opcionesDeCodigo(delPuesto as TurnoSla[], deTodos, ultimoUsadoRapido, catalogoNovedad, cortadosDelServicio);
         const actual = ctx?.p && !ctx.p.isDeleted ? ctx.p : ctx?.s;
         const volanteOpciones = !!(emp && esVolanteDelCrono(emp.volante, idsObjetivosDelCrono(selectedObjective, selectedGrupo?.objectiveIds, !!(selectedGrupo && grupoUnifiedMode))));
         if (!esCeldaFranco(actual) || volanteOpciones) return base;
@@ -16886,7 +16932,7 @@ function PlanificacionDesktop() {
             return { change: { ...base, ...config, positionName: posReal, isFranco: false } };
         }
         const h = fuente && fuente.code === code && fuente.startTime && fuente.endTime
-            ? { code, name: fuente.name || code, startTime: fuente.startTime, endTime: fuente.endTime, hours: fuente.hours || 0, positionName: fuente.positionName }
+            ? { code, name: fuente.name || code, startTime: fuente.startTime, endTime: fuente.endTime, hours: fuente.hours || 0, positionName: fuente.positionName, ...(fuente.blocks && fuente.blocks.length >= 2 ? { blocks: fuente.blocks } : {}) }
             : horarioDeCodigo(code, {
                 slaPuesto: getShiftsForPosition(pos, objectiveId) as TurnoSla[],
                 slaTodos: slaTodosRapido,
@@ -16902,6 +16948,7 @@ function PlanificacionDesktop() {
                 hours: Number(h.hours) || 8,
                 startTime: h.startTime,
                 endTime: h.endTime,
+                ...(h.blocks && h.blocks.length >= 2 ? { blocks: h.blocks } : {}),
                 positionName: fuente?.forzarPuesto && fuente.positionName ? fuente.positionName : (posSla && pos === 'General' ? posSla : (posSla && !getShiftsForPosition(pos, objectiveId).some((s: any) => normalizarCodigo(s.code) === code) ? posSla : pos)),
                 isFranco: false,
             },
@@ -22953,7 +23000,7 @@ function PlanificacionDesktop() {
                         colorPuesto={leyendaGrupo?.colores || colorPuestoGrilla}
                         puestos={leyendaGrupo?.puestos || (positionStructure || []).map((p: any) => ({
                             name: String(p.positionName || p.name || 'Puesto'),
-                            shifts: (p.shifts || []).map((s: any) => ({ code: String(s.code || ''), startTime: s.startTime, endTime: s.endTime, hours: Number(s.hours) || 0, name: s.name })),
+                            shifts: (p.shifts || []).map((s: any) => ({ code: String(s.code || ''), startTime: s.startTime, endTime: s.endTime, hours: Number(s.hours) || 0, name: s.name, blocks: s.blocks })),
                         }))}
                         usados={codigosUsadosLeyenda}
                         sumas={sumasExtLeyenda}
@@ -22990,7 +23037,7 @@ function PlanificacionDesktop() {
                                         colorPuesto={leyendaGrupo?.colores || colorPuestoGrilla}
                                         puestos={leyendaGrupo?.puestos || (positionStructure || []).map((p: any) => ({
                                             name: String(p.positionName || p.name || 'Puesto'),
-                                            shifts: (p.shifts || []).map((sh: any) => ({ code: String(sh.code || ''), startTime: sh.startTime, endTime: sh.endTime, hours: Number(sh.hours) || 0, name: sh.name })),
+                                            shifts: (p.shifts || []).map((sh: any) => ({ code: String(sh.code || ''), startTime: sh.startTime, endTime: sh.endTime, hours: Number(sh.hours) || 0, name: sh.name, blocks: sh.blocks })),
                                         }))}
                                         usados={codigosUsadosLeyenda}
                                         sumas={sumasExtLeyenda}

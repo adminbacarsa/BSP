@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { sumPublishedPlanHours } from '@cosp/hours-core';
 import {
     autorizacionesAlGuardar,
     agruparAvisos,
@@ -175,6 +176,59 @@ describe('modo rápido · códigos y horario', () => {
         assert.equal(ult?.fuente, 'ULTIMO');
         assert.equal(ult?.hours, 6);
         assert.equal(horarioDeCodigo('ZZ', {}), null);
+    });
+    it('turno cortado: el desplegable muestra los dos horarios', () => {
+        const gp = {
+            code: 'GP',
+            startTime: '09:00',
+            endTime: '14:00',
+            hours: 9,
+            positionName: 'GP',
+            blocks: [
+                { startTime: '09:00', endTime: '14:00' },
+                { startTime: '18:00', endTime: '22:00' },
+            ],
+        };
+        const ops = opcionesDeCodigo([gp], [gp]);
+        const op = ops.find((o) => o.code === 'GP');
+        assert.equal(op?.horario, '09:00–14:00 + 18:00–22:00');
+        const conUsado = opcionesDeCodigo([gp], [gp], { GP: { startTime: '09:00', endTime: '14:00' } });
+        assert.deepEqual(
+            conUsado.filter((o) => o.code === 'GP' && o.detalle === 'Usado en el objetivo'),
+            [],
+        );
+        const otroDia = opcionesDeCodigo([], [], { GPD: { startTime: '09:30', endTime: '13:30' } }, [], ['GPD']);
+        assert.deepEqual(
+            otroDia.filter((o) => o.code === 'GPD'),
+            [],
+        );
+    });
+    it('turno cortado: un código, dos horarios, horas sumadas', () => {
+        const h = horarioDeCodigo('GP', {
+            slaPuesto: [{
+                code: 'GP',
+                startTime: '09:00',
+                endTime: '14:00',
+                hours: 9,
+                blocks: [
+                    { startTime: '09:00', endTime: '14:00' },
+                    { startTime: '18:00', endTime: '22:00' },
+                ],
+            }],
+        });
+        assert.equal(h?.startTime, '09:00');
+        assert.equal(h?.endTime, '14:00');
+        assert.equal(h?.hours, 9);
+        assert.equal(h?.blocks?.length, 2);
+        const liq = sumPublishedPlanHours([{
+            code: 'GP',
+            startTime: new Date('2026-11-18T12:00:00Z'),
+            endTime: new Date('2026-11-18T17:00:00Z'),
+            hours: 5,
+            blocks: h?.blocks,
+        }]);
+        assert.equal(liq.hours, 9);
+        assert.equal(liq.byCode.GP.count, 1);
     });
     it('tipo de código', () => {
         assert.equal(tipoDeCodigo('ff'), 'FRANCO');

@@ -328,7 +328,17 @@ export function sugerirCodigos(prefijo: string, opciones: OpcionCodigo[], max = 
     return [...exactas, ...porBanda, ...prefijos].slice(0, max);
 }
 
-export type TurnoSla = { code: string; name?: string; hours?: number; startTime?: string; endTime?: string; positionName?: string };
+export type BloqueHorario = { startTime: string; endTime: string };
+
+export type TurnoSla = {
+    code: string;
+    name?: string;
+    hours?: number;
+    startTime?: string;
+    endTime?: string;
+    positionName?: string;
+    blocks?: BloqueHorario[];
+};
 
 export function horasEntre(startTime: string, endTime: string): number {
     const [h1, m1] = startTime.split(':').map(Number);
@@ -346,8 +356,27 @@ export type HorarioResuelto = {
     endTime: string;
     hours: number;
     positionName?: string;
+    /** Mismos dos horarios del turno. start/end siguen siendo el primero. */
+    blocks?: BloqueHorario[];
     fuente: 'SLA' | 'ULTIMO' | 'ESTANDAR';
 };
+
+function bloquesDelTurno(shift: TurnoSla | undefined): BloqueHorario[] | undefined {
+    const raw = shift?.blocks;
+    if (!Array.isArray(raw) || raw.length < 2) return undefined;
+    const out: BloqueHorario[] = [];
+    for (const b of raw) {
+        const startTime = String(b?.startTime || '').slice(0, 5);
+        const endTime = String(b?.endTime || '').slice(0, 5);
+        if (!/^\d{2}:\d{2}$/.test(startTime) || !/^\d{2}:\d{2}$/.test(endTime)) return undefined;
+        out.push({ startTime, endTime });
+    }
+    return out;
+}
+
+export function horasDeBloques(blocks: BloqueHorario[]): number {
+    return Math.round(blocks.reduce((s, b) => s + horasEntre(b.startTime, b.endTime), 0) * 100) / 100;
+}
 
 /**
  * Horario de un código de trabajo: el del SLA del puesto (o de otro puesto del SLA),
@@ -361,12 +390,15 @@ export function horarioDeCodigo(
     const del = (lista?: TurnoSla[]) => (lista || []).find((s) => normalizarCodigo(s.code) === c && s.startTime && s.endTime);
     const sla = del(opts.slaPuesto) || del(opts.slaTodos);
     if (sla) {
+        const blocks = bloquesDelTurno(sla);
+        const horasBloques = blocks ? horasDeBloques(blocks) : 0;
         return {
             code: c,
             name: sla.name || c,
             startTime: sla.startTime!,
             endTime: sla.endTime!,
-            hours: Number(sla.hours) || horasEntre(sla.startTime!, sla.endTime!),
+            hours: horasBloques || Number(sla.hours) || horasEntre(sla.startTime!, sla.endTime!),
+            ...(blocks ? { blocks } : {}),
             positionName: sla.positionName,
             fuente: 'SLA',
         };
@@ -408,14 +440,23 @@ export function resolverNovedad(texto: string, catalogo: readonly TipoNovedadRap
     return null;
 }
 
-export function opcionesDeCodigo(slaPuesto: TurnoSla[], slaTodos: TurnoSla[], ultimoUsado: Record<string, { startTime: string; endTime: string }> = {}, catalogo: readonly TipoNovedadRapida[] = []): OpcionCodigo[] {
-    const fmt = (s: TurnoSla) => (s.startTime && s.endTime ? `${s.startTime}–${s.endTime}` : undefined);
+export function opcionesDeCodigo(slaPuesto: TurnoSla[], slaTodos: TurnoSla[], ultimoUsado: Record<string, { startTime: string; endTime: string }> = {}, catalogo: readonly TipoNovedadRapida[] = [], codigosCortados: readonly string[] = []): OpcionCodigo[] {
+    const fmt = (s: TurnoSla) => {
+        const bloques = bloquesDelTurno(s);
+        if (bloques) return bloques.map((b) => `${b.startTime}–${b.endTime}`).join(' + ');
+        return s.startTime && s.endTime ? `${s.startTime}–${s.endTime}` : undefined;
+    };
     const out: OpcionCodigo[] = [];
     for (const s of slaPuesto) out.push({ code: normalizarCodigo(s.code), horario: fmt(s), detalle: s.positionName ? `SLA · ${s.positionName}` : 'SLA', ...(s.positionName ? { puesto: s.positionName } : {}) });
     for (const s of slaTodos) out.push({ code: normalizarCodigo(s.code), horario: fmt(s), detalle: s.positionName ? `SLA · ${s.positionName}` : 'SLA', ...(s.positionName ? { puesto: s.positionName } : {}) });
     for (const [code, h] of Object.entries(HORARIO_ESTANDAR)) out.push({ code, horario: `${h.startTime}–${h.endTime}`, detalle: 'Estándar' });
+    const cortados = new Set([
+        ...[...slaPuesto, ...slaTodos].filter((s) => bloquesDelTurno(s)).map((s) => normalizarCodigo(s.code)),
+        ...codigosCortados.map((c) => normalizarCodigo(c)),
+    ]);
     for (const [code, h] of Object.entries(ultimoUsado)) {
         if (normalizarCodigo(code) === 'EV') continue;
+        if (cortados.has(normalizarCodigo(code))) continue;
         out.push({ code, horario: `${h.startTime}–${h.endTime}`, detalle: 'Usado en el objetivo' });
     }
     out.push({ code: 'F', detalle: 'Franco' }, { code: 'FF', detalle: 'Franco feriado' }, { code: 'FP', detalle: 'Franco permuta' });

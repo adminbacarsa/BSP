@@ -55,6 +55,40 @@ function toMs(value: unknown): number | null {
   return null;
 }
 
+/** Dos horarios del mismo turno (09–14 + 18–22). La jornada es la suma, no el hueco del medio. */
+export function horasDeBloquesTurno(shift: { blocks?: unknown } | null | undefined): number {
+  const blocks = shift?.blocks;
+  if (!Array.isArray(blocks) || blocks.length < 2) return 0;
+  let total = 0;
+  for (const raw of blocks) {
+    const b = raw as { startTime?: unknown; endTime?: unknown };
+    const start = String(b?.startTime || '').slice(0, 5);
+    const end = String(b?.endTime || '').slice(0, 5);
+    if (!/^\d{2}:\d{2}$/.test(start) || !/^\d{2}:\d{2}$/.test(end)) return 0;
+    const [h1, m1] = start.split(':').map(Number);
+    const [h2, m2] = end.split(':').map(Number);
+    let min = (h2 * 60 + m2) - (h1 * 60 + m1);
+    if (min <= 0) min += 24 * 60;
+    total += min / 60;
+  }
+  const hours = Math.round(total * 100) / 100;
+  return hours >= 0.5 && hours <= 16 ? hours : 0;
+}
+
+export function etiquetaBloquesTurno(shift: { blocks?: unknown } | null | undefined): string | null {
+  const blocks = shift?.blocks;
+  if (!Array.isArray(blocks) || blocks.length < 2) return null;
+  const partes: string[] = [];
+  for (const raw of blocks) {
+    const b = raw as { startTime?: unknown; endTime?: unknown };
+    const start = String(b?.startTime || '').slice(0, 5);
+    const end = String(b?.endTime || '').slice(0, 5);
+    if (!/^\d{2}:\d{2}$/.test(start) || !/^\d{2}:\d{2}$/.test(end)) return null;
+    partes.push(`${start}–${end}`);
+  }
+  return partes.join(' + ');
+}
+
 function clockHours(shift: any): number {
   const a = toMs(shift?.startTime);
   const b = toMs(shift?.endTime);
@@ -135,7 +169,8 @@ function hoursOf(shift: any): { key: string; hours: number } | null {
   // Borrador con horario «HH:MM» (sin fecha): las horas del turno antes que el 8 por defecto (PP de 7 h).
   const declaradas = Number(shift?.hours);
   const fromHours = declaradas >= 0.5 && declaradas <= 16 ? declaradas : 0;
-  const hs = fromClock || fromHours || CODE_FALLBACK[code] || 8;
+  const deBloques = horasDeBloquesTurno(shift);
+  const hs = deBloques || fromClock || fromHours || CODE_FALLBACK[code] || 8;
   return { key: code, hours: r1(hs) };
 }
 

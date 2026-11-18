@@ -71,6 +71,8 @@ export {
 
 export {
   sumPublishedPlanHours,
+  horasDeBloquesTurno,
+  etiquetaBloquesTurno,
   type PublishedPlanHours,
   type PublishedPlanCodeRow,
 } from './motors/planning/publishedPlanHours';

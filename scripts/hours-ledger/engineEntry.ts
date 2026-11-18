@@ -14,6 +14,7 @@ import {
   buildPersonaBook,
   calculateLiquidationHoursStatsF0,
   sumPublishedPlanHours,
+  horasDeBloquesTurno,
 } from '../../packages/hours-core/src/index';
 import { assignWorkedShares, classifySlaBucket } from './slaPolicy';
 import {
@@ -396,6 +397,8 @@ function instantMs(value: unknown): number | null {
 
 /** Jornada paga: 8 o 12 h del turno. Nunca 24 h de calendario. */
 export function jornadaPagada(t: any): number {
+  const deBloques = horasDeBloquesTurno(t);
+  if (deBloques > 0) return deBloques;
   const h = Number(t?.hours);
   if (h === 8 || h === 9 || h === 12) return h;
   const a = instantMs(t?.startTime);

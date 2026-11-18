@@ -119,7 +119,18 @@ export function hhmmAR(value: TsLike | Date | string | null | undefined): string
   return new Date(ms).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: TZ });
 }
 
-export function horarioPlanificado(shift: { shiftDateObj?: Date | string | null; endDateObj?: Date | string | null; startTime?: TsLike; endTime?: TsLike }): string {
+export function horarioPlanificado(shift: { shiftDateObj?: Date | string | null; endDateObj?: Date | string | null; startTime?: TsLike; endTime?: TsLike; blocks?: Array<{ startTime?: string; endTime?: string }> }): string {
+  const blocks = shift.blocks;
+  if (Array.isArray(blocks) && blocks.length >= 2) {
+    const partes = blocks
+      .map((b) => {
+        const a = String(b?.startTime || '').slice(0, 5);
+        const c = String(b?.endTime || '').slice(0, 5);
+        return /^\d{2}:\d{2}$/.test(a) && /^\d{2}:\d{2}$/.test(c) ? `${a}–${c}` : '';
+      })
+      .filter(Boolean);
+    if (partes.length >= 2) return partes.join(' + ');
+  }
   const start = hhmmAR(shift.shiftDateObj || shift.startTime);
   const end = hhmmAR(shift.endDateObj || shift.endTime);
   if (start && end) return `${start}–${end}`;

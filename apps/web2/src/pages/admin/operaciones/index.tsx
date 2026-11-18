@@ -111,6 +111,17 @@ const formatDateShort = (dateObj: any) => { try { return toDate(dateObj).toLocal
 const formatTimeRange = (start: any, end: any) => { try { return `${toDate(start).toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit', timeZone: 'America/Argentina/Cordoba'})} - ${toDate(end).toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit', timeZone: 'America/Argentina/Cordoba'})}`; } catch { return '--:--'; } };
 const displayShiftTimeRange = (shift: any) => {
     if (shift?.turaContiguous && shift?.turaExtensionRange) return shift.turaExtensionRange;
+    const blocks = shift?.blocks;
+    if (Array.isArray(blocks) && blocks.length >= 2) {
+        const partes = blocks
+            .map((b: { startTime?: string; endTime?: string }) => {
+                const a = String(b?.startTime || '').slice(0, 5);
+                const c = String(b?.endTime || '').slice(0, 5);
+                return /^\d{2}:\d{2}$/.test(a) && /^\d{2}:\d{2}$/.test(c) ? `${a}–${c}` : '';
+            })
+            .filter(Boolean);
+        if (partes.length >= 2) return partes.join(' + ');
+    }
     return formatTimeRange(shift.shiftDateObj, shift.endDateObj);
 };
 const fmt24h = (dateObj: any) => { try { return toDate(dateObj).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Argentina/Cordoba' }); } catch(e) { return '-'; } };
@@ -5118,7 +5129,7 @@ export default function OperacionesPage() {
                                                             <ShiftCodeBadge shift={s} />
                                                         </p>
                                                         <p className="text-xs text-slate-500 truncate">{s.objectiveName}</p>
-                                                        <p className="text-xs text-indigo-500 font-semibold truncate">{s.positionName} · <span className="font-mono text-slate-500">{formatTimeRange(s.shiftDateObj, s.endDateObj)}</span></p>
+                                                        <p className="text-xs text-indigo-500 font-semibold truncate">{s.positionName} · <span className="font-mono text-slate-500">{displayShiftTimeRange(s)}</span></p>
                                                     </div>
                                                     <span className={`text-[10px] font-black px-2 py-1 rounded-full shrink-0 ${s.isRetention ? 'bg-orange-100 text-orange-700' : s.isPendingRetention ? 'bg-yellow-100 text-yellow-700' : s.isEarlyStart ? 'bg-indigo-100 text-indigo-700' : s.isAwaitingCoverageCheckIn ? 'bg-indigo-100 text-indigo-700' : 'bg-rose-100 text-rose-700'}`}>
                                                         {s.isRetention ? 'RECARGO' : s.isPendingRetention ? 'ATENCIÓN' : s.isEarlyStart ? 'ADELANTADO' : s.isAwaitingCoverageCheckIn ? 'CONVOCADO' : 'INMINENTE'}
@@ -5149,7 +5160,7 @@ export default function OperacionesPage() {
                                                             {s.isRetention ? 'RECARGO' : s.isPendingRetention ? 'ATENCIÓN' : s.isEarlyStart ? 'ADELANTADO' : s.isAwaitingCoverageCheckIn ? 'CONVOCADO' : 'INMINENTE'}
                                                         </span>
                                                     </p>
-                                                    <p className="text-[9px] text-slate-400 truncate leading-tight">{s.objectiveName} · <span className="text-indigo-500">{s.positionName}</span> · <span className="font-mono">{formatTimeRange(s.shiftDateObj, s.endDateObj)}</span></p>
+                                                    <p className="text-[9px] text-slate-400 truncate leading-tight">{s.objectiveName} · <span className="text-indigo-500">{s.positionName}</span> · <span className="font-mono">{displayShiftTimeRange(s)}</span></p>
                                                 </div>
                                                 <div className="flex gap-1 shrink-0">
                                                     {s.isRetention ? (<>

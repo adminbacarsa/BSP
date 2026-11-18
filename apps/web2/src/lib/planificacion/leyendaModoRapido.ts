@@ -5,7 +5,14 @@ export type ChipLeyenda = { code: string; horario: string; horas: number; detall
 
 export type GrupoLeyenda = { titulo: string; chips: ChipLeyenda[] };
 
-export type TurnoLeyenda = { code: string; startTime?: string; endTime?: string; hours?: number; name?: string };
+export type TurnoLeyenda = {
+  code: string;
+  startTime?: string;
+  endTime?: string;
+  hours?: number;
+  name?: string;
+  blocks?: Array<{ startTime?: string; endTime?: string }>;
+};
 
 const OTROS = [
   { code: 'F', horario: 'Franco', horas: 0 },
@@ -20,6 +27,15 @@ function hm(a?: string, b?: string): string {
   const corto = (v?: string) => String(v || '').slice(0, 5);
   if (!a || !b) return '';
   return `${corto(a)}–${corto(b)}`;
+}
+
+function horarioLeyenda(s: TurnoLeyenda): string {
+  const blocks = s.blocks;
+  if (Array.isArray(blocks) && blocks.length >= 2) {
+    const partes = blocks.map((b) => hm(b.startTime, b.endTime)).filter(Boolean);
+    if (partes.length >= 2) return partes.join(' + ');
+  }
+  return hm(s.startTime, s.endTime);
 }
 
 /** Pares de extensión del mismo objetivo (ej. EM+EM2). No incluye +EM2 de otro objetivo. */
@@ -41,7 +57,7 @@ export function armarLeyenda(
         propios.add(s.code.toUpperCase());
         return {
           code: s.code.toUpperCase(),
-          horario: hm(s.startTime, s.endTime),
+          horario: horarioLeyenda(s),
           horas: Number(s.hours) || 0,
           detalle: s.name && s.name.toUpperCase() !== s.code.toUpperCase() ? s.name : undefined,
         };
