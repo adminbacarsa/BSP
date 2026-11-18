@@ -37,6 +37,9 @@ export const waMensaje = {
   intercambio: (nombre: string, objetivoDestino: string) =>
     `Hola ${nombre} 👋, te contacta *Operaciones Crono*.\n\nNecesitamos que pases al objetivo *${objetivoDestino}*.\n\n¿Podés hacer el movimiento? Confirmá.`,
 
+  intercambioHecho: (nombre: string, objetivo: string, horaInicio: string, horaFin: string) =>
+    `Hola ${nombre} 👋, te contacta *Operaciones Crono*.\n\nQuedó confirmado el cambio de turno: ahora cubrís *${objetivo}* de *${horaInicio}* a *${horaFin}*.\n\nConfirmá recibo.`,
+
   adelanto: (nombre: string, objetivo: string, hora: string) =>
     `Hola ${nombre} 👋, te contacta *Operaciones Crono*.\n\nNecesitamos que adelantes tu ingreso al puesto *${objetivo}* a las *${hora}*.\n\n¿Podés llegar? Confirmá.`,
 

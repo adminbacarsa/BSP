@@ -32,12 +32,12 @@ function AssistantWrapper() {
   const { empresa } = useEmpresa();
   const router = useRouter();
   const movil = useMovilMode();
+  // Operaciones (clásico, modo rápido y mapa): el globo tapa la planilla y los controles.
+  if (router.pathname.startsWith('/admin/operaciones')) return null;
   // En el celular el globo no se muestra: el asistente se abre desde Más (evento cosp-assistant-open).
   if (movil) {
     return <AssistantFloatingBubble />;
   }
-  // En el escritorio del Centro de Control el globo tapaba los controles.
-  if (router.pathname === '/admin/operaciones') return null;
   // En Planificación el globo arranca oculto: se abre con el ícono de la barra (evento cosp-assistant-open).
   if (router.pathname.startsWith('/admin/planificacion')) return <AssistantFloatingBubble sinGlobo />;
   if (empresa?.isTrainingEmpresa) {

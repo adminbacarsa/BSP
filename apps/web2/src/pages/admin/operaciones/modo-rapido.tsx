@@ -14,22 +14,45 @@ import {
   where,
 } from 'firebase/firestore';
 import {
+  ArrowDownAZ,
+  ArrowDownUp,
   ArrowLeft,
+  CheckCircle2,
   ChevronDown,
   ChevronRight,
   ChevronUp,
+  Clock,
+  Flame,
+  GripVertical,
+  Hand,
+  HelpCircle,
+  LayoutList,
+  Lock,
+  Maximize,
   MessageSquare,
+  Minimize2,
   Pin,
+  Radio,
   Search,
+  Shield,
+  Siren,
+  Smartphone,
+  UserX,
+  Users,
   Zap,
+  type LucideIcon,
 } from 'lucide-react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
-import { db } from '@/lib/firebase';
+import { httpsCallable } from 'firebase/functions';
+import { db, functions } from '@/lib/firebase';
+import { openWhatsApp, waMensaje } from '@/lib/whatsapp';
+import { invokeCrearConvocatoriaCobertura } from '@/lib/operaciones/opsConvocatoriaCobertura';
 import { empresaCollectionQuery, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
 import { readPreferOpsModoRapido, writePreferOpsModoRapido } from '@/lib/panelViewPrefs';
 import { isRestFrancoShift } from '@/hooks/useOperacionesMonitor';
+import { computeShiftCloseTimes } from '@cosp/ops-core';
 import {
   TurnoHoy,
   UseWABridgeReturn,
@@ -109,6 +132,16 @@ function minutesSinceExpected(
   return Math.floor((nowMs - d.getTime()) / 60000);
 }
 
+type PresenciaMeta = {
+  checkInSource: string;
+  presenciaSource: string;
+  checkInMethod: string;
+  isPresent: boolean;
+  isCompleted: boolean;
+  isRetention: boolean;
+  realEndLabel: string;
+};
+
 function extractBand(shift: string): string {
   const code = String(shift || '')
     .trim()
@@ -136,10 +169,16 @@ function useTurnosHoy({
   loading: boolean;
   phones: string[];
   francos: TurnoHoy[];
+  presenciaMeta: Record<string, PresenciaMeta>;
+  cerrados: Record<string, TurnoHoy>;
+  clientePorObj: Record<string, string>;
 } {
   const [turnos, setTurnos] = useState<Record<string, TurnoHoy>>({});
+  const [cerrados, setCerrados] = useState<Record<string, TurnoHoy>>({});
+  const [presenciaMeta, setPresenciaMeta] = useState<Record<string, PresenciaMeta>>({});
   const [loading, setLoading] = useState(true);
   const [phones, setPhones] = useState<string[]>([]);
+  const [clientePorObj, setClientePorObj] = useState<Record<string, string>>({});
   const [francos, setFrancos] = useState<TurnoHoy[]>([]);
   const objMapRef = useRef<Map<string, { name: string; clientName: string; lat?: number; lng?: number }>>(new Map());
   const phoneMapRef = useRef<Map<string, string>>(new Map());
@@ -190,6 +229,7 @@ function useTurnosHoy({
       francosHoyRef.current = [];
       const now = Date.now();
       const byName = new Map<string, { turno: TurnoHoy; startMs: number }>();
+      const cerradosMap = new Map<string, TurnoHoy>();
 
       for (const d of docs) {
         const shift = d.data() as Record<string, unknown>;
@@ -255,7 +295,7 @@ function useTurnosHoy({
         const startMs = toStartMs(shift.startTime);
         if (Number.isNaN(startMs)) continue;
 
-        if (String(shift.status || '').toUpperCase() === 'COMPLETED') continue;
+        const cerrado = String(shift.status || '').toUpperCase() === 'COMPLETED' || shift.isCompleted === true;
 
         let endMs = toStartMs(shift.endTime);
         if (Number.isNaN(endMs)) endMs = startMs;
@@ -302,6 +342,11 @@ function useTurnosHoy({
           empresaId: String(shift.empresaId || ''),
         };
 
+        if (cerrado) {
+          cerradosMap.set(d.id, mapped);
+          continue;
+        }
+
         const prev = byName.get(employeeName);
         if (!prev) {
           byName.set(employeeName, { turno: mapped, startMs });
@@ -315,10 +360,30 @@ function useTurnosHoy({
       }
 
       const next: Record<string, TurnoHoy> = {};
+      const metaNext: Record<string, PresenciaMeta> = {};
       byName.forEach((v, name) => {
         next[name] = v.turno;
       });
+      for (const d of docs) {
+        const shift = d.data() as Record<string, unknown>;
+        const realEnd = shift.realEndTime as Timestamp | undefined;
+        metaNext[d.id] = {
+          checkInSource: String(shift.checkInSource || ''),
+          presenciaSource: String(shift.presenciaSource || ''),
+          checkInMethod: String(shift.checkInMethod || ''),
+          isPresent: shift.isPresent === true,
+          isCompleted: String(shift.status || '').toUpperCase() === 'COMPLETED' || shift.isCompleted === true,
+          isRetention: shift.isRetention === true,
+          realEndLabel: realEnd ? formatHHMM(realEnd) : '',
+        };
+      }
+      const cerradosNext: Record<string, TurnoHoy> = {};
+      cerradosMap.forEach((turno, id) => {
+        cerradosNext[id] = turno;
+      });
       setTurnos(next);
+      setCerrados(cerradosNext);
+      setPresenciaMeta(metaNext);
       setFrancos(francosHoyRef.current);
       setLoading(false);
     };
@@ -326,6 +391,11 @@ function useTurnosHoy({
     const clientsQ = empresaCollectionQuery('clients', empresaId, scopeEmpresa);
     const unsubClients = onSnapshot(clientsQ, (snap) => {
       objMapRef.current = buildObjMap(snap.docs);
+      const porNombre: Record<string, string> = {};
+      objMapRef.current.forEach((v) => {
+        if (v.name && v.clientName) porNombre[v.name] = v.clientName;
+      });
+      setClientePorObj(porNombre);
       if (lastTurnosSnapRef.current) applyTurnos(lastTurnosSnapRef.current);
     });
 
@@ -370,7 +440,7 @@ function useTurnosHoy({
     };
   }, [empresaId, scopeEmpresa]);
 
-  return { turnos, loading, phones, francos };
+  return { turnos, loading, phones, francos, presenciaMeta, cerrados, clientePorObj };
 }
 
 type GuardEstado =
@@ -380,9 +450,33 @@ type GuardEstado =
   | 'AUSENTE'
   | 'ESPERANDO'
   | 'TARDANZA'
-  | 'NO_LLEGO';
+  | 'NO_LLEGO'
+  | 'CERRADO';
 
-type StatsFilter = 'all' | 'critico' | 'tardanza' | 'sin_confirmar' | 'ok';
+type StatsFilter =
+  | 'all'
+  | 'critico'
+  | 'tardanza'
+  | 'sin_confirmar'
+  | 'ok'
+  | 'sin_presencia'
+  | 'radio'
+  | 'app'
+  | 'cerrado';
+
+type FuenteMarca = 'WA' | 'Radio' | 'App' | 'Op' | '—';
+
+function fuenteDe(estado: GuardEstado, meta?: PresenciaMeta): FuenteMarca {
+  if (estado === 'PENDIENTE_WA' || estado === 'PRESENTE_WA') return 'WA';
+  const src = String(meta?.presenciaSource || meta?.checkInMethod || meta?.checkInSource || '').toUpperCase();
+  if (src === 'PORTAL_GPS' || src === 'APP_GEO' || src === 'APP_QR') return 'App';
+  if (src === 'MANUAL_RADIO' || src.includes('RADIO')) return 'Radio';
+  if (src === 'WA' || src === 'WHATSAPP') return 'WA';
+  if (src === 'MANUAL' || src === 'OPERATIONS' || src === 'MANUAL_PHONE') return 'Op';
+  if (estado === 'PRESENTE_PLAT' && meta?.isPresent) return 'App';
+  if (estado === 'PRESENTE_PLAT') return 'Op';
+  return '—';
+}
 
 type GuardRowModel = {
   employeeName: string;
@@ -393,9 +487,107 @@ type GuardRowModel = {
   diffLabel: string;
   diffTone: 'late' | 'early' | 'countdown' | 'neutral';
   band: string;
+  fuente: FuenteMarca;
+  salida: string;
+  salidaReal?: string;
   /** Nombre de quien ya cubrió este turno (mismo objetivo+puesto+horario), si aplica. */
   coveredByName?: string;
 };
+
+const SHEET_COLS =
+  'grid-cols-[3px_minmax(160px,1.5fr)_minmax(130px,1.1fr)_96px_52px_5.5rem_5.5rem_5.5rem_5.5rem_6.5rem_4.5rem_6.5rem_minmax(11rem,auto)]';
+
+type OrdenModo = 'prioridad' | 'alfabetico' | 'cliente' | 'manual';
+
+type IconoSheet = LucideIcon;
+
+const ORDEN_OPCIONES: Array<{ id: OrdenModo; label: string; title: string; icon: IconoSheet }> = [
+  { id: 'prioridad', label: 'Prioridad', title: 'Primero los objetivos con problemas', icon: Flame },
+  { id: 'alfabetico', label: 'A–Z', title: 'Objetivos por orden alfabético', icon: ArrowDownAZ },
+  { id: 'cliente', label: 'Cliente', title: 'Agrupados por cliente', icon: Users },
+  { id: 'manual', label: 'Manual', title: 'Arrastrá los objetivos al lugar que quieras', icon: Hand },
+];
+
+function ChipIcono({
+  icon: Icono,
+  label,
+  count,
+  active,
+  accent,
+  tono,
+  siempre,
+  onClick,
+}: {
+  icon: IconoSheet;
+  label: string;
+  count: number;
+  active: boolean;
+  accent: string;
+  tono?: string;
+  siempre?: boolean;
+  onClick: () => void;
+}) {
+  const apagado = !active && !siempre && count === 0;
+  return (
+    <button
+      type="button"
+      title={`${label}: ${count}`}
+      aria-label={`${label}: ${count}`}
+      aria-pressed={active}
+      onClick={onClick}
+      className={`flex items-center gap-1 px-2 py-1.5 rounded-full text-[11px] font-bold whitespace-nowrap border transition-colors flex-shrink-0 ${
+        active ? accent : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+      } ${apagado ? 'opacity-50' : ''}`}
+    >
+      <Icono size={13} className={active ? '' : tono || ''} />
+      <span className="tabular-nums">{count}</span>
+    </button>
+  );
+}
+
+const SIN_CLIENTE = 'Sin cliente';
+
+function compararTexto(a: string, b: string): number {
+  return a.localeCompare(b, 'es', { sensitivity: 'base', numeric: true });
+}
+
+function abrirWa(phone: string | undefined, text: string): boolean {
+  if (!phone) return false;
+  openWhatsApp(phone, text);
+  return true;
+}
+
+const SHEET_ALIGN =
+  'gap-x-0 text-left [&>*]:min-w-0 [&>*:not(:first-child)]:px-2 [&>*]:text-left';
+
+const SHEET_SHADE = 'mr-head';
+
+function rowRank(row: GuardRowModel): number {
+  if (row.estado === 'NO_LLEGO' && !row.coveredByName) return 0;
+  if (row.estado === 'TARDANZA') return 1;
+  if (row.estado === 'PENDIENTE_WA') return 2;
+  if (row.estado === 'AUSENTE' && !row.coveredByName) return 3;
+  if (row.estado === 'ESPERANDO') return 4;
+  if (row.estado === 'CERRADO') return 6;
+  return 5;
+}
+
+function pasaFiltro(row: GuardRowModel, statsFilter: StatsFilter): boolean {
+  if (statsFilter === 'critico') return row.estado === 'NO_LLEGO' && !row.coveredByName;
+  if (statsFilter === 'tardanza') return row.estado === 'TARDANZA';
+  if (statsFilter === 'sin_confirmar') return row.estado === 'PENDIENTE_WA';
+  if (statsFilter === 'ok') return row.estado === 'PRESENTE_WA' || row.estado === 'PRESENTE_PLAT';
+  if (statsFilter === 'sin_presencia') {
+    return (
+      row.fuente === '—' &&
+      (row.estado === 'ESPERANDO' || row.estado === 'TARDANZA' || row.estado === 'NO_LLEGO')
+    );
+  }
+  if (statsFilter === 'radio') return row.fuente === 'Radio';
+  if (statsFilter === 'app') return row.fuente === 'App';
+  if (statsFilter === 'cerrado') return row.estado === 'CERRADO';
+  return true;
+}
 
 function classifyEstado(
   turno: TurnoHoy,
@@ -457,6 +649,8 @@ function barClass(estado: GuardEstado): string {
       return 'bg-emerald-600';
     case 'AUSENTE':
       return 'bg-slate-300';
+    case 'CERRADO':
+      return 'bg-slate-400';
     default:
       return 'bg-slate-200';
   }
@@ -465,21 +659,23 @@ function barClass(estado: GuardEstado): string {
 function estadoPill(estado: GuardEstado): { label: string; className: string } {
   switch (estado) {
     case 'NO_LLEGO':
-      return { label: 'NO LLEGÓ', className: 'bg-red-100 text-red-700' };
+      return { label: 'NO LLEGÓ', className: 'mr-pill mr-pill-red' };
     case 'TARDANZA':
-      return { label: 'TARDANZA', className: 'bg-orange-100 text-orange-700' };
+      return { label: 'TARDANZA', className: 'mr-pill mr-pill-orange' };
     case 'PENDIENTE_WA':
-      return { label: '● WA', className: 'bg-blue-100 text-blue-700 animate-pulse' };
+      return { label: '● WA', className: 'mr-pill mr-pill-blue animate-pulse' };
     case 'ESPERANDO':
-      return { label: 'ESPERANDO', className: 'bg-amber-100 text-amber-700' };
+      return { label: 'ESPERANDO', className: 'mr-pill mr-pill-amber' };
     case 'PRESENTE_WA':
-      return { label: '✓ WA', className: 'bg-emerald-100 text-emerald-700' };
+      return { label: '✓ WA', className: 'mr-pill mr-pill-green' };
     case 'PRESENTE_PLAT':
-      return { label: '✓ PRESENTE', className: 'bg-emerald-200 text-emerald-800' };
+      return { label: '✓ PRESENTE', className: 'mr-pill mr-pill-green-strong' };
     case 'AUSENTE':
-      return { label: 'AUSENTE', className: 'bg-red-100 text-red-700' };
+      return { label: 'AUSENTE', className: 'mr-pill mr-pill-red' };
+    case 'CERRADO':
+      return { label: 'CERRADO', className: 'mr-pill mr-pill-slate' };
     default:
-      return { label: estado, className: 'bg-slate-100 text-slate-600' };
+      return { label: estado, className: 'mr-pill mr-pill-mute' };
   }
 }
 
@@ -495,6 +691,7 @@ function ModalCobertura({
   onExtender,
   onIntercambiar,
   onConvocarFt,
+  onAvisarWa,
 }: {
   absent: GuardRowModel;
   retCandidates: GuardRowModel[];
@@ -507,6 +704,7 @@ function ModalCobertura({
   onExtender: (c: GuardRowModel, code: 'D12' | 'N12') => void;
   onIntercambiar: (c: GuardRowModel) => void;
   onConvocarFt: (c: GuardRowModel) => void;
+  onAvisarWa: (c: GuardRowModel, plantilla: 'cobertura' | 'intercambio') => void;
 }) {
   const esPuesto24h = ['M', 'T', 'N'].includes(absent.band);
 
@@ -554,6 +752,15 @@ function ModalCobertura({
                     <div className="flex-1 min-w-0 text-[12px] font-semibold text-slate-800 truncate">
                       {c.employeeName}
                     </div>
+                    <button
+                      type="button"
+                      disabled={busy || !c.turno.phone}
+                      title={c.turno.phone ? 'Convocar por WhatsApp, sin asignar' : 'Sin teléfono'}
+                      onClick={() => onAvisarWa(c, 'cobertura')}
+                      className="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold disabled:opacity-50"
+                    >
+                      WA
+                    </button>
                     <button
                       type="button"
                       disabled={busy}
@@ -640,6 +847,15 @@ function ModalCobertura({
                     </div>
                     <button
                       type="button"
+                      disabled={busy || !c.turno.phone}
+                      title={c.turno.phone ? 'Pedir el cambio por WhatsApp' : 'Sin teléfono'}
+                      onClick={() => onAvisarWa(c, 'intercambio')}
+                      className="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold disabled:opacity-50"
+                    >
+                      WA
+                    </button>
+                    <button
+                      type="button"
                       disabled={busy}
                       onClick={() => onIntercambiar(c)}
                       className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-bold disabled:opacity-50"
@@ -671,11 +887,20 @@ function ModalCobertura({
                     </div>
                     <button
                       type="button"
+                      disabled={busy || !c.turno.phone}
+                      title={c.turno.phone ? 'Convocar por WhatsApp, sin asignar' : 'Sin teléfono'}
+                      onClick={() => onAvisarWa(c, 'cobertura')}
+                      className="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold disabled:opacity-50"
+                    >
+                      WA
+                    </button>
+                    <button
+                      type="button"
                       disabled={busy}
                       onClick={() => onConvocarFt(c)}
                       className="px-2.5 py-1 rounded-lg bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold disabled:opacity-50"
                     >
-                      Convocar FT
+                      App + WA
                     </button>
                   </div>
                 ))}
@@ -704,12 +929,18 @@ function ModalAcciones({
   onClose,
   onMarcarPresente,
   onMarcarAusente,
+  onIntercambio,
+  onRetiro,
+  onAvisarWa,
 }: {
   row: GuardRowModel;
   busy: boolean;
   onClose: () => void;
   onMarcarPresente: (row: GuardRowModel) => void;
   onMarcarAusente: (row: GuardRowModel) => void;
+  onIntercambio: (row: GuardRowModel) => void;
+  onRetiro: (row: GuardRowModel) => void;
+  onAvisarWa: (row: GuardRowModel) => void;
 }) {
   const pill = estadoPill(row.estado);
   return (
@@ -768,6 +999,46 @@ function ModalAcciones({
         </div>
 
         <div className="px-4 pb-4 flex flex-col gap-2">
+          {row.estado !== 'CERRADO' &&
+            row.estado !== 'NO_LLEGO' &&
+            row.estado !== 'AUSENTE' && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  onIntercambio(row);
+                  onClose();
+                }}
+                className="w-full py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-[12px] font-bold disabled:opacity-50"
+              >
+                Cambiar turno (anticipado)
+              </button>
+            )}
+          {(row.estado === 'PRESENTE_PLAT' || row.estado === 'PRESENTE_WA') && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                onRetiro(row);
+                onClose();
+              }}
+              className="w-full py-2 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-800 border border-purple-200 text-[12px] font-bold disabled:opacity-50"
+            >
+              Retiro anticipado (se siente mal)
+            </button>
+          )}
+          <button
+            type="button"
+            disabled={!row.turno.phone}
+            title={row.turno.phone ? 'Abre WhatsApp con el aviso del turno' : 'Sin teléfono'}
+            onClick={() => {
+              onAvisarWa(row);
+              onClose();
+            }}
+            className="w-full py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[12px] font-bold disabled:opacity-50"
+          >
+            Avisar por WhatsApp
+          </button>
           {row.estado !== 'PRESENTE_PLAT' &&
             row.estado !== 'PRESENTE_WA' &&
             row.estado !== 'AUSENTE' && (
@@ -812,16 +1083,38 @@ function ModalAcciones({
 function GuardRow({
   row,
   busy,
+  active,
+  hourValue,
+  hourCampo,
+  onSelect,
+  onHourChange,
+  onHourCommit,
+  onBeginEdit,
   onMarcarPresente,
   onConfirmarWA,
+  onCerrar,
   onCobertura,
+  onIntercambio,
+  onRetiro,
+  swapOrigin,
   onMore,
 }: {
   row: GuardRowModel;
   busy: boolean;
+  active: boolean;
+  hourValue: string | null;
+  hourCampo: 'ingreso' | 'salida' | null;
+  swapOrigin: boolean;
+  onSelect: (row: GuardRowModel) => void;
+  onBeginEdit: (row: GuardRowModel, campo: 'ingreso' | 'salida') => void;
+  onHourChange: (value: string) => void;
+  onHourCommit: (row: GuardRowModel, value: string) => void;
   onMarcarPresente: (row: GuardRowModel) => void;
   onConfirmarWA: (row: GuardRowModel) => void;
+  onCerrar: (row: GuardRowModel) => void;
   onCobertura: (row: GuardRowModel) => void;
+  onIntercambio: (row: GuardRowModel) => void;
+  onRetiro: (row: GuardRowModel) => void;
   onMore: (row: GuardRowModel) => void;
 }) {
   const pill = estadoPill(row.estado);
@@ -852,14 +1145,25 @@ function GuardRow({
     );
   } else if (row.estado === 'TARDANZA') {
     primary = (
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() => onMarcarPresente(row)}
-        className="px-2 py-1 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-[10px] font-bold disabled:opacity-50"
-      >
-        Registrar
-      </button>
+      <>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => onMarcarPresente(row)}
+          className="px-2 py-1 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-[10px] font-bold disabled:opacity-50"
+        >
+          Registrar
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          title="Intercambio anticipado: elegí el otro guardia y Enter"
+          onClick={() => onIntercambio(row)}
+          className="mr-btn-swap px-2 py-1 rounded-lg text-[10px] font-bold disabled:opacity-50"
+        >
+          {swapOrigin ? 'Origen' : 'Cambiar'}
+        </button>
+      </>
     );
   } else if (row.estado === 'PENDIENTE_WA') {
     primary = (
@@ -874,34 +1178,145 @@ function GuardRow({
     );
   } else if (row.estado === 'ESPERANDO') {
     primary = (
+      <>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => onMarcarPresente(row)}
+          className="mr-btn-neutral px-2 py-1 rounded-lg text-[10px] font-bold disabled:opacity-50"
+        >
+          ✓ Llegó
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          title="Intercambio anticipado: elegí el otro guardia y Enter"
+          onClick={() => onIntercambio(row)}
+          className="mr-btn-swap px-2 py-1 rounded-lg text-[10px] font-bold disabled:opacity-50"
+        >
+          {swapOrigin ? 'Origen' : 'Cambiar'}
+        </button>
+      </>
+    );
+  } else if (row.estado === 'PRESENTE_PLAT' || row.estado === 'PRESENTE_WA') {
+    primary = (
+      <>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => onCerrar(row)}
+          className="mr-btn-close px-2 py-1 rounded-lg text-[10px] font-bold disabled:opacity-50"
+        >
+          Cerrar
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          title="Retiro anticipado por enfermedad"
+          onClick={() => onRetiro(row)}
+          className="mr-btn-retiro px-2 py-1 rounded-lg text-[10px] font-bold disabled:opacity-50"
+        >
+          Retiro
+        </button>
+      </>
+    );
+  } else if (row.estado === 'CERRADO') {
+    primary = (
       <button
         type="button"
         disabled={busy}
-        onClick={() => onMarcarPresente(row)}
-        className="px-2 py-1 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-700 text-[10px] font-bold disabled:opacity-50"
+        onClick={() => onBeginEdit(row, 'ingreso')}
+        className="px-2 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold disabled:opacity-50"
       >
-        ✓ Llegó
+        Horario
       </button>
     );
   }
 
+  const fuenteClass =
+    row.fuente === 'WA'
+      ? 'text-blue-700'
+      : row.fuente === 'App'
+        ? 'text-indigo-700'
+        : row.fuente === 'Radio'
+          ? 'text-emerald-700'
+          : 'text-slate-500';
+
   return (
-    <div className="grid grid-cols-[3px_minmax(0,1.6fr)_minmax(0,0.9fr)_64px_64px_72px_88px_minmax(96px,auto)] items-center gap-x-2 px-2 py-2 border-b border-slate-100 odd:bg-white even:bg-slate-50/40 hover:bg-slate-50/80 [&>*:not(:first-child)]:border-r [&>*:not(:first-child)]:border-slate-100 [&>*:last-child]:border-r-0">
+    <div
+      data-rowid={row.turno.rowId}
+      onClick={() => onSelect(row)}
+      className={`mr-row grid ${SHEET_COLS} ${SHEET_ALIGN} items-center px-0 py-0 border-b border-slate-100 cursor-pointer [&>*]:py-1.5 [&>*:not(:first-child)]:border-r [&>*:not(:first-child)]:border-slate-100 [&>*:last-child]:border-r-0 ${
+        active ? 'mr-row-active' : swapOrigin ? 'mr-row-swap' : ''
+      }`}
+    >
       <div className={`self-stretch rounded-full ${barClass(row.estado)}`} />
-      <div className="min-w-0 pl-1">
-        <div className="text-sm font-medium text-slate-800 truncate">{row.employeeName}</div>
-        <div className="text-[10px] text-slate-500 truncate">{row.turno.obj}</div>
+      <div className="truncate text-sm font-medium text-slate-800">{row.employeeName}</div>
+      <div className="truncate text-[11px] text-slate-600" title={row.turno.obj}>{row.turno.obj}</div>
+      <div className="truncate text-[11px] text-slate-500" title={row.turno.positionName}>{row.turno.positionName || '—'}</div>
+      <div className="truncate font-mono text-[11px] text-slate-700">{row.turno.code || row.band || '—'}</div>
+      <div className="mr-plan whitespace-nowrap font-mono text-[11px] tabular-nums" title="Ingreso planificado">{row.turno.expected}</div>
+      <div
+        className="mr-real whitespace-nowrap font-mono text-[12px] font-black tabular-nums"
+        title="Ingreso real"
+        onClick={(e) => {
+          e.stopPropagation();
+          if (row.estado === 'CERRADO' && hourCampo !== 'ingreso') onBeginEdit(row, 'ingreso');
+        }}
+      >
+        {hourValue !== null && hourCampo !== 'salida' ? (
+            <input
+            value={hourValue}
+            onChange={(e) => onHourChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                e.stopPropagation();
+                onHourCommit(row, hourValue);
+              }
+            }}
+            onFocus={(e) => e.currentTarget.select()}
+            className="w-14 px-1 py-0.5 text-[11px] font-mono border border-indigo-300 rounded-md bg-white focus:outline-none"
+          />
+        ) : (
+          row.realDisplay
+        )}
       </div>
-      <div className="text-[11px] text-slate-600 font-mono truncate">{row.turno.shift}</div>
-      <div className="text-[11px] text-slate-500 font-mono text-left">{row.turno.expected}</div>
-      <div className="text-[11px] text-slate-700 font-mono text-left">{row.realDisplay}</div>
-      <div className={`text-[10px] font-semibold text-left ${diffClass}`}>{row.diffLabel}</div>
+      <div className="mr-plan whitespace-nowrap font-mono text-[11px] tabular-nums" title="Egreso planificado">{row.salida || '—'}</div>
+      <div
+        className="mr-real whitespace-nowrap font-mono text-[12px] font-black tabular-nums"
+        title={row.estado === 'CERRADO' ? 'Egreso real. Clic para corregir' : 'Egreso real'}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (row.estado === 'CERRADO' && hourCampo !== 'salida') onBeginEdit(row, 'salida');
+        }}
+      >
+        {hourValue !== null && hourCampo === 'salida' ? (
+          <input
+            value={hourValue}
+            onChange={(e) => onHourChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                e.stopPropagation();
+                onHourCommit(row, hourValue);
+              }
+            }}
+            onFocus={(e) => e.currentTarget.select()}
+            className="w-14 px-1 py-0.5 text-[11px] font-mono border border-indigo-300 rounded-md bg-white focus:outline-none"
+          />
+        ) : (
+          row.salidaReal && row.salidaReal !== '--:--' ? row.salidaReal : '—'
+        )}
+      </div>
+      <div className={`whitespace-nowrap text-[10px] font-semibold tabular-nums ${diffClass}`}>{row.diffLabel}</div>
+      <div className={`whitespace-nowrap text-[10px] font-bold ${fuenteClass}`}>{row.fuente}</div>
       <div className="flex justify-start">
         <span className={`px-2 py-0.5 text-[9px] font-bold rounded-full whitespace-nowrap ${pill.className}`}>
           {pill.label}
         </span>
       </div>
-      <div className="flex items-center justify-start gap-1 pr-1">
+      <div className="flex items-center justify-start gap-1" onClick={(e) => e.stopPropagation()}>
         {primary}
         <button
           type="button"
@@ -934,7 +1349,7 @@ function RetenePanel({
   ).length;
 
   return (
-    <div className="border-b-2 border-violet-200 bg-violet-50/60">
+    <div className="mr-retenes border-b-2 border-violet-200">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -1026,33 +1441,92 @@ function ObjectiveGroup({
   open,
   onToggle,
   busy,
+  activeRowId,
+  hourEdit,
+  onSelect,
+  onHourChange,
+  onHourCommit,
+  onBeginEdit,
   onMarcarPresente,
   onConfirmarWA,
+  onCerrar,
   onCobertura,
+  onIntercambio,
+  onRetiro,
+  swapFromId,
   onMore,
+  cliente,
+  arrastrando,
+  soltarAca,
+  onDragStartGrupo,
+  onDragOverGrupo,
+  onDropGrupo,
+  onDragEndGrupo,
 }: {
   objName: string;
+  cliente: string | null;
+  arrastrando: boolean;
+  soltarAca: boolean;
+  onDragStartGrupo: (name: string) => void;
+  onDragOverGrupo: (name: string) => void;
+  onDropGrupo: (name: string) => void;
+  onDragEndGrupo: () => void;
   rows: GuardRowModel[];
   open: boolean;
   onToggle: () => void;
   busy: boolean;
+  activeRowId: string | null;
+  hourEdit: { rowId: string; value: string; campo: 'ingreso' | 'salida' } | null;
+  swapFromId: string | null;
+  onSelect: (row: GuardRowModel) => void;
+  onHourChange: (value: string) => void;
+  onHourCommit: (row: GuardRowModel, value: string) => void;
+  onBeginEdit: (row: GuardRowModel, campo: 'ingreso' | 'salida') => void;
   onMarcarPresente: (row: GuardRowModel) => void;
   onConfirmarWA: (row: GuardRowModel) => void;
+  onCerrar: (row: GuardRowModel) => void;
   onCobertura: (row: GuardRowModel) => void;
+  onIntercambio: (row: GuardRowModel) => void;
+  onRetiro: (row: GuardRowModel) => void;
   onMore: (row: GuardRowModel) => void;
 }) {
   const hasNoLlego = rows.some((r) => r.estado === 'NO_LLEGO' && !r.coveredByName);
   const hasTardanza = rows.some((r) => r.estado === 'TARDANZA');
 
   return (
-    <div className="border-b border-slate-200">
-      <button
-        type="button"
+    <div
+      className={`border-b border-slate-200 ${arrastrando ? 'opacity-50' : ''} ${soltarAca ? 'shadow-[inset_0_3px_0_0_#6366f1]' : ''}`}
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        onDragOverGrupo(objName);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        onDropGrupo(objName);
+      }}
+    >
+      <div
+        role="button"
+        tabIndex={-1}
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', objName);
+          onDragStartGrupo(objName);
+        }}
+        onDragEnd={onDragEndGrupo}
         onClick={onToggle}
-        className="w-full flex items-center gap-2 px-3 py-2 bg-slate-50 hover:bg-slate-100 text-left"
+        title="Arrastrá para mover el objetivo. Clic para abrir o cerrar."
+        className="w-full flex items-center gap-2 px-3 py-2 bg-slate-50 hover:bg-slate-100 text-left cursor-grab active:cursor-grabbing select-none"
       >
+        <GripVertical size={14} className="text-slate-400 flex-shrink-0" />
         {open ? <ChevronDown size={14} className="text-slate-400" /> : <ChevronRight size={14} className="text-slate-400" />}
-        <span className="text-xs font-bold text-slate-800 truncate flex-1">{objName}</span>
+        <span className="text-xs font-bold text-slate-800 truncate">{objName}</span>
+        {cliente && (
+          <span className="text-[10px] font-semibold text-slate-400 truncate flex-1">· {cliente}</span>
+        )}
+        {!cliente && <span className="flex-1" />}
         {hasNoLlego && (
           <span className="px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 text-[9px] font-bold">
             Crítico
@@ -1064,7 +1538,7 @@ function ObjectiveGroup({
           </span>
         )}
         <span className="text-[10px] text-slate-500 font-medium">{rows.length}</span>
-      </button>
+      </div>
       {open && (
         <div>
           {rows.map((row) => (
@@ -1072,9 +1546,20 @@ function ObjectiveGroup({
               key={row.turno.rowId}
               row={row}
               busy={busy}
+              active={activeRowId === row.turno.rowId}
+              hourValue={hourEdit?.rowId === row.turno.rowId ? hourEdit.value : null}
+              hourCampo={hourEdit?.rowId === row.turno.rowId ? hourEdit.campo : null}
+              onSelect={onSelect}
+              onHourChange={onHourChange}
+              onHourCommit={onHourCommit}
+              onBeginEdit={onBeginEdit}
               onMarcarPresente={onMarcarPresente}
               onConfirmarWA={onConfirmarWA}
+              onCerrar={onCerrar}
               onCobertura={onCobertura}
+              onIntercambio={onIntercambio}
+              onRetiro={onRetiro}
+              swapOrigin={swapFromId === row.turno.rowId}
               onMore={onMore}
             />
           ))}
@@ -1404,7 +1889,7 @@ export default function ModoRapidoPage() {
     empresaId: empresaId || null,
     scopeEmpresa,
   });
-  const { turnos, loading, francos } = turnosData;
+  const { turnos, loading, francos, presenciaMeta, cerrados, clientePorObj } = turnosData;
   const wa = useWABridge(turnos, empresaId);
 
   const [bridgeUrl, setBridgeUrl] = useState(DEFAULT_BRIDGE_URL);
@@ -1422,7 +1907,19 @@ export default function ModoRapidoPage() {
   const [toast, setToast] = useState<{ msg: string; color: string } | null>(null);
   const [coberturaModal, setCoberturaModal] = useState<GuardRowModel | null>(null);
   const [accionesModal, setAccionesModal] = useState<GuardRowModel | null>(null);
+  const [activeRowId, setActiveRowId] = useState<string | null>(null);
+  const [hourEdit, setHourEdit] = useState<{ rowId: string; value: string; campo: 'ingreso' | 'salida' } | null>(null);
+  const [arm, setArm] = useState<null | { kind: 'ausente' | 'quitar' | 'radio' | 'cerrar' | 'retiro' | 'retiro-si'; rowId: string }>(null);
+  const [swapFromId, setSwapFromId] = useState<string | null>(null);
+  const [pantallaCompleta, setPantallaCompleta] = useState(false);
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const [ordenModo, setOrdenModo] = useState<OrdenModo>('prioridad');
+  const [ordenManual, setOrdenManual] = useState<string[]>([]);
+  const [dragObj, setDragObj] = useState<string | null>(null);
+  const [dropObj, setDropObj] = useState<string | null>(null);
+  const ordenKey = `cosp_mr_orden_v1_${user?.uid || 'anon'}_${empresaId || ''}`;
   const [preferOpsRapido, setPreferOpsRapido] = useState(false);
+  const undoRef = useRef<Array<{ rowId: string; data: Record<string, unknown> }>>([]);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -1512,7 +2009,7 @@ export default function ModoRapidoPage() {
     turnoId: string,
     empleado: { name: string; expected: string },
     realTime: string,
-    source: 'WA' | 'MANUAL',
+    source: 'WA' | 'MANUAL' | 'MANUAL_RADIO',
   ) {
     const today = new Date();
     const [hh, mm] = realTime.split(':').map(Number);
@@ -1527,7 +2024,7 @@ export default function ModoRapidoPage() {
     });
 
     await addDoc(collection(db, 'novedades'), {
-      type: source === 'WA' ? 'CHECK_IN_WA' : 'CHECK_IN_MANUAL',
+      type: source === 'WA' ? 'CHECK_IN_WA' : source === 'MANUAL_RADIO' ? 'CHECK_IN_RADIO' : 'CHECK_IN_MANUAL',
       turnoId,
       employeeName: empleado.name,
       expected: empleado.expected,
@@ -1582,6 +2079,7 @@ export default function ModoRapidoPage() {
           turno.startTimeRaw as Timestamp | undefined,
         );
 
+        const fuente = fuenteDe(estado, presenciaMeta[turno.rowId]);
         return {
           employeeName,
           turno,
@@ -1591,14 +2089,17 @@ export default function ModoRapidoPage() {
           diffLabel: diff.label,
           diffTone: diff.tone,
           band: extractBand(turno.shift),
+          fuente,
+          salida: formatHHMM(turno.endTimeRaw as Timestamp | undefined),
+          salidaReal: presenciaMeta[turno.rowId]?.realEndLabel || undefined,
         };
       })
-      .sort((a, b) => String(a.turno.expected).localeCompare(String(b.turno.expected)));
+      .sort((a, b) => rowRank(a) - rowRank(b) || String(a.turno.expected).localeCompare(String(b.turno.expected)));
 
     // Segunda pasada: un turno NO_LLEGO/AUSENTE puede ya estar cubierto por otro turno
     // real de hoy, mismo objetivo + mismo puesto + mismo horario de inicio, asignado a
     // otro empleado que sí está presente/esperando (no ausente/no-llegó él mismo).
-    return base.map((row) => {
+    return base.map((row): GuardRowModel => {
       if (row.estado !== 'NO_LLEGO' && row.estado !== 'AUSENTE') return row;
       const cover = base.find((other) => {
         if (other === row) return false;
@@ -1618,8 +2119,25 @@ export default function ModoRapidoPage() {
         return true;
       });
       return cover ? { ...row, coveredByName: cover.employeeName } : row;
-    });
-  }, [turnos, wa, nowMs]);
+    }).concat(
+      Object.entries(cerrados).map(([rowId, turno]): GuardRowModel => {
+        const nombre = turno.name || '—';
+        const estado: GuardEstado = 'CERRADO';
+        return {
+          employeeName: nombre,
+          turno: { ...turno, rowId: turno.rowId || rowId },
+          estado,
+          realDisplay: turno.realStartTime || '—',
+          diffLabel: 'cerrado',
+          diffTone: 'neutral' as const,
+          band: extractBand(turno.shift),
+          fuente: fuenteDe(estado, presenciaMeta[turno.rowId || rowId]),
+          salida: formatHHMM(turno.endTimeRaw as Timestamp | undefined),
+          salidaReal: presenciaMeta[turno.rowId || rowId]?.realEndLabel || undefined,
+        };
+      }),
+    );
+  }, [turnos, wa, nowMs, presenciaMeta, cerrados]);
 
   const stats = useMemo(() => {
     let critico = 0;
@@ -1627,37 +2145,34 @@ export default function ModoRapidoPage() {
     let sinConfirmar = 0;
     let ok = 0;
     let retenes = 0;
+    let sinPresencia = 0;
+    let radio = 0;
+    let app = 0;
+    let cerrado = 0;
     for (const r of classifiedRows) {
-      if (r.band === 'RET') {
-        retenes += 1;
-        continue;
-      }
-      if (r.estado === 'NO_LLEGO' && !r.coveredByName) critico += 1;
-      else if (r.estado === 'TARDANZA') tardanza += 1;
-      else if (r.estado === 'PENDIENTE_WA') sinConfirmar += 1;
-      else if (r.estado === 'PRESENTE_WA' || r.estado === 'PRESENTE_PLAT') ok += 1;
+      if (r.band === 'RET') retenes += 1;
+      if (pasaFiltro(r, 'critico')) critico += 1;
+      if (pasaFiltro(r, 'tardanza')) tardanza += 1;
+      if (pasaFiltro(r, 'sin_confirmar')) sinConfirmar += 1;
+      if (pasaFiltro(r, 'ok')) ok += 1;
+      if (pasaFiltro(r, 'sin_presencia')) sinPresencia += 1;
+      if (pasaFiltro(r, 'radio')) radio += 1;
+      if (pasaFiltro(r, 'app')) app += 1;
+      if (pasaFiltro(r, 'cerrado')) cerrado += 1;
     }
-    return { total: classifiedRows.length, critico, tardanza, sinConfirmar, ok, retenes };
+    return { total: classifiedRows.length, critico, tardanza, sinConfirmar, ok, retenes, sinPresencia, radio, app, cerrado };
   }, [classifiedRows]);
 
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
     return classifiedRows.filter((r) => {
       if (bandFilter !== 'all' && r.band !== bandFilter) return false;
-      if (statsFilter === 'critico' && r.estado !== 'NO_LLEGO') return false;
-      if (statsFilter === 'tardanza' && r.estado !== 'TARDANZA') return false;
-      if (statsFilter === 'sin_confirmar' && r.estado !== 'PENDIENTE_WA') return false;
-      if (
-        statsFilter === 'ok' &&
-        r.estado !== 'PRESENTE_WA' &&
-        r.estado !== 'PRESENTE_PLAT'
-      ) {
-        return false;
-      }
+      if (!pasaFiltro(r, statsFilter)) return false;
       if (q) {
         const hay =
           r.employeeName.toLowerCase().includes(q) ||
-          r.turno.obj.toLowerCase().includes(q);
+          r.turno.obj.toLowerCase().includes(q) ||
+          String(r.turno.positionName || '').toLowerCase().includes(q);
         if (!hay) return false;
       }
       return true;
@@ -1672,8 +2187,81 @@ export default function ModoRapidoPage() {
       list.push(r);
       map.set(key, list);
     }
-    return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-  }, [filteredRows]);
+    const clienteDe = (obj: string) => clientePorObj[obj] || SIN_CLIENTE;
+    const posManual = new Map<string, number>();
+    ordenManual.forEach((n, i) => posManual.set(n, i));
+    return Array.from(map.entries())
+      .map(([name, rows]) => [name, [...rows].sort((a, b) => rowRank(a) - rowRank(b) || a.turno.expected.localeCompare(b.turno.expected))] as [string, GuardRowModel[]])
+      .sort((a, b) => {
+        if (ordenModo === 'alfabetico') return compararTexto(a[0], b[0]);
+        if (ordenModo === 'cliente') {
+          const ca = clienteDe(a[0]);
+          const cb = clienteDe(b[0]);
+          if (ca === SIN_CLIENTE && cb !== SIN_CLIENTE) return 1;
+          if (cb === SIN_CLIENTE && ca !== SIN_CLIENTE) return -1;
+          return compararTexto(ca, cb) || compararTexto(a[0], b[0]);
+        }
+        if (ordenModo === 'manual') {
+          const pa = posManual.has(a[0]) ? (posManual.get(a[0]) as number) : Number.MAX_SAFE_INTEGER;
+          const pb = posManual.has(b[0]) ? (posManual.get(b[0]) as number) : Number.MAX_SAFE_INTEGER;
+          return pa - pb || compararTexto(a[0], b[0]);
+        }
+        const ra = Math.min(...a[1].map(rowRank));
+        const rb = Math.min(...b[1].map(rowRank));
+        return ra - rb || a[0].localeCompare(b[0]);
+      });
+  }, [filteredRows, ordenModo, ordenManual, clientePorObj]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(ordenKey);
+      if (!raw) {
+        setOrdenModo('prioridad');
+        setOrdenManual([]);
+        return;
+      }
+      const parsed = JSON.parse(raw) as { modo?: OrdenModo; manual?: unknown };
+      const modo = ORDEN_OPCIONES.some((o) => o.id === parsed.modo) ? (parsed.modo as OrdenModo) : 'prioridad';
+      setOrdenModo(modo);
+      setOrdenManual(Array.isArray(parsed.manual) ? parsed.manual.map((x) => String(x)) : []);
+    } catch {
+      setOrdenModo('prioridad');
+      setOrdenManual([]);
+    }
+  }, [ordenKey]);
+
+  function guardarOrden(modo: OrdenModo, manual: string[]) {
+    setOrdenModo(modo);
+    setOrdenManual(manual);
+    try {
+      localStorage.setItem(ordenKey, JSON.stringify({ modo, manual }));
+    } catch {
+      /* sin almacenamiento: el orden vale solo para esta sesión */
+    }
+  }
+
+  function moverObjetivo(origen: string, destino: string) {
+    if (origen === destino) return;
+    const conocidos = Array.from(new Set(classifiedRows.map((r) => r.turno.obj || '—')));
+    const visibles = groups.map(([k]) => k);
+    const base = ordenModo === 'manual'
+      ? [
+          ...ordenManual.filter((n) => conocidos.includes(n)),
+          ...conocidos.filter((n) => !ordenManual.includes(n)).sort(compararTexto),
+        ]
+      : [
+          ...visibles,
+          ...conocidos.filter((n) => !visibles.includes(n)).sort(compararTexto),
+        ];
+    const desde = base.indexOf(origen);
+    const hasta = base.indexOf(destino);
+    if (desde < 0 || hasta < 0) return;
+    const lista = base.filter((n) => n !== origen);
+    const idx = lista.indexOf(destino);
+    lista.splice(desde < hasta ? idx + 1 : idx, 0, origen);
+    guardarOrden('manual', lista);
+    showToast(`Orden manual · ${origen}`, 'bg-indigo-700');
+  }
 
   const nonReteGroups = useMemo(
     () =>
@@ -1687,6 +2275,15 @@ export default function ModoRapidoPage() {
     () => filteredRows.filter((r) => r.band === 'RET'),
     [filteredRows],
   );
+
+  const sheetRows = useMemo(() => {
+    const list: GuardRowModel[] = [];
+    for (const [, rows] of nonReteGroups) list.push(...rows);
+    list.push(...reteneRows);
+    return list;
+  }, [nonReteGroups, reteneRows]);
+
+  const activeRow = sheetRows.find((r) => r.turno.rowId === activeRowId) ?? null;
 
   useEffect(() => {
     if (groupInitDone || classifiedRows.length === 0) return;
@@ -1756,6 +2353,8 @@ export default function ModoRapidoPage() {
       diffLabel: '—',
       diffTone: 'neutral' as const,
       band: 'FRANCO',
+      fuente: '—' as const,
+      salida: '—',
     }));
   }, [francos]);
 
@@ -1782,14 +2381,311 @@ export default function ModoRapidoPage() {
     if (busy) return;
     setBusy(true);
     try {
+      await recordarTurno(row.turno.rowId);
       await registrarAusencia(row.turno.rowId, { name: row.employeeName });
       showToast(`Ausencia registrada · ${row.employeeName}`, 'bg-red-700');
     } catch {
       showToast('Error al registrar ausencia', 'bg-red-600');
     } finally {
       setBusy(false);
+      setArm(null);
     }
   };
+
+  async function recordarTurno(rowId: string) {
+    const snap = await getDoc(doc(db, 'turnos', rowId));
+    const d = snap.data() || {};
+    undoRef.current.push({
+      rowId,
+      data: {
+        status: d.status ?? 'PENDING',
+        realStartTime: d.realStartTime ?? null,
+        checkInSource: d.checkInSource ?? null,
+        checkInAt: d.checkInAt ?? null,
+        isPresent: d.isPresent ?? false,
+        isCompleted: d.isCompleted ?? false,
+        realEndTime: d.realEndTime ?? null,
+        isRetention: d.isRetention ?? false,
+        absenceCode: d.absenceCode ?? null,
+      },
+    });
+    if (undoRef.current.length > 8) undoRef.current.shift();
+  }
+
+  function horaSobre(base: unknown, hh: number, mm: number): Timestamp {
+    const src = base && typeof (base as Timestamp).toDate === 'function' ? (base as Timestamp).toDate() : new Date();
+    const d = new Date(src.getTime());
+    d.setHours(hh, mm, 0, 0);
+    return Timestamp.fromDate(d);
+  }
+
+  async function guardarHora(
+    row: GuardRowModel,
+    raw: string,
+    comoRadio: boolean,
+    campo: 'ingreso' | 'salida' = 'ingreso',
+  ) {
+    const hhmm = raw.trim();
+    if (!/^\d{1,2}:\d{2}$/.test(hhmm)) {
+      showToast('Hora inválida. Usá HH:MM', 'bg-red-600');
+      return;
+    }
+    const [hh, mm] = hhmm.split(':').map(Number);
+    if (hh > 23 || mm > 59) {
+      showToast('Hora inválida. Usá HH:MM', 'bg-red-600');
+      return;
+    }
+    const normal = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+    if (row.estado === 'CERRADO' || campo === 'salida') {
+      if (campo === 'salida' && row.estado !== 'CERRADO') {
+        showToast('La salida real se corrige en un turno cerrado', 'bg-slate-700');
+        setHourEdit(null);
+        return;
+      }
+      if (busy) return;
+      setBusy(true);
+      try {
+        await recordarTurno(row.turno.rowId);
+        const base = campo === 'salida' ? row.turno.endTimeRaw : row.turno.startTimeRaw;
+        const ts = horaSobre(base, hh, mm);
+        await updateDoc(doc(db, 'turnos', row.turno.rowId), campo === 'salida'
+          ? { realEndTime: ts }
+          : { realStartTime: ts });
+        await addDoc(collection(db, 'novedades'), {
+          type: campo === 'salida' ? 'CORRECCION_SALIDA' : 'CORRECCION_HORA',
+          turnoId: row.turno.rowId,
+          employeeName: row.employeeName,
+          realTime: normal,
+          empresaId,
+          operatorId: user?.uid ?? 'cc-modo-rapido',
+          createdAt: serverTimestamp(),
+        });
+        showToast(
+          campo === 'salida'
+            ? `Salida corregida · ${row.employeeName} ${normal}`
+            : `Ingreso corregido · ${row.employeeName} ${normal}`,
+          'bg-indigo-700',
+        );
+      } catch (err) {
+        console.warn('[modo-rapido] guardarHora cerrado', err);
+        showToast('Error al corregir el horario', 'bg-red-600');
+      } finally {
+        setBusy(false);
+        setHourEdit(null);
+        setArm(null);
+      }
+      return;
+    }
+    const esWa = row.estado === 'PENDIENTE_WA' || row.estado === 'PRESENTE_WA' || row.fuente === 'WA';
+    if (esWa) {
+      showToast('Ese turno se confirma por WhatsApp', 'bg-slate-700');
+      setHourEdit(null);
+      setArm(null);
+      return;
+    }
+    if (busy) return;
+    setBusy(true);
+    try {
+      await recordarTurno(row.turno.rowId);
+      const yaPresente = row.estado === 'PRESENTE_PLAT';
+      if (yaPresente && !comoRadio) {
+        const today = new Date();
+        today.setHours(hh, mm, 0, 0);
+        await updateDoc(doc(db, 'turnos', row.turno.rowId), { realStartTime: Timestamp.fromDate(today) });
+        await addDoc(collection(db, 'novedades'), {
+          type: 'CORRECCION_HORA',
+          turnoId: row.turno.rowId,
+          employeeName: row.employeeName,
+          realTime: normal,
+          empresaId,
+          operatorId: user?.uid ?? 'cc-modo-rapido',
+          createdAt: serverTimestamp(),
+        });
+        showToast(`Hora corregida · ${row.employeeName} ${normal}`, 'bg-indigo-700');
+      } else {
+        await marcarPresente(
+          row.turno.rowId,
+          { name: row.employeeName, expected: row.turno.expected },
+          normal,
+          'MANUAL_RADIO',
+        );
+        showToast(`Radio · ${row.employeeName} ${normal}`, 'bg-emerald-700');
+      }
+    } catch (err) {
+      console.warn('[modo-rapido] guardarHora', err);
+      showToast('Error al guardar la hora', 'bg-red-600');
+    } finally {
+      setBusy(false);
+      setHourEdit(null);
+      setArm(null);
+    }
+  }
+
+  async function quitarPresencia(row: GuardRowModel) {
+    if (row.fuente === 'WA' || row.estado === 'PRESENTE_WA' || row.estado === 'PENDIENTE_WA') {
+      showToast('La presencia de WhatsApp queda en el puente', 'bg-slate-700');
+      setArm(null);
+      return;
+    }
+    if (row.estado !== 'PRESENTE_PLAT') {
+      setArm(null);
+      return;
+    }
+    if (busy) return;
+    setBusy(true);
+    try {
+      await recordarTurno(row.turno.rowId);
+      await updateDoc(doc(db, 'turnos', row.turno.rowId), {
+        status: 'PENDING',
+        isPresent: false,
+      });
+      await addDoc(collection(db, 'novedades'), {
+        type: 'PRESENCIA_REVERTIDA',
+        turnoId: row.turno.rowId,
+        employeeName: row.employeeName,
+        empresaId,
+        operatorId: user?.uid ?? 'cc-modo-rapido',
+        createdAt: serverTimestamp(),
+      });
+      showToast(`Presencia quitada · ${row.employeeName}`, 'bg-slate-700');
+    } catch {
+      showToast('Error al quitar la presencia', 'bg-red-600');
+    } finally {
+      setBusy(false);
+      setArm(null);
+    }
+  }
+
+  async function deshacer() {
+    const last = undoRef.current.pop();
+    if (!last) {
+      showToast('Nada para deshacer', 'bg-slate-700');
+      return;
+    }
+    if (busy) {
+      undoRef.current.push(last);
+      return;
+    }
+    setBusy(true);
+    try {
+      await updateDoc(doc(db, 'turnos', last.rowId), last.data);
+      showToast('Corrección deshecha', 'bg-slate-700');
+    } catch {
+      undoRef.current.push(last);
+      showToast('No se pudo deshacer', 'bg-red-600');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function pedirRetiro(row: GuardRowModel) {
+    if (row.estado !== 'PRESENTE_PLAT' && row.estado !== 'PRESENTE_WA') {
+      showToast('El retiro anticipado es de un guardia que ya está presente', 'bg-slate-700');
+      return;
+    }
+    if (arm?.kind === 'retiro' && arm.rowId === row.turno.rowId) {
+      void retirarTurno(row, null);
+      return;
+    }
+    setHourEdit(null);
+    setSwapFromId(null);
+    setActiveRowId(row.turno.rowId);
+    setArm({ kind: 'retiro', rowId: row.turno.rowId });
+  }
+
+  async function retirarTurno(row: GuardRowModel, operatorReplaceChoice: boolean | null) {
+    if (busy) return;
+    if (row.estado !== 'PRESENTE_PLAT' && row.estado !== 'PRESENTE_WA' && arm?.kind !== 'retiro-si') return;
+    setBusy(true);
+    try {
+      const fn = httpsCallable(functions, 'processEarlyWithdrawalCallable');
+      const res = await fn({
+        shiftId: row.turno.rowId,
+        reason: 'ENFERMEDAD',
+        operatorReplaceChoice,
+      });
+      const data = (res.data || {}) as { needsOperatorChoice?: boolean; remainderShiftId?: string };
+      if (data.needsOperatorChoice) {
+        setArm({ kind: 'retiro-si', rowId: row.turno.rowId });
+        showToast('Quedan entre 2 y 3 h. Enter cubre el resto, N deja el hueco.', 'bg-amber-700');
+        return;
+      }
+      showToast(
+        data.remainderShiftId
+          ? `Retiro por enfermedad · ${row.employeeName}. Quedó el hueco para cubrir.`
+          : `Retiro por enfermedad · ${row.employeeName}`,
+        'bg-purple-700',
+      );
+      setArm(null);
+    } catch (err) {
+      const code = String((err as { code?: string })?.code || '');
+      const raw = String((err as { message?: string })?.message || '');
+      const msg = code === 'functions/not-found' || code === 'functions/unavailable'
+        ? 'El emulador no tiene el retiro anticipado. No se escribió el turno.'
+        : raw.replace(/^FirebaseError:\s*/i, '') || 'No se pudo registrar el retiro';
+      console.warn('[modo-rapido] retiro', err);
+      showToast(msg, 'bg-red-600');
+      setArm(null);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function pedirCierre(row: GuardRowModel) {
+    if (row.estado !== 'PRESENTE_PLAT' && row.estado !== 'PRESENTE_WA') {
+      showToast('Primero tiene que estar presente', 'bg-slate-700');
+      return;
+    }
+    if (arm?.kind === 'cerrar' && arm.rowId === row.turno.rowId) {
+      void cerrarTurno(row);
+      return;
+    }
+    setHourEdit(null);
+    setSwapFromId(null);
+    setActiveRowId(row.turno.rowId);
+    setArm({ kind: 'cerrar', rowId: row.turno.rowId });
+  }
+
+  async function cerrarTurno(row: GuardRowModel) {
+    if (busy) return;
+    if (row.estado !== 'PRESENTE_PLAT' && row.estado !== 'PRESENTE_WA') return;
+    setBusy(true);
+    try {
+      await recordarTurno(row.turno.rowId);
+      const snap = await getDoc(doc(db, 'turnos', row.turno.rowId));
+      const data = (snap.data() || {}) as Record<string, unknown>;
+      const close = computeShiftCloseTimes(data, Date.now());
+      const realEndTime = Timestamp.fromMillis(close.realEndMs);
+      const patch: Record<string, unknown> = {
+        status: 'COMPLETED',
+        isCompleted: true,
+        isPresent: false,
+        realEndTime,
+      };
+      if (data.isRetention === true) {
+        patch.isRetention = false;
+        patch.retentionEndedAt = realEndTime;
+        if (close.retentionMinutes != null) patch.retentionMinutes = close.retentionMinutes;
+      }
+      await updateDoc(doc(db, 'turnos', row.turno.rowId), patch);
+      await addDoc(collection(db, 'novedades'), {
+        type: 'CHECKOUT',
+        turnoId: row.turno.rowId,
+        employeeName: row.employeeName,
+        realTime: formatHHMM(realEndTime),
+        empresaId,
+        operatorId: user?.uid ?? 'cc-modo-rapido',
+        createdAt: serverTimestamp(),
+      });
+      showToast(`Turno cerrado · ${row.employeeName} ${formatHHMM(realEndTime)}`, 'bg-slate-800');
+    } catch (err) {
+      console.warn('[modo-rapido] cerrarTurno', err);
+      showToast('Error al cerrar el turno', 'bg-red-600');
+    } finally {
+      setBusy(false);
+      setArm(null);
+    }
+  }
 
   const handleAsignarRet = async (candidate: GuardRowModel) => {
     if (!coberturaModal || busy) return;
@@ -1814,7 +2710,21 @@ export default function ModoRapidoPage() {
         operatorId: user?.uid ?? 'cc-modo-rapido',
         createdAt: serverTimestamp(),
       });
-      showToast(`RET asignado · ${candidate.employeeName}`, 'bg-violet-700');
+      const aviso = abrirWa(
+        candidate.turno.phone,
+        waMensaje.cobertura(
+          candidate.employeeName,
+          coberturaModal.turno.obj,
+          coberturaModal.turno.expected,
+          coberturaModal.salida || '—',
+        ),
+      );
+      showToast(
+        aviso
+          ? `RET asignado · WhatsApp abierto · ${candidate.employeeName}`
+          : `RET asignado · ${candidate.employeeName}. Sin teléfono para WhatsApp.`,
+        aviso ? 'bg-violet-700' : 'bg-amber-700',
+      );
     } catch {
       showToast('Error al asignar RET', 'bg-red-600');
     } finally {
@@ -1889,8 +2799,26 @@ export default function ModoRapidoPage() {
         operatorId: user?.uid ?? 'cc-modo-rapido',
         createdAt: serverTimestamp(),
       });
+      const avisoA = abrirWa(
+        candidate.turno.phone,
+        waMensaje.intercambioHecho(
+          candidate.employeeName,
+          coberturaModal.turno.obj,
+          coberturaModal.turno.expected,
+          coberturaModal.salida || '—',
+        ),
+      );
+      const avisoB = abrirWa(
+        coberturaModal.turno.phone,
+        waMensaje.intercambioHecho(
+          coberturaModal.employeeName,
+          candidate.turno.obj,
+          candidate.turno.expected,
+          candidate.salida || '—',
+        ),
+      );
       showToast(
-        `Intercambio · ${candidate.employeeName} ↔ ${coberturaModal.employeeName}`,
+        `Intercambio · ${candidate.employeeName} ↔ ${coberturaModal.employeeName}${avisoA || avisoB ? ' · WhatsApp abierto' : ''}`,
         'bg-blue-700',
       );
     } catch {
@@ -1901,31 +2829,140 @@ export default function ModoRapidoPage() {
     }
   };
 
-  const handleConvocarFt = async (candidate: GuardRowModel) => {
-    if (!coberturaModal || busy) return;
+  async function intercambiarFilas(origen: GuardRowModel, destino: GuardRowModel) {
+    if (busy || origen.turno.rowId === destino.turno.rowId) return;
     setBusy(true);
     try {
-      await updateDoc(doc(db, 'turnos', candidate.turno.rowId), {
-        code: 'FT',
-        objectiveId: coberturaModal.turno.objectiveId,
-        objectiveName: coberturaModal.turno.obj,
-        startTime: coberturaModal.turno.startTimeRaw,
-        endTime: coberturaModal.turno.endTimeRaw,
-        status: 'PENDING',
-        origin: 'FT_COBERTURA',
-        coberturaDesdeTurnoId: coberturaModal.turno.rowId,
+      const origenEmployeeId = String(origen.turno.employeeId || '');
+      await updateDoc(doc(db, 'turnos', origen.turno.rowId), {
+        employeeId: destino.turno.employeeId,
+        employeeName: destino.employeeName,
+        origin: 'INTERCAMBIO',
+        intercambioConTurnoId: destino.turno.rowId,
       });
+      await updateDoc(doc(db, 'turnos', destino.turno.rowId), {
+        employeeId: origenEmployeeId,
+        employeeName: origen.employeeName,
+        origin: 'INTERCAMBIO',
+        intercambioConTurnoId: origen.turno.rowId,
+      });
+      const anticipado =
+        origen.estado !== 'NO_LLEGO' &&
+        origen.estado !== 'AUSENTE' &&
+        destino.estado !== 'NO_LLEGO' &&
+        destino.estado !== 'AUSENTE';
       await addDoc(collection(db, 'novedades'), {
-        type: 'FRANCO_TRABAJADO',
-        turnoAusenteId: coberturaModal.turno.rowId,
-        turnoAusenteEmpleado: coberturaModal.employeeName,
-        turnoAusenteObj: coberturaModal.turno.obj,
-        ftEmpleado: candidate.employeeName,
+        type: anticipado ? 'INTERCAMBIO_ANTICIPADO' : 'INTERCAMBIO_TURNO',
+        turnoAusenteId: origen.turno.rowId,
+        turnoAusenteEmpleado: origen.employeeName,
+        turnoAusenteObj: origen.turno.obj,
+        intercambioEmpleado: destino.employeeName,
+        intercambioObj: destino.turno.obj,
         empresaId,
         operatorId: user?.uid ?? 'cc-modo-rapido',
         createdAt: serverTimestamp(),
       });
-      showToast(`FT convocado · ${candidate.employeeName}`, 'bg-red-700');
+      const avisoA = abrirWa(
+        origen.turno.phone,
+        waMensaje.intercambioHecho(
+          origen.employeeName,
+          destino.turno.obj,
+          destino.turno.expected,
+          destino.salida || '—',
+        ),
+      );
+      const avisoB = abrirWa(
+        destino.turno.phone,
+        waMensaje.intercambioHecho(
+          destino.employeeName,
+          origen.turno.obj,
+          origen.turno.expected,
+          origen.salida || '—',
+        ),
+      );
+      showToast(
+        `${anticipado ? 'Intercambio anticipado' : 'Intercambio'} · ${origen.employeeName} ↔ ${destino.employeeName}${avisoA || avisoB ? ' · WhatsApp abierto' : ''}`,
+        'bg-blue-700',
+      );
+      setSwapFromId(null);
+    } catch {
+      showToast('Error al intercambiar turnos', 'bg-red-600');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const handleConvocarFt = async (candidate: GuardRowModel) => {
+    if (!coberturaModal || busy) return;
+    const ausente = coberturaModal;
+    setBusy(true);
+    let porApp = false;
+    try {
+      const candidateEmployeeId = String(candidate.turno.employeeId || '').trim();
+      if (candidateEmployeeId && empresaId) {
+        try {
+          await invokeCrearConvocatoriaCobertura({
+            absenceShift: {
+              id: ausente.turno.rowId,
+              employeeId: ausente.turno.employeeId || '',
+              employeeName: ausente.employeeName,
+              objectiveId: ausente.turno.objectiveId || '',
+              objectiveName: ausente.turno.obj,
+              positionName: ausente.turno.positionName || '',
+              code: ausente.turno.code || '',
+              startTime: ausente.turno.startTimeRaw,
+              endTime: ausente.turno.endTimeRaw,
+            },
+            candidateEmployeeId,
+            type: 'FT',
+            empresaId,
+            ftShiftId: candidate.turno.rowId,
+            candidateShiftId: candidate.turno.rowId,
+          });
+          porApp = true;
+        } catch (err) {
+          console.warn('[modo-rapido] convocatoria app', err);
+        }
+      }
+      if (!porApp) {
+        await updateDoc(doc(db, 'turnos', candidate.turno.rowId), {
+          code: 'FT',
+          objectiveId: ausente.turno.objectiveId,
+          objectiveName: ausente.turno.obj,
+          startTime: ausente.turno.startTimeRaw,
+          endTime: ausente.turno.endTimeRaw,
+          status: 'PENDING',
+          origin: 'FT_COBERTURA',
+          coberturaDesdeTurnoId: ausente.turno.rowId,
+        });
+        await addDoc(collection(db, 'novedades'), {
+          type: 'FRANCO_TRABAJADO',
+          turnoAusenteId: ausente.turno.rowId,
+          turnoAusenteEmpleado: ausente.employeeName,
+          turnoAusenteObj: ausente.turno.obj,
+          ftEmpleado: candidate.employeeName,
+          empresaId,
+          operatorId: user?.uid ?? 'cc-modo-rapido',
+          createdAt: serverTimestamp(),
+        });
+      }
+      const aviso = abrirWa(
+        candidate.turno.phone,
+        waMensaje.cobertura(
+          candidate.employeeName,
+          ausente.turno.obj,
+          ausente.turno.expected,
+          ausente.salida || '—',
+        ),
+      );
+      showToast(
+        porApp
+          ? `FT convocado por la app${aviso ? ' y WhatsApp' : ''} · ${candidate.employeeName}`
+          : aviso
+            ? `FT asignado · WhatsApp abierto · ${candidate.employeeName}`
+            : `FT asignado · ${candidate.employeeName}. Sin teléfono para WhatsApp.`,
+        aviso || porApp ? 'bg-red-700' : 'bg-amber-700',
+      );
     } catch {
       showToast('Error al convocar FT', 'bg-red-600');
     } finally {
@@ -1984,16 +3021,187 @@ export default function ModoRapidoPage() {
     }
   };
 
-  const chipClass = (active: boolean, accent: string) =>
-    `flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold whitespace-nowrap border transition-colors ${
-      active
-        ? accent
-        : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-    }`;
+  useEffect(() => {
+    if (activeRowId && sheetRows.some((r) => r.turno.rowId === activeRowId)) return;
+    setActiveRowId(sheetRows[0]?.turno.rowId ?? null);
+  }, [sheetRows, activeRowId]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || !!target?.isContentEditable;
+      if (coberturaModal || accionesModal) {
+        if (e.key === 'Escape') {
+          setCoberturaModal(null);
+          setAccionesModal(null);
+        }
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !typing) {
+        e.preventDefault();
+        void deshacer();
+        return;
+      }
+      if (typing) {
+        if (e.key === 'Escape') target?.blur();
+        return;
+      }
+      if (e.key === '/') {
+        e.preventDefault();
+        const nodes = document.querySelectorAll<HTMLInputElement>('input[data-mr-search="1"]');
+        const visible = Array.from(nodes).find((n) => n.offsetParent !== null) || nodes[0];
+        visible?.focus();
+        return;
+      }
+      if (e.key === 'Escape') {
+        if (hourEdit || arm || swapFromId) {
+          e.preventDefault();
+          setHourEdit(null);
+          setArm(null);
+          setSwapFromId(null);
+          return;
+        }
+        if (pantallaCompleta) {
+          setPantallaCompleta(false);
+          if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
+          return;
+        }
+        return;
+      }
+      const idx = sheetRows.findIndex((r) => r.turno.rowId === activeRowId);
+      const row = idx >= 0 ? sheetRows[idx] : sheetRows[0];
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (!sheetRows.length) return;
+        const from = idx < 0 ? 0 : idx;
+        const next = e.key === 'ArrowDown'
+          ? sheetRows[Math.min(sheetRows.length - 1, from + 1)]
+          : sheetRows[Math.max(0, from - 1)];
+        setActiveRowId(next.turno.rowId);
+        setGroupOpen((prev) => ({ ...prev, [next.turno.obj || '—']: true }));
+        return;
+      }
+      if (!row) return;
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        if (hourEdit && hourEdit.rowId === row.turno.rowId) {
+          void guardarHora(row, hourEdit.value, arm?.kind === 'radio', hourEdit.campo);
+          return;
+        }
+        if (arm?.kind === 'ausente' && arm.rowId === row.turno.rowId) {
+          void handleRegistrarAusencia(row);
+          return;
+        }
+        if (arm?.kind === 'quitar' && arm.rowId === row.turno.rowId) {
+          void quitarPresencia(row);
+          return;
+        }
+        if (arm?.kind === 'cerrar' && arm.rowId === row.turno.rowId) {
+          void cerrarTurno(row);
+          return;
+        }
+        if (arm?.kind === 'retiro' && arm.rowId === row.turno.rowId) {
+          void retirarTurno(row, null);
+          return;
+        }
+        if (arm?.kind === 'retiro-si' && arm.rowId === row.turno.rowId) {
+          void retirarTurno(row, true);
+          return;
+        }
+        if (swapFromId && swapFromId !== row.turno.rowId) {
+          const from = sheetRows.find((r) => r.turno.rowId === swapFromId);
+          if (from) void intercambiarFilas(from, row);
+          return;
+        }
+        if (row.estado === 'PENDIENTE_WA') void handleConfirmarWA(row);
+        return;
+      }
+      const k = e.key.toLowerCase();
+      if (k === 'p') {
+        setSwapFromId(null);
+        setArm({ kind: 'radio', rowId: row.turno.rowId });
+        setHourEdit({ rowId: row.turno.rowId, value: nowHHMM(), campo: 'ingreso' });
+        return;
+      }
+      if (k === 'h' || e.key === 'F2') {
+        e.preventDefault();
+        setArm(null);
+        setHourEdit({
+          rowId: row.turno.rowId,
+          value: row.realDisplay !== '—' ? row.realDisplay : nowHHMM(),
+          campo: 'ingreso',
+        });
+        return;
+      }
+      if (k === 'w' && row.estado === 'PENDIENTE_WA') {
+        void handleConfirmarWA(row);
+        return;
+      }
+      if (k === 'a') {
+        setHourEdit(null);
+        setArm({ kind: 'ausente', rowId: row.turno.rowId });
+        return;
+      }
+      if (k === 'u') {
+        setHourEdit(null);
+        setArm({ kind: 'quitar', rowId: row.turno.rowId });
+        return;
+      }
+      if (k === 's' && (row.estado === 'PRESENTE_PLAT' || row.estado === 'PRESENTE_WA')) {
+        pedirCierre(row);
+        return;
+      }
+      if (k === 'r' && (row.estado === 'PRESENTE_PLAT' || row.estado === 'PRESENTE_WA')) {
+        pedirRetiro(row);
+        return;
+      }
+      if (k === 'n' && arm?.kind === 'retiro-si' && arm.rowId === row.turno.rowId) {
+        void retirarTurno(row, false);
+        return;
+      }
+      if (k === 'c' && (row.estado === 'NO_LLEGO' || row.estado === 'AUSENTE')) {
+        setCoberturaModal(row);
+        return;
+      }
+      if (k === 'x') {
+        setArm(null);
+        setSwapFromId(row.turno.rowId);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [sheetRows, activeRowId, hourEdit, arm, swapFromId, coberturaModal, accionesModal, busy, pantallaCompleta]);
+
+  useEffect(() => {
+    const onFs = () => setPantallaCompleta(document.fullscreenElement === sheetRef.current);
+    document.addEventListener('fullscreenchange', onFs);
+    return () => document.removeEventListener('fullscreenchange', onFs);
+  }, []);
+
+  async function togglePantalla() {
+    const el = sheetRef.current;
+    if (pantallaCompleta) {
+      setPantallaCompleta(false);
+      if (document.fullscreenElement) {
+        try { await document.exitFullscreen(); } catch { /* el navegador ya salió */ }
+      }
+      return;
+    }
+    setPantallaCompleta(true);
+    try {
+      await el?.requestFullscreen();
+    } catch {
+      /* sin permiso del navegador: el panel igual cubre el menú */
+    }
+  }
 
   return (
     <DashboardLayout>
-      <div className="flex flex-col h-[calc(100vh-56px)] relative">
+      <div
+        ref={sheetRef}
+        className={`mr-root flex flex-col bg-white ${pantallaCompleta ? 'fixed inset-0 z-[1100] h-screen w-screen' : 'relative h-[calc(100vh-56px)]'}`}
+      >
         <header className="flex items-center gap-2 px-4 py-2 bg-white border-b border-slate-200 flex-shrink-0 min-h-11">
           <button
             type="button"
@@ -2052,9 +3260,10 @@ export default function ModoRapidoPage() {
           <div className="ml-3 relative flex-1 max-w-xs hidden sm:block">
             <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
+              data-mr-search="1"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar guardia u objetivo…"
+              placeholder="Buscar guardia, objetivo o puesto…"
               className="w-full pl-7 pr-2 py-1.5 text-[11px] border border-slate-200 rounded-xl bg-slate-50 focus:outline-none focus:ring-1 focus:ring-emerald-400"
             />
           </div>
@@ -2063,6 +3272,16 @@ export default function ModoRapidoPage() {
             <span className="text-[10px] text-slate-400">
               {loading ? 'cargando…' : `${Object.keys(turnos).length} guardias hoy`}
             </span>
+            <button
+              type="button"
+              onClick={() => void togglePantalla()}
+              title={pantallaCompleta ? 'Salir de pantalla completa (Esc)' : 'Pantalla completa'}
+              aria-label={pantallaCompleta ? 'Salir de pantalla completa' : 'Pantalla completa'}
+              aria-pressed={pantallaCompleta}
+              className="flex items-center justify-center w-8 h-8 rounded-lg bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 text-slate-600"
+            >
+              {pantallaCompleta ? <Minimize2 size={15} /> : <Maximize size={15} />}
+            </button>
             <button
               type="button"
               onClick={() => setSidebar(!sidebarCollapsed)}
@@ -2079,114 +3298,236 @@ export default function ModoRapidoPage() {
           </div>
         </header>
 
-        <div className="flex items-center gap-2 px-3 py-2 bg-white border-b border-slate-100 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden flex-shrink-0">
-          <button
-            type="button"
+        <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white border-b border-slate-100 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden flex-shrink-0">
+          <ChipIcono
+            icon={LayoutList}
+            label="Todos"
+            count={stats.total}
+            active={statsFilter === 'all'}
+            accent="bg-slate-800 text-white border-slate-800"
+            siempre
             onClick={() => setStatsFilter('all')}
-            className={chipClass(
-              statsFilter === 'all',
-              'bg-slate-800 text-white border-slate-800',
-            )}
-          >
-            Todos · {stats.total}
-          </button>
-          <button
-            type="button"
+          />
+          <ChipIcono
+            icon={Siren}
+            label="Crítico: no llegó y nadie lo cubre"
+            count={stats.critico}
+            active={statsFilter === 'critico'}
+            accent="bg-red-100 text-red-700 border-red-300"
+            tono="text-red-600"
             onClick={() => setStatsFilter('critico')}
-            className={chipClass(
-              statsFilter === 'critico',
-              'bg-red-100 text-red-700 border-red-300',
-            )}
-          >
-            🔴 Crítico · {stats.critico}
-          </button>
-          <button
-            type="button"
+          />
+          <ChipIcono
+            icon={Clock}
+            label="Tardanza"
+            count={stats.tardanza}
+            active={statsFilter === 'tardanza'}
+            accent="bg-orange-100 text-orange-700 border-orange-300"
+            tono="text-orange-500"
             onClick={() => setStatsFilter('tardanza')}
-            className={chipClass(
-              statsFilter === 'tardanza',
-              'bg-orange-100 text-orange-700 border-orange-300',
-            )}
-          >
-            🟠 Tardanza · {stats.tardanza}
-          </button>
-          <button
-            type="button"
+          />
+          <ChipIcono
+            icon={HelpCircle}
+            label="Sin confirmar: WhatsApp pendiente"
+            count={stats.sinConfirmar}
+            active={statsFilter === 'sin_confirmar'}
+            accent="bg-blue-100 text-blue-700 border-blue-300"
+            tono="text-blue-500"
             onClick={() => setStatsFilter('sin_confirmar')}
-            className={chipClass(
-              statsFilter === 'sin_confirmar',
-              'bg-blue-100 text-blue-700 border-blue-300',
-            )}
-          >
-            🟡 Sin confirmar · {stats.sinConfirmar}
-          </button>
-          <button
-            type="button"
+          />
+          <ChipIcono
+            icon={CheckCircle2}
+            label="OK: presente"
+            count={stats.ok}
+            active={statsFilter === 'ok'}
+            accent="bg-emerald-100 text-emerald-700 border-emerald-300"
+            tono="text-emerald-600"
             onClick={() => setStatsFilter('ok')}
-            className={chipClass(
-              statsFilter === 'ok',
-              'bg-emerald-100 text-emerald-700 border-emerald-300',
-            )}
-          >
-            🟢 OK · {stats.ok}
-          </button>
-
+          />
+          <ChipIcono
+            icon={Lock}
+            label="Cerrado"
+            count={stats.cerrado}
+            active={statsFilter === 'cerrado'}
+            accent="bg-slate-700 text-white border-slate-700"
+            tono="text-slate-500"
+            onClick={() => setStatsFilter('cerrado')}
+          />
+          <ChipIcono
+            icon={UserX}
+            label="Sin presencia marcada"
+            count={stats.sinPresencia}
+            active={statsFilter === 'sin_presencia'}
+            accent="bg-amber-100 text-amber-800 border-amber-300"
+            tono="text-amber-600"
+            onClick={() => setStatsFilter('sin_presencia')}
+          />
+          <ChipIcono
+            icon={Radio}
+            label="Presencia por radio"
+            count={stats.radio}
+            active={statsFilter === 'radio'}
+            accent="bg-emerald-100 text-emerald-800 border-emerald-300"
+            tono="text-emerald-600"
+            onClick={() => setStatsFilter('radio')}
+          />
+          <ChipIcono
+            icon={Smartphone}
+            label="Presencia por la app del guardia"
+            count={stats.app}
+            active={statsFilter === 'app'}
+            accent="bg-indigo-100 text-indigo-800 border-indigo-300"
+            tono="text-indigo-600"
+            onClick={() => setStatsFilter('app')}
+          />
           {stats.retenes > 0 && (
-            <button
-              type="button"
+            <ChipIcono
+              icon={Shield}
+              label="Retenes (RET)"
+              count={stats.retenes}
+              active={bandFilter === 'RET'}
+              accent="bg-violet-100 text-violet-700 border-violet-300"
+              tono="text-violet-600"
               onClick={() => setBandFilter(bandFilter === 'RET' ? 'all' : 'RET')}
-              className={chipClass(
-                bandFilter === 'RET',
-                'bg-violet-100 text-violet-700 border-violet-300',
-              )}
-            >
-              🛡️ RET · {stats.retenes}
-            </button>
+            />
           )}
 
-          <div className="w-px h-5 bg-slate-200 mx-1 flex-shrink-0" />
+          <div className="w-px h-5 bg-slate-200 mx-0.5 flex-shrink-0" />
 
-          <button
-            type="button"
-            onClick={() => setBandFilter('all')}
-            className={`px-2 py-1 rounded-lg text-[10px] font-bold border ${
-              bandFilter === 'all'
-                ? 'bg-indigo-600 text-white border-indigo-600'
-                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-            }`}
-          >
-            Todos
-          </button>
-          {BANDS.map((b) => (
-            <button
-              key={b}
-              type="button"
-              onClick={() => setBandFilter(b)}
-              className={`px-2 py-1 rounded-lg text-[10px] font-bold border ${
-                bandFilter === b
-                  ? 'bg-indigo-600 text-white border-indigo-600'
-                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-              }`}
-            >
-              {b}
-            </button>
-          ))}
+          <div className="flex items-center gap-0.5 flex-shrink-0" role="group" aria-label="Banda horaria">
+            {BANDS.map((b) => (
+              <button
+                key={b}
+                type="button"
+                title={bandFilter === b ? `Banda ${b}. Clic para ver todas` : `Solo banda ${b}`}
+                aria-pressed={bandFilter === b}
+                onClick={() => setBandFilter(bandFilter === b ? 'all' : b)}
+                className={`px-1.5 py-1 rounded-lg text-[10px] font-bold border ${
+                  bandFilter === b
+                    ? 'bg-indigo-600 text-white border-indigo-600'
+                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                {b}
+              </button>
+            ))}
+          </div>
+
+          <div className="w-px h-5 bg-slate-200 mx-0.5 flex-shrink-0" />
+
+          <div className="flex items-center gap-0.5 flex-shrink-0" role="group" aria-label="Orden de los objetivos">
+            <ArrowDownUp size={12} className="text-slate-400 mr-0.5" aria-hidden />
+            {ORDEN_OPCIONES.map((o) => {
+              const Icono = o.icon;
+              return (
+                <button
+                  key={o.id}
+                  type="button"
+                  title={`Orden ${o.label}: ${o.title}`}
+                  aria-label={`Orden ${o.label}`}
+                  aria-pressed={ordenModo === o.id}
+                  onClick={() => {
+                    if (o.id === 'manual' && ordenManual.length === 0) {
+                      guardarOrden('manual', groups.map(([k]) => k));
+                      return;
+                    }
+                    guardarOrden(o.id, ordenManual);
+                  }}
+                  className={`flex items-center justify-center w-7 h-7 rounded-lg border ${
+                    ordenModo === o.id
+                      ? 'bg-indigo-600 text-white border-indigo-600'
+                      : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                  }`}
+                >
+                  <Icono size={13} />
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         <div className="sm:hidden px-3 py-2 border-b border-slate-100 bg-white flex-shrink-0">
           <div className="relative">
             <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
+              data-mr-search="1"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar guardia u objetivo…"
+              placeholder="Buscar guardia, objetivo o puesto…"
               className="w-full pl-7 pr-2 py-1.5 text-[11px] border border-slate-200 rounded-xl bg-slate-50 focus:outline-none focus:ring-1 focus:ring-emerald-400"
             />
           </div>
         </div>
 
+        <div className="px-3 py-1.5 bg-slate-900 text-slate-100 text-[11px] flex-shrink-0 flex items-center gap-2 min-h-8">
+          {hourEdit && (
+            <input
+              autoFocus
+              onFocus={(e) => e.currentTarget.select()}
+              value={hourEdit.value}
+              onChange={(e) => setHourEdit({ rowId: hourEdit.rowId, value: e.target.value, campo: hourEdit.campo })}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const row = sheetRows.find((r) => r.turno.rowId === hourEdit.rowId);
+                  if (row) void guardarHora(row, hourEdit.value, arm?.kind === 'radio', hourEdit.campo);
+                }
+              }}
+              className="w-16 px-1.5 py-0.5 text-[11px] font-mono text-slate-900 rounded-md border border-slate-500"
+            />
+          )}
+          <span className="truncate">
+          {(() => {
+            if (!activeRow) return 'Flechas mueven la fila. / busca. P radio, W confirma WA, H hora, A ausencia, U quita presencia, S cierra, R retiro, C cobertura, X cambio anticipado.';
+            if (hourEdit && arm?.kind === 'radio' && arm.rowId === activeRow.turno.rowId) {
+              return `Radio · ${activeRow.employeeName}. Hora ${hourEdit.value}. Enter guarda, Esc suelta.`;
+            }
+            if (hourEdit && hourEdit.rowId === activeRow.turno.rowId) {
+              const que = hourEdit.campo === 'salida' ? 'Salida' : 'Ingreso';
+              const cierre = activeRow.estado === 'CERRADO' ? ' El turno sigue cerrado.' : ' El WhatsApp no se reescribe.';
+              return `${que} de ${activeRow.employeeName}. Enter guarda, Esc suelta.${cierre}`;
+            }
+            if (arm?.kind === 'ausente' && arm.rowId === activeRow.turno.rowId) {
+              return `Ausencia AA de ${activeRow.employeeName}. Enter confirma, Esc cancela.`;
+            }
+            if (arm?.kind === 'quitar' && arm.rowId === activeRow.turno.rowId) {
+              return `Quitar presencia de ${activeRow.employeeName}. Enter confirma. WhatsApp no se toca.`;
+            }
+            if (arm?.kind === 'cerrar' && arm.rowId === activeRow.turno.rowId) {
+              return `Cerrar turno de ${activeRow.employeeName}. Egreso previsto ${activeRow.salida || '—'}. Enter confirma el egreso real de ahora.`;
+            }
+            if (arm?.kind === 'retiro' && arm.rowId === activeRow.turno.rowId) {
+              return `Retiro anticipado por enfermedad · ${activeRow.employeeName}. Enter registra la baja. Esc cancela.`;
+            }
+            if (arm?.kind === 'retiro-si' && arm.rowId === activeRow.turno.rowId) {
+              return `Quedan entre 2 y 3 h · ${activeRow.employeeName}. Enter cubre el resto. N deja el hueco. Esc cancela.`;
+            }
+            if (swapFromId) {
+              const from = sheetRows.find((r) => r.turno.rowId === swapFromId);
+              const anticipado = !!from
+                && from.estado !== 'NO_LLEGO' && from.estado !== 'AUSENTE'
+                && activeRow.estado !== 'NO_LLEGO' && activeRow.estado !== 'AUSENTE';
+              const titulo = anticipado ? 'Intercambio anticipado' : 'Intercambio';
+              if (from && from.turno.rowId !== activeRow.turno.rowId) {
+                return `${titulo} ${from.employeeName} ↔ ${activeRow.employeeName}. Enter aplica y abre WhatsApp. Esc cancela.`;
+              }
+              return `${titulo} desde ${from?.employeeName || '—'}. Elegí el otro guardia con las flechas.`;
+            }
+            if (activeRow.estado === 'PENDIENTE_WA') {
+              return `WA pendiente · ${activeRow.employeeName} ${activeRow.realDisplay}. W o Enter confirma la hora del mensaje.`;
+            }
+            if (activeRow.estado === 'CERRADO') {
+              return `Cerrado · ${activeRow.employeeName}. Ing. R. ${activeRow.realDisplay}, Egr. R. ${activeRow.salidaReal || '—'}. H corrige el ingreso real. Clic en Egr. R. corrige el egreso real.`;
+            }
+            const sale = `sale ${activeRow.salida || '—'}`;
+            return `${activeRow.employeeName} · ${activeRow.turno.obj} · ${activeRow.turno.positionName || 'puesto'} · ${sale} · fuente ${activeRow.fuente}`;
+          })()}
+          </span>
+        </div>
+
         <div className="flex flex-1 overflow-hidden">
-          <div className="flex-1 overflow-y-auto min-w-0">
+          <div className="flex-1 overflow-auto min-w-0">
             {loading ? (
               <div className="p-8 text-center text-sm text-slate-400">
                 Cargando planificación del día…
@@ -2200,16 +3541,21 @@ export default function ModoRapidoPage() {
                 Sin resultados para el filtro actual
               </div>
             ) : (
-              <>
-                <div className="hidden md:grid grid-cols-[3px_minmax(0,1.6fr)_minmax(0,0.9fr)_64px_64px_72px_88px_minmax(96px,auto)] gap-x-2 px-2 py-1.5 bg-slate-50 border-b border-slate-200 sticky top-0 z-10 text-[9px] font-bold uppercase tracking-wide text-slate-400 [&>*:not(:first-child)]:border-r [&>*:not(:first-child)]:border-slate-200 [&>*:last-child]:border-r-0">
+              <div className="min-w-[1280px]">
+                <div className={`grid ${SHEET_COLS} ${SHEET_ALIGN} ${SHEET_SHADE} sticky top-0 z-10 border-b border-slate-200 text-[9px] font-bold uppercase text-slate-500 [&>*]:py-2 [&>*:not(:first-child)]:border-r [&>*:not(:first-child)]:border-slate-200 [&>*:last-child]:border-r-0`}>
                   <span />
-                  <span className="pl-1">Guardia</span>
-                  <span>Turno</span>
-                  <span className="text-left">Esperado</span>
-                  <span className="text-left">Real</span>
-                  <span className="text-left">Dif.</span>
-                  <span className="text-left">Estado</span>
-                  <span className="text-left pr-1">Acción</span>
+                  <span>Guardia</span>
+                  <span>Objetivo</span>
+                  <span>Puesto</span>
+                  <span>Cód</span>
+                  <span className="whitespace-nowrap" title="Ingreso planificado">Ing. P.</span>
+                  <span className="whitespace-nowrap font-black" title="Ingreso real">Ing. R.</span>
+                  <span className="whitespace-nowrap" title="Egreso planificado">Egr. P.</span>
+                  <span className="whitespace-nowrap font-black" title="Egreso real">Egr. R.</span>
+                  <span>Dif</span>
+                  <span>Fuente</span>
+                  <span>Estado</span>
+                  <span>Acción</span>
                 </div>
                 <RetenePanel
                   rows={reteneRows}
@@ -2217,10 +3563,32 @@ export default function ModoRapidoPage() {
                   onMarcarPresente={(r) => void handleMarcarPresente(r)}
                   onConfirmarWA={(r) => void handleConfirmarWA(r)}
                 />
-                {nonReteGroups.map(([objName, rows]) => (
+                {nonReteGroups.map(([objName, rows], gi) => {
+                  const clienteGrupo = clientePorObj[objName] || SIN_CLIENTE;
+                  const clientePrevio = gi > 0 ? (clientePorObj[nonReteGroups[gi - 1][0]] || SIN_CLIENTE) : null;
+                  return (
+                  <React.Fragment key={objName}>
+                  {ordenModo === 'cliente' && clienteGrupo !== clientePrevio && (
+                    <div className="px-3 py-1 bg-indigo-50 text-indigo-700 border-b border-slate-200 text-[10px] font-black uppercase tracking-wide">
+                      {clienteGrupo}
+                    </div>
+                  )}
                   <ObjectiveGroup
-                    key={objName}
                     objName={objName}
+                    cliente={ordenModo === 'cliente' ? null : (clientePorObj[objName] || null)}
+                    arrastrando={dragObj === objName}
+                    soltarAca={!!dragObj && dropObj === objName && dragObj !== objName}
+                    onDragStartGrupo={(n) => setDragObj(n)}
+                    onDragOverGrupo={(n) => setDropObj((prev) => (prev === n ? prev : n))}
+                    onDropGrupo={(n) => {
+                      if (dragObj) moverObjetivo(dragObj, n);
+                      setDragObj(null);
+                      setDropObj(null);
+                    }}
+                    onDragEndGrupo={() => {
+                      setDragObj(null);
+                      setDropObj(null);
+                    }}
                     rows={rows}
                     open={groupOpen[objName] ?? true}
                     onToggle={() =>
@@ -2230,13 +3598,43 @@ export default function ModoRapidoPage() {
                       }))
                     }
                     busy={busy}
+                    activeRowId={activeRowId}
+                    hourEdit={hourEdit}
+                    onSelect={(r) => {
+                      setActiveRowId(r.turno.rowId);
+                      setArm((prev) => (prev && prev.rowId === r.turno.rowId ? prev : null));
+                      setHourEdit((prev) => (prev && prev.rowId === r.turno.rowId ? prev : null));
+                    }}
+                    onHourChange={(value) =>
+                      setHourEdit((prev) => (prev ? { ...prev, value } : prev))
+                    }
+                    onHourCommit={(r, value) => void guardarHora(r, value, arm?.kind === 'radio', hourEdit?.campo ?? 'ingreso')}
+                    onBeginEdit={(r, campo) => {
+                      const value = campo === 'salida'
+                        ? (r.salidaReal && r.salidaReal !== '--:--' ? r.salidaReal : nowHHMM())
+                        : (r.realDisplay !== '—' ? r.realDisplay : nowHHMM());
+                      setArm(null);
+                      setActiveRowId(r.turno.rowId);
+                      setHourEdit({ rowId: r.turno.rowId, value, campo });
+                    }}
+                    onCerrar={(r) => pedirCierre(r)}
                     onMarcarPresente={(r) => void handleMarcarPresente(r)}
                     onConfirmarWA={(r) => void handleConfirmarWA(r)}
                     onCobertura={(r) => setCoberturaModal(r)}
+                    onIntercambio={(r) => {
+                      setHourEdit(null);
+                      setArm(null);
+                      setActiveRowId(r.turno.rowId);
+                      setSwapFromId((prev) => (prev === r.turno.rowId ? null : r.turno.rowId));
+                    }}
+                    onRetiro={(r) => pedirRetiro(r)}
+                    swapFromId={swapFromId}
                     onMore={(r) => setAccionesModal(r)}
                   />
-                ))}
-              </>
+                  </React.Fragment>
+                  );
+                })}
+              </div>
             )}
           </div>
 
@@ -2270,6 +3668,21 @@ export default function ModoRapidoPage() {
             onExtender={(c, code) => void handleExtender(c, code)}
             onIntercambiar={(c) => void handleIntercambiarCobertura(c)}
             onConvocarFt={(c) => void handleConvocarFt(c)}
+            onAvisarWa={(c, plantilla) => {
+              if (!c.turno.phone) {
+                showToast(`${c.employeeName} no tiene teléfono`, 'bg-amber-700');
+                return;
+              }
+              const text = plantilla === 'intercambio'
+                ? waMensaje.intercambio(c.employeeName, coberturaModal.turno.obj)
+                : waMensaje.cobertura(
+                    c.employeeName,
+                    coberturaModal.turno.obj,
+                    coberturaModal.turno.expected,
+                    coberturaModal.salida || '—',
+                  );
+              abrirWa(c.turno.phone, text);
+            }}
           />
         )}
 
@@ -2280,6 +3693,30 @@ export default function ModoRapidoPage() {
             onClose={() => setAccionesModal(null)}
             onMarcarPresente={(r) => void handleMarcarPresente(r)}
             onMarcarAusente={(r) => void handleRegistrarAusencia(r)}
+            onIntercambio={(r) => {
+              setHourEdit(null);
+              setArm(null);
+              setActiveRowId(r.turno.rowId);
+              setSwapFromId(r.turno.rowId);
+            }}
+            onRetiro={(r) => pedirRetiro(r)}
+            onAvisarWa={(r) => {
+              if (!r.turno.phone) {
+                showToast(`${r.employeeName} no tiene teléfono`, 'bg-amber-700');
+                return;
+              }
+              const fecha = new Date().toLocaleDateString('es-AR');
+              abrirWa(
+                r.turno.phone,
+                waMensaje.turnoRecordatorio(
+                  r.employeeName,
+                  r.turno.obj,
+                  fecha,
+                  r.turno.expected,
+                  r.salida || '—',
+                ),
+              );
+            }}
           />
         )}
 

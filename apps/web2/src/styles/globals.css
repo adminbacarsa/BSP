@@ -507,3 +507,139 @@ input:focus, select:focus, textarea:focus {
   .break-inside-avoid { break-inside: avoid; }
   * { overflow: visible !important; }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   CC MODO RÁPIDO — planilla con paleta propia por tema
+   Claro por defecto. .dark cubre oscuro, azul pro, contraste y zinc;
+   cada tema se afina después. Las clases mr-* no llevan bg-* de Tailwind,
+   así los !important globales de arriba no las pisan.
+   ═══════════════════════════════════════════════════════════════ */
+.mr-root {
+  --mr-row-a: #ffffff;
+  --mr-row-b: #fafbfc;
+  --mr-hover: #f1f5f9;
+  --mr-active: #c7d2fe;
+  --mr-active-bar: #4338ca;
+  --mr-swap: #fef3c7;
+  --mr-swap-bar: #d97706;
+  --mr-head: #ffffff;
+  --mr-plan: #f8fafc;
+  --mr-plan-on: #c7d2fe;
+  --mr-plan-text: #64748b;
+  --mr-real: #c7d2fe;
+  --mr-real-on: #818cf8;
+  --mr-real-text: #1e1b4b;
+  --mr-dim: #64748b;
+}
+.dark .mr-root {
+  --mr-row-a: #1e293b;
+  --mr-row-b: #18233a;
+  --mr-hover: #2a3a54;
+  --mr-active: #312e81;
+  --mr-active-bar: #a5b4fc;
+  --mr-swap: #78350f;
+  --mr-swap-bar: #fbbf24;
+  --mr-head: #0f172a;
+  --mr-plan: #0f172a;
+  --mr-plan-on: #3b3a8f;
+  --mr-plan-text: #94a3b8;
+  --mr-real: #26245e;
+  --mr-real-on: #4f46e5;
+  --mr-real-text: #e0e7ff;
+  --mr-dim: #94a3b8;
+}
+.theme-contrast .mr-root {
+  --mr-row-a: #000000;
+  --mr-row-b: #0a0a00;
+  --mr-hover: #1a1400;
+  --mr-active: #3a2f00;
+  --mr-active-bar: #ffd700;
+  --mr-swap: #4d3b00;
+  --mr-swap-bar: #ffd700;
+  --mr-head: #000000;
+  --mr-plan: #000000;
+  --mr-plan-on: #3a2f00;
+  --mr-plan-text: #ffffff;
+  --mr-real: #1a1400;
+  --mr-real-on: #665500;
+  --mr-real-text: #ffd700;
+  --mr-dim: #ffffff;
+}
+.theme-custom .mr-root {
+  --mr-row-a: #27272a;
+  --mr-row-b: #202023;
+  --mr-hover: #323236;
+  --mr-head: #18181b;
+  --mr-plan: #18181b;
+  --mr-dim: #a1a1aa;
+  --mr-plan-text: #a1a1aa;
+}
+
+.mr-root .mr-row { background: var(--mr-row-a); }
+.mr-root .mr-row:nth-child(even) { background: var(--mr-row-b); }
+.mr-root .mr-row:hover { background: var(--mr-hover); }
+.mr-root .mr-row.mr-row-swap { background: var(--mr-swap); box-shadow: inset 4px 0 0 0 var(--mr-swap-bar); }
+.mr-root .mr-row.mr-row-active { background: var(--mr-active); box-shadow: inset 4px 0 0 0 var(--mr-active-bar); }
+
+.mr-root .mr-head { background: var(--mr-head); }
+.mr-root .mr-head > :nth-child(6),
+.mr-root .mr-head > :nth-child(8) { background: var(--mr-plan); }
+.mr-root .mr-head > :nth-child(7),
+.mr-root .mr-head > :nth-child(9) { background: var(--mr-real); color: var(--mr-real-text); }
+
+.mr-root .mr-plan { background: var(--mr-plan); color: var(--mr-plan-text); }
+.mr-root .mr-real { background: var(--mr-real); color: var(--mr-real-text); }
+.mr-root .mr-row-active .mr-plan { background: var(--mr-plan-on); }
+.mr-root .mr-row-active .mr-real { background: var(--mr-real-on); }
+.dark .mr-root .mr-row-active .mr-real { color: #ffffff; }
+.theme-contrast .mr-root .mr-row-active .mr-real { color: #ffffff; }
+
+.dark .mr-root .text-slate-500,
+.dark .mr-root .text-slate-400 { color: var(--mr-dim) !important; }
+
+/* Botones de acción */
+.mr-root .mr-btn-neutral { background: #e2e8f0; color: #0f172a; }
+.mr-root .mr-btn-neutral:hover { background: #cbd5e1; }
+.mr-root .mr-btn-swap { background: #fef3c7; color: #78350f; }
+.mr-root .mr-btn-swap:hover { background: #fde68a; }
+.mr-root .mr-btn-retiro { background: #f3e8ff; color: #581c87; }
+.mr-root .mr-btn-retiro:hover { background: #e9d5ff; }
+.mr-root .mr-btn-close { background: #1e293b; color: #ffffff; }
+.mr-root .mr-btn-close:hover { background: #0f172a; }
+.dark .mr-root .mr-btn-neutral { background: #475569; color: #f8fafc; }
+.dark .mr-root .mr-btn-neutral:hover { background: #64748b; }
+.dark .mr-root .mr-btn-swap { background: rgba(245, 158, 11, 0.28); color: #fde68a; }
+.dark .mr-root .mr-btn-swap:hover { background: rgba(245, 158, 11, 0.42); }
+.dark .mr-root .mr-btn-retiro { background: rgba(168, 85, 247, 0.30); color: #e9d5ff; }
+.dark .mr-root .mr-btn-retiro:hover { background: rgba(168, 85, 247, 0.45); }
+.dark .mr-root .mr-btn-close { background: #e2e8f0; color: #0f172a; }
+.dark .mr-root .mr-btn-close:hover { background: #ffffff; }
+.theme-contrast .mr-root .mr-btn-neutral,
+.theme-contrast .mr-root .mr-btn-swap,
+.theme-contrast .mr-root .mr-btn-retiro { background: #000000; color: #ffd700; }
+.theme-contrast .mr-root .mr-btn-close { background: #ffd700; color: #000000; }
+
+/* Estados (pastillas) */
+.mr-root .mr-pill { background: var(--pb); color: var(--pt); }
+.mr-root .mr-pill-red { --pb: #fee2e2; --pt: #b91c1c; }
+.mr-root .mr-pill-orange { --pb: #ffedd5; --pt: #c2410c; }
+.mr-root .mr-pill-blue { --pb: #dbeafe; --pt: #1d4ed8; }
+.mr-root .mr-pill-amber { --pb: #fef3c7; --pt: #b45309; }
+.mr-root .mr-pill-green { --pb: #d1fae5; --pt: #047857; }
+.mr-root .mr-pill-green-strong { --pb: #a7f3d0; --pt: #065f46; }
+.mr-root .mr-pill-slate { --pb: #e2e8f0; --pt: #334155; }
+.mr-root .mr-pill-mute { --pb: #f1f5f9; --pt: #475569; }
+.dark .mr-root .mr-pill-red { --pb: rgba(239, 68, 68, 0.22); --pt: #fca5a5; }
+.dark .mr-root .mr-pill-orange { --pb: rgba(249, 115, 22, 0.22); --pt: #fdba74; }
+.dark .mr-root .mr-pill-blue { --pb: rgba(59, 130, 246, 0.24); --pt: #93c5fd; }
+.dark .mr-root .mr-pill-amber { --pb: rgba(245, 158, 11, 0.22); --pt: #fcd34d; }
+.dark .mr-root .mr-pill-green { --pb: rgba(16, 185, 129, 0.22); --pt: #6ee7b7; }
+.dark .mr-root .mr-pill-green-strong { --pb: rgba(16, 185, 129, 0.40); --pt: #d1fae5; }
+.dark .mr-root .mr-pill-slate { --pb: #475569; --pt: #f1f5f9; }
+.dark .mr-root .mr-pill-mute { --pb: #334155; --pt: #cbd5e1; }
+.theme-contrast .mr-root .mr-pill { background: #000000; color: #ffd700; box-shadow: inset 0 0 0 1px #ffd700; }
+
+/* Franja de retenes */
+.mr-root .mr-retenes { background: rgba(245, 243, 255, 0.6); }
+.dark .mr-root .mr-retenes { background: rgba(139, 92, 246, 0.10); }
+.theme-contrast .mr-root .mr-retenes { background: #000000; }
