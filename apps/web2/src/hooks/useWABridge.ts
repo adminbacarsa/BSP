@@ -63,6 +63,8 @@ export interface TurnoHoy {
   docId?: string;
   bloque?: number;
   bloquesTotal?: number;
+  /** Retiro anticipado ya registrado: motivo y hora real del retiro (HH:MM). */
+  retiro?: { motivo: string; hora: string };
 }
 
 export type WABridgeStatus = 'idle' | 'connecting' | 'connected' | 'error';

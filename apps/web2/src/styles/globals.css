@@ -578,6 +578,10 @@ input:focus, select:focus, textarea:focus {
 .mr-root .mr-row { background: var(--mr-row-a); }
 .mr-root .mr-row:nth-child(even) { background: var(--mr-row-b); }
 .mr-root .mr-row:hover { background: var(--mr-hover); }
+.mr-root .mr-row.mr-row-retiro { background: #fee2e2; box-shadow: inset 4px 0 0 0 #dc2626; }
+.mr-root .mr-row.mr-row-retiro:hover { background: #fecaca; }
+.dark .mr-root .mr-row.mr-row-retiro { background: rgba(239, 68, 68, 0.18); }
+.dark .mr-root .mr-row.mr-row-retiro:hover { background: rgba(239, 68, 68, 0.28); }
 .mr-root .mr-row.mr-row-swap { background: var(--mr-swap); box-shadow: inset 4px 0 0 0 var(--mr-swap-bar); }
 .mr-root .mr-row.mr-row-active { background: var(--mr-active); box-shadow: inset 4px 0 0 0 var(--mr-active-bar); }
 

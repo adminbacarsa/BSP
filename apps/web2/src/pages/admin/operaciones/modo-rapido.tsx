@@ -52,6 +52,11 @@ import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '@/lib/firebase';
 import { openWhatsApp, waMensaje } from '@/lib/whatsapp';
 import { invokeCrearConvocatoriaCobertura } from '@/lib/operaciones/opsConvocatoriaCobertura';
+import {
+  hoursRemainingUntilEnd,
+  resolveEarlyWithdrawReplacePolicy,
+  type EarlyWithdrawReplacePolicy,
+} from '@/lib/operaciones/earlyWithdrawPolicy';
 import { empresaCollectionQuery, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
 import { readPreferOpsModoRapido, writePreferOpsModoRapido } from '@/lib/panelViewPrefs';
 import { isRestFrancoShift } from '@/hooks/useOperacionesMonitor';
@@ -441,7 +446,12 @@ function useTurnosHoy({
           startDate.getDate() === manana.getDate();
         if (!esRetManana && !inProgress && !sameCalendarDay && !startsSoon) continue;
 
-        const endTs = shift.endTime as Timestamp | undefined;
+        // Retiro anticipado: el servidor mueve endTime a la hora del retiro; el egreso planificado
+        // sigue siendo el original (plannedEndTime) y el retiro se muestra aparte.
+        const retiroAnticipado = shift.completionReason === 'EARLY_WITHDRAW';
+        const endTs = (
+          retiroAnticipado && shift.plannedEndTime ? shift.plannedEndTime : shift.endTime
+        ) as Timestamp | undefined;
         const startTs = shift.startTime as Timestamp;
         const realTs = shift.realStartTime as Timestamp | undefined;
 
@@ -449,6 +459,14 @@ function useTurnosHoy({
         const mapped: TurnoHoy = {
           shift: `${code || '?'} ${bloquesCortado ? bloquesCortado.map((b) => `${b.startTime}–${b.endTime}`).join(' + ') : `${formatHHMM(startTs)}–${formatHHMM(endTs)}`}`,
           ...(bloquesCortado ? { blocks: bloquesCortado } : {}),
+          ...(retiroAnticipado
+            ? {
+                retiro: {
+                  motivo: String(shift.interruptionReason || ''),
+                  hora: formatHHMM((shift.realEndTime || shift.endTime) as Timestamp | undefined),
+                },
+              }
+            : {}),
           obj:
             objMapRef.current.get(String(shift.objectiveId || ''))?.name ||
             String(shift.objectiveName || '—'),
@@ -893,8 +911,174 @@ function estadoPill(estado: GuardEstado): { label: string; className: string } {
   }
 }
 
+type MotivoRetiro = 'ENFERMEDAD' | 'FAMILIAR' | 'AUTORIZADO' | 'ABANDONO';
+
+const MOTIVOS_RETIRO: Array<{ id: MotivoRetiro; tecla: string; label: string; detalle: string }> = [
+  { id: 'ENFERMEDAD', tecla: '1', label: 'Enfermedad', detalle: 'Ausencia parcial E' },
+  { id: 'FAMILIAR', tecla: '2', label: 'Emergencia familiar', detalle: 'Ausencia parcial A' },
+  { id: 'AUTORIZADO', tecla: '3', label: 'Autorizado / operativo', detalle: 'Ausencia parcial A' },
+  { id: 'ABANDONO', tecla: '4', label: 'Abandono de puesto', detalle: 'AA parcial + novedad disciplinaria' },
+];
+
+function ModalRetiro({
+  row,
+  hoursLeft,
+  policy,
+  colleagues,
+  motivo,
+  reemplazo,
+  busy,
+  onMotivo,
+  onReemplazo,
+  onConfirm,
+  onClose,
+}: {
+  row: GuardRowModel;
+  hoursLeft: number;
+  policy: EarlyWithdrawReplacePolicy;
+  colleagues: number;
+  motivo: MotivoRetiro;
+  reemplazo: boolean | null;
+  busy: boolean;
+  onMotivo: (m: MotivoRetiro) => void;
+  onReemplazo: (v: boolean) => void;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  const necesitaDecision = policy === 'OPERATOR_CHOICE';
+  const buscaReemplazo = policy === 'REPLACE' || policy === 'AUTO_REPLACE' || (necesitaDecision && reemplazo === true);
+  const horas = `${Math.floor(hoursLeft)} h ${String(Math.round((hoursLeft % 1) * 60)).padStart(2, '0')} min`;
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-4 py-3 border-b border-slate-200 flex items-center gap-3 bg-purple-50">
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-black text-purple-800">Retiro anticipado</div>
+            <div className="text-[11px] text-slate-600 truncate">
+              {row.employeeName} · {row.turno.obj} · {row.turno.shift}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1 rounded-lg hover:bg-purple-100 text-slate-400"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="px-4 py-3 space-y-3">
+          <div>
+            <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1.5">
+              Motivo del retiro
+            </div>
+            <div className="grid grid-cols-1 gap-1.5">
+              {MOTIVOS_RETIRO.map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => onMotivo(m.id)}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-left transition-colors ${
+                    motivo === m.id
+                      ? 'border-purple-400 bg-purple-50 text-purple-900'
+                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  <span className="w-5 h-5 rounded-md bg-slate-100 text-[10px] font-black flex items-center justify-center text-slate-600">
+                    {m.tecla}
+                  </span>
+                  <span className="flex-1 text-[12px] font-bold">{m.label}</span>
+                  <span className="text-[10px] text-slate-500">{m.detalle}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
+            <div className="flex justify-between">
+              <span>Faltan para el cierre</span>
+              <span className="font-mono font-bold text-slate-800">{horas}</span>
+            </div>
+            <div className="flex justify-between mt-0.5">
+              <span>Compañeros presentes en el objetivo</span>
+              <span className="font-mono font-bold text-slate-800">{colleagues}</span>
+            </div>
+          </div>
+
+          {necesitaDecision && (
+            <div className="p-3 rounded-xl border border-amber-200 bg-amber-50 space-y-2">
+              <div className="text-[11px] font-bold text-amber-900">
+                Quedan entre 2 y 3 h: ¿buscar reemplazo para el resto?
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => onReemplazo(true)}
+                  className={`flex-1 py-1.5 rounded-lg text-[11px] font-black border ${
+                    reemplazo === true ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-700 border-slate-200'
+                  }`}
+                >
+                  S · Sí, cubrir
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onReemplazo(false)}
+                  className={`flex-1 py-1.5 rounded-lg text-[11px] font-black border ${
+                    reemplazo === false ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-700 border-slate-200'
+                  }`}
+                >
+                  N · No reemplazar
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div
+            className={`text-[11px] rounded-xl px-3 py-2 border ${
+              buscaReemplazo
+                ? 'bg-violet-50 border-violet-200 text-violet-800'
+                : 'bg-slate-50 border-slate-200 text-slate-600'
+            }`}
+          >
+            {necesitaDecision && reemplazo === null
+              ? 'Elegí si se reemplaza el resto del turno.'
+              : buscaReemplazo
+                ? 'Al confirmar se cierra su turno y se abre la búsqueda de reemplazo: RET, franco trabajado u otra opción.'
+                : 'Al confirmar se cierra su turno. Falta menos de 2 h y hay compañeros: no se busca reemplazo.'}
+          </div>
+        </div>
+
+        <div className="px-4 py-3 border-t border-slate-100 flex gap-2 justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-1.5 rounded-xl text-[11px] font-bold text-slate-600 bg-slate-100 hover:bg-slate-200"
+          >
+            Cancelar (Esc)
+          </button>
+          <button
+            type="button"
+            disabled={busy || (necesitaDecision && reemplazo === null)}
+            onClick={onConfirm}
+            className="px-4 py-1.5 rounded-xl text-[11px] font-black text-white bg-purple-600 hover:bg-purple-700 disabled:opacity-50"
+          >
+            Confirmar retiro (Enter)
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ModalCobertura({
   absent,
+  remanente,
   retCandidates,
   retEsManana,
   extCandidates,
@@ -909,6 +1093,8 @@ function ModalCobertura({
   onAvisarWa,
 }: {
   absent: GuardRowModel;
+  /** Retiro anticipado: se cubre solo el resto del turno (desde/hasta HH:MM). */
+  remanente?: { desde: string; hasta: string } | null;
   retCandidates: GuardRowModel[];
   retEsManana: boolean;
   extCandidates: GuardRowModel[];
@@ -922,7 +1108,7 @@ function ModalCobertura({
   onConvocarFt: (c: GuardRowModel) => void;
   onAvisarWa: (c: GuardRowModel, plantilla: 'cobertura' | 'intercambio') => void;
 }) {
-  const esPuesto24h = ['M', 'T', 'N'].includes(absent.band);
+  const esPuesto24h = ['M', 'T', 'N'].includes(absent.band) && !remanente;
 
   return (
     <div
@@ -936,9 +1122,12 @@ function ModalCobertura({
         <div className="px-4 py-3 border-b border-slate-200 flex items-center gap-2 flex-shrink-0">
           <span className="text-base">🚨</span>
           <div className="flex-1 min-w-0">
-            <div className="text-sm font-black text-red-700">Cobertura urgente</div>
+            <div className="text-sm font-black text-red-700">
+              {remanente ? 'Retiro anticipado: cubrir el resto del turno' : 'Cobertura urgente'}
+            </div>
             <div className="text-[11px] text-slate-500 truncate">
               {absent.employeeName} · {absent.turno.obj} · {absent.turno.shift}
+              {remanente ? ` · cubrir ${remanente.desde}–${remanente.hasta}` : ''}
             </div>
           </div>
           <button
@@ -1041,7 +1230,8 @@ function ModalCobertura({
             </div>
           )}
 
-          {/* 3. Intercambio */}
+          {/* 3. Intercambio (no aplica al resto de un retiro anticipado) */}
+          {!remanente && (
           <div className="mb-4">
             <div className="text-[11px] font-bold text-blue-700 uppercase tracking-wide mb-2">
               🔄 3. Intercambio con otro turno ({intercambioCandidates.length})
@@ -1085,6 +1275,7 @@ function ModalCobertura({
               </div>
             )}
           </div>
+          )}
 
           {/* 4. FT — último recurso */}
           <div>
@@ -1336,6 +1527,13 @@ function GuardRow({
   onMore: (row: GuardRowModel) => void;
 }) {
   const pill = estadoPill(row.estado);
+  const motivoRetiro = row.turno.retiro
+    ? MOTIVOS_RETIRO.find((m) => m.id === row.turno.retiro?.motivo)?.label ||
+      (row.turno.retiro.motivo ? row.turno.retiro.motivo.toLowerCase() : 'sin motivo')
+    : '';
+  const retiroTexto = row.turno.retiro
+    ? `Retiro anticipado a las ${row.turno.retiro.hora} · ${motivoRetiro}. No trabaja el resto del turno (hasta ${row.salida || '—'}).`
+    : '';
   const diffClass =
     row.diffTone === 'late'
       ? 'text-red-600'
@@ -1466,8 +1664,9 @@ function GuardRow({
       style={{ scrollMarginTop: 72, scrollMarginBottom: 16 }}
       onClick={() => onSelect(row)}
       className={`mr-row grid ${SHEET_COLS} ${SHEET_ALIGN} items-center px-0 py-0 border-b border-slate-100 cursor-pointer [&>*]:py-1.5 [&>*:not(:first-child)]:border-r [&>*:not(:first-child)]:border-slate-100 [&>*:last-child]:border-r-0 ${
-        active ? 'mr-row-active' : swapOrigin ? 'mr-row-swap' : ''
+        active ? 'mr-row-active' : swapOrigin ? 'mr-row-swap' : row.turno.retiro ? 'mr-row-retiro' : ''
       }`}
+      title={retiroTexto || undefined}
     >
       <div className={`self-stretch rounded-full ${barClass(row.estado)}`} />
       <div className="truncate text-sm font-medium text-slate-800">
@@ -1550,11 +1749,21 @@ function GuardRow({
           row.salidaReal && row.salidaReal !== '--:--' ? row.salidaReal : '—'
         )}
       </div>
-      <div className={`whitespace-nowrap text-[10px] font-semibold tabular-nums ${diffClass}`}>{row.diffLabel}</div>
+      <div
+        className={`whitespace-nowrap text-[10px] font-semibold tabular-nums ${row.turno.retiro ? 'text-red-700' : diffClass}`}
+        title={retiroTexto || undefined}
+      >
+        {row.turno.retiro ? `retiro ${row.turno.retiro.hora}` : row.diffLabel}
+      </div>
       <div className={`whitespace-nowrap text-[10px] font-bold ${fuenteClass}`}>{row.fuente}</div>
       <div className="flex justify-start">
-        <span className={`px-2 py-0.5 text-[9px] font-bold rounded-full whitespace-nowrap ${pill.className}`}>
-          {pill.label}
+        <span
+          className={`px-2 py-0.5 text-[9px] font-bold rounded-full whitespace-nowrap ${
+            row.turno.retiro ? 'mr-pill mr-pill-red' : pill.className
+          }`}
+          title={retiroTexto || undefined}
+        >
+          {row.turno.retiro ? 'RETIRO' : pill.label}
         </span>
       </div>
       <div className="flex items-center justify-start gap-1" onClick={(e) => e.stopPropagation()}>
@@ -2150,7 +2359,12 @@ export default function ModoRapidoPage() {
   const [accionesModal, setAccionesModal] = useState<GuardRowModel | null>(null);
   const [activeRowId, setActiveRowId] = useState<string | null>(null);
   const [hourEdit, setHourEdit] = useState<{ rowId: string; value: string; campo: 'ingreso' | 'salida' } | null>(null);
-  const [arm, setArm] = useState<null | { kind: 'ausente' | 'quitar' | 'radio' | 'cerrar' | 'retiro' | 'retiro-si'; rowId: string }>(null);
+  const [arm, setArm] = useState<null | { kind: 'ausente' | 'quitar' | 'radio' | 'cerrar'; rowId: string }>(null);
+  const [retiroModal, setRetiroModal] = useState<GuardRowModel | null>(null);
+  const [retiroMotivo, setRetiroMotivo] = useState<MotivoRetiro>('ENFERMEDAD');
+  const [retiroReemplazo, setRetiroReemplazo] = useState<boolean | null>(null);
+  /** Retiro anticipado con reemplazo: ventana del resto del turno a cubrir. */
+  const [huecoRetiro, setHuecoRetiro] = useState<{ docId: string; desdeMs: number; hastaMs: number } | null>(null);
   const [swapFromId, setSwapFromId] = useState<string | null>(null);
   const [pantallaCompleta, setPantallaCompleta] = useState(false);
   const sheetRef = useRef<HTMLDivElement>(null);
@@ -2967,39 +3181,73 @@ export default function ModoRapidoPage() {
       showToast('El retiro anticipado es de un guardia que ya está presente', 'bg-slate-700');
       return;
     }
-    if (arm?.kind === 'retiro' && arm.rowId === row.turno.rowId) {
-      void retirarTurno(row, null);
-      return;
-    }
     setHourEdit(null);
     setSwapFromId(null);
+    setArm(null);
     setActiveRowId(row.turno.rowId);
-    setArm({ kind: 'retiro', rowId: row.turno.rowId });
+    setRetiroMotivo('ENFERMEDAD');
+    setRetiroReemplazo(null);
+    setRetiroModal(row);
   }
 
-  async function retirarTurno(row: GuardRowModel, operatorReplaceChoice: boolean | null) {
+  /** Datos del retiro que se está pidiendo: horas que faltan, compañeros y política de reemplazo. */
+  const retiroInfo = useMemo(() => {
+    if (!retiroModal) return null;
+    const finMs = toStartMs(retiroModal.turno.endTimeRaw);
+    const hoursLeft = Number.isNaN(finMs) ? 0 : hoursRemainingUntilEnd(nowMs, finMs);
+    const obj = retiroModal.turno.objectiveId;
+    const colleagues = classifiedRows.filter(
+      (r) =>
+        !!obj &&
+        r.turno.objectiveId === obj &&
+        docIdDe(r.turno.rowId) !== docIdDe(retiroModal.turno.rowId) &&
+        (r.estado === 'PRESENTE_PLAT' || r.estado === 'PRESENTE_WA'),
+    ).length;
+    const policy = resolveEarlyWithdrawReplacePolicy({
+      hoursLeft,
+      colleaguesPresent: colleagues,
+      reemplazarRetiro2a3h: null,
+      isAutoMode: false,
+      operatorReplaceChoice: retiroReemplazo,
+    });
+    return { hoursLeft, colleagues, policy, finMs };
+  }, [retiroModal, classifiedRows, nowMs, retiroReemplazo]);
+
+  async function retirarTurno(row: GuardRowModel, motivo: MotivoRetiro, operatorReplaceChoice: boolean | null) {
     if (busy) return;
-    if (row.estado !== 'PRESENTE_PLAT' && row.estado !== 'PRESENTE_WA' && arm?.kind !== 'retiro-si') return;
+    if (row.estado !== 'PRESENTE_PLAT' && row.estado !== 'PRESENTE_WA') return;
     setBusy(true);
     try {
+      const finPlanificadoMs = toStartMs(row.turno.endTimeRaw);
+      const retiroMs = Date.now();
       const fn = httpsCallable(functions, 'processEarlyWithdrawalCallable');
       const res = await fn({
         shiftId: row.turno.rowId,
-        reason: 'ENFERMEDAD',
+        reason: motivo,
         operatorReplaceChoice,
       });
       const data = (res.data || {}) as { needsOperatorChoice?: boolean; remainderShiftId?: string };
       if (data.needsOperatorChoice) {
-        setArm({ kind: 'retiro-si', rowId: row.turno.rowId });
-        showToast('Quedan entre 2 y 3 h. Enter cubre el resto, N deja el hueco.', 'bg-amber-700');
+        showToast('Quedan entre 2 y 3 h: elegí si se reemplaza el resto (S o N).', 'bg-amber-700');
         return;
       }
-      showToast(
-        data.remainderShiftId
-          ? `Retiro por enfermedad · ${row.employeeName}. Quedó el hueco para cubrir.`
-          : `Retiro por enfermedad · ${row.employeeName}`,
-        'bg-purple-700',
-      );
+      const etiqueta = MOTIVOS_RETIRO.find((m) => m.id === motivo)?.label.toLowerCase() || motivo.toLowerCase();
+      setRetiroModal(null);
+      if (data.remainderShiftId && !Number.isNaN(finPlanificadoMs) && finPlanificadoMs > retiroMs) {
+        // Resto del turno sin cubrir: se abre la búsqueda de reemplazo (RET, franco trabajado).
+        const desdeTs = Timestamp.fromMillis(retiroMs);
+        const hastaTs = Timestamp.fromMillis(finPlanificadoMs);
+        setHuecoRetiro({ docId: row.turno.rowId, desdeMs: retiroMs, hastaMs: finPlanificadoMs });
+        setCoberturaModal({
+          ...row,
+          estado: 'AUSENTE',
+          salida: formatHHMM(hastaTs),
+          turno: { ...row.turno, startTimeRaw: desdeTs, endTimeRaw: hastaTs },
+        });
+        showToast(`Retiro por ${etiqueta} · ${row.employeeName}. Elegí quién cubre el resto.`, 'bg-purple-700');
+      } else {
+        showToast(`Retiro por ${etiqueta} · ${row.employeeName}`, 'bg-purple-700');
+      }
       setArm(null);
     } catch (err) {
       const code = String((err as { code?: string })?.code || '');
@@ -3107,6 +3355,72 @@ export default function ModoRapidoPage() {
     if (!coberturaModal || busy) return;
     setBusy(true);
     try {
+      if (huecoRetiro) {
+        // Retiro anticipado: el turno del que se retira queda cerrado con sus horas trabajadas y el
+        // resto lo cubre un turno nuevo del RET (desde el retiro hasta el fin planificado).
+        const origenSnap = await leerTurnoRapido(huecoRetiro.docId);
+        const origen = (origenSnap.data() || {}) as Record<string, unknown>;
+        const copiar: Record<string, unknown> = {};
+        for (const campo of [
+          'empresaId',
+          'objectiveId',
+          'objectiveName',
+          'positionName',
+          'clientId',
+          'clientName',
+          'code',
+          'scheduleDate',
+          'type',
+        ]) {
+          if (origen[campo] !== undefined) copiar[campo] = origen[campo];
+        }
+        const horasResto = Math.round(((huecoRetiro.hastaMs - huecoRetiro.desdeMs) / 3600000) * 100) / 100;
+        const nuevoRef = await addDoc(collection(db, 'turnos'), {
+          ...copiar,
+          employeeId: candidate.turno.employeeId,
+          employeeName: candidate.employeeName,
+          startTime: Timestamp.fromMillis(huecoRetiro.desdeMs),
+          endTime: Timestamp.fromMillis(huecoRetiro.hastaMs),
+          hours: horasResto,
+          status: 'PENDING',
+          draft: false,
+          origin: 'RET_COBERTURA',
+          resolvedBy: 'OPERACIONES',
+          coberturaDesdeTurnoId: candidate.turno.rowId,
+          remanenteDeTurnoId: huecoRetiro.docId,
+          createdAt: serverTimestamp(),
+        });
+        await updateDoc(doc(db, 'turnos', candidate.turno.rowId), {
+          coverageAssignedTo: nuevoRef.id,
+        });
+        await addDoc(collection(db, 'novedades'), {
+          type: 'COBERTURA_RET',
+          turnoAusenteId: huecoRetiro.docId,
+          turnoAusenteEmpleado: coberturaModal.employeeName,
+          turnoAusenteObj: coberturaModal.turno.obj,
+          retEmpleado: candidate.employeeName,
+          motivo: 'RETIRO_ANTICIPADO',
+          empresaId,
+          operatorId: user?.uid ?? 'cc-modo-rapido',
+          createdAt: serverTimestamp(),
+        });
+        const avisoResto = abrirWa(
+          candidate.turno.phone,
+          waMensaje.cobertura(
+            candidate.employeeName,
+            coberturaModal.turno.obj,
+            formatHHMM(Timestamp.fromMillis(huecoRetiro.desdeMs)),
+            coberturaModal.salida || '—',
+          ),
+        );
+        showToast(
+          avisoResto
+            ? `RET asignado al resto del turno · WhatsApp abierto · ${candidate.employeeName}`
+            : `RET asignado al resto del turno · ${candidate.employeeName}. Sin teléfono para WhatsApp.`,
+          avisoResto ? 'bg-violet-700' : 'bg-amber-700',
+        );
+        return;
+      }
       await updateDoc(doc(db, 'turnos', coberturaModal.turno.rowId), {
         employeeId: candidate.turno.employeeId,
         employeeName: candidate.employeeName,
@@ -3466,6 +3780,31 @@ export default function ModoRapidoPage() {
       const target = e.target as HTMLElement | null;
       const tag = target?.tagName;
       const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || !!target?.isContentEditable;
+      if (retiroModal) {
+        e.preventDefault();
+        const k = e.key.toLowerCase();
+        if (e.key === 'Escape') {
+          setRetiroModal(null);
+          return;
+        }
+        const motivoTecla = MOTIVOS_RETIRO.find((m) => m.tecla === e.key);
+        if (motivoTecla) {
+          setRetiroMotivo(motivoTecla.id);
+          return;
+        }
+        if (retiroInfo?.policy === 'OPERATOR_CHOICE' || retiroReemplazo !== null) {
+          if (k === 's') setRetiroReemplazo(true);
+          if (k === 'n') setRetiroReemplazo(false);
+        }
+        if (e.key === 'Enter') {
+          if (retiroInfo?.policy === 'OPERATOR_CHOICE' && retiroReemplazo === null) {
+            showToast('Elegí si se reemplaza el resto del turno (S o N)', 'bg-amber-700');
+            return;
+          }
+          void retirarTurno(retiroModal, retiroMotivo, retiroInfo?.policy === 'OPERATOR_CHOICE' ? retiroReemplazo : null);
+        }
+        return;
+      }
       if (coberturaModal || accionesModal) {
         if (e.key === 'Escape') {
           setCoberturaModal(null);
@@ -3536,14 +3875,6 @@ export default function ModoRapidoPage() {
           void cerrarTurno(row);
           return;
         }
-        if (arm?.kind === 'retiro' && arm.rowId === row.turno.rowId) {
-          void retirarTurno(row, null);
-          return;
-        }
-        if (arm?.kind === 'retiro-si' && arm.rowId === row.turno.rowId) {
-          void retirarTurno(row, true);
-          return;
-        }
         if (swapFromId && swapFromId !== row.turno.rowId) {
           const from = sheetRows.find((r) => r.turno.rowId === swapFromId);
           if (from) void intercambiarFilas(from, row);
@@ -3591,10 +3922,6 @@ export default function ModoRapidoPage() {
         pedirRetiro(row);
         return;
       }
-      if (k === 'n' && arm?.kind === 'retiro-si' && arm.rowId === row.turno.rowId) {
-        void retirarTurno(row, false);
-        return;
-      }
       if (k === 'c' && (row.estado === 'NO_LLEGO' || row.estado === 'AUSENTE')) {
         if (bloqueaTramo(row)) return;
         setCoberturaModal(row);
@@ -3608,7 +3935,11 @@ export default function ModoRapidoPage() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [sheetRows, activeRowId, hourEdit, arm, swapFromId, coberturaModal, accionesModal, busy, pantallaCompleta]);
+  }, [sheetRows, activeRowId, hourEdit, arm, swapFromId, coberturaModal, accionesModal, busy, pantallaCompleta, retiroModal, retiroMotivo, retiroReemplazo, retiroInfo]);
+
+  useEffect(() => {
+    if (!coberturaModal) setHuecoRetiro(null);
+  }, [coberturaModal]);
 
   useEffect(() => {
     const onFs = () => setPantallaCompleta(document.fullscreenElement === sheetRef.current);
@@ -3944,12 +4275,6 @@ export default function ModoRapidoPage() {
             if (arm?.kind === 'cerrar' && arm.rowId === activeRow.turno.rowId) {
               return `Cerrar turno de ${activeRow.employeeName}. Egreso previsto ${activeRow.salida || '—'}. Enter confirma el egreso real de ahora.`;
             }
-            if (arm?.kind === 'retiro' && arm.rowId === activeRow.turno.rowId) {
-              return `Retiro anticipado por enfermedad · ${activeRow.employeeName}. Enter registra la baja. Esc cancela.`;
-            }
-            if (arm?.kind === 'retiro-si' && arm.rowId === activeRow.turno.rowId) {
-              return `Quedan entre 2 y 3 h · ${activeRow.employeeName}. Enter cubre el resto. N deja el hueco. Esc cancela.`;
-            }
             if (swapFromId) {
               const from = sheetRows.find((r) => r.turno.rowId === swapFromId);
               const anticipado = !!from
@@ -4106,9 +4431,39 @@ export default function ModoRapidoPage() {
           />
         </div>
 
+        {retiroModal && retiroInfo && (
+          <ModalRetiro
+            row={retiroModal}
+            hoursLeft={retiroInfo.hoursLeft}
+            policy={retiroInfo.policy}
+            colleagues={retiroInfo.colleagues}
+            motivo={retiroMotivo}
+            reemplazo={retiroReemplazo}
+            busy={busy}
+            onMotivo={setRetiroMotivo}
+            onReemplazo={setRetiroReemplazo}
+            onConfirm={() =>
+              void retirarTurno(
+                retiroModal,
+                retiroMotivo,
+                retiroInfo.policy === 'OPERATOR_CHOICE' ? retiroReemplazo : null,
+              )
+            }
+            onClose={() => setRetiroModal(null)}
+          />
+        )}
+
         {coberturaModal && (
           <ModalCobertura
             absent={coberturaModal}
+            remanente={
+              huecoRetiro
+                ? {
+                    desde: formatHHMM(Timestamp.fromMillis(huecoRetiro.desdeMs)),
+                    hasta: formatHHMM(Timestamp.fromMillis(huecoRetiro.hastaMs)),
+                  }
+                : null
+            }
             retCandidates={retCandidates}
             retEsManana={retUsaManana}
             extCandidates={extCandidates}
@@ -4130,7 +4485,9 @@ export default function ModoRapidoPage() {
                 : waMensaje.cobertura(
                     c.employeeName,
                     coberturaModal.turno.obj,
-                    coberturaModal.turno.expected,
+                    huecoRetiro
+                      ? formatHHMM(Timestamp.fromMillis(huecoRetiro.desdeMs))
+                      : coberturaModal.turno.expected,
                     coberturaModal.salida || '—',
                   );
               abrirWa(c.turno.phone, text);

@@ -150,6 +150,7 @@ export async function processEarlyWithdrawal(
     interrupted: true,
     interruptionReason: input.reason,
     endTime: now,
+    plannedEndTime: shift.endTime ?? Timestamp.fromMillis(endMsVal),
     completionReason: 'EARLY_WITHDRAW',
   });
 
