@@ -142,6 +142,28 @@ type PresenciaMeta = {
   realEndLabel: string;
 };
 
+/**
+ * Banda horaria según la hora de inicio del turno (sin importar el código):
+ * M 06:00–11:59 · T 12:00–20:59 · N 21:00–05:59.
+ */
+function bandaPorHoraInicio(expected: string): 'M' | 'T' | 'N' | '' {
+  const mins = parseHHMMToMins(String(expected || ''));
+  if (mins === null) return '';
+  if (mins >= 6 * 60 && mins < 12 * 60) return 'M';
+  if (mins >= 12 * 60 && mins < 21 * 60) return 'T';
+  return 'N';
+}
+
+function pasaFiltroBanda(row: { band: string; turno: { expected: string } }, filtro: string): boolean {
+  if (filtro === 'all') return true;
+  // Los RET son personal pasivo del día, sin horario propio: nunca se ocultan por banda.
+  if (row.band === 'RET') return true;
+  if (filtro === 'M' || filtro === 'T' || filtro === 'N') {
+    return bandaPorHoraInicio(row.turno.expected) === filtro;
+  }
+  return row.band === filtro;
+}
+
 function extractBand(shift: string): string {
   const code = String(shift || '')
     .trim()
@@ -172,7 +194,10 @@ function useTurnosHoy({
   presenciaMeta: Record<string, PresenciaMeta>;
   cerrados: Record<string, TurnoHoy>;
   clientePorObj: Record<string, string>;
+  /** Retenes del día siguiente (para cubrir una noche). No entran al dict del puente WA. */
+  retenesManana: TurnoHoy[];
 } {
+  const [retenesManana, setRetenesManana] = useState<TurnoHoy[]>([]);
   const [turnos, setTurnos] = useState<Record<string, TurnoHoy>>({});
   const [cerrados, setCerrados] = useState<Record<string, TurnoHoy>>({});
   const [presenciaMeta, setPresenciaMeta] = useState<Record<string, PresenciaMeta>>({});
@@ -188,6 +213,7 @@ function useTurnosHoy({
   useEffect(() => {
     if (!empresaId) {
       setTurnos({});
+      setRetenesManana([]);
       setPhones([]);
       setFrancos([]);
       setLoading(false);
@@ -230,6 +256,9 @@ function useTurnosHoy({
       const now = Date.now();
       const byName = new Map<string, { turno: TurnoHoy; startMs: number }>();
       const cerradosMap = new Map<string, TurnoHoy>();
+      const retMananaList: TurnoHoy[] = [];
+      const manana = new Date(now);
+      manana.setDate(manana.getDate() + 1);
 
       for (const d of docs) {
         const shift = d.data() as Record<string, unknown>;
@@ -309,7 +338,12 @@ function useTurnosHoy({
           startDate.getDate() === nowDate.getDate();
         const inProgress = startMs <= nowMs && endMs > nowMs;
         const startsSoon = startMs > nowMs && startMs - nowMs <= 4 * 3600000;
-        if (!inProgress && !sameCalendarDay && !startsSoon) continue;
+        const esRetManana =
+          code === 'RET' &&
+          startDate.getFullYear() === manana.getFullYear() &&
+          startDate.getMonth() === manana.getMonth() &&
+          startDate.getDate() === manana.getDate();
+        if (!esRetManana && !inProgress && !sameCalendarDay && !startsSoon) continue;
 
         const endTs = shift.endTime as Timestamp | undefined;
         const startTs = shift.startTime as Timestamp;
@@ -341,6 +375,11 @@ function useTurnosHoy({
           endTimeRaw: endTs,
           empresaId: String(shift.empresaId || ''),
         };
+
+        if (esRetManana) {
+          retMananaList.push(mapped);
+          continue;
+        }
 
         if (cerrado) {
           cerradosMap.set(d.id, mapped);
@@ -382,6 +421,7 @@ function useTurnosHoy({
         cerradosNext[id] = turno;
       });
       setTurnos(next);
+      setRetenesManana(retMananaList);
       setCerrados(cerradosNext);
       setPresenciaMeta(metaNext);
       setFrancos(francosHoyRef.current);
@@ -440,7 +480,7 @@ function useTurnosHoy({
     };
   }, [empresaId, scopeEmpresa]);
 
-  return { turnos, loading, phones, francos, presenciaMeta, cerrados, clientePorObj };
+  return { turnos, loading, phones, francos, presenciaMeta, cerrados, clientePorObj, retenesManana };
 }
 
 type GuardEstado =
@@ -599,6 +639,8 @@ function classifyEstado(
   if (wa.confirmedRowIds.has(turno.rowId)) return { estado: 'PRESENTE_WA', pendingEntry };
   if (pendingEntry) return { estado: 'PENDIENTE_WA', pendingEntry };
   if (turno.turnoStatus === 'ABSENT') return { estado: 'AUSENTE', pendingEntry };
+  // El RET es pasivo (espera que lo activen): no corre tardanza ni "no llegó".
+  if (String(turno.code || '').toUpperCase() === 'RET') return { estado: 'ESPERANDO', pendingEntry };
 
   const late = minutesSinceExpected(
     turno.expected,
@@ -682,6 +724,7 @@ function estadoPill(estado: GuardEstado): { label: string; className: string } {
 function ModalCobertura({
   absent,
   retCandidates,
+  retEsManana,
   extCandidates,
   intercambioCandidates,
   francoCandidates,
@@ -695,6 +738,7 @@ function ModalCobertura({
 }: {
   absent: GuardRowModel;
   retCandidates: GuardRowModel[];
+  retEsManana: boolean;
   extCandidates: GuardRowModel[];
   intercambioCandidates: GuardRowModel[];
   francoCandidates: GuardRowModel[];
@@ -738,10 +782,12 @@ function ModalCobertura({
           {/* 1. RET disponible */}
           <div className="mb-4">
             <div className="text-[11px] font-bold text-violet-700 uppercase tracking-wide mb-2">
-              🛡️ 1. RET disponible ({retCandidates.length})
+              🛡️ 1. RET {retEsManana ? 'de mañana (cubre la noche)' : 'de hoy'} ({retCandidates.length})
             </div>
             {retCandidates.length === 0 ? (
-              <div className="text-[11px] text-slate-400 py-2">Sin retenes disponibles</div>
+              <div className="text-[11px] text-slate-400 py-2">
+                {retEsManana ? 'Sin retenes cargados para mañana' : 'Sin retenes disponibles'}
+              </div>
             ) : (
               <div className="space-y-1">
                 {retCandidates.map((c) => (
@@ -1820,13 +1866,13 @@ function WASidebar({
                 {wa.confirmedEntries.length}
               </span>
             </button>
-            <button
-              type="button"
-              onClick={() => wa.clearAll()}
-              className="ml-auto text-[9px] font-bold text-red-500 hover:text-red-700"
+            <span
+              className="ml-auto text-[9px] font-semibold text-slate-400"
+              title="El registro de confirmados queda fijo durante el día"
             >
-              Limpiar
-            </button>
+              <Lock size={10} className="inline -mt-0.5 mr-0.5" aria-hidden />
+              Fijo
+            </span>
           </div>
           {logOpen && (
             <div className="overflow-y-auto flex-1 min-h-0">
@@ -1889,7 +1935,7 @@ export default function ModoRapidoPage() {
     empresaId: empresaId || null,
     scopeEmpresa,
   });
-  const { turnos, loading, francos, presenciaMeta, cerrados, clientePorObj } = turnosData;
+  const { turnos, loading, francos, presenciaMeta, cerrados, clientePorObj, retenesManana } = turnosData;
   const wa = useWABridge(turnos, empresaId);
 
   const [bridgeUrl, setBridgeUrl] = useState(DEFAULT_BRIDGE_URL);
@@ -2072,7 +2118,10 @@ export default function ModoRapidoPage() {
           realDisplay !== '—'
             ? realDisplay
             : undefined;
-        const diff = buildDiff(
+        const esRet = String(turno.code || '').toUpperCase() === 'RET';
+        const diff = esRet && !realForDiff
+          ? { label: 'en espera', tone: 'neutral' as const }
+          : buildDiff(
           turno.expected,
           realForDiff,
           nowMs,
@@ -2166,7 +2215,7 @@ export default function ModoRapidoPage() {
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
     return classifiedRows.filter((r) => {
-      if (bandFilter !== 'all' && r.band !== bandFilter) return false;
+      if (!pasaFiltroBanda(r, bandFilter)) return false;
       if (!pasaFiltro(r, statsFilter)) return false;
       if (q) {
         const hay =
@@ -2315,12 +2364,37 @@ export default function ModoRapidoPage() {
     return !mismoObjetivoYHorario;
   };
 
+  /**
+   * Para cubrir M o T (o una N que arranca de madrugada) se usan los RET de hoy.
+   * Para cubrir una N que arranca de noche se usan los RET del día siguiente.
+   */
+  const retUsaManana = useMemo((): boolean => {
+    if (!coberturaModal) return false;
+    const mins = parseHHMMToMins(String(coberturaModal.turno.expected || ''));
+    return mins !== null && mins >= 21 * 60;
+  }, [coberturaModal]);
+
   const retCandidates = useMemo((): GuardRowModel[] => {
     if (!coberturaModal) return [];
+    if (retUsaManana) {
+      return retenesManana
+        .filter((t) => esCandidatoValido({ turno: t } as GuardRowModel, coberturaModal))
+        .map((turno): GuardRowModel => ({
+          employeeName: turno.name || '—',
+          turno,
+          estado: 'ESPERANDO',
+          realDisplay: '—',
+          diffLabel: '—',
+          diffTone: 'neutral',
+          band: 'RET',
+          fuente: '—',
+          salida: '—',
+        }));
+    }
     return classifiedRows.filter(
       (r) => r.band === 'RET' && esCandidatoValido(r, coberturaModal),
     );
-  }, [coberturaModal, classifiedRows]);
+  }, [coberturaModal, classifiedRows, retenesManana, retUsaManana]);
 
   const extCandidates = useMemo((): GuardRowModel[] => {
     if (!coberturaModal) return [];
@@ -3399,7 +3473,17 @@ export default function ModoRapidoPage() {
               <button
                 key={b}
                 type="button"
-                title={bandFilter === b ? `Banda ${b}. Clic para ver todas` : `Solo banda ${b}`}
+                title={
+                  bandFilter === b
+                    ? `Banda ${b}. Clic para ver todas`
+                    : b === 'M'
+                      ? 'Mañana: turnos que inician 06:00–11:59'
+                      : b === 'T'
+                        ? 'Tarde: turnos que inician 12:00–20:59'
+                        : b === 'N'
+                          ? 'Noche: turnos que inician 21:00–05:59'
+                          : `Solo ${b}`
+                }
                 aria-pressed={bandFilter === b}
                 onClick={() => setBandFilter(bandFilter === b ? 'all' : b)}
                 className={`px-1.5 py-1 rounded-lg text-[10px] font-bold border ${
@@ -3659,6 +3743,7 @@ export default function ModoRapidoPage() {
           <ModalCobertura
             absent={coberturaModal}
             retCandidates={retCandidates}
+            retEsManana={retUsaManana}
             extCandidates={extCandidates}
             intercambioCandidates={intercambioCandidates}
             francoCandidates={francoCandidates}
