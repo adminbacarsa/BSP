@@ -16458,10 +16458,17 @@ function PlanificacionDesktop() {
             const _b2Range = (_b2?.startTime && _b2?.endTime)
                 ? `${formatTime(_b2.startTime)} - ${formatTime(_b2.endTime)}`
                 : null;
+            // Turno cortado: el horario son sus tramos. `endTime` del documento puede estar corrido
+            // al fin del último tramo (lo hace Operaciones al marcar el tramo 2), no es el fin del primero.
+            const _bloquesCelda = Array.isArray(_cellShift?.blocks) && _cellShift.blocks.length >= 2 ? _cellShift.blocks : null;
+            const _rangoBloques = _bloquesCelda
+                ? _bloquesCelda.map((bl: { startTime?: string; endTime?: string }) => `${formatTime(String(bl.startTime || '').slice(0, 5))} - ${formatTime(String(bl.endTime || '').slice(0, 5))}`).join(' + ')
+                : null;
             const cellRange = cellCode
-                ? ((_cellActualRange && _b2Range)
-                    ? `${_cellActualRange} + ${_b2Range}`
-                    : (_cellActualRange || SHIFT_RANGES[cellCode] || null))
+                ? (_rangoBloques
+                    || ((_cellActualRange && _b2Range)
+                        ? `${_cellActualRange} + ${_b2Range}`
+                        : (_cellActualRange || SHIFT_RANGES[cellCode] || null)))
                 : null;
             const { isEarly, isExtended, covRole, covNote, coverageSourceShift } = c;
             const _covSegHint = isEarly || covRole === 'EARLY_START'
