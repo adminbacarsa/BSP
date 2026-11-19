@@ -69,7 +69,6 @@ import {
   useWABridge,
 } from '@/hooks/useWABridge';
 
-const DEFAULT_BRIDGE_URL = 'https://autbacar.dnsalias.com/wabridge';
 const LOG_PAGE = 10;
 const BANDS = ['M', 'T', 'N', 'D12', 'N12'] as const;
 const SKIP_CODES = new Set([
@@ -2448,7 +2447,8 @@ export default function ModoRapidoPage() {
   const { turnos, loading, francos, presenciaMeta, cerrados, clientePorObj, retenesManana, tramosExtra } = turnosData;
   const wa = useWABridge(turnos, empresaId);
 
-  const [bridgeUrl, setBridgeUrl] = useState(DEFAULT_BRIDGE_URL);
+  const [bridgeUrl, setBridgeUrl] = useState('');
+  const [bridgeCfg, setBridgeCfg] = useState<'cargando' | 'ok' | 'sin_config'>('cargando');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
   const [logFilter, setLogFilter] = useState('');
@@ -2577,28 +2577,29 @@ export default function ModoRapidoPage() {
 
   useEffect(() => {
     let cancelled = false;
+    // Cada empresa usa SOLO su bridge (Configuración → WA Bridge). Sin configuración no se
+    // conecta a ninguno: antes caía al bridge de Bacar y leía/escribía en el WhatsApp de otra empresa.
+    setBridgeUrl('');
+    setBridgeCfg('cargando');
+    wa.disconnect();
     (async () => {
+      if (!empresaId) {
+        setBridgeCfg('sin_config');
+        return;
+      }
       try {
-        // URL por empresa (Configuración → WA Bridge); fallback al doc global legacy
-        const paths = empresaId
-          ? [
-              doc(db, 'empresas', empresaId, 'config', 'wa-bridge'),
-              doc(db, 'config', 'wa-bridge'),
-            ]
-          : [doc(db, 'config', 'wa-bridge')];
-        for (const ref of paths) {
-          const snap = await getDoc(ref);
-          if (cancelled) return;
-          if (snap.exists()) {
-            const data = snap.data() as { url?: string };
-            if (typeof data.url === 'string' && data.url.trim()) {
-              setBridgeUrl(data.url.trim());
-              break;
-            }
-          }
+        const snap = await getDoc(doc(db, 'empresas', empresaId, 'config', 'wa-bridge'));
+        if (cancelled) return;
+        const data = snap.exists() ? (snap.data() as { url?: string }) : null;
+        const url = typeof data?.url === 'string' ? data.url.trim() : '';
+        if (url) {
+          setBridgeUrl(url);
+          setBridgeCfg('ok');
+        } else {
+          setBridgeCfg('sin_config');
         }
       } catch {
-        /* fallback DEFAULT_BRIDGE_URL */
+        if (!cancelled) setBridgeCfg('sin_config');
       }
     })();
 
@@ -4271,21 +4272,34 @@ export default function ModoRapidoPage() {
               {wa.badge}
             </span>
           )}
-          <div className="flex items-center gap-1 ml-2 text-[10px] text-slate-500">
+          <div
+            className="flex items-center gap-1 ml-2 text-[10px] text-slate-500"
+            title={
+              bridgeCfg === 'sin_config'
+                ? `${empresa?.name || empresaId || 'Esta empresa'} no tiene WA Bridge configurado (Configuración → WA Bridge)`
+                : bridgeUrl
+                  ? `WA Bridge de ${empresa?.name || empresaId || 'la empresa'}: ${bridgeUrl}`
+                  : undefined
+            }
+          >
             <span
               className={`w-1.5 h-1.5 rounded-full ${
-                wa.status === 'connected'
-                  ? 'bg-emerald-500 animate-pulse'
-                  : wa.status === 'error'
-                    ? 'bg-red-500'
-                    : 'bg-amber-400'
+                bridgeCfg === 'sin_config'
+                  ? 'bg-slate-300'
+                  : wa.status === 'connected'
+                    ? 'bg-emerald-500 animate-pulse'
+                    : wa.status === 'error'
+                      ? 'bg-red-500'
+                      : 'bg-amber-400'
               }`}
             />
-            {wa.status === 'connected'
-              ? 'conectado'
-              : wa.status === 'error'
-                ? 'sin respuesta'
-                : 'conectando…'}
+            {bridgeCfg === 'sin_config'
+              ? 'sin bridge configurado'
+              : wa.status === 'connected'
+                ? 'conectado'
+                : wa.status === 'error'
+                  ? 'sin respuesta'
+                  : 'conectando…'}
           </div>
 
           <div className="ml-3 relative flex-1 max-w-xs hidden sm:block">

@@ -82,8 +82,12 @@ export interface UseWABridgeReturn {
   dismissEntry: (entry: WAEntry) => void;
   /** Le escribe al guardia por mensaje privado, no al grupo (el bridge decide si está habilitado). */
   responder: (entry: WAEntry, texto: string) => void;
+  /** Mensaje privado a un teléfono por el bridge de la empresa (aviso informativo). `true` si salió. */
+  enviar: (phone: string, texto: string) => Promise<boolean>;
   clearAll: () => void;
   connect: (url: string) => void;
+  /** Corta la conexión con el bridge actual (cambio de empresa o sin configuración). */
+  disconnect: () => void;
   /** Solo pruebas / demo sin bridge. */
   addFakePending: (partial?: Partial<WAEntry>) => void;
   groups: { id: string; name: string; participants: number }[];
@@ -539,6 +543,36 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
     });
   }, []);
 
+  /** Corta el sondeo y olvida la URL (cambio de empresa o empresa sin bridge). */
+  const disconnect = useCallback(() => {
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+    bridgeUrlRef.current = '';
+    setStatus('idle');
+    setGroups([]);
+  }, []);
+
+  /** Envía un mensaje privado por el bridge. `true` solo si el bridge confirmó el envío. */
+  const enviar = useCallback(async (phone: string, texto: string): Promise<boolean> => {
+    const url = bridgeUrlRef.current;
+    if (!url || !phone || !texto) return false;
+    try {
+      const r = await fetch(`${url}/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, message: texto }),
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!r.ok) return false;
+      const d = (await r.json().catch(() => ({}))) as { ok?: boolean };
+      return d.ok === true;
+    } catch {
+      return false;
+    }
+  }, []);
+
   const dismissEntry = useCallback((entry: WAEntry) => {
     setPending((prev) => prev.filter((e) => e.id !== entry.id));
     setBadge((b) => Math.max(0, b - 1));
@@ -618,8 +652,10 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
     confirmEntry,
     dismissEntry,
     responder,
+    enviar,
     clearAll,
     connect,
+    disconnect,
     addFakePending,
     groups,
     monitoredGroupIds,

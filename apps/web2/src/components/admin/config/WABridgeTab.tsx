@@ -5,11 +5,13 @@ import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useEmpresa } from '@/context/EmpresaContext';
 
-const DEFAULT_URL = 'https://autbacar.dnsalias.com/wabridge';
+// Sin URL por defecto: cada empresa tiene su propio bridge (puerto y QR propios). Precargar la de otra
+// empresa haría que dos empresas compartan el mismo WhatsApp.
+const EJEMPLO_URL = 'https://autbacar.dnsalias.com/<empresa>';
 
 export default function WABridgeTab() {
-  const { empresaId } = useEmpresa();
-  const [url, setUrl] = useState(DEFAULT_URL);
+  const { empresaId, empresa } = useEmpresa();
+  const [url, setUrl] = useState('');
   const [saved, setSaved] = useState('');
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -28,16 +30,16 @@ export default function WABridgeTab() {
         if (cancelled) return;
         if (snap.exists()) {
           const data = snap.data() as { url?: string };
-          const value = typeof data.url === 'string' ? data.url : DEFAULT_URL;
+          const value = typeof data.url === 'string' ? data.url : '';
           setUrl(value);
           setSaved(value);
         } else {
-          setUrl(DEFAULT_URL);
+          setUrl('');
           setSaved('');
         }
       } catch {
         if (!cancelled) {
-          setUrl(DEFAULT_URL);
+          setUrl('');
           setSaved('');
           toast.error('No se pudo cargar la config del bridge');
         }
@@ -95,9 +97,17 @@ export default function WABridgeTab() {
           Servidor WA Bridge
         </h3>
         <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-          URL del servidor WhatsApp Bridge para check-ins en tiempo real
+          URL del servidor WhatsApp Bridge de <strong>{empresa?.name || empresaId}</strong> para check-ins y avisos al guardia
         </p>
       </div>
+
+      {saved === '' && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 shadow-sm">
+          Esta empresa todavía no tiene un WA Bridge configurado. Mientras tanto, el Centro de Control
+          funciona sin WhatsApp. Cada empresa necesita su propio bridge (puerto y QR propios): se da de alta
+          en el servidor con <code className="font-mono text-xs">node nueva-empresa.js</code> y después se pega acá su URL.
+        </div>
+      )}
 
       <div
         className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 space-y-4 shadow-sm"
@@ -119,7 +129,7 @@ export default function WABridgeTab() {
               setUrl(e.target.value);
               setTestResult(null);
             }}
-            placeholder="https://autbacar.dnsalias.com/wabridge"
+            placeholder={EJEMPLO_URL}
             className="w-full text-sm font-mono bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2.5 outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500 transition-colors"
             style={{ color: 'var(--txt)', borderColor: 'var(--border)' }}
           />
@@ -152,7 +162,7 @@ export default function WABridgeTab() {
           <button
             type="button"
             onClick={() => void handleSave()}
-            disabled={saving || url.trim() === saved}
+            disabled={saving || !url.trim() || url.trim() === saved}
             className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ml-auto"
           >
             {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
