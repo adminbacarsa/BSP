@@ -1,3 +1,5 @@
+import { huecosPlanificadosCortado, solapeHuecosMs } from '../planning/turnoCortadoHoras';
+
 const PAID_LEAVE = new Set(['V', 'L', 'PG', 'E', 'A']);
 const ZERO_HOUR_CODES = new Set(['F', 'FF', 'FP', 'V', 'L', 'PG', 'A', 'E', 'AA', 'RET']);
 const SHIFT_HOURS_FALLBACK: Record<string, number> = {
@@ -291,10 +293,17 @@ export function accumulatePayrollTurnoContribution(
     }
     workStart = rStart!;
     workEnd = rEnd!;
-    workDur = rDur;
+    // Turno cortado: la banda va de inicio a fin, pero el hueco entre tramos no se trabaja.
+    workDur = Math.max(0, rDur - solapeHuecosMs(huecosPlanificadosCortado(data), workStart.getTime(), workEnd.getTime()) / 3600000);
   }
 
-  const night = getNightDuration(workStart, workEnd);
+  let night = getNightDuration(workStart, workEnd);
+  for (const h of huecosPlanificadosCortado(data)) {
+    const a = Math.max(h.startMs, workStart.getTime());
+    const b = Math.min(h.endMs, workEnd.getTime());
+    if (b > a) night -= getNightDuration(new Date(a), new Date(b));
+  }
+  night = Math.max(0, night);
   const day = Math.max(0, workDur - night);
   const plusFeriado = holidaysHas(ctx.holidays, start) ? workDur : 0;
   const desglose = breakdownForWorked(data, code, workDur, plannedDur, isFT);

@@ -31,6 +31,8 @@ import {
     buildPersonaBook,
     calculateLiquidationHoursStats as calculateLiquidationHoursStatsCore,
     isHoursCoreEnabled,
+    huecosPlanificadosCortado,
+    solapeHuecosMs,
 } from '@cosp/hours-core';
 import {
     fetchReportAjustesHoras,
@@ -849,7 +851,8 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
                 if (duration <= 0) return;
                 if (!usePlannedHours && end > new Date()) return;
             } else {
-                duration = (end.getTime() - start.getTime()) / 3600000;
+                // Turno cortado: la jornada es la suma de los tramos, sin el hueco del medio.
+                duration = (end.getTime() - start.getTime() - solapeHuecosMs(huecosPlanificadosCortado(d), start.getTime(), end.getTime())) / 3600000;
                 if (duration < 0 || duration > 24 || isNaN(duration)) {
                     duration = SHIFT_HOURS_LOOKUP[rawCode] || 8;
                 }
@@ -909,7 +912,7 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
             const rEnd   = (!usePlannedHours && rEndRaw)   ? clampE(rEndRaw,   end)   : null;
             let worked = 0;
             if (rStart && rEnd) {
-                const rDur = (rEnd.getTime() - rStart.getTime()) / 3600000;
+                const rDur = (rEnd.getTime() - rStart.getTime() - solapeHuecosMs(huecosPlanificadosCortado(d), rStart.getTime(), rEnd.getTime())) / 3600000;
                 if (rDur >= 0) {
                     worked = Math.min(rDur, 24); // Fix 3: cap a 24h en lugar de descartar
                     turnosConDatosReales++;

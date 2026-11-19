@@ -29,6 +29,7 @@
  */
 import { getDateKeyInTimezone, toDateSafe } from './crmDateUtils';
 import { FICHADA_SHIFT_HOURS, isShiftAbsent, isShiftFichado } from './fichadaHours';
+import { huecosPlanificadosCortado, solapeHuecosMs } from '@cosp/hours-core';
 
 const ADICIONAL_CODES = new Set(['RFZ', 'TURA', 'EV']);
 /** No son franjas vendidas al cliente: francos, retén, escuela y refuerzo interno. */
@@ -201,7 +202,8 @@ function subtractPieces(pieces: FranjaWindow[], taken: FranjaWindow[]): FranjaWi
 /** Horas pedidas de la franja: horario planificado; tabla por código solo si no hay timestamps. */
 function requestedHours(t: FranjaShift, code: string): number {
   const w = plannedWindow(t);
-  if (w) return (w.end - w.start) / HOUR_MS;
+  // Turno cortado: se pide la suma de los tramos, sin el hueco del medio.
+  if (w) return (w.end - w.start - solapeHuecosMs(huecosPlanificadosCortado(t), w.start, w.end)) / HOUR_MS;
   if (FICHADA_SHIFT_HOURS[code]) return FICHADA_SHIFT_HOURS[code];
   const stored = Number(t.hours);
   if (Number.isFinite(stored) && stored > 0 && stored <= 24) return stored;
@@ -385,12 +387,13 @@ export function executedBillableHoursByFranja(
     const shiftId = String(t.id || '');
     const contributions: FranjaContribution[] = [];
     const titWin = plannedWindow(t);
+    const huecosTitular: FranjaWindow[] = huecosPlanificadosCortado(t).map((h) => ({ start: h.startMs, end: h.endMs }));
     const covs = coveragesByTarget.get(shiftId) || [];
 
     if (titWin) {
       let taken: FranjaWindow[] = [];
       const take = (who: FranjaShift, kind: FranjaContributionKind, pieces: FranjaWindow[]): FranjaWindow[] => {
-        const fresh = subtractPieces(clipPieces(pieces, titWin), taken);
+        const fresh = subtractPieces(clipPieces(pieces, titWin), [...taken, ...huecosTitular]);
         const hours = hoursOf(fresh);
         if (hours <= 0) return [];
         contributions.push({

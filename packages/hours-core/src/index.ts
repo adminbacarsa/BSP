@@ -78,6 +78,15 @@ export {
 } from './motors/planning/publishedPlanHours';
 
 export {
+  tramosPlanificadosCortado,
+  huecosPlanificadosCortado,
+  huecosRealesCortado,
+  solapeHuecosMs,
+  horasHuecoCortado,
+  type HuecoCortado,
+} from './motors/planning/turnoCortadoHoras';
+
+export {
   PLANNING_NON_BILLABLE_CODES,
   normalizePlanningPositionName,
 } from './motors/planning/positionCoverageUnits';

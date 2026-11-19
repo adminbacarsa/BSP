@@ -2,7 +2,7 @@
  * Qué objetivo-mes queda sucio, y qué filas del libro tienen el motor viejo.
  * Puro: no lee Firestore. Al cambiar reglas de horas, subir LEDGER_ENGINE_VERSION.
  */
-export const LEDGER_ENGINE_VERSION = 1;
+export const LEDGER_ENGINE_VERSION = 2;
 
 export type DirtyMark = { empresaId: string; objectiveId: string; periodKey: string };
 

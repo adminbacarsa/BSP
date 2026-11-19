@@ -2,6 +2,8 @@ import { Timestamp } from 'firebase-admin/firestore';
 import {
   calcTurnoHoursContrib as calcTurnoHoursContribCore,
   monthKeyFromDate as monthKeyFromDateCore,
+  huecosPlanificadosCortado,
+  solapeHuecosMs,
 } from '@cosp/hours-core';
 
 const ZERO_HOUR_CODES = new Set(['F', 'FF', 'FP', 'V', 'L', 'PG', 'A', 'E', 'AA', 'RET']);
@@ -87,7 +89,8 @@ function calcTurnoHoursContribLegacy(
 
   let plannedDur = 0;
   if (!zeroHours) {
-    plannedDur = Math.max(0, (endDt.getTime() - startDt.getTime()) / 3600000);
+    // Turno cortado: la jornada es la suma de los tramos, sin el hueco del medio.
+    plannedDur = Math.max(0, (endDt.getTime() - startDt.getTime() - solapeHuecosMs(huecosPlanificadosCortado(data), startDt.getTime(), endDt.getTime())) / 3600000);
     if (plannedDur === 0 || plannedDur > 24 || isNaN(plannedDur)) plannedDur = 8;
   }
 
@@ -123,7 +126,7 @@ function calcTurnoHoursContribLegacy(
     };
   }
 
-  const rd = (rEnd.getTime() - rStart.getTime()) / 3600000;
+  const rd = (rEnd.getTime() - rStart.getTime() - solapeHuecosMs(huecosPlanificadosCortado(data), rStart.getTime(), rEnd.getTime())) / 3600000;
   if (rd < 0 || rd > 36) return null;
 
   const night = getNightDuration(rStart, rEnd);
