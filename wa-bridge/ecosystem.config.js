@@ -1,6 +1,7 @@
 // Un proceso de bridge por empresa (puerto, sesión de WhatsApp y logs propios).
-// Para dar de alta una empresa nueva NO se edita a mano: `node nueva-empresa.js <slug>`
-// agrega la línea entre las marcas EMPRESAS:START / EMPRESAS:END y el bloque de caddy.
+// Para dar de alta una empresa nueva NO se edita a mano: `node alta-empresa.js` (en el servidor)
+// lee las empresas de la plataforma, agrega la línea entre las marcas EMPRESAS:START / EMPRESAS:END,
+// la ruta de caddy, arranca el proceso y entrega la ficha con las direcciones y los datos de la plataforma.
 //
 // responder: true  → el bridge le escribe al guardia por privado (confirmación de presencia,
 //                    avisos por ubicación estática o solo texto). Equivale a WA_RESPONDER=1.

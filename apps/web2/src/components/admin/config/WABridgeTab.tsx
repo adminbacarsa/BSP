@@ -105,7 +105,7 @@ export default function WABridgeTab() {
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 shadow-sm">
           Esta empresa todavía no tiene un WA Bridge configurado. Mientras tanto, el Centro de Control
           funciona sin WhatsApp. Cada empresa necesita su propio bridge (puerto y QR propios): se da de alta
-          en el servidor con <code className="font-mono text-xs">node nueva-empresa.js</code> y después se pega acá su URL.
+          en el servidor con <code className="font-mono text-xs">node alta-empresa.js</code>, que entrega la URL para pegar acá.
         </div>
       )}
 
