@@ -29,6 +29,7 @@ module.exports = {
         NODE_ENV:    'production',
         PORT:        7292,
         WA_AUTH_DIR: '.wa_auth_pruebas',
+        WA_RESPONDER: '1',
       },
       error_file:  './logs/err-pruebas.log',
       out_file:    './logs/out-pruebas.log',

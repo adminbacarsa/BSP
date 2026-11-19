@@ -15,6 +15,8 @@ export interface WAEntry {
   msgType: string;
   /** Base64 data-URL de foto de check-in (si el bridge la envía). */
   photo?: string;
+  /** Grupo de WhatsApp de origen (para responderle al guardia). */
+  groupId?: string;
   /** Nombre del objetivo/puesto donde trabaja el guardia. */
   obj?: string;
   /** Coordenadas del objetivo (para badge de distancia). */
@@ -76,6 +78,10 @@ export interface UseWABridgeReturn {
   confirmedEntries: WAConfirmedEntry[];
   confirmedRowIds: ReadonlySet<string>;
   confirmEntry: (entry: WAEntry) => void;
+  /** Descarta un check-in pendiente sin marcar presencia (duplicado, error, mensaje equivocado). */
+  dismissEntry: (entry: WAEntry) => void;
+  /** Le escribe al guardia por mensaje privado, no al grupo (el bridge decide si está habilitado). */
+  responder: (entry: WAEntry, texto: string) => void;
   clearAll: () => void;
   connect: (url: string) => void;
   /** Solo pruebas / demo sin bridge. */
@@ -97,6 +103,7 @@ interface BridgeMsg {
   type: 'location' | 'image' | 'text' | 'protocol' | string;
   location?: { latitude: number; longitude: number };
   hasPhoto?: boolean;
+  groupId?: string;
   photo?: string | null;
 }
 
@@ -198,6 +205,26 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
   useEffect(() => {
     confirmedRowIdsRef.current = confirmedRowIds;
   }, [confirmedRowIds]);
+
+  // Un check-in pendiente de una fila que ya quedó presente (confirmada acá, en otra pantalla o
+  // por otro medio) es un duplicado: se descarta para no volver a marcar la misma presencia.
+  useEffect(() => {
+    if (pending.length === 0) return;
+    const resueltos = new Set(
+      Object.values(turnos)
+        .filter((t) => t.turnoStatus === 'PRESENT' || t.turnoStatus === 'COMPLETED')
+        .map((t) => t.rowId),
+    );
+    if (resueltos.size === 0) return;
+    const obsoletos = pending.filter((e) => e.rowId && resueltos.has(e.rowId));
+    if (obsoletos.length === 0) return;
+    obsoletos.forEach((e) => {
+      if (e.rowId) pendingRowIdsRef.current.delete(e.rowId);
+    });
+    const ids = new Set(obsoletos.map((e) => e.id));
+    setPending((prev) => prev.filter((e) => !ids.has(e.id)));
+    setBadge((b) => Math.max(0, b - obsoletos.length));
+  }, [turnos, pending]);
 
   useEffect(() => {
     try {
@@ -348,6 +375,7 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
           lat: (m.location as { lat?: number; latitude?: number } | undefined)?.lat ?? m.location?.latitude,
           lng: (m.location as { lng?: number; longitude?: number } | undefined)?.lng ?? m.location?.longitude,
           msgType: m.type,
+          groupId: m.groupId,
           photo: typeof m.photo === 'string' && m.photo ? m.photo : undefined,
           obj: turno?.obj,
           objLat: turno?.objLat,
@@ -498,6 +526,35 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
     }
   }, []);
 
+  const responder = useCallback((entry: WAEntry, texto: string) => {
+    const url = bridgeUrlRef.current;
+    if (!url || !texto) return;
+    fetch(`${url}/reply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ quotedId: entry.id, phone: entry.phone, text: texto }),
+      signal: AbortSignal.timeout(8000),
+    }).catch(() => {
+      /* ignore — la respuesta al guardia no es crítica */
+    });
+  }, []);
+
+  const dismissEntry = useCallback((entry: WAEntry) => {
+    setPending((prev) => prev.filter((e) => e.id !== entry.id));
+    setBadge((b) => Math.max(0, b - 1));
+    if (entry.rowId) pendingRowIdsRef.current.delete(entry.rowId);
+    seenIdsRef.current.add(entry.id);
+    // El mensaje descartado no vuelve a aparecer aunque se recargue la página.
+    try {
+      const key = lsKey('wa-seen');
+      const existing = JSON.parse(localStorage.getItem(key) || '[]') as string[];
+      const next = Array.from(new Set([...existing, entry.id])).slice(-500);
+      localStorage.setItem(key, JSON.stringify(next));
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   const clearAll = useCallback(() => {
     setPending([]);
     setBadge(0);
@@ -559,6 +616,8 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
     confirmedEntries,
     confirmedRowIds,
     confirmEntry,
+    dismissEntry,
+    responder,
     clearAll,
     connect,
     addFakePending,

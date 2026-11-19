@@ -48,6 +48,62 @@ function saveLidMap() {
   }
 }
 
+// ── Respuestas automáticas al guardia (opt-in: WA_RESPONDER=1) ────────────
+// Avisa al guardia, por mensaje privado y no por el grupo, cuando mandó algo que no sirve
+// (ubicación fija, solo texto), cuando se recibió su check-in y, desde la planilla, cuando el
+// operador confirma su presencia.
+const RESPONDER      = process.env.WA_RESPONDER === '1';
+const rawMsgs        = new Map();   // id de mensaje → mensaje crudo (para saber quién lo mandó)
+const RAW_MAX        = 300;
+const ultimoAviso    = new Map();   // `${chat}|${tipo}` → ts del último aviso (anti-spam)
+const AVISO_ESPERA   = 60 * 1000;
+
+function guardarRaw(msg) {
+  if (!RESPONDER || !msg?.key?.id) return;
+  rawMsgs.set(msg.key.id, msg);
+  if (rawMsgs.size > RAW_MAX) rawMsgs.delete(rawMsgs.keys().next().value);
+}
+
+function nombrePila(pushName) {
+  const limpio = String(pushName || '').trim();
+  if (!limpio) return '';
+  const partes = limpio.includes(',') ? limpio.split(',')[1].trim().split(/\s+/) : limpio.split(/\s+/);
+  const n = partes[0] || '';
+  return n ? n.charAt(0).toUpperCase() + n.slice(1).toLowerCase() : '';
+}
+
+// Chat privado del guardia: por teléfono real si se conoce; si no, el JID con el que escribió al grupo.
+function jidDelGuardia(phone, senderJid) {
+  const num = String(phone || '').replace(/\D/g, '').replace(/^549/, '');
+  if (num.length >= 8) return `549${num}@s.whatsapp.net`;
+  const jid = String(senderJid || '');
+  if (jid.endsWith('@s.whatsapp.net') || jid.endsWith('@lid')) return jid;
+  return null;
+}
+
+// Siempre por mensaje directo al guardia, nunca al grupo.
+async function responderDirecto(destJid, texto) {
+  if (!RESPONDER || !sock || !connected || !destJid || !texto) return false;
+  if (destJid.endsWith('@g.us')) return false;
+  try {
+    await sock.sendMessage(destJid, { text: texto });
+    console.log(`  [reply] → ${destJid}: "${texto.slice(0, 70)}"`);
+    return true;
+  } catch (e) {
+    console.warn(`  [reply] ✗ ${destJid}: ${e.message}`);
+    return false;
+  }
+}
+
+function avisarUnaVez(destJid, tipo, texto) {
+  if (!RESPONDER || !destJid) return;
+  const clave = `${destJid}|${tipo}`;
+  const ahora = Date.now();
+  if (ahora - (ultimoAviso.get(clave) || 0) < AVISO_ESPERA) return;
+  ultimoAviso.set(clave, ahora);
+  void responderDirecto(destJid, texto);
+}
+
 const messages        = [];
 let   availableGroups = [];
 const monitoredGroups = new Set();
@@ -88,6 +144,20 @@ app.post('/send', async (req, res) => {
     console.error(`[send] ✗ ${e.message}`);
     res.status(500).json({ error: e.message });
   }
+});
+
+// La planilla pide responderle al guardia (ej.: presencia confirmada), por mensaje privado.
+// El destinatario sale del mensaje original (quotedId) o, si no está, del teléfono recibido.
+app.post('/reply', async (req, res) => {
+  const { quotedId, phone, text } = req.body || {};
+  if (!text || (!quotedId && !phone)) return res.status(400).json({ error: 'text y (quotedId o phone) requeridos' });
+  if (!RESPONDER) return res.json({ ok: false, disabled: true });
+  const raw = rawMsgs.get(String(quotedId || ''));
+  const senderJid = raw?.key?.participant || raw?.participant || '';
+  const dest = jidDelGuardia(phone, senderJid);
+  if (!dest) return res.json({ ok: false, error: 'sin destinatario' });
+  const ok = await responderDirecto(dest, String(text).slice(0, 500));
+  res.json({ ok });
 });
 
 app.get('/qr', async (req, res) => {
@@ -351,7 +421,12 @@ async function startWA() {
       const pushName  = msg.pushName || rawId;
       if (isLid && !phone) console.log(`  ⚠ LID sin mapa aún: ${rawId} (${pushName}) — esperando sync de contactos`);
 
-      const msgType         = Object.keys(msg.message || {})[0] || '';
+      // Cuando WhatsApp renueva la clave del grupo, el mensaje real viaja junto con un
+      // senderKeyDistributionMessage (a veces como primera clave). El tipo es el del contenido real;
+      // solo si no hay otro contenido es un mensaje de protocolo.
+      const clavesMsg       = Object.keys(msg.message || {});
+      const msgType         = clavesMsg.find((k) => k !== 'senderKeyDistributionMessage' && k !== 'messageContextInfo')
+                           || clavesMsg[0] || '';
       const hasPhoto        = msgType === 'imageMessage';
       const hasLiveLocation = msgType === 'liveLocationMessage';
       const hasLocation     = msgType === 'locationMessage' || hasLiveLocation;
@@ -410,6 +485,21 @@ async function startWA() {
           if (messages.length > MAX_MSGS) messages.pop();
           console.log(`  [protocol] ${groupName} | ${pushName}: clave WA renovada - pedirle que reenvie`);
         }
+        // Avisos al guardia (no a los mensajes propios del bridge): ubicación fija o "presente" sin foto.
+        if (!msg.key.fromMe) {
+          const dest   = jidDelGuardia(phone, senderJid);
+          const nombre = nombrePila(pushName);
+          const saludo = nombre ? `Hola ${nombre}, ` : 'Hola, ';
+          if (msgType === 'locationMessage') {
+            guardarRaw(msg);
+            avisarUnaVez(dest, 'estatica',
+              `⚠️ ${saludo}la ubicación que enviaste al grupo ${groupName} es una ubicación fija y no sirve para registrar tu ingreso. Enviá tu *ubicación en tiempo real* (Adjuntar → Ubicación → Compartir ubicación en tiempo real) o una *foto*.`);
+          } else if (/presente/i.test(text) && msgType !== 'senderKeyDistributionMessage') {
+            guardarRaw(msg);
+            avisarUnaVez(dest, 'solo-texto',
+              `⚠️ ${saludo}para registrar tu ingreso en el grupo ${groupName} enviá una *foto* o tu *ubicación en tiempo real*. El texto solo no alcanza.`);
+          }
+        }
         console.log(`  [skip] ${groupName} | ${pushName}: type=${msgType} text="${text.slice(0, 80)}"`);
         continue;
       }
@@ -436,6 +526,15 @@ async function startWA() {
 
       messages.unshift(entry);
       if (messages.length > MAX_MSGS) messages.pop();
+
+      // Acuse de recibo por mensaje privado (el de confirmación lo manda la planilla cuando el
+      // operador confirma la presencia).
+      if (RESPONDER && !msg.key.fromMe) {
+        guardarRaw(msg);
+        const nombre = nombrePila(pushName);
+        avisarUnaVez(jidDelGuardia(phone, senderJid), 'recibido',
+          `📥 ${nombre ? `${nombre}, r` : 'R'}ecibimos tu mensaje del grupo ${groupName}. En breve el Centro de Control confirma tu presencia.`);
+      }
     }
   });
 }

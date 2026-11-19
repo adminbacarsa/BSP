@@ -724,8 +724,52 @@ type GuardRowModel = {
   coveredByName?: string;
 };
 
-const SHEET_COLS =
-  'grid-cols-[3px_minmax(160px,1.5fr)_minmax(130px,1.1fr)_96px_52px_5.5rem_5.5rem_5.5rem_5.5rem_6.5rem_4.5rem_6.5rem_minmax(11rem,auto)]';
+const COLS_DEFAULT =
+  '3px minmax(270px,2.2fr) minmax(130px,1fr) 96px 52px 5.5rem 5.5rem 5.5rem 5.5rem 6.5rem 4.5rem 6.5rem minmax(11rem,auto)';
+
+const SHEET_COLS = 'grid-cols-[var(--mr-cols)]';
+
+/** Anchos mínimos (px) de las 12 columnas ajustables: Guardia … Acción. */
+const COLS_MIN = [150, 90, 60, 40, 60, 60, 60, 60, 50, 50, 80, 140];
+const COLS_ANCHOS_KEY = 'mr-col-anchos-v1';
+
+function plantillaColumnas(anchos: number[] | null): string {
+  if (!anchos || anchos.length !== COLS_MIN.length) return COLS_DEFAULT;
+  const fijos = anchos.slice(0, -1).map((w) => `${Math.round(w)}px`).join(' ');
+  return `3px ${fijos} minmax(${Math.round(anchos[anchos.length - 1])}px,1fr)`;
+}
+
+function CabeceraCol({
+  idx,
+  onResizeStart,
+  onResizeReset,
+  className,
+  title,
+  children,
+}: {
+  idx: number;
+  onResizeStart: (idx: number, e: React.PointerEvent<HTMLSpanElement>) => void;
+  onResizeReset: () => void;
+  className?: string;
+  title?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <span className={`relative ${className || ''}`} title={title}>
+      {children}
+      <span
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Ajustar ancho de columna. Doble clic restablece"
+        title="Arrastrá para ajustar el ancho · doble clic restablece todas"
+        onPointerDown={(e) => onResizeStart(idx, e)}
+        onDoubleClick={onResizeReset}
+        onClick={(e) => e.stopPropagation()}
+        className="absolute right-0 top-0 z-20 h-full w-2 cursor-col-resize touch-none select-none hover:bg-indigo-300/60 active:bg-indigo-400/70"
+      />
+    </span>
+  );
+}
 
 type OrdenModo = 'prioridad' | 'alfabetico' | 'cliente' | 'horario' | 'manual';
 
@@ -738,6 +782,50 @@ const ORDEN_OPCIONES: Array<{ id: OrdenModo; label: string; title: string; icon:
   { id: 'horario', label: 'Horario', title: 'Primero los objetivos cuyo turno empieza antes', icon: Clock },
   { id: 'manual', label: 'Manual', title: 'Arrastrá los objetivos al lugar que quieras', icon: Hand },
 ];
+
+/** Texto que el bridge le manda al guardia cuando el operador confirma su ingreso. */
+function textoConfirmacionWA(nombreCompleto: string, hora: string, turno?: TurnoHoy): string {
+  const crudo = String(nombreCompleto || '').trim();
+  const pila = (crudo.includes(',') ? crudo.split(',')[1] : crudo).trim().split(/\s+/)[0] || '';
+  const nombre = pila ? pila.charAt(0).toUpperCase() + pila.slice(1).toLowerCase() : '';
+  const tramo =
+    turno && turno.bloquesTotal && turno.bloquesTotal > 1 && turno.bloque
+      ? ` (tramo ${turno.bloque} de ${turno.bloquesTotal})`
+      : '';
+  const donde = turno?.obj && turno.obj !== '—' ? ` en ${turno.obj}` : '';
+  return `✅ ${nombre ? `${nombre}, ` : ''}recibimos tu ingreso y se confirmó tu presencia a las ${hora}${tramo}${donde}. ¡Gracias!`;
+}
+
+function RelojCabecera() {
+  const [ahora, setAhora] = useState(() => new Date());
+  useEffect(() => {
+    const t = setInterval(() => setAhora(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const hora = ahora.toLocaleTimeString('es-AR', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+  const fecha = ahora.toLocaleDateString('es-AR', {
+    weekday: 'short',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
+  return (
+    <div
+      className="ml-auto flex items-center gap-2 px-3 py-1 rounded-2xl bg-slate-900 text-white shadow-sm"
+      title="Hora actual"
+      aria-label={`Hora actual ${hora}`}
+    >
+      <Clock size={14} className="text-emerald-400" />
+      <span className="font-mono text-lg font-black leading-none tabular-nums tracking-wide">{hora}</span>
+      <span className="text-[10px] font-semibold uppercase text-slate-300 leading-none">{fecha}</span>
+    </div>
+  );
+}
 
 function ChipIcono({
   icon: Icono,
@@ -1670,7 +1758,7 @@ function GuardRow({
       title={retiroTexto || undefined}
     >
       <div className={`self-stretch rounded-full ${barClass(row.estado)}`} />
-      <div className="truncate text-sm font-medium text-slate-800">
+      <div className="min-w-0 break-words text-sm font-medium leading-tight text-slate-800" title={row.employeeName}>
         {row.employeeName}
         {esTramoCortado(row.turno) && (
           <span
@@ -2033,10 +2121,12 @@ function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): num
 function WACard({
   entry,
   onConfirm,
+  onDismiss,
   busy,
 }: {
   entry: WAEntry;
   onConfirm: () => void;
+  onDismiss: () => void;
   busy?: boolean;
 }) {
   const thumb =
@@ -2105,6 +2195,15 @@ function WACard({
         >
           Confirmar
         </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={onDismiss}
+          title="Descartar este mensaje sin marcar presencia (duplicado o error)"
+          className="px-2 py-0.5 bg-white hover:bg-red-50 text-red-600 border border-red-200 text-[9px] font-bold rounded-lg transition-colors disabled:opacity-50"
+        >
+          Descartar
+        </button>
       </div>
     </div>
   );
@@ -2139,6 +2238,7 @@ function ConfirmedCard({ entry }: { entry: WAConfirmedEntry }) {
 
 function WASidebar({
   wa,
+  confirmados,
   collapsed,
   onExpand,
   onCollapse,
@@ -2151,8 +2251,11 @@ function WASidebar({
   LOG_PAGE: pageSize,
   busy,
   onConfirmEntry,
+  onDismissEntry,
 }: {
   wa: UseWABridgeReturn;
+  /** Check-ins WA confirmados hoy desde cualquier sesión (sale de la planilla compartida). */
+  confirmados: WAConfirmedEntry[];
   collapsed: boolean;
   onExpand: () => void;
   onCollapse: () => void;
@@ -2165,8 +2268,9 @@ function WASidebar({
   LOG_PAGE: number;
   busy: boolean;
   onConfirmEntry: (entry: WAEntry) => void;
+  onDismissEntry: (entry: WAEntry) => void;
 }) {
-  const filtered = wa.confirmedEntries.filter(
+  const filtered = confirmados.filter(
     (e) => !logFilter || e.name.toLowerCase().includes(logFilter.toLowerCase()),
   );
   const visible = filtered.slice(0, logPage * pageSize);
@@ -2252,12 +2356,13 @@ function WASidebar({
               entry={entry}
               busy={busy}
               onConfirm={() => onConfirmEntry(entry)}
+              onDismiss={() => onDismissEntry(entry)}
             />
           ))
         )}
       </div>
 
-      {wa.confirmedEntries.length > 0 && (
+      {confirmados.length > 0 && (
         <div className="border-t border-slate-200 flex-shrink-0 max-h-[45%] flex flex-col">
           <div className="px-3 py-2 flex items-center gap-2">
             <button
@@ -2268,20 +2373,20 @@ function WASidebar({
               {logOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
               Confirmados hoy
               <span className="px-1.5 py-0.5 bg-slate-100 rounded-full text-[9px]">
-                {wa.confirmedEntries.length}
+                {confirmados.length}
               </span>
             </button>
             <span
               className="ml-auto text-[9px] font-semibold text-slate-400"
-              title="El registro de confirmados queda fijo durante el día"
+              title="Incluye lo confirmado desde todas las pantallas y sesiones"
             >
               <Lock size={10} className="inline -mt-0.5 mr-0.5" aria-hidden />
-              Fijo
+              Todas las sesiones
             </span>
           </div>
           {logOpen && (
             <div className="overflow-y-auto flex-1 min-h-0">
-              {wa.confirmedEntries.length > pageSize && (
+              {confirmados.length > pageSize && (
                 <div className="px-3 pb-2">
                   <input
                     placeholder="Filtrar…"
@@ -2371,6 +2476,76 @@ export default function ModoRapidoPage() {
   const sheetRef = useRef<HTMLDivElement>(null);
   const [ordenModo, setOrdenModo] = useState<OrdenModo>('prioridad');
   const [horarioDir, setHorarioDir] = useState<'asc' | 'desc'>('asc');
+  const [colAnchos, setColAnchos] = useState<number[] | null>(null);
+  const cabeceraRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem(COLS_ANCHOS_KEY) || 'null') as unknown;
+      if (
+        Array.isArray(raw) &&
+        raw.length === COLS_MIN.length &&
+        raw.every((n) => typeof n === 'number' && Number.isFinite(n) && n > 0)
+      ) {
+        setColAnchos(raw as number[]);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  function restablecerColumnas() {
+    setColAnchos(null);
+    try {
+      localStorage.removeItem(COLS_ANCHOS_KEY);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function iniciarAjusteColumna(idx: number, e: React.PointerEvent<HTMLSpanElement>) {
+    e.preventDefault();
+    e.stopPropagation();
+    const cab = cabeceraRef.current;
+    if (!cab) return;
+    const base =
+      colAnchos && colAnchos.length === COLS_MIN.length
+        ? [...colAnchos]
+        : Array.from({ length: COLS_MIN.length }, (_, i) => {
+            const el = cab.children[i + 1] as HTMLElement | undefined;
+            return Math.max(COLS_MIN[i], Math.round(el?.getBoundingClientRect().width || COLS_MIN[i]));
+          });
+    const inicioX = e.clientX;
+    const anchoInicial = base[idx];
+    let ultimo = base;
+    let movido = false;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    const mover = (ev: PointerEvent) => {
+      movido = true;
+      const siguiente = [...base];
+      siguiente[idx] = Math.max(COLS_MIN[idx], Math.round(anchoInicial + ev.clientX - inicioX));
+      ultimo = siguiente;
+      setColAnchos(siguiente);
+    };
+    const soltar = () => {
+      window.removeEventListener('pointermove', mover);
+      window.removeEventListener('pointerup', soltar);
+      window.removeEventListener('pointercancel', soltar);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      if (!movido) return;
+      try {
+        localStorage.setItem(COLS_ANCHOS_KEY, JSON.stringify(ultimo));
+      } catch {
+        /* ignore */
+      }
+    };
+    window.addEventListener('pointermove', mover);
+    window.addEventListener('pointerup', soltar);
+    window.addEventListener('pointercancel', soltar);
+  }
   const [ordenManual, setOrdenManual] = useState<string[]>([]);
   const [dragObj, setDragObj] = useState<string | null>(null);
   const [dropObj, setDropObj] = useState<string | null>(null);
@@ -2663,6 +2838,39 @@ export default function ModoRapidoPage() {
       }),
     );
   }, [turnos, tramosExtra, wa, nowMs, presenciaMeta, cerrados]);
+
+  // «Confirmados hoy» sale de la planilla compartida (presencias con fuente WA), no de lo que
+  // confirmó esta sesión: así se ven los de todos los operadores. De la sesión local se toma
+  // solo la ubicación, que no queda guardada en el turno.
+  const confirmadosHoy = useMemo((): WAConfirmedEntry[] => {
+    const locales = new Map(
+      wa.confirmedEntries.filter((e) => e.rowId).map((e) => [e.rowId as string, e]),
+    );
+    const vistos = new Set<string>();
+    const lista: WAConfirmedEntry[] = [];
+    classifiedRows.forEach((row) => {
+      if (row.fuente !== 'WA' || row.estado === 'PENDIENTE_WA') return;
+      const rowId = row.turno.rowId;
+      if (vistos.has(rowId)) return;
+      vistos.add(rowId);
+      const local = locales.get(rowId);
+      lista.push({
+        rowId,
+        name: row.employeeName,
+        arrivedAt: row.realDisplay !== '—' ? row.realDisplay : local?.arrivedAt || '',
+        shift: row.turno.shift,
+        obj: row.turno.obj,
+        phone: row.turno.phone,
+        lat: local?.lat,
+        lng: local?.lng,
+      });
+    });
+    wa.confirmedEntries.forEach((e) => {
+      if (e.rowId && vistos.has(e.rowId)) return;
+      lista.push(e);
+    });
+    return lista.sort((a, b) => String(b.arrivedAt).localeCompare(String(a.arrivedAt)));
+  }, [classifiedRows, wa.confirmedEntries]);
 
   const stats = useMemo(() => {
     let critico = 0;
@@ -3758,6 +3966,7 @@ export default function ModoRapidoPage() {
           entry.arrivedAt || nowHHMM(),
           'WA',
         );
+        wa.responder(entry, textoConfirmacionWA(row.employeeName, entry.arrivedAt || nowHHMM(), row.turno));
       }
       showToast(`Confirmado WA · ${row.employeeName}`, 'bg-emerald-700');
     } catch (err) {
@@ -3767,6 +3976,11 @@ export default function ModoRapidoPage() {
       setBusy(false);
     }
   };
+
+  function descartarCheckIn(entry: WAEntry) {
+    wa.dismissEntry(entry);
+    showToast(`Check-in descartado · ${entry.name}`, 'bg-slate-700');
+  }
 
   const handleConfirmEntrySidebar = async (entry: WAEntry) => {
     if (busy) return;
@@ -3784,6 +3998,10 @@ export default function ModoRapidoPage() {
           { name: empName, expected },
           entry.arrivedAt || nowHHMM(),
           'WA',
+        );
+        wa.responder(
+          entry,
+          textoConfirmacionWA(empName, entry.arrivedAt || nowHHMM(), Object.values(turnos).find((t) => t.rowId === entry.rowId)),
         );
       }
       showToast(`Confirmado WA · ${entry.name}`, 'bg-emerald-700');
@@ -3944,6 +4162,11 @@ export default function ModoRapidoPage() {
         void handleConfirmarWA(row);
         return;
       }
+      if (e.key === 'Delete' && row.estado === 'PENDIENTE_WA' && row.pendingEntry) {
+        e.preventDefault();
+        descartarCheckIn(row.pendingEntry);
+        return;
+      }
       if (k === 'a') {
         setHourEdit(null);
         setArm({ kind: 'ausente', rowId: row.turno.rowId });
@@ -4075,6 +4298,8 @@ export default function ModoRapidoPage() {
               className="w-full pl-7 pr-2 py-1.5 text-[11px] border border-slate-200 rounded-xl bg-slate-50 focus:outline-none focus:ring-1 focus:ring-emerald-400"
             />
           </div>
+
+          <RelojCabecera />
 
           <div className="ml-auto flex items-center gap-2">
             <span className="text-[10px] text-slate-400">
@@ -4331,7 +4556,7 @@ export default function ModoRapidoPage() {
               return `${titulo} desde ${from?.employeeName || '—'}. Elegí el otro guardia con las flechas.`;
             }
             if (activeRow.estado === 'PENDIENTE_WA') {
-              return `WA pendiente · ${activeRow.employeeName} ${activeRow.realDisplay}. W o Enter confirma la hora del mensaje.`;
+              return `WA pendiente · ${activeRow.employeeName} ${activeRow.realDisplay}. W o Enter confirma la hora del mensaje. Supr lo descarta.`;
             }
             if (activeRow.estado === 'CERRADO') {
               return `Cerrado · ${activeRow.employeeName}. Ing. R. ${activeRow.realDisplay}, Egr. R. ${activeRow.salidaReal || '—'}. H corrige el ingreso real. Clic en Egr. R. corrige el egreso real.`;
@@ -4357,34 +4582,47 @@ export default function ModoRapidoPage() {
                 Sin resultados para el filtro actual
               </div>
             ) : (
-              <div className="min-w-[1280px]">
-                <div className={`grid ${SHEET_COLS} ${SHEET_ALIGN} ${SHEET_SHADE} sticky top-0 z-10 border-b border-slate-200 text-[9px] font-bold uppercase text-slate-500 [&>*]:py-2 [&>*:not(:first-child)]:border-r [&>*:not(:first-child)]:border-slate-200 [&>*:last-child]:border-r-0`}>
+              <div
+                className={colAnchos ? undefined : 'min-w-[1280px]'}
+                style={
+                  {
+                    '--mr-cols': plantillaColumnas(colAnchos),
+                    ...(colAnchos ? { minWidth: 3 + colAnchos.reduce((a, b) => a + b, 0) } : {}),
+                  } as React.CSSProperties
+                }
+              >
+                <div
+                  ref={cabeceraRef}
+                  className={`grid ${SHEET_COLS} ${SHEET_ALIGN} ${SHEET_SHADE} sticky top-0 z-10 border-b border-slate-200 text-[9px] font-bold uppercase text-slate-500 [&>*]:py-2 [&>*:not(:first-child)]:border-r [&>*:not(:first-child)]:border-slate-200 [&>*:last-child]:border-r-0`}
+                >
                   <span />
-                  <span>Guardia</span>
-                  <span>Objetivo</span>
-                  <span>Puesto</span>
-                  <span>Cód</span>
-                  <button
-                    type="button"
-                    onClick={alternarOrdenHorario}
-                    title="Ingreso planificado. Clic ordena por horario: ascendente, descendente, y vuelve a prioridad"
-                    aria-label="Ordenar por horario programado"
-                    className={`whitespace-nowrap text-left uppercase font-bold flex items-center gap-0.5 hover:text-indigo-600 ${
-                      ordenModo === 'horario' ? 'text-indigo-600' : ''
-                    }`}
-                  >
-                    Ing. P.
-                    {ordenModo === 'horario' && (
-                      <span aria-hidden className="text-[8px]">{horarioDir === 'asc' ? '▲' : '▼'}</span>
-                    )}
-                  </button>
-                  <span className="whitespace-nowrap font-black" title="Ingreso real">Ing. R.</span>
-                  <span className="whitespace-nowrap" title="Egreso planificado">Egr. P.</span>
-                  <span className="whitespace-nowrap font-black" title="Egreso real">Egr. R.</span>
-                  <span>Dif</span>
-                  <span>Fuente</span>
-                  <span>Estado</span>
-                  <span>Acción</span>
+                  <CabeceraCol idx={0} onResizeStart={iniciarAjusteColumna} onResizeReset={restablecerColumnas}>Guardia</CabeceraCol>
+                  <CabeceraCol idx={1} onResizeStart={iniciarAjusteColumna} onResizeReset={restablecerColumnas}>Objetivo</CabeceraCol>
+                  <CabeceraCol idx={2} onResizeStart={iniciarAjusteColumna} onResizeReset={restablecerColumnas}>Puesto</CabeceraCol>
+                  <CabeceraCol idx={3} onResizeStart={iniciarAjusteColumna} onResizeReset={restablecerColumnas}>Cód</CabeceraCol>
+                  <CabeceraCol idx={4} onResizeStart={iniciarAjusteColumna} onResizeReset={restablecerColumnas}>
+                    <button
+                      type="button"
+                      onClick={alternarOrdenHorario}
+                      title="Ingreso planificado. Clic ordena por horario: ascendente, descendente, y vuelve a prioridad"
+                      aria-label="Ordenar por horario programado"
+                      className={`whitespace-nowrap text-left uppercase font-bold flex items-center gap-0.5 hover:text-indigo-600 ${
+                        ordenModo === 'horario' ? 'text-indigo-600' : ''
+                      }`}
+                    >
+                      Ing. P.
+                      {ordenModo === 'horario' && (
+                        <span aria-hidden className="text-[8px]">{horarioDir === 'asc' ? '▲' : '▼'}</span>
+                      )}
+                    </button>
+                  </CabeceraCol>
+                  <CabeceraCol idx={5} onResizeStart={iniciarAjusteColumna} onResizeReset={restablecerColumnas} className="whitespace-nowrap font-black" title="Ingreso real">Ing. R.</CabeceraCol>
+                  <CabeceraCol idx={6} onResizeStart={iniciarAjusteColumna} onResizeReset={restablecerColumnas} className="whitespace-nowrap" title="Egreso planificado">Egr. P.</CabeceraCol>
+                  <CabeceraCol idx={7} onResizeStart={iniciarAjusteColumna} onResizeReset={restablecerColumnas} className="whitespace-nowrap font-black" title="Egreso real">Egr. R.</CabeceraCol>
+                  <CabeceraCol idx={8} onResizeStart={iniciarAjusteColumna} onResizeReset={restablecerColumnas}>Dif</CabeceraCol>
+                  <CabeceraCol idx={9} onResizeStart={iniciarAjusteColumna} onResizeReset={restablecerColumnas}>Fuente</CabeceraCol>
+                  <CabeceraCol idx={10} onResizeStart={iniciarAjusteColumna} onResizeReset={restablecerColumnas}>Estado</CabeceraCol>
+                  <CabeceraCol idx={11} onResizeStart={iniciarAjusteColumna} onResizeReset={restablecerColumnas}>Acción</CabeceraCol>
                 </div>
                 <RetenePanel
                   rows={reteneRows}
@@ -4476,6 +4714,7 @@ export default function ModoRapidoPage() {
             collapsed={sidebarCollapsed}
             onExpand={() => setSidebar(false)}
             onCollapse={() => setSidebar(true)}
+            confirmados={confirmadosHoy}
             logOpen={logOpen}
             setLogOpen={setLogOpen}
             logFilter={logFilter}
@@ -4485,6 +4724,7 @@ export default function ModoRapidoPage() {
             LOG_PAGE={LOG_PAGE}
             busy={busy}
             onConfirmEntry={(e) => void handleConfirmEntrySidebar(e)}
+            onDismissEntry={(e) => descartarCheckIn(e)}
           />
         </div>
 
