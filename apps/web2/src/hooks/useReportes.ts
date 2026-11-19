@@ -33,6 +33,7 @@ import {
     isHoursCoreEnabled,
     huecosPlanificadosCortado,
     solapeHuecosMs,
+    tramosPlanificadosCortado,
 } from '@cosp/hours-core';
 import {
     fetchReportAjustesHoras,
@@ -503,7 +504,23 @@ export function resolveLiquidationPlannedWindow(
     hasCoverageAdjust: boolean;
     isEarlyDisplay: boolean;
     isExtDisplay: boolean;
+    tramos: { start: Date; end: Date }[] | null;
 } {
+    const tramosCortado = tramosPlanificadosCortado(shift);
+    if (tramosCortado) {
+        const inicio = new Date(tramosCortado[0].startMs);
+        const fin = new Date(tramosCortado[tramosCortado.length - 1].endMs);
+        return {
+            start: inicio,
+            end: fin,
+            bandStart: inicio,
+            bandEnd: fin,
+            hasCoverageAdjust: false,
+            isEarlyDisplay: false,
+            isExtDisplay: false,
+            tramos: tramosCortado.map((t) => ({ start: new Date(t.startMs), end: new Date(t.endMs) })),
+        };
+    }
     const bandStart = new Date(plannedStart);
     const bandEnd = new Date(plannedEnd);
     let dispStart = new Date(plannedStart);
@@ -556,6 +573,7 @@ export function resolveLiquidationPlannedWindow(
         hasCoverageAdjust,
         isEarlyDisplay: isEarly,
         isExtDisplay: isExt,
+        tramos: null,
     };
 }
 

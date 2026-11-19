@@ -1376,6 +1376,7 @@ export default function ReportsPage() {
                     planDisplayEnd: planEnd,
                     bandStart: plannedWindow.bandStart,
                     bandEnd: plannedWindow.bandEnd,
+                    tramosPlan: plannedWindow.tramos,
                     hasCoverageAdjust: plannedWindow.hasCoverageAdjust,
                     isEarlyStartRow: plannedWindow.isEarlyDisplay,
                     isExtendedRow: plannedWindow.isExtDisplay,
@@ -1578,7 +1579,9 @@ export default function ReportsPage() {
                                             ) : (
                                                 <div className="flex flex-col gap-0.5">
                                                     <span className={row.hasCoverageAdjust ? 'text-indigo-700 font-bold' : 'text-slate-600'}>
-                                                        {fmt(row.planDisplayStart)}–{fmt(row.planDisplayEnd)}
+                                                        {Array.isArray(row.tramosPlan) && row.tramosPlan.length >= 2
+                                                            ? row.tramosPlan.map((t: { start: Date; end: Date }) => `${fmt(t.start)}–${fmt(t.end)}`).join(' + ')
+                                                            : `${fmt(row.planDisplayStart)}–${fmt(row.planDisplayEnd)}`}
                                                     </span>
                                                     {row.hasCoverageAdjust && (
                                                         <span className="text-[9px] text-slate-400 font-sans normal-case font-medium">
