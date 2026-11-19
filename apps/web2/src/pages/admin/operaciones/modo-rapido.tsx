@@ -727,7 +727,7 @@ type GuardRowModel = {
 const SHEET_COLS =
   'grid-cols-[3px_minmax(160px,1.5fr)_minmax(130px,1.1fr)_96px_52px_5.5rem_5.5rem_5.5rem_5.5rem_6.5rem_4.5rem_6.5rem_minmax(11rem,auto)]';
 
-type OrdenModo = 'prioridad' | 'alfabetico' | 'cliente' | 'manual';
+type OrdenModo = 'prioridad' | 'alfabetico' | 'cliente' | 'horario' | 'manual';
 
 type IconoSheet = LucideIcon;
 
@@ -735,6 +735,7 @@ const ORDEN_OPCIONES: Array<{ id: OrdenModo; label: string; title: string; icon:
   { id: 'prioridad', label: 'Prioridad', title: 'Primero los objetivos con problemas', icon: Flame },
   { id: 'alfabetico', label: 'A–Z', title: 'Objetivos por orden alfabético', icon: ArrowDownAZ },
   { id: 'cliente', label: 'Cliente', title: 'Agrupados por cliente', icon: Users },
+  { id: 'horario', label: 'Horario', title: 'Primero los objetivos cuyo turno empieza antes', icon: Clock },
   { id: 'manual', label: 'Manual', title: 'Arrastrá los objetivos al lugar que quieras', icon: Hand },
 ];
 
@@ -2369,6 +2370,7 @@ export default function ModoRapidoPage() {
   const [pantallaCompleta, setPantallaCompleta] = useState(false);
   const sheetRef = useRef<HTMLDivElement>(null);
   const [ordenModo, setOrdenModo] = useState<OrdenModo>('prioridad');
+  const [horarioDir, setHorarioDir] = useState<'asc' | 'desc'>('asc');
   const [ordenManual, setOrdenManual] = useState<string[]>([]);
   const [dragObj, setDragObj] = useState<string | null>(null);
   const [dropObj, setDropObj] = useState<string | null>(null);
@@ -2713,10 +2715,26 @@ export default function ModoRapidoPage() {
     const clienteDe = (obj: string) => clientePorObj[obj] || SIN_CLIENTE;
     const posManual = new Map<string, number>();
     ordenManual.forEach((n, i) => posManual.set(n, i));
+    const inicioMs = (r: GuardRowModel): number => {
+      const ms = toStartMs(r.turno.startTimeRaw);
+      return Number.isNaN(ms) ? Number.MAX_SAFE_INTEGER : ms;
+    };
+    const primerInicio = (rows: GuardRowModel[]): number => Math.min(...rows.map(inicioMs));
+    const signo = horarioDir === 'desc' ? -1 : 1;
     return Array.from(map.entries())
-      .map(([name, rows]) => [name, [...rows].sort((a, b) => rowRank(a) - rowRank(b) || a.turno.expected.localeCompare(b.turno.expected))] as [string, GuardRowModel[]])
+      .map(([name, rows]) => [
+        name,
+        [...rows].sort((a, b) =>
+          ordenModo === 'horario'
+            ? signo * (inicioMs(a) - inicioMs(b)) || rowRank(a) - rowRank(b) || compararTexto(a.employeeName, b.employeeName)
+            : rowRank(a) - rowRank(b) || a.turno.expected.localeCompare(b.turno.expected),
+        ),
+      ] as [string, GuardRowModel[]])
       .sort((a, b) => {
         if (ordenModo === 'alfabetico') return compararTexto(a[0], b[0]);
+        if (ordenModo === 'horario') {
+          return signo * (primerInicio(a[1]) - primerInicio(b[1])) || compararTexto(a[0], b[0]);
+        }
         if (ordenModo === 'cliente') {
           const ca = clienteDe(a[0]);
           const cb = clienteDe(b[0]);
@@ -2733,7 +2751,7 @@ export default function ModoRapidoPage() {
         const rb = Math.min(...b[1].map(rowRank));
         return ra - rb || a[0].localeCompare(b[0]);
       });
-  }, [filteredRows, ordenModo, ordenManual, clientePorObj]);
+  }, [filteredRows, ordenModo, ordenManual, clientePorObj, horarioDir]);
 
   useEffect(() => {
     try {
@@ -2741,25 +2759,40 @@ export default function ModoRapidoPage() {
       if (!raw) {
         setOrdenModo('prioridad');
         setOrdenManual([]);
+        setHorarioDir('asc');
         return;
       }
-      const parsed = JSON.parse(raw) as { modo?: OrdenModo; manual?: unknown };
+      const parsed = JSON.parse(raw) as { modo?: OrdenModo; manual?: unknown; dir?: string };
       const modo = ORDEN_OPCIONES.some((o) => o.id === parsed.modo) ? (parsed.modo as OrdenModo) : 'prioridad';
       setOrdenModo(modo);
       setOrdenManual(Array.isArray(parsed.manual) ? parsed.manual.map((x) => String(x)) : []);
+      setHorarioDir(parsed.dir === 'desc' ? 'desc' : 'asc');
     } catch {
       setOrdenModo('prioridad');
       setOrdenManual([]);
+      setHorarioDir('asc');
     }
   }, [ordenKey]);
 
-  function guardarOrden(modo: OrdenModo, manual: string[]) {
+  function guardarOrden(modo: OrdenModo, manual: string[], dir: 'asc' | 'desc' = horarioDir) {
     setOrdenModo(modo);
     setOrdenManual(manual);
+    setHorarioDir(dir);
     try {
-      localStorage.setItem(ordenKey, JSON.stringify({ modo, manual }));
+      localStorage.setItem(ordenKey, JSON.stringify({ modo, manual, dir }));
     } catch {
       /* sin almacenamiento: el orden vale solo para esta sesión */
+    }
+  }
+
+  /** Clic en el título «Ing. P.»: horario programado ascendente, luego descendente, luego vuelve a Prioridad. */
+  function alternarOrdenHorario() {
+    if (ordenModo !== 'horario') {
+      guardarOrden('horario', ordenManual, 'asc');
+    } else if (horarioDir === 'asc') {
+      guardarOrden('horario', ordenManual, 'desc');
+    } else {
+      guardarOrden('prioridad', ordenManual, 'asc');
     }
   }
 
@@ -3077,6 +3110,13 @@ export default function ModoRapidoPage() {
           'MANUAL_RADIO',
         );
         showToast(`Radio · ${row.employeeName} ${normal}`, 'bg-emerald-700');
+        // Carga seguida de presentes: el foco pasa al guardia siguiente, no se queda en el que se marcó.
+        const idxActual = sheetRows.findIndex((r) => r.turno.rowId === row.turno.rowId);
+        const siguiente = idxActual >= 0 ? sheetRows[idxActual + 1] : undefined;
+        if (siguiente) {
+          setActiveRowId(siguiente.turno.rowId);
+          setGroupOpen((prev) => ({ ...prev, [siguiente.turno.obj || '—']: true }));
+        }
       }
     } catch (err) {
       console.warn('[modo-rapido] guardarHora', err);
@@ -4209,7 +4249,11 @@ export default function ModoRapidoPage() {
                       guardarOrden('manual', groups.map(([k]) => k));
                       return;
                     }
-                    guardarOrden(o.id, ordenManual);
+                    if (o.id === 'horario' && ordenModo === 'horario') {
+                      guardarOrden('horario', ordenManual, horarioDir === 'asc' ? 'desc' : 'asc');
+                      return;
+                    }
+                    guardarOrden(o.id, ordenManual, 'asc');
                   }}
                   className={`flex items-center justify-center w-7 h-7 rounded-lg border ${
                     ordenModo === o.id
@@ -4320,7 +4364,20 @@ export default function ModoRapidoPage() {
                   <span>Objetivo</span>
                   <span>Puesto</span>
                   <span>Cód</span>
-                  <span className="whitespace-nowrap" title="Ingreso planificado">Ing. P.</span>
+                  <button
+                    type="button"
+                    onClick={alternarOrdenHorario}
+                    title="Ingreso planificado. Clic ordena por horario: ascendente, descendente, y vuelve a prioridad"
+                    aria-label="Ordenar por horario programado"
+                    className={`whitespace-nowrap text-left uppercase font-bold flex items-center gap-0.5 hover:text-indigo-600 ${
+                      ordenModo === 'horario' ? 'text-indigo-600' : ''
+                    }`}
+                  >
+                    Ing. P.
+                    {ordenModo === 'horario' && (
+                      <span aria-hidden className="text-[8px]">{horarioDir === 'asc' ? '▲' : '▼'}</span>
+                    )}
+                  </button>
                   <span className="whitespace-nowrap font-black" title="Ingreso real">Ing. R.</span>
                   <span className="whitespace-nowrap" title="Egreso planificado">Egr. P.</span>
                   <span className="whitespace-nowrap font-black" title="Egreso real">Egr. R.</span>

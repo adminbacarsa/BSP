@@ -89,6 +89,8 @@ export interface UseWABridgeReturn {
 
 interface BridgeMsg {
   id: string;
+  /** Epoch ms real del mensaje en WhatsApp. */
+  ts?: number;
   name: string;
   phone: string;
   time: string;
@@ -110,6 +112,12 @@ function todayKey(): string {
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
+}
+
+function inicioDeHoyMs(): number {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
 }
 
 let _lsEmpresaId: string | null = null;
@@ -307,6 +315,10 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
         seenIdsRef.current.add(m.id);
 
         if (m.type === 'protocol') continue;
+
+        // Mensajes de días anteriores (el bridge guarda los últimos y al cambiar de día
+        // el puntero se reinicia): nunca son una llegada de hoy.
+        if (typeof m.ts === 'number' && m.ts > 0 && m.ts < inicioDeHoyMs()) continue;
 
         const turno = findTurno(turnosRef.current, m.name, m.phone);
         // Regla 1: sin turno planificado hoy → descartar
