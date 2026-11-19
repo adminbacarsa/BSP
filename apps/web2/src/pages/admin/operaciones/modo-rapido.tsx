@@ -2695,9 +2695,18 @@ export default function ModoRapidoPage() {
     const tramo = indiceTramoDe(turnoId) + 1;
 
     if (tramo === 1) {
+      // `isPresent` es lo que leen el CC clásico, el cierre automático y la protección contra la
+      // ausencia automática (AA): sin él, el guardia figuraba ausente fuera de Modo Rápido. Los campos
+      // de ausencia se limpian igual que en `registrarPresencia` (si el servidor ya lo había marcado AA,
+      // onTurnoWrite lo pasa a Llegada Tarde).
       escribir(
         updateDoc(doc(db, 'turnos', docId), {
           status: 'PRESENT',
+          isPresent: true,
+          isAbsent: false,
+          absenceType: null,
+          absenceDetectedAt: null,
+          isAwaitingCoverageCheckIn: false,
           realStartTime: realTs,
           checkInSource: source,
           checkInAt: serverTimestamp(),
