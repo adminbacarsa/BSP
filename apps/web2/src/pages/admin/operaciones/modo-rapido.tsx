@@ -2564,6 +2564,38 @@ export default function ModoRapidoPage() {
     toastTimerRef.current = setTimeout(() => setToast(null), 3000);
   }, []);
 
+  const wabEnviar = wa.enviar;
+  const wabConectado = wa.status === 'connected';
+
+  /**
+   * Avisa a los guardias por privado desde el bridge de la empresa, uno detrás de otro (con una pausa
+   * corta entre envíos). Si el bridge no está conectado o no confirma el envío, abre wa.me como antes.
+   * Devuelve el texto para sumar al toast.
+   */
+  const avisarPorWhatsApp = useCallback(
+    async (avisos: { phone?: string; texto: string }[]): Promise<string> => {
+      let porBridge = 0;
+      let porWame = 0;
+      let ultimoFueBridge = false;
+      for (const a of avisos) {
+        if (!a.phone) continue;
+        if (ultimoFueBridge) await new Promise((r) => setTimeout(r, 1500));
+        const ok = wabConectado ? await wabEnviar(a.phone, a.texto) : false;
+        ultimoFueBridge = ok;
+        if (ok) {
+          porBridge += 1;
+        } else if (abrirWa(a.phone, a.texto)) {
+          porWame += 1;
+        }
+      }
+      if (porBridge > 0 && porWame === 0) return ' · aviso enviado por WhatsApp';
+      if (porBridge === 0 && porWame > 0) return ' · WhatsApp abierto (bridge sin conexión)';
+      if (porBridge > 0 && porWame > 0) return ' · aviso enviado por WhatsApp (uno abierto a mano)';
+      return '';
+    },
+    [wabEnviar, wabConectado],
+  );
+
   useEffect(() => {
     const t = setInterval(() => setNowMs(Date.now()), 30000);
     return () => clearInterval(t);
@@ -3778,28 +3810,32 @@ export default function ModoRapidoPage() {
         operatorId: user?.uid ?? 'cc-modo-rapido',
         createdAt: serverTimestamp(),
       });
-      const avisoA = abrirWa(
-        candidate.turno.phone,
-        waMensaje.intercambioHecho(
-          candidate.employeeName,
-          coberturaModal.turno.obj,
-          coberturaModal.turno.expected,
-          coberturaModal.salida || '—',
-        ),
-      );
-      const avisoB = abrirWa(
-        coberturaModal.turno.phone,
-        waMensaje.intercambioHecho(
-          coberturaModal.employeeName,
-          candidate.turno.obj,
-          candidate.turno.expected,
-          candidate.salida || '—',
-        ),
-      );
-      showToast(
-        `Intercambio · ${candidate.employeeName} ↔ ${coberturaModal.employeeName}${avisoA || avisoB ? ' · WhatsApp abierto' : ''}`,
-        'bg-blue-700',
-      );
+      const tituloToast = `Intercambio · ${candidate.employeeName} ↔ ${coberturaModal.employeeName}`;
+      const avisos = [
+        {
+          phone: candidate.turno.phone,
+          texto: waMensaje.intercambioHecho(
+            candidate.employeeName,
+            coberturaModal.turno.obj,
+            coberturaModal.turno.expected,
+            coberturaModal.salida || '—',
+          ),
+        },
+        {
+          phone: coberturaModal.turno.phone,
+          texto: waMensaje.intercambioHecho(
+            coberturaModal.employeeName,
+            candidate.turno.obj,
+            candidate.turno.expected,
+            candidate.salida || '—',
+          ),
+        },
+      ];
+      const hayAvisos = avisos.some((a) => a.phone);
+      showToast(`${tituloToast}${hayAvisos ? ' · enviando aviso…' : ''}`, 'bg-blue-700');
+      if (hayAvisos) {
+        void avisarPorWhatsApp(avisos).then((sufijo) => showToast(`${tituloToast}${sufijo}`, 'bg-blue-700'));
+      }
     } catch {
       showToast('Error al intercambiar turnos', 'bg-red-600');
     } finally {
@@ -3845,28 +3881,32 @@ export default function ModoRapidoPage() {
         operatorId: user?.uid ?? 'cc-modo-rapido',
         createdAt: serverTimestamp(),
       });
-      const avisoA = abrirWa(
-        origen.turno.phone,
-        waMensaje.intercambioHecho(
-          origen.employeeName,
-          destino.turno.obj,
-          destino.turno.expected,
-          destino.salida || '—',
-        ),
-      );
-      const avisoB = abrirWa(
-        destino.turno.phone,
-        waMensaje.intercambioHecho(
-          destino.employeeName,
-          origen.turno.obj,
-          origen.turno.expected,
-          origen.salida || '—',
-        ),
-      );
-      showToast(
-        `${anticipado ? 'Intercambio anticipado' : 'Intercambio'} · ${origen.employeeName} ↔ ${destino.employeeName}${avisoA || avisoB ? ' · WhatsApp abierto' : ''}`,
-        'bg-blue-700',
-      );
+      const tituloToast = `${anticipado ? 'Intercambio anticipado' : 'Intercambio'} · ${origen.employeeName} ↔ ${destino.employeeName}`;
+      const avisos = [
+        {
+          phone: origen.turno.phone,
+          texto: waMensaje.intercambioHecho(
+            origen.employeeName,
+            destino.turno.obj,
+            destino.turno.expected,
+            destino.salida || '—',
+          ),
+        },
+        {
+          phone: destino.turno.phone,
+          texto: waMensaje.intercambioHecho(
+            destino.employeeName,
+            origen.turno.obj,
+            origen.turno.expected,
+            origen.salida || '—',
+          ),
+        },
+      ];
+      const hayAvisos = avisos.some((a) => a.phone);
+      showToast(`${tituloToast}${hayAvisos ? ' · enviando aviso…' : ''}`, 'bg-blue-700');
+      if (hayAvisos) {
+        void avisarPorWhatsApp(avisos).then((sufijo) => showToast(`${tituloToast}${sufijo}`, 'bg-blue-700'));
+      }
       setSwapFromId(null);
     } catch {
       showToast('Error al intercambiar turnos', 'bg-red-600');

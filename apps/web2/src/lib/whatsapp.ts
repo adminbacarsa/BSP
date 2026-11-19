@@ -37,8 +37,14 @@ export const waMensaje = {
   intercambio: (nombre: string, objetivoDestino: string) =>
     `Hola ${nombre} 👋, te contacta *Operaciones Crono*.\n\nNecesitamos que pases al objetivo *${objetivoDestino}*.\n\n¿Podés hacer el movimiento? Confirmá.`,
 
-  intercambioHecho: (nombre: string, objetivo: string, horaInicio: string, horaFin: string) =>
-    `Hola ${nombre} 👋, te contacta *Operaciones Crono*.\n\nQuedó confirmado el cambio de turno: ahora cubrís *${objetivo}* de *${horaInicio}* a *${horaFin}*.\n\nConfirmá recibo.`,
+  /** Aviso informativo del intercambio que pidieron los guardias: no es una convocatoria ni pide respuesta. */
+  intercambioHecho: (nombre: string, objetivo: string, horaInicio: string, horaFin: string) => {
+    const ini = String(horaInicio || '').trim();
+    const fin = String(horaFin || '').trim();
+    const finValido = fin && fin !== '—' && fin !== '-';
+    const horario = ini && finValido ? ` de *${ini}* a *${fin}*` : ini ? ` desde las *${ini}*` : '';
+    return `Hola ${nombre} 👋, te contacta *Operaciones Crono*.\n\nQuedó registrado el cambio de turno: ahora cubrís *${objetivo}*${horario}.`;
+  },
 
   adelanto: (nombre: string, objetivo: string, hora: string) =>
     `Hola ${nombre} 👋, te contacta *Operaciones Crono*.\n\nNecesitamos que adelantes tu ingreso al puesto *${objetivo}* a las *${hora}*.\n\n¿Podés llegar? Confirmá.`,
