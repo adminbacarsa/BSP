@@ -744,7 +744,12 @@ export function resolveShiftDurationHours(
     const endAt = parseShiftInstant(shift.endTime);
     if (!startAt || !endAt) return lookup[rawCode] || PAID_DAY_DEFAULT_HOURS;
 
-    let duration = Math.max(0, (endAt.getTime() - startAt.getTime()) / 3600000);
+    const huecoCortadoMs = solapeHuecosMs(
+        huecosPlanificadosCortado(shift as unknown as { blocks?: unknown; startTime?: unknown }),
+        startAt.getTime(),
+        endAt.getTime(),
+    );
+    let duration = Math.max(0, (endAt.getTime() - startAt.getTime() - huecoCortadoMs) / 3600000);
     if (duration === 0 || duration >= 23.5 || duration > 24 || isNaN(duration)) {
         duration = lookup[rawCode] || PAID_DAY_DEFAULT_HOURS;
     }

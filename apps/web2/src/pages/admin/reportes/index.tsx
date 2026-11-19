@@ -28,6 +28,7 @@ import { shouldScopeQueriesToEmpresa, filterSlaRowsByEmpresa } from '@/lib/multi
 import { slaService } from '@/services/slaService';
 import { useReportes, resolveShiftDurationHours, dedupeShiftsByAbsencePriority, mapAbsenceStatusLabel, LEAVE_REPORT_CODES, isLeaveReportShift, isReportVacancyShift, buildPayrollExportPayload, shouldBillShiftToObjective, isFrancoTrabajadoShift, propagateFrancoTrabajadoFlags, buildFrancoDocLiquidationSkipIds, resolveLiquidationWorkedHours, liquidacion200FromWorkedHours, collapseShiftsByEmployeeDayForLiquidation, liquidationBillableHoursForShift, resolveLiquidationPlannedWindow, type ReportPublishFilter, type ReportFetchScope } from '@/hooks/useReportes';
 import { toast } from 'sonner';
+import { huecosPlanificadosCortado, solapeHuecosMs, tramosPlanificadosCortado } from '@cosp/hours-core';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { exportServiciosReportPdf } from '@/lib/reportes/serviciosReportPdf';
@@ -93,6 +94,26 @@ type PlanEmpMeta = {
     experienciaObjetivos?: Record<string, unknown>;
     planificacionDotacion?: Record<string, unknown>;
 };
+
+/** Fichada de cada tramo de un turno cortado (`presenciaBloques`); null si no es cortado o aún hay un solo tramo con dato. */
+function fichadaPorTramo(s: any): { ini: Date; fin: Date | null }[] | null {
+    const tramos = tramosPlanificadosCortado(s);
+    const pb = s?.presenciaBloques;
+    if (!tramos || !pb || typeof pb !== 'object') return null;
+    const aFecha = (v: any): Date | null => {
+        const sec = Number(v?.seconds ?? v?._seconds);
+        return Number.isFinite(sec) && sec > 0 ? new Date(sec * 1000) : null;
+    };
+    const out: { ini: Date; fin: Date | null }[] = [];
+    tramos.forEach((_, i) => {
+        const b = pb[`b${i + 1}`] || {};
+        const esUltimo = i === tramos.length - 1;
+        const ini = aFecha(b.realStartTime) ?? (i === 0 ? aFecha(s.realStartTime) : null);
+        const fin = aFecha(b.realEndTime) ?? (esUltimo ? aFecha(s.realEndTime) : null);
+        if (ini) out.push({ ini, fin });
+    });
+    return out.length >= 2 ? out : null;
+}
 
 function collectEmployeeObjectiveKeys(
     meta: PlanEmpMeta | undefined,
@@ -761,7 +782,7 @@ export default function ReportsPage() {
                                                                                       : end)                                     // sin retencion -> clampear a planificado
                                                                                     : rEndRaw)                                   // sin planificado -> usar real
                                                                                 : null;
-                                                                            const rDur   = rStart && rEnd ? Math.min(36, Math.max(0, (rEnd.getTime()-rStart.getTime())/3600000)) : null;
+                                                                            const rDur   = rStart && rEnd ? Math.min(36, Math.max(0, (rEnd.getTime() - rStart.getTime() - solapeHuecosMs(huecosPlanificadosCortado(s), rStart.getTime(), rEnd.getTime())) / 3600000)) : null;
                                                                             const hasOvertime = isRetentionShift && rDur != null && rDur > dur + 0.1;
                                                                             const fmt = (d: Date) => d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
                                                                             const isLeaveRow = isLeaveReportShift(s);
@@ -1338,7 +1359,11 @@ export default function ReportsPage() {
                 // Relevo anticipado: si salió antes del fin planificado → crédito hasta fin planificado
                 const rEnd   = rEndRaw && endSec && rEndRaw < end ? end : rEndRaw;
                 let rDur: number | null = null;
-                if (rStart && rEnd) { const rd = (rEnd.getTime()-rStart.getTime())/3600000; rDur = rd >= 0 && rd <= 36 ? rd : null; }
+                if (rStart && rEnd) {
+                    const rd = (rEnd.getTime() - rStart.getTime() - solapeHuecosMs(huecosPlanificadosCortado(s), rStart.getTime(), rEnd.getTime())) / 3600000;
+                    rDur = rd >= 0 && rd <= 36 ? rd : null;
+                }
+                const fichadaTramos = usePlannedHours ? null : fichadaPorTramo(s);
 
                 const isRetentionShift = s.isRetention === true;
                 const plannedWindow = resolveLiquidationPlannedWindow(s, start, end, SHIFT_HOURS_LOOKUP);
@@ -1377,6 +1402,7 @@ export default function ReportsPage() {
                     bandStart: plannedWindow.bandStart,
                     bandEnd: plannedWindow.bandEnd,
                     tramosPlan: plannedWindow.tramos,
+                    fichadaTramos,
                     hasCoverageAdjust: plannedWindow.hasCoverageAdjust,
                     isEarlyStartRow: plannedWindow.isEarlyDisplay,
                     isExtendedRow: plannedWindow.isExtDisplay,
@@ -1596,6 +1622,8 @@ export default function ReportsPage() {
                                         <td className="py-2 px-2 font-mono whitespace-nowrap">
                                             {usePlannedHours && !row.isLeaveDay
                                                 ? <span className="text-indigo-600 font-bold">{row.horasTrabajadas > 0 ? `${row.horasTrabajadas.toFixed(1)} h` : (row.total > 0 ? `${row.total.toFixed(1)} h` : '—')}</span>
+                                                : Array.isArray(row.fichadaTramos) && row.fichadaTramos.length >= 2
+                                                ? <span className="text-slate-600">{row.fichadaTramos.map((t: { ini: Date; fin: Date | null }) => `${fmt(t.ini)}–${t.fin ? fmt(t.fin) : '…'}`).join(' + ')}</span>
                                                 : row.rStart && row.rEnd
                                                 ? <span className={row.hasOvertime ? 'text-orange-600 font-bold' : 'text-slate-600'}>{fmt(row.rStart)}–{fmt(row.rEnd)}</span>
                                                 : <span className="text-slate-300">—</span>}
