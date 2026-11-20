@@ -2616,9 +2616,10 @@ function RetenePanel({
   /** Retenes que pueden ir a ese destino (de hoy, o de mañana si el hueco es una noche que arranca tarde). */
   candidatosPara: (d: DestinoRetenOpcion) => { rows: GuardRowModel[]; esManana: boolean };
   onAsignar: (ret: GuardRowModel, d: DestinoRetenOpcion) => void;
-  onAvisar: (ret: GuardRowModel, d: DestinoRetenOpcion) => void;
+  onAvisar: (ret: GuardRowModel, d: DestinoRetenOpcion, canal: 'wa' | 'app') => void;
 }) {
   const [open, setOpen] = useState(true);
+  const [verLejanos, setVerLejanos] = useState(false);
   const [destinoKey, setDestinoKey] = useState('');
   const [orden, setOrden] = useState<OrdenRetenes>('cercania');
   if (rows.length === 0) return null;
@@ -2642,6 +2643,8 @@ function RetenePanel({
     evaluados.sort((a, b) => compararRetenesEvaluados(a.ev, b.ev, orden));
   }
   const fueraDeRadio = evaluados.filter((e) => !e.ev.dentroRadio).length;
+  // Los que viven a más de 15 km se ocultan por defecto; sin dato de distancia no se ocultan.
+  const visibles = verLejanos ? evaluados : evaluados.filter((e) => e.ev.dentroRadio);
   const disponibles = rows.filter(
     (r) => r.estado !== 'AUSENTE' && r.estado !== 'NO_LLEGO',
   ).length;
@@ -2680,13 +2683,25 @@ function RetenePanel({
             {candidatosEsManana ? 'Retenes de mañana (cubren la noche)' : 'Retenes de hoy'} para{' '}
             <span className="font-bold text-slate-700">{destino.etiqueta}</span>
             {' · '}
-            {evaluados.length} {evaluados.length === 1 ? 'retén' : 'retenes'}
-            {fueraDeRadio > 0 ? ` · ${fueraDeRadio} fuera de 15 km` : ''}
+            {visibles.length} {visibles.length === 1 ? 'retén' : 'retenes'}
+            {fueraDeRadio > 0 && (
+              <button
+                type="button"
+                onClick={() => setVerLejanos((v) => !v)}
+                className="ml-2 px-2 py-0.5 rounded-full border border-amber-200 bg-amber-50 text-amber-800 text-[10px] font-bold hover:bg-amber-100"
+              >
+                {verLejanos ? `Ocultar los de más de 15 km (${fueraDeRadio})` : `Mostrar ${fueraDeRadio} a más de 15 km`}
+              </button>
+            )}
           </div>
-          {evaluados.length === 0 && (
-            <div className="px-4 py-3 text-[11px] text-slate-400">No hay retenes disponibles para este destino.</div>
+          {visibles.length === 0 && (
+            <div className="px-4 py-3 text-[11px] text-slate-400">
+              {fueraDeRadio > 0
+                ? 'No hay retenes a menos de 15 km de este destino.'
+                : 'No hay retenes disponibles para este destino.'}
+            </div>
           )}
-          {evaluados.map(({ row, ev }) => {
+          {visibles.map(({ row, ev }) => {
             const pill = estadoPill(row.estado);
             return (
               <div
@@ -2707,20 +2722,35 @@ function RetenePanel({
                   </div>
                   <ChipsRetenEvaluado ev={ev} />
                 </div>
-                <button
-                  type="button"
-                  disabled={busy || !row.turno.phone}
-                  title={row.turno.phone ? 'Avisar por WhatsApp' : 'Sin teléfono'}
-                  onClick={() => onAvisar(row, destino)}
-                  className="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold shadow-sm disabled:opacity-50 active:scale-95"
-                >
-                  {destino.tipo === 'hueco' ? 'Solo avisar' : 'Avisar'}
-                </button>
+                <div className="flex items-center gap-1">
+                  <span className="text-[9px] font-bold uppercase text-slate-400 mr-0.5">
+                    {destino.tipo === 'hueco' ? 'Solo avisar' : 'Avisar'}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={busy || !row.turno.phone}
+                    title={row.turno.phone ? 'Avisar por WhatsApp' : 'Sin teléfono'}
+                    onClick={() => onAvisar(row, destino, 'wa')}
+                    className="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold shadow-sm disabled:opacity-50 active:scale-95"
+                  >
+                    WA
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy || !row.turno.employeeId}
+                    title="Avisar por la app del guardia (notificación push)"
+                    onClick={() => onAvisar(row, destino, 'app')}
+                    className="px-2.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold shadow-sm disabled:opacity-50 active:scale-95"
+                  >
+                    App
+                  </button>
+                </div>
                 {destino.tipo === 'hueco' && (
                   <button
                     type="button"
                     disabled={busy}
                     onClick={() => onAsignar(row, destino)}
+                    title="Asigna el RET al hueco y le avisa por WhatsApp y por la app"
                     className="px-2.5 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-[10px] font-bold shadow-sm disabled:opacity-50 active:scale-95"
                   >
                     Asignar y avisar
@@ -5240,8 +5270,7 @@ export default function ModoRapidoPage() {
         reportedBy: 'OPERACIONES',
         operatorId: user?.uid ?? 'cc-modo-rapido',
       });
-      const aviso = abrirWa(
-        candidate.turno.phone,
+      const textoAsignacion =
         opciones?.mensaje === 'asignacion'
           ? waMensaje.asignacionRet(
               candidate.employeeName,
@@ -5256,13 +5285,18 @@ export default function ModoRapidoPage() {
               hueco.turno.obj,
               hueco.turno.expected,
               hueco.salida || '—',
-            ),
-      );
+            );
+      const aviso = abrirWa(candidate.turno.phone, textoAsignacion);
+      // Desde el panel de retenes el mensaje de asignación sale por los dos canales: WhatsApp y app del guardia.
+      const porApp =
+        opciones?.mensaje === 'asignacion'
+          ? (await enviarAppRetenes([{ item: retenItemDe(candidate), texto: textoAsignacion }])).enviados > 0
+          : false;
       showToast(
         aviso
-          ? `RET asignado · WhatsApp abierto · ${candidate.employeeName}`
-          : `RET asignado · ${candidate.employeeName}. Sin teléfono para WhatsApp.`,
-        aviso ? 'bg-violet-700' : 'bg-amber-700',
+          ? `RET asignado · WhatsApp abierto${porApp ? ' y aviso por la app' : ''} · ${candidate.employeeName}`
+          : `RET asignado · ${candidate.employeeName}.${porApp ? ' Avisado por la app; sin teléfono para WhatsApp.' : ' Sin teléfono para WhatsApp.'}`,
+        aviso || porApp ? 'bg-violet-700' : 'bg-amber-700',
       );
     } catch (err) {
       console.warn('[modo-rapido] asignar RET', err);
@@ -5296,7 +5330,7 @@ export default function ModoRapidoPage() {
         declarar
           ? `\n\n${hueco.employeeName} no llegó pasados 30 min: se declara la ausencia (AA), queda en RRHH y Planificación.`
           : ''
-      }\n\nSe abre WhatsApp con el mensaje de asignación. ¿Confirmás?`,
+      }\n\nSe abre WhatsApp con el mensaje de asignación y se avisa por la app del guardia. ¿Confirmás?`,
       textoOk: declarar ? 'Declarar y asignar' : 'Asignar y avisar',
       tono: declarar ? 'rojo' : 'indigo',
     });
@@ -5324,12 +5358,23 @@ export default function ModoRapidoPage() {
     });
   }
 
-  /** Panel de retenes: avisa por WhatsApp sin asignar (consulta de disponibilidad para el hueco u objetivo). */
-  function avisarRetDesdePanel(ret: GuardRowModel, destino: DestinoRetenOpcion) {
-    if (!ret.turno.phone) {
-      showToast(`${ret.employeeName} no tiene teléfono`, 'bg-amber-700');
-      return;
-    }
+  /** Datos mínimos de un RET para enviarle un aviso por la app (mismo formato que el modal de retenes). */
+  function retenItemDe(ret: GuardRowModel): RetenItem {
+    return {
+      rowId: ret.turno.rowId,
+      employeeId: String(ret.turno.employeeId || ''),
+      nombre: ret.employeeName,
+      phone: ret.turno.phone,
+      objetivo: ret.turno.obj,
+      horario: ret.turno.shift.replace(/^RET\s*/i, '') || ret.turno.expected,
+      estadoLabel: 'RET',
+      estadoTono: 'neutro',
+      dia: 'hoy',
+    };
+  }
+
+  /** Panel de retenes: avisa sin asignar (consulta de disponibilidad para el hueco u objetivo), por WhatsApp o por la app. */
+  async function avisarRetDesdePanel(ret: GuardRowModel, destino: DestinoRetenOpcion, canal: 'wa' | 'app') {
     const hueco =
       destino.tipo === 'hueco'
         ? classifiedRows.find((r) => `hueco:${r.turno.rowId}` === destino.key)
@@ -5337,6 +5382,18 @@ export default function ModoRapidoPage() {
     const texto = hueco
       ? waMensaje.cobertura(ret.employeeName, hueco.turno.obj, hueco.turno.expected, hueco.salida || '—')
       : waMensaje.consultaRetObjetivo(ret.employeeName, destino.objetivo);
+    if (canal === 'app') {
+      if (!ret.turno.employeeId) {
+        showToast(`${ret.employeeName} no tiene legajo asociado para avisar por la app`, 'bg-amber-700');
+        return;
+      }
+      await enviarAppRetenes([{ item: retenItemDe(ret), texto }]);
+      return;
+    }
+    if (!ret.turno.phone) {
+      showToast(`${ret.employeeName} no tiene teléfono`, 'bg-amber-700');
+      return;
+    }
     abrirWa(ret.turno.phone, texto);
     showToast(`WhatsApp abierto · ${ret.employeeName}`, 'bg-emerald-700');
   }
@@ -6655,7 +6712,7 @@ export default function ModoRapidoPage() {
                   empInfo={empInfo}
                   candidatosPara={candidatosRetenesPanel}
                   onAsignar={(r, d) => void asignarRetDesdePanel(r, d)}
-                  onAvisar={(r, d) => avisarRetDesdePanel(r, d)}
+                  onAvisar={(r, d, canal) => void avisarRetDesdePanel(r, d, canal)}
                 />
                 {nonReteGroups.map(([objName, rows], gi) => {
                   const clienteGrupo = clientePorObj[objName] || SIN_CLIENTE;
