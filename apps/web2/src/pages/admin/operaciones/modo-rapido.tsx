@@ -564,7 +564,8 @@ function useTurnosHoy({
         };
 
         if (esRetManana) {
-          retMananaList.push(mapped);
+          // Un RET de mañana ya asignado a cubrir una noche de hoy sale de la lista: ya está usado.
+          if (!mapped.coverageUsed) retMananaList.push(mapped);
           continue;
         }
 
@@ -3665,7 +3666,7 @@ export default function ModoRapidoPage() {
 
   const retenesHoyItems = useMemo((): RetenItem[] => {
     return classifiedRows
-      .filter((r) => r.band === 'RET')
+      .filter((r) => r.band === 'RET' && !r.turno.coverageUsed)
       .map((r) => ({
         rowId: r.turno.rowId,
         employeeId: String(r.turno.employeeId || ''),
