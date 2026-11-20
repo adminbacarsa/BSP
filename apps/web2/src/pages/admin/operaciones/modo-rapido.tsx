@@ -41,6 +41,7 @@ import {
   Scissors,
   Search,
   Shield,
+  ShieldCheck,
   Siren,
   Smartphone,
   UserX,
@@ -49,6 +50,12 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
+import ModalRetenesDia, {
+  type RetenAviso,
+  type RetenEnvioApp,
+  type RetenItem,
+  type RetenTono,
+} from '@/components/operaciones/ModalRetenesDia';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { httpsCallable } from 'firebase/functions';
@@ -2799,6 +2806,7 @@ export default function ModoRapidoPage() {
   const [coberturaModal, setCoberturaModal] = useState<GuardRowModel | null>(null);
   const [accionesModal, setAccionesModal] = useState<GuardRowModel | null>(null);
   const [comentarioModal, setComentarioModal] = useState<GuardRowModel | null>(null);
+  const [retenesModalOpen, setRetenesModalOpen] = useState(false);
   const [revertirChoice, setRevertirChoice] = useState<GuardRowModel | null>(null);
   const [activeRowId, setActiveRowId] = useState<string | null>(null);
   const [hourEdit, setHourEdit] = useState<{ rowId: string; value: string; campo: 'ingreso' | 'salida' } | null>(null);
@@ -3349,6 +3357,102 @@ export default function ModoRapidoPage() {
     }
     return { total: classifiedRows.length, critico, tardanza, sinConfirmar, ok, retenes, sinPresencia, radio, app, cerrado };
   }, [classifiedRows]);
+
+  const retenesHoyItems = useMemo((): RetenItem[] => {
+    const tonoDe = (estado: GuardEstado): RetenTono => {
+      if (estado === 'PRESENTE_WA' || estado === 'PRESENTE_PLAT') return 'ok';
+      if (estado === 'ESPERANDO' || estado === 'PENDIENTE_WA') return 'espera';
+      if (estado === 'NO_LLEGO' || estado === 'AUSENTE' || estado === 'TARDANZA') return 'alerta';
+      if (estado === 'CERRADO') return 'cerrado';
+      return 'neutro';
+    };
+    return classifiedRows
+      .filter((r) => r.band === 'RET')
+      .map((r) => ({
+        rowId: r.turno.rowId,
+        employeeId: String(r.turno.employeeId || ''),
+        nombre: r.employeeName,
+        phone: r.turno.phone,
+        objetivo: r.turno.obj,
+        horario: r.turno.shift.replace(/^RET\s*/i, '') || r.turno.expected,
+        estadoLabel: estadoPill(r.estado).label,
+        estadoTono: tonoDe(r.estado),
+        dia: 'hoy' as const,
+      }))
+      .sort((a, b) => compararTexto(a.nombre, b.nombre));
+  }, [classifiedRows]);
+
+  const retenesMananaItems = useMemo(
+    (): RetenItem[] =>
+      retenesManana
+        .map((t) => ({
+          rowId: t.rowId,
+          employeeId: String(t.employeeId || ''),
+          nombre: t.name,
+          phone: t.phone,
+          objetivo: t.obj,
+          horario: t.shift.replace(/^RET\s*/i, '') || t.expected,
+          estadoLabel: 'PROGRAMADO',
+          estadoTono: 'neutro' as const,
+          dia: 'manana' as const,
+        }))
+        .sort((a, b) => compararTexto(a.nombre, b.nombre)),
+    [retenesManana],
+  );
+
+  /** Aviso por la app del guardia: queda en su bandeja y sale el push (mismo canal que los avisos del CC). */
+  const enviarAppRetenes = useCallback(
+    async (avisos: RetenAviso[]): Promise<RetenEnvioApp> => {
+      let enviados = 0;
+      let fallidos = 0;
+      const operador = user?.displayName || user?.email || 'Operador';
+      for (const { item, texto } of avisos) {
+        try {
+          await addDoc(collection(db, 'user_notifications'), {
+            uid: null,
+            employeeId: item.employeeId,
+            userId: item.employeeId,
+            type: 'AVISO_TURNO_PROXIMO',
+            title: 'Mensaje de Operaciones',
+            body: texto,
+            target: 'employee',
+            empresaId: empresaId || null,
+            shiftId: docIdDe(item.rowId),
+            turnoId: docIdDe(item.rowId),
+            objectiveName: item.objetivo || null,
+            shiftCode: 'RET',
+            manual: true,
+            origen: 'MODO_RAPIDO_RETENES',
+            enviadoPor: operador,
+            read: false,
+            readAt: null,
+            createdAt: serverTimestamp(),
+          });
+          enviados += 1;
+        } catch (e) {
+          fallidos += 1;
+          console.error('[modo-rapido] aviso por app a retén', item.nombre, e);
+        }
+      }
+      if (enviados > 0) {
+        showToast(`Mensaje enviado por la app a ${enviados} retén${enviados === 1 ? '' : 'es'}`, 'bg-emerald-700');
+      }
+      if (fallidos > 0) {
+        showToast(`No se pudo enviar por la app a ${fallidos} retén${fallidos === 1 ? '' : 'es'}`, 'bg-red-700');
+      }
+      return { enviados, fallidos };
+    },
+    [user?.displayName, user?.email, empresaId, showToast],
+  );
+
+  const enviarWaRetenes = useCallback(
+    async (avisos: RetenAviso[]): Promise<string> => {
+      const extra = await avisarPorWhatsApp(avisos.map((a) => ({ phone: a.item.phone, texto: a.texto })));
+      showToast(`Retenes avisados${extra}`.trim(), 'bg-emerald-700');
+      return extra;
+    },
+    [avisarPorWhatsApp, showToast],
+  );
 
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -4801,6 +4905,8 @@ export default function ModoRapidoPage() {
       const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || !!target?.isContentEditable;
       // El modal de comentario maneja sus propias teclas (Esc, Ctrl+Enter): los atajos de la planilla no corren.
       if (comentarioModal) return;
+      // El modal de retenes maneja sus propias teclas (Esc): los atajos de la planilla no corren.
+      if (retenesModalOpen) return;
       if (revertirChoice) {
         if (e.key === 'Escape') setRevertirChoice(null);
         return;
@@ -4964,7 +5070,7 @@ export default function ModoRapidoPage() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [sheetRows, activeRowId, hourEdit, arm, swapFromId, coberturaModal, accionesModal, comentarioModal, revertirChoice, busy, pantallaCompleta, retiroModal, retiroMotivo, retiroReemplazo, retiroInfo]);
+  }, [sheetRows, activeRowId, hourEdit, arm, swapFromId, coberturaModal, accionesModal, comentarioModal, retenesModalOpen, revertirChoice, busy, pantallaCompleta, retiroModal, retiroMotivo, retiroReemplazo, retiroInfo]);
 
   useEffect(() => {
     if (!coberturaModal) setHuecoRetiro(null);
@@ -5203,6 +5309,16 @@ export default function ModoRapidoPage() {
               onClick={() => setBandFilter(bandFilter === 'RET' ? 'all' : 'RET')}
             />
           )}
+          <ChipIcono
+            icon={ShieldCheck}
+            label="Retenes del día: ver y enviar mensaje por la app y WhatsApp"
+            count={retenesHoyItems.length}
+            active={retenesModalOpen}
+            accent="bg-violet-600 text-white border-violet-600"
+            tono="text-violet-600"
+            siempre
+            onClick={() => setRetenesModalOpen(true)}
+          />
 
           <div className="w-px h-5 bg-slate-200 mx-0.5 flex-shrink-0" />
 
@@ -5586,6 +5702,17 @@ export default function ModoRapidoPage() {
               );
             }}
             onClose={() => setRevertirChoice(null)}
+          />
+        )}
+
+        {retenesModalOpen && (
+          <ModalRetenesDia
+            hoy={retenesHoyItems}
+            manana={retenesMananaItems}
+            bridgeConectado={wabConectado}
+            onEnviarApp={enviarAppRetenes}
+            onEnviarWa={enviarWaRetenes}
+            onClose={() => setRetenesModalOpen(false)}
           />
         )}
 
