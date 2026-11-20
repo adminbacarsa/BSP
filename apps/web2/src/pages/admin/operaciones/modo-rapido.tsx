@@ -2723,6 +2723,20 @@ function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): num
   return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
 }
 
+/** Radio (m) dentro del cual un check-in por WhatsApp con ubicación se confirma solo. */
+const AUTO_WA_RADIO_M = 200;
+
+/**
+ * Un check-in de WhatsApp se puede confirmar sin operador cuando está atado a un turno de hoy y trae
+ * ubicación dentro del radio del objetivo. Sin ubicación, sin coordenadas del objetivo o lejos: queda
+ * pendiente para que lo mire el operador.
+ */
+function entradaWaVerificada(e: WAEntry): boolean {
+  if (!e.rowId || !e.hasLocation) return false;
+  if (e.lat == null || e.lng == null || e.objLat == null || e.objLng == null) return false;
+  return haversineM(e.lat, e.lng, e.objLat, e.objLng) <= AUTO_WA_RADIO_M;
+}
+
 function WACard({
   entry,
   onConfirm,
@@ -3071,6 +3085,9 @@ export default function ModoRapidoPage() {
   const [accionesModal, setAccionesModal] = useState<GuardRowModel | null>(null);
   const [comentarioModal, setComentarioModal] = useState<GuardRowModel | null>(null);
   const [retenesModalOpen, setRetenesModalOpen] = useState(false);
+  const [autoWa, setAutoWa] = useState(true);
+  const [autoWaCount, setAutoWaCount] = useState(0);
+  const autoWaProcesadosRef = useRef<Set<string>>(new Set());
   const [revertirChoice, setRevertirChoice] = useState<GuardRowModel | null>(null);
   const [confirmacion, setConfirmacion] = useState<ConfirmacionPlanilla | null>(null);
   const confirmacionResolverRef = useRef<((ok: boolean) => void) | null>(null);
@@ -5365,6 +5382,67 @@ export default function ModoRapidoPage() {
     }
   };
 
+  /**
+   * Presente automático por WhatsApp: mismo camino que «Confirmar» del operador (marcarPresente con
+   * fuente WA, respuesta privada al guardia), pero sin tocar la planilla ni bloquearla.
+   */
+  async function autoConfirmarWA(row: GuardRowModel, entry: WAEntry) {
+    try {
+      const hora = entry.arrivedAt || nowHHMM();
+      await marcarPresente(
+        entry.rowId as string,
+        { name: row.employeeName, expected: row.turno.expected },
+        hora,
+        'WA',
+      );
+      wa.confirmEntry(entry);
+      wa.responder(entry, textoConfirmacionWA(row.employeeName, hora, row.turno));
+      setAutoWaCount((n) => n + 1);
+      showToast(`Presente automático por WA · ${row.employeeName} ${hora}`, 'bg-emerald-700');
+    } catch (err) {
+      console.warn('[modo-rapido] presente automático WA', err);
+      showToast(`No se pudo confirmar solo a ${row.employeeName}: queda para el operador`, 'bg-amber-700');
+    }
+  }
+
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem('mr-auto-wa');
+      if (v === '0') setAutoWa(false);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!autoWa) return;
+    for (const row of classifiedRows) {
+      const entry = row.pendingEntry;
+      if (!entry || row.estado !== 'PENDIENTE_WA') continue;
+      if (autoWaProcesadosRef.current.has(entry.id)) continue;
+      if (!entradaWaVerificada(entry)) continue;
+      autoWaProcesadosRef.current.add(entry.id);
+      void autoConfirmarWA(row, entry);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- autoConfirmarWA usa solo refs y callbacks estables de la sesión
+  }, [classifiedRows, autoWa]);
+
+  function alternarAutoWa() {
+    const nuevo = !autoWa;
+    setAutoWa(nuevo);
+    try {
+      localStorage.setItem('mr-auto-wa', nuevo ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+    showToast(
+      nuevo
+        ? `Presente automático por WA activado (ubicación a menos de ${AUTO_WA_RADIO_M} m del objetivo)`
+        : 'Presente automático por WA desactivado: confirmás vos',
+      'bg-slate-700',
+    );
+  }
+
   function descartarCheckIn(entry: WAEntry) {
     wa.dismissEntry(entry);
     showToast(`Check-in descartado · ${entry.name}`, 'bg-slate-700');
@@ -5851,6 +5929,20 @@ export default function ModoRapidoPage() {
             tono="text-violet-600"
             siempre
             onClick={() => setRetenesModalOpen(true)}
+          />
+          <ChipIcono
+            icon={Zap}
+            label={
+              autoWa
+                ? `Presente automático por WA activado (${AUTO_WA_RADIO_M} m). Clic para desactivar`
+                : 'Presente automático por WA desactivado. Clic para activar'
+            }
+            count={autoWaCount}
+            active={autoWa}
+            accent="bg-emerald-600 text-white border-emerald-600"
+            tono="text-slate-400"
+            siempre
+            onClick={alternarAutoWa}
           />
 
           <div className="w-px h-5 bg-slate-200 mx-0.5 flex-shrink-0" />
