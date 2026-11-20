@@ -2102,6 +2102,7 @@ function GuardRow({
   onMore,
   onComentario,
   onRevertirAusencia,
+  onReabrir,
 }: {
   row: GuardRowModel;
   busy: boolean;
@@ -2122,6 +2123,7 @@ function GuardRow({
   onRetiro: (row: GuardRowModel) => void;
   onMore: (row: GuardRowModel) => void;
   onComentario: (row: GuardRowModel) => void;
+  onReabrir: (row: GuardRowModel) => void;
 }) {
   const pill = estadoPill(row.estado);
   const motivoRetiro = row.turno.retiro
@@ -2286,14 +2288,25 @@ function GuardRow({
     );
   } else if (row.estado === 'CERRADO') {
     primary = (
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() => onBeginEdit(row, 'ingreso')}
-        className="px-2 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold disabled:opacity-50"
-      >
-        Horario
-      </button>
+      <>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => onBeginEdit(row, 'ingreso')}
+          className="px-2 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold disabled:opacity-50"
+        >
+          Horario
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          title="Cerré el turno sin querer: vuelve a presente"
+          onClick={() => onReabrir(row)}
+          className="px-2 py-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-300 text-[10px] font-bold disabled:opacity-50"
+        >
+          Reabrir
+        </button>
+      </>
     );
   }
 
@@ -2586,6 +2599,7 @@ function ObjectiveGroup({
   onDropGrupo,
   onDragEndGrupo,
   onComentario,
+  onReabrir,
 }: {
   objName: string;
   cliente: string | null;
@@ -2615,6 +2629,7 @@ function ObjectiveGroup({
   onRetiro: (row: GuardRowModel) => void;
   onMore: (row: GuardRowModel) => void;
   onComentario: (row: GuardRowModel) => void;
+  onReabrir: (row: GuardRowModel) => void;
 }) {
   const hasNoLlego = rows.some((r) => r.estado === 'NO_LLEGO' && !r.coveredByName);
   const hasTardanza = rows.some((r) => r.estado === 'TARDANZA');
@@ -2682,6 +2697,7 @@ function ObjectiveGroup({
               onMarcarPresente={onMarcarPresente}
               onConfirmarWA={onConfirmarWA}
               onCerrar={onCerrar}
+              onReabrir={onReabrir}
               onCobertura={onCobertura}
               onRevertirAusencia={onRevertirAusencia}
               onIntercambio={onIntercambio}
@@ -4654,6 +4670,60 @@ export default function ModoRapidoPage() {
     }
   }
 
+  /**
+   * Reabrir un turno cerrado (cierre hecho sin querer): vuelve a presente, se quita el egreso real y,
+   * si el cierre había terminado una retención, la retención vuelve a estar en curso.
+   */
+  async function reabrirTurno(row: GuardRowModel) {
+    if (busy) return;
+    if (row.estado !== 'CERRADO') return;
+    setBusy(true);
+    try {
+      await recordarTurno(row.turno.rowId);
+      const docId = docIdDe(row.turno.rowId);
+      const data = ((await leerTurnoRapido(docId)).data() || {}) as Record<string, unknown>;
+      const cortado = esTramoCortado(row.turno);
+      const tramoN = row.turno.bloque ?? 1;
+      const ultimoTramo = esUltimoTramo(row.turno);
+      const patch: Record<string, unknown> = {
+        status: 'PRESENT',
+        isPresent: true,
+        isCompleted: false,
+      };
+      if (cortado) {
+        patch[`presenciaBloques.b${tramoN}.cerrado`] = false;
+        patch[`presenciaBloques.b${tramoN}.realEndTime`] = deleteField();
+        if (ultimoTramo) patch.realEndTime = deleteField();
+      } else {
+        patch.realEndTime = deleteField();
+      }
+      if (data.retentionEndedAt && (!cortado || ultimoTramo)) {
+        patch.isRetention = true;
+        patch.retentionEndedAt = deleteField();
+        patch.retentionMinutes = deleteField();
+      }
+      escribir(updateDoc(doc(db, 'turnos', docId), patch), 'la reapertura');
+      escribir(
+        addDoc(collection(db, 'novedades'), {
+          type: 'REAPERTURA_TURNO',
+          turnoId: docId,
+          ...(cortado ? { bloque: tramoN } : {}),
+          employeeName: row.employeeName,
+          empresaId,
+          operatorId: user?.uid ?? 'cc-modo-rapido',
+          createdAt: serverTimestamp(),
+        }),
+        'la novedad de reapertura',
+      );
+      showToast(`Turno reabierto · ${row.employeeName}`, 'bg-indigo-700');
+    } catch (err) {
+      console.warn('[modo-rapido] reabrirTurno', err);
+      showToast('No se pudo reabrir el turno', 'bg-red-600');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const handleAsignarRet = async (candidate: GuardRowModel) => {
     if (!coberturaModal || busy) return;
     setBusy(true);
@@ -6043,6 +6113,7 @@ export default function ModoRapidoPage() {
                       setHourEdit({ rowId: r.turno.rowId, value, campo });
                     }}
                     onCerrar={(r) => pedirCierre(r)}
+                    onReabrir={(r) => void reabrirTurno(r)}
                     onMarcarPresente={(r) => void handleMarcarPresente(r)}
                     onConfirmarWA={(r) => void handleConfirmarWA(r)}
                     onCobertura={(r) => void abrirCobertura(r)}
