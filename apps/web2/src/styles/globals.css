@@ -530,6 +530,10 @@ input:focus, select:focus, textarea:focus {
   --mr-real-on: #818cf8;
   --mr-real-text: #1e1b4b;
   --mr-dim: #64748b;
+  --mr-group: #dbe2ee;
+  --mr-group-hover: #cdd6e6;
+  --mr-group-text: #0f172a;
+  --mr-group-bar: #4f46e5;
 }
 .dark .mr-root {
   --mr-row-a: #1e293b;
@@ -547,6 +551,10 @@ input:focus, select:focus, textarea:focus {
   --mr-real-on: #4f46e5;
   --mr-real-text: #e0e7ff;
   --mr-dim: #94a3b8;
+  --mr-group: #0b1220;
+  --mr-group-hover: #111b30;
+  --mr-group-text: #f8fafc;
+  --mr-group-bar: #818cf8;
 }
 .theme-contrast .mr-root {
   --mr-row-a: #000000;
@@ -564,6 +572,10 @@ input:focus, select:focus, textarea:focus {
   --mr-real-on: #665500;
   --mr-real-text: #ffd700;
   --mr-dim: #ffffff;
+  --mr-group: #221a00;
+  --mr-group-hover: #2e2400;
+  --mr-group-text: #ffd700;
+  --mr-group-bar: #ffd700;
 }
 .theme-custom .mr-root {
   --mr-row-a: #27272a;
@@ -573,7 +585,16 @@ input:focus, select:focus, textarea:focus {
   --mr-plan: #18181b;
   --mr-dim: #a1a1aa;
   --mr-plan-text: #a1a1aa;
+  --mr-group: #111113;
+  --mr-group-hover: #19191c;
+  --mr-group-text: #fafafa;
+  --mr-group-bar: #a5b4fc;
 }
+
+/* Encabezado de objetivo: más oscuro y con barra de color para que se distinga de las filas de guardias. */
+.mr-root .mr-group-head { background: var(--mr-group); box-shadow: inset 4px 0 0 0 var(--mr-group-bar); border-top: 1px solid rgba(100, 116, 139, 0.35); }
+.mr-root .mr-group-head:hover { background: var(--mr-group-hover); }
+.mr-root .mr-group-name { color: var(--mr-group-text); }
 
 .mr-root .mr-row { background: var(--mr-row-a); }
 .mr-root .mr-row:nth-child(even) { background: var(--mr-row-b); }

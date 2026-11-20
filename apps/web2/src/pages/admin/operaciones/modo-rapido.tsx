@@ -2644,11 +2644,11 @@ function ObjectiveGroup({
         onDragEnd={onDragEndGrupo}
         onClick={onToggle}
         title="Arrastrá para mover el objetivo. Clic para abrir o cerrar."
-        className="w-full flex items-center gap-2 px-3 py-2 bg-slate-50 hover:bg-slate-100 text-left cursor-grab active:cursor-grabbing select-none"
+        className="mr-group-head w-full flex items-center gap-2 pl-4 pr-3 py-2.5 text-left cursor-grab active:cursor-grabbing select-none"
       >
         <GripVertical size={14} className="text-slate-400 flex-shrink-0" />
         {open ? <ChevronDown size={14} className="text-slate-400" /> : <ChevronRight size={14} className="text-slate-400" />}
-        <span className="text-xs font-bold text-slate-800 truncate">{objName}</span>
+        <span className="mr-group-name text-sm font-black tracking-tight truncate">{objName}</span>
         {cliente && (
           <span className="text-[10px] font-semibold text-slate-400 truncate flex-1">· {cliente}</span>
         )}
