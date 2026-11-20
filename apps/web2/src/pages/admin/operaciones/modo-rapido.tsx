@@ -793,19 +793,22 @@ type GuardRowModel = {
   relevoNombre?: string;
   /** Hora (HH:MM) en que el guardia avisó su salida por WhatsApp con ubicación. */
   salidaAvisada?: string;
-  /** Avisó su salida pero no hay relevo presente: queda retenido hasta que el operador lo cierre. */
+  /** Avisó su salida pero su relevo programado todavía no está presente: queda retenido hasta que el operador lo cierre. */
   salidaSinRelevo?: boolean;
+  /** El puesto no tiene relevo programado: el servicio termina con este guardia. */
+  finSinRelevo?: boolean;
 };
 
 const CODIGOS_SIN_RELEVO = new Set(["RET", "ESC", "REF", "F", "FF", "FP", "V", "L", "E", "A", "PG", "ART", "AA"]);
 
-const esRelevoDe = (row: GuardRowModel, o: GuardRowModel): boolean => {
+const esRelevoDe = (row: GuardRowModel, o: GuardRowModel, incluirAusentes = false): boolean => {
   if (o.turno.rowId === row.turno.rowId) return false;
   if (!row.turno.objectiveId || o.turno.objectiveId !== row.turno.objectiveId) return false;
   if (row.turno.positionName && o.turno.positionName && row.turno.positionName !== o.turno.positionName) return false;
   if (o.turno.employeeId && o.turno.employeeId === row.turno.employeeId) return false;
   if (CODIGOS_SIN_RELEVO.has(String(o.turno.code || "").toUpperCase())) return false;
-  if (o.estado === "AUSENTE" || o.estado === "NO_LLEGO" || o.estado === "CERRADO") return false;
+  if (o.estado === "CERRADO") return false;
+  if (!incluirAusentes && (o.estado === "AUSENTE" || o.estado === "NO_LLEGO")) return false;
   const finMs = toStartMs(row.turno.endTimeRaw);
   const st = toStartMs(o.turno.startTimeRaw);
   if (Number.isNaN(finMs) || Number.isNaN(st)) return false;
@@ -828,6 +831,14 @@ function buscarRelevo(row: GuardRowModel, rows: GuardRowModel[]): GuardRowModel 
     }
   }
   return mejor;
+}
+
+/**
+ * El puesto tiene un relevo programado para este turno (aunque todavía no haya llegado o esté ausente).
+ * Si no hay ninguno, el servicio termina con este guardia y no hay nadie a quien esperar.
+ */
+function hayRelevoProgramado(row: GuardRowModel, rows: GuardRowModel[]): boolean {
+  return rows.some((o) => esRelevoDe(row, o, true));
 }
 
 /** Hay un relevo presente que todavía no tomó otro saliente del mismo puesto (cerrados con salida cercana). */
@@ -2451,11 +2462,15 @@ function GuardRow({
         title={row.turno.blocks?.length ? `Turno cortado: ${row.turno.blocks.map((b) => `${b.startTime}–${b.endTime}`).join(' + ')}` : 'Egreso planificado'}
       >
         {row.salida || '—'}
-        {row.relevoNombre && (
+        {row.relevoNombre ? (
           <span className="block max-w-full truncate text-[8px] font-sans font-semibold leading-none opacity-80" title={`Releva: ${row.relevoNombre}`}>
             ↳ {row.relevoNombre.split(',')[0]}
           </span>
-        )}
+        ) : row.finSinRelevo ? (
+          <span className="block max-w-full truncate text-[8px] font-sans font-semibold leading-none opacity-70" title="Sin relevo programado: el servicio termina con este guardia">
+            sin relevo
+          </span>
+        ) : null}
       </div>
       <div
         className="mr-real whitespace-nowrap font-mono text-[12px] font-black tabular-nums"
@@ -2487,7 +2502,7 @@ function GuardRow({
               className={`text-[10px] font-bold ${row.salidaSinRelevo ? 'text-amber-600' : 'text-emerald-700'}`}
               title={
                 row.salidaSinRelevo
-                  ? `Avisó su salida a las ${row.salidaAvisada} por WhatsApp, pero no hay relevo presente: queda retenido hasta que lo cierres`
+                  ? `Avisó su salida a las ${row.salidaAvisada} por WhatsApp, pero su relevo todavía no está presente: queda retenido hasta que lo cierres`
                   : `Avisó su salida a las ${row.salidaAvisada} por WhatsApp`
               }
             >
@@ -3638,12 +3653,13 @@ export default function ModoRapidoPage() {
       if (!estaPresente(row)) return row;
       const relevo = buscarRelevo(row, classifiedRowsBase);
       const aviso = avisos.get(row.turno.rowId);
-      if (!relevo && !aviso) return row;
+      const programado = hayRelevoProgramado(row, classifiedRowsBase);
       return {
         ...row,
         relevoNombre: relevo?.employeeName,
         salidaAvisada: aviso?.arrivedAt,
-        salidaSinRelevo: !!aviso && !hayRelevoLibre(row, classifiedRowsBase),
+        finSinRelevo: !programado,
+        salidaSinRelevo: !!aviso && programado && !hayRelevoLibre(row, classifiedRowsBase),
       };
     });
   }, [classifiedRowsBase, wa.salidas]);
@@ -5569,7 +5585,9 @@ export default function ModoRapidoPage() {
       const row = classifiedRows.find((r) => r.turno.rowId === entry.rowId);
       if (!row || !estaPresente(row)) continue;
       if (!entradaWaVerificada(entry)) continue;
-      if (!hayRelevoLibre(row, classifiedRows)) continue;
+      // Sin relevo programado el servicio termina con este guardia: se cierra. Con relevo programado
+      // hay que esperar a que esté presente.
+      if (hayRelevoProgramado(row, classifiedRows) && !hayRelevoLibre(row, classifiedRows)) continue;
       autoSalidaProcesadosRef.current.add(entry.id);
       void autoCerrarPorWA(row, entry);
     }
