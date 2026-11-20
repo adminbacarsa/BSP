@@ -1245,7 +1245,9 @@ function ModalCobertura({
   // es un puesto custom (EN, C1, SA…): solo admite RET y franco trabajado.
   const codigoAusente = String(absent.turno.code || '').trim().toUpperCase();
   const esCustom = !BANDS.includes(codigoAusente as (typeof BANDS)[number]);
-  const esPuesto24h = !esCustom && ['M', 'T', 'N'].includes(absent.band) && !remanente;
+  // Turno cortado: se cubre completo con RET o FT; extender e intercambiar no aplican.
+  const esCortado = esTramoCortado(absent.turno);
+  const esPuesto24h = !esCustom && !esCortado && ['M', 'T', 'N'].includes(absent.band) && !remanente;
 
   return (
     <div
@@ -1266,6 +1268,11 @@ function ModalCobertura({
               {absent.employeeName} · {absent.turno.obj} · {absent.turno.shift}
               {remanente ? ` · cubrir ${remanente.desde}–${remanente.hasta}` : ''}
             </div>
+            {esCortado && (
+              <div className="text-[10px] font-semibold text-indigo-600">
+                Turno cortado: el reemplazo cubre el turno completo (los dos tramos).
+              </div>
+            )}
           </div>
           <button
             type="button"
@@ -1368,7 +1375,7 @@ function ModalCobertura({
           )}
 
           {/* 3. Intercambio (no aplica al resto de un retiro anticipado ni a puestos custom) */}
-          {!remanente && !esCustom && (
+          {!remanente && !esCustom && !esCortado && (
           <div className="mb-4">
             <div className="text-[11px] font-bold text-blue-700 uppercase tracking-wide mb-2">
               🔄 3. Intercambio con otro turno ({intercambioCandidates.length})
@@ -3129,6 +3136,21 @@ export default function ModoRapidoPage() {
     };
   }
 
+  /**
+   * Si el titular tiene turno cortado, el turno de cobertura hereda los mismos tramos (el reemplazo no
+   * trabaja ni cobra el corte). Va en el mismo batch que la cobertura.
+   */
+  async function heredarTramosEnCobertura(
+    batch: ReturnType<typeof writeBatch>,
+    titularId: string,
+    coverDocId: string,
+  ) {
+    const raw = (await leerTurnoRapido(titularId)).data() || {};
+    if (Array.isArray(raw.blocks) && raw.blocks.length > 1) {
+      batch.set(doc(db, 'turnos', coverDocId), { blocks: raw.blocks }, { merge: true });
+    }
+  }
+
   /** Marca la ausencia de RRHH como gestionada. Un fallo no frena la cobertura ya hecha. */
   async function marcarAusenciaGestionada(
     turnoId: string,
@@ -3632,7 +3654,7 @@ export default function ModoRapidoPage() {
    */
   async function abrirCobertura(row: GuardRowModel) {
     if (busy) return;
-    if (bloqueaTramo(row)) return;
+    if (coberturaBloqueadaPorTramo(row)) return;
     if (row.estado !== 'NO_LLEGO' || row.turno.turnoStatus === 'ABSENT') {
       setCoberturaModal(row);
       return;
@@ -3668,7 +3690,6 @@ export default function ModoRapidoPage() {
    */
   async function revertirAusencia(row: GuardRowModel) {
     if (busy) return;
-    if (bloqueaTramo(row)) return;
     const turnoId = docIdDe(row.turno.rowId);
     try {
       const actual = (await leerTurnoRapido(turnoId)).data() || {};
@@ -4034,10 +4055,30 @@ export default function ModoRapidoPage() {
     }
   }
 
-  /** Cobertura, cambio y retiro de un tramo de turno cortado todavía se hacen desde Operaciones. */
+  /** Cambio y retiro de un tramo de turno cortado todavía se hacen desde Operaciones. */
   function bloqueaTramo(row: GuardRowModel): boolean {
     if (!esTramoCortado(row.turno)) return false;
-    showToast('Turno cortado: cobertura, cambio y retiro se hacen desde Operaciones por ahora', 'bg-slate-700');
+    showToast('Turno cortado: cambio y retiro se hacen desde Operaciones por ahora', 'bg-slate-700');
+    return true;
+  }
+
+  /**
+   * Cobertura de un turno cortado: se cubre el turno completo (los dos tramos) con un solo reemplazo,
+   * que hereda los mismos tramos. Solo si ningún tramo ya fichó: la cobertura de un solo tramo (el otro
+   * ya se trabajó) la sigue haciendo Operaciones, porque el motor oficial no parte la cobertura por tramo.
+   */
+  function coberturaBloqueadaPorTramo(row: GuardRowModel): boolean {
+    if (!esTramoCortado(row.turno)) return false;
+    const docId = docIdDe(row.turno.rowId);
+    const hermanos = classifiedRows.filter((r) => docIdDe(r.turno.rowId) === docId);
+    const algunoTrabajo = hermanos.some(
+      (r) => r.estado === 'PRESENTE_PLAT' || r.estado === 'PRESENTE_WA' || r.estado === 'CERRADO',
+    );
+    if (!algunoTrabajo) return false;
+    showToast(
+      'Turno cortado con un tramo ya trabajado: la cobertura de un solo tramo se hace desde Operaciones por ahora',
+      'bg-slate-700',
+    );
     return true;
   }
 
@@ -4300,6 +4341,7 @@ export default function ModoRapidoPage() {
         resolvedBy: 'OPERACIONES',
         empresaId,
       });
+      await heredarTramosEnCobertura(batchRet, titularId, coverDocId);
       await syncAusenciaCoberturaGestionada(
         db,
         {
@@ -4573,7 +4615,8 @@ export default function ModoRapidoPage() {
     let porApp = false;
     try {
       const candidateEmployeeId = String(candidate.turno.employeeId || '').trim();
-      if (candidateEmployeeId && empresaId) {
+      // Turno cortado: la convocatoria por la app cubriría un solo tramo; se asigna directo el turno completo.
+      if (candidateEmployeeId && empresaId && !esTramoCortado(ausente.turno)) {
         try {
           await invokeCrearConvocatoriaCobertura({
             absenceShift: {
@@ -4612,6 +4655,7 @@ export default function ModoRapidoPage() {
           empresaId,
           code: 'FT',
         });
+        await heredarTramosEnCobertura(batchFt, titularId, coverDocId);
         await syncAusenciaCoberturaGestionada(
           db,
           {
