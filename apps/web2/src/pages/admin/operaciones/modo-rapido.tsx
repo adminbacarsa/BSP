@@ -40,7 +40,6 @@ import {
   Radio,
   Scissors,
   Search,
-  Shield,
   ShieldCheck,
   Siren,
   Smartphone,
@@ -53,6 +52,7 @@ import DashboardLayout from '@/components/layout/DashboardLayout';
 import ModalRetenesDia, {
   type RetenAviso,
   type RetenEnvioApp,
+  type RetenesParaDestino,
   type RetenItem,
   type RetenTono,
 } from '@/components/operaciones/ModalRetenesDia';
@@ -61,16 +61,11 @@ import { useEmpresa } from '@/context/EmpresaContext';
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '@/lib/firebase';
 import { openWhatsApp, waMensaje } from '@/lib/whatsapp';
-import {
-  ChipsRetenEvaluado,
-  SelectorDestinoRetenes,
-  type DestinoRetenOpcion,
-} from '@/components/operaciones/RetenesDestinoPiezas';
+import { ChipsRetenEvaluado, type DestinoRetenOpcion } from '@/components/operaciones/RetenesDestinoPiezas';
 import {
   compararRetenesEvaluados,
   evaluarRetenParaDestino,
   type EmpleadoRetenInfo,
-  type OrdenRetenes,
   type RetenEvaluado,
 } from '@/lib/operaciones/retenesParaDestino';
 import { invokeCrearConvocatoriaCobertura } from '@/lib/operaciones/opsConvocatoriaCobertura';
@@ -2595,238 +2590,12 @@ function GuardRow({
   );
 }
 
-function RetenePanel({
-  rows,
-  busy,
-  onMarcarPresente,
-  onConfirmarWA,
-  destinos,
-  empInfo,
-  candidatosPara,
-  onAsignar,
-  onAvisar,
-}: {
-  rows: GuardRowModel[];
-  busy: boolean;
-  onMarcarPresente: (row: GuardRowModel) => void;
-  onConfirmarWA: (row: GuardRowModel) => void;
-  /** Huecos sin cubrir y objetivos de hoy donde se puede usar un retén. */
-  destinos: DestinoRetenOpcion[];
-  empInfo: Record<string, EmpleadoRetenInfo>;
-  /** Retenes que pueden ir a ese destino (de hoy, o de mañana si el hueco es una noche que arranca tarde). */
-  candidatosPara: (d: DestinoRetenOpcion) => { rows: GuardRowModel[]; esManana: boolean };
-  onAsignar: (ret: GuardRowModel, d: DestinoRetenOpcion) => void;
-  onAvisar: (ret: GuardRowModel, d: DestinoRetenOpcion, canal: 'wa' | 'app') => void;
-}) {
-  const [open, setOpen] = useState(true);
-  const [verLejanos, setVerLejanos] = useState(false);
-  const [destinoKey, setDestinoKey] = useState('');
-  const [orden, setOrden] = useState<OrdenRetenes>('cercania');
-  if (rows.length === 0) return null;
-  const destino = destinoKey ? destinos.find((d) => d.key === destinoKey) ?? null : null;
-  const evaluados: Array<{ row: GuardRowModel; ev: RetenEvaluado }> = [];
-  let candidatosEsManana = false;
-  if (destino) {
-    const cand = candidatosPara(destino);
-    candidatosEsManana = cand.esManana;
-    for (const row of cand.rows) {
-      evaluados.push({
-        row,
-        ev: evaluarRetenParaDestino(String(row.turno.employeeId || ''), empInfo[String(row.turno.employeeId || '')], {
-          objectiveId: destino.objectiveId,
-          lat: destino.lat,
-          lng: destino.lng,
-          positionName: destino.positionName,
-        }),
-      });
-    }
-    evaluados.sort((a, b) => compararRetenesEvaluados(a.ev, b.ev, orden));
-  }
-  const fueraDeRadio = evaluados.filter((e) => !e.ev.dentroRadio).length;
-  // Los que viven a más de 15 km se ocultan por defecto; sin dato de distancia no se ocultan.
-  const visibles = verLejanos ? evaluados : evaluados.filter((e) => e.ev.dentroRadio);
-  const disponibles = rows.filter(
-    (r) => r.estado !== 'AUSENTE' && r.estado !== 'NO_LLEGO',
-  ).length;
-
-  return (
-    <div className="mr-retenes border-b-2 border-violet-200">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-violet-100/60 text-left"
-      >
-        {open ? (
-          <ChevronDown size={14} className="text-violet-500" />
-        ) : (
-          <ChevronRight size={14} className="text-violet-500" />
-        )}
-        <span className="text-xs font-black text-violet-800 tracking-wide">
-          🛡️ RETENES HOY
-        </span>
-        <span className="ml-1 px-1.5 py-0.5 rounded-full bg-violet-200 text-violet-700 text-[9px] font-bold">
-          {disponibles} disp. / {rows.length}
-        </span>
-      </button>
-      {open && destinos.length > 0 && (
-        <SelectorDestinoRetenes
-          destinos={destinos}
-          valor={destinoKey}
-          orden={orden}
-          onChange={setDestinoKey}
-          onOrden={setOrden}
-        />
-      )}
-      {open && destino && (
-        <div>
-          <div className="px-4 py-1.5 text-[10px] text-slate-500 border-b border-violet-100">
-            {candidatosEsManana ? 'Retenes de mañana (cubren la noche)' : 'Retenes de hoy'} para{' '}
-            <span className="font-bold text-slate-700">{destino.etiqueta}</span>
-            {' · '}
-            {visibles.length} {visibles.length === 1 ? 'retén' : 'retenes'}
-            {fueraDeRadio > 0 && (
-              <button
-                type="button"
-                onClick={() => setVerLejanos((v) => !v)}
-                className="ml-2 px-2 py-0.5 rounded-full border border-amber-200 bg-amber-50 text-amber-800 text-[10px] font-bold hover:bg-amber-100"
-              >
-                {verLejanos ? `Ocultar los de más de 15 km (${fueraDeRadio})` : `Mostrar ${fueraDeRadio} a más de 15 km`}
-              </button>
-            )}
-          </div>
-          {visibles.length === 0 && (
-            <div className="px-4 py-3 text-[11px] text-slate-400">
-              {fueraDeRadio > 0
-                ? 'No hay retenes a menos de 15 km de este destino.'
-                : 'No hay retenes disponibles para este destino.'}
-            </div>
-          )}
-          {visibles.map(({ row, ev }) => {
-            const pill = estadoPill(row.estado);
-            return (
-              <div
-                key={row.turno.rowId}
-                className={`flex flex-wrap items-center gap-3 px-4 py-2 border-b border-violet-100 hover:bg-violet-50 ${
-                  ev.dentroRadio ? '' : 'opacity-70'
-                }`}
-              >
-                <div className="flex-1 min-w-[200px]">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold text-slate-800 truncate">{row.employeeName}</span>
-                    <span className={`px-2 py-0.5 text-[9px] font-bold rounded-full whitespace-nowrap ${pill.className}`}>
-                      {pill.label}
-                    </span>
-                  </div>
-                  <div className="text-[10px] text-slate-500 mb-1">
-                    {row.turno.phone ? row.turno.phone : 'Sin teléfono'}
-                  </div>
-                  <ChipsRetenEvaluado ev={ev} />
-                </div>
-                <div className="flex items-center gap-1">
-                  <span className="text-[9px] font-bold uppercase text-slate-400 mr-0.5">
-                    {destino.tipo === 'hueco' ? 'Solo avisar' : 'Avisar'}
-                  </span>
-                  <button
-                    type="button"
-                    disabled={busy || !row.turno.phone}
-                    title={row.turno.phone ? 'Avisar por WhatsApp' : 'Sin teléfono'}
-                    onClick={() => onAvisar(row, destino, 'wa')}
-                    className="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold shadow-sm disabled:opacity-50 active:scale-95"
-                  >
-                    WA
-                  </button>
-                  <button
-                    type="button"
-                    disabled={busy || !row.turno.employeeId}
-                    title="Avisar por la app del guardia (notificación push)"
-                    onClick={() => onAvisar(row, destino, 'app')}
-                    className="px-2.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold shadow-sm disabled:opacity-50 active:scale-95"
-                  >
-                    App
-                  </button>
-                </div>
-                {destino.tipo === 'hueco' && (
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => onAsignar(row, destino)}
-                    title="Asigna el RET al hueco y le avisa por WhatsApp y por la app"
-                    className="px-2.5 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-[10px] font-bold shadow-sm disabled:opacity-50 active:scale-95"
-                  >
-                    Asignar y avisar
-                  </button>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-      {open && !destino && (
-        <div>
-          {rows.map((row) => {
-            const pill = estadoPill(row.estado);
-            let action: React.ReactNode = null;
-            if (row.estado === 'PENDIENTE_WA') {
-              action = (
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => onConfirmarWA(row)}
-                  className="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold disabled:opacity-50"
-                >
-                  ✓ Confirmar
-                </button>
-              );
-            } else if (row.estado === 'ESPERANDO' || row.estado === 'TARDANZA') {
-              action = (
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => onMarcarPresente(row)}
-                  className="px-2 py-1 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-[10px] font-bold disabled:opacity-50"
-                >
-                  ✓ Disponible
-                </button>
-              );
-            }
-            return (
-              <div
-                key={row.turno.rowId}
-                className="flex items-center gap-3 px-4 py-2 border-b border-violet-100 hover:bg-violet-50"
-              >
-                <span
-                  className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                    row.estado === 'PRESENTE_WA' || row.estado === 'PRESENTE_PLAT'
-                      ? 'bg-emerald-500'
-                      : row.estado === 'ESPERANDO' || row.estado === 'PENDIENTE_WA'
-                        ? 'bg-violet-400 animate-pulse'
-                        : row.estado === 'AUSENTE' || row.estado === 'NO_LLEGO'
-                          ? 'bg-red-400'
-                          : 'bg-slate-300'
-                  }`}
-                />
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-semibold text-slate-800 truncate">
-                    {row.employeeName}
-                  </div>
-                  <div className="text-[10px] text-slate-500">
-                    {row.turno.expected}
-                    {row.turno.phone ? ` · ${row.turno.phone}` : ''}
-                  </div>
-                </div>
-                <span
-                  className={`px-2 py-0.5 text-[9px] font-bold rounded-full whitespace-nowrap ${pill.className}`}
-                >
-                  {pill.label}
-                </span>
-                {action}
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
+function retenTonoDe(estado: GuardEstado): RetenTono {
+  if (estado === 'PRESENTE_WA' || estado === 'PRESENTE_PLAT') return 'ok';
+  if (estado === 'ESPERANDO' || estado === 'PENDIENTE_WA') return 'espera';
+  if (estado === 'NO_LLEGO' || estado === 'AUSENTE' || estado === 'TARDANZA') return 'alerta';
+  if (estado === 'CERRADO') return 'cerrado';
+  return 'neutro';
 }
 
 function ObjectiveGroup({
@@ -3895,13 +3664,6 @@ export default function ModoRapidoPage() {
   }, [classifiedRows]);
 
   const retenesHoyItems = useMemo((): RetenItem[] => {
-    const tonoDe = (estado: GuardEstado): RetenTono => {
-      if (estado === 'PRESENTE_WA' || estado === 'PRESENTE_PLAT') return 'ok';
-      if (estado === 'ESPERANDO' || estado === 'PENDIENTE_WA') return 'espera';
-      if (estado === 'NO_LLEGO' || estado === 'AUSENTE' || estado === 'TARDANZA') return 'alerta';
-      if (estado === 'CERRADO') return 'cerrado';
-      return 'neutro';
-    };
     return classifiedRows
       .filter((r) => r.band === 'RET')
       .map((r) => ({
@@ -3912,8 +3674,9 @@ export default function ModoRapidoPage() {
         objetivo: r.turno.obj,
         horario: r.turno.shift.replace(/^RET\s*/i, '') || r.turno.expected,
         estadoLabel: estadoPill(r.estado).label,
-        estadoTono: tonoDe(r.estado),
+        estadoTono: retenTonoDe(r.estado),
         dia: 'hoy' as const,
+        estadoRaw: r.estado,
       }))
       .sort((a, b) => compararTexto(a.nombre, b.nombre));
   }, [classifiedRows]);
@@ -4129,17 +3892,11 @@ export default function ModoRapidoPage() {
     [groups],
   );
 
-  const reteneRows = useMemo(
-    () => filteredRows.filter((r) => r.band === 'RET'),
-    [filteredRows],
-  );
-
   const sheetRows = useMemo(() => {
     const list: GuardRowModel[] = [];
     for (const [, rows] of nonReteGroups) list.push(...rows);
-    list.push(...reteneRows);
     return list;
-  }, [nonReteGroups, reteneRows]);
+  }, [nonReteGroups]);
 
   const activeRow = sheetRows.find((r) => r.turno.rowId === activeRowId) ?? null;
 
@@ -5310,8 +5067,57 @@ export default function ModoRapidoPage() {
     }
   };
 
+  /** Un RET como ítem del modal de retenes. Con destino, objetivo y horario son los del destino (para armar el mensaje). */
+  function retenItemModal(ret: GuardRowModel, dia: 'hoy' | 'manana', destino?: DestinoRetenOpcion): RetenItem {
+    const hueco =
+      destino?.tipo === 'hueco'
+        ? classifiedRows.find((r) => `hueco:${r.turno.rowId}` === destino.key)
+        : undefined;
+    return {
+      rowId: ret.turno.rowId,
+      employeeId: String(ret.turno.employeeId || ''),
+      nombre: ret.employeeName,
+      phone: ret.turno.phone,
+      objetivo: destino ? destino.objetivo : ret.turno.obj,
+      horario: hueco
+        ? `${hueco.turno.expected}–${hueco.salida || '—'}`
+        : ret.turno.shift.replace(/^RET\s*/i, '') || ret.turno.expected,
+      estadoLabel: dia === 'manana' ? 'PROGRAMADO' : estadoPill(ret.estado).label,
+      estadoTono: dia === 'manana' ? 'neutro' : retenTonoDe(ret.estado),
+      dia,
+      estadoRaw: dia === 'manana' ? undefined : ret.estado,
+    };
+  }
+
+  /** Retenes para un destino del modal (los mismos que el panel: de hoy, o de mañana si el hueco es una noche tardía). */
+  const candidatosModalRetenes = (d: DestinoRetenOpcion): RetenesParaDestino => {
+    const cand = candidatosRetenesPanel(d);
+    const dia = cand.esManana ? 'manana' : 'hoy';
+    return { esManana: cand.esManana, items: cand.rows.map((r) => retenItemModal(r, dia, d)) };
+  };
+
+  /** El modal trabaja con ítems; acá se vuelve al turno real para asignar con el motor de cobertura. */
+  function asignarRetDesdeModal(item: RetenItem, destino: DestinoRetenOpcion) {
+    const ret = candidatosRetenesPanel(destino).rows.find((r) => r.turno.rowId === item.rowId);
+    if (!ret) {
+      showToast('El retén ya no está disponible para este hueco', 'bg-amber-700');
+      return;
+    }
+    void asignarRetDesdePanel(ret, destino);
+  }
+
+  function marcarPresenteDesdeItem(item: RetenItem) {
+    const row = classifiedRows.find((r) => r.turno.rowId === item.rowId);
+    if (row) void handleMarcarPresente(row);
+  }
+
+  function confirmarWADesdeItem(item: RetenItem) {
+    const row = classifiedRows.find((r) => r.turno.rowId === item.rowId);
+    if (row) void handleConfirmarWA(row);
+  }
+
   /**
-   * Panel de retenes: asigna el RET elegido a un hueco sin cubrir y le manda el mensaje de asignación.
+   * Asigna el RET elegido a un hueco sin cubrir y le manda el mensaje de asignación.
    * Usa el mismo motor que la ventana de cobertura (`handleAsignarRet`). Si el guardia todavía no está
    * declarado ausente (no llegó pasados 30 min) se declara antes, igual que al abrir la cobertura.
    */
@@ -5371,31 +5177,6 @@ export default function ModoRapidoPage() {
       estadoTono: 'neutro',
       dia: 'hoy',
     };
-  }
-
-  /** Panel de retenes: avisa sin asignar (consulta de disponibilidad para el hueco u objetivo), por WhatsApp o por la app. */
-  async function avisarRetDesdePanel(ret: GuardRowModel, destino: DestinoRetenOpcion, canal: 'wa' | 'app') {
-    const hueco =
-      destino.tipo === 'hueco'
-        ? classifiedRows.find((r) => `hueco:${r.turno.rowId}` === destino.key)
-        : undefined;
-    const texto = hueco
-      ? waMensaje.cobertura(ret.employeeName, hueco.turno.obj, hueco.turno.expected, hueco.salida || '—')
-      : waMensaje.consultaRetObjetivo(ret.employeeName, destino.objetivo);
-    if (canal === 'app') {
-      if (!ret.turno.employeeId) {
-        showToast(`${ret.employeeName} no tiene legajo asociado para avisar por la app`, 'bg-amber-700');
-        return;
-      }
-      await enviarAppRetenes([{ item: retenItemDe(ret), texto }]);
-      return;
-    }
-    if (!ret.turno.phone) {
-      showToast(`${ret.employeeName} no tiene teléfono`, 'bg-amber-700');
-      return;
-    }
-    abrirWa(ret.turno.phone, texto);
-    showToast(`WhatsApp abierto · ${ret.employeeName}`, 'bg-emerald-700');
   }
 
   /**
@@ -6468,20 +6249,9 @@ export default function ModoRapidoPage() {
             tono="text-indigo-600"
             onClick={() => setStatsFilter('app')}
           />
-          {stats.retenes > 0 && (
-            <ChipIcono
-              icon={Shield}
-              label="Retenes (RET)"
-              count={stats.retenes}
-              active={bandFilter === 'RET'}
-              accent="bg-violet-100 text-violet-700 border-violet-300"
-              tono="text-violet-600"
-              onClick={() => setBandFilter(bandFilter === 'RET' ? 'all' : 'RET')}
-            />
-          )}
           <ChipIcono
             icon={ShieldCheck}
-            label="Retenes del día: ver y enviar mensaje por la app y WhatsApp"
+            label="Retenes: ver, asignar a un hueco y avisar por la app y WhatsApp"
             count={retenesHoyItems.length}
             active={retenesModalOpen}
             accent="bg-violet-600 text-white border-violet-600"
@@ -6703,17 +6473,6 @@ export default function ModoRapidoPage() {
                   <CabeceraCol idx={10} onResizeStart={iniciarAjusteColumna} onResizeReset={restablecerColumnas}>Estado</CabeceraCol>
                   <CabeceraCol idx={11} onResizeStart={iniciarAjusteColumna} onResizeReset={restablecerColumnas}>Acción</CabeceraCol>
                 </div>
-                <RetenePanel
-                  rows={reteneRows}
-                  busy={busy}
-                  onMarcarPresente={(r) => void handleMarcarPresente(r)}
-                  onConfirmarWA={(r) => void handleConfirmarWA(r)}
-                  destinos={destinosRetenes}
-                  empInfo={empInfo}
-                  candidatosPara={candidatosRetenesPanel}
-                  onAsignar={(r, d) => void asignarRetDesdePanel(r, d)}
-                  onAvisar={(r, d, canal) => void avisarRetDesdePanel(r, d, canal)}
-                />
                 {nonReteGroups.map(([objName, rows], gi) => {
                   const clienteGrupo = clientePorObj[objName] || SIN_CLIENTE;
                   const clientePrevio = gi > 0 ? (clientePorObj[nonReteGroups[gi - 1][0]] || SIN_CLIENTE) : null;
@@ -6905,6 +6664,13 @@ export default function ModoRapidoPage() {
             onEnviarApp={enviarAppRetenes}
             onEnviarWa={enviarWaRetenes}
             onClose={() => setRetenesModalOpen(false)}
+            destinos={destinosRetenes}
+            empInfo={empInfo}
+            candidatosPara={candidatosModalRetenes}
+            onAsignar={asignarRetDesdeModal}
+            onMarcarPresente={marcarPresenteDesdeItem}
+            onConfirmarWA={confirmarWADesdeItem}
+            ocupado={busy}
           />
         )}
 

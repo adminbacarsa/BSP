@@ -1,6 +1,17 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { addDays, format } from 'date-fns';
 import { CheckCircle2, MessageSquare, Phone, Send, Shield, Smartphone, X } from 'lucide-react';
+import {
+  ChipsRetenEvaluado,
+  SelectorDestinoRetenes,
+  type DestinoRetenOpcion,
+} from '@/components/operaciones/RetenesDestinoPiezas';
+import {
+  compararRetenesEvaluados,
+  evaluarRetenParaDestino,
+  type EmpleadoRetenInfo,
+  type OrdenRetenes,
+} from '@/lib/operaciones/retenesParaDestino';
 
 export type RetenTono = 'ok' | 'espera' | 'alerta' | 'cerrado' | 'neutro';
 
@@ -14,6 +25,14 @@ export interface RetenItem {
   estadoLabel: string;
   estadoTono: RetenTono;
   dia: 'hoy' | 'manana';
+  /** Estado operativo del RET hoy (ESPERANDO, PENDIENTE_WA, TARDANZA…): habilita «Disponible» / «Confirmar». */
+  estadoRaw?: string;
+}
+
+/** Retenes que pueden ir a un destino (ya con objetivo y horario del destino para armar el mensaje). */
+export interface RetenesParaDestino {
+  items: RetenItem[];
+  esManana: boolean;
 }
 
 export interface RetenAviso {
@@ -33,6 +52,15 @@ interface ModalRetenesDiaProps {
   onEnviarApp: (avisos: RetenAviso[]) => Promise<RetenEnvioApp>;
   onEnviarWa: (avisos: RetenAviso[]) => Promise<string>;
   onClose: () => void;
+  /** Huecos sin cubrir y objetivos de hoy donde se puede usar un retén. */
+  destinos?: DestinoRetenOpcion[];
+  empInfo?: Record<string, EmpleadoRetenInfo>;
+  candidatosPara?: (d: DestinoRetenOpcion) => RetenesParaDestino;
+  /** Asigna el retén al hueco y le avisa por WhatsApp y por la app. */
+  onAsignar?: (item: RetenItem, d: DestinoRetenOpcion) => void;
+  onMarcarPresente?: (item: RetenItem) => void;
+  onConfirmarWA?: (item: RetenItem) => void;
+  ocupado?: boolean;
 }
 
 interface Plantilla {
@@ -60,6 +88,20 @@ const PLANTILLAS: Plantilla[] = [
     texto: '{nombre}, ya no te necesitamos {cuando} como retén. Gracias por la disponibilidad. — Operaciones',
   },
 ];
+
+/** Plantillas que solo tienen sentido con un destino elegido ({objetivo} y {horario} son los del destino). */
+const PLANTILLA_ASIGNACION: Plantilla = {
+  id: 'asignacion',
+  label: 'Asignación al hueco',
+  texto:
+    '{nombre}, quedaste asignado a cubrir {objetivo} ({horario}). Confirmá que vas en camino y avisá cuando llegues. — Operaciones',
+};
+const PLANTILLA_CONSULTA: Plantilla = {
+  id: 'consulta',
+  label: 'Consulta por el objetivo',
+  texto:
+    '{nombre}, podemos necesitarte en {objetivo}. ¿Estás disponible y cuánto tardarías en llegar? Confirmá a la brevedad. — Operaciones',
+};
 
 const MENSAJE_MAX = 400;
 
@@ -109,8 +151,18 @@ export default function ModalRetenesDia({
   onEnviarApp,
   onEnviarWa,
   onClose,
+  destinos = [],
+  empInfo = {},
+  candidatosPara,
+  onAsignar,
+  onMarcarPresente,
+  onConfirmarWA,
+  ocupado = false,
 }: ModalRetenesDiaProps) {
   const [dia, setDia] = useState<'hoy' | 'manana'>('hoy');
+  const [destinoKey, setDestinoKey] = useState('');
+  const [orden, setOrden] = useState<OrdenRetenes>('cercania');
+  const [verLejanos, setVerLejanos] = useState(false);
   const [seleccion, setSeleccion] = useState<Set<string>>(new Set());
   const [plantillaId, setPlantillaId] = useState<string>(PLANTILLAS[0].id);
   const [texto, setTexto] = useState<string>(PLANTILLAS[0].texto);
@@ -132,16 +184,60 @@ export default function ModalRetenesDia({
     return () => window.removeEventListener('keydown', onKey, true);
   }, [onClose]);
 
-  const lista = dia === 'hoy' ? hoy : manana;
+  const destino = destinoKey ? destinos.find((d) => d.key === destinoKey) ?? null : null;
+  // Si el hueco se cubrió o desapareció mientras el modal estaba abierto, vuelve a la lista normal.
+  useEffect(() => {
+    if (destinoKey && !destino) setDestinoKey('');
+  }, [destinoKey, destino]);
+
+  /** Con destino: retenes que pueden ir ahí, con distancia y conocimiento del objetivo, ordenados. */
+  const paraDestino = useMemo(() => {
+    if (!destino || !candidatosPara) return null;
+    const cand = candidatosPara(destino);
+    const evaluados = cand.items.map((item) => ({
+      item,
+      ev: evaluarRetenParaDestino(item.employeeId, empInfo[item.employeeId], {
+        objectiveId: destino.objectiveId,
+        lat: destino.lat,
+        lng: destino.lng,
+        positionName: destino.positionName,
+      }),
+    }));
+    evaluados.sort((a, b) => compararRetenesEvaluados(a.ev, b.ev, orden));
+    return { esManana: cand.esManana, evaluados };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [destino, candidatosPara, empInfo, orden, hoy, manana]);
+
+  const fueraDeRadio = paraDestino ? paraDestino.evaluados.filter((e) => !e.ev.dentroRadio).length : 0;
+  // A más de 15 km se ocultan por defecto; sin dato de distancia no se ocultan.
+  const evaluadosVisibles = paraDestino
+    ? verLejanos
+      ? paraDestino.evaluados
+      : paraDestino.evaluados.filter((e) => e.ev.dentroRadio)
+    : [];
+  const evaluacionPorRow = useMemo(() => {
+    const m = new Map<string, (typeof evaluadosVisibles)[number]['ev']>();
+    for (const e of evaluadosVisibles) m.set(e.item.rowId, e.ev);
+    return m;
+  }, [evaluadosVisibles]);
+
+  const lista = paraDestino ? evaluadosVisibles.map((e) => e.item) : dia === 'hoy' ? hoy : manana;
   const fechaDia = useMemo(() => {
-    const base = dia === 'hoy' ? new Date() : addDays(new Date(), 1);
+    const base = (paraDestino?.esManana ?? dia === 'manana') ? addDays(new Date(), 1) : new Date();
     return format(base, 'dd/MM/yyyy');
-  }, [dia]);
+  }, [dia, paraDestino?.esManana]);
 
   useEffect(() => {
     setSeleccion(new Set());
     setMensajeEstado('');
-  }, [dia]);
+  }, [dia, destinoKey]);
+
+  // Al elegir un destino se propone el mensaje que corresponde; al volver a la lista, el de disponibilidad.
+  useEffect(() => {
+    const p = !destino ? PLANTILLAS[0] : destino.tipo === 'hueco' ? PLANTILLA_ASIGNACION : PLANTILLA_CONSULTA;
+    setPlantillaId(p.id);
+    setTexto(p.texto);
+  }, [destino?.key, destino?.tipo]);
 
   const seleccionados = useMemo(() => lista.filter((i) => seleccion.has(i.rowId)), [lista, seleccion]);
   const todosMarcados = lista.length > 0 && seleccionados.length === lista.length;
@@ -247,31 +343,34 @@ export default function ModalRetenesDia({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <div
-        className="bg-white rounded-3xl shadow-lg max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden"
+        className="bg-white rounded-3xl shadow-lg max-w-3xl w-full max-h-[90vh] flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="px-4 py-3 border-b border-slate-200 flex items-center gap-3 bg-violet-50">
           <Shield size={18} className="text-violet-600 flex-shrink-0" aria-hidden />
           <div className="flex-1 min-w-0">
-            <div className="text-sm font-black text-violet-800">Retenes del día</div>
+            <div className="text-sm font-black text-violet-800">Retenes</div>
             <div className="text-[11px] text-slate-600">
               {fechaDia} · {lista.length} retén{lista.length === 1 ? '' : 'es'}
+              {paraDestino && destino ? ` para ${destino.etiqueta}` : ''}
             </div>
           </div>
-          <div className="flex items-center gap-1 rounded-xl bg-white border border-violet-200 p-0.5">
-            {(['hoy', 'manana'] as const).map((d) => (
-              <button
-                key={d}
-                type="button"
-                onClick={() => setDia(d)}
-                className={`px-3 py-1 rounded-lg text-[11px] font-bold ${
-                  dia === d ? 'bg-violet-600 text-white' : 'text-slate-600 hover:bg-violet-50'
-                }`}
-              >
-                {d === 'hoy' ? `Hoy (${hoy.length})` : `Mañana (${manana.length})`}
-              </button>
-            ))}
-          </div>
+          {!destino && (
+            <div className="flex items-center gap-1 rounded-xl bg-white border border-violet-200 p-0.5">
+              {(['hoy', 'manana'] as const).map((d) => (
+                <button
+                  key={d}
+                  type="button"
+                  onClick={() => setDia(d)}
+                  className={`px-3 py-1 rounded-lg text-[11px] font-bold ${
+                    dia === d ? 'bg-violet-600 text-white' : 'text-slate-600 hover:bg-violet-50'
+                  }`}
+                >
+                  {d === 'hoy' ? `Hoy (${hoy.length})` : `Mañana (${manana.length})`}
+                </button>
+              ))}
+            </div>
+          )}
           <button
             type="button"
             onClick={onClose}
@@ -282,10 +381,40 @@ export default function ModalRetenesDia({
           </button>
         </div>
 
+        {destinos.length > 0 && candidatosPara && (
+          <SelectorDestinoRetenes
+            destinos={destinos}
+            valor={destinoKey}
+            orden={orden}
+            onChange={setDestinoKey}
+            onOrden={setOrden}
+          />
+        )}
+        {paraDestino && (
+          <div className="px-4 py-1.5 text-[10px] text-slate-500 border-b border-violet-100 bg-white">
+            {paraDestino.esManana ? 'Retenes de mañana (cubren la noche)' : 'Retenes de hoy'}
+            {fueraDeRadio > 0 && (
+              <button
+                type="button"
+                onClick={() => setVerLejanos((v) => !v)}
+                className="ml-2 px-2 py-0.5 rounded-full border border-amber-200 bg-amber-50 text-amber-800 text-[10px] font-bold hover:bg-amber-100"
+              >
+                {verLejanos ? `Ocultar los de más de 15 km (${fueraDeRadio})` : `Mostrar ${fueraDeRadio} a más de 15 km`}
+              </button>
+            )}
+          </div>
+        )}
+
         <div className="flex-1 min-h-0 overflow-y-auto">
           {lista.length === 0 ? (
             <div className="px-4 py-10 text-center text-sm text-slate-500">
-              {dia === 'hoy' ? 'No hay retenes cargados para hoy.' : 'No hay retenes cargados para mañana.'}
+              {paraDestino
+                ? fueraDeRadio > 0
+                  ? 'No hay retenes a menos de 15 km de este destino.'
+                  : 'No hay retenes disponibles para este destino.'
+                : dia === 'hoy'
+                  ? 'No hay retenes cargados para hoy.'
+                  : 'No hay retenes cargados para mañana.'}
             </div>
           ) : (
             <div>
@@ -295,10 +424,13 @@ export default function ModalRetenesDia({
               </label>
               {lista.map((it) => {
                 const res = resultados[it.rowId];
+                const ev = evaluacionPorRow.get(it.rowId);
                 return (
                   <div
                     key={it.rowId}
-                    className="flex items-center gap-3 px-4 py-2 border-b border-slate-100 hover:bg-violet-50/50"
+                    className={`flex items-center gap-3 px-4 py-2 border-b border-slate-100 hover:bg-violet-50/50 ${
+                      ev && !ev.dentroRadio ? 'opacity-70' : ''
+                    }`}
                   >
                     <input
                       type="checkbox"
@@ -310,16 +442,55 @@ export default function ModalRetenesDia({
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-semibold text-slate-800 truncate">{it.nombre}</div>
                       <div className="text-[10px] text-slate-500 truncate">
-                        {it.horario}
-                        {it.objetivo && it.objetivo !== '—' ? ` · ${it.objetivo}` : ''}
+                        {ev ? 'RET' : it.horario}
+                        {!ev && it.objetivo && it.objetivo !== '—' ? ` · ${it.objetivo}` : ''}
                         {it.phone ? ` · ${it.phone}` : ' · sin teléfono'}
                       </div>
+                      {ev && (
+                        <div className="mt-1">
+                          <ChipsRetenEvaluado ev={ev} />
+                        </div>
+                      )}
                     </div>
                     <span
                       className={`px-2 py-0.5 text-[9px] font-bold rounded-full border whitespace-nowrap ${TONO_CLASE[it.estadoTono]}`}
                     >
                       {it.estadoLabel}
                     </span>
+                    {!destino && it.dia === 'hoy' && onConfirmarWA && it.estadoRaw === 'PENDIENTE_WA' && (
+                      <button
+                        type="button"
+                        disabled={ocupado}
+                        onClick={() => onConfirmarWA(it)}
+                        className="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold disabled:opacity-50 active:scale-95"
+                      >
+                        ✓ Confirmar
+                      </button>
+                    )}
+                    {!destino &&
+                      it.dia === 'hoy' &&
+                      onMarcarPresente &&
+                      (it.estadoRaw === 'ESPERANDO' || it.estadoRaw === 'TARDANZA') && (
+                        <button
+                          type="button"
+                          disabled={ocupado}
+                          onClick={() => onMarcarPresente(it)}
+                          className="px-2 py-1 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-[10px] font-bold disabled:opacity-50 active:scale-95"
+                        >
+                          ✓ Disponible
+                        </button>
+                      )}
+                    {destino && destino.tipo === 'hueco' && onAsignar && (
+                      <button
+                        type="button"
+                        disabled={ocupado || enviando}
+                        onClick={() => onAsignar(it, destino)}
+                        title="Asigna el RET al hueco y le avisa por WhatsApp y por la app"
+                        className="px-2.5 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-[10px] font-bold shadow-sm disabled:opacity-50 active:scale-95"
+                      >
+                        Asignar y avisar
+                      </button>
+                    )}
                     {(res?.app || res?.wa) && (
                       <span
                         className="flex items-center gap-0.5 text-[9px] font-bold text-emerald-600"
@@ -361,7 +532,7 @@ export default function ModalRetenesDia({
         <div className="px-4 py-3 border-t border-slate-200 bg-slate-50 space-y-2">
           <div className="flex flex-wrap items-center gap-1.5">
             <MessageSquare size={13} className="text-slate-400" aria-hidden />
-            {PLANTILLAS.map((p) => (
+            {[...PLANTILLAS, ...(destino ? [destino.tipo === 'hueco' ? PLANTILLA_ASIGNACION : PLANTILLA_CONSULTA] : [])].map((p) => (
               <button
                 key={p.id}
                 type="button"
