@@ -2312,7 +2312,7 @@ function GuardRow({
       style={{ scrollMarginTop: 72, scrollMarginBottom: 16 }}
       onClick={() => onSelect(row)}
       className={`mr-row grid ${SHEET_COLS} ${SHEET_ALIGN} items-center px-0 py-0 border-b border-slate-100 cursor-pointer [&>*]:py-1.5 [&>*:not(:first-child)]:border-r [&>*:not(:first-child)]:border-slate-100 [&>*:last-child]:border-r-0 ${
-        active ? 'mr-row-active' : swapOrigin ? 'mr-row-swap' : row.turno.retiro ? 'mr-row-retiro' : ''
+        active ? 'mr-row-active' : swapOrigin ? 'mr-row-swap' : row.turno.retiro || row.estado === 'AUSENTE' ? 'mr-row-retiro' : ''
       }`}
       title={retiroTexto || undefined}
     >
