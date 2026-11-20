@@ -22,6 +22,8 @@ export interface WAEntry {
   /** Coordenadas del objetivo (para badge de distancia). */
   objLat?: number;
   objLng?: number;
+  /** Epoch ms real del mensaje (para registrar la salida a la hora en que el guardia la avisó). */
+  msgTs?: number;
 }
 
 export interface WAConfirmedEntry {
@@ -91,6 +93,13 @@ export interface UseWABridgeReturn {
   confirmedEntries: WAConfirmedEntry[];
   confirmedRowIds: ReadonlySet<string>;
   confirmEntry: (entry: WAEntry) => void;
+  /**
+   * Avisos de salida: ubicación enviada por un guardia que ya está presente, una vez finalizado su turno.
+   * No son check-ins: la planilla decide si cierra el turno o lo deja para el operador.
+   */
+  salidas: WAEntry[];
+  /** Da por atendido un aviso de salida (el turno se cerró o se descartó). */
+  consumirSalida: (entry: WAEntry) => void;
   /** Descarta un check-in pendiente sin marcar presencia (duplicado, error, mensaje equivocado). */
   dismissEntry: (entry: WAEntry) => void;
   /** Le escribe al guardia por mensaje privado, no al grupo (el bridge decide si está habilitado). */
@@ -136,6 +145,14 @@ function todayKey(): string {
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
+}
+
+function msDeRaw(raw: unknown): number {
+  if (!raw) return 0;
+  const r = raw as { toMillis?: () => number; seconds?: number };
+  if (typeof r.toMillis === 'function') return r.toMillis();
+  if (typeof r.seconds === 'number') return r.seconds * 1000;
+  return 0;
 }
 
 function inicioDeHoyMs(): number {
@@ -201,6 +218,8 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
   const [status, setStatus] = useState<WABridgeStatus>('idle');
   const [badge, setBadge] = useState(0);
   const [pending, setPending] = useState<WAEntry[]>([]);
+  const [salidas, setSalidas] = useState<WAEntry[]>([]);
+  const salidaRowIdsRef = useRef<Set<string>>(new Set());
   const [confirmedEntries, setConfirmedEntries] = useState<WAConfirmedEntry[]>([]);
   const [confirmedRowIds, setConfirmedRowIds] = useState<Set<string>>(() => new Set());
   const [groups, setGroups] = useState<{ id: string; name: string; participants: number }[]>([]);
@@ -242,6 +261,21 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
     setPending((prev) => prev.filter((e) => !ids.has(e.id)));
     setBadge((b) => Math.max(0, b - obsoletos.length));
   }, [turnos, pending]);
+
+  // Un aviso de salida de un turno que ya se cerró (acá o en otra pantalla) no tiene nada más que hacer.
+  useEffect(() => {
+    if (salidas.length === 0) return;
+    const cerrados = new Set(
+      Object.values(turnos)
+        .filter((t) => t.turnoStatus === 'COMPLETED')
+        .map((t) => t.rowId),
+    );
+    if (cerrados.size === 0) return;
+    setSalidas((prev) => {
+      const sigue = prev.filter((e) => !(e.rowId && cerrados.has(e.rowId)));
+      return sigue.length === prev.length ? prev : sigue;
+    });
+  }, [turnos, salidas]);
 
   useEffect(() => {
     try {
@@ -353,6 +387,7 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
       if (!msgs.length) return;
 
       const newEntries: WAEntry[] = [];
+      const salidasNuevas: WAEntry[] = [];
       let added = 0;
 
       for (const m of msgs) {
@@ -367,8 +402,41 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
         const turno = findTurno(turnosRef.current, m.name, m.phone);
         // Regla 1: sin turno planificado hoy → descartar
         if (!turno) continue;
-        // Regla 2: ya presente en plataforma → descartar
-        if (turno.turnoStatus === 'PRESENT' || turno.turnoStatus === 'COMPLETED') continue;
+        // Regla 2: ya presente en plataforma → no es un check-in. Si el turno ya terminó y el guardia
+        // manda su ubicación, es el aviso de salida; si no, se descarta.
+        if (turno.turnoStatus === 'PRESENT') {
+          const finMs = msDeRaw(turno.endTimeRaw);
+          const msgMs = typeof m.ts === 'number' && m.ts > 0 ? m.ts : Date.now();
+          if (
+            m.location &&
+            turno.rowId &&
+            finMs > 0 &&
+            msgMs >= finMs &&
+            !salidaRowIdsRef.current.has(turno.rowId)
+          ) {
+            salidaRowIdsRef.current.add(turno.rowId);
+            salidasNuevas.push({
+              id: m.id,
+              rowId: turno.rowId,
+              name: turno.name || m.name,
+              phone: turno.phone || m.phone,
+              arrivedAt: m.time || nowHHMM(),
+              shift: turno.shift,
+              expected: turno.expected,
+              hasLocation: true,
+              lat: (m.location as { lat?: number; latitude?: number }).lat ?? m.location.latitude,
+              lng: (m.location as { lng?: number; longitude?: number }).lng ?? m.location.longitude,
+              msgType: m.type,
+              groupId: m.groupId,
+              obj: turno.obj,
+              objLat: turno.objLat,
+              objLng: turno.objLng,
+              msgTs: msgMs,
+            });
+          }
+          continue;
+        }
+        if (turno.turnoStatus === 'COMPLETED') continue;
         // Regla 3: ya pendiente o confirmado en esta sesión → descartar (primer mensaje gana)
         if (
           turno.rowId &&
@@ -402,6 +470,10 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
         if (entry.rowId) pendingRowIdsRef.current.add(entry.rowId);
         newEntries.push(entry);
         added += 1;
+      }
+
+      if (salidasNuevas.length) {
+        setSalidas((prev) => [...salidasNuevas.reverse(), ...prev]);
       }
 
       if (!newEntries.length) return;
@@ -602,8 +674,23 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
     }
   }, []);
 
+  const consumirSalida = useCallback((entry: WAEntry) => {
+    setSalidas((prev) => prev.filter((e) => e.id !== entry.id));
+    seenIdsRef.current.add(entry.id);
+    try {
+      const key = lsKey('wa-seen');
+      const existing = JSON.parse(localStorage.getItem(key) || '[]') as string[];
+      const next = Array.from(new Set([...existing, entry.id])).slice(-500);
+      localStorage.setItem(key, JSON.stringify(next));
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   const clearAll = useCallback(() => {
     setPending([]);
+    setSalidas([]);
+    salidaRowIdsRef.current.clear();
     setBadge(0);
     setConfirmedEntries([]);
     setConfirmedRowIds(new Set());
@@ -663,6 +750,8 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
     confirmedEntries,
     confirmedRowIds,
     confirmEntry,
+    salidas,
+    consumirSalida,
     dismissEntry,
     responder,
     enviar,

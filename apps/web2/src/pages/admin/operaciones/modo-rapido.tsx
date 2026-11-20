@@ -789,7 +789,61 @@ type GuardRowModel = {
   salidaReal?: string;
   /** Nombre de quien ya cubrió este turno (mismo objetivo+puesto+horario), si aplica. */
   coveredByName?: string;
+  /** Quién releva a este guardia en el puesto (mismo objetivo y puesto, entra cerca de su hora de salida). */
+  relevoNombre?: string;
+  /** Hora (HH:MM) en que el guardia avisó su salida por WhatsApp con ubicación. */
+  salidaAvisada?: string;
+  /** Avisó su salida pero no hay relevo presente: queda retenido hasta que el operador lo cierre. */
+  salidaSinRelevo?: boolean;
 };
+
+const CODIGOS_SIN_RELEVO = new Set(["RET", "ESC", "REF", "F", "FF", "FP", "V", "L", "E", "A", "PG", "ART", "AA"]);
+
+const esRelevoDe = (row: GuardRowModel, o: GuardRowModel): boolean => {
+  if (o.turno.rowId === row.turno.rowId) return false;
+  if (!row.turno.objectiveId || o.turno.objectiveId !== row.turno.objectiveId) return false;
+  if (row.turno.positionName && o.turno.positionName && row.turno.positionName !== o.turno.positionName) return false;
+  if (o.turno.employeeId && o.turno.employeeId === row.turno.employeeId) return false;
+  if (CODIGOS_SIN_RELEVO.has(String(o.turno.code || "").toUpperCase())) return false;
+  if (o.estado === "AUSENTE" || o.estado === "NO_LLEGO" || o.estado === "CERRADO") return false;
+  const finMs = toStartMs(row.turno.endTimeRaw);
+  const st = toStartMs(o.turno.startTimeRaw);
+  if (Number.isNaN(finMs) || Number.isNaN(st)) return false;
+  return st >= finMs - 30 * 60000 && st <= finMs + 2 * 3600000;
+};
+
+const estaPresente = (r: GuardRowModel): boolean => r.estado === "PRESENTE_PLAT" || r.estado === "PRESENTE_WA";
+
+/** Relevo del guardia en el puesto: prefiere al que ya está presente y, entre iguales, al que entra más cerca de su salida. */
+function buscarRelevo(row: GuardRowModel, rows: GuardRowModel[]): GuardRowModel | undefined {
+  const finMs = toStartMs(row.turno.endTimeRaw);
+  let mejor: GuardRowModel | undefined;
+  let mejorPuntaje = Number.POSITIVE_INFINITY;
+  for (const o of rows) {
+    if (!esRelevoDe(row, o)) continue;
+    const puntaje = Math.abs(toStartMs(o.turno.startTimeRaw) - finMs) + (estaPresente(o) ? 0 : 1e12);
+    if (puntaje < mejorPuntaje) {
+      mejor = o;
+      mejorPuntaje = puntaje;
+    }
+  }
+  return mejor;
+}
+
+/** Hay un relevo presente que todavía no tomó otro saliente del mismo puesto (cerrados con salida cercana). */
+function hayRelevoLibre(row: GuardRowModel, rows: GuardRowModel[]): boolean {
+  const finMs = toStartMs(row.turno.endTimeRaw);
+  const presentes = rows.filter((o) => esRelevoDe(row, o) && estaPresente(o)).length;
+  const yaRelevados = rows.filter((o) => {
+    if (o.estado !== "CERRADO" || o.turno.rowId === row.turno.rowId) return false;
+    if (!row.turno.objectiveId || o.turno.objectiveId !== row.turno.objectiveId) return false;
+    if (row.turno.positionName && o.turno.positionName && row.turno.positionName !== o.turno.positionName) return false;
+    if (o.turno.employeeId && o.turno.employeeId === row.turno.employeeId) return false;
+    const fin = toStartMs(o.turno.endTimeRaw);
+    return !Number.isNaN(fin) && Math.abs(fin - finMs) <= 30 * 60000;
+  }).length;
+  return presentes > yaRelevados;
+}
 
 const COLS_DEFAULT =
   '3px minmax(270px,2.2fr) minmax(130px,1fr) 96px 52px 5.5rem 5.5rem 5.5rem 5.5rem 6.5rem 4.5rem 6.5rem minmax(11rem,auto)';
@@ -2397,6 +2451,11 @@ function GuardRow({
         title={row.turno.blocks?.length ? `Turno cortado: ${row.turno.blocks.map((b) => `${b.startTime}–${b.endTime}`).join(' + ')}` : 'Egreso planificado'}
       >
         {row.salida || '—'}
+        {row.relevoNombre && (
+          <span className="block max-w-full truncate text-[8px] font-sans font-semibold leading-none opacity-80" title={`Releva: ${row.relevoNombre}`}>
+            ↳ {row.relevoNombre.split(',')[0]}
+          </span>
+        )}
       </div>
       <div
         className="mr-real whitespace-nowrap font-mono text-[12px] font-black tabular-nums"
@@ -2421,7 +2480,22 @@ function GuardRow({
             className="w-14 px-1 py-0.5 text-[11px] font-mono border border-indigo-300 rounded-md bg-white focus:outline-none"
           />
         ) : (
-          row.salidaReal && row.salidaReal !== '--:--' ? row.salidaReal : '—'
+          row.salidaReal && row.salidaReal !== '--:--' ? (
+            row.salidaReal
+          ) : row.salidaAvisada ? (
+            <span
+              className={`text-[10px] font-bold ${row.salidaSinRelevo ? 'text-amber-600' : 'text-emerald-700'}`}
+              title={
+                row.salidaSinRelevo
+                  ? `Avisó su salida a las ${row.salidaAvisada} por WhatsApp, pero no hay relevo presente: queda retenido hasta que lo cierres`
+                  : `Avisó su salida a las ${row.salidaAvisada} por WhatsApp`
+              }
+            >
+              avisó {row.salidaAvisada}
+            </span>
+          ) : (
+            '—'
+          )
         )}
       </div>
       <div
@@ -2723,8 +2797,8 @@ function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): num
   return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
 }
 
-/** Radio (m) dentro del cual un check-in por WhatsApp con ubicación se confirma solo. */
-const AUTO_WA_RADIO_M = 200;
+/** Radio (m) dentro del cual un check-in o una salida por WhatsApp con ubicación se confirma sola. */
+const AUTO_WA_RADIO_M = 80;
 
 /**
  * Un check-in de WhatsApp se puede confirmar sin operador cuando está atado a un turno de hoy y trae
@@ -3462,7 +3536,7 @@ export default function ModoRapidoPage() {
     }
   }
 
-  const classifiedRows = useMemo((): GuardRowModel[] => {
+  const classifiedRowsBase = useMemo((): GuardRowModel[] => {
     const entradas: Array<[string, TurnoHoy]> = [
       ...Object.entries(turnos),
       ...tramosExtra.map((t): [string, TurnoHoy] => [t.name || '—', t]),
@@ -3556,6 +3630,23 @@ export default function ModoRapidoPage() {
       }),
     );
   }, [turnos, tramosExtra, wa, nowMs, presenciaMeta, cerrados]);
+
+  // Relevo y aviso de salida de cada guardia presente (para la columna de egreso y el cierre automático).
+  const classifiedRows = useMemo((): GuardRowModel[] => {
+    const avisos = new Map(wa.salidas.filter((s) => s.rowId).map((s) => [s.rowId as string, s]));
+    return classifiedRowsBase.map((row): GuardRowModel => {
+      if (!estaPresente(row)) return row;
+      const relevo = buscarRelevo(row, classifiedRowsBase);
+      const aviso = avisos.get(row.turno.rowId);
+      if (!relevo && !aviso) return row;
+      return {
+        ...row,
+        relevoNombre: relevo?.employeeName,
+        salidaAvisada: aviso?.arrivedAt,
+        salidaSinRelevo: !!aviso && !hayRelevoLibre(row, classifiedRowsBase),
+      };
+    });
+  }, [classifiedRowsBase, wa.salidas]);
 
   // «Confirmados hoy» sale de la planilla compartida (presencias con fuente WA), no de lo que
   // confirmó esta sesión: así se ven los de todos los operadores. De la sesión local se toma
@@ -4614,10 +4705,14 @@ export default function ModoRapidoPage() {
     setArm({ kind: 'cerrar', rowId: row.turno.rowId });
   }
 
-  async function cerrarTurno(row: GuardRowModel) {
-    if (busy) return;
-    if (row.estado !== 'PRESENTE_PLAT' && row.estado !== 'PRESENTE_WA') return;
-    setBusy(true);
+  async function cerrarTurno(
+    row: GuardRowModel,
+    opts?: { auto?: boolean; finMs?: number; ubicacion?: { lat: number; lng: number; distM?: number } },
+  ): Promise<boolean> {
+    const auto = opts?.auto === true;
+    if (!auto && busy) return false;
+    if (row.estado !== 'PRESENTE_PLAT' && row.estado !== 'PRESENTE_WA') return false;
+    if (!auto) setBusy(true);
     try {
       await recordarTurno(row.turno.rowId);
       const refTurno = doc(db, 'turnos', docIdDe(row.turno.rowId));
@@ -4636,7 +4731,7 @@ export default function ModoRapidoPage() {
           realStartTime: tramoN === 1 ? data.realStartTime : pbData[`b${tramoN}`]?.realStartTime,
         };
       }
-      const close = computeShiftCloseTimes(dataCierre, Date.now());
+      const close = computeShiftCloseTimes(dataCierre, opts?.finMs ?? Date.now());
       const realEndTime = Timestamp.fromMillis(close.realEndMs);
       const patch: Record<string, unknown> = {};
       if (cortado) {
@@ -4663,6 +4758,12 @@ export default function ModoRapidoPage() {
         patch.retentionEndedAt = realEndTime;
         if (close.retentionMinutes != null) patch.retentionMinutes = close.retentionMinutes;
       }
+      if (opts?.ubicacion) {
+        // La salida avisada por WhatsApp guarda dónde estaba el guardia, igual que el ingreso (checkInCoords).
+        patch.checkOutSource = 'WA';
+        patch.checkOutCoords = { lat: opts.ubicacion.lat, lng: opts.ubicacion.lng };
+        if (opts.ubicacion.distM != null) patch.checkOutDistanceM = opts.ubicacion.distM;
+      }
       escribir(updateDoc(refTurno, patch), 'el cierre');
       escribir(
         addDoc(collection(db, 'novedades'), {
@@ -4677,13 +4778,22 @@ export default function ModoRapidoPage() {
         }),
         'la novedad de cierre',
       );
-      showToast(`Turno cerrado · ${row.employeeName} ${formatHHMM(realEndTime)}`, 'bg-slate-800');
+      showToast(
+        auto
+          ? `Salida automática por WA · ${row.employeeName} ${formatHHMM(realEndTime)}`
+          : `Turno cerrado · ${row.employeeName} ${formatHHMM(realEndTime)}`,
+        auto ? 'bg-emerald-700' : 'bg-slate-800',
+      );
+      return true;
     } catch (err) {
       console.warn('[modo-rapido] cerrarTurno', err);
       showToast('Error al cerrar el turno', 'bg-red-600');
+      return false;
     } finally {
-      setBusy(false);
-      setArm(null);
+      if (!auto) {
+        setBusy(false);
+        setArm(null);
+      }
     }
   }
 
@@ -5427,6 +5537,45 @@ export default function ModoRapidoPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- autoConfirmarWA usa solo refs y callbacks estables de la sesión
   }, [classifiedRows, autoWa]);
 
+  /**
+   * Salida por WhatsApp: el guardia mandó su ubicación una vez finalizado el turno. Si está a menos de
+   * AUTO_WA_RADIO_M del objetivo y hay un relevo presente, el turno se cierra a la hora del mensaje y se
+   * guarda la ubicación. Sin relevo queda retenido (aviso en la fila) hasta que el operador lo cierre.
+   */
+  async function autoCerrarPorWA(row: GuardRowModel, entry: WAEntry) {
+    const tieneUbicacion = entry.lat != null && entry.lng != null;
+    const distM =
+      tieneUbicacion && entry.objLat != null && entry.objLng != null
+        ? haversineM(entry.lat as number, entry.lng as number, entry.objLat, entry.objLng)
+        : undefined;
+    const ok = await cerrarTurno(row, {
+      auto: true,
+      finMs: entry.msgTs ?? Date.now(),
+      ubicacion: tieneUbicacion ? { lat: entry.lat as number, lng: entry.lng as number, distM } : undefined,
+    });
+    if (!ok) return;
+    wa.consumirSalida(entry);
+    const nombre = row.employeeName.includes(',')
+      ? row.employeeName.split(',')[1].trim().split(' ')[0]
+      : row.employeeName.split(' ')[0];
+    wa.responder(entry, `Salida registrada a las ${entry.arrivedAt}. Gracias, ${nombre}.`);
+  }
+
+  const autoSalidaProcesadosRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!autoWa) return;
+    for (const entry of wa.salidas) {
+      if (autoSalidaProcesadosRef.current.has(entry.id)) continue;
+      const row = classifiedRows.find((r) => r.turno.rowId === entry.rowId);
+      if (!row || !estaPresente(row)) continue;
+      if (!entradaWaVerificada(entry)) continue;
+      if (!hayRelevoLibre(row, classifiedRows)) continue;
+      autoSalidaProcesadosRef.current.add(entry.id);
+      void autoCerrarPorWA(row, entry);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- autoCerrarPorWA usa solo refs y callbacks estables de la sesión
+  }, [classifiedRows, wa.salidas, autoWa]);
+
   function alternarAutoWa() {
     const nuevo = !autoWa;
     setAutoWa(nuevo);
@@ -5437,8 +5586,8 @@ export default function ModoRapidoPage() {
     }
     showToast(
       nuevo
-        ? `Presente automático por WA activado (ubicación a menos de ${AUTO_WA_RADIO_M} m del objetivo)`
-        : 'Presente automático por WA desactivado: confirmás vos',
+        ? `Presente y salida automáticos por WA activados (ubicación a menos de ${AUTO_WA_RADIO_M} m del objetivo)`
+        : 'Presente y salida automáticos por WA desactivados: confirmás vos',
       'bg-slate-700',
     );
   }
@@ -5934,8 +6083,8 @@ export default function ModoRapidoPage() {
             icon={Zap}
             label={
               autoWa
-                ? `Presente automático por WA activado (${AUTO_WA_RADIO_M} m). Clic para desactivar`
-                : 'Presente automático por WA desactivado. Clic para activar'
+                ? `Presente y salida automáticos por WA activados (${AUTO_WA_RADIO_M} m). Clic para desactivar`
+                : 'Presente y salida automáticos por WA desactivados. Clic para activar'
             }
             count={autoWaCount}
             active={autoWa}
