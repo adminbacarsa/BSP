@@ -57,7 +57,7 @@ interface ModalRetenesDiaProps {
   empInfo?: Record<string, EmpleadoRetenInfo>;
   candidatosPara?: (d: DestinoRetenOpcion) => RetenesParaDestino;
   /** Asigna el retén al hueco y le avisa por WhatsApp y por la app. */
-  onAsignar?: (item: RetenItem, d: DestinoRetenOpcion) => void;
+  onAsignar?: (item: RetenItem, d: DestinoRetenOpcion, avisar: boolean) => void;
   onMarcarPresente?: (item: RetenItem) => void;
   onConfirmarWA?: (item: RetenItem) => void;
   ocupado?: boolean;
@@ -95,6 +95,13 @@ const PLANTILLA_ASIGNACION: Plantilla = {
   label: 'Asignación al hueco',
   texto:
     '{nombre}, quedaste asignado a cubrir {objetivo} ({horario}). Confirmá que vas en camino y avisá cuando llegues. — Operaciones',
+};
+/** Primero se consulta si puede ir; recién después se asigna. */
+const PLANTILLA_CONSULTA_HUECO: Plantilla = {
+  id: 'consulta_hueco',
+  label: 'Consultar si puede ir',
+  texto:
+    '{nombre}, ¿podés cubrir {objetivo} de {horario}? Confirmanos a la brevedad si podés ir. — Operaciones',
 };
 const PLANTILLA_CONSULTA: Plantilla = {
   id: 'consulta',
@@ -241,7 +248,7 @@ export default function ModalRetenesDia({
 
   // Al elegir un destino se propone el mensaje que corresponde; al volver a la lista, el de disponibilidad.
   useEffect(() => {
-    const p = !destino ? PLANTILLAS[0] : destino.tipo === 'hueco' ? PLANTILLA_ASIGNACION : PLANTILLA_CONSULTA;
+    const p = !destino ? PLANTILLAS[0] : destino.tipo === 'hueco' ? PLANTILLA_CONSULTA_HUECO : PLANTILLA_CONSULTA;
     setPlantillaId(p.id);
     setTexto(p.texto);
   }, [destino?.key, destino?.tipo]);
@@ -506,15 +513,26 @@ export default function ModalRetenesDia({
                         </button>
                       )}
                     {destino && destino.tipo === 'hueco' && onAsignar && (
-                      <button
-                        type="button"
-                        disabled={ocupado || enviando}
-                        onClick={() => onAsignar(it, destino)}
-                        title="Asigna el RET al hueco y le avisa por WhatsApp y por la app"
-                        className="px-2.5 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-[10px] font-bold shadow-sm disabled:opacity-50 active:scale-95"
-                      >
-                        Asignar y avisar
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          disabled={ocupado || enviando}
+                          onClick={() => onAsignar(it, destino, false)}
+                          title="Asigna el RET al hueco sin mandarle mensaje (cuando ya confirmó que puede ir)"
+                          className="px-2.5 py-1.5 rounded-xl border border-violet-300 bg-white text-violet-700 hover:bg-violet-50 text-[10px] font-bold shadow-sm disabled:opacity-50 active:scale-95"
+                        >
+                          Asignar
+                        </button>
+                        <button
+                          type="button"
+                          disabled={ocupado || enviando}
+                          onClick={() => onAsignar(it, destino, true)}
+                          title="Asigna el RET al hueco y le avisa por WhatsApp y por la app"
+                          className="px-2.5 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-[10px] font-bold shadow-sm disabled:opacity-50 active:scale-95"
+                        >
+                          Asignar y avisar
+                        </button>
+                      </div>
                     )}
                     {(res?.app || res?.wa) && (
                       <span
@@ -558,7 +576,11 @@ export default function ModalRetenesDia({
         <div className="px-4 py-3 border-t border-slate-200 bg-slate-50 space-y-2">
           <div className="flex flex-wrap items-center gap-1.5">
             <MessageSquare size={13} className="text-slate-400" aria-hidden />
-            {[...PLANTILLAS, ...(destino ? [destino.tipo === 'hueco' ? PLANTILLA_ASIGNACION : PLANTILLA_CONSULTA] : [])].map((p) => (
+            {[...PLANTILLAS, ...(destino
+              ? destino.tipo === 'hueco'
+                ? [PLANTILLA_CONSULTA_HUECO, PLANTILLA_ASIGNACION]
+                : [PLANTILLA_CONSULTA]
+              : [])].map((p) => (
               <button
                 key={p.id}
                 type="button"

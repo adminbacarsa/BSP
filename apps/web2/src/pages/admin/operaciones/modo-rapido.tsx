@@ -4912,7 +4912,7 @@ export default function ModoRapidoPage() {
 
   const handleAsignarRet = async (
     candidate: GuardRowModel,
-    opciones?: { hueco?: GuardRowModel; mensaje?: 'asignacion' | 'consulta' },
+    opciones?: { hueco?: GuardRowModel; mensaje?: 'asignacion' | 'consulta' | 'ninguno' },
   ) => {
     const hueco = opciones?.hueco ?? coberturaModal;
     // Desde la ventana de cobertura puede haber un retiro anticipado; asignando desde el panel de retenes no.
@@ -5044,6 +5044,11 @@ export default function ModoRapidoPage() {
               hueco.turno.expected,
               hueco.salida || '—',
             );
+      if (opciones?.mensaje === 'ninguno') {
+        // Ya confirmó que puede ir: se asigna sin mandarle otro mensaje.
+        showToast(`RET asignado · ${candidate.employeeName}`, 'bg-violet-700');
+        return;
+      }
       const aviso = abrirWa(candidate.turno.phone, textoAsignacion);
       // Desde el panel de retenes el mensaje de asignación sale por los dos canales: WhatsApp y app del guardia.
       const porApp =
@@ -5098,13 +5103,13 @@ export default function ModoRapidoPage() {
   };
 
   /** El modal trabaja con ítems; acá se vuelve al turno real para asignar con el motor de cobertura. */
-  function asignarRetDesdeModal(item: RetenItem, destino: DestinoRetenOpcion) {
+  function asignarRetDesdeModal(item: RetenItem, destino: DestinoRetenOpcion, avisar: boolean) {
     const ret = candidatosRetenesPanel(destino).rows.find((r) => r.turno.rowId === item.rowId);
     if (!ret) {
       showToast('El retén ya no está disponible para este hueco', 'bg-amber-700');
       return;
     }
-    void asignarRetDesdePanel(ret, destino);
+    void asignarRetDesdePanel(ret, destino, avisar);
   }
 
   function marcarPresenteDesdeItem(item: RetenItem) {
@@ -5122,7 +5127,7 @@ export default function ModoRapidoPage() {
    * Usa el mismo motor que la ventana de cobertura (`handleAsignarRet`). Si el guardia todavía no está
    * declarado ausente (no llegó pasados 30 min) se declara antes, igual que al abrir la cobertura.
    */
-  async function asignarRetDesdePanel(ret: GuardRowModel, destino: DestinoRetenOpcion) {
+  async function asignarRetDesdePanel(ret: GuardRowModel, destino: DestinoRetenOpcion, avisar = true) {
     if (busy || destino.tipo !== 'hueco') return;
     const hueco = classifiedRows.find((r) => `hueco:${r.turno.rowId}` === destino.key);
     if (!hueco) {
@@ -5137,8 +5142,8 @@ export default function ModoRapidoPage() {
         declarar
           ? `\n\n${hueco.employeeName} no llegó pasados 30 min: se declara la ausencia (AA), queda en RRHH y Planificación.`
           : ''
-      }\n\nSe abre WhatsApp con el mensaje de asignación y se avisa por la app del guardia. ¿Confirmás?`,
-      textoOk: declarar ? 'Declarar y asignar' : 'Asignar y avisar',
+      }\n\n${avisar ? 'Se abre WhatsApp con el mensaje de asignación y se avisa por la app del guardia.' : 'No se le manda ningún mensaje.'} ¿Confirmás?`,
+      textoOk: declarar ? 'Declarar y asignar' : avisar ? 'Asignar y avisar' : 'Asignar',
       tono: declarar ? 'rojo' : 'indigo',
     });
     if (!ok) return;
@@ -5161,7 +5166,7 @@ export default function ModoRapidoPage() {
     }
     await handleAsignarRet(ret, {
       hueco: declarar ? { ...hueco, estado: 'AUSENTE', turno: { ...hueco.turno, turnoStatus: 'ABSENT' } } : hueco,
-      mensaje: 'asignacion',
+      mensaje: avisar ? 'asignacion' : 'ninguno',
     });
   }
 
