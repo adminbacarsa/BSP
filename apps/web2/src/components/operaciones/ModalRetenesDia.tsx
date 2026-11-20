@@ -105,6 +105,9 @@ const PLANTILLA_CONSULTA: Plantilla = {
 
 const MENSAJE_MAX = 400;
 
+/** Valor del selector de destino para ver la lista completa de retenes. */
+export const TODOS_LOS_RETENES = '__todos__';
+
 const TONO_CLASE: Record<RetenTono, string> = {
   ok: 'bg-emerald-100 text-emerald-700 border-emerald-200',
   espera: 'bg-amber-100 text-amber-800 border-amber-200',
@@ -185,9 +188,13 @@ export default function ModalRetenesDia({
   }, [onClose]);
 
   const destino = destinoKey ? destinos.find((d) => d.key === destinoKey) ?? null : null;
-  // Si el hueco se cubrió o desapareció mientras el modal estaba abierto, vuelve a la lista normal.
+  /** Con muchos retenes no se vuelca la lista: primero se elige el destino, o «Todos los retenes». */
+  const exigeDestino = destinos.length > 0 && !!candidatosPara;
+  const verTodos = destinoKey === TODOS_LOS_RETENES;
+  const mostrarLista = !exigeDestino || !!destino || verTodos;
+  // Si el hueco se cubrió o desapareció mientras el modal estaba abierto, vuelve a pedir el destino.
   useEffect(() => {
-    if (destinoKey && !destino) setDestinoKey('');
+    if (destinoKey && !destino && destinoKey !== TODOS_LOS_RETENES) setDestinoKey('');
   }, [destinoKey, destino]);
 
   /** Con destino: retenes que pueden ir ahí, con distancia y conocimiento del objetivo, ordenados. */
@@ -351,11 +358,14 @@ export default function ModalRetenesDia({
           <div className="flex-1 min-w-0">
             <div className="text-sm font-black text-violet-800">Retenes</div>
             <div className="text-[11px] text-slate-600">
-              {fechaDia} · {lista.length} retén{lista.length === 1 ? '' : 'es'}
+              {fechaDia} ·{' '}
+              {mostrarLista
+                ? `${lista.length} retén${lista.length === 1 ? '' : 'es'}`
+                : `${hoy.length} hoy · ${manana.length} mañana`}
               {paraDestino && destino ? ` para ${destino.etiqueta}` : ''}
             </div>
           </div>
-          {!destino && (
+          {!destino && mostrarLista && (
             <div className="flex items-center gap-1 rounded-xl bg-white border border-violet-200 p-0.5">
               {(['hoy', 'manana'] as const).map((d) => (
                 <button
@@ -385,6 +395,7 @@ export default function ModalRetenesDia({
           <SelectorDestinoRetenes
             destinos={destinos}
             valor={destinoKey}
+            totalRetenes={hoy.length + manana.length}
             orden={orden}
             onChange={setDestinoKey}
             onOrden={setOrden}
@@ -406,7 +417,21 @@ export default function ModalRetenesDia({
         )}
 
         <div className="flex-1 min-h-0 overflow-y-auto">
-          {lista.length === 0 ? (
+          {!mostrarLista ? (
+            <div className="px-6 py-10 text-center">
+              <div className="text-sm font-bold text-slate-700">Elegí dónde lo vas a usar</div>
+              <div className="mt-1 text-[12px] text-slate-500">
+                Te muestro solo los retenes que sirven para ese hueco u objetivo, con la distancia y si conocen el lugar.
+              </div>
+              <button
+                type="button"
+                onClick={() => setDestinoKey(TODOS_LOS_RETENES)}
+                className="mt-4 px-3 py-1.5 rounded-xl border border-violet-200 bg-violet-50 text-violet-700 text-[11px] font-bold hover:bg-violet-100 active:scale-95"
+              >
+                Ver todos los retenes ({hoy.length + manana.length})
+              </button>
+            </div>
+          ) : lista.length === 0 ? (
             <div className="px-4 py-10 text-center text-sm text-slate-500">
               {paraDestino
                 ? fueraDeRadio > 0
@@ -529,6 +554,7 @@ export default function ModalRetenesDia({
           )}
         </div>
 
+        {mostrarLista && (
         <div className="px-4 py-3 border-t border-slate-200 bg-slate-50 space-y-2">
           <div className="flex flex-wrap items-center gap-1.5">
             <MessageSquare size={13} className="text-slate-400" aria-hidden />
@@ -601,6 +627,7 @@ export default function ModalRetenesDia({
             </div>
           )}
         </div>
+        )}
       </div>
     </div>
   );

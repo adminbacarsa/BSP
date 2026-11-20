@@ -84,12 +84,15 @@ export function ChipsRetenEvaluado({ ev }: { ev: RetenEvaluado }) {
 export function SelectorDestinoRetenes({
   destinos,
   valor,
+  totalRetenes,
   orden,
   onChange,
   onOrden,
 }: {
   destinos: DestinoRetenOpcion[];
   valor: string;
+  /** Si viene, se ofrece «Todos los retenes (N)» para ver la lista completa sin elegir destino. */
+  totalRetenes?: number;
   orden: OrdenRetenes;
   onChange: (key: string) => void;
   onOrden: (o: OrdenRetenes) => void;
@@ -108,6 +111,9 @@ export function SelectorDestinoRetenes({
         className="flex-1 min-w-[220px] max-w-xl rounded-xl border border-violet-200 bg-white px-2.5 py-1.5 text-[12px] font-semibold text-slate-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
       >
         <option value="">Elegí un hueco u objetivo…</option>
+        {totalRetenes !== undefined && (
+          <option value="__todos__">Todos los retenes ({totalRetenes})</option>
+        )}
         {huecos.length > 0 && (
           <optgroup label="Huecos sin cubrir">
             {huecos.map((d) => (
@@ -127,7 +133,7 @@ export function SelectorDestinoRetenes({
           </optgroup>
         )}
       </select>
-      {valor && (
+      {valor && valor !== '__todos__' && (
         <div className="inline-flex rounded-xl border border-violet-200 bg-white p-0.5 shadow-sm" role="group" aria-label="Orden de retenes">
           {(
             [
