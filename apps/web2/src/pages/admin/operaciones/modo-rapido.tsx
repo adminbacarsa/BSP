@@ -1671,6 +1671,66 @@ function ModalCobertura({
   );
 }
 
+/**
+ * Confirmación propia de la planilla. `window.confirm` hace que el navegador salga de pantalla completa,
+ * por eso toda confirmación se resuelve acá adentro (queda dentro del panel a pantalla completa).
+ */
+type ConfirmacionPlanilla = {
+  titulo: string;
+  mensaje: string;
+  textoOk: string;
+  tono: 'indigo' | 'rojo';
+};
+
+function ModalConfirmar({
+  datos,
+  onResolver,
+}: {
+  datos: ConfirmacionPlanilla;
+  onResolver: (ok: boolean) => void;
+}) {
+  const okRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    okRef.current?.focus();
+  }, []);
+  const rojo = datos.tono === 'rojo';
+  return (
+    <div
+      className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/40 p-4"
+      onClick={() => onResolver(false)}
+    >
+      <div
+        className="bg-white rounded-3xl shadow-2xl max-w-md w-full overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className={`px-5 py-3 border-b border-slate-200 ${rojo ? 'bg-red-50' : 'bg-indigo-50'}`}>
+          <div className={`text-sm font-black ${rojo ? 'text-red-800' : 'text-indigo-800'}`}>{datos.titulo}</div>
+        </div>
+        <div className="px-5 py-4 text-[12px] text-slate-600 whitespace-pre-line">{datos.mensaje}</div>
+        <div className="px-5 pb-4 flex gap-2">
+          <button
+            type="button"
+            onClick={() => onResolver(false)}
+            className="flex-1 py-2.5 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-[12px] font-bold active:scale-95"
+          >
+            Cancelar <span className="text-slate-400 font-medium">(Esc)</span>
+          </button>
+          <button
+            ref={okRef}
+            type="button"
+            onClick={() => onResolver(true)}
+            className={`flex-1 py-2.5 rounded-2xl text-white text-[12px] font-bold shadow-sm active:scale-95 ${
+              rojo ? 'bg-red-600 hover:bg-red-700' : 'bg-indigo-600 hover:bg-indigo-700'
+            }`}
+          >
+            {datos.textoOk} <span className="opacity-70 font-medium">(Enter)</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ModalRevertirAusencia({
   row,
   busy,
@@ -2996,6 +3056,8 @@ export default function ModoRapidoPage() {
   const [comentarioModal, setComentarioModal] = useState<GuardRowModel | null>(null);
   const [retenesModalOpen, setRetenesModalOpen] = useState(false);
   const [revertirChoice, setRevertirChoice] = useState<GuardRowModel | null>(null);
+  const [confirmacion, setConfirmacion] = useState<ConfirmacionPlanilla | null>(null);
+  const confirmacionResolverRef = useRef<((ok: boolean) => void) | null>(null);
   const [activeRowId, setActiveRowId] = useState<string | null>(null);
   const [hourEdit, setHourEdit] = useState<{ rowId: string; value: string; campo: 'ingreso' | 'salida' } | null>(null);
   const [arm, setArm] = useState<null | { kind: 'ausente' | 'quitar' | 'radio' | 'cerrar'; rowId: string }>(null);
@@ -3954,6 +4016,21 @@ export default function ModoRapidoPage() {
    * tiempo es ausencia, así que si todavía no está declarada se declara por el camino oficial (va a
    * Planificación y RRHH) antes de cubrir, pidiendo confirmación una vez.
    */
+  function pedirConfirmacion(datos: ConfirmacionPlanilla): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+      confirmacionResolverRef.current?.(false);
+      confirmacionResolverRef.current = resolve;
+      setConfirmacion(datos);
+    });
+  }
+
+  function resolverConfirmacion(ok: boolean) {
+    const resolver = confirmacionResolverRef.current;
+    confirmacionResolverRef.current = null;
+    setConfirmacion(null);
+    resolver?.(ok);
+  }
+
   async function abrirCobertura(row: GuardRowModel) {
     if (busy) return;
     if (coberturaBloqueadaPorTramo(row)) return;
@@ -3961,9 +4038,12 @@ export default function ModoRapidoPage() {
       setCoberturaModal(row);
       return;
     }
-    const ok = window.confirm(
-      `${row.employeeName} no llegó pasados 30 min del inicio.\n\nPara cubrir se declara la ausencia (AA): queda en RRHH y Planificación. Podés revertirla si llega.\n\n¿Declarar la ausencia y cubrir?`,
-    );
+    const ok = await pedirConfirmacion({
+      titulo: 'Declarar ausencia y cubrir',
+      mensaje: `${row.employeeName} no llegó pasados 30 min del inicio.\n\nPara cubrir se declara la ausencia (AA): queda en RRHH y Planificación. Podés revertirla si llega.\n\n¿Declarar la ausencia y cubrir?`,
+      textoOk: 'Declarar y cubrir',
+      tono: 'rojo',
+    });
     if (!ok) return;
     // La ventana abre al instante: la declaración oficial corre en segundo plano (el callable puede
     // tardar por arranque en frío o red). Si falla, se cierra la ventana y se avisa el motivo. Aunque
@@ -4030,7 +4110,13 @@ export default function ModoRapidoPage() {
         setRevertirChoice(row);
         return;
       }
-      if (!window.confirm(`¿Revertir la ausencia de ${row.employeeName}?`)) return;
+      const okRevertir = await pedirConfirmacion({
+        titulo: 'Revertir ausencia',
+        mensaje: `¿Revertir la ausencia de ${row.employeeName}?`,
+        textoOk: 'Revertir',
+        tono: 'indigo',
+      });
+      if (!okRevertir) return;
       await ejecutarReversionAusencia(row, false);
     } catch (err) {
       console.warn('[modo-rapido] revertirAusencia', err);
@@ -5274,6 +5360,16 @@ export default function ModoRapidoPage() {
       if (comentarioModal) return;
       // El modal de retenes maneja sus propias teclas (Esc): los atajos de la planilla no corren.
       if (retenesModalOpen) return;
+      if (confirmacion) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          resolverConfirmacion(false);
+        } else if (e.key === 'Enter') {
+          e.preventDefault();
+          if (!e.repeat) resolverConfirmacion(true);
+        }
+        return;
+      }
       if (revertirChoice) {
         if (e.key === 'Escape') setRevertirChoice(null);
         return;
@@ -5437,7 +5533,7 @@ export default function ModoRapidoPage() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [sheetRows, activeRowId, hourEdit, arm, swapFromId, coberturaModal, accionesModal, comentarioModal, retenesModalOpen, revertirChoice, busy, pantallaCompleta, retiroModal, retiroMotivo, retiroReemplazo, retiroInfo]);
+  }, [sheetRows, activeRowId, hourEdit, arm, swapFromId, coberturaModal, accionesModal, comentarioModal, retenesModalOpen, revertirChoice, confirmacion, busy, pantallaCompleta, retiroModal, retiroMotivo, retiroReemplazo, retiroInfo]);
 
   useEffect(() => {
     if (!coberturaModal) setHuecoRetiro(null);
@@ -6128,6 +6224,8 @@ export default function ModoRapidoPage() {
             }}
           />
         )}
+
+        {confirmacion && <ModalConfirmar datos={confirmacion} onResolver={resolverConfirmacion} />}
 
         {toast && (
           <div
