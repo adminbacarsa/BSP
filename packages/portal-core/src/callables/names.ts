@@ -3,6 +3,8 @@ export const PORTAL_CALLABLES = {
   activateAndSetPassword: 'activateAndSetPassword',
   requestCheckIn: 'requestCheckIn',
   cerrarTurnoPortal: 'cerrarTurnoPortal',
+  /** Salida del guardia una vez finalizado el turno (con ubicación). */
+  marcarSalidaPortal: 'marcarSalidaPortal',
   reportarAusencia: 'reportarAusencia',
   notificarLlegadaTarde: 'notificarLlegadaTarde',
   responderConvocatoriaCobertura: 'responderConvocatoriaCobertura',

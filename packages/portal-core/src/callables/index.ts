@@ -32,6 +32,10 @@ export function createPortalCallables(functions: Functions) {
       functions,
       PORTAL_CALLABLES.cerrarTurnoPortal,
     ),
+    marcarSalidaPortal: httpsCallable<
+      { shiftId: string; coords?: { lat: number; lng: number } | null },
+      { success?: boolean; closed?: boolean; alreadyClosed?: boolean; waitingRelief?: boolean }
+    >(functions, PORTAL_CALLABLES.marcarSalidaPortal),
     notificarLlegadaTarde: httpsCallable<{ shiftId: string; etaMinutes?: number }, unknown>(
       functions,
       PORTAL_CALLABLES.notificarLlegadaTarde,

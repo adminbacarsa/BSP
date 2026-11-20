@@ -1496,6 +1496,62 @@ export const cerrarTurnoPortal = functions.https.onCall(async (data, context) =>
   }
 });
 
+/**
+ * Salida marcada por el guardia desde la app (turno ya finalizado, GPS validado en el cliente).
+ * Cierra el turno si no hay relevo programado o el relevo ya está presente; si lo espera, solo registra el aviso.
+ */
+export const marcarSalidaPortal = functions.https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sin permisos.');
+  const shiftId = String(data?.shiftId || '').trim();
+  if (!shiftId) throw new functions.https.HttpsError('invalid-argument', 'shiftId requerido.');
+  const rawCoords = data?.coords as { lat?: unknown; lng?: unknown; latitude?: unknown; longitude?: unknown } | null | undefined;
+  const coords = rawCoords
+    ? {
+        lat: Number(rawCoords.lat ?? rawCoords.latitude),
+        lng: Number(rawCoords.lng ?? rawCoords.longitude),
+      }
+    : null;
+  const db = admin.firestore();
+  const { resolvePortalEmployeeDocId } = await import('./fichajes/resolvePortalEmployee');
+  const empId = await resolvePortalEmployeeDocId(db, {
+    uid: context.auth.uid,
+    email: context.auth.token.email,
+  });
+  if (!empId) throw new functions.https.HttpsError('not-found', 'Empleado no encontrado.');
+  const { processPortalCheckOut } = await import('./fichajes/applyPortalCheckOut');
+  try {
+    const result = await processPortalCheckOut(db, { shiftId, empId, coords });
+    return { success: true, ...result };
+  } catch (e) {
+    const msg = (e as Error)?.message || '';
+    if (msg === 'NOT_OWNER') {
+      throw new functions.https.HttpsError('permission-denied', 'El turno no es de tu legajo.');
+    }
+    if (msg === 'NOT_PRESENT') {
+      throw new functions.https.HttpsError('failed-precondition', 'Primero tenés que fichar el ingreso.');
+    }
+    if (msg === 'TOO_EARLY') {
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        'Podés marcar tu salida cuando termine tu turno.',
+      );
+    }
+    if (msg === 'TURNO_CORTADO') {
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        'Tu turno es cortado: pedile al operador que registre tu salida.',
+      );
+    }
+    if (msg === 'SIN_HORARIO') {
+      throw new functions.https.HttpsError('failed-precondition', 'El turno no tiene horario de fin.');
+    }
+    if (msg === 'TURNO_NOT_FOUND') {
+      throw new functions.https.HttpsError('not-found', 'Turno no encontrado.');
+    }
+    throw new functions.https.HttpsError('internal', msg || 'No se pudo registrar la salida.');
+  }
+});
+
 export const sesionOperador = sesionOperadorCallable;
 export const resolveStaffProfile = resolveStaffProfileCallable;
 export const resolvePanelPermissions = resolvePanelPermissionsCallable;

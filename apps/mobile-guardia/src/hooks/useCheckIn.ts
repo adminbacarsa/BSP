@@ -54,6 +54,77 @@ async function getCurrentCoords(): Promise<{ latitude: number; longitude: number
   }
 }
 
+type SalidaOwner = {
+  empDocId: string | null;
+  authUid: string | null;
+  employeeIds?: string[];
+  fichadaRemota?: boolean;
+  empresaId?: string | null;
+};
+
+/**
+ * Ubicación para marcar la salida: mismas reglas que el ingreso (objetivo del turno, radio de 80 m,
+ * sin radio si el legajo o el objetivo permiten fichada remota). Devuelve las coordenadas o el motivo.
+ */
+async function ubicacionParaSalida(
+  shift: Shift,
+  objectivesMap: Record<string, ObjectiveLocation>,
+  owner?: SalidaOwner,
+): Promise<{ ok: true; coords: { latitude: number; longitude: number } | null } | { ok: false; message: string }> {
+  const shiftEmp = String(shift.employeeId ?? '').trim();
+  const empDocId = owner?.empDocId?.trim() ?? '';
+  const authUid = owner?.authUid?.trim() ?? '';
+  const extraIds = (owner?.employeeIds ?? []).map((id) => id.trim()).filter(Boolean);
+  const owns =
+    !shiftEmp ||
+    (empDocId && shiftEmp === empDocId) ||
+    (authUid && shiftEmp === authUid) ||
+    extraIds.includes(shiftEmp);
+  if (!owns) {
+    return { ok: false, message: 'Este turno no está asignado a tu legajo.' };
+  }
+  const { db } = getPortalFirebase();
+  const lookup = await resolveObjectiveLocationForShift(
+    firestoreObjectiveReader(db),
+    {
+      objectiveId: shift.objectiveId,
+      objectiveName: shift.objectiveName,
+      clientId: shift.clientId,
+      empresaId: shift.empresaId || owner?.empresaId || null,
+    },
+    objectivesMap,
+  );
+  if (lookup.status === 'error' && owner?.fichadaRemota !== true) {
+    return { ok: false, message: lookup.message };
+  }
+  const objective = lookup.status === 'found' ? lookup.location : null;
+  if (!objective && lookup.status === 'not_found' && owner?.fichadaRemota !== true) {
+    return { ok: false, message: OBJECTIVE_NOT_FOUND_MESSAGE };
+  }
+  const remoteAllowed = objective?.allowRemoteCheckIn === true || owner?.fichadaRemota === true;
+  const hasCoords =
+    !!objective &&
+    objective.lat != null &&
+    objective.lng != null &&
+    Number(objective.lat) !== 0 &&
+    Number(objective.lng) !== 0;
+  let coords: { latitude: number; longitude: number } | null = null;
+  if (!remoteAllowed && hasCoords) {
+    coords = await getCurrentCoords();
+  } else {
+    try {
+      coords = await getCurrentCoords();
+    } catch {
+      coords = null;
+    }
+  }
+  const validation = validateCheckInDistance(objective, coords, {
+    fichadaRemota: owner?.fichadaRemota === true,
+  });
+  if (!validation.ok) return { ok: false, message: validation.message };
+  return { ok: true, coords };
+}
+
 export function useCheckIn() {
   const [pendingCount, setPendingCount] = useState(0);
   const [pendingShiftIds, setPendingShiftIds] = useState<string[]>([]);
@@ -216,6 +287,55 @@ export function useCheckIn() {
     [invokeCheckIn, refreshPendingCount],
   );
 
+  /**
+   * Marca la salida con ubicación una vez finalizado el turno. El servidor cierra el turno o, si el
+   * relevo programado todavía no llegó, deja registrado el aviso y el turno sigue abierto.
+   */
+  const requestCheckOutForShift = useCallback(
+    async (
+      shift: Shift,
+      objectivesMap: Record<string, ObjectiveLocation>,
+      owner?: SalidaOwner,
+    ): Promise<{ ok: true; message: string } | { ok: false; message: string }> => {
+      setBusyShiftId(shift.id);
+      try {
+        const net = await NetInfo.fetch();
+        if (!net.isConnected) {
+          return { ok: false, message: 'Sin conexión. Marcá tu salida cuando tengas red.' };
+        }
+        const ubicacion = await ubicacionParaSalida(shift, objectivesMap, owner);
+        if (!ubicacion.ok) return { ok: false, message: ubicacion.message };
+        const { auth } = getPortalFirebase();
+        if (!auth.currentUser) {
+          return { ok: false, message: 'Sesión expirada. Volvé a iniciar sesión.' };
+        }
+        await auth.currentUser.getIdToken(true);
+        const { marcarSalidaPortal } = getPortalCallables();
+        const res = await marcarSalidaPortal({
+          shiftId: shift.id,
+          coords: ubicacion.coords
+            ? { lat: ubicacion.coords.latitude, lng: ubicacion.coords.longitude }
+            : null,
+        });
+        const data = res.data ?? {};
+        if (data.alreadyClosed) return { ok: true, message: 'Tu turno ya estaba cerrado.' };
+        if (data.waitingRelief) {
+          return {
+            ok: true,
+            message:
+              'Registramos tu aviso de salida. Tu relevo todavía no llegó: seguí en el puesto, el operador ya lo sabe.',
+          };
+        }
+        return { ok: true, message: 'Salida registrada. ¡Gracias!' };
+      } catch (e) {
+        return { ok: false, message: mapPortalCallableError(e) };
+      } finally {
+        setBusyShiftId(null);
+      }
+    },
+    [],
+  );
+
   const closeReviewShift = useCallback(async (shiftId: string) => {
     setBusyShiftId(shiftId);
     try {
@@ -249,6 +369,7 @@ export function useCheckIn() {
     busyShiftId,
     lateEtaByShiftId,
     requestCheckInForShift,
+    requestCheckOutForShift,
     closeReviewShift,
     notifyLateArrival,
     flushQueue,

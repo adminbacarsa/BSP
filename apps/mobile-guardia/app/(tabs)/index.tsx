@@ -29,6 +29,7 @@ import { usePendingAaCertificates } from '../../src/hooks/usePendingAaCertificat
 import {
   heroShift,
   isShiftInProgress,
+  shiftOwnedByEmployee,
   shiftStartsToday,
   pickTodayAbsentShift,
 } from '../../src/lib/shifts';
@@ -109,8 +110,16 @@ function HoyScreenContent() {
   const previewConsulta = argsPreviewConsulta({ isPreviewMode, bolsaCuil, employeeId: empDocId });
   const [consultaBusyId, setConsultaBusyId] = useState<string | null>(null);
   const { objectivesMap } = useObjectivesMap();
-  const { pendingCount, pendingShiftIds, busyShiftId, requestCheckInForShift, closeReviewShift, notifyLateArrival, lateEtaByShiftId } =
-    useCheckIn();
+  const {
+    pendingCount,
+    pendingShiftIds,
+    busyShiftId,
+    requestCheckInForShift,
+    requestCheckOutForShift,
+    closeReviewShift,
+    notifyLateArrival,
+    lateEtaByShiftId,
+  } = useCheckIn();
   const { empresaNombre, empresaColor } = useEmpresaBranding(employee?.empresaId);
   const appVersion = Constants.expoConfig?.version ?? '—';
   const headerTitle = useMemo(() => {
@@ -410,6 +419,41 @@ function HoyScreenContent() {
     appAlert(result.ok ? 'Presente' : 'Fichada', result.message);
   }
 
+  // Turno presente que ya terminó y sigue abierto (aunque no sea el hero): se puede marcar la salida.
+  const exitShift = (() => {
+    const nowMs = now.getTime();
+    const candidatos = (allShifts ?? shifts).filter((s) => {
+      if (!shiftOwnedByEmployee(s, empDocId, user?.uid ?? null)) return false;
+      const presente = s.isPresent === true || String(s.status || '').toUpperCase() === 'PRESENT';
+      if (!presente || s.isCompleted === true) return false;
+      if ((s as { realEndTime?: unknown }).realEndTime) return false;
+      if (s.isAbsent === true || s.isFranco === true) return false;
+      const blocks = (s as { blocks?: unknown }).blocks;
+      if (Array.isArray(blocks) && blocks.length > 1) return false;
+      const endMs = timestampLikeToMillis(s.endTime);
+      return endMs > 0 && endMs <= nowMs && nowMs - endMs <= 16 * 3600000;
+    });
+    return candidatos.sort(
+      (a, b) => timestampLikeToMillis(b.endTime) - timestampLikeToMillis(a.endTime),
+    )[0];
+  })();
+  const exitAvisoMs = exitShift
+    ? timestampLikeToMillis((exitShift as { salidaMarcadaAt?: unknown }).salidaMarcadaAt)
+    : 0;
+
+  async function onCheckOut() {
+    if (!exitShift) return;
+    const result = await requestCheckOutForShift(exitShift, objectivesMap, {
+      empDocId,
+      authUid: user?.uid ?? null,
+      employeeIds: eventualLegajos.map((l) => l.employeeId),
+      fichadaRemota: employee?.fichadaRemota === true,
+      empresaId: employee?.empresaId ?? null,
+    });
+    appAlert('Salida', result.message);
+    if (result.ok) refreshEmployee();
+  }
+
   async function onCloseReview() {
     if (!mainShift) return;
     const result = await closeReviewShift(mainShift.id);
@@ -610,6 +654,25 @@ function HoyScreenContent() {
             uploadingId={aaUploadingId}
             onUpload={uploadAaCertificate}
           />
+
+          {exitShift ? (
+            <CommandCard title="Tu turno terminó">
+              <Text style={[styles.emptyShifts, { color: palette.onSurfaceMuted }]}>
+                {`${exitShift.objectiveName || 'Tu puesto'} · ${formatHeroTimeRange(exitShift)}. Cuando te retires, marcá tu salida: se toma tu ubicación.`}
+              </Text>
+              {exitAvisoMs > 0 ? (
+                <Text style={[styles.pendingLine, { color: palette.warning || '#b45309' }]}>
+                  {`Avisaste tu salida a las ${new Date(exitAvisoMs).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false })}. Esperando a tu relevo.`}
+                </Text>
+              ) : null}
+              <CommandButton
+                label={exitAvisoMs > 0 ? 'Marcar salida de nuevo' : 'Marcar salida'}
+                variant="success"
+                loading={busyShiftId === exitShift.id}
+                onPress={onCheckOut}
+              />
+            </CommandCard>
+          ) : null}
 
           {loading ? (
             <ActivityIndicator size="large" color={palette.primary} style={styles.loader} />
