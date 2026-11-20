@@ -71,6 +71,15 @@ export interface TurnoHoy {
   comentario?: string;
   /** Quién lo escribió. */
   comentarioPor?: string;
+  /** Cobertura (motor oficial): origen del turno y vínculos con la ausencia que cubre/que lo cubre. */
+  origin?: string;
+  /** Turno RET/REF origen ya usado para cubrir a otro. */
+  coverageUsed?: boolean;
+  coverageDocId?: string;
+  /** Si el titular ausente ya está cubierto: quién lo cubre y en qué estado. */
+  coveredByName?: string;
+  coverageStatus?: string;
+  operacionallyCovered?: boolean;
 }
 
 export type WABridgeStatus = 'idle' | 'connecting' | 'connected' | 'error';

@@ -16,6 +16,7 @@ import {
   Timestamp,
   updateDoc,
   where,
+  writeBatch,
 } from 'firebase/firestore';
 import {
   ArrowDownAZ,
@@ -56,6 +57,8 @@ import { openWhatsApp, waMensaje } from '@/lib/whatsapp';
 import { invokeCrearConvocatoriaCobertura } from '@/lib/operaciones/opsConvocatoriaCobertura';
 import {
   absentShiftCoveragePatch,
+  applyCoverage,
+  CoverageApplyError,
   syncAusenciaCoberturaGestionada,
 } from '@/lib/operaciones/syncAusenciaCobertura';
 import {
@@ -65,6 +68,7 @@ import {
 } from '@/lib/operaciones/earlyWithdrawPolicy';
 import { empresaCollectionQuery, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
 import { readPreferOpsModoRapido, writePreferOpsModoRapido } from '@/lib/panelViewPrefs';
+import { isRevertAbsenceExpired } from '@/lib/operaciones/revertAbsenceWindow';
 import { isRestFrancoShift } from '@/hooks/useOperacionesMonitor';
 import { computeShiftCloseTimes } from '@cosp/ops-core';
 import {
@@ -379,6 +383,15 @@ function useTurnosHoy({
           continue;
         }
         if (shift.draft === true) continue;
+        // Turnos que el motor de cobertura dio de baja (fuente convertida, cobertura cancelada o
+        // reemplazada): no son operativos, el CC clásico tampoco los muestra.
+        if (
+          shift.isDeleted === true ||
+          shift.coverageSuperseded === true ||
+          String(shift.status || '').toUpperCase() === 'CANCELLED'
+        ) {
+          continue;
+        }
 
         const employeeId = String(shift.employeeId ?? '');
         const employeeName = String(shift.employeeName ?? '').trim();
@@ -495,6 +508,17 @@ function useTurnosHoy({
           startTimeRaw: startTs,
           endTimeRaw: endTs,
           empresaId: String(shift.empresaId || ''),
+          origin: String(shift.origin || '').toUpperCase() || undefined,
+          coverageUsed: shift.coverageUsed === true,
+          coverageDocId: String(shift.coverageDocId || '').trim() || undefined,
+          coverageStatus: String(shift.coverageStatus || '').toUpperCase() || undefined,
+          operacionallyCovered: shift.operacionallyCovered === true,
+          coveredByName:
+            shift.operacionallyCovered === true || String(shift.coverageStatus || '').toUpperCase() === 'COVERED'
+              ? String(shift.coveringDisplayName || shift.coveredByEmployeeName || '')
+                  .replace(/\s*\([^)]*\)\s*$/, '')
+                  .trim() || undefined
+              : undefined,
           ...(String(shift.comentarioOps || '').trim()
             ? {
                 comentario: String(shift.comentarioOps).trim(),
@@ -513,6 +537,15 @@ function useTurnosHoy({
           if (!prev) {
             byName.set(employeeName, { turno, startMs: turnoStartMs });
           } else {
+            // Un guardia que cubre tiene dos turnos: su RET/origen (ya usado) y el de la cobertura.
+            // La fila viva es la cobertura; el origen usado queda por detrás.
+            const prioridad = (t: TurnoHoy) => (t.origin === 'OPERATIONS_COVERAGE' ? 2 : t.coverageUsed ? 0 : 1);
+            const prevPrio = prioridad(prev.turno);
+            const nextPrio = prioridad(turno);
+            if (nextPrio !== prevPrio) {
+              if (nextPrio > prevPrio) byName.set(employeeName, { turno, startMs: turnoStartMs });
+              return;
+            }
             const prevDist = Math.abs(prev.startMs - now);
             const nextDist = Math.abs(turnoStartMs - now);
             if (nextDist < prevDist) {
@@ -1436,6 +1469,75 @@ function ModalCobertura({
   );
 }
 
+function ModalRevertirAusencia({
+  row,
+  busy,
+  onLiberarCobertura,
+  onDejarAusencia,
+  onClose,
+}: {
+  row: GuardRowModel;
+  busy: boolean;
+  onLiberarCobertura: (row: GuardRowModel) => void;
+  onDejarAusencia: (row: GuardRowModel) => void;
+  onClose: () => void;
+}) {
+  const cubre = row.coveredByName || row.turno.coveredByName || '';
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-4 py-3 border-b border-slate-200 bg-indigo-50">
+          <div className="text-sm font-black text-indigo-800">Revertir ausencia</div>
+          <div className="text-[11px] text-slate-600 truncate">
+            {row.employeeName} · {row.turno.obj} · {row.turno.shift}
+          </div>
+        </div>
+        <div className="px-4 py-3 text-[12px] text-slate-600">
+          {cubre ? (
+            <>
+              El lugar ya lo cubre <b>{cubre}</b>. Si {row.employeeName} llegó quedan dos para un lugar: elegí a quién
+              liberás.
+            </>
+          ) : (
+            <>{row.employeeName} tiene cobertura o convocatorias activas. ¿Qué hacemos?</>
+          )}
+        </div>
+        <div className="px-4 pb-4 flex flex-col gap-2">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onLiberarCobertura(row)}
+            className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-[12px] font-bold disabled:opacity-50"
+          >
+            {cubre ? `Liberar a ${cubre} · vuelve ${row.employeeName}` : 'Cancelar cobertura y revertir'}
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onDejarAusencia(row)}
+            className="w-full py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-[12px] font-bold disabled:opacity-50"
+          >
+            {cubre ? `Liberar a ${row.employeeName} · sigue ${cubre} (queda AA)` : 'Dejar AA'}
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-full py-1.5 text-[11px] text-slate-400 hover:text-slate-600"
+          >
+            Cerrar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const COMENTARIO_MAX = 300;
 
 function ModalComentario({
@@ -1806,9 +1908,20 @@ function GuardRow({
     );
   } else if (row.estado === 'AUSENTE' && row.coveredByName) {
     primary = (
-      <span className="px-2 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold whitespace-nowrap">
-        ✓ Cubierto por {row.coveredByName}
-      </span>
+      <>
+        <span className="px-2 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold whitespace-nowrap">
+          ✓ Cubierto por {row.coveredByName}
+        </span>
+        <button
+          type="button"
+          disabled={busy}
+          title="Revertir la ausencia: el guardia llegó (hasta T+60)"
+          onClick={() => onRevertirAusencia(row)}
+          className="mr-btn-neutral px-2 py-1 rounded-lg text-[10px] font-bold disabled:opacity-50"
+        >
+          ↩ Llegó
+        </button>
+      </>
     );
   } else if (row.estado === 'AUSENTE') {
     primary = (
@@ -2679,6 +2792,7 @@ export default function ModoRapidoPage() {
   const [coberturaModal, setCoberturaModal] = useState<GuardRowModel | null>(null);
   const [accionesModal, setAccionesModal] = useState<GuardRowModel | null>(null);
   const [comentarioModal, setComentarioModal] = useState<GuardRowModel | null>(null);
+  const [revertirChoice, setRevertirChoice] = useState<GuardRowModel | null>(null);
   const [activeRowId, setActiveRowId] = useState<string | null>(null);
   const [hourEdit, setHourEdit] = useState<{ rowId: string; value: string; campo: 'ingreso' | 'salida' } | null>(null);
   const [arm, setArm] = useState<null | { kind: 'ausente' | 'quitar' | 'radio' | 'cerrar'; rowId: string }>(null);
@@ -3117,6 +3231,8 @@ export default function ModoRapidoPage() {
     // otro empleado que sí está presente/esperando (no ausente/no-llegó él mismo).
     return base.map((row): GuardRowModel => {
       if (row.estado !== 'NO_LLEGO' && row.estado !== 'AUSENTE') return row;
+      // Cobertura del motor oficial: el propio titular ya lo dice (cubre RET, FT o extensión).
+      if (row.turno.coveredByName) return { ...row, coveredByName: row.turno.coveredByName };
       const cover = base.find((other) => {
         if (other === row) return false;
         if (other.estado === 'NO_LLEGO' || other.estado === 'AUSENTE') return false;
@@ -3547,31 +3663,92 @@ export default function ModoRapidoPage() {
   }
 
   /**
-   * Revierte una ausencia por el camino oficial (el guardia llegó tarde): igual que «Revertir ausencia»
-   * del CC clásico, dentro de T+60. Si ya tiene cobertura asignada no se revierte desde acá: la cobertura
-   * hay que deshacerla antes.
+   * Revertir ausencia: mismo criterio que el CC clásico. Se puede hasta T+60; si ya hay cobertura o
+   * convocatorias en curso se pregunta qué hacer (liberar a quien cubre y vuelve el titular, o dejar la AA).
    */
   async function revertirAusencia(row: GuardRowModel) {
     if (busy) return;
     if (bloqueaTramo(row)) return;
     const turnoId = docIdDe(row.turno.rowId);
-    setBusy(true);
     try {
       const actual = (await leerTurnoRapido(turnoId)).data() || {};
-      if (actual.operacionallyCovered === true || actual.coverageStatus === 'COVERED' || actual.coverageDocId) {
-        showToast('Ya tiene cobertura asignada: deshacela antes de revertir la ausencia', 'bg-amber-700');
+      if (isRevertAbsenceExpired(actual)) {
+        showToast('No se puede revertir después de T+60', 'bg-red-600');
         return;
       }
+      const covSt = String(actual.coverageStatus || '').toUpperCase();
+      let convocatoriaPendiente = false;
+      try {
+        const qs = await getDocs(
+          query(collection(db, 'convocatorias_cobertura'), where('shiftId', '==', turnoId), limit(15)),
+        );
+        convocatoriaPendiente = qs.docs.some((d) => {
+          const st = String(d.data().status || '').toUpperCase();
+          return st === 'PENDING' || st === 'ESCALATED';
+        });
+      } catch {
+        /* emulador sin índice */
+      }
+      const enCurso =
+        !!String(actual.coverageDocId || '').trim() ||
+        convocatoriaPendiente ||
+        covSt === 'COVERED' ||
+        covSt === 'PARTIAL' ||
+        actual.operacionallyCovered === true;
+      if (enCurso) {
+        setRevertirChoice(row);
+        return;
+      }
+      if (!window.confirm(`¿Revertir la ausencia de ${row.employeeName}?`)) return;
+      await ejecutarReversionAusencia(row, false);
+    } catch (err) {
+      console.warn('[modo-rapido] revertirAusencia', err);
+      showToast('No se pudo revertir la ausencia', 'bg-red-600');
+    }
+  }
+
+  async function ejecutarReversionAusencia(row: GuardRowModel, cancelCoverage: boolean) {
+    if (busy) return;
+    const turnoId = docIdDe(row.turno.rowId);
+    setBusy(true);
+    try {
+      const antes = (await leerTurnoRapido(turnoId)).data() || {};
       const fn = httpsCallable(functions, 'revertirAusencia');
-      await fn({ shiftId: turnoId, cancelCoverage: false });
+      await fn({ shiftId: turnoId, cancelCoverage });
+      // Extensión hecha desde Modo Rápido (sin turno de cobertura aparte): se deshace acá.
+      const candidatoExtId = String(antes.extensionCandidateTurnoId || '').trim();
+      if (cancelCoverage && candidatoExtId) {
+        try {
+          await updateDoc(doc(db, 'turnos', candidatoExtId), {
+            code: antes.extensionPrevCode ?? deleteField(),
+            endTime: antes.extensionPrevEndTime ?? deleteField(),
+            extensionPrevCode: deleteField(),
+            extensionPrevEndTime: deleteField(),
+            extensionParaTurnoId: deleteField(),
+          });
+          await updateDoc(doc(db, 'turnos', turnoId), {
+            extensionCandidateTurnoId: deleteField(),
+            operacionallyCovered: false,
+            coverageStatus: deleteField(),
+            coverageType: deleteField(),
+            coveredAt: deleteField(),
+            coveredByEmployeeId: deleteField(),
+            coveredByEmployeeName: deleteField(),
+          });
+        } catch (err) {
+          console.warn('[modo-rapido] no se pudo deshacer la extensión', err);
+          showToast('Ausencia revertida, pero revisá la extensión del otro guardia', 'bg-amber-700');
+          return;
+        }
+      }
       showToast(`Ausencia revertida · ${row.employeeName} figura presente (llegó tarde)`, 'bg-emerald-700');
     } catch (err) {
       const code = String((err as { code?: string })?.code || '');
-      console.warn('[modo-rapido] revertirAusencia', err);
+      console.warn('[modo-rapido] ejecutarReversionAusencia', err);
       if (code.includes('deadline-exceeded')) {
         showToast('No se puede revertir después de T+60', 'bg-red-600');
       } else if (code.includes('failed-precondition')) {
-        showToast('No se pudo revertir: hay cobertura o convocatorias en curso', 'bg-red-600');
+        showToast('No se pudo revertir: revisá cobertura activa o convocatorias', 'bg-red-600');
       } else {
         showToast('No se pudo revertir la ausencia', 'bg-red-600');
       }
@@ -4110,32 +4287,46 @@ export default function ModoRapidoPage() {
         );
         return;
       }
-      await updateDoc(doc(db, 'turnos', coberturaModal.turno.rowId), {
-        ...parcheTurnoReasignadoDeAusente(coberturaModal.turno),
-        employeeId: candidate.turno.employeeId,
-        employeeName: candidate.employeeName,
-        origin: 'RET_COBERTURA',
-        coberturaDesdeTurnoId: candidate.turno.rowId,
-      });
-      await updateDoc(doc(db, 'turnos', candidate.turno.rowId), {
-        coverageAssignedTo: coberturaModal.turno.rowId,
-      });
-      if (coberturaModal.turno.turnoStatus === 'ABSENT') {
-        await marcarAusenciaGestionada(
-          docIdDe(coberturaModal.turno.rowId),
-          { id: candidate.turno.employeeId, name: candidate.employeeName },
-          'RET',
-        );
-      }
-      await addDoc(collection(db, 'novedades'), {
-        type: 'COBERTURA_RET',
-        turnoAusenteId: coberturaModal.turno.rowId,
-        turnoAusenteEmpleado: coberturaModal.employeeName,
-        turnoAusenteObj: coberturaModal.turno.obj,
-        retEmpleado: candidate.employeeName,
+      // Motor oficial (el mismo del CC clásico): turno de cobertura aparte vinculado al ausente, el
+      // RET queda como origen usado y la ausencia de RRHH como gestionada. Así se puede revertir.
+      const titularId = docIdDe(coberturaModal.turno.rowId);
+      const batchRet = writeBatch(db);
+      const coverDocId = await applyCoverage(db, batchRet, {
+        titularShiftId: titularId,
+        candidateEmployeeId: String(candidate.turno.employeeId || ''),
+        candidateEmployeeName: candidate.employeeName,
+        sourceShiftId: docIdDe(candidate.turno.rowId),
+        coverageType: 'RET',
+        resolvedBy: 'OPERACIONES',
         empresaId,
-        operatorId: user?.uid ?? 'cc-modo-rapido',
+      });
+      await syncAusenciaCoberturaGestionada(
+        db,
+        {
+          shiftId: titularId,
+          coveredByEmployeeId: candidate.turno.employeeId ?? null,
+          coveredByEmployeeName: candidate.employeeName,
+          coverageType: 'RET',
+          empresaId,
+          resolvedBy: 'OPERACIONES',
+        },
+        batchRet,
+      );
+      await batchRet.commit();
+      await addDoc(collection(db, 'novedades'), {
+        type: 'CONVOCATORIA_COBERTURA',
+        title: 'Cobertura RET',
+        status: 'pending',
+        employeeId: candidate.turno.employeeId ?? null,
+        employeeName: candidate.employeeName,
+        objectiveId: coberturaModal.turno.objectiveId ?? null,
+        objectiveName: coberturaModal.turno.obj,
+        shiftId: coverDocId,
+        description: `${candidate.employeeName} (RET) cubre ${coberturaModal.turno.expected}–${coberturaModal.salida || '—'} en ${coberturaModal.turno.obj} (titular: ${coberturaModal.employeeName})`,
+        empresaId,
         createdAt: serverTimestamp(),
+        reportedBy: 'OPERACIONES',
+        operatorId: user?.uid ?? 'cc-modo-rapido',
       });
       const aviso = abrirWa(
         candidate.turno.phone,
@@ -4152,8 +4343,12 @@ export default function ModoRapidoPage() {
           : `RET asignado · ${candidate.employeeName}. Sin teléfono para WhatsApp.`,
         aviso ? 'bg-violet-700' : 'bg-amber-700',
       );
-    } catch {
-      showToast('Error al asignar RET', 'bg-red-600');
+    } catch (err) {
+      console.warn('[modo-rapido] asignar RET', err);
+      showToast(
+        err instanceof CoverageApplyError ? err.message : 'Error al asignar RET',
+        'bg-red-600',
+      );
     } finally {
       setBusy(false);
       setCoberturaModal(null);
@@ -4170,15 +4365,26 @@ export default function ModoRapidoPage() {
           ? (candidate.turno.startTimeRaw as Timestamp).toMillis()
           : Date.now();
       const newEndTime = Timestamp.fromMillis(startMs + 12 * 3600000);
-      await updateDoc(doc(db, 'turnos', candidate.turno.rowId), {
+      // Se guardan el código y el fin anteriores del guardia que extiende: si se revierte la ausencia
+      // del titular, la extensión se deshace y el guardia vuelve a su turno original.
+      const candidatoDocId = docIdDe(candidate.turno.rowId);
+      const titularExtId = docIdDe(coberturaModal.turno.rowId);
+      const previo = (await leerTurnoRapido(candidatoDocId)).data() || {};
+      await updateDoc(doc(db, 'turnos', candidatoDocId), {
         code,
         endTime: newEndTime,
+        extensionPrevCode: previo.code ?? null,
+        extensionPrevEndTime: previo.endTime ?? null,
+        extensionParaTurnoId: titularExtId,
       });
       await marcarTitularCubierto(
         coberturaModal.turno,
         { id: candidate.turno.employeeId, name: candidate.employeeName },
         'EXTEND',
       );
+      if (coberturaModal.turno.turnoStatus === 'ABSENT') {
+        await updateDoc(doc(db, 'turnos', titularExtId), { extensionCandidateTurnoId: candidatoDocId });
+      }
       await addDoc(collection(db, 'novedades'), {
         type: 'EXTENSION_12H',
         code,
@@ -4393,31 +4599,47 @@ export default function ModoRapidoPage() {
         }
       }
       if (!porApp) {
-        await updateDoc(doc(db, 'turnos', candidate.turno.rowId), {
+        // Motor oficial (igual que el CC clásico): cobertura FT aparte sobre el franco del guardia.
+        const titularId = docIdDe(ausente.turno.rowId);
+        const batchFt = writeBatch(db);
+        const coverDocId = await applyCoverage(db, batchFt, {
+          titularShiftId: titularId,
+          candidateEmployeeId: candidateEmployeeId,
+          candidateEmployeeName: candidate.employeeName,
+          sourceShiftId: docIdDe(candidate.turno.rowId),
+          coverageType: 'FT',
+          resolvedBy: 'OPERACIONES',
+          empresaId,
           code: 'FT',
-          objectiveId: ausente.turno.objectiveId,
-          objectiveName: ausente.turno.obj,
-          startTime: ausente.turno.startTimeRaw,
-          endTime: ausente.turno.endTimeRaw,
-          status: 'PENDING',
-          origin: 'FT_COBERTURA',
-          coberturaDesdeTurnoId: ausente.turno.rowId,
         });
+        await syncAusenciaCoberturaGestionada(
+          db,
+          {
+            shiftId: titularId,
+            coveredByEmployeeId: candidateEmployeeId || null,
+            coveredByEmployeeName: candidate.employeeName,
+            coverageType: 'FT',
+            empresaId,
+            resolvedBy: 'OPERACIONES',
+          },
+          batchFt,
+        );
+        await batchFt.commit();
         await addDoc(collection(db, 'novedades'), {
           type: 'FRANCO_TRABAJADO',
-          turnoAusenteId: ausente.turno.rowId,
-          turnoAusenteEmpleado: ausente.employeeName,
-          turnoAusenteObj: ausente.turno.obj,
-          ftEmpleado: candidate.employeeName,
+          title: 'Franco trabajado',
+          status: 'pending',
+          employeeId: candidateEmployeeId || null,
+          employeeName: candidate.employeeName,
+          objectiveId: ausente.turno.objectiveId ?? null,
+          objectiveName: ausente.turno.obj,
+          shiftId: coverDocId,
+          description: `${candidate.employeeName} trabaja su franco (titular: ${ausente.employeeName})`,
           empresaId,
-          operatorId: user?.uid ?? 'cc-modo-rapido',
           createdAt: serverTimestamp(),
+          reportedBy: 'OPERACIONES',
+          operatorId: user?.uid ?? 'cc-modo-rapido',
         });
-        await marcarTitularCubierto(
-          ausente.turno,
-          { id: candidate.turno.employeeId, name: candidate.employeeName },
-          'FT',
-        );
       }
       const aviso = abrirWa(
         candidate.turno.phone,
@@ -4436,8 +4658,12 @@ export default function ModoRapidoPage() {
             : `FT asignado · ${candidate.employeeName}. Sin teléfono para WhatsApp.`,
         aviso || porApp ? 'bg-red-700' : 'bg-amber-700',
       );
-    } catch {
-      showToast('Error al convocar FT', 'bg-red-600');
+    } catch (err) {
+      console.warn('[modo-rapido] convocar FT', err);
+      showToast(
+        err instanceof CoverageApplyError ? err.message : 'Error al convocar FT',
+        'bg-red-600',
+      );
     } finally {
       setBusy(false);
       setCoberturaModal(null);
@@ -4531,6 +4757,10 @@ export default function ModoRapidoPage() {
       const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || !!target?.isContentEditable;
       // El modal de comentario maneja sus propias teclas (Esc, Ctrl+Enter): los atajos de la planilla no corren.
       if (comentarioModal) return;
+      if (revertirChoice) {
+        if (e.key === 'Escape') setRevertirChoice(null);
+        return;
+      }
       if (retiroModal) {
         e.preventDefault();
         const k = e.key.toLowerCase();
@@ -4690,7 +4920,7 @@ export default function ModoRapidoPage() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [sheetRows, activeRowId, hourEdit, arm, swapFromId, coberturaModal, accionesModal, comentarioModal, busy, pantallaCompleta, retiroModal, retiroMotivo, retiroReemplazo, retiroInfo]);
+  }, [sheetRows, activeRowId, hourEdit, arm, swapFromId, coberturaModal, accionesModal, comentarioModal, revertirChoice, busy, pantallaCompleta, retiroModal, retiroMotivo, retiroReemplazo, retiroInfo]);
 
   useEffect(() => {
     if (!coberturaModal) setHuecoRetiro(null);
@@ -5293,6 +5523,25 @@ export default function ModoRapidoPage() {
                   );
               abrirWa(c.turno.phone, text);
             }}
+          />
+        )}
+
+        {revertirChoice && (
+          <ModalRevertirAusencia
+            row={revertirChoice}
+            busy={busy}
+            onLiberarCobertura={(r) => {
+              setRevertirChoice(null);
+              void ejecutarReversionAusencia(r, true);
+            }}
+            onDejarAusencia={(r) => {
+              setRevertirChoice(null);
+              showToast(
+                `${r.employeeName} permanece ausente (AA)${r.coveredByName ? `; sigue ${r.coveredByName}` : ''}`,
+                'bg-slate-700',
+              );
+            }}
+            onClose={() => setRevertirChoice(null)}
           />
         )}
 
