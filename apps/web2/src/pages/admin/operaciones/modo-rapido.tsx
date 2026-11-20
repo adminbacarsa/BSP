@@ -7,6 +7,8 @@ import {
   doc,
   getDoc,
   getDocFromCache,
+  getDocs,
+  limit,
   onSnapshot,
   query,
   QueryDocumentSnapshot,
@@ -52,6 +54,10 @@ import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '@/lib/firebase';
 import { openWhatsApp, waMensaje } from '@/lib/whatsapp';
 import { invokeCrearConvocatoriaCobertura } from '@/lib/operaciones/opsConvocatoriaCobertura';
+import {
+  absentShiftCoveragePatch,
+  syncAusenciaCoberturaGestionada,
+} from '@/lib/operaciones/syncAusenciaCobertura';
 import {
   hoursRemainingUntilEnd,
   resolveEarlyWithdrawReplacePolicy,
@@ -2764,28 +2770,86 @@ export default function ModoRapidoPage() {
     );
   }
 
-  async function registrarAusencia(rowId: string, empleado: { name: string }) {
+  /**
+   * Ausencia por el camino oficial (el mismo que el Centro de Control clásico): el servidor marca
+   * `isAbsent`, crea el registro de RRHH (`ausencias`), la novedad AUSENCIA_AUTO, la retención del
+   * saliente y, si la empresa no está en modo manual, abre la vacante. Se espera la respuesta: si el
+   * servidor no la acepta, la fila no queda a medias y el operador lo ve.
+   */
+  async function registrarAusencia(rowId: string, _empleado: { name: string }) {
     const turnoId = docIdDe(rowId);
-    escribir(
-      updateDoc(doc(db, 'turnos', turnoId), {
-        status: 'ABSENT',
-        absenceCode: 'AA',
-        absenceRegisteredAt: serverTimestamp(),
-      }),
-      'la ausencia',
-    );
-    escribir(
-      addDoc(collection(db, 'novedades'), {
-        type: 'AUSENCIA_REGISTRADA',
-        turnoId,
-        employeeName: empleado.name,
-        code: 'AA',
+    const fn = httpsCallable(functions, 'marcarAusenciaOperaciones');
+    const res = (await fn({ shiftId: turnoId })) as { data?: { success?: boolean } };
+    if (res?.data?.success !== true) {
+      throw new Error('El servidor no registró la ausencia');
+    }
+  }
+
+  /**
+   * El turno de un ausente pasa a manos de otro guardia (RET, intercambio): deja de ser una ausencia
+   * del turno —así el guardia que lo toma no hereda la AA ni una "llegada tarde" de otro— y el
+   * registro de RRHH de la ausencia queda gestionado con quién cubrió. Solo aplica si el turno estaba
+   * marcado ausente.
+   */
+  function parcheTurnoReasignadoDeAusente(turno: TurnoHoy): Record<string, unknown> {
+    if (turno.turnoStatus !== 'ABSENT') return {};
+    return {
+      status: 'PENDING',
+      isAbsent: false,
+      absenceType: null,
+      absenceDetectedAt: null,
+      absenceDetectedBy: null,
+      absenceCode: null,
+      ausenteOriginalEmployeeId: turno.employeeId ?? null,
+      ausenteOriginalEmployeeName: turno.name || null,
+    };
+  }
+
+  /** Marca la ausencia de RRHH como gestionada. Un fallo no frena la cobertura ya hecha. */
+  async function marcarAusenciaGestionada(
+    turnoId: string,
+    cubre: { id?: string | null; name: string },
+    coverageType: string,
+  ) {
+    try {
+      await syncAusenciaCoberturaGestionada(db, {
+        shiftId: turnoId,
+        coveredByEmployeeId: cubre.id ?? null,
+        coveredByEmployeeName: cubre.name,
+        coverageType,
         empresaId,
-        operatorId: user?.uid ?? 'cc-modo-rapido',
-        createdAt: serverTimestamp(),
-      }),
-      'la novedad de ausencia',
-    );
+        resolvedBy: 'OPERACIONES',
+      });
+    } catch (err) {
+      console.warn('[modo-rapido] no se pudo marcar la ausencia de RRHH como gestionada', err);
+    }
+  }
+
+  /**
+   * La ausencia sigue en el turno del titular y la cubre otro turno (extensión, FT): se marca el
+   * titular como cubierto para que el Centro de Control clásico no lo muestre «sin cubrir».
+   */
+  async function marcarTitularCubierto(
+    turno: TurnoHoy,
+    cubre: { id?: string | null; name: string },
+    coverageType: string,
+  ) {
+    if (turno.turnoStatus !== 'ABSENT') return;
+    try {
+      await updateDoc(
+        doc(db, 'turnos', docIdDe(turno.rowId)),
+        absentShiftCoveragePatch({
+          coveredByEmployeeId: cubre.id ?? null,
+          coveredByEmployeeName: cubre.name,
+          coverageType,
+          resolvedBy: 'OPERACIONES',
+          isAbsence: true,
+        }),
+      );
+    } catch (err) {
+      console.warn('[modo-rapido] no se pudo marcar el titular como cubierto', err);
+    }
+    await marcarAusenciaGestionada(docIdDe(turno.rowId), cubre, coverageType);
   }
 
   const classifiedRows = useMemo((): GuardRowModel[] => {
@@ -3212,11 +3276,16 @@ export default function ModoRapidoPage() {
   const handleRegistrarAusencia = async (row: GuardRowModel) => {
     if (busy) return;
     setBusy(true);
+    let apilado = false;
     try {
       await recordarTurno(row.turno.rowId);
+      apilado = true;
       await registrarAusencia(row.turno.rowId, { name: row.employeeName });
       showToast(`Ausencia registrada · ${row.employeeName}`, 'bg-red-700');
-    } catch {
+    } catch (err) {
+      // La ausencia no se registró: no debe quedar un "deshacer" de algo que no pasó.
+      if (apilado) undoRef.current.pop();
+      console.warn('[modo-rapido] registrarAusencia', err);
       showToast('Error al registrar ausencia', 'bg-red-600');
     } finally {
       setBusy(false);
@@ -3242,6 +3311,10 @@ export default function ModoRapidoPage() {
         realEndTime: d.realEndTime ?? null,
         isRetention: d.isRetention ?? false,
         absenceCode: d.absenceCode ?? null,
+        isAbsent: d.isAbsent ?? false,
+        absenceType: d.absenceType ?? null,
+        absenceDetectedAt: d.absenceDetectedAt ?? null,
+        absenceDetectedBy: d.absenceDetectedBy ?? null,
       },
     });
     if (undoRef.current.length > 8) undoRef.current.shift();
@@ -3448,8 +3521,27 @@ export default function ModoRapidoPage() {
     }
     setBusy(true);
     try {
+      // Si se deshace una ausencia, el registro de RRHH que creó el servidor se anula (igual que
+      // «Revertir ausencia» del CC clásico) y se avisa si había convocatorias abiertas.
+      let avisoAusencia = '';
+      if (last.data.isAbsent !== true) {
+        const actual = (await leerTurnoRapido(last.rowId)).data() || {};
+        if (actual.isAbsent === true) {
+          const aus = await getDocs(query(collection(db, 'ausencias'), where('shiftId', '==', last.rowId), limit(10)));
+          for (const a of aus.docs) {
+            if (String(a.data().status || '') === 'Anulada') continue;
+            escribir(
+              updateDoc(a.ref, { status: 'Anulada', anuladaAt: serverTimestamp() }),
+              'la anulación de la ausencia',
+            );
+          }
+          if (actual.absenceVacancyOpenedAt) {
+            avisoAusencia = ' · revisá las convocatorias abiertas en Operaciones';
+          }
+        }
+      }
       escribir(updateDoc(doc(db, 'turnos', last.rowId), last.data), 'el deshacer');
-      showToast('Corrección deshecha', 'bg-slate-700');
+      showToast(`Corrección deshecha${avisoAusencia}`, 'bg-slate-700');
     } catch {
       undoRef.current.push(last);
       showToast('No se pudo deshacer', 'bg-red-600');
@@ -3712,6 +3804,7 @@ export default function ModoRapidoPage() {
         return;
       }
       await updateDoc(doc(db, 'turnos', coberturaModal.turno.rowId), {
+        ...parcheTurnoReasignadoDeAusente(coberturaModal.turno),
         employeeId: candidate.turno.employeeId,
         employeeName: candidate.employeeName,
         origin: 'RET_COBERTURA',
@@ -3720,6 +3813,13 @@ export default function ModoRapidoPage() {
       await updateDoc(doc(db, 'turnos', candidate.turno.rowId), {
         coverageAssignedTo: coberturaModal.turno.rowId,
       });
+      if (coberturaModal.turno.turnoStatus === 'ABSENT') {
+        await marcarAusenciaGestionada(
+          docIdDe(coberturaModal.turno.rowId),
+          { id: candidate.turno.employeeId, name: candidate.employeeName },
+          'RET',
+        );
+      }
       await addDoc(collection(db, 'novedades'), {
         type: 'COBERTURA_RET',
         turnoAusenteId: coberturaModal.turno.rowId,
@@ -3767,6 +3867,11 @@ export default function ModoRapidoPage() {
         code,
         endTime: newEndTime,
       });
+      await marcarTitularCubierto(
+        coberturaModal.turno,
+        { id: candidate.turno.employeeId, name: candidate.employeeName },
+        'EXTEND',
+      );
       await addDoc(collection(db, 'novedades'), {
         type: 'EXTENSION_12H',
         code,
@@ -3797,6 +3902,7 @@ export default function ModoRapidoPage() {
           '',
       );
       await updateDoc(doc(db, 'turnos', coberturaModal.turno.rowId), {
+        ...parcheTurnoReasignadoDeAusente(coberturaModal.turno),
         employeeId: candidate.turno.employeeId,
         employeeName: candidate.employeeName,
         origin: 'INTERCAMBIO',
@@ -3808,6 +3914,13 @@ export default function ModoRapidoPage() {
         origin: 'INTERCAMBIO',
         intercambioConTurnoId: coberturaModal.turno.rowId,
       });
+      if (coberturaModal.turno.turnoStatus === 'ABSENT') {
+        await marcarAusenciaGestionada(
+          docIdDe(coberturaModal.turno.rowId),
+          { id: candidate.turno.employeeId, name: candidate.employeeName },
+          'INTERCAMBIO',
+        );
+      }
       await addDoc(collection(db, 'novedades'), {
         type: 'INTERCAMBIO_TURNO',
         turnoAusenteId: coberturaModal.turno.rowId,
@@ -3863,17 +3976,33 @@ export default function ModoRapidoPage() {
     try {
       const origenEmployeeId = String(origen.turno.employeeId || '');
       await updateDoc(doc(db, 'turnos', origen.turno.rowId), {
+        ...parcheTurnoReasignadoDeAusente(origen.turno),
         employeeId: destino.turno.employeeId,
         employeeName: destino.employeeName,
         origin: 'INTERCAMBIO',
         intercambioConTurnoId: destino.turno.rowId,
       });
       await updateDoc(doc(db, 'turnos', destino.turno.rowId), {
+        ...parcheTurnoReasignadoDeAusente(destino.turno),
         employeeId: origenEmployeeId,
         employeeName: origen.employeeName,
         origin: 'INTERCAMBIO',
         intercambioConTurnoId: origen.turno.rowId,
       });
+      if (origen.turno.turnoStatus === 'ABSENT') {
+        await marcarAusenciaGestionada(
+          docIdDe(origen.turno.rowId),
+          { id: destino.turno.employeeId, name: destino.employeeName },
+          'INTERCAMBIO',
+        );
+      }
+      if (destino.turno.turnoStatus === 'ABSENT') {
+        await marcarAusenciaGestionada(
+          docIdDe(destino.turno.rowId),
+          { id: origenEmployeeId, name: origen.employeeName },
+          'INTERCAMBIO',
+        );
+      }
       const anticipado =
         origen.estado !== 'NO_LLEGO' &&
         origen.estado !== 'AUSENTE' &&
@@ -3977,6 +4106,11 @@ export default function ModoRapidoPage() {
           operatorId: user?.uid ?? 'cc-modo-rapido',
           createdAt: serverTimestamp(),
         });
+        await marcarTitularCubierto(
+          ausente.turno,
+          { id: candidate.turno.employeeId, name: candidate.employeeName },
+          'FT',
+        );
       }
       const aviso = abrirWa(
         candidate.turno.phone,
