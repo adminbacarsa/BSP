@@ -3767,25 +3767,33 @@ export default function ModoRapidoPage() {
       `${row.employeeName} no llegó pasados 30 min del inicio.\n\nPara cubrir se declara la ausencia (AA): queda en RRHH y Planificación. Podés revertirla si llega.\n\n¿Declarar la ausencia y cubrir?`,
     );
     if (!ok) return;
-    setBusy(true);
-    let apilado = false;
-    try {
-      await recordarTurno(row.turno.rowId);
-      apilado = true;
-      await registrarAusencia(row.turno.rowId, { name: row.employeeName });
-      showToast(`Ausencia declarada · ${row.employeeName}`, 'bg-red-700');
-      setCoberturaModal({
-        ...row,
-        estado: 'AUSENTE',
-        turno: { ...row.turno, turnoStatus: 'ABSENT' },
-      });
-    } catch (err) {
-      if (apilado) undoRef.current.pop();
-      console.warn('[modo-rapido] abrirCobertura', err);
-      showToast('No se pudo declarar la ausencia', 'bg-red-600');
-    } finally {
-      setBusy(false);
-    }
+    // La ventana abre al instante: la declaración oficial corre en segundo plano (el callable puede
+    // tardar por arranque en frío o red). Si falla, se cierra la ventana y se avisa el motivo. Aunque
+    // todavía no haya terminado, asignar la cobertura la declara igual (es idempotente por turno).
+    const turnoRowId = row.turno.rowId;
+    setCoberturaModal({
+      ...row,
+      estado: 'AUSENTE',
+      turno: { ...row.turno, turnoStatus: 'ABSENT' },
+    });
+    void (async () => {
+      let apilado = false;
+      try {
+        await recordarTurno(turnoRowId);
+        apilado = true;
+        await registrarAusencia(turnoRowId, { name: row.employeeName });
+        showToast(`Ausencia declarada · ${row.employeeName}`, 'bg-red-700');
+      } catch (err) {
+        if (apilado) undoRef.current.pop();
+        console.warn('[modo-rapido] abrirCobertura', err);
+        const detalle = (err as { message?: string })?.message || '';
+        setCoberturaModal((actual) => (actual && actual.turno.rowId === turnoRowId ? null : actual));
+        showToast(
+          `No se pudo declarar la ausencia de ${row.employeeName}${detalle ? `: ${detalle}` : ''}`,
+          'bg-red-600',
+        );
+      }
+    })();
   }
 
   /**
