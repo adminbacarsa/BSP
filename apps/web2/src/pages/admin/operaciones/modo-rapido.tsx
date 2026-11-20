@@ -1208,7 +1208,11 @@ function ModalCobertura({
   onConvocarFt: (c: GuardRowModel) => void;
   onAvisarWa: (c: GuardRowModel, plantilla: 'cobertura' | 'intercambio') => void;
 }) {
-  const esPuesto24h = ['M', 'T', 'N'].includes(absent.band) && !remanente;
+  // Puesto 24 h: el turno es exactamente M/T/N/D12/N12 (código del catálogo). Cualquier otro código
+  // es un puesto custom (EN, C1, SA…): solo admite RET y franco trabajado.
+  const codigoAusente = String(absent.turno.code || '').trim().toUpperCase();
+  const esCustom = !BANDS.includes(codigoAusente as (typeof BANDS)[number]);
+  const esPuesto24h = !esCustom && ['M', 'T', 'N'].includes(absent.band) && !remanente;
 
   return (
     <div
@@ -1330,8 +1334,8 @@ function ModalCobertura({
             </div>
           )}
 
-          {/* 3. Intercambio (no aplica al resto de un retiro anticipado) */}
-          {!remanente && (
+          {/* 3. Intercambio (no aplica al resto de un retiro anticipado ni a puestos custom) */}
+          {!remanente && !esCustom && (
           <div className="mb-4">
             <div className="text-[11px] font-bold text-blue-700 uppercase tracking-wide mb-2">
               🔄 3. Intercambio con otro turno ({intercambioCandidates.length})
@@ -1733,6 +1737,7 @@ function GuardRow({
   swapOrigin,
   onMore,
   onComentario,
+  onRevertirAusencia,
 }: {
   row: GuardRowModel;
   busy: boolean;
@@ -1748,6 +1753,7 @@ function GuardRow({
   onConfirmarWA: (row: GuardRowModel) => void;
   onCerrar: (row: GuardRowModel) => void;
   onCobertura: (row: GuardRowModel) => void;
+  onRevertirAusencia: (row: GuardRowModel) => void;
   onIntercambio: (row: GuardRowModel) => void;
   onRetiro: (row: GuardRowModel) => void;
   onMore: (row: GuardRowModel) => void;
@@ -1777,14 +1783,54 @@ function GuardRow({
     );
   } else if (row.estado === 'NO_LLEGO') {
     primary = (
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() => onCobertura(row)}
-        className="px-2 py-1 rounded-lg bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold disabled:opacity-50"
-      >
-        🚨 Cobertura
-      </button>
+      <>
+        <button
+          type="button"
+          disabled={busy}
+          title="Declara la ausencia (si pasaron 30 min) y abre las opciones de cobertura"
+          onClick={() => onCobertura(row)}
+          className="px-2 py-1 rounded-lg bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold disabled:opacity-50"
+        >
+          🚨 Cobertura
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          title="El guardia llegó: registrar presencia"
+          onClick={() => onMarcarPresente(row)}
+          className="mr-btn-neutral px-2 py-1 rounded-lg text-[10px] font-bold disabled:opacity-50"
+        >
+          ✓ Llegó
+        </button>
+      </>
+    );
+  } else if (row.estado === 'AUSENTE' && row.coveredByName) {
+    primary = (
+      <span className="px-2 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold whitespace-nowrap">
+        ✓ Cubierto por {row.coveredByName}
+      </span>
+    );
+  } else if (row.estado === 'AUSENTE') {
+    primary = (
+      <>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => onCobertura(row)}
+          className="px-2 py-1 rounded-lg bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold disabled:opacity-50"
+        >
+          🚨 Cobertura
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          title="Revertir la ausencia: el guardia llegó (hasta T+60)"
+          onClick={() => onRevertirAusencia(row)}
+          className="mr-btn-neutral px-2 py-1 rounded-lg text-[10px] font-bold disabled:opacity-50"
+        >
+          ↩ Llegó
+        </button>
+      </>
     );
   } else if (row.estado === 'TARDANZA') {
     primary = (
@@ -2152,6 +2198,7 @@ function ObjectiveGroup({
   onConfirmarWA,
   onCerrar,
   onCobertura,
+  onRevertirAusencia,
   onIntercambio,
   onRetiro,
   swapFromId,
@@ -2188,6 +2235,7 @@ function ObjectiveGroup({
   onConfirmarWA: (row: GuardRowModel) => void;
   onCerrar: (row: GuardRowModel) => void;
   onCobertura: (row: GuardRowModel) => void;
+  onRevertirAusencia: (row: GuardRowModel) => void;
   onIntercambio: (row: GuardRowModel) => void;
   onRetiro: (row: GuardRowModel) => void;
   onMore: (row: GuardRowModel) => void;
@@ -2260,6 +2308,7 @@ function ObjectiveGroup({
               onConfirmarWA={onConfirmarWA}
               onCerrar={onCerrar}
               onCobertura={onCobertura}
+              onRevertirAusencia={onRevertirAusencia}
               onIntercambio={onIntercambio}
               onRetiro={onRetiro}
               swapOrigin={swapFromId === row.turno.rowId}
@@ -3460,6 +3509,77 @@ export default function ModoRapidoPage() {
     showToast(limpio ? `Comentario guardado · ${row.employeeName}` : `Comentario quitado · ${row.employeeName}`, 'bg-indigo-700');
   }
 
+  /**
+   * Abre la cobertura de un guardia. «No llegó» es solo un estado (puede llegar hasta T+30): pasado ese
+   * tiempo es ausencia, así que si todavía no está declarada se declara por el camino oficial (va a
+   * Planificación y RRHH) antes de cubrir, pidiendo confirmación una vez.
+   */
+  async function abrirCobertura(row: GuardRowModel) {
+    if (busy) return;
+    if (bloqueaTramo(row)) return;
+    if (row.estado !== 'NO_LLEGO' || row.turno.turnoStatus === 'ABSENT') {
+      setCoberturaModal(row);
+      return;
+    }
+    const ok = window.confirm(
+      `${row.employeeName} no llegó pasados 30 min del inicio.\n\nPara cubrir se declara la ausencia (AA): queda en RRHH y Planificación. Podés revertirla si llega.\n\n¿Declarar la ausencia y cubrir?`,
+    );
+    if (!ok) return;
+    setBusy(true);
+    let apilado = false;
+    try {
+      await recordarTurno(row.turno.rowId);
+      apilado = true;
+      await registrarAusencia(row.turno.rowId, { name: row.employeeName });
+      showToast(`Ausencia declarada · ${row.employeeName}`, 'bg-red-700');
+      setCoberturaModal({
+        ...row,
+        estado: 'AUSENTE',
+        turno: { ...row.turno, turnoStatus: 'ABSENT' },
+      });
+    } catch (err) {
+      if (apilado) undoRef.current.pop();
+      console.warn('[modo-rapido] abrirCobertura', err);
+      showToast('No se pudo declarar la ausencia', 'bg-red-600');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * Revierte una ausencia por el camino oficial (el guardia llegó tarde): igual que «Revertir ausencia»
+   * del CC clásico, dentro de T+60. Si ya tiene cobertura asignada no se revierte desde acá: la cobertura
+   * hay que deshacerla antes.
+   */
+  async function revertirAusencia(row: GuardRowModel) {
+    if (busy) return;
+    if (bloqueaTramo(row)) return;
+    const turnoId = docIdDe(row.turno.rowId);
+    setBusy(true);
+    try {
+      const actual = (await leerTurnoRapido(turnoId)).data() || {};
+      if (actual.operacionallyCovered === true || actual.coverageStatus === 'COVERED' || actual.coverageDocId) {
+        showToast('Ya tiene cobertura asignada: deshacela antes de revertir la ausencia', 'bg-amber-700');
+        return;
+      }
+      const fn = httpsCallable(functions, 'revertirAusencia');
+      await fn({ shiftId: turnoId, cancelCoverage: false });
+      showToast(`Ausencia revertida · ${row.employeeName} figura presente (llegó tarde)`, 'bg-emerald-700');
+    } catch (err) {
+      const code = String((err as { code?: string })?.code || '');
+      console.warn('[modo-rapido] revertirAusencia', err);
+      if (code.includes('deadline-exceeded')) {
+        showToast('No se puede revertir después de T+60', 'bg-red-600');
+      } else if (code.includes('failed-precondition')) {
+        showToast('No se pudo revertir: hay cobertura o convocatorias en curso', 'bg-red-600');
+      } else {
+        showToast('No se pudo revertir la ausencia', 'bg-red-600');
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const handleRegistrarAusencia = async (row: GuardRowModel) => {
     if (busy) return;
     setBusy(true);
@@ -4559,8 +4679,7 @@ export default function ModoRapidoPage() {
         return;
       }
       if (k === 'c' && (row.estado === 'NO_LLEGO' || row.estado === 'AUSENTE')) {
-        if (bloqueaTramo(row)) return;
-        setCoberturaModal(row);
+        void abrirCobertura(row);
         return;
       }
       if (k === 'x') {
@@ -5073,10 +5192,8 @@ export default function ModoRapidoPage() {
                     onCerrar={(r) => pedirCierre(r)}
                     onMarcarPresente={(r) => void handleMarcarPresente(r)}
                     onConfirmarWA={(r) => void handleConfirmarWA(r)}
-                    onCobertura={(r) => {
-                      if (bloqueaTramo(r)) return;
-                      setCoberturaModal(r);
-                    }}
+                    onCobertura={(r) => void abrirCobertura(r)}
+                    onRevertirAusencia={(r) => void revertirAusencia(r)}
                     onIntercambio={(r) => {
                       if (bloqueaTramo(r)) return;
                       setHourEdit(null);
