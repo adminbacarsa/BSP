@@ -76,6 +76,7 @@ import {
 import { empresaCollectionQuery, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
 import { readPreferOpsModoRapido, writePreferOpsModoRapido } from '@/lib/panelViewPrefs';
 import { isRevertAbsenceExpired } from '@/lib/operaciones/revertAbsenceWindow';
+import { arHmOnYmdMs, arHour, arYmd } from '@/lib/arClock';
 import { isRestFrancoShift } from '@/hooks/useOperacionesMonitor';
 import { computeShiftCloseTimes } from '@cosp/ops-core';
 import {
@@ -169,6 +170,11 @@ function docIdDe(rowId: string): string {
 function indiceTramoDe(rowId: string): number {
   const m = /#b(\d+)$/.exec(String(rowId || ''));
   return m ? Number(m[1]) - 1 : 0;
+}
+
+function msDeTimestamp(v: unknown): number {
+  const t = v as { toMillis?: () => number } | null | undefined;
+  return typeof t?.toMillis === 'function' ? t.toMillis() || 0 : 0;
 }
 
 function esTramoCortado(t: Pick<TurnoHoy, 'bloquesTotal'>): boolean {
@@ -399,6 +405,9 @@ function useTurnosHoy({
         ) {
           continue;
         }
+        // D12/N12 (extender o adelantar): las horas se llevan en el turno del propio guardia, que sigue
+        // siendo su fila con el horario ajustado. El doc de cobertura es solo el vínculo con el ausente.
+        if (shift.coverageHoursOnSource === true) continue;
 
         const employeeId = String(shift.employeeId ?? '');
         const employeeName = String(shift.employeeName ?? '').trim();
@@ -474,10 +483,17 @@ function useTurnosHoy({
         // Retiro anticipado: el servidor mueve endTime a la hora del retiro; el egreso planificado
         // sigue siendo el original (plannedEndTime) y el retiro se muestra aparte.
         const retiroAnticipado = shift.completionReason === 'EARLY_WITHDRAW';
+        // Horario ajustado por extender/adelantar (D12/N12): si es una marca de tiempo, es el horario real.
+        const esMarca = (v: unknown): v is Timestamp =>
+          !!v && typeof (v as { toMillis?: unknown }).toMillis === 'function';
+        const finAjustado =
+          shift.isExtended === true && esMarca(shift.adjustedEndTime) ? shift.adjustedEndTime : undefined;
+        const inicioAjustado =
+          shift.isEarlyStart === true && esMarca(shift.adjustedStartTime) ? shift.adjustedStartTime : undefined;
         const endTs = (
-          retiroAnticipado && shift.plannedEndTime ? shift.plannedEndTime : shift.endTime
+          retiroAnticipado && shift.plannedEndTime ? shift.plannedEndTime : finAjustado ?? shift.endTime
         ) as Timestamp | undefined;
-        const startTs = shift.startTime as Timestamp;
+        const startTs = (inicioAjustado ?? shift.startTime) as Timestamp;
         const realTs = shift.realStartTime as Timestamp | undefined;
 
         const bloquesCortado = bloquesDelTurno(shift.blocks);
@@ -1216,6 +1232,17 @@ function ModalRetiro({
   );
 }
 
+type ParteDualEval =
+  | { ok: true; tipo: 'EXTEND' | 'ADVANCE'; etiqueta: 'D12' | 'N12'; desde: string; hasta: string; horas: number }
+  | { ok: false; motivo: string };
+
+type PartesDual = {
+  parte1: { desde: string; hasta: string };
+  parte2: { desde: string; hasta: string };
+};
+
+type SeccionCobertura = 'ret' | 'dual' | 'cambio' | 'ft';
+
 function ModalCobertura({
   absent,
   remanente,
@@ -1224,10 +1251,12 @@ function ModalCobertura({
   extCandidates,
   intercambioCandidates,
   francoCandidates,
+  partesDual,
+  evaluarParteDual,
   busy,
   onClose,
   onAsignarRet,
-  onExtender,
+  onAplicarDual,
   onIntercambiar,
   onConvocarFt,
   onAvisarWa,
@@ -1240,10 +1269,13 @@ function ModalCobertura({
   extCandidates: GuardRowModel[];
   intercambioCandidates: GuardRowModel[];
   francoCandidates: GuardRowModel[];
+  /** Tramos del hueco para D12 + N12 (1ª y 2ª parte). */
+  partesDual: PartesDual | null;
+  evaluarParteDual: (c: GuardRowModel, parte: 1 | 2) => ParteDualEval;
   busy: boolean;
   onClose: () => void;
   onAsignarRet: (c: GuardRowModel) => void;
-  onExtender: (c: GuardRowModel, code: 'D12' | 'N12') => void;
+  onAplicarDual: (parte1: GuardRowModel | null, parte2: GuardRowModel | null) => void;
   onIntercambiar: (c: GuardRowModel) => void;
   onConvocarFt: (c: GuardRowModel) => void;
   onAvisarWa: (c: GuardRowModel, plantilla: 'cobertura' | 'intercambio') => void;
@@ -1254,7 +1286,96 @@ function ModalCobertura({
   const esCustom = !BANDS.includes(codigoAusente as (typeof BANDS)[number]);
   // Turno cortado: se cubre completo con RET o FT; extender e intercambiar no aplican.
   const esCortado = esTramoCortado(absent.turno);
-  const esPuesto24h = !esCustom && !esCortado && ['M', 'T', 'N'].includes(absent.band) && !remanente;
+  const esPuesto24h = !esCustom && !esCortado && ['M', 'T', 'N'].includes(absent.band) && !remanente && !!partesDual;
+  const hayIntercambio = !remanente && !esCustom && !esCortado;
+
+  // Secciones visibles, en orden. Se muestra una sola abierta: al plegar una se abre la siguiente.
+  const visibles = useMemo((): SeccionCobertura[] => {
+    const lista: SeccionCobertura[] = ['ret'];
+    if (esPuesto24h) lista.push('dual');
+    if (hayIntercambio) lista.push('cambio');
+    lista.push('ft');
+    return lista;
+  }, [esPuesto24h, hayIntercambio]);
+
+  const [abierta, setAbierta] = useState<SeccionCobertura | null>(() => {
+    if (retCandidates.length > 0) return 'ret';
+    if (esPuesto24h && extCandidates.length > 0) return 'dual';
+    if (hayIntercambio && intercambioCandidates.length > 0) return 'cambio';
+    return 'ft';
+  });
+
+  const alternar = (id: SeccionCobertura) => {
+    if (abierta !== id) {
+      setAbierta(id);
+      return;
+    }
+    if (visibles.length <= 1) {
+      setAbierta(null);
+      return;
+    }
+    const idx = visibles.indexOf(id);
+    setAbierta(visibles[(idx + 1) % visibles.length]);
+  };
+
+  const numero = (id: SeccionCobertura): number => visibles.indexOf(id) + 1;
+
+  // D12 + N12: el operador elige quién cubre cada parte del hueco.
+  const [sel1, setSel1] = useState<string | null>(null);
+  const [sel2, setSel2] = useState<string | null>(null);
+
+  const evaluados = useMemo(
+    () =>
+      extCandidates.map((c) => ({
+        c,
+        e1: evaluarParteDual(c, 1),
+        e2: evaluarParteDual(c, 2),
+      })),
+    [extCandidates, evaluarParteDual],
+  );
+
+  const elegirParte = (rowId: string, parte: 1 | 2) => {
+    if (parte === 1) {
+      setSel1((prev) => (prev === rowId ? null : rowId));
+      setSel2((prev) => (prev === rowId ? null : prev));
+    } else {
+      setSel2((prev) => (prev === rowId ? null : rowId));
+      setSel1((prev) => (prev === rowId ? null : prev));
+    }
+  };
+
+  const cand1 = evaluados.find((x) => x.c.turno.rowId === sel1) ?? null;
+  const cand2 = evaluados.find((x) => x.c.turno.rowId === sel2) ?? null;
+  const nombreCorto = (n: string): string => n.split(',')[0] || n;
+
+  const Cabecera = ({
+    id,
+    titulo,
+    cantidad,
+    tono,
+  }: {
+    id: SeccionCobertura;
+    titulo: string;
+    cantidad: number;
+    tono: string;
+  }) => (
+    <button
+      type="button"
+      onClick={() => alternar(id)}
+      aria-expanded={abierta === id}
+      className="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-slate-50 rounded-2xl"
+    >
+      {abierta === id ? (
+        <ChevronDown size={14} className="text-slate-400 flex-shrink-0" />
+      ) : (
+        <ChevronRight size={14} className="text-slate-400 flex-shrink-0" />
+      )}
+      <span className={`flex-1 text-[11px] font-bold uppercase tracking-wide ${tono}`}>{titulo}</span>
+      <span className="px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600 text-[10px] font-bold tabular-nums">
+        {cantidad}
+      </span>
+    </button>
+  );
 
   return (
     <div
@@ -1262,7 +1383,7 @@ function ModalCobertura({
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden max-h-[90vh] flex flex-col"
+        className="bg-white rounded-3xl shadow-lg max-w-md w-full overflow-hidden max-h-[90vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="px-4 py-3 border-b border-slate-200 flex items-center gap-2 flex-shrink-0">
@@ -1290,180 +1411,270 @@ function ModalCobertura({
           </button>
         </div>
 
-        <div className="px-4 py-3 overflow-y-auto">
-          {/* 1. RET disponible */}
-          <div className="mb-4">
-            <div className="text-[11px] font-bold text-violet-700 uppercase tracking-wide mb-2">
-              🛡️ 1. RET {retEsManana ? 'de mañana (cubre la noche)' : 'de hoy'} ({retCandidates.length})
-            </div>
-            {retCandidates.length === 0 ? (
-              <div className="text-[11px] text-slate-400 py-2">
-                {retEsManana ? 'Sin retenes cargados para mañana' : 'Sin retenes disponibles'}
-              </div>
-            ) : (
-              <div className="space-y-1">
-                {retCandidates.map((c) => (
-                  <div
-                    key={c.turno.rowId}
-                    className="flex items-center gap-2 p-2 rounded-xl border border-violet-200 bg-violet-50"
-                  >
-                    <div className="flex-1 min-w-0 text-[12px] font-semibold text-slate-800 truncate">
-                      {c.employeeName}
-                    </div>
-                    <button
-                      type="button"
-                      disabled={busy || !c.turno.phone}
-                      title={c.turno.phone ? 'Convocar por WhatsApp, sin asignar' : 'Sin teléfono'}
-                      onClick={() => onAvisarWa(c, 'cobertura')}
-                      className="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold disabled:opacity-50"
-                    >
-                      WA
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => onAsignarRet(c)}
-                      className="px-2.5 py-1 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-[10px] font-bold disabled:opacity-50"
-                    >
-                      Asignar RET
-                    </button>
+        <div className="px-3 py-3 overflow-y-auto space-y-2">
+          {/* RET disponible */}
+          <div className="rounded-2xl border border-violet-200 bg-white shadow-sm">
+            <Cabecera
+              id="ret"
+              titulo={`🛡️ ${numero('ret')}. RET ${retEsManana ? 'de mañana (cubre la noche)' : 'de hoy'}`}
+              cantidad={retCandidates.length}
+              tono="text-violet-700"
+            />
+            {abierta === 'ret' && (
+              <div className="px-3 pb-3">
+                {retCandidates.length === 0 ? (
+                  <div className="text-[11px] text-slate-400 py-2">
+                    {retEsManana ? 'Sin retenes cargados para mañana' : 'Sin retenes disponibles'}
                   </div>
-                ))}
+                ) : (
+                  <div className="space-y-1 max-h-56 overflow-y-auto">
+                    {retCandidates.map((c) => (
+                      <div
+                        key={c.turno.rowId}
+                        className="flex items-center gap-2 p-2 rounded-xl border border-violet-200 bg-violet-50"
+                      >
+                        <div className="flex-1 min-w-0 text-[12px] font-semibold text-slate-800 truncate">
+                          {c.employeeName}
+                        </div>
+                        <button
+                          type="button"
+                          disabled={busy || !c.turno.phone}
+                          title={c.turno.phone ? 'Convocar por WhatsApp, sin asignar' : 'Sin teléfono'}
+                          onClick={() => onAvisarWa(c, 'cobertura')}
+                          className="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold disabled:opacity-50"
+                        >
+                          WA
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => onAsignarRet(c)}
+                          className="px-2.5 py-1 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-[10px] font-bold disabled:opacity-50"
+                        >
+                          Asignar RET
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>
 
-          {/* 2. Extender a 12h — solo si el puesto es 24hs */}
-          {esPuesto24h && (
-            <div className="mb-4">
-              <div className="text-[11px] font-bold text-amber-700 uppercase tracking-wide mb-2">
-                ⏱ 2. Extender a 12 h ({extCandidates.length})
-              </div>
-              {extCandidates.length === 0 ? (
-                <div className="text-[11px] text-slate-400 py-2">
-                  Sin guardias del mismo objetivo para extender
-                </div>
-              ) : (
-                <div className="space-y-1">
-                  {extCandidates.map((c) => (
-                    <div
-                      key={c.turno.rowId}
-                      className="flex items-center gap-2 p-2 rounded-xl border border-amber-200 bg-amber-50"
-                    >
-                      <div className="flex-1 min-w-0">
-                        <div className="text-[12px] font-semibold text-slate-800 truncate">
-                          {c.employeeName}
+          {/* D12 + N12 — solo si el puesto es 24hs */}
+          {esPuesto24h && partesDual && (
+            <div className="rounded-2xl border border-amber-200 bg-white shadow-sm">
+              <Cabecera
+                id="dual"
+                titulo={`⏱ ${numero('dual')}. D12 + N12`}
+                cantidad={extCandidates.length}
+                tono="text-amber-700"
+              />
+              {abierta === 'dual' && (
+                <div className="px-3 pb-3">
+                  {extCandidates.length === 0 ? (
+                    <div className="text-[11px] text-slate-400 py-2">
+                      Sin guardias del mismo objetivo para extender
+                    </div>
+                  ) : (
+                    <>
+                      <div className="text-[10px] text-slate-500 mb-2">
+                        Elegí quién cubre cada parte del hueco, las dos a la vez. Cada guardia extiende o adelanta su
+                        turno sin pasar de 12 h.
+                      </div>
+                      <div className="flex items-center gap-2 px-2 pb-1 text-[10px] font-bold text-slate-500">
+                        <div className="flex-1" />
+                        <div className="w-24 text-center">
+                          1ª {partesDual.parte1.desde}–{partesDual.parte1.hasta}
                         </div>
-                        <div className="text-[10px] text-slate-500">
-                          {c.band} · {c.turno.expected}
+                        <div className="w-24 text-center">
+                          2ª {partesDual.parte2.desde}–{partesDual.parte2.hasta}
+                        </div>
+                      </div>
+                      <div className="space-y-1 max-h-56 overflow-y-auto">
+                        {evaluados.map(({ c, e1, e2 }) => (
+                          <div
+                            key={c.turno.rowId}
+                            className="flex items-center gap-2 p-2 rounded-xl border border-amber-200 bg-amber-50"
+                          >
+                            <div className="flex-1 min-w-0">
+                              <div className="text-[12px] font-semibold text-slate-800 truncate">
+                                {c.employeeName}
+                              </div>
+                              <div className="text-[10px] text-slate-500">
+                                {c.band} · {c.turno.expected}–{c.salida || '—'}
+                              </div>
+                            </div>
+                            {([
+                              { parte: 1 as const, ev: e1, activo: sel1 === c.turno.rowId },
+                              { parte: 2 as const, ev: e2, activo: sel2 === c.turno.rowId },
+                            ]).map(({ parte, ev, activo }) => (
+                              <button
+                                key={parte}
+                                type="button"
+                                disabled={busy || !ev.ok}
+                                aria-pressed={activo}
+                                title={
+                                  ev.ok === true
+                                    ? `${ev.etiqueta}: pasa a trabajar ${ev.desde}–${ev.hasta} (${ev.horas} h)`
+                                    : ev.motivo
+                                }
+                                onClick={() => elegirParte(c.turno.rowId, parte)}
+                                className={`w-24 py-1 rounded-lg text-[10px] font-bold border active:scale-95 disabled:opacity-40 ${
+                                  activo
+                                    ? 'bg-indigo-600 text-white border-indigo-600'
+                                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                                }`}
+                              >
+                                {ev.ok ? (
+                                  <>
+                                    → {ev.etiqueta}
+                                    <span className="block text-[9px] font-semibold opacity-80">
+                                      {ev.desde}–{ev.hasta}
+                                    </span>
+                                  </>
+                                ) : (
+                                  '—'
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                      <div className="mt-2 rounded-xl bg-slate-50 border border-slate-200 p-2 text-[11px] text-slate-600 space-y-0.5">
+                        <div>
+                          1ª parte ({partesDual.parte1.desde}–{partesDual.parte1.hasta}):{' '}
+                          <b>
+                            {cand1 && cand1.e1.ok
+                              ? `${nombreCorto(cand1.c.employeeName)} → ${cand1.e1.etiqueta}`
+                              : 'sin elegir'}
+                          </b>
+                        </div>
+                        <div>
+                          2ª parte ({partesDual.parte2.desde}–{partesDual.parte2.hasta}):{' '}
+                          <b>
+                            {cand2 && cand2.e2.ok
+                              ? `${nombreCorto(cand2.c.employeeName)} → ${cand2.e2.etiqueta}`
+                              : 'sin elegir'}
+                          </b>
                         </div>
                       </div>
                       <button
                         type="button"
-                        disabled={busy}
-                        onClick={() => onExtender(c, 'D12')}
-                        className="px-2 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-[10px] font-bold disabled:opacity-50"
+                        disabled={busy || (!cand1 && !cand2)}
+                        onClick={() => onAplicarDual(cand1 ? cand1.c : null, cand2 ? cand2.c : null)}
+                        className="mt-2 w-full py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-[12px] font-bold shadow-sm disabled:opacity-50 active:scale-95"
                       >
-                        → D12
+                        {cand1 && cand2
+                          ? 'Aplicar D12 + N12'
+                          : cand1 || cand2
+                            ? 'Aplicar solo esta parte (la otra queda sin cubrir)'
+                            : 'Elegí al menos una parte'}
                       </button>
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => onExtender(c, 'N12')}
-                        className="px-2 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold disabled:opacity-50"
-                      >
-                        → N12
-                      </button>
-                    </div>
-                  ))}
+                    </>
+                  )}
                 </div>
               )}
             </div>
           )}
 
-          {/* 3. Intercambio (no aplica al resto de un retiro anticipado ni a puestos custom) */}
-          {!remanente && !esCustom && !esCortado && (
-          <div className="mb-4">
-            <div className="text-[11px] font-bold text-blue-700 uppercase tracking-wide mb-2">
-              🔄 3. Intercambio con otro turno ({intercambioCandidates.length})
-            </div>
-            {intercambioCandidates.length === 0 ? (
-              <div className="text-[11px] text-slate-400 py-2">Sin candidatos para intercambiar</div>
-            ) : (
-              <div className="space-y-1 max-h-32 overflow-y-auto">
-                {intercambioCandidates.map((c) => (
-                  <div
-                    key={c.turno.rowId}
-                    className="flex items-center gap-2 p-2 rounded-xl border border-blue-200 bg-blue-50"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="text-[12px] font-semibold text-slate-800 truncate">
-                        {c.employeeName}
-                      </div>
-                      <div className="text-[10px] text-slate-500 truncate">
-                        {c.turno.obj} · {c.turno.shift}
-                      </div>
+          {/* Intercambio (no aplica al resto de un retiro anticipado ni a puestos custom) */}
+          {hayIntercambio && (
+            <div className="rounded-2xl border border-blue-200 bg-white shadow-sm">
+              <Cabecera
+                id="cambio"
+                titulo={`🔄 ${numero('cambio')}. Intercambio con otro turno`}
+                cantidad={intercambioCandidates.length}
+                tono="text-blue-700"
+              />
+              {abierta === 'cambio' && (
+                <div className="px-3 pb-3">
+                  {intercambioCandidates.length === 0 ? (
+                    <div className="text-[11px] text-slate-400 py-2">Sin candidatos para intercambiar</div>
+                  ) : (
+                    <div className="space-y-1 max-h-56 overflow-y-auto">
+                      {intercambioCandidates.map((c) => (
+                        <div
+                          key={c.turno.rowId}
+                          className="flex items-center gap-2 p-2 rounded-xl border border-blue-200 bg-blue-50"
+                        >
+                          <div className="flex-1 min-w-0">
+                            <div className="text-[12px] font-semibold text-slate-800 truncate">
+                              {c.employeeName}
+                            </div>
+                            <div className="text-[10px] text-slate-500 truncate">
+                              {c.turno.obj} · {c.turno.shift}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            disabled={busy || !c.turno.phone}
+                            title={c.turno.phone ? 'Pedir el cambio por WhatsApp' : 'Sin teléfono'}
+                            onClick={() => onAvisarWa(c, 'intercambio')}
+                            className="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold disabled:opacity-50"
+                          >
+                            WA
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => onIntercambiar(c)}
+                            className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-bold disabled:opacity-50"
+                          >
+                            Intercambiar
+                          </button>
+                        </div>
+                      ))}
                     </div>
-                    <button
-                      type="button"
-                      disabled={busy || !c.turno.phone}
-                      title={c.turno.phone ? 'Pedir el cambio por WhatsApp' : 'Sin teléfono'}
-                      onClick={() => onAvisarWa(c, 'intercambio')}
-                      className="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold disabled:opacity-50"
-                    >
-                      WA
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => onIntercambiar(c)}
-                      className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-bold disabled:opacity-50"
-                    >
-                      Intercambiar
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+                  )}
+                </div>
+              )}
+            </div>
           )}
 
-          {/* 4. FT — último recurso */}
-          <div>
-            <div className="text-[11px] font-bold text-red-700 uppercase tracking-wide mb-2">
-              💰 4. Franco trabajado — último recurso ({francoCandidates.length})
-            </div>
-            {francoCandidates.length === 0 ? (
-              <div className="text-[11px] text-slate-400 py-2">Sin guardias de franco hoy</div>
-            ) : (
-              <div className="space-y-1 max-h-32 overflow-y-auto">
-                {francoCandidates.map((c) => (
-                  <div
-                    key={c.turno.rowId}
-                    className="flex items-center gap-2 p-2 rounded-xl border border-red-200 bg-red-50"
-                  >
-                    <div className="flex-1 min-w-0 text-[12px] font-semibold text-slate-800 truncate">
-                      {c.employeeName}
-                    </div>
-                    <button
-                      type="button"
-                      disabled={busy || !c.turno.phone}
-                      title={c.turno.phone ? 'Convocar por WhatsApp, sin asignar' : 'Sin teléfono'}
-                      onClick={() => onAvisarWa(c, 'cobertura')}
-                      className="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold disabled:opacity-50"
-                    >
-                      WA
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => onConvocarFt(c)}
-                      className="px-2.5 py-1 rounded-lg bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold disabled:opacity-50"
-                    >
-                      App + WA
-                    </button>
+          {/* FT — último recurso */}
+          <div className="rounded-2xl border border-red-200 bg-white shadow-sm">
+            <Cabecera
+              id="ft"
+              titulo={`💰 ${numero('ft')}. Franco trabajado — último recurso`}
+              cantidad={francoCandidates.length}
+              tono="text-red-700"
+            />
+            {abierta === 'ft' && (
+              <div className="px-3 pb-3">
+                {francoCandidates.length === 0 ? (
+                  <div className="text-[11px] text-slate-400 py-2">Sin guardias de franco hoy</div>
+                ) : (
+                  <div className="space-y-1 max-h-56 overflow-y-auto">
+                    {francoCandidates.map((c) => (
+                      <div
+                        key={c.turno.rowId}
+                        className="flex items-center gap-2 p-2 rounded-xl border border-red-200 bg-red-50"
+                      >
+                        <div className="flex-1 min-w-0 text-[12px] font-semibold text-slate-800 truncate">
+                          {c.employeeName}
+                        </div>
+                        <button
+                          type="button"
+                          disabled={busy || !c.turno.phone}
+                          title={c.turno.phone ? 'Convocar por WhatsApp, sin asignar' : 'Sin teléfono'}
+                          onClick={() => onAvisarWa(c, 'cobertura')}
+                          className="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold disabled:opacity-50"
+                        >
+                          WA
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => onConvocarFt(c)}
+                          className="px-2.5 py-1 rounded-lg bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold disabled:opacity-50"
+                        >
+                          App + WA
+                        </button>
+                      </div>
+                    ))}
                   </div>
-                ))}
+                )}
               </div>
             )}
           </div>
@@ -3179,33 +3390,6 @@ export default function ModoRapidoPage() {
     }
   }
 
-  /**
-   * La ausencia sigue en el turno del titular y la cubre otro turno (extensión, FT): se marca el
-   * titular como cubierto para que el Centro de Control clásico no lo muestre «sin cubrir».
-   */
-  async function marcarTitularCubierto(
-    turno: TurnoHoy,
-    cubre: { id?: string | null; name: string },
-    coverageType: string,
-  ) {
-    if (turno.turnoStatus !== 'ABSENT') return;
-    try {
-      await updateDoc(
-        doc(db, 'turnos', docIdDe(turno.rowId)),
-        absentShiftCoveragePatch({
-          coveredByEmployeeId: cubre.id ?? null,
-          coveredByEmployeeName: cubre.name,
-          coverageType,
-          resolvedBy: 'OPERACIONES',
-          isAbsence: true,
-        }),
-      );
-    } catch (err) {
-      console.warn('[modo-rapido] no se pudo marcar el titular como cubierto', err);
-    }
-    await marcarAusenciaGestionada(docIdDe(turno.rowId), cubre, coverageType);
-  }
-
   const classifiedRows = useMemo((): GuardRowModel[] => {
     const entradas: Array<[string, TurnoHoy]> = [
       ...Object.entries(turnos),
@@ -3681,6 +3865,83 @@ export default function ModoRapidoPage() {
         (r.estado === 'ESPERANDO' || r.estado === 'PRESENTE_PLAT' || r.estado === 'PRESENTE_WA'),
     );
   }, [coberturaModal, classifiedRows]);
+
+  /**
+   * D12 + N12: el hueco del ausente se parte en dos. Si cruza las 18:00 (D12 06–18 / N12 18–06) se corta
+   * ahí; si no, en la mitad. Cada parte la cubre un guardia que extiende (su turno termina donde empieza
+   * la parte) o adelanta (su turno empieza donde termina la parte), sin pasar de 12:59 h.
+   */
+  const partesDualMs = useMemo((): { s: number; mid: number; e: number } | null => {
+    if (!coberturaModal) return null;
+    const s = msDeTimestamp(coberturaModal.turno.startTimeRaw);
+    const e = msDeTimestamp(coberturaModal.turno.endTimeRaw);
+    if (!s || !e || e <= s) return null;
+    const corte18 = arHmOnYmdMs(arYmd(s), 18, 0);
+    const mid = corte18 > s && corte18 < e ? corte18 : s + Math.floor((e - s) / 2);
+    return { s, mid, e };
+  }, [coberturaModal]);
+
+  const partesDualTexto = useMemo(
+    () =>
+      partesDualMs
+        ? {
+            parte1: {
+              desde: formatHHMM(Timestamp.fromMillis(partesDualMs.s)),
+              hasta: formatHHMM(Timestamp.fromMillis(partesDualMs.mid)),
+            },
+            parte2: {
+              desde: formatHHMM(Timestamp.fromMillis(partesDualMs.mid)),
+              hasta: formatHHMM(Timestamp.fromMillis(partesDualMs.e)),
+            },
+          }
+        : null,
+    [partesDualMs],
+  );
+
+  const evaluarParteDual = useCallback(
+    (c: GuardRowModel, parte: 1 | 2): ParteDualEval => {
+      if (!partesDualMs) return { ok: false, motivo: 'No se conoce el horario del hueco' };
+      if (esTramoCortado(c.turno)) return { ok: false, motivo: 'Turno cortado: no se extiende' };
+      const cs = msDeTimestamp(c.turno.startTimeRaw);
+      const ce = msDeTimestamp(c.turno.endTimeRaw);
+      if (!cs || !ce || ce <= cs) return { ok: false, motivo: 'No se conoce el horario de su turno' };
+      const segDesde = parte === 1 ? partesDualMs.s : partesDualMs.mid;
+      const segHasta = parte === 1 ? partesDualMs.mid : partesDualMs.e;
+      const fmt = (ms: number): string => formatHHMM(Timestamp.fromMillis(ms));
+      const TOL_MS = 60000;
+      let tipo: 'EXTEND' | 'ADVANCE';
+      let nuevoDesde: number;
+      let nuevoHasta: number;
+      if (Math.abs(ce - segDesde) <= TOL_MS) {
+        tipo = 'EXTEND';
+        nuevoDesde = cs;
+        nuevoHasta = segHasta;
+      } else if (Math.abs(cs - segHasta) <= TOL_MS) {
+        tipo = 'ADVANCE';
+        nuevoDesde = segDesde;
+        nuevoHasta = ce;
+      } else {
+        return {
+          ok: false,
+          motivo: `Su turno (${fmt(cs)}–${fmt(ce)}) no es contiguo a ${fmt(segDesde)}–${fmt(segHasta)}`,
+        };
+      }
+      const duracionMs = nuevoHasta - nuevoDesde;
+      if (duracionMs > 12 * 3600000 + 59 * 60000) {
+        return { ok: false, motivo: `Pasaría de 12:59 h de jornada (${Math.round((duracionMs / 3600000) * 10) / 10} h)` };
+      }
+      const horaInicio = arHour(nuevoDesde);
+      return {
+        ok: true,
+        tipo,
+        etiqueta: horaInicio >= 6 && horaInicio < 18 ? 'D12' : 'N12',
+        desde: fmt(nuevoDesde),
+        hasta: fmt(nuevoHasta),
+        horas: Math.round((duracionMs / 3600000) * 10) / 10,
+      };
+    },
+    [partesDualMs],
+  );
 
   const intercambioCandidates = useMemo((): GuardRowModel[] => {
     if (!coberturaModal) return [];
@@ -4509,50 +4770,126 @@ export default function ModoRapidoPage() {
     }
   };
 
-  const handleExtender = async (candidate: GuardRowModel, code: 'D12' | 'N12') => {
-    if (!coberturaModal || busy) return;
+  /**
+   * D12 + N12 en una sola vez, por el motor oficial (igual que el CC clásico: EXTEND + ADVANCE sobre el
+   * turno de cada guardia, con la ausencia de RRHH gestionada). El operador elige quién cubre cada parte
+   * del hueco; con una sola parte elegida queda cobertura parcial.
+   */
+  const handleExtenderDual = async (parte1: GuardRowModel | null, parte2: GuardRowModel | null) => {
+    if (!coberturaModal || busy || !partesDualMs) return;
+    const elegidos: Array<{ c: GuardRowModel; parte: 1 | 2 }> = [];
+    if (parte1) elegidos.push({ c: parte1, parte: 1 });
+    if (parte2) elegidos.push({ c: parte2, parte: 2 });
+    if (elegidos.length === 0) return;
     setBusy(true);
     try {
-      const startMs =
-        candidate.turno.startTimeRaw &&
-        typeof (candidate.turno.startTimeRaw as Timestamp).toMillis === 'function'
-          ? (candidate.turno.startTimeRaw as Timestamp).toMillis()
-          : Date.now();
-      const newEndTime = Timestamp.fromMillis(startMs + 12 * 3600000);
-      // Se guardan el código y el fin anteriores del guardia que extiende: si se revierte la ausencia
-      // del titular, la extensión se deshace y el guardia vuelve a su turno original.
-      const candidatoDocId = docIdDe(candidate.turno.rowId);
-      const titularExtId = docIdDe(coberturaModal.turno.rowId);
-      const previo = (await leerTurnoRapido(candidatoDocId)).data() || {};
-      await updateDoc(doc(db, 'turnos', candidatoDocId), {
-        code,
-        endTime: newEndTime,
-        extensionPrevCode: previo.code ?? null,
-        extensionPrevEndTime: previo.endTime ?? null,
-        extensionParaTurnoId: titularExtId,
-      });
-      await marcarTitularCubierto(
-        coberturaModal.turno,
-        { id: candidate.turno.employeeId, name: candidate.employeeName },
-        'EXTEND',
-      );
-      if (coberturaModal.turno.turnoStatus === 'ABSENT') {
-        await updateDoc(doc(db, 'turnos', titularExtId), { extensionCandidateTurnoId: candidatoDocId });
+      const planes: Array<{
+        c: GuardRowModel;
+        segDesde: number;
+        segHasta: number;
+        tipo: 'EXTEND' | 'ADVANCE';
+        etiqueta: 'D12' | 'N12';
+        desde: string;
+        hasta: string;
+      }> = [];
+      for (const { c, parte } of elegidos) {
+        const ev = evaluarParteDual(c, parte);
+        if (ev.ok === false) throw new Error(ev.motivo);
+        planes.push({
+          c,
+          segDesde: parte === 1 ? partesDualMs.s : partesDualMs.mid,
+          segHasta: parte === 1 ? partesDualMs.mid : partesDualMs.e,
+          tipo: ev.tipo,
+          etiqueta: ev.etiqueta,
+          desde: ev.desde,
+          hasta: ev.hasta,
+        });
       }
+      const completo = planes.length === 2;
+      if (completo && planes[0].tipo === planes[1].tipo) {
+        throw new Error('Las dos partes no pueden resolverse con el mismo tipo de ajuste: elegí un guardia que extienda y otro que adelante.');
+      }
+      const titularId = docIdDe(coberturaModal.turno.rowId);
+      const titularSnap = await leerTurnoRapido(titularId);
+      if (!titularSnap.exists()) throw new CoverageApplyError('NOT_FOUND', 'Turno titular no encontrado');
+      const titular = { id: titularId, ...(titularSnap.data() || {}) } as Record<string, unknown>;
+      const nombreCorto = (n: string): string => n.split(',')[0] || n;
+      const etiquetaTitular = planes
+        .map((p) => `${nombreCorto(p.c.employeeName)} ${p.etiqueta} ${p.desde}–${p.hasta}`)
+        .join(' + ');
+
+      const batch = writeBatch(db);
+      for (let i = 0; i < planes.length; i += 1) {
+        const p = planes[i];
+        const ultimo = i === planes.length - 1;
+        const segDesdeTs = Timestamp.fromMillis(p.segDesde);
+        const segHastaTs = Timestamp.fromMillis(p.segHasta);
+        await applyCoverage(db, batch, {
+          titularShiftId: titularId,
+          titularShift: titular,
+          candidateEmployeeId: String(p.c.turno.employeeId || ''),
+          candidateEmployeeName: p.c.employeeName,
+          sourceShiftId: docIdDe(p.c.turno.rowId),
+          coverageType: p.tipo,
+          resolvedBy: 'OPERACIONES',
+          empresaId,
+          covSegmentStart: segDesdeTs,
+          covSegmentEnd: segHastaTs,
+          ...(p.tipo === 'EXTEND' ? { extensionEndTime: segHastaTs } : { adjustedStartTime: segDesdeTs }),
+          titularCloseMode: completo && ultimo ? 'FULL' : 'PARTIAL',
+          ...(completo && ultimo ? { coveredByLabel: etiquetaTitular } : {}),
+        });
+      }
+      if (completo) {
+        await syncAusenciaCoberturaGestionada(
+          db,
+          {
+            shiftId: titularId,
+            coveredByEmployeeId: planes[0].c.turno.employeeId ?? null,
+            coveredByEmployeeName: etiquetaTitular,
+            coverageType: 'RETENCION',
+            empresaId,
+            resolvedBy: 'OPERACIONES',
+          },
+          batch,
+        );
+      }
+      await batch.commit();
+
       await addDoc(collection(db, 'novedades'), {
-        type: 'EXTENSION_12H',
-        code,
-        turnoAusenteId: coberturaModal.turno.rowId,
-        turnoAusenteEmpleado: coberturaModal.employeeName,
-        turnoAusenteObj: coberturaModal.turno.obj,
-        extendidoEmpleado: candidate.employeeName,
+        type: 'COBERTURA_ASIGNADA',
+        title: completo ? 'Cobertura D12 + N12' : `Cobertura parcial ${planes[0].etiqueta}`,
+        status: 'pending',
+        employeeId: planes[0].c.turno.employeeId ?? null,
+        employeeName: etiquetaTitular,
+        objectiveId: coberturaModal.turno.objectiveId ?? null,
+        objectiveName: coberturaModal.turno.obj,
+        shiftId: titularId,
+        description: `${etiquetaTitular} · cubren a ${coberturaModal.employeeName} en ${coberturaModal.turno.obj}`,
         empresaId,
-        operatorId: user?.uid ?? 'cc-modo-rapido',
         createdAt: serverTimestamp(),
+        reportedBy: 'OPERACIONES',
+        operatorId: user?.uid ?? 'cc-modo-rapido',
       });
-      showToast(`${candidate.employeeName} extendido a ${code}`, 'bg-amber-700');
-    } catch {
-      showToast('Error al extender turno', 'bg-red-600');
+
+      const tituloToast = completo
+        ? `D12 + N12 aplicado · ${etiquetaTitular}`
+        : `Cobertura parcial aplicada · ${etiquetaTitular} (queda parte sin cubrir)`;
+      const avisos = planes.map((p) => ({
+        phone: p.c.turno.phone,
+        texto: waMensaje.cobertura(p.c.employeeName, coberturaModal.turno.obj, p.desde, p.hasta),
+      }));
+      const hayAvisos = avisos.some((a) => a.phone);
+      showToast(`${tituloToast}${hayAvisos ? ' · enviando aviso…' : ''}`, completo ? 'bg-amber-700' : 'bg-orange-700');
+      if (hayAvisos) {
+        void avisarPorWhatsApp(avisos).then((sufijo) => showToast(`${tituloToast}${sufijo}`, 'bg-amber-700'));
+      }
+    } catch (err) {
+      console.warn('[modo-rapido] D12 + N12', err);
+      showToast(
+        err instanceof CoverageApplyError || err instanceof Error ? err.message : 'Error al aplicar D12 + N12',
+        'bg-red-600',
+      );
     } finally {
       setBusy(false);
       setCoberturaModal(null);
@@ -5671,7 +6008,9 @@ export default function ModoRapidoPage() {
             busy={busy}
             onClose={() => setCoberturaModal(null)}
             onAsignarRet={(c) => void handleAsignarRet(c)}
-            onExtender={(c, code) => void handleExtender(c, code)}
+            partesDual={partesDualTexto}
+            evaluarParteDual={evaluarParteDual}
+            onAplicarDual={(p1, p2) => void handleExtenderDual(p1, p2)}
             onIntercambiar={(c) => void handleIntercambiarCobertura(c)}
             onConvocarFt={(c) => void handleConvocarFt(c)}
             onAvisarWa={(c, plantilla) => {
