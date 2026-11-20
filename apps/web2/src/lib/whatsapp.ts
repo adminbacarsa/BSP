@@ -34,6 +34,21 @@ export const waMensaje = {
   cobertura: (nombre: string, objetivo: string, horaInicio: string, horaFin: string) =>
     `Hola ${nombre} 👋, te contacta *Operaciones Crono*.\n\n¿Podés cubrir el puesto en *${objetivo}* de *${horaInicio}* a *${horaFin}*?\n\nConfirmá a la brevedad. Gracias.`,
 
+  /** Asignación de un retén a un hueco: ya quedó asignado, solo pide confirmar que va. */
+  asignacionRet: (nombre: string, objetivo: string, puesto: string, horaInicio: string, horaFin: string, reemplazaA?: string) => {
+    const ini = String(horaInicio || '').trim();
+    const fin = String(horaFin || '').trim();
+    const finValido = fin && fin !== '—' && fin !== '-';
+    const horario = ini && finValido ? ` de *${ini}* a *${fin}*` : ini ? ` desde las *${ini}*` : '';
+    const lugarPuesto = puesto ? `*${objetivo}* (${puesto})` : `*${objetivo}*`;
+    const reemplazo = reemplazaA ? `\nReemplazás a: ${reemplazaA}.` : '';
+    return `Hola ${nombre} 👋, te contacta *Operaciones Crono*.\n\nQuedaste *asignado* a cubrir ${lugarPuesto}${horario}.${reemplazo}\n\nConfirmá que vas en camino y avisá cuando llegues. Gracias.`;
+  },
+
+  /** Consulta a un retén por un objetivo sin asignarlo todavía. */
+  consultaRetObjetivo: (nombre: string, objetivo: string) =>
+    `Hola ${nombre} 👋, te contacta *Operaciones Crono*.\n\nPodemos necesitarte en *${objetivo}*.\n\n¿Estás disponible y cuánto tardarías en llegar? Confirmá a la brevedad. Gracias.`,
+
   intercambio: (nombre: string, objetivoDestino: string) =>
     `Hola ${nombre} 👋, te contacta *Operaciones Crono*.\n\nNecesitamos que pases al objetivo *${objetivoDestino}*.\n\n¿Podés hacer el movimiento? Confirmá.`,
 

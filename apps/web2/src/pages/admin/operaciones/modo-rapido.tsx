@@ -61,6 +61,18 @@ import { useEmpresa } from '@/context/EmpresaContext';
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '@/lib/firebase';
 import { openWhatsApp, waMensaje } from '@/lib/whatsapp';
+import {
+  ChipsRetenEvaluado,
+  SelectorDestinoRetenes,
+  type DestinoRetenOpcion,
+} from '@/components/operaciones/RetenesDestinoPiezas';
+import {
+  compararRetenesEvaluados,
+  evaluarRetenParaDestino,
+  type EmpleadoRetenInfo,
+  type OrdenRetenes,
+  type RetenEvaluado,
+} from '@/lib/operaciones/retenesParaDestino';
 import { invokeCrearConvocatoriaCobertura } from '@/lib/operaciones/opsConvocatoriaCobertura';
 import {
   absentShiftCoveragePatch,
@@ -257,6 +269,8 @@ type PresenciaMeta = {
   isCompleted: boolean;
   isRetention: boolean;
   realEndLabel: string;
+  /** HH:MM en que el guardia avisó su salida desde la app (turno todavía abierto). */
+  salidaMarcada?: string;
 };
 
 /**
@@ -315,7 +329,10 @@ function useTurnosHoy({
   retenesManana: TurnoHoy[];
   /** Tramos abiertos de turnos cortados que no entran al dict del puente WA (una fila por tramo). */
   tramosExtra: TurnoHoy[];
+  /** Domicilio geocodificado, objetivo titular y experiencia por objetivo (para elegir retenes). */
+  empInfo: Record<string, EmpleadoRetenInfo>;
 } {
+  const [empInfo, setEmpInfo] = useState<Record<string, EmpleadoRetenInfo>>({});
   const [retenesManana, setRetenesManana] = useState<TurnoHoy[]>([]);
   const [tramosExtra, setTramosExtra] = useState<TurnoHoy[]>([]);
   const [turnos, setTurnos] = useState<Record<string, TurnoHoy>>({});
@@ -336,6 +353,7 @@ function useTurnosHoy({
       setRetenesManana([]);
       setTramosExtra([]);
       setPhones([]);
+      setEmpInfo({});
       setFrancos([]);
       setLoading(false);
       return;
@@ -669,6 +687,12 @@ function useTurnosHoy({
           isCompleted: String(shift.status || '').toUpperCase() === 'COMPLETED' || shift.isCompleted === true,
           isRetention: shift.isRetention === true,
           realEndLabel: realEnd ? formatHHMM(realEnd) : '',
+          salidaMarcada:
+            shift.salidaMarcadaAt &&
+            !realEnd &&
+            String(shift.status || '').toUpperCase() !== 'COMPLETED'
+              ? formatHHMM(shift.salidaMarcadaAt as Timestamp)
+              : undefined,
         };
       }
       Object.assign(metaNext, metaTramos);
@@ -700,12 +724,24 @@ function useTurnosHoy({
     const empQ = empresaCollectionQuery('empleados', empresaId, scopeEmpresa);
     const unsubEmps = onSnapshot(empQ, (snap) => {
       const m = new Map<string, string>();
+      const infoNext: Record<string, EmpleadoRetenInfo> = {};
       snap.docs.forEach((d) => {
         const data = d.data() as Record<string, unknown>;
         const raw = String(data.telefono || data.phone || '').replace(/\D/g, '');
         const norm = raw.replace(/^549/, '');
         if (norm) m.set(d.id, norm);
+        const lat = Number(data.lat ?? data.latitude);
+        const lng = Number(data.lng ?? data.longitude);
+        const exp = data.experienciaObjetivos;
+        infoNext[d.id] = {
+          lat: Number.isFinite(lat) ? lat : null,
+          lng: Number.isFinite(lng) ? lng : null,
+          preferredObjectiveId: data.preferredObjectiveId ? String(data.preferredObjectiveId) : null,
+          experienciaObjetivos:
+            exp && typeof exp === 'object' ? (exp as EmpleadoRetenInfo['experienciaObjetivos']) : undefined,
+        };
       });
+      setEmpInfo(infoNext);
       phoneMapRef.current = m;
       setPhones(Array.from(m.values()).filter(Boolean));
       if (lastTurnosSnapRef.current) applyTurnos(lastTurnosSnapRef.current);
@@ -737,7 +773,7 @@ function useTurnosHoy({
     };
   }, [empresaId, scopeEmpresa]);
 
-  return { turnos, loading, phones, francos, presenciaMeta, cerrados, clientePorObj, retenesManana, tramosExtra };
+  return { turnos, loading, phones, francos, presenciaMeta, cerrados, clientePorObj, retenesManana, tramosExtra, empInfo };
 }
 
 type GuardEstado =
@@ -1321,6 +1357,7 @@ function ModalCobertura({
   remanente,
   retCandidates,
   retEsManana,
+  retEval,
   extCandidates,
   intercambioCandidates,
   francoCandidates,
@@ -1338,6 +1375,8 @@ function ModalCobertura({
   remanente?: { desde: string; hasta: string } | null;
   retCandidates: GuardRowModel[];
   retEsManana: boolean;
+  /** Distancia y conocimiento del objetivo de cada RET (por rowId), si se pudo evaluar. */
+  retEval?: Record<string, RetenEvaluado>;
   extCandidates: GuardRowModel[];
   intercambioCandidates: GuardRowModel[];
   francoCandidates: GuardRowModel[];
@@ -1492,8 +1531,9 @@ function ModalCobertura({
                         key={c.turno.rowId}
                         className="flex items-center gap-2 p-2 rounded-xl border border-violet-200 bg-violet-50"
                       >
-                        <div className="flex-1 min-w-0 text-[12px] font-semibold text-slate-800 truncate">
-                          {c.employeeName}
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[12px] font-semibold text-slate-800 truncate">{c.employeeName}</div>
+                          {retEval?.[c.turno.rowId] && <ChipsRetenEvaluado ev={retEval[c.turno.rowId]} />}
                         </div>
                         <button
                           type="button"
@@ -2560,14 +2600,48 @@ function RetenePanel({
   busy,
   onMarcarPresente,
   onConfirmarWA,
+  destinos,
+  empInfo,
+  candidatosPara,
+  onAsignar,
+  onAvisar,
 }: {
   rows: GuardRowModel[];
   busy: boolean;
   onMarcarPresente: (row: GuardRowModel) => void;
   onConfirmarWA: (row: GuardRowModel) => void;
+  /** Huecos sin cubrir y objetivos de hoy donde se puede usar un retén. */
+  destinos: DestinoRetenOpcion[];
+  empInfo: Record<string, EmpleadoRetenInfo>;
+  /** Retenes que pueden ir a ese destino (de hoy, o de mañana si el hueco es una noche que arranca tarde). */
+  candidatosPara: (d: DestinoRetenOpcion) => { rows: GuardRowModel[]; esManana: boolean };
+  onAsignar: (ret: GuardRowModel, d: DestinoRetenOpcion) => void;
+  onAvisar: (ret: GuardRowModel, d: DestinoRetenOpcion) => void;
 }) {
   const [open, setOpen] = useState(true);
+  const [destinoKey, setDestinoKey] = useState('');
+  const [orden, setOrden] = useState<OrdenRetenes>('cercania');
   if (rows.length === 0) return null;
+  const destino = destinoKey ? destinos.find((d) => d.key === destinoKey) ?? null : null;
+  const evaluados: Array<{ row: GuardRowModel; ev: RetenEvaluado }> = [];
+  let candidatosEsManana = false;
+  if (destino) {
+    const cand = candidatosPara(destino);
+    candidatosEsManana = cand.esManana;
+    for (const row of cand.rows) {
+      evaluados.push({
+        row,
+        ev: evaluarRetenParaDestino(String(row.turno.employeeId || ''), empInfo[String(row.turno.employeeId || '')], {
+          objectiveId: destino.objectiveId,
+          lat: destino.lat,
+          lng: destino.lng,
+          positionName: destino.positionName,
+        }),
+      });
+    }
+    evaluados.sort((a, b) => compararRetenesEvaluados(a.ev, b.ev, orden));
+  }
+  const fueraDeRadio = evaluados.filter((e) => !e.ev.dentroRadio).length;
   const disponibles = rows.filter(
     (r) => r.estado !== 'AUSENTE' && r.estado !== 'NO_LLEGO',
   ).length;
@@ -2591,7 +2665,73 @@ function RetenePanel({
           {disponibles} disp. / {rows.length}
         </span>
       </button>
-      {open && (
+      {open && destinos.length > 0 && (
+        <SelectorDestinoRetenes
+          destinos={destinos}
+          valor={destinoKey}
+          orden={orden}
+          onChange={setDestinoKey}
+          onOrden={setOrden}
+        />
+      )}
+      {open && destino && (
+        <div>
+          <div className="px-4 py-1.5 text-[10px] text-slate-500 border-b border-violet-100">
+            {candidatosEsManana ? 'Retenes de mañana (cubren la noche)' : 'Retenes de hoy'} para{' '}
+            <span className="font-bold text-slate-700">{destino.etiqueta}</span>
+            {' · '}
+            {evaluados.length} {evaluados.length === 1 ? 'retén' : 'retenes'}
+            {fueraDeRadio > 0 ? ` · ${fueraDeRadio} fuera de 15 km` : ''}
+          </div>
+          {evaluados.length === 0 && (
+            <div className="px-4 py-3 text-[11px] text-slate-400">No hay retenes disponibles para este destino.</div>
+          )}
+          {evaluados.map(({ row, ev }) => {
+            const pill = estadoPill(row.estado);
+            return (
+              <div
+                key={row.turno.rowId}
+                className={`flex flex-wrap items-center gap-3 px-4 py-2 border-b border-violet-100 hover:bg-violet-50 ${
+                  ev.dentroRadio ? '' : 'opacity-70'
+                }`}
+              >
+                <div className="flex-1 min-w-[200px]">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold text-slate-800 truncate">{row.employeeName}</span>
+                    <span className={`px-2 py-0.5 text-[9px] font-bold rounded-full whitespace-nowrap ${pill.className}`}>
+                      {pill.label}
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-slate-500 mb-1">
+                    {row.turno.phone ? row.turno.phone : 'Sin teléfono'}
+                  </div>
+                  <ChipsRetenEvaluado ev={ev} />
+                </div>
+                <button
+                  type="button"
+                  disabled={busy || !row.turno.phone}
+                  title={row.turno.phone ? 'Avisar por WhatsApp' : 'Sin teléfono'}
+                  onClick={() => onAvisar(row, destino)}
+                  className="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold shadow-sm disabled:opacity-50 active:scale-95"
+                >
+                  {destino.tipo === 'hueco' ? 'Solo avisar' : 'Avisar'}
+                </button>
+                {destino.tipo === 'hueco' && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => onAsignar(row, destino)}
+                    className="px-2.5 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-[10px] font-bold shadow-sm disabled:opacity-50 active:scale-95"
+                  >
+                    Asignar y avisar
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {open && !destino && (
         <div>
           {rows.map((row) => {
             const pill = estadoPill(row.estado);
@@ -3153,7 +3293,7 @@ export default function ModoRapidoPage() {
     empresaId: empresaId || null,
     scopeEmpresa,
   });
-  const { turnos, loading, francos, presenciaMeta, cerrados, clientePorObj, retenesManana, tramosExtra } = turnosData;
+  const { turnos, loading, francos, presenciaMeta, cerrados, clientePorObj, retenesManana, tramosExtra, empInfo } = turnosData;
   const wa = useWABridge(turnos, empresaId);
 
   const [bridgeUrl, setBridgeUrl] = useState('');
@@ -3657,12 +3797,15 @@ export default function ModoRapidoPage() {
       return {
         ...row,
         relevoNombre: relevo?.employeeName,
-        salidaAvisada: aviso?.arrivedAt,
+        salidaAvisada: aviso?.arrivedAt ?? presenciaMeta[row.turno.rowId]?.salidaMarcada,
         finSinRelevo: !programado,
-        salidaSinRelevo: !!aviso && programado && !hayRelevoLibre(row, classifiedRowsBase),
+        salidaSinRelevo:
+          (!!aviso || !!presenciaMeta[row.turno.rowId]?.salidaMarcada) &&
+          programado &&
+          !hayRelevoLibre(row, classifiedRowsBase),
       };
     });
-  }, [classifiedRowsBase, wa.salidas]);
+  }, [classifiedRowsBase, wa.salidas, presenciaMeta]);
 
   // «Confirmados hoy» sale de la planilla compartida (presencias con fuente WA), no de lo que
   // confirmó esta sesión: así se ven los de todos los operadores. De la sesión local se toma
@@ -4011,27 +4154,139 @@ export default function ModoRapidoPage() {
     return mins !== null && mins >= 21 * 60;
   }, [coberturaModal]);
 
+  /** Una noche que arranca de las 21:00 en adelante se cubre con los RET del día siguiente. */
+  const huecoUsaRetManana = (hueco: GuardRowModel): boolean => {
+    const mins = parseHHMMToMins(String(hueco.turno.expected || ''));
+    return mins !== null && mins >= 21 * 60;
+  };
+
+  /** RET que pueden cubrir ese hueco (de hoy, o de mañana si es una noche que arranca tarde). */
+  const candidatosRetParaHueco = (hueco: GuardRowModel): { rows: GuardRowModel[]; esManana: boolean } => {
+    if (huecoUsaRetManana(hueco)) {
+      return {
+        esManana: true,
+        rows: retenesManana
+          .filter((t) => esCandidatoValido({ turno: t } as GuardRowModel, hueco))
+          .map((turno): GuardRowModel => ({
+            employeeName: turno.name || '—',
+            turno,
+            estado: 'ESPERANDO',
+            realDisplay: '—',
+            diffLabel: '—',
+            diffTone: 'neutral',
+            band: 'RET',
+            fuente: '—',
+            salida: '—',
+          })),
+      };
+    }
+    return {
+      esManana: false,
+      rows: classifiedRows.filter((r) => r.band === 'RET' && esCandidatoValido(r, hueco)),
+    };
+  };
+
   const retCandidates = useMemo((): GuardRowModel[] => {
     if (!coberturaModal) return [];
-    if (retUsaManana) {
-      return retenesManana
-        .filter((t) => esCandidatoValido({ turno: t } as GuardRowModel, coberturaModal))
-        .map((turno): GuardRowModel => ({
-          employeeName: turno.name || '—',
-          turno,
-          estado: 'ESPERANDO',
-          realDisplay: '—',
-          diffLabel: '—',
-          diffTone: 'neutral',
-          band: 'RET',
-          fuente: '—',
-          salida: '—',
-        }));
-    }
-    return classifiedRows.filter(
-      (r) => r.band === 'RET' && esCandidatoValido(r, coberturaModal),
-    );
+    return candidatosRetParaHueco(coberturaModal).rows;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [coberturaModal, classifiedRows, retenesManana, retUsaManana]);
+
+  /** Distancia, conocimiento del objetivo y orden sugerido de los RET para el hueco abierto en cobertura. */
+  const retEvaluados = useMemo((): Record<string, RetenEvaluado> => {
+    if (!coberturaModal) return {};
+    const salida: Record<string, RetenEvaluado> = {};
+    for (const c of retCandidates) {
+      salida[c.turno.rowId] = evaluarRetenParaDestino(
+        String(c.turno.employeeId || ''),
+        empInfo[String(c.turno.employeeId || '')],
+        {
+          objectiveId: coberturaModal.turno.objectiveId || '',
+          lat: coberturaModal.turno.objLat,
+          lng: coberturaModal.turno.objLng,
+          positionName: coberturaModal.turno.positionName,
+        },
+      );
+    }
+    return salida;
+  }, [coberturaModal, retCandidates, empInfo]);
+
+  const retCandidatesOrdenados = useMemo(
+    (): GuardRowModel[] =>
+      [...retCandidates].sort((a, b) => {
+        const ea = retEvaluados[a.turno.rowId];
+        const eb = retEvaluados[b.turno.rowId];
+        if (!ea || !eb) return 0;
+        return compararRetenesEvaluados(ea, eb, 'cercania');
+      }),
+    [retCandidates, retEvaluados],
+  );
+
+  /** Destinos del panel de retenes: huecos sin cubrir primero, después los objetivos con turnos hoy. */
+  const destinosRetenes = useMemo((): DestinoRetenOpcion[] => {
+    const lista: DestinoRetenOpcion[] = [];
+    const huecos = classifiedRows
+      .filter(
+        (r) =>
+          r.band !== 'RET' &&
+          (r.estado === 'NO_LLEGO' || r.estado === 'AUSENTE') &&
+          !r.coveredByName,
+      )
+      .sort((a, b) => rowRank(a) - rowRank(b));
+    for (const r of huecos) {
+      lista.push({
+        key: `hueco:${r.turno.rowId}`,
+        tipo: 'hueco',
+        objectiveId: r.turno.objectiveId || '',
+        objetivo: r.turno.obj,
+        positionName: r.turno.positionName || undefined,
+        lat: r.turno.objLat,
+        lng: r.turno.objLng,
+        etiqueta: `${r.estado === 'NO_LLEGO' ? 'No llegó' : 'Ausente'} · ${r.turno.obj} · ${r.turno.expected}–${r.salida || '—'} · ${r.employeeName}`,
+      });
+    }
+    const vistos = new Set<string>();
+    for (const r of classifiedRows) {
+      if (r.band === 'RET') continue;
+      const objId = r.turno.objectiveId || '';
+      if (!objId || vistos.has(objId)) continue;
+      vistos.add(objId);
+      lista.push({
+        key: `obj:${objId}`,
+        tipo: 'objetivo',
+        objectiveId: objId,
+        objetivo: r.turno.obj,
+        lat: r.turno.objLat,
+        lng: r.turno.objLng,
+        etiqueta: r.turno.obj,
+      });
+    }
+    return lista.sort((a, b) =>
+      a.tipo === b.tipo ? (a.tipo === 'objetivo' ? compararTexto(a.etiqueta, b.etiqueta) : 0) : a.tipo === 'hueco' ? -1 : 1,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [classifiedRows]);
+
+  /** Retenes del panel para un destino: para un hueco aplican las mismas reglas que la ventana de cobertura. */
+  const candidatosRetenesPanel = (d: DestinoRetenOpcion): { rows: GuardRowModel[]; esManana: boolean } => {
+    if (d.tipo === 'hueco') {
+      const hueco = classifiedRows.find((r) => `hueco:${r.turno.rowId}` === d.key);
+      if (!hueco) return { rows: [], esManana: false };
+      const cand = candidatosRetParaHueco(hueco);
+      return { esManana: cand.esManana, rows: cand.rows.filter((r) => !r.turno.coverageUsed) };
+    }
+    return {
+      esManana: false,
+      rows: classifiedRows.filter(
+        (r) =>
+          r.band === 'RET' &&
+          !r.turno.coverageUsed &&
+          r.estado !== 'CERRADO' &&
+          r.estado !== 'AUSENTE' &&
+          r.estado !== 'NO_LLEGO',
+      ),
+    };
+  };
 
   const extCandidates = useMemo((): GuardRowModel[] => {
     if (!coberturaModal) return [];
@@ -4867,14 +5122,20 @@ export default function ModoRapidoPage() {
     }
   }
 
-  const handleAsignarRet = async (candidate: GuardRowModel) => {
-    if (!coberturaModal || busy) return;
+  const handleAsignarRet = async (
+    candidate: GuardRowModel,
+    opciones?: { hueco?: GuardRowModel; mensaje?: 'asignacion' | 'consulta' },
+  ) => {
+    const hueco = opciones?.hueco ?? coberturaModal;
+    // Desde la ventana de cobertura puede haber un retiro anticipado; asignando desde el panel de retenes no.
+    const retiro = opciones?.hueco ? null : huecoRetiro;
+    if (!hueco || busy) return;
     setBusy(true);
     try {
-      if (huecoRetiro) {
+      if (retiro) {
         // Retiro anticipado: el turno del que se retira queda cerrado con sus horas trabajadas y el
         // resto lo cubre un turno nuevo del RET (desde el retiro hasta el fin planificado).
-        const origenSnap = await leerTurnoRapido(huecoRetiro.docId);
+        const origenSnap = await leerTurnoRapido(retiro.docId);
         const origen = (origenSnap.data() || {}) as Record<string, unknown>;
         const copiar: Record<string, unknown> = {};
         for (const campo of [
@@ -4890,20 +5151,20 @@ export default function ModoRapidoPage() {
         ]) {
           if (origen[campo] !== undefined) copiar[campo] = origen[campo];
         }
-        const horasResto = Math.round(((huecoRetiro.hastaMs - huecoRetiro.desdeMs) / 3600000) * 100) / 100;
+        const horasResto = Math.round(((retiro.hastaMs - retiro.desdeMs) / 3600000) * 100) / 100;
         const nuevoRef = await addDoc(collection(db, 'turnos'), {
           ...copiar,
           employeeId: candidate.turno.employeeId,
           employeeName: candidate.employeeName,
-          startTime: Timestamp.fromMillis(huecoRetiro.desdeMs),
-          endTime: Timestamp.fromMillis(huecoRetiro.hastaMs),
+          startTime: Timestamp.fromMillis(retiro.desdeMs),
+          endTime: Timestamp.fromMillis(retiro.hastaMs),
           hours: horasResto,
           status: 'PENDING',
           draft: false,
           origin: 'RET_COBERTURA',
           resolvedBy: 'OPERACIONES',
           coberturaDesdeTurnoId: candidate.turno.rowId,
-          remanenteDeTurnoId: huecoRetiro.docId,
+          remanenteDeTurnoId: retiro.docId,
           createdAt: serverTimestamp(),
         });
         await updateDoc(doc(db, 'turnos', candidate.turno.rowId), {
@@ -4911,9 +5172,9 @@ export default function ModoRapidoPage() {
         });
         await addDoc(collection(db, 'novedades'), {
           type: 'COBERTURA_RET',
-          turnoAusenteId: huecoRetiro.docId,
-          turnoAusenteEmpleado: coberturaModal.employeeName,
-          turnoAusenteObj: coberturaModal.turno.obj,
+          turnoAusenteId: retiro.docId,
+          turnoAusenteEmpleado: hueco.employeeName,
+          turnoAusenteObj: hueco.turno.obj,
           retEmpleado: candidate.employeeName,
           motivo: 'RETIRO_ANTICIPADO',
           empresaId,
@@ -4924,9 +5185,9 @@ export default function ModoRapidoPage() {
           candidate.turno.phone,
           waMensaje.cobertura(
             candidate.employeeName,
-            coberturaModal.turno.obj,
-            formatHHMM(Timestamp.fromMillis(huecoRetiro.desdeMs)),
-            coberturaModal.salida || '—',
+            hueco.turno.obj,
+            formatHHMM(Timestamp.fromMillis(retiro.desdeMs)),
+            hueco.salida || '—',
           ),
         );
         showToast(
@@ -4939,7 +5200,7 @@ export default function ModoRapidoPage() {
       }
       // Motor oficial (el mismo del CC clásico): turno de cobertura aparte vinculado al ausente, el
       // RET queda como origen usado y la ausencia de RRHH como gestionada. Así se puede revertir.
-      const titularId = docIdDe(coberturaModal.turno.rowId);
+      const titularId = docIdDe(hueco.turno.rowId);
       const batchRet = writeBatch(db);
       const coverDocId = await applyCoverage(db, batchRet, {
         titularShiftId: titularId,
@@ -4970,10 +5231,10 @@ export default function ModoRapidoPage() {
         status: 'pending',
         employeeId: candidate.turno.employeeId ?? null,
         employeeName: candidate.employeeName,
-        objectiveId: coberturaModal.turno.objectiveId ?? null,
-        objectiveName: coberturaModal.turno.obj,
+        objectiveId: hueco.turno.objectiveId ?? null,
+        objectiveName: hueco.turno.obj,
         shiftId: coverDocId,
-        description: `${candidate.employeeName} (RET) cubre ${coberturaModal.turno.expected}–${coberturaModal.salida || '—'} en ${coberturaModal.turno.obj} (titular: ${coberturaModal.employeeName})`,
+        description: `${candidate.employeeName} (RET) cubre ${hueco.turno.expected}–${hueco.salida || '—'} en ${hueco.turno.obj} (titular: ${hueco.employeeName})`,
         empresaId,
         createdAt: serverTimestamp(),
         reportedBy: 'OPERACIONES',
@@ -4981,12 +5242,21 @@ export default function ModoRapidoPage() {
       });
       const aviso = abrirWa(
         candidate.turno.phone,
-        waMensaje.cobertura(
-          candidate.employeeName,
-          coberturaModal.turno.obj,
-          coberturaModal.turno.expected,
-          coberturaModal.salida || '—',
-        ),
+        opciones?.mensaje === 'asignacion'
+          ? waMensaje.asignacionRet(
+              candidate.employeeName,
+              hueco.turno.obj,
+              hueco.turno.positionName || '',
+              hueco.turno.expected,
+              hueco.salida || '—',
+              hueco.employeeName,
+            )
+          : waMensaje.cobertura(
+              candidate.employeeName,
+              hueco.turno.obj,
+              hueco.turno.expected,
+              hueco.salida || '—',
+            ),
       );
       showToast(
         aviso
@@ -5005,6 +5275,71 @@ export default function ModoRapidoPage() {
       setCoberturaModal(null);
     }
   };
+
+  /**
+   * Panel de retenes: asigna el RET elegido a un hueco sin cubrir y le manda el mensaje de asignación.
+   * Usa el mismo motor que la ventana de cobertura (`handleAsignarRet`). Si el guardia todavía no está
+   * declarado ausente (no llegó pasados 30 min) se declara antes, igual que al abrir la cobertura.
+   */
+  async function asignarRetDesdePanel(ret: GuardRowModel, destino: DestinoRetenOpcion) {
+    if (busy || destino.tipo !== 'hueco') return;
+    const hueco = classifiedRows.find((r) => `hueco:${r.turno.rowId}` === destino.key);
+    if (!hueco) {
+      showToast('El hueco ya no está disponible: se cubrió o cambió de estado', 'bg-amber-700');
+      return;
+    }
+    if (coberturaBloqueadaPorTramo(hueco)) return;
+    const declarar = hueco.estado === 'NO_LLEGO' && hueco.turno.turnoStatus !== 'ABSENT';
+    const ok = await pedirConfirmacion({
+      titulo: declarar ? 'Declarar ausencia y asignar retén' : 'Asignar retén',
+      mensaje: `${ret.employeeName} (RET) cubre a ${hueco.employeeName} en ${hueco.turno.obj} de ${hueco.turno.expected} a ${hueco.salida || '—'}.${
+        declarar
+          ? `\n\n${hueco.employeeName} no llegó pasados 30 min: se declara la ausencia (AA), queda en RRHH y Planificación.`
+          : ''
+      }\n\nSe abre WhatsApp con el mensaje de asignación. ¿Confirmás?`,
+      textoOk: declarar ? 'Declarar y asignar' : 'Asignar y avisar',
+      tono: declarar ? 'rojo' : 'indigo',
+    });
+    if (!ok) return;
+    if (declarar) {
+      let apilado = false;
+      try {
+        await recordarTurno(hueco.turno.rowId);
+        apilado = true;
+        await registrarAusencia(hueco.turno.rowId, { name: hueco.employeeName });
+      } catch (err) {
+        if (apilado) undoRef.current.pop();
+        console.warn('[modo-rapido] asignarRetDesdePanel', err);
+        const detalle = (err as { message?: string })?.message || '';
+        showToast(
+          `No se pudo declarar la ausencia de ${hueco.employeeName}${detalle ? `: ${detalle}` : ''}`,
+          'bg-red-600',
+        );
+        return;
+      }
+    }
+    await handleAsignarRet(ret, {
+      hueco: declarar ? { ...hueco, estado: 'AUSENTE', turno: { ...hueco.turno, turnoStatus: 'ABSENT' } } : hueco,
+      mensaje: 'asignacion',
+    });
+  }
+
+  /** Panel de retenes: avisa por WhatsApp sin asignar (consulta de disponibilidad para el hueco u objetivo). */
+  function avisarRetDesdePanel(ret: GuardRowModel, destino: DestinoRetenOpcion) {
+    if (!ret.turno.phone) {
+      showToast(`${ret.employeeName} no tiene teléfono`, 'bg-amber-700');
+      return;
+    }
+    const hueco =
+      destino.tipo === 'hueco'
+        ? classifiedRows.find((r) => `hueco:${r.turno.rowId}` === destino.key)
+        : undefined;
+    const texto = hueco
+      ? waMensaje.cobertura(ret.employeeName, hueco.turno.obj, hueco.turno.expected, hueco.salida || '—')
+      : waMensaje.consultaRetObjetivo(ret.employeeName, destino.objetivo);
+    abrirWa(ret.turno.phone, texto);
+    showToast(`WhatsApp abierto · ${ret.employeeName}`, 'bg-emerald-700');
+  }
 
   /**
    * D12 + N12 en una sola vez. Si falta la T: el de la M extiende hasta las 18:00 (D12) y el de la N adelanta
@@ -6316,6 +6651,11 @@ export default function ModoRapidoPage() {
                   busy={busy}
                   onMarcarPresente={(r) => void handleMarcarPresente(r)}
                   onConfirmarWA={(r) => void handleConfirmarWA(r)}
+                  destinos={destinosRetenes}
+                  empInfo={empInfo}
+                  candidatosPara={candidatosRetenesPanel}
+                  onAsignar={(r, d) => void asignarRetDesdePanel(r, d)}
+                  onAvisar={(r, d) => avisarRetDesdePanel(r, d)}
                 />
                 {nonReteGroups.map(([objName, rows], gi) => {
                   const clienteGrupo = clientePorObj[objName] || SIN_CLIENTE;
@@ -6448,7 +6788,8 @@ export default function ModoRapidoPage() {
                   }
                 : null
             }
-            retCandidates={retCandidates}
+            retCandidates={retCandidatesOrdenados}
+            retEval={retEvaluados}
             retEsManana={retUsaManana}
             extCandidates={extCandidates}
             intercambioCandidates={intercambioCandidates}
