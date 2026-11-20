@@ -67,6 +67,10 @@ export interface TurnoHoy {
   bloquesTotal?: number;
   /** Retiro anticipado ya registrado: motivo y hora real del retiro (HH:MM). */
   retiro?: { motivo: string; hora: string };
+  /** Comentario del operador sobre el turno (`comentarioOps` del turno). */
+  comentario?: string;
+  /** Quién lo escribió. */
+  comentarioPor?: string;
 }
 
 export type WABridgeStatus = 'idle' | 'connecting' | 'connected' | 'error';

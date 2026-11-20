@@ -495,6 +495,12 @@ function useTurnosHoy({
           startTimeRaw: startTs,
           endTimeRaw: endTs,
           empresaId: String(shift.empresaId || ''),
+          ...(String(shift.comentarioOps || '').trim()
+            ? {
+                comentario: String(shift.comentarioOps).trim(),
+                comentarioPor: String(shift.comentarioOpsPor || '').trim() || undefined,
+              }
+            : {}),
         };
 
         if (esRetManana) {
@@ -1426,6 +1432,119 @@ function ModalCobertura({
   );
 }
 
+const COMENTARIO_MAX = 300;
+
+function ModalComentario({
+  row,
+  onGuardar,
+  onClose,
+}: {
+  row: GuardRowModel;
+  onGuardar: (row: GuardRowModel, texto: string) => void;
+  onClose: () => void;
+}) {
+  const [texto, setTexto] = useState(row.turno.comentario || '');
+  const taRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    taRef.current?.focus();
+    taRef.current?.select();
+  }, []);
+
+  const guardar = () => {
+    onGuardar(row, texto.trim().slice(0, COMENTARIO_MAX));
+    onClose();
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-4 py-3 border-b border-slate-200 flex items-center gap-3 bg-indigo-50">
+          <MessageSquare size={16} className="text-indigo-600 flex-shrink-0" aria-hidden />
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-black text-indigo-800">Comentario del turno</div>
+            <div className="text-[11px] text-slate-600 truncate">
+              {row.employeeName} · {row.turno.obj} · {row.turno.shift}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1 rounded-lg hover:bg-indigo-100 text-slate-400"
+          >
+            ✕
+          </button>
+        </div>
+        <div className="px-4 py-3 space-y-2">
+          <textarea
+            ref={taRef}
+            value={texto}
+            maxLength={COMENTARIO_MAX}
+            rows={4}
+            placeholder="Ej.: avisó que llega 20 min tarde, viene del otro objetivo…"
+            onChange={(e) => setTexto(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                onClose();
+                return;
+              }
+              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                guardar();
+              }
+            }}
+            className="w-full resize-none rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+          />
+          <div className="flex items-center justify-between text-[10px] text-slate-400">
+            <span>
+              {row.turno.comentarioPor ? `Último: ${row.turno.comentarioPor} · ` : ''}Ctrl+Enter guarda · Esc cierra
+            </span>
+            <span className="tabular-nums">
+              {texto.length}/{COMENTARIO_MAX}
+            </span>
+          </div>
+        </div>
+        <div className="px-4 pb-4 flex items-center gap-2">
+          {row.turno.comentario && (
+            <button
+              type="button"
+              onClick={() => {
+                onGuardar(row, '');
+                onClose();
+              }}
+              className="px-3 py-2 rounded-xl bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-[12px] font-bold"
+            >
+              Quitar
+            </button>
+          )}
+          <div className="flex-1" />
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-[12px] font-bold"
+          >
+            Cancelar
+          </button>
+          <button
+            type="button"
+            onClick={guardar}
+            className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-[12px] font-bold"
+          >
+            Guardar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ModalAcciones({
   row,
   busy,
@@ -1435,10 +1554,12 @@ function ModalAcciones({
   onIntercambio,
   onRetiro,
   onAvisarWa,
+  onComentario,
 }: {
   row: GuardRowModel;
   busy: boolean;
   onClose: () => void;
+  onComentario: (row: GuardRowModel) => void;
   onMarcarPresente: (row: GuardRowModel) => void;
   onMarcarAusente: (row: GuardRowModel) => void;
   onIntercambio: (row: GuardRowModel) => void;
@@ -1502,6 +1623,16 @@ function ModalAcciones({
         </div>
 
         <div className="px-4 pb-4 flex flex-col gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              onComentario(row);
+              onClose();
+            }}
+            className="w-full py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 text-[12px] font-bold"
+          >
+            {row.turno.comentario ? 'Editar comentario del turno' : 'Agregar comentario al turno'}
+          </button>
           {row.estado !== 'CERRADO' &&
             row.estado !== 'NO_LLEGO' &&
             row.estado !== 'AUSENTE' && (
@@ -1601,6 +1732,7 @@ function GuardRow({
   onRetiro,
   swapOrigin,
   onMore,
+  onComentario,
 }: {
   row: GuardRowModel;
   busy: boolean;
@@ -1619,6 +1751,7 @@ function GuardRow({
   onIntercambio: (row: GuardRowModel) => void;
   onRetiro: (row: GuardRowModel) => void;
   onMore: (row: GuardRowModel) => void;
+  onComentario: (row: GuardRowModel) => void;
 }) {
   const pill = estadoPill(row.estado);
   const motivoRetiro = row.turno.retiro
@@ -1774,6 +1907,20 @@ function GuardRow({
             {row.turno.bloque}/{row.turno.bloquesTotal}
           </span>
         )}
+        {row.turno.comentario && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onComentario(row);
+            }}
+            className="mt-0.5 flex w-full min-w-0 items-start gap-1 rounded-md bg-indigo-50 px-1.5 py-0.5 text-left text-[10px] font-medium leading-snug text-indigo-700 hover:bg-indigo-100"
+            title={`${row.turno.comentario}${row.turno.comentarioPor ? ` — ${row.turno.comentarioPor}` : ''}`}
+          >
+            <MessageSquare size={10} className="mt-0.5 flex-shrink-0" aria-hidden />
+            <span className="min-w-0 break-words">{row.turno.comentario}</span>
+          </button>
+        )}
       </div>
       <div className="truncate text-[11px] text-slate-600" title={row.turno.obj}>{row.turno.obj}</div>
       <div className="truncate text-[11px] text-slate-500" title={row.turno.positionName}>{row.turno.positionName || '—'}</div>
@@ -1862,6 +2009,16 @@ function GuardRow({
       </div>
       <div className="flex items-center justify-start gap-1" onClick={(e) => e.stopPropagation()}>
         {primary}
+        <button
+          type="button"
+          onClick={() => onComentario(row)}
+          className={`px-1.5 py-1 rounded-lg hover:bg-slate-100 ${
+            row.turno.comentario ? 'text-indigo-600' : 'text-slate-400 hover:text-slate-600'
+          }`}
+          title={row.turno.comentario ? 'Editar comentario del turno' : 'Agregar comentario al turno'}
+        >
+          <MessageSquare size={13} aria-hidden />
+        </button>
         <button
           type="button"
           onClick={() => onMore(row)}
@@ -2006,6 +2163,7 @@ function ObjectiveGroup({
   onDragOverGrupo,
   onDropGrupo,
   onDragEndGrupo,
+  onComentario,
 }: {
   objName: string;
   cliente: string | null;
@@ -2033,6 +2191,7 @@ function ObjectiveGroup({
   onIntercambio: (row: GuardRowModel) => void;
   onRetiro: (row: GuardRowModel) => void;
   onMore: (row: GuardRowModel) => void;
+  onComentario: (row: GuardRowModel) => void;
 }) {
   const hasNoLlego = rows.some((r) => r.estado === 'NO_LLEGO' && !r.coveredByName);
   const hasTardanza = rows.some((r) => r.estado === 'TARDANZA');
@@ -2105,6 +2264,7 @@ function ObjectiveGroup({
               onRetiro={onRetiro}
               swapOrigin={swapFromId === row.turno.rowId}
               onMore={onMore}
+              onComentario={onComentario}
             />
           ))}
         </div>
@@ -2469,6 +2629,7 @@ export default function ModoRapidoPage() {
   const [toast, setToast] = useState<{ msg: string; color: string } | null>(null);
   const [coberturaModal, setCoberturaModal] = useState<GuardRowModel | null>(null);
   const [accionesModal, setAccionesModal] = useState<GuardRowModel | null>(null);
+  const [comentarioModal, setComentarioModal] = useState<GuardRowModel | null>(null);
   const [activeRowId, setActiveRowId] = useState<string | null>(null);
   const [hourEdit, setHourEdit] = useState<{ rowId: string; value: string; campo: 'ingreso' | 'salida' } | null>(null);
   const [arm, setArm] = useState<null | { kind: 'ausente' | 'quitar' | 'radio' | 'cerrar'; rowId: string }>(null);
@@ -3272,6 +3433,32 @@ export default function ModoRapidoPage() {
       setBusy(false);
     }
   };
+
+  /** Comentario libre del operador sobre el turno (vacío = se quita). Se guarda en el documento del turno. */
+  function guardarComentario(row: GuardRowModel, texto: string) {
+    const turnoId = docIdDe(row.turno.rowId);
+    const limpio = texto.trim();
+    escribir(
+      updateDoc(
+        doc(db, 'turnos', turnoId),
+        limpio
+          ? {
+              comentarioOps: limpio,
+              comentarioOpsPor: user?.displayName || user?.email || 'Operador',
+              comentarioOpsUid: user?.uid ?? null,
+              comentarioOpsAt: serverTimestamp(),
+            }
+          : {
+              comentarioOps: deleteField(),
+              comentarioOpsPor: deleteField(),
+              comentarioOpsUid: deleteField(),
+              comentarioOpsAt: deleteField(),
+            },
+      ),
+      'el comentario',
+    );
+    showToast(limpio ? `Comentario guardado · ${row.employeeName}` : `Comentario quitado · ${row.employeeName}`, 'bg-indigo-700');
+  }
 
   const handleRegistrarAusencia = async (row: GuardRowModel) => {
     if (busy) return;
@@ -4222,6 +4409,8 @@ export default function ModoRapidoPage() {
       const target = e.target as HTMLElement | null;
       const tag = target?.tagName;
       const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || !!target?.isContentEditable;
+      // El modal de comentario maneja sus propias teclas (Esc, Ctrl+Enter): los atajos de la planilla no corren.
+      if (comentarioModal) return;
       if (retiroModal) {
         e.preventDefault();
         const k = e.key.toLowerCase();
@@ -4382,7 +4571,7 @@ export default function ModoRapidoPage() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [sheetRows, activeRowId, hourEdit, arm, swapFromId, coberturaModal, accionesModal, busy, pantallaCompleta, retiroModal, retiroMotivo, retiroReemplazo, retiroInfo]);
+  }, [sheetRows, activeRowId, hourEdit, arm, swapFromId, coberturaModal, accionesModal, comentarioModal, busy, pantallaCompleta, retiroModal, retiroMotivo, retiroReemplazo, retiroInfo]);
 
   useEffect(() => {
     if (!coberturaModal) setHuecoRetiro(null);
@@ -4898,6 +5087,7 @@ export default function ModoRapidoPage() {
                     onRetiro={(r) => pedirRetiro(r)}
                     swapFromId={swapFromId}
                     onMore={(r) => setAccionesModal(r)}
+                    onComentario={(r) => setComentarioModal(r)}
                   />
                   </React.Fragment>
                   );
@@ -4989,11 +5179,21 @@ export default function ModoRapidoPage() {
           />
         )}
 
+        {comentarioModal && (
+          <ModalComentario
+            key={comentarioModal.turno.rowId}
+            row={comentarioModal}
+            onGuardar={guardarComentario}
+            onClose={() => setComentarioModal(null)}
+          />
+        )}
+
         {accionesModal && (
           <ModalAcciones
             row={accionesModal}
             busy={busy}
             onClose={() => setAccionesModal(null)}
+            onComentario={(r) => setComentarioModal(r)}
             onMarcarPresente={(r) => void handleMarcarPresente(r)}
             onMarcarAusente={(r) => void handleRegistrarAusencia(r)}
             onIntercambio={(r) => {
