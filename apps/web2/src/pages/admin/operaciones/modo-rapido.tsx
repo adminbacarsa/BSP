@@ -76,7 +76,7 @@ import {
 import { empresaCollectionQuery, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
 import { readPreferOpsModoRapido, writePreferOpsModoRapido } from '@/lib/panelViewPrefs';
 import { isRevertAbsenceExpired } from '@/lib/operaciones/revertAbsenceWindow';
-import { arHmOnYmdMs, arHour, arYmd } from '@/lib/arClock';
+import { arHmOnYmdMs, arYmd } from '@/lib/arClock';
 import { isRestFrancoShift } from '@/hooks/useOperacionesMonitor';
 import { computeShiftCloseTimes } from '@cosp/ops-core';
 import {
@@ -1232,13 +1232,21 @@ function ModalRetiro({
   );
 }
 
-type ParteDualEval =
-  | { ok: true; tipo: 'EXTEND' | 'ADVANCE'; etiqueta: 'D12' | 'N12'; desde: string; hasta: string; horas: number }
-  | { ok: false; motivo: string };
+type BandaPuesto = 'M' | 'T' | 'N';
 
-type PartesDual = {
-  parte1: { desde: string; hasta: string };
-  parte2: { desde: string; hasta: string };
+/**
+ * D12 + N12 (puesto 24 h): dos guardias cubren el día completo, D12 06:00–18:00 y N12 18:00–06:00.
+ * Si falta la T, extiende el de la M y adelanta el de la N. Si falta la M o la N, uno de la T se
+ * intercambia al lugar del ausente (queda D12 si falta la M, N12 si falta la N) y la T pasa a ser el
+ * hueco que cubren D12 y N12.
+ */
+type PlanD12N12 = {
+  banda: BandaPuesto;
+  bandaD12: BandaPuesto;
+  bandaN12: BandaPuesto;
+  /** Rol del guardia de la T que se intercambia al lugar del ausente (null si falta la T). */
+  rolIntercambio: 'D12' | 'N12' | null;
+  explicacion: string;
 };
 
 type SeccionCobertura = 'ret' | 'dual' | 'cambio' | 'ft';
@@ -1251,8 +1259,7 @@ function ModalCobertura({
   extCandidates,
   intercambioCandidates,
   francoCandidates,
-  partesDual,
-  evaluarParteDual,
+  planD12N12,
   busy,
   onClose,
   onAsignarRet,
@@ -1269,13 +1276,12 @@ function ModalCobertura({
   extCandidates: GuardRowModel[];
   intercambioCandidates: GuardRowModel[];
   francoCandidates: GuardRowModel[];
-  /** Tramos del hueco para D12 + N12 (1ª y 2ª parte). */
-  partesDual: PartesDual | null;
-  evaluarParteDual: (c: GuardRowModel, parte: 1 | 2) => ParteDualEval;
+  /** D12 + N12: quién puede ser cada uno según la banda que falta. */
+  planD12N12: PlanD12N12 | null;
   busy: boolean;
   onClose: () => void;
   onAsignarRet: (c: GuardRowModel) => void;
-  onAplicarDual: (parte1: GuardRowModel | null, parte2: GuardRowModel | null) => void;
+  onAplicarDual: (d12: GuardRowModel, n12: GuardRowModel) => void;
   onIntercambiar: (c: GuardRowModel) => void;
   onConvocarFt: (c: GuardRowModel) => void;
   onAvisarWa: (c: GuardRowModel, plantilla: 'cobertura' | 'intercambio') => void;
@@ -1286,7 +1292,7 @@ function ModalCobertura({
   const esCustom = !BANDS.includes(codigoAusente as (typeof BANDS)[number]);
   // Turno cortado: se cubre completo con RET o FT; extender e intercambiar no aplican.
   const esCortado = esTramoCortado(absent.turno);
-  const esPuesto24h = !esCustom && !esCortado && ['M', 'T', 'N'].includes(absent.band) && !remanente && !!partesDual;
+  const esPuesto24h = !esCustom && !esCortado && ['M', 'T', 'N'].includes(absent.band) && !remanente && !!planD12N12;
   const hayIntercambio = !remanente && !esCustom && !esCortado;
 
   // Secciones visibles, en orden. Se muestra una sola abierta: al plegar una se abre la siguiente.
@@ -1320,32 +1326,20 @@ function ModalCobertura({
 
   const numero = (id: SeccionCobertura): number => visibles.indexOf(id) + 1;
 
-  // D12 + N12: el operador elige quién cubre cada parte del hueco.
-  const [sel1, setSel1] = useState<string | null>(null);
-  const [sel2, setSel2] = useState<string | null>(null);
+  // D12 + N12: el operador elige quién queda D12 y quién N12, los dos a la vez.
+  const [selD12, setSelD12] = useState<string | null>(null);
+  const [selN12, setSelN12] = useState<string | null>(null);
 
-  const evaluados = useMemo(
-    () =>
-      extCandidates.map((c) => ({
-        c,
-        e1: evaluarParteDual(c, 1),
-        e2: evaluarParteDual(c, 2),
-      })),
-    [extCandidates, evaluarParteDual],
+  const candidatosD12 = useMemo(
+    () => (planD12N12 ? extCandidates.filter((c) => c.band === planD12N12.bandaD12) : []),
+    [extCandidates, planD12N12],
   );
-
-  const elegirParte = (rowId: string, parte: 1 | 2) => {
-    if (parte === 1) {
-      setSel1((prev) => (prev === rowId ? null : rowId));
-      setSel2((prev) => (prev === rowId ? null : prev));
-    } else {
-      setSel2((prev) => (prev === rowId ? null : rowId));
-      setSel1((prev) => (prev === rowId ? null : prev));
-    }
-  };
-
-  const cand1 = evaluados.find((x) => x.c.turno.rowId === sel1) ?? null;
-  const cand2 = evaluados.find((x) => x.c.turno.rowId === sel2) ?? null;
+  const candidatosN12 = useMemo(
+    () => (planD12N12 ? extCandidates.filter((c) => c.band === planD12N12.bandaN12) : []),
+    [extCandidates, planD12N12],
+  );
+  const elegidoD12 = candidatosD12.find((c) => c.turno.rowId === selD12) ?? null;
+  const elegidoN12 = candidatosN12.find((c) => c.turno.rowId === selN12) ?? null;
   const nombreCorto = (n: string): string => n.split(',')[0] || n;
 
   const Cabecera = ({
@@ -1462,117 +1456,100 @@ function ModalCobertura({
           </div>
 
           {/* D12 + N12 — solo si el puesto es 24hs */}
-          {esPuesto24h && partesDual && (
+          {esPuesto24h && planD12N12 && (
             <div className="rounded-2xl border border-amber-200 bg-white shadow-sm">
               <Cabecera
                 id="dual"
                 titulo={`⏱ ${numero('dual')}. D12 + N12`}
-                cantidad={extCandidates.length}
+                cantidad={candidatosD12.length + candidatosN12.length}
                 tono="text-amber-700"
               />
               {abierta === 'dual' && (
-                <div className="px-3 pb-3">
-                  {extCandidates.length === 0 ? (
-                    <div className="text-[11px] text-slate-400 py-2">
-                      Sin guardias del mismo objetivo para extender
-                    </div>
-                  ) : (
-                    <>
-                      <div className="text-[10px] text-slate-500 mb-2">
-                        Elegí quién cubre cada parte del hueco, las dos a la vez. Cada guardia extiende o adelanta su
-                        turno sin pasar de 12 h.
+                <div className="px-3 pb-3 space-y-3">
+                  <div className="text-[11px] text-slate-600 rounded-xl bg-amber-50 border border-amber-100 px-2.5 py-2">
+                    {planD12N12.explicacion}
+                  </div>
+                  {([
+                    {
+                      rol: 'D12' as const,
+                      horario: '06:00–18:00',
+                      banda: planD12N12.bandaD12,
+                      lista: candidatosD12,
+                      seleccion: selD12,
+                      elegir: setSelD12,
+                      claseOn: 'bg-amber-500 text-white border-amber-500',
+                    },
+                    {
+                      rol: 'N12' as const,
+                      horario: '18:00–06:00',
+                      banda: planD12N12.bandaN12,
+                      lista: candidatosN12,
+                      seleccion: selN12,
+                      elegir: setSelN12,
+                      claseOn: 'bg-slate-800 text-white border-slate-800',
+                    },
+                  ]).map((grupo) => (
+                    <div key={grupo.rol}>
+                      <div className="text-[11px] font-bold text-slate-700 mb-1">
+                        {grupo.rol} · {grupo.horario}{' '}
+                        <span className="font-semibold text-slate-400">
+                          (guardia de la {grupo.banda}
+                          {planD12N12.rolIntercambio === grupo.rol ? ' · se intercambia al lugar del ausente' : ''})
+                        </span>
                       </div>
-                      <div className="flex items-center gap-2 px-2 pb-1 text-[10px] font-bold text-slate-500">
-                        <div className="flex-1" />
-                        <div className="w-24 text-center">
-                          1ª {partesDual.parte1.desde}–{partesDual.parte1.hasta}
+                      {grupo.lista.length === 0 ? (
+                        <div className="text-[11px] text-slate-400 py-1">
+                          Sin guardias de la {grupo.banda} disponibles en este objetivo
                         </div>
-                        <div className="w-24 text-center">
-                          2ª {partesDual.parte2.desde}–{partesDual.parte2.hasta}
-                        </div>
-                      </div>
-                      <div className="space-y-1 max-h-56 overflow-y-auto">
-                        {evaluados.map(({ c, e1, e2 }) => (
-                          <div
-                            key={c.turno.rowId}
-                            className="flex items-center gap-2 p-2 rounded-xl border border-amber-200 bg-amber-50"
-                          >
-                            <div className="flex-1 min-w-0">
-                              <div className="text-[12px] font-semibold text-slate-800 truncate">
-                                {c.employeeName}
-                              </div>
-                              <div className="text-[10px] text-slate-500">
-                                {c.band} · {c.turno.expected}–{c.salida || '—'}
-                              </div>
-                            </div>
-                            {([
-                              { parte: 1 as const, ev: e1, activo: sel1 === c.turno.rowId },
-                              { parte: 2 as const, ev: e2, activo: sel2 === c.turno.rowId },
-                            ]).map(({ parte, ev, activo }) => (
+                      ) : (
+                        <div className="space-y-1 max-h-40 overflow-y-auto">
+                          {grupo.lista.map((c) => {
+                            const activo = grupo.seleccion === c.turno.rowId;
+                            return (
                               <button
-                                key={parte}
+                                key={c.turno.rowId}
                                 type="button"
-                                disabled={busy || !ev.ok}
+                                disabled={busy}
                                 aria-pressed={activo}
-                                title={
-                                  ev.ok === true
-                                    ? `${ev.etiqueta}: pasa a trabajar ${ev.desde}–${ev.hasta} (${ev.horas} h)`
-                                    : ev.motivo
-                                }
-                                onClick={() => elegirParte(c.turno.rowId, parte)}
-                                className={`w-24 py-1 rounded-lg text-[10px] font-bold border active:scale-95 disabled:opacity-40 ${
+                                onClick={() => grupo.elegir(activo ? null : c.turno.rowId)}
+                                className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl border text-left active:scale-95 disabled:opacity-50 ${
                                   activo
-                                    ? 'bg-indigo-600 text-white border-indigo-600'
-                                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                                    ? grupo.claseOn
+                                    : 'bg-white text-slate-800 border-slate-200 hover:bg-slate-50'
                                 }`}
                               >
-                                {ev.ok ? (
-                                  <>
-                                    → {ev.etiqueta}
-                                    <span className="block text-[9px] font-semibold opacity-80">
-                                      {ev.desde}–{ev.hasta}
-                                    </span>
-                                  </>
-                                ) : (
-                                  '—'
-                                )}
+                                <span className="flex-1 min-w-0 text-[12px] font-semibold truncate">
+                                  {c.employeeName}
+                                </span>
+                                <span className={`text-[10px] ${activo ? 'opacity-80' : 'text-slate-500'}`}>
+                                  {c.band} · {c.turno.expected}–{c.salida || '—'}
+                                </span>
+                                {activo && <span className="text-[11px] font-black">✓</span>}
                               </button>
-                            ))}
-                          </div>
-                        ))}
-                      </div>
-                      <div className="mt-2 rounded-xl bg-slate-50 border border-slate-200 p-2 text-[11px] text-slate-600 space-y-0.5">
-                        <div>
-                          1ª parte ({partesDual.parte1.desde}–{partesDual.parte1.hasta}):{' '}
-                          <b>
-                            {cand1 && cand1.e1.ok
-                              ? `${nombreCorto(cand1.c.employeeName)} → ${cand1.e1.etiqueta}`
-                              : 'sin elegir'}
-                          </b>
+                            );
+                          })}
                         </div>
-                        <div>
-                          2ª parte ({partesDual.parte2.desde}–{partesDual.parte2.hasta}):{' '}
-                          <b>
-                            {cand2 && cand2.e2.ok
-                              ? `${nombreCorto(cand2.c.employeeName)} → ${cand2.e2.etiqueta}`
-                              : 'sin elegir'}
-                          </b>
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        disabled={busy || (!cand1 && !cand2)}
-                        onClick={() => onAplicarDual(cand1 ? cand1.c : null, cand2 ? cand2.c : null)}
-                        className="mt-2 w-full py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-[12px] font-bold shadow-sm disabled:opacity-50 active:scale-95"
-                      >
-                        {cand1 && cand2
-                          ? 'Aplicar D12 + N12'
-                          : cand1 || cand2
-                            ? 'Aplicar solo esta parte (la otra queda sin cubrir)'
-                            : 'Elegí al menos una parte'}
-                      </button>
-                    </>
-                  )}
+                      )}
+                    </div>
+                  ))}
+                  <div className="rounded-xl bg-slate-50 border border-slate-200 p-2 text-[11px] text-slate-600 space-y-0.5">
+                    <div>
+                      D12: <b>{elegidoD12 ? nombreCorto(elegidoD12.employeeName) : 'sin elegir'}</b>
+                    </div>
+                    <div>
+                      N12: <b>{elegidoN12 ? nombreCorto(elegidoN12.employeeName) : 'sin elegir'}</b>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={busy || !elegidoD12 || !elegidoN12}
+                    onClick={() => {
+                      if (elegidoD12 && elegidoN12) onAplicarDual(elegidoD12, elegidoN12);
+                    }}
+                    className="w-full py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-[12px] font-bold shadow-sm disabled:opacity-50 active:scale-95"
+                  >
+                    {elegidoD12 && elegidoN12 ? 'Aplicar D12 + N12' : 'Elegí el D12 y el N12'}
+                  </button>
                 </div>
               )}
             </div>
@@ -3866,82 +3843,42 @@ export default function ModoRapidoPage() {
     );
   }, [coberturaModal, classifiedRows]);
 
-  /**
-   * D12 + N12: el hueco del ausente se parte en dos. Si cruza las 18:00 (D12 06–18 / N12 18–06) se corta
-   * ahí; si no, en la mitad. Cada parte la cubre un guardia que extiende (su turno termina donde empieza
-   * la parte) o adelanta (su turno empieza donde termina la parte), sin pasar de 12:59 h.
-   */
-  const partesDualMs = useMemo((): { s: number; mid: number; e: number } | null => {
+  /** D12 + N12: quién puede ser cada uno según la banda que falta (M, T o N). */
+  const planD12N12 = useMemo((): PlanD12N12 | null => {
     if (!coberturaModal) return null;
-    const s = msDeTimestamp(coberturaModal.turno.startTimeRaw);
-    const e = msDeTimestamp(coberturaModal.turno.endTimeRaw);
-    if (!s || !e || e <= s) return null;
-    const corte18 = arHmOnYmdMs(arYmd(s), 18, 0);
-    const mid = corte18 > s && corte18 < e ? corte18 : s + Math.floor((e - s) / 2);
-    return { s, mid, e };
-  }, [coberturaModal]);
-
-  const partesDualTexto = useMemo(
-    () =>
-      partesDualMs
-        ? {
-            parte1: {
-              desde: formatHHMM(Timestamp.fromMillis(partesDualMs.s)),
-              hasta: formatHHMM(Timestamp.fromMillis(partesDualMs.mid)),
-            },
-            parte2: {
-              desde: formatHHMM(Timestamp.fromMillis(partesDualMs.mid)),
-              hasta: formatHHMM(Timestamp.fromMillis(partesDualMs.e)),
-            },
-          }
-        : null,
-    [partesDualMs],
-  );
-
-  const evaluarParteDual = useCallback(
-    (c: GuardRowModel, parte: 1 | 2): ParteDualEval => {
-      if (!partesDualMs) return { ok: false, motivo: 'No se conoce el horario del hueco' };
-      if (esTramoCortado(c.turno)) return { ok: false, motivo: 'Turno cortado: no se extiende' };
-      const cs = msDeTimestamp(c.turno.startTimeRaw);
-      const ce = msDeTimestamp(c.turno.endTimeRaw);
-      if (!cs || !ce || ce <= cs) return { ok: false, motivo: 'No se conoce el horario de su turno' };
-      const segDesde = parte === 1 ? partesDualMs.s : partesDualMs.mid;
-      const segHasta = parte === 1 ? partesDualMs.mid : partesDualMs.e;
-      const fmt = (ms: number): string => formatHHMM(Timestamp.fromMillis(ms));
-      const TOL_MS = 60000;
-      let tipo: 'EXTEND' | 'ADVANCE';
-      let nuevoDesde: number;
-      let nuevoHasta: number;
-      if (Math.abs(ce - segDesde) <= TOL_MS) {
-        tipo = 'EXTEND';
-        nuevoDesde = cs;
-        nuevoHasta = segHasta;
-      } else if (Math.abs(cs - segHasta) <= TOL_MS) {
-        tipo = 'ADVANCE';
-        nuevoDesde = segDesde;
-        nuevoHasta = ce;
-      } else {
-        return {
-          ok: false,
-          motivo: `Su turno (${fmt(cs)}–${fmt(ce)}) no es contiguo a ${fmt(segDesde)}–${fmt(segHasta)}`,
-        };
-      }
-      const duracionMs = nuevoHasta - nuevoDesde;
-      if (duracionMs > 12 * 3600000 + 59 * 60000) {
-        return { ok: false, motivo: `Pasaría de 12:59 h de jornada (${Math.round((duracionMs / 3600000) * 10) / 10} h)` };
-      }
-      const horaInicio = arHour(nuevoDesde);
+    const banda = coberturaModal.band;
+    if (banda === 'M') {
       return {
-        ok: true,
-        tipo,
-        etiqueta: horaInicio >= 6 && horaInicio < 18 ? 'D12' : 'N12',
-        desde: fmt(nuevoDesde),
-        hasta: fmt(nuevoHasta),
-        horas: Math.round((duracionMs / 3600000) * 10) / 10,
+        banda: 'M',
+        bandaD12: 'T',
+        bandaN12: 'N',
+        rolIntercambio: 'D12',
+        explicacion:
+          'Falta la M: el guardia de la T que elijas pasa al lugar de la M y queda D12 (06:00–18:00); el de la N pasa a N12 (18:00–06:00).',
       };
-    },
-    [partesDualMs],
-  );
+    }
+    if (banda === 'T') {
+      return {
+        banda: 'T',
+        bandaD12: 'M',
+        bandaN12: 'N',
+        rolIntercambio: null,
+        explicacion:
+          'Falta la T: el de la M extiende a D12 (06:00–18:00) y el de la N adelanta a N12 (18:00–06:00).',
+      };
+    }
+    if (banda === 'N') {
+      return {
+        banda: 'N',
+        bandaD12: 'M',
+        bandaN12: 'T',
+        rolIntercambio: 'N12',
+        explicacion:
+          'Falta la N: el guardia de la T que elijas pasa al lugar de la N y queda N12 (18:00–06:00); el de la M extiende a D12 (06:00–18:00).',
+      };
+    }
+    return null;
+  }, [coberturaModal]);
 
   const intercambioCandidates = useMemo((): GuardRowModel[] => {
     if (!coberturaModal) return [];
@@ -4771,125 +4708,210 @@ export default function ModoRapidoPage() {
   };
 
   /**
-   * D12 + N12 en una sola vez, por el motor oficial (igual que el CC clásico: EXTEND + ADVANCE sobre el
-   * turno de cada guardia, con la ausencia de RRHH gestionada). El operador elige quién cubre cada parte
-   * del hueco; con una sola parte elegida queda cobertura parcial.
+   * D12 + N12 en una sola vez. Si falta la T: el de la M extiende hasta las 18:00 (D12) y el de la N adelanta
+   * su ingreso a las 18:00 (N12). Si falta la M o la N: primero un guardia de la T se intercambia al lugar del
+   * ausente (la ausencia pasa al turno de la T, que queda como hueco) y después se aplica lo mismo. Todo por el
+   * motor oficial (EXTEND + ADVANCE), en un solo lote, para que se pueda revertir como en el CC clásico.
    */
-  const handleExtenderDual = async (parte1: GuardRowModel | null, parte2: GuardRowModel | null) => {
-    if (!coberturaModal || busy || !partesDualMs) return;
-    const elegidos: Array<{ c: GuardRowModel; parte: 1 | 2 }> = [];
-    if (parte1) elegidos.push({ c: parte1, parte: 1 });
-    if (parte2) elegidos.push({ c: parte2, parte: 2 });
-    if (elegidos.length === 0) return;
+  const handleD12N12 = async (d12: GuardRowModel, n12: GuardRowModel) => {
+    if (!coberturaModal || busy || !planD12N12) return;
     setBusy(true);
     try {
-      const planes: Array<{
-        c: GuardRowModel;
-        segDesde: number;
-        segHasta: number;
-        tipo: 'EXTEND' | 'ADVANCE';
-        etiqueta: 'D12' | 'N12';
-        desde: string;
-        hasta: string;
-      }> = [];
-      for (const { c, parte } of elegidos) {
-        const ev = evaluarParteDual(c, parte);
-        if (ev.ok === false) throw new Error(ev.motivo);
-        planes.push({
-          c,
-          segDesde: parte === 1 ? partesDualMs.s : partesDualMs.mid,
-          segHasta: parte === 1 ? partesDualMs.mid : partesDualMs.e,
-          tipo: ev.tipo,
-          etiqueta: ev.etiqueta,
-          desde: ev.desde,
-          hasta: ev.hasta,
-        });
-      }
-      const completo = planes.length === 2;
-      if (completo && planes[0].tipo === planes[1].tipo) {
-        throw new Error('Las dos partes no pueden resolverse con el mismo tipo de ajuste: elegí un guardia que extienda y otro que adelante.');
-      }
-      const titularId = docIdDe(coberturaModal.turno.rowId);
-      const titularSnap = await leerTurnoRapido(titularId);
-      if (!titularSnap.exists()) throw new CoverageApplyError('NOT_FOUND', 'Turno titular no encontrado');
-      const titular = { id: titularId, ...(titularSnap.data() || {}) } as Record<string, unknown>;
+      const aRowId = coberturaModal.turno.rowId;
+      const aId = docIdDe(aRowId);
+      const guardiaIntercambio =
+        planD12N12.rolIntercambio === 'D12' ? d12 : planD12N12.rolIntercambio === 'N12' ? n12 : null;
       const nombreCorto = (n: string): string => n.split(',')[0] || n;
-      const etiquetaTitular = planes
-        .map((p) => `${nombreCorto(p.c.employeeName)} ${p.etiqueta} ${p.desde}–${p.hasta}`)
-        .join(' + ');
+      const fmt = (ms: number): string => formatHHMM(Timestamp.fromMillis(ms));
+      const estaAusente = (d: Record<string, unknown>): boolean =>
+        d.isAbsent === true || String(d.status || '').toUpperCase() === 'ABSENT';
+
+      // Estado real del turno del ausente (servidor): la declaración de la ausencia puede estar en curso.
+      let aData = ((await getDoc(doc(db, 'turnos', aId))).data() || {}) as Record<string, unknown>;
+      if (!estaAusente(aData)) {
+        await registrarAusencia(aRowId, { name: coberturaModal.employeeName });
+        aData = ((await getDoc(doc(db, 'turnos', aId))).data() || {}) as Record<string, unknown>;
+      }
 
       const batch = writeBatch(db);
-      for (let i = 0; i < planes.length; i += 1) {
-        const p = planes[i];
-        const ultimo = i === planes.length - 1;
-        const segDesdeTs = Timestamp.fromMillis(p.segDesde);
-        const segHastaTs = Timestamp.fromMillis(p.segHasta);
-        await applyCoverage(db, batch, {
-          titularShiftId: titularId,
-          titularShift: titular,
-          candidateEmployeeId: String(p.c.turno.employeeId || ''),
-          candidateEmployeeName: p.c.employeeName,
-          sourceShiftId: docIdDe(p.c.turno.rowId),
-          coverageType: p.tipo,
-          resolvedBy: 'OPERACIONES',
-          empresaId,
-          covSegmentStart: segDesdeTs,
-          covSegmentEnd: segHastaTs,
-          ...(p.tipo === 'EXTEND' ? { extensionEndTime: segHastaTs } : { adjustedStartTime: segDesdeTs }),
-          titularCloseMode: completo && ultimo ? 'FULL' : 'PARTIAL',
-          ...(completo && ultimo ? { coveredByLabel: etiquetaTitular } : {}),
+      let titularId = aId;
+      let titular: Record<string, unknown> = { id: aId, ...aData };
+      let fuenteD12 = docIdDe(d12.turno.rowId);
+      let fuenteN12 = docIdDe(n12.turno.rowId);
+
+      if (guardiaIntercambio) {
+        const pId = docIdDe(guardiaIntercambio.turno.rowId);
+        const pData = ((await getDoc(doc(db, 'turnos', pId))).data() || null) as Record<string, unknown> | null;
+        if (!pData) throw new CoverageApplyError('NOT_FOUND', 'No se encontró el turno del guardia a intercambiar');
+        const ausenteId = String(aData.employeeId || coberturaModal.turno.employeeId || '');
+        const ausenteNombre = String(aData.employeeName || coberturaModal.employeeName);
+        const guardiaId = String(pData.employeeId || guardiaIntercambio.turno.employeeId || '');
+
+        // El guardia de la T pasa al lugar del ausente, limpio de toda marca de ausencia.
+        batch.update(doc(db, 'turnos', aId), {
+          employeeId: guardiaId,
+          employeeName: guardiaIntercambio.employeeName,
+          status: 'PENDING',
+          isAbsent: false,
+          absenceType: null,
+          absenceDetectedAt: null,
+          absenceDetectedBy: null,
+          absenceCode: null,
+          origin: 'INTERCAMBIO',
+          intercambioConTurnoId: pId,
+          ausenteOriginalEmployeeId: ausenteId || null,
+          ausenteOriginalEmployeeName: ausenteNombre || null,
         });
+        // El ausente queda en el turno de la T (el hueco), ya como ausente: sin cascada ni retención duplicadas.
+        batch.update(doc(db, 'turnos', pId), {
+          employeeId: ausenteId,
+          employeeName: ausenteNombre,
+          origin: 'INTERCAMBIO',
+          intercambioConTurnoId: aId,
+          status: 'ABSENT',
+          isAbsent: true,
+          absenceType: String(aData.absenceType || 'AA'),
+          absenceDetectedAt: aData.absenceDetectedAt ?? serverTimestamp(),
+          absenceDetectedBy: String(aData.absenceDetectedBy || 'MANUAL_OPS'),
+          absenceCascadeSkip: true,
+          ...(aData.absenceCode ? { absenceCode: aData.absenceCode } : {}),
+        });
+        // El registro de RRHH sigue siendo uno solo: ahora apunta al turno de la T.
+        const ausenciasSnap = await getDocs(
+          query(collection(db, 'ausencias'), where('shiftId', '==', aId), limit(5)),
+        );
+        ausenciasSnap.docs.forEach((d) => {
+          batch.update(d.ref, { shiftId: pId, shiftCode: String(pData.code || '').toUpperCase() || null });
+        });
+
+        titularId = pId;
+        titular = {
+          ...pData,
+          id: pId,
+          employeeId: ausenteId,
+          employeeName: ausenteNombre,
+          status: 'ABSENT',
+          isAbsent: true,
+          absenceType: String(aData.absenceType || 'AA'),
+        };
+        // El guardia intercambiado trabaja ahora sobre el turno que era del ausente.
+        if (planD12N12.rolIntercambio === 'D12') fuenteD12 = aId;
+        else fuenteN12 = aId;
       }
-      if (completo) {
-        await syncAusenciaCoberturaGestionada(
-          db,
-          {
-            shiftId: titularId,
-            coveredByEmployeeId: planes[0].c.turno.employeeId ?? null,
-            coveredByEmployeeName: etiquetaTitular,
-            coverageType: 'RETENCION',
-            empresaId,
-            resolvedBy: 'OPERACIONES',
-          },
-          batch,
+
+      const gapDesde = msDeTimestamp(titular.startTime);
+      const gapHasta = msDeTimestamp(titular.endTime);
+      if (!gapDesde || !gapHasta || gapHasta <= gapDesde) {
+        throw new CoverageApplyError('INVALID', 'No se conoce el horario del hueco a cubrir');
+      }
+      const corte18 = arHmOnYmdMs(arYmd(gapDesde), 18, 0);
+      const corte = corte18 > gapDesde && corte18 < gapHasta ? corte18 : gapDesde + Math.floor((gapHasta - gapDesde) / 2);
+
+      const datosFuente = async (id: string): Promise<{ desde: number; hasta: number }> => {
+        const data = id === aId ? aData : (((await getDoc(doc(db, 'turnos', id))).data() || {}) as Record<string, unknown>);
+        return { desde: msDeTimestamp(data.startTime), hasta: msDeTimestamp(data.endTime) };
+      };
+      const tolMs = 60000;
+      const horaD12 = await datosFuente(fuenteD12);
+      if (!horaD12.hasta || Math.abs(horaD12.hasta - gapDesde) > tolMs) {
+        throw new CoverageApplyError(
+          'INVALID',
+          `El turno de ${nombreCorto(d12.employeeName)} (${fmt(horaD12.desde)}–${fmt(horaD12.hasta)}) no empalma con el hueco ${fmt(gapDesde)}–${fmt(gapHasta)}`,
         );
       }
+      const horaN12 = await datosFuente(fuenteN12);
+      if (!horaN12.desde || Math.abs(horaN12.desde - gapHasta) > tolMs) {
+        throw new CoverageApplyError(
+          'INVALID',
+          `El turno de ${nombreCorto(n12.employeeName)} (${fmt(horaN12.desde)}–${fmt(horaN12.hasta)}) no empalma con el hueco ${fmt(gapDesde)}–${fmt(gapHasta)}`,
+        );
+      }
+      const tope = 12 * 3600000 + 59 * 60000;
+      if (corte - horaD12.desde > tope || horaN12.hasta - corte > tope) {
+        throw new CoverageApplyError('INVALID', 'Alguno de los dos pasaría de 12:59 h de jornada');
+      }
+
+      const etiquetaTitular = `${nombreCorto(d12.employeeName)} D12 ${fmt(horaD12.desde)}–${fmt(corte)} + ${nombreCorto(n12.employeeName)} N12 ${fmt(corte)}–${fmt(horaN12.hasta)}`;
+      const corteTs = Timestamp.fromMillis(corte);
+      await applyCoverage(db, batch, {
+        titularShiftId: titularId,
+        titularShift: titular,
+        candidateEmployeeId: String(d12.turno.employeeId || ''),
+        candidateEmployeeName: d12.employeeName,
+        sourceShiftId: fuenteD12,
+        coverageType: 'EXTEND',
+        resolvedBy: 'OPERACIONES',
+        empresaId,
+        covSegmentStart: Timestamp.fromMillis(gapDesde),
+        covSegmentEnd: corteTs,
+        extensionEndTime: corteTs,
+        titularCloseMode: 'PARTIAL',
+      });
+      await applyCoverage(db, batch, {
+        titularShiftId: titularId,
+        titularShift: titular,
+        candidateEmployeeId: String(n12.turno.employeeId || ''),
+        candidateEmployeeName: n12.employeeName,
+        sourceShiftId: fuenteN12,
+        coverageType: 'ADVANCE',
+        resolvedBy: 'OPERACIONES',
+        empresaId,
+        covSegmentStart: corteTs,
+        covSegmentEnd: Timestamp.fromMillis(gapHasta),
+        adjustedStartTime: corteTs,
+        titularCloseMode: 'FULL',
+        coveredByLabel: etiquetaTitular,
+      });
+      // El registro de RRHH se busca por el turno original del ausente (antes de moverlo al turno de la T).
+      await syncAusenciaCoberturaGestionada(
+        db,
+        {
+          shiftId: aId,
+          coveredByEmployeeId: d12.turno.employeeId ?? null,
+          coveredByEmployeeName: etiquetaTitular,
+          coverageType: 'RETENCION',
+          empresaId,
+          resolvedBy: 'OPERACIONES',
+        },
+        batch,
+      );
       await batch.commit();
 
       await addDoc(collection(db, 'novedades'), {
         type: 'COBERTURA_ASIGNADA',
-        title: completo ? 'Cobertura D12 + N12' : `Cobertura parcial ${planes[0].etiqueta}`,
+        title: 'Cobertura D12 + N12',
         status: 'pending',
-        employeeId: planes[0].c.turno.employeeId ?? null,
+        employeeId: d12.turno.employeeId ?? null,
         employeeName: etiquetaTitular,
         objectiveId: coberturaModal.turno.objectiveId ?? null,
         objectiveName: coberturaModal.turno.obj,
         shiftId: titularId,
-        description: `${etiquetaTitular} · cubren a ${coberturaModal.employeeName} en ${coberturaModal.turno.obj}`,
+        description: `${etiquetaTitular} · cubren a ${coberturaModal.employeeName} en ${coberturaModal.turno.obj}${guardiaIntercambio ? ` (${nombreCorto(guardiaIntercambio.employeeName)} se intercambió al lugar del ausente)` : ''}`,
         empresaId,
         createdAt: serverTimestamp(),
         reportedBy: 'OPERACIONES',
         operatorId: user?.uid ?? 'cc-modo-rapido',
       });
 
-      const tituloToast = completo
-        ? `D12 + N12 aplicado · ${etiquetaTitular}`
-        : `Cobertura parcial aplicada · ${etiquetaTitular} (queda parte sin cubrir)`;
-      const avisos = planes.map((p) => ({
-        phone: p.c.turno.phone,
-        texto: waMensaje.cobertura(p.c.employeeName, coberturaModal.turno.obj, p.desde, p.hasta),
-      }));
+      const tituloToast = `D12 + N12 aplicado · ${etiquetaTitular}`;
+      const avisos = [
+        {
+          phone: d12.turno.phone,
+          texto: waMensaje.cobertura(d12.employeeName, coberturaModal.turno.obj, fmt(horaD12.desde), fmt(corte)),
+        },
+        {
+          phone: n12.turno.phone,
+          texto: waMensaje.cobertura(n12.employeeName, coberturaModal.turno.obj, fmt(corte), fmt(horaN12.hasta)),
+        },
+      ];
       const hayAvisos = avisos.some((a) => a.phone);
-      showToast(`${tituloToast}${hayAvisos ? ' · enviando aviso…' : ''}`, completo ? 'bg-amber-700' : 'bg-orange-700');
+      showToast(`${tituloToast}${hayAvisos ? ' · enviando aviso…' : ''}`, 'bg-amber-700');
       if (hayAvisos) {
         void avisarPorWhatsApp(avisos).then((sufijo) => showToast(`${tituloToast}${sufijo}`, 'bg-amber-700'));
       }
     } catch (err) {
       console.warn('[modo-rapido] D12 + N12', err);
-      showToast(
-        err instanceof CoverageApplyError || err instanceof Error ? err.message : 'Error al aplicar D12 + N12',
-        'bg-red-600',
-      );
+      showToast(err instanceof Error ? err.message : 'Error al aplicar D12 + N12', 'bg-red-600');
     } finally {
       setBusy(false);
       setCoberturaModal(null);
@@ -6008,9 +6030,8 @@ export default function ModoRapidoPage() {
             busy={busy}
             onClose={() => setCoberturaModal(null)}
             onAsignarRet={(c) => void handleAsignarRet(c)}
-            partesDual={partesDualTexto}
-            evaluarParteDual={evaluarParteDual}
-            onAplicarDual={(p1, p2) => void handleExtenderDual(p1, p2)}
+            planD12N12={planD12N12}
+            onAplicarDual={(d12, n12) => void handleD12N12(d12, n12)}
             onIntercambiar={(c) => void handleIntercambiarCobertura(c)}
             onConvocarFt={(c) => void handleConvocarFt(c)}
             onAvisarWa={(c, plantilla) => {
