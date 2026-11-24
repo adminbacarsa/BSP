@@ -25,18 +25,29 @@ const AUTH_DIR  = process.env.WA_AUTH_DIR || path.join(__dirname, '.wa_auth');
 const MAX_MSGS  = 200;
 const PUBLIC    = path.join(__dirname, 'public');
 const STARTED_AT = Date.now();
-const LID_MAP_FILE = path.join(__dirname, 'lid-map.json');
+const STATE_TAG = String(process.env.WA_AUTH_DIR || 'default').replace(/[^\w.-]+/g, '_');
+const LID_MAP_FILE = path.join(__dirname, `lid-map_${STATE_TAG}.json`);
+const PHONES_FILE  = path.join(__dirname, `phones-plataforma_${STATE_TAG}.json`);
+const GROUPS_FILE  = path.join(__dirname, `monitored-groups_${STATE_TAG}.json`);
+// Compat: si existe el lid-map viejo sin sufijo, se usa como arranque.
+const LID_MAP_LEGACY = path.join(__dirname, 'lid-map.json');
+
+function normPhone(value) {
+  return String(value || '').replace(/\D/g, '').replace(/^549/, '');
+}
 
 // Cargar mapa LID→teléfono persistido (sobrevive reinicios)
 function loadLidMap() {
   try {
-    if (fs.existsSync(LID_MAP_FILE)) {
-      const data = JSON.parse(fs.readFileSync(LID_MAP_FILE, 'utf8'));
+    const src = fs.existsSync(LID_MAP_FILE) ? LID_MAP_FILE
+      : (fs.existsSync(LID_MAP_LEGACY) ? LID_MAP_LEGACY : null);
+    if (src) {
+      const data = JSON.parse(fs.readFileSync(src, 'utf8'));
       Object.assign(lidToPhone, data);
-      console.log(`[lid-map] Cargados ${Object.keys(data).length} mapeos LID→phone desde disco`);
+      console.log(`[lid-map] Cargados ${Object.keys(data).length} mapeos LID→phone desde ${path.basename(src)}`);
     }
   } catch (e) {
-    console.warn('[lid-map] No se pudo cargar lid-map.json:', e.message);
+    console.warn('[lid-map] No se pudo cargar lid-map:', e.message);
   }
 }
 
@@ -44,8 +55,93 @@ function saveLidMap() {
   try {
     fs.writeFileSync(LID_MAP_FILE, JSON.stringify(lidToPhone, null, 2));
   } catch (e) {
-    console.warn('[lid-map] No se pudo guardar lid-map.json:', e.message);
+    console.warn('[lid-map] No se pudo guardar lid-map:', e.message);
   }
+}
+
+function loadPhonesPlataforma() {
+  try {
+    if (!fs.existsSync(PHONES_FILE)) return;
+    const data = JSON.parse(fs.readFileSync(PHONES_FILE, 'utf8'));
+    if (!Array.isArray(data)) return;
+    for (const p of data) {
+      const n = normPhone(p);
+      if (n.length >= 8) phonesPlataforma.add(n);
+    }
+    console.log(`[phones] ${phonesPlataforma.size} teléfonos de la plataforma en disco`);
+  } catch (e) {
+    console.warn('[phones] No se pudo cargar phones-plataforma:', e.message);
+  }
+}
+
+function savePhonesPlataforma() {
+  try {
+    fs.writeFileSync(PHONES_FILE, JSON.stringify([...phonesPlataforma], null, 2));
+  } catch (e) {
+    console.warn('[phones] No se pudo guardar phones-plataforma:', e.message);
+  }
+}
+
+function recordarPhonesPlataforma(phones) {
+  let nuevos = 0;
+  for (const raw of phones || []) {
+    const n = normPhone(raw);
+    if (n.length < 8 || phonesPlataforma.has(n)) continue;
+    phonesPlataforma.add(n);
+    nuevos++;
+  }
+  if (nuevos > 0) savePhonesPlataforma();
+  return nuevos;
+}
+
+function loadMonitoredGroups() {
+  try {
+    if (!fs.existsSync(GROUPS_FILE)) return;
+    const data = JSON.parse(fs.readFileSync(GROUPS_FILE, 'utf8'));
+    if (!Array.isArray(data)) return;
+    for (const id of data) {
+      if (typeof id === 'string' && id.endsWith('@g.us')) monitoredGroups.add(id);
+    }
+    console.log(`[monitor] ${monitoredGroups.size} grupos restaurados desde disco`);
+  } catch (e) {
+    console.warn('[monitor] No se pudo cargar monitored-groups:', e.message);
+  }
+}
+
+function saveMonitoredGroups() {
+  try {
+    fs.writeFileSync(GROUPS_FILE, JSON.stringify([...monitoredGroups], null, 2));
+  } catch (e) {
+    console.warn('[monitor] No se pudo guardar monitored-groups:', e.message);
+  }
+}
+
+/** Mensaje de grupo/teléfono cargado desde Modo Rápido (sync-phones / monitor). */
+function grupoMonitoreado(entry) {
+  if (entry?.groupId && monitoredGroups.has(entry.groupId)) return true;
+  if (!entry?.groupId && entry?.group && monitoredGroups.size > 0) {
+    const g = availableGroups.find((x) => x.name === entry.group);
+    if (g && monitoredGroups.has(g.id)) return true;
+  }
+  return false;
+}
+
+function esDePlataforma(entry) {
+  const ph = normPhone(entry?.phone);
+  // Con padrones sincronizados: solo esos teléfonos (el chat del grupo no importa).
+  if (phonesPlataforma.size > 0) {
+    if (ph && phonesPlataforma.has(ph)) return true;
+    // Check-in sin LID resuelto todavía, en grupo de la planilla: no ocultar.
+    if (!ph && entry?.cuenta && grupoMonitoreado(entry)) return true;
+    return false;
+  }
+  // Sin teléfonos aún: al menos los grupos que activó Modo Rápido.
+  if (monitoredGroups.size > 0) return grupoMonitoreado(entry);
+  return false;
+}
+
+function tieneFiltroPlataforma() {
+  return phonesPlataforma.size > 0 || monitoredGroups.size > 0;
 }
 
 // ── Respuestas automáticas al guardia (opt-in: WA_RESPONDER=1) ────────────
@@ -110,11 +206,14 @@ const bitacora        = [];
 const BITACORA_MAX    = 200;
 let   availableGroups = [];
 const monitoredGroups = new Set();
+const phonesPlataforma = new Set(); // teléfonos de empleados/turnos que mandó Modo Rápido
 let   connected       = false;
 let   sock            = null; // instancia Baileys — compartida con los endpoints HTTP
 let   lastQR          = null; // último QR recibido (para el endpoint /qr del browser)
 const lidToPhone      = {};   // LID numérico → teléfono real (ej: "80629488218268" → "3516294882")
-loadLidMap(); // Cargar mapeos persistidos
+loadLidMap();
+loadPhonesPlataforma();
+loadMonitoredGroups();
 
 // ── Express ──────────────────────────────────────────────
 const app = express();
@@ -123,7 +222,13 @@ app.use(express.json());
 app.use(express.static(PUBLIC));
 
 app.get('/status', (req, res) => {
-  res.json({ connected, groups: availableGroups, monitored: [...monitoredGroups], startedAt: STARTED_AT });
+  res.json({
+    connected,
+    groups: availableGroups,
+    monitored: [...monitoredGroups],
+    phonesPlataforma: phonesPlataforma.size,
+    startedAt: STARTED_AT,
+  });
 });
 
 function anotarBitacora(entry) {
@@ -137,8 +242,11 @@ function escHtml(value) {
   ));
 }
 
-function htmlBitacora() {
-  const filas = bitacora.map((m) => {
+function htmlBitacora(opts = {}) {
+  const verTodo = Boolean(opts.all);
+  const filtroActivo = !verTodo && tieneFiltroPlataforma();
+  const lista = filtroActivo ? bitacora.filter(esDePlataforma) : bitacora;
+  const filas = lista.map((m) => {
     const mapa = m.lat != null && m.lng != null
       ? `<a href="https://www.google.com/maps?q=${m.lat},${m.lng}" target="_blank" rel="noopener">${m.lat.toFixed(5)}, ${m.lng.toFixed(5)}</a>`
       : '—';
@@ -157,6 +265,14 @@ function htmlBitacora() {
   }).join('');
   const desde = new Date(STARTED_AT).toLocaleString('es-AR', { hour12: false, timeZone: 'America/Argentina/Buenos_Aires' });
   const marca = String(process.env.WA_AUTH_DIR || '').replace(/^\.wa_auth_/, '') || `puerto ${PORT}`;
+  const resumenFiltro = filtroActivo
+    ? `${lista.length} de plataforma · ${bitacora.length} en memoria · ${phonesPlataforma.size} tel. · ${monitoredGroups.size} grupos`
+    : `${bitacora.length} en memoria${tieneFiltroPlataforma() ? ' · viendo todos' : ' · sin filtro (abrí Modo Rápido para sync)'}`;
+  const linkFiltro = filtroActivo
+    ? `<a href="?all=1" style="color:#c7d2fe">ver todos</a>`
+    : (tieneFiltroPlataforma()
+      ? `<a href="?" style="color:#c7d2fe">solo plataforma</a>`
+      : '');
   return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>WA ${escHtml(marca)} · mensajes</title>
 <meta http-equiv="refresh" content="20">
 <style>
@@ -176,15 +292,15 @@ function htmlBitacora() {
 </style></head><body>
 <header>
   <h1>Mensajes de WhatsApp · ${escHtml(marca)}</h1>
-  <p>${bitacora.length} en memoria · el bridge arrancó ${escHtml(desde)} · se actualiza solo · la hora no trae el día · <a href="?format=json" style="color:#c7d2fe">JSON</a></p>
+  <p>${escHtml(resumenFiltro)} · el bridge arrancó ${escHtml(desde)} · se actualiza solo · la hora no trae el día · ${linkFiltro}${linkFiltro ? ' · ' : ''}<a href="?format=json" style="color:#c7d2fe">JSON</a></p>
 </header>
-${bitacora.length ? `<table><thead><tr><th>Hora</th><th>Quién</th><th>Grupo</th><th>Qué mandó</th><th>Texto</th><th>Ubicación</th><th>¿Entra al CC?</th></tr></thead><tbody>${filas}</tbody></table>` : '<p class="vacio">Todavía no llegó ningún mensaje desde que arrancó este proceso.</p>'}
+${lista.length ? `<table><thead><tr><th>Hora</th><th>Quién</th><th>Grupo</th><th>Qué mandó</th><th>Texto</th><th>Ubicación</th><th>¿Entra al CC?</th></tr></thead><tbody>${filas}</tbody></table>` : `<p class="vacio">${bitacora.length && filtroActivo ? 'Hay mensajes en memoria, pero ninguno es de un grupo monitoreado ni de un teléfono de la planilla. <a href="?all=1">Ver todos</a> o abrí Modo Rápido para sincronizar.' : 'Todavía no llegó ningún mensaje desde que arrancó este proceso.'}</p>`}
 </body></html>`;
 }
 
 app.get('/log', (req, res) => {
   res.set('Content-Type', 'text/html; charset=utf-8');
-  res.send(htmlBitacora());
+  res.send(htmlBitacora({ all: req.query.all === '1' }));
 });
 
 app.get('/messages', (req, res) => {
@@ -194,7 +310,7 @@ app.get('/messages', (req, res) => {
   // El navegador abre esta URL para leer. Modo Rápido pide JSON (Accept */* o ?since=).
   if (!since && req.query.format !== 'json' && accept.includes('text/html')) {
     res.set('Content-Type', 'text/html; charset=utf-8');
-    return res.send(htmlBitacora());
+    return res.send(htmlBitacora({ all: req.query.all === '1' }));
   }
   res.json({ messages: result, ts: Date.now(), startedAt: STARTED_AT });
 });
@@ -298,6 +414,7 @@ app.post('/monitor', (req, res) => {
   const { groupId, enable } = req.body;
   if (!groupId) return res.status(400).json({ error: 'groupId requerido' });
   enable ? monitoredGroups.add(groupId) : monitoredGroups.delete(groupId);
+  saveMonitoredGroups();
   console.log(`[monitor] ${enable ? '✓' : '✗'} ${groupId}`);
   res.json({ ok: true, monitored: [...monitoredGroups] });
 });
@@ -307,11 +424,12 @@ app.post('/monitor', (req, res) => {
 app.post('/lid-map', (req, res) => {
   const { lid, phone } = req.body;
   if (!lid || !phone) return res.status(400).json({ error: 'lid y phone requeridos' });
-  const normPhone = String(phone).replace(/\D/g, '').replace(/^549/, '');
-  lidToPhone[lid] = normPhone;
+  const nPhone = normPhone(phone);
+  lidToPhone[lid] = nPhone;
+  recordarPhonesPlataforma([nPhone]);
   saveLidMap();
-  console.log(`[lid-map] Mapeo manual: LID ${lid} → ${normPhone}`);
-  res.json({ ok: true, lid, phone: normPhone });
+  console.log(`[lid-map] Mapeo manual: LID ${lid} → ${nPhone}`);
+  res.json({ ok: true, lid, phone: nPhone });
 });
 
 // Endpoint para ver el mapa actual
@@ -323,12 +441,19 @@ app.get('/lid-map', (req, res) => {
 app.post('/remap-phone', (req, res) => {
   const { oldPhone, newPhone } = req.body;
   if (!oldPhone || !newPhone) return res.status(400).json({ error: 'oldPhone y newPhone requeridos' });
-  const normOld = String(oldPhone).replace(/\D/g, '').replace(/^549/, '');
-  const normNew = String(newPhone).replace(/\D/g, '').replace(/^549/, '');
+  const normOld = normPhone(oldPhone);
+  const normNew = normPhone(newPhone);
   if (normOld === normNew) return res.json({ ok: true, updated: 0 });
   let updated = 0;
   for (const [lid, ph] of Object.entries(lidToPhone)) {
     if (ph === normOld) { lidToPhone[lid] = normNew; updated++; }
+  }
+  if (phonesPlataforma.has(normOld)) {
+    phonesPlataforma.delete(normOld);
+    phonesPlataforma.add(normNew);
+    savePhonesPlataforma();
+  } else {
+    recordarPhonesPlataforma([normNew]);
   }
   if (updated > 0) saveLidMap();
   console.log(`[remap-phone] ${normOld} → ${normNew}: ${updated} LID(s) actualizados`);
@@ -345,7 +470,13 @@ app.post('/sync-phones', async (req, res) => {
     return res.status(503).json({ error: 'WhatsApp no conectado aún' });
   }
 
-  const stats = { resolved: 0, alreadyKnown: 0, notOnWA: 0, errors: 0 };
+  const stats = {
+    resolved: 0,
+    alreadyKnown: 0,
+    notOnWA: 0,
+    errors: 0,
+    phonesPlataforma: recordarPhonesPlataforma(phones),
+  };
 
   // Procesar en lotes de 10 para no saturar WA
   const BATCH = 10;
@@ -353,7 +484,7 @@ app.post('/sync-phones', async (req, res) => {
     const batch = phones.slice(i, i + BATCH);
     for (const rawPhone of batch) {
       try {
-        const norm = String(rawPhone).replace(/\D/g, '').replace(/^549/, '');
+        const norm = normPhone(rawPhone);
         if (!norm || norm.length < 8) continue;
         const waJid = '549' + norm + '@s.whatsapp.net';
         const results = await sock.onWhatsApp(waJid);
@@ -385,8 +516,8 @@ app.post('/sync-phones', async (req, res) => {
   }
 
   if (stats.resolved > 0) saveLidMap();
-  console.log(`[sync-phones] +${stats.resolved} LIDs nuevos, ${stats.alreadyKnown} ya conocidos, ${stats.notOnWA} sin WA, ${stats.errors} errores`);
-  res.json({ ok: true, ...stats });
+  console.log(`[sync-phones] +${stats.resolved} LIDs nuevos, ${stats.alreadyKnown} ya conocidos, ${stats.notOnWA} sin WA, ${stats.errors} errores, +${stats.phonesPlataforma} tel. plataforma`);
+  res.json({ ok: true, ...stats, phonesTotal: phonesPlataforma.size });
 });
 
 // ── WhatsApp con Baileys ──────────────────────────────────
@@ -554,13 +685,14 @@ async function startWA() {
           messages.unshift(proto);
           if (messages.length > MAX_MSGS) messages.pop();
           anotarBitacora({
-            id: proto.id, ts: proto.ts, time: proto.time, name: pushName, phone, group: groupName,
+            id: proto.id, ts: proto.ts, time: proto.time, name: pushName, phone,
+            group: groupName, groupId: jid,
             que: 'Clave del grupo', text: '', cuenta: false, motivo: 'no es un mensaje del guardia',
           });
           console.log(`  [protocol] ${groupName} | ${pushName}: clave WA renovada - pedirle que reenvie`);
         }
-        // Avisos al guardia (no a los mensajes propios del bridge): ubicación fija o "presente" sin foto.
-        if (!msg.key.fromMe) {
+        // Ubicación fija o "presente" sin foto. También si lo manda el teléfono vinculado (prueba).
+        if (RESPONDER) {
           const dest   = jidDelGuardia(phone, senderJid);
           const nombre = nombrePila(pushName);
           const saludo = nombre ? `Hola ${nombre}, ` : 'Hola, ';
@@ -591,6 +723,7 @@ async function startWA() {
           name: pushName,
           phone,
           group: groupName,
+          groupId: jid,
           que: queSkip,
           text: String(text || '').slice(0, 140),
           lat: locationData?.lat,
@@ -627,6 +760,7 @@ async function startWA() {
         name: entry.name,
         phone: entry.phone,
         group: entry.group,
+        groupId: entry.groupId,
         que: hasLiveLocation ? 'Ubicación en vivo' : 'Foto',
         text: String(text || '').slice(0, 140),
         lat: locationData?.lat,
@@ -639,8 +773,8 @@ async function startWA() {
       messages.unshift(entry);
       if (messages.length > MAX_MSGS) messages.pop();
 
-      // Acuse corto: la planilla responde según el caso (confirmado, lejos, muy anticipado, salida).
-      if (RESPONDER && !msg.key.fromMe) {
+      // Acuse corto: la planilla responde el caso (confirmado, lejos, ya presente, sin turno, horario).
+      if (RESPONDER) {
         guardarRaw(msg);
         const nombre = nombrePila(pushName);
         avisarUnaVez(jidDelGuardia(phone, senderJid), 'recibido',
