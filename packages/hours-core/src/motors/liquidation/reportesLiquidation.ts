@@ -4,7 +4,7 @@ import {
   isRegularLiquidationWorkShift,
 } from '../planning/deploymentRoles';
 import { RET_STANDBY_REFERENCE_HOURS } from '../planning/constants';
-import { huecosPlanificadosCortado, solapeHuecosMs } from '../planning/turnoCortadoHoras';
+import { huecosPlanificadosCortado, solapeHuecosMs, tramosPlanificadosCortado } from '../planning/turnoCortadoHoras';
 import { calcPlanningBillableShiftHours } from '../planning/planningScheduledHours';
 import {
   coalescePlannedCellBillableHours,
@@ -836,6 +836,17 @@ const getNightDuration = (start: Date, end: Date) => {
     return durationMins / 60;
 };
 
+/** Horas nocturnas de [start, end] sin las del hueco entre tramos de un turno cortado. */
+const nocturnasSinHuecos = (start: Date, end: Date, huecos: readonly { startMs: number; endMs: number }[]) => {
+    let night = getNightDuration(start, end);
+    for (const h of huecos) {
+        const a = Math.max(h.startMs, start.getTime());
+        const b = Math.min(h.endMs, end.getTime());
+        if (b > a) night -= getNightDuration(new Date(a), new Date(b));
+    }
+    return Math.max(0, night);
+};
+
 /** Calculadora CCT de horas teóricas/reales por legajo (misma regla que Reportes → Liquidación). */
 export function calculateLiquidationHoursStats(
     shifts: any[],
@@ -933,7 +944,7 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
             }
 
             const statsEnd = effectiveEndForBillableDuration(start, end, duration);
-            const night = getNightDuration(start, statsEnd);
+            const night = nocturnasSinHuecos(start, statsEnd, huecosPlanificadosCortado(d));
             const day = Math.max(0, duration - night);
             const dateKey = getArgentinaDate(d.startTime);
             const isFeriado = holidaysMap[dateKey];
@@ -1023,6 +1034,20 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
             // Fix 1: acumular horas FT reales (solo trabajadas)
             if (isFT && worked > 0) horasFTReal += worked;
             horasRealesTotal += worked;
+            if (worked > 0 && rStart && rEnd && !isFT) {
+                // Turno cortado sin ingreso marcado en algún tramo posterior al 1.º: se liquida lo fichado, a revisar.
+                const tramosCortado = tramosPlanificadosCortado(d);
+                if (tramosCortado) {
+                    const pb = (d.presenciaBloques && typeof d.presenciaBloques === 'object' ? d.presenciaBloques : {}) as Record<string, { realStartTime?: unknown } | null | undefined>;
+                    const faltantes: number[] = [];
+                    for (let n = 2; n <= tramosCortado.length; n += 1) {
+                        if (!pb[`b${n}`]?.realStartTime) faltantes.push(n);
+                    }
+                    if (faltantes.length > 0) {
+                        warnings.push(`Turno cortado ${dateKey || ''}: sin ingreso marcado en el tramo ${faltantes.join(', ')} — se liquidó lo fichado, requiere revisión.`);
+                    }
+                }
+            }
             if (worked > 0) {
                 const codeUp = rawCode.includes('/') ? rawCode.split('/')[0] : rawCode;
                 const band = SHIFT_HOURS_LOOKUP[codeUp] > 0 ? SHIFT_HOURS_LOOKUP[codeUp] : Math.max(0, duration);
@@ -1069,7 +1094,7 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
             if (worked > 0) {
                 const effS = rStart || start;
                 const effE = rEnd || effectiveEndForBillableDuration(effS, end, worked);
-                const nightWorked = getNightDuration(effS, effE);
+                const nightWorked = nocturnasSinHuecos(effS, effE, huecosPlanificadosCortado(d));
                 totalNocturnas += nightWorked;
                 totalDiurnas += Math.max(0, worked - nightWorked);
             }

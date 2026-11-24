@@ -102,6 +102,44 @@ describe('turno cortado: hueco entre tramos', () => {
     assert.equal(Math.round(m.horasReales * 100) / 100, 8);
   });
 
+  it('nocturnas: el hueco de un turno cortado nocturno no cuenta como noche', () => {
+    // 19–22 + 23–02: banda 19:00–02:00 (7 h), hueco 22–23 (nocturno), trabajado 6 h.
+    const noche = cortado({
+      blocks: [{ startTime: '19:00', endTime: '22:00' }, { startTime: '23:00', endTime: '02:00' }],
+      startTime: ts('2026-11-18T19:00:00-03:00'),
+      endTime: ts('2026-11-19T02:00:00-03:00'),
+      realStartTime: ts('2026-11-18T19:00:00-03:00'),
+      realEndTime: ts('2026-11-19T02:00:00-03:00'),
+      presenciaBloques: {
+        b1: { realStartTime: ts('2026-11-18T19:00:00-03:00'), realEndTime: ts('2026-11-18T22:00:00-03:00'), cerrado: true },
+        b2: { realStartTime: ts('2026-11-18T23:00:00-03:00') },
+      },
+    });
+    const liq = calculateLiquidationHoursStats([noche]);
+    assert.equal(Math.round(liq.horasReales * 100) / 100, 6);
+    // Noche (21–06): 21–22 del tramo 1 + 23–02 del tramo 2 = 4 h. Sin descontar el hueco serían 5.
+    assert.equal(Math.round(liq.totalNocturnas * 100) / 100, 4);
+    assert.equal(Math.round(liq.totalDiurnas * 100) / 100, 2);
+    const libro = accumulatePayrollTurnoContribution(noche, { hoursMode: 'real', holidays: new Set() });
+    assert.equal(Math.round(libro.nocturnas * 100) / 100, 4);
+  });
+
+  it('tramo 2 sin ingreso marcado: se liquida lo fichado y queda a revisar', () => {
+    const sinTramo2 = cortado({
+      presenciaBloques: {
+        b1: { realStartTime: ts('2026-11-18T10:00:00-03:00'), realEndTime: ts('2026-11-18T13:00:00-03:00'), cerrado: true },
+      },
+    });
+    const liq = calculateLiquidationHoursStats([sinTramo2]);
+    assert.equal(liq.requiresReview, true);
+    assert.ok(liq.warnings.some((w: string) => w.includes('tramo 2')));
+    const libro = accumulatePayrollTurnoContribution(sinTramo2, { hoursMode: 'real', holidays: new Set() });
+    assert.ok(libro.warnings.some((w) => w.includes('tramo 2')));
+    // Con el ingreso del tramo 2 no hay aviso.
+    assert.equal(calculateLiquidationHoursStats([cortado()]).requiresReview, false);
+    assert.equal(accumulatePayrollTurnoContribution(cortado(), { hoursMode: 'real', holidays: new Set() }).warnings.length, 0);
+  });
+
   it('prefactura: se piden y se facturan 6 h, no 7', () => {
     const r = executedBillableHoursByFranja([cortado()]);
     assert.equal(r.totalRequested, 6);

@@ -1,4 +1,4 @@
-import { huecosPlanificadosCortado, solapeHuecosMs } from '../planning/turnoCortadoHoras';
+import { huecosPlanificadosCortado, solapeHuecosMs, tramosPlanificadosCortado } from '../planning/turnoCortadoHoras';
 
 const PAID_LEAVE = new Set(['V', 'L', 'PG', 'E', 'A']);
 const ZERO_HOUR_CODES = new Set(['F', 'FF', 'FP', 'V', 'L', 'PG', 'A', 'E', 'AA', 'RET']);
@@ -305,6 +305,20 @@ export function accumulatePayrollTurnoContribution(
   }
   night = Math.max(0, night);
   const day = Math.max(0, workDur - night);
+  const warningsCortado: string[] = [];
+  if (!isFT && ctx.hoursMode !== 'planned') {
+    const tramos = tramosPlanificadosCortado(data);
+    if (tramos) {
+      const pb = (data.presenciaBloques && typeof data.presenciaBloques === 'object' ? data.presenciaBloques : {}) as Record<string, { realStartTime?: unknown } | null | undefined>;
+      const faltantes: number[] = [];
+      for (let n = 2; n <= tramos.length; n += 1) {
+        if (!pb[`b${n}`]?.realStartTime) faltantes.push(n);
+      }
+      if (faltantes.length > 0) {
+        warningsCortado.push(`Turno cortado ${docId} (${codeRaw} ${dateKeyAR(start)}) sin ingreso marcado en el tramo ${faltantes.join(', ')} — a revisar.`);
+      }
+    }
+  }
   const plusFeriado = holidaysHas(ctx.holidays, start) ? workDur : 0;
   const desglose = breakdownForWorked(data, code, workDur, plannedDur, isFT);
 
@@ -329,7 +343,7 @@ export function accumulatePayrollTurnoContribution(
     nocturnas: night,
     al100FT: 0,
     plusFeriado,
-    warnings: [],
+    warnings: warningsCortado,
     skipped: false,
     desglose,
   };
