@@ -545,7 +545,8 @@ function useTurnosHoy({
           endTimeRaw: endTs,
           empresaId: String(shift.empresaId || ''),
           origin: String(shift.origin || '').toUpperCase() || undefined,
-          coverageUsed: shift.coverageUsed === true,
+          // Un RET que cubrió el resto de un retiro anticipado queda con coverageAssignedTo: también está usado.
+          coverageUsed: shift.coverageUsed === true || (code === 'RET' && !!shift.coverageAssignedTo),
           coverageDocId: String(shift.coverageDocId || '').trim() || undefined,
           coverageStatus: String(shift.coverageStatus || '').toUpperCase() || undefined,
           operacionallyCovered: shift.operacionallyCovered === true,

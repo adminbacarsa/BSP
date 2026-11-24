@@ -108,6 +108,10 @@ const turnosSnap = await db
   .collection('turnos')
   .where('startTime', '>=', admin.firestore.Timestamp.fromDate(desde))
   .where('startTime', '<', admin.firestore.Timestamp.fromDate(new Date(ahoraMs)))
+  .select(
+    'empresaId', 'employeeId', 'objectiveId', 'startTime', 'code', 'status', 'origin', 'draft', 'isDeleted',
+    'coverageSuperseded', 'isAbsent', 'deploymentRole', 'positionName',
+  )
   .get();
 
 /** empleadoId → objetivoId → acumulado. */

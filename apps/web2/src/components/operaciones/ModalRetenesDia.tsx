@@ -27,6 +27,8 @@ export interface RetenItem {
   dia: 'hoy' | 'manana';
   /** Estado operativo del RET hoy (ESPERANDO, PENDIENTE_WA, TARDANZA…): habilita «Disponible» / «Confirmar». */
   estadoRaw?: string;
+  /** Horario que el operador escribió para un objetivo suelto (se usa en {horarioDe}). */
+  horarioDestino?: string;
 }
 
 /** Retenes que pueden ir a un destino (ya con objetivo y horario del destino para armar el mensaje). */
@@ -107,10 +109,19 @@ const PLANTILLA_CONSULTA: Plantilla = {
   id: 'consulta',
   label: 'Consulta por el objetivo',
   texto:
-    '{nombre}, podemos necesitarte en {objetivo}. ¿Estás disponible y cuánto tardarías en llegar? Confirmá a la brevedad. — Operaciones',
+    '{nombre}, podemos necesitarte en {objetivo}{horarioDe}. ¿Estás disponible y cuánto tardarías en llegar? Confirmá a la brevedad. — Operaciones',
 };
 
 const MENSAJE_MAX = 400;
+
+/** Minúsculas y sin tildes, para buscar por nombre. */
+function normalizarBusqueda(s: string): string {
+  return s
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
 
 /** Valor del selector de destino para ver la lista completa de retenes. */
 export const TODOS_LOS_RETENES = '__todos__';
@@ -137,6 +148,7 @@ export function armarTextoReten(plantilla: string, item: RetenItem): string {
   const nombre = primerNombre(item.nombre);
   const cuando = item.dia === 'manana' ? 'mañana' : 'hoy';
   let texto = plantilla
+    .replace(/\{horarioDe\}/g, item.horarioDestino ? ` (${item.horarioDestino})` : '')
     .replace(/\{cuando\}/g, cuando)
     .replace(/\{horario\}/g, item.horario)
     .replace(/\{objetivo\}/g, item.objetivo);
@@ -173,6 +185,8 @@ export default function ModalRetenesDia({
   const [destinoKey, setDestinoKey] = useState('');
   const [orden, setOrden] = useState<OrdenRetenes>('cercania');
   const [verLejanos, setVerLejanos] = useState(false);
+  const [busqueda, setBusqueda] = useState('');
+  const [horarioObj, setHorarioObj] = useState('');
   const [seleccion, setSeleccion] = useState<Set<string>>(new Set());
   const [plantillaId, setPlantillaId] = useState<string>(PLANTILLAS[0].id);
   const [texto, setTexto] = useState<string>(PLANTILLAS[0].texto);
@@ -224,10 +238,14 @@ export default function ModalRetenesDia({
 
   const fueraDeRadio = paraDestino ? paraDestino.evaluados.filter((e) => !e.ev.dentroRadio).length : 0;
   // A más de 15 km se ocultan por defecto; sin dato de distancia no se ocultan.
+  const textoBusqueda = normalizarBusqueda(busqueda);
+  const coincideBusqueda = (it: RetenItem): boolean =>
+    !textoBusqueda || normalizarBusqueda(it.nombre).includes(textoBusqueda);
+  const horarioLibre = destino?.tipo === 'objetivo' ? horarioObj.trim() : '';
   const evaluadosVisibles = paraDestino
-    ? verLejanos
-      ? paraDestino.evaluados
-      : paraDestino.evaluados.filter((e) => e.ev.dentroRadio)
+    ? (verLejanos ? paraDestino.evaluados : paraDestino.evaluados.filter((e) => e.ev.dentroRadio))
+        .filter((e) => coincideBusqueda(e.item))
+        .map((e) => (horarioLibre ? { ...e, item: { ...e.item, horarioDestino: horarioLibre } } : e))
     : [];
   const evaluacionPorRow = useMemo(() => {
     const m = new Map<string, (typeof evaluadosVisibles)[number]['ev']>();
@@ -235,7 +253,9 @@ export default function ModalRetenesDia({
     return m;
   }, [evaluadosVisibles]);
 
-  const lista = paraDestino ? evaluadosVisibles.map((e) => e.item) : dia === 'hoy' ? hoy : manana;
+  const lista = paraDestino
+    ? evaluadosVisibles.map((e) => e.item)
+    : (dia === 'hoy' ? hoy : manana).filter(coincideBusqueda);
   const fechaDia = useMemo(() => {
     const base = (paraDestino?.esManana ?? dia === 'manana') ? addDays(new Date(), 1) : new Date();
     return format(base, 'dd/MM/yyyy');
@@ -407,6 +427,29 @@ export default function ModalRetenesDia({
             onChange={setDestinoKey}
             onOrden={setOrden}
           />
+        )}
+        {mostrarLista && (
+          <div className="flex flex-wrap items-center gap-2 px-4 py-2 border-b border-violet-100 bg-white">
+            <input
+              type="search"
+              value={busqueda}
+              onChange={(e) => setBusqueda(e.target.value)}
+              placeholder="Buscar retén por nombre…"
+              aria-label="Buscar retén por nombre"
+              className="flex-1 min-w-[180px] rounded-xl border border-slate-200 px-3 py-1.5 text-[12px] text-slate-700 focus:outline-none focus:ring-2 focus:ring-violet-300"
+            />
+            {destino?.tipo === 'objetivo' && (
+              <input
+                type="text"
+                value={horarioObj}
+                onChange={(e) => setHorarioObj(e.target.value)}
+                placeholder="Horario (opcional) · ej. 08:00–18:00"
+                aria-label="Horario para el aviso"
+                maxLength={40}
+                className="w-64 rounded-xl border border-slate-200 px-3 py-1.5 text-[12px] text-slate-700 focus:outline-none focus:ring-2 focus:ring-violet-300"
+              />
+            )}
+          </div>
         )}
         {paraDestino && (
           <div className="px-4 py-1.5 text-[10px] text-slate-500 border-b border-violet-100 bg-white">
