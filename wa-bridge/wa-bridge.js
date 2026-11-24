@@ -168,12 +168,26 @@ function nombrePila(pushName) {
   return n ? n.charAt(0).toUpperCase() + n.slice(1).toLowerCase() : '';
 }
 
-// Chat privado del guardia: por teléfono real si se conoce; si no, el JID con el que escribió al grupo.
-function jidDelGuardia(phone, senderJid) {
-  const num = String(phone || '').replace(/\D/g, '').replace(/^549/, '');
-  if (num.length >= 8) return `549${num}@s.whatsapp.net`;
+// phone → último JID real visto en un grupo (casi siempre @lid). Evita armar 549…@s.whatsapp.net
+// a ciegas: eso deja en el celular del guardia "Esperando el mensaje…".
+const phoneToJid = {};
+
+function recordarJidGuardia(phone, senderJid) {
+  const num = normPhone(phone);
   const jid = String(senderJid || '');
-  if (jid.endsWith('@s.whatsapp.net') || jid.endsWith('@lid')) return jid;
+  if (num.length < 8) return;
+  if (jid.endsWith('@lid') || jid.endsWith('@s.whatsapp.net')) {
+    phoneToJid[num] = jid;
+  }
+}
+
+// Preferir el JID del mensaje (LID). Si no está, el último LID de ese teléfono; recién después 549…
+function jidDelGuardia(phone, senderJid) {
+  const jid = String(senderJid || '');
+  if (jid.endsWith('@lid') || jid.endsWith('@s.whatsapp.net')) return jid;
+  const num = normPhone(phone);
+  if (num.length >= 8 && phoneToJid[num]) return phoneToJid[num];
+  if (num.length >= 8) return `549${num}@s.whatsapp.net`;
   return null;
 }
 
@@ -629,6 +643,7 @@ async function startWA() {
         : rawId.replace(/^549/, '');
       const pushName  = msg.pushName || rawId;
       if (isLid && !phone) console.log(`  ⚠ LID sin mapa aún: ${rawId} (${pushName}) — esperando sync de contactos`);
+      if (phone) recordarJidGuardia(phone, senderJid);
 
       // Cuando WhatsApp renueva la clave del grupo, el mensaje real viaja junto con un
       // senderKeyDistributionMessage (a veces como primera clave). El tipo es el del contenido real;
