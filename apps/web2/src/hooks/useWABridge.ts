@@ -324,13 +324,26 @@ export function useWABridge(
   }, []);
 
   const avisosRef = useRef<Set<string>>(new Set());
-  /** Una sola vez por mensaje y texto. El ingreso muy anticipado lo manda el sondeo y también el automático. */
-  const avisarGuardia = useCallback((id: string, phone: string | undefined, texto: string) => {
+  const avisosCoolRef = useRef<Map<string, number>>(new Map());
+  /** Una sola vez por mensaje; y como máximo uno por teléfono+tipo en 90 s (ubicación en vivo). */
+  const avisarGuardia = useCallback((
+    id: string,
+    phone: string | undefined,
+    texto: string,
+    kind?: string,
+  ) => {
     const url = bridgeUrlRef.current;
     const tel = String(phone || '').trim();
     if (!url || !id || !tel || !texto) return;
     const key = `${id}\n${texto}`;
     if (avisosRef.current.has(key)) return;
+    if (kind) {
+      const telNorm = tel.replace(/\D/g, '').replace(/^549/, '');
+      const coolKey = `${telNorm}|${kind}`;
+      const ahora = Date.now();
+      if (ahora - (avisosCoolRef.current.get(coolKey) || 0) < 90_000) return;
+      avisosCoolRef.current.set(coolKey, ahora);
+    }
     avisosRef.current.add(key);
     fetch(`${url}/reply`, {
       method: 'POST',
@@ -425,8 +438,9 @@ export function useWABridge(
             pendingRowIdsRef.current.has(rowId) || confirmedRowIdsRef.current.has(rowId),
         });
         // Solo lo que acaba de llegar: al abrir la planilla no se le escribe a todo el buffer del bridge.
+        // Destino = quien mandó (m.phone), no el teléfono del turno: si el match falla no le escribimos a otro.
         if (clasif.texto && Date.now() - msgMs <= 3 * 60 * 1000) {
-          avisarGuardia(m.id, clasif.turno?.phone || m.phone, clasif.texto);
+          avisarGuardia(m.id, m.phone, clasif.texto, clasif.aviso);
         }
         if (clasif.cortar || !clasif.turno) continue;
         const turno = clasif.turno as TurnoHoy;

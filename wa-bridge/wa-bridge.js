@@ -342,7 +342,15 @@ app.post('/reply', async (req, res) => {
   const senderJid = raw?.key?.participant || raw?.participant || '';
   const dest = jidDelGuardia(phone, senderJid);
   if (!dest) return res.json({ ok: false, error: 'sin destinatario' });
-  const ok = await responderDirecto(dest, String(text).slice(0, 500));
+  // Varias pestañas de Modo Rápido o ubicación en vivo: no repetir el mismo texto al mismo destino.
+  const cuerpo = String(text).slice(0, 500);
+  const clave = `${dest}|${cuerpo.slice(0, 120)}`;
+  const ahora = Date.now();
+  if (ahora - (ultimoAviso.get(clave) || 0) < AVISO_ESPERA) {
+    return res.json({ ok: true, deduped: true });
+  }
+  ultimoAviso.set(clave, ahora);
+  const ok = await responderDirecto(dest, cuerpo);
   res.json({ ok });
 });
 

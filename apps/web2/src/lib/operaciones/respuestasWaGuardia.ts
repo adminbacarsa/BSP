@@ -159,10 +159,18 @@ export function textoMarcaYaRecibidaWa(nombreCompleto: string): string {
 
 export type TurnoClasificacionWa = TurnoWaMatch & TurnoParaRespuestaWa & { realStartTime?: string };
 
+export type AvisoWaKind =
+  | 'sin_turno'
+  | 'turno_cerrado'
+  | 'ya_presente'
+  | 'marca_recibida'
+  | 'anticipado';
+
 /**
  * Qué contestarle al guardia cuando la foto o la ubicación no se confirma sola.
  * `cortar`: no sigue como check-in. Salida (presente y ya pasó el fin) y el ingreso
  * en horario devuelven texto vacío y cortar false: los resuelve Modo Rápido.
+ * `aviso`: clave para no spamear si la ubicación en vivo manda varios eventos.
  */
 export function clasificarIngresoWa(input: {
   turnos: readonly TurnoClasificacionWa[];
@@ -170,29 +178,60 @@ export function clasificarIngresoWa(input: {
   phone?: string | null;
   msgMs: number;
   yaMarcado: (rowId: string) => boolean;
-}): { texto: string | null; cortar: boolean; turno?: TurnoClasificacionWa } {
+}): {
+  texto: string | null;
+  cortar: boolean;
+  turno?: TurnoClasificacionWa;
+  aviso?: AvisoWaKind;
+} {
   const { turnos, name, phone, msgMs, yaMarcado } = input;
   const candidatos = candidatosTurnoWa(turnos, name, phone) as TurnoClasificacionWa[];
   const turno = elegirTurnoWa(turnos, name, phone, msgMs) as TurnoClasificacionWa | undefined;
   const quien = turno?.name || name;
   if (!turno) {
-    if (!candidatos.length) return { texto: textoSinTurnoWa(name), cortar: true };
-    return { texto: textoTurnoNoAbiertoWa(name, candidatos), cortar: true };
+    if (!candidatos.length) {
+      return { texto: textoSinTurnoWa(name), cortar: true, aviso: 'sin_turno' };
+    }
+    return {
+      texto: textoTurnoNoAbiertoWa(name, candidatos),
+      cortar: true,
+      aviso: 'turno_cerrado',
+    };
   }
   const st = String(turno.turnoStatus || 'PENDING').toUpperCase();
   if (st === 'PRESENT') {
     const fin = msDeRawWa(turno.endTimeRaw);
     if (fin > 0 && msgMs >= fin) return { texto: null, cortar: false, turno };
-    return { texto: textoYaPresenteWa(quien, turno), cortar: true, turno };
+    return {
+      texto: textoYaPresenteWa(quien, turno),
+      cortar: true,
+      turno,
+      aviso: 'ya_presente',
+    };
   }
   if (st === 'COMPLETED' || st === 'CANCELED' || st === 'CANCELLED' || st === 'ABSENT') {
-    return { texto: textoTurnoNoAbiertoWa(quien, [turno]), cortar: true, turno };
+    return {
+      texto: textoTurnoNoAbiertoWa(quien, [turno]),
+      cortar: true,
+      turno,
+      aviso: 'turno_cerrado',
+    };
   }
   if (turno.rowId && yaMarcado(turno.rowId)) {
-    return { texto: textoMarcaYaRecibidaWa(quien), cortar: true, turno };
+    return {
+      texto: textoMarcaYaRecibidaWa(quien),
+      cortar: true,
+      turno,
+      aviso: 'marca_recibida',
+    };
   }
   if (ingresoDemasiadoAnticipado(turno.startTimeRaw, msgMs)) {
-    return { texto: textoIngresoAnticipadoWa(quien, turno, msgMs), cortar: false, turno };
+    return {
+      texto: textoIngresoAnticipadoWa(quien, turno, msgMs),
+      cortar: false,
+      turno,
+      aviso: 'anticipado',
+    };
   }
   return { texto: null, cortar: false, turno };
 }
