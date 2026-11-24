@@ -44,8 +44,9 @@ export default function ExperienciaObjetivosPanel({
                 <div className="text-[11px] text-indigo-800 dark:text-indigo-200 leading-relaxed">
                     <p className="font-black uppercase mb-1">Historial por objetivo</p>
                     <p>
-                        Se actualiza automáticamente al guardar turnos en <strong>Planificación</strong>
-                        {' '}(ESC escuela, REF refuerzo, coberturas y turnos regulares).
+                        Se actualiza solo: al guardar ESC y REF en <strong>Planificación</strong> y, cada noche,
+                        {' '}recalculando los últimos 12 meses de turnos efectivamente trabajados (regulares, refuerzo y coberturas;
+                        {' '}no cuentan borradores, francos, licencias, ausencias ni retenes en stand-by).
                         Tras <strong>{ESCUELA_TURNOS_PARA_CONOCIDO} turnos ESC</strong> en un objetivo, el guardia pasa a <strong>Conocido</strong>.
                     </p>
                 </div>

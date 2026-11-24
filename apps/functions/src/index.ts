@@ -2462,6 +2462,7 @@ export { onNovedadCreated } from './notifications/onNovedadCreated';
 export { onTurnoWrite } from './notifications/onTurnoWrite';
 export { syncTurnoClientOwner } from './integrity/syncTurnoClientOwner';
 export { scheduledIntegrityScan } from './integrity/integrityScan';
+export { scheduledExperienciaObjetivos } from './rrhh/experienciaObjetivosJob';
 export { onCronogramaPublished } from './notifications/onCronogramaPublished';
 export { onEmployeeNotificationCreated } from './notifications/onEmployeeNotificationCreated';
 export { onVacanteCorrectionCreated } from './notifications/onVacanteCorrectionCreated';
