@@ -38,17 +38,45 @@ function statusOf(t: TurnoWaMatch): string {
   return String(t.turnoStatus || 'PENDING').toUpperCase();
 }
 
-/** Candidatos del mismo teléfono o, si no hay, del mismo nombre (fuzzy). */
+/** Tokens de nombre ≥ 4 letras, sin tildes, para comparar pushName vs legajo. */
+export function tokensNombreWa(value: string): string[] {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length >= 4);
+}
+
+/**
+ * El pushName de WhatsApp y el nombre del legajo deben compartir al menos un token.
+ * Evita cerrar el turno de Nahuel cuando manda Franco, aunque el teléfono en RRHH esté mal.
+ */
+export function nombresCompatiblesWa(pushName: string, employeeName: string): boolean {
+  const a = tokensNombreWa(pushName);
+  const b = new Set(tokensNombreWa(employeeName));
+  if (!a.length || !b.size) return true;
+  return a.some((t) => b.has(t));
+}
+
+/**
+ * Solo por teléfono. El match por nombre fuzzy cerraba turnos ajenos (Franco → Nahuel).
+ * `permitirNombre` queda por si hace falta en pantallas manuales; el automático no lo usa.
+ */
 export function candidatosTurnoWa(
   turnos: readonly TurnoWaMatch[],
   name: string,
   phone?: string | null,
+  opts?: { permitirNombre?: boolean },
 ): TurnoWaMatch[] {
   const np = normPhone(phone);
   if (np) {
     const byPhone = turnos.filter((t) => t.phone && normPhone(t.phone) === np);
-    if (byPhone.length) return byPhone;
+    if (byPhone.length) {
+      return byPhone.filter((t) => nombresCompatiblesWa(name, String(t.name || '')));
+    }
   }
+  if (!opts?.permitirNombre) return [];
   const pushName = (name || '').toLowerCase().trim();
   if (!pushName) return [];
   return turnos.filter((t) => {
@@ -68,8 +96,9 @@ export function elegirTurnoWa(
   name: string,
   phone?: string | null,
   msgMs?: number,
+  opts?: { permitirNombre?: boolean },
 ): TurnoWaMatch | undefined {
-  const candidatos = candidatosTurnoWa(turnos, name, phone);
+  const candidatos = candidatosTurnoWa(turnos, name, phone, opts);
   if (!candidatos.length) return undefined;
   const msg = msgMs && msgMs > 0 ? msgMs : Date.now();
 

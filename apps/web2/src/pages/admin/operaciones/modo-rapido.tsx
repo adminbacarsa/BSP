@@ -267,6 +267,7 @@ function minutesSinceExpected(
 
 type PresenciaMeta = {
   checkInSource: string;
+  checkOutSource: string;
   presenciaSource: string;
   checkInMethod: string;
   isPresent: boolean;
@@ -641,6 +642,7 @@ function useTurnosHoy({
             const esUltimo = i === tramos.length - 1;
             metaTramos[turnoTramo.rowId] = {
               checkInSource: i === 0 ? String(shift.checkInSource || '') : String(p.checkInSource || ''),
+              checkOutSource: i === 0 ? String(shift.checkOutSource || '') : String(p.checkOutSource || ''),
               presenciaSource: i === 0 ? String(shift.presenciaSource || '') : '',
               checkInMethod: i === 0 ? String(shift.checkInMethod || '') : '',
               isPresent: status === 'PRESENT',
@@ -687,6 +689,7 @@ function useTurnosHoy({
         const realEnd = shift.realEndTime as Timestamp | undefined;
         metaNext[d.id] = {
           checkInSource: String(shift.checkInSource || ''),
+          checkOutSource: String(shift.checkOutSource || ''),
           presenciaSource: String(shift.presenciaSource || ''),
           checkInMethod: String(shift.checkInMethod || ''),
           isPresent: shift.isPresent === true,
@@ -807,6 +810,11 @@ type FuenteMarca = 'WA' | 'Radio' | 'App' | 'Op' | '—';
 
 function fuenteDe(estado: GuardEstado, meta?: PresenciaMeta): FuenteMarca {
   if (estado === 'PENDIENTE_WA' || estado === 'PRESENTE_WA') return 'WA';
+  // Cerrado por salida WA: la columna refleja el egreso, no el ingreso (que pudo ser Op).
+  if (estado === 'CERRADO') {
+    const out = String(meta?.checkOutSource || '').toUpperCase();
+    if (out === 'WA' || out === 'WHATSAPP') return 'WA';
+  }
   const src = String(meta?.presenciaSource || meta?.checkInMethod || meta?.checkInSource || '').toUpperCase();
   if (src === 'PORTAL_GPS' || src === 'APP_GEO' || src === 'APP_QR') return 'App';
   if (src === 'MANUAL_RADIO' || src.includes('RADIO')) return 'Radio';
