@@ -105,6 +105,9 @@ function avisarUnaVez(destJid, tipo, texto) {
 }
 
 const messages        = [];
+// Bitácora liviana (sin fotos) de todo lo que llega, también lo que el panel descarta.
+const bitacora        = [];
+const BITACORA_MAX    = 200;
 let   availableGroups = [];
 const monitoredGroups = new Set();
 let   connected       = false;
@@ -123,9 +126,76 @@ app.get('/status', (req, res) => {
   res.json({ connected, groups: availableGroups, monitored: [...monitoredGroups], startedAt: STARTED_AT });
 });
 
+function anotarBitacora(entry) {
+  bitacora.unshift(entry);
+  if (bitacora.length > BITACORA_MAX) bitacora.pop();
+}
+
+function escHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+}
+
+function htmlBitacora() {
+  const filas = bitacora.map((m) => {
+    const mapa = m.lat != null && m.lng != null
+      ? `<a href="https://www.google.com/maps?q=${m.lat},${m.lng}" target="_blank" rel="noopener">${m.lat.toFixed(5)}, ${m.lng.toFixed(5)}</a>`
+      : '—';
+    const cuenta = m.cuenta
+      ? '<span class="si">entra</span>'
+      : `<span class="no">no</span>`;
+    return `<tr>
+      <td class="hora">${escHtml(m.time)}</td>
+      <td>${escHtml(m.name)}<div class="sub">${escHtml(m.phone || 'sin teléfono')}</div></td>
+      <td>${escHtml(m.group)}</td>
+      <td>${escHtml(m.que)}</td>
+      <td>${escHtml(m.text || '—')}</td>
+      <td>${mapa}</td>
+      <td>${cuenta}<div class="sub">${escHtml(m.motivo || '')}</div></td>
+    </tr>`;
+  }).join('');
+  const desde = new Date(STARTED_AT).toLocaleString('es-AR', { hour12: false, timeZone: 'America/Argentina/Buenos_Aires' });
+  const marca = String(process.env.WA_AUTH_DIR || '').replace(/^\.wa_auth_/, '') || `puerto ${PORT}`;
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>WA ${escHtml(marca)} · mensajes</title>
+<meta http-equiv="refresh" content="20">
+<style>
+  body{margin:0;font-family:Segoe UI,sans-serif;background:#f8fafc;color:#0f172a}
+  header{padding:16px 20px;background:#0f172a;color:#e2e8f0}
+  header h1{margin:0;font-size:16px}
+  header p{margin:6px 0 0;font-size:12px;color:#94a3b8}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{text-align:left;font-size:11px;letter-spacing:.04em;color:#64748b;padding:8px 10px;border-bottom:1px solid #e2e8f0}
+  td{padding:8px 10px;border-bottom:1px solid #e2e8f0;vertical-align:top}
+  tr:hover td{background:#eef2ff}
+  .hora{font-variant-numeric:tabular-nums;font-weight:700}
+  .sub{font-size:11px;color:#64748b;margin-top:2px}
+  .si{color:#047857;font-weight:700}.no{color:#b45309;font-weight:700}
+  a{color:#4338ca}
+  .vacio{padding:28px;color:#64748b}
+</style></head><body>
+<header>
+  <h1>Mensajes de WhatsApp · ${escHtml(marca)}</h1>
+  <p>${bitacora.length} en memoria · el bridge arrancó ${escHtml(desde)} · se actualiza solo · la hora no trae el día · <a href="?format=json" style="color:#c7d2fe">JSON</a></p>
+</header>
+${bitacora.length ? `<table><thead><tr><th>Hora</th><th>Quién</th><th>Grupo</th><th>Qué mandó</th><th>Texto</th><th>Ubicación</th><th>¿Entra al CC?</th></tr></thead><tbody>${filas}</tbody></table>` : '<p class="vacio">Todavía no llegó ningún mensaje desde que arrancó este proceso.</p>'}
+</body></html>`;
+}
+
+app.get('/log', (req, res) => {
+  res.set('Content-Type', 'text/html; charset=utf-8');
+  res.send(htmlBitacora());
+});
+
 app.get('/messages', (req, res) => {
   const since  = parseInt(req.query.since) || 0;
   const result = since ? messages.filter(m => m.ts > since - 10000) : messages.slice(0, 50);
+  const accept = String(req.get('accept') || '');
+  // El navegador abre esta URL para leer. Modo Rápido pide JSON (Accept */* o ?since=).
+  if (!since && req.query.format !== 'json' && accept.includes('text/html')) {
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    return res.send(htmlBitacora());
+  }
   res.json({ messages: result, ts: Date.now(), startedAt: STARTED_AT });
 });
 
@@ -404,7 +474,7 @@ async function startWA() {
       if (!jid.endsWith('@g.us')) continue; // solo grupos
 
       // Deduplicar: Baileys puede disparar el mismo mensaje varias veces
-      if (msg.key.id && messages.some(m => m.id === msg.key.id)) continue;
+      if (msg.key.id && (messages.some(m => m.id === msg.key.id) || bitacora.some(m => m.id === msg.key.id))) continue;
 
       if (monitoredGroups.size > 0 && !monitoredGroups.has(jid)) continue;
 
@@ -483,6 +553,10 @@ async function startWA() {
           };
           messages.unshift(proto);
           if (messages.length > MAX_MSGS) messages.pop();
+          anotarBitacora({
+            id: proto.id, ts: proto.ts, time: proto.time, name: pushName, phone, group: groupName,
+            que: 'Clave del grupo', text: '', cuenta: false, motivo: 'no es un mensaje del guardia',
+          });
           console.log(`  [protocol] ${groupName} | ${pushName}: clave WA renovada - pedirle que reenvie`);
         }
         // Avisos al guardia (no a los mensajes propios del bridge): ubicación fija o "presente" sin foto.
@@ -500,6 +574,30 @@ async function startWA() {
               `⚠️ ${saludo}para registrar tu ingreso en el grupo ${groupName} enviá una *foto* o tu *ubicación en tiempo real*. El texto solo no alcanza.`);
           }
         }
+        const queSkip = msgType === 'locationMessage'
+          ? 'Ubicación fija'
+          : msgType === 'senderKeyDistributionMessage'
+            ? 'Clave del grupo'
+            : 'Texto';
+        const motivoSkip = msgType === 'locationMessage'
+          ? 'el panel solo toma foto o ubicación en vivo'
+          : msgType === 'senderKeyDistributionMessage'
+            ? 'no es un mensaje del guardia'
+            : 'sin foto ni ubicación en vivo';
+        anotarBitacora({
+          id: msg.key.id,
+          ts: ((msg.messageTimestamp || 0) * 1000) || Date.now(),
+          time: new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false }),
+          name: pushName,
+          phone,
+          group: groupName,
+          que: queSkip,
+          text: String(text || '').slice(0, 140),
+          lat: locationData?.lat,
+          lng: locationData?.lng,
+          cuenta: false,
+          motivo: motivoSkip,
+        });
         console.log(`  [skip] ${groupName} | ${pushName}: type=${msgType} text="${text.slice(0, 80)}"`);
         continue;
       }
@@ -522,18 +620,31 @@ async function startWA() {
         location: locationData,
       };
 
+      anotarBitacora({
+        id: entry.id,
+        ts: entry.ts,
+        time: entry.time,
+        name: entry.name,
+        phone: entry.phone,
+        group: entry.group,
+        que: hasLiveLocation ? 'Ubicación en vivo' : 'Foto',
+        text: String(text || '').slice(0, 140),
+        lat: locationData?.lat,
+        lng: locationData?.lng,
+        cuenta: true,
+        motivo: 'check-in o salida',
+      });
       console.log(`[${entry.time}] [${type}] ${entry.group} | ${entry.name} (${entry.phone}): "${text.slice(0, 60)}"${hasPhoto ? ' 📸' : ''}${hasLocation ? ` 📍(${locationData?.lat?.toFixed(4)},${locationData?.lng?.toFixed(4)})` : ''}`);
 
       messages.unshift(entry);
       if (messages.length > MAX_MSGS) messages.pop();
 
-      // Acuse de recibo por mensaje privado (el de confirmación lo manda la planilla cuando el
-      // operador confirma la presencia).
+      // Acuse corto: la planilla responde según el caso (confirmado, lejos, muy anticipado, salida).
       if (RESPONDER && !msg.key.fromMe) {
         guardarRaw(msg);
         const nombre = nombrePila(pushName);
         avisarUnaVez(jidDelGuardia(phone, senderJid), 'recibido',
-          `📥 ${nombre ? `${nombre}, r` : 'R'}ecibimos tu mensaje del grupo ${groupName}. En breve el Centro de Control confirma tu presencia.`);
+          `📥 ${nombre ? `${nombre}, r` : 'R'}ecibimos tu ${hasLiveLocation ? 'ubicación' : 'foto'} del grupo ${groupName}. Te respondemos en un momento.`);
       }
     }
   });

@@ -1,4 +1,5 @@
 import { FieldValue, Timestamp, type Firestore } from 'firebase-admin/firestore';
+import { seriesHandoffKind } from '../common/shiftSeries';
 import { closeTimeMs, computeShiftCloseTimes } from '../scheduling/shiftCloseCore';
 
 /** Ventana en la que un turno se considera relevo del saliente (misma regla que el cierre automático). */
@@ -39,9 +40,9 @@ export type PortalCheckOutResult = {
 export type EstadoRelevoSalida = { programado: boolean; presente: boolean };
 
 /**
- * Relevo del saliente entre los turnos del mismo objetivo que empiezan cerca de su fin: mismo puesto,
- * otra persona, no franco/licencia/RET/ESC/REF, publicado y no cancelado. «Programado» incluye al
- * ausente o al que todavía no llegó (hay a quién esperar); «presente» es el que ya fichó.
+ * Relevo del saliente: solo puesto 24 h (M→T→N o D12↔N12), mismo puesto, otra persona,
+ * que empieza cerca del fin. C0, C1 y cualquier código que no sea esa serie no relevan.
+ * «Programado» incluye al ausente o al que todavía no llegó; «presente» es el que ya fichó.
  */
 export function evaluarRelevoSalida(
   saliente: Record<string, unknown>,
@@ -54,6 +55,7 @@ export function evaluarRelevoSalida(
   for (const { id, data } of candidatos) {
     if (id === salienteId) continue;
     if (puesto && data.positionName && String(data.positionName).trim() !== puesto) continue;
+    if (seriesHandoffKind(saliente.code, data.code) !== 'SERIES') continue;
     const eid = String(data.employeeId || '').trim();
     if (!eid || eid === 'VACANTE' || eid === empId || data.isUnassigned === true) continue;
     if (data.draft === true) continue;

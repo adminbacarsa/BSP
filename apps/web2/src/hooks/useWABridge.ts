@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { elegirTurnoWa } from '@/lib/operaciones/elegirTurnoWa';
 
 export interface WAEntry {
   id: string;
@@ -187,33 +188,24 @@ function calcTardanzaMins(arrivedAt: string, expected?: string): number | undefi
   }
 }
 
-function findTurno(
-  turnos: Record<string, TurnoHoy>,
-  name: string,
-  phone?: string | null,
-): TurnoHoy | undefined {
-  // 1. Match por teléfono (más confiable — el nombre WA puede diferir)
-  if (phone) {
-    const normPhone = String(phone).replace(/\D/g, '').replace(/^549/, '');
-    if (normPhone) {
-      const byPhone = Object.values(turnos).find(
-        (t) => t.phone && t.phone.replace(/\D/g, '') === normPhone,
-      );
-      if (byPhone) return byPhone;
-    }
+/** Una fila por rowId: el dict «vigente» más los tramos extra del mismo día. */
+function listaTurnosWa(turnos: Record<string, TurnoHoy>, extras: readonly TurnoHoy[]): TurnoHoy[] {
+  const byId = new Map<string, TurnoHoy>();
+  for (const t of Object.values(turnos)) {
+    if (t?.rowId) byId.set(t.rowId, t);
   }
-
-  // 2. Fallback: match por nombre (fuzzy)
-  const pushName = (name || '').toLowerCase();
-  if (!pushName) return undefined;
-  const key = Object.keys(turnos).find((k) => {
-    const kk = k.toLowerCase();
-    return pushName.includes(kk) || kk.includes(pushName);
-  });
-  return key ? turnos[key] : undefined;
+  for (const t of extras) {
+    if (t?.rowId) byId.set(t.rowId, t);
+  }
+  return [...byId.values()];
 }
 
-export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string | null): UseWABridgeReturn {
+export function useWABridge(
+  turnos: Record<string, TurnoHoy>,
+  empresaId?: string | null,
+  /** Tramos abiertos que no quedaron en el dict por nombre (p. ej. tramo 1 de un cortado). */
+  extras: readonly TurnoHoy[] = [],
+): UseWABridgeReturn {
   _lsEmpresaId = empresaId ?? null;
   const [status, setStatus] = useState<WABridgeStatus>('idle');
   const [badge, setBadge] = useState(0);
@@ -232,11 +224,16 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
   const pendingRowIdsRef = useRef<Set<string>>(new Set());
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const turnosRef = useRef(turnos);
+  const extrasRef = useRef(extras);
   const confirmedRowIdsRef = useRef(confirmedRowIds);
 
   useEffect(() => {
     turnosRef.current = turnos;
   }, [turnos]);
+
+  useEffect(() => {
+    extrasRef.current = extras;
+  }, [extras]);
 
   useEffect(() => {
     confirmedRowIdsRef.current = confirmedRowIds;
@@ -247,7 +244,7 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
   useEffect(() => {
     if (pending.length === 0) return;
     const resueltos = new Set(
-      Object.values(turnos)
+      listaTurnosWa(turnos, extras)
         .filter((t) => t.turnoStatus === 'PRESENT' || t.turnoStatus === 'COMPLETED')
         .map((t) => t.rowId),
     );
@@ -260,13 +257,13 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
     const ids = new Set(obsoletos.map((e) => e.id));
     setPending((prev) => prev.filter((e) => !ids.has(e.id)));
     setBadge((b) => Math.max(0, b - obsoletos.length));
-  }, [turnos, pending]);
+  }, [turnos, extras, pending]);
 
   // Un aviso de salida de un turno que ya se cerró (acá o en otra pantalla) no tiene nada más que hacer.
   useEffect(() => {
     if (salidas.length === 0) return;
     const cerrados = new Set(
-      Object.values(turnos)
+      listaTurnosWa(turnos, extras)
         .filter((t) => t.turnoStatus === 'COMPLETED')
         .map((t) => t.rowId),
     );
@@ -275,7 +272,7 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
       const sigue = prev.filter((e) => !(e.rowId && cerrados.has(e.rowId)));
       return sigue.length === prev.length ? prev : sigue;
     });
-  }, [turnos, salidas]);
+  }, [turnos, extras, salidas]);
 
   useEffect(() => {
     try {
@@ -399,14 +396,19 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
         // el puntero se reinicia): nunca son una llegada de hoy.
         if (typeof m.ts === 'number' && m.ts > 0 && m.ts < inicioDeHoyMs()) continue;
 
-        const turno = findTurno(turnosRef.current, m.name, m.phone);
+        const msgMs = typeof m.ts === 'number' && m.ts > 0 ? m.ts : Date.now();
+        const turno = elegirTurnoWa(
+          listaTurnosWa(turnosRef.current, extrasRef.current),
+          m.name,
+          m.phone,
+          msgMs,
+        ) as TurnoHoy | undefined;
         // Regla 1: sin turno planificado hoy → descartar
         if (!turno) continue;
         // Regla 2: ya presente en plataforma → no es un check-in. Si el turno ya terminó y el guardia
         // manda su ubicación, es el aviso de salida; si no, se descarta.
         if (turno.turnoStatus === 'PRESENT') {
           const finMs = msDeRaw(turno.endTimeRaw);
-          const msgMs = typeof m.ts === 'number' && m.ts > 0 ? m.ts : Date.now();
           if (
             m.location &&
             turno.rowId &&
@@ -465,6 +467,7 @@ export function useWABridge(turnos: Record<string, TurnoHoy>, empresaId?: string
           obj: turno?.obj,
           objLat: turno?.objLat,
           objLng: turno?.objLng,
+          msgTs: msgMs,
         };
 
         if (entry.rowId) pendingRowIdsRef.current.add(entry.rowId);

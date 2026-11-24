@@ -85,7 +85,16 @@ import { readPreferOpsModoRapido, writePreferOpsModoRapido } from '@/lib/panelVi
 import { isRevertAbsenceExpired } from '@/lib/operaciones/revertAbsenceWindow';
 import { arHmOnYmdMs, arYmd } from '@/lib/arClock';
 import { isRestFrancoShift } from '@/hooks/useOperacionesMonitor';
-import { computeShiftCloseTimes } from '@cosp/ops-core';
+import { computeShiftCloseTimes, seriesHandoffKind } from '@cosp/ops-core';
+import {
+  ingresoDemasiadoAnticipado,
+  textoConfirmacionIngresoWa,
+  textoFueraDeRadioWa,
+  textoIngresoAnticipadoWa,
+  textoSalidaAntesDeFinWa,
+  textoSalidaRegistradaWa,
+  WA_RADIO_MAX_M,
+} from '@/lib/operaciones/respuestasWaGuardia';
 import {
   TurnoHoy,
   UseWABridgeReturn,
@@ -838,6 +847,9 @@ const esRelevoDe = (row: GuardRowModel, o: GuardRowModel, incluirAusentes = fals
   if (o.turno.rowId === row.turno.rowId) return false;
   if (!row.turno.objectiveId || o.turno.objectiveId !== row.turno.objectiveId) return false;
   if (row.turno.positionName && o.turno.positionName && row.turno.positionName !== o.turno.positionName) return false;
+  // Relevo solo en puesto 24 h: M→T→N (M2→T2) o D12↔N12. C0, C1, EN, SA y el resto
+  // no se relevan aunque compartan objetivo y nombre de puesto.
+  if (seriesHandoffKind(row.turno.code, o.turno.code) !== 'SERIES') return false;
   if (o.turno.employeeId && o.turno.employeeId === row.turno.employeeId) return false;
   if (CODIGOS_SIN_RELEVO.has(String(o.turno.code || "").toUpperCase())) return false;
   if (o.estado === "CERRADO") return false;
@@ -867,8 +879,8 @@ function buscarRelevo(row: GuardRowModel, rows: GuardRowModel[]): GuardRowModel 
 }
 
 /**
- * El puesto tiene un relevo programado para este turno (aunque todavía no haya llegado o esté ausente).
- * Si no hay ninguno, el servicio termina con este guardia y no hay nadie a quien esperar.
+ * Puesto 24 h con relevo de la serie siguiente (aunque todavía no haya llegado o esté ausente).
+ * Un código que no es 24 h no tiene relevo: el servicio termina con este guardia.
  */
 function hayRelevoProgramado(row: GuardRowModel, rows: GuardRowModel[]): boolean {
   return rows.some((o) => esRelevoDe(row, o, true));
@@ -950,15 +962,7 @@ const ORDEN_OPCIONES: Array<{ id: OrdenModo; label: string; title: string; icon:
 
 /** Texto que el bridge le manda al guardia cuando el operador confirma su ingreso. */
 function textoConfirmacionWA(nombreCompleto: string, hora: string, turno?: TurnoHoy): string {
-  const crudo = String(nombreCompleto || '').trim();
-  const pila = (crudo.includes(',') ? crudo.split(',')[1] : crudo).trim().split(/\s+/)[0] || '';
-  const nombre = pila ? pila.charAt(0).toUpperCase() + pila.slice(1).toLowerCase() : '';
-  const tramo =
-    turno && turno.bloquesTotal && turno.bloquesTotal > 1 && turno.bloque
-      ? ` (tramo ${turno.bloque} de ${turno.bloquesTotal})`
-      : '';
-  const donde = turno?.obj && turno.obj !== '—' ? ` en ${turno.obj}` : '';
-  return `✅ ${nombre ? `${nombre}, ` : ''}recibimos tu ingreso y se confirmó tu presencia a las ${hora}${tramo}${donde}. ¡Gracias!`;
+  return textoConfirmacionIngresoWa(nombreCompleto, hora, turno);
 }
 
 function RelojCabecera() {
@@ -2754,7 +2758,7 @@ function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): num
 }
 
 /** Radio (m) dentro del cual un check-in o una salida por WhatsApp con ubicación se confirma sola. */
-const AUTO_WA_RADIO_M = 80;
+const AUTO_WA_RADIO_M = WA_RADIO_MAX_M;
 
 /**
  * Un check-in de WhatsApp se puede confirmar sin operador cuando está atado a un turno de hoy y trae
@@ -3095,7 +3099,7 @@ export default function ModoRapidoPage() {
     scopeEmpresa,
   });
   const { turnos, loading, francos, presenciaMeta, cerrados, clientePorObj, retenesManana, tramosExtra, empInfo } = turnosData;
-  const wa = useWABridge(turnos, empresaId);
+  const wa = useWABridge(turnos, empresaId, tramosExtra);
 
   const [bridgeUrl, setBridgeUrl] = useState('');
   const [bridgeCfg, setBridgeCfg] = useState<'cargando' | 'ok' | 'sin_config'>('cargando');
@@ -3352,8 +3356,8 @@ export default function ModoRapidoPage() {
     const docId = docIdDe(turnoId);
     const tramo = indiceTramoDe(turnoId) + 1;
 
-    // Misma regla de pago que `resolveCheckInPayClock` (app/portal): hasta T+5 el reloj de pago es
-    // el inicio planificado (o el adelanto formal). La marca temprana no suma minutos a liquidación.
+    // CC / FICHADA: siempre la hora que marcó. Liquidación clampea al inicio planificado
+    // (salvo adelanto formal isEarlyStart). T+5 solo define si es llegada tarde.
     const snap = await leerTurnoRapido(docId);
     const data = (snap.data() || {}) as Record<string, unknown>;
     const bloques = bloquesDelTurno(data.blocks);
@@ -3369,9 +3373,7 @@ export default function ModoRapidoPage() {
     const PAY_GRACE_MS = 5 * 60 * 1000;
     const pastGrace =
       !Number.isNaN(payAnchorMs) && payAnchorMs > 0 && punchMs > payAnchorMs + PAY_GRACE_MS;
-    const realStartMs =
-      pastGrace || Number.isNaN(payAnchorMs) || payAnchorMs <= 0 ? punchMs : payAnchorMs;
-    const realTs = Timestamp.fromMillis(realStartMs);
+    const realTs = Timestamp.fromMillis(punchMs);
     const isLate = pastGrace;
     const lateMinutes = pastGrace
       ? Math.max(0, Math.round((punchMs - payAnchorMs) / 60000))
@@ -3392,7 +3394,8 @@ export default function ModoRapidoPage() {
           isAwaitingCoverageCheckIn: false,
           realStartTime: realTs,
           checkInSource: source,
-          checkInAt: serverTimestamp(),
+          checkInAt: realTs,
+          checkInTime: realTs,
           isLate,
           lateMinutes,
         }),
@@ -5689,9 +5692,19 @@ export default function ModoRapidoPage() {
 
   const handleConfirmarWA = async (row: GuardRowModel) => {
     if (busy || !row.pendingEntry) return;
+    const entry = row.pendingEntry;
+    const marca = entry.msgTs ?? Date.now();
+    if (ingresoDemasiadoAnticipado(row.turno.startTimeRaw, marca)) {
+      wa.responder(entry, textoIngresoAnticipadoWa(row.employeeName, row.turno, marca));
+      wa.dismissEntry(entry);
+      showToast(
+        `Muy anticipado · ${row.employeeName}: presencia recién desde 30 min antes del inicio`,
+        'bg-amber-700',
+      );
+      return;
+    }
     setBusy(true);
     try {
-      const entry = row.pendingEntry;
       wa.confirmEntry(entry);
       if (entry.rowId) {
         await marcarPresente(
@@ -5749,6 +5762,32 @@ export default function ModoRapidoPage() {
       const entry = row.pendingEntry;
       if (!entry || row.estado !== 'PENDIENTE_WA') continue;
       if (autoWaProcesadosRef.current.has(entry.id)) continue;
+      const marca = entry.msgTs ?? Date.now();
+
+      if (ingresoDemasiadoAnticipado(row.turno.startTimeRaw, marca)) {
+        autoWaProcesadosRef.current.add(entry.id);
+        wa.responder(entry, textoIngresoAnticipadoWa(row.employeeName, row.turno, marca));
+        wa.dismissEntry(entry);
+        showToast(
+          `WA anticipado · ${row.employeeName}: le avisamos que marque desde 30 min antes`,
+          'bg-amber-700',
+        );
+        continue;
+      }
+
+      if (entry.hasLocation && entry.lat != null && entry.lng != null && entry.objLat != null && entry.objLng != null) {
+        const distM = haversineM(entry.lat, entry.lng, entry.objLat, entry.objLng);
+        if (distM > AUTO_WA_RADIO_M) {
+          autoWaProcesadosRef.current.add(entry.id);
+          wa.responder(entry, textoFueraDeRadioWa(row.employeeName, distM, 'ingreso'));
+          showToast(
+            `WA lejos · ${row.employeeName} a ${distM} m (máx. ${AUTO_WA_RADIO_M}): le pedimos que se acerque`,
+            'bg-amber-700',
+          );
+          continue;
+        }
+      }
+
       if (!entradaWaVerificada(entry)) continue;
       autoWaProcesadosRef.current.add(entry.id);
       void autoConfirmarWA(row, entry);
@@ -5757,27 +5796,31 @@ export default function ModoRapidoPage() {
   }, [classifiedRows, autoWa]);
 
   /**
-   * Salida por WhatsApp: el guardia mandó su ubicación una vez finalizado el turno. Si está a menos de
-   * AUTO_WA_RADIO_M del objetivo y hay un relevo presente, el turno se cierra a la hora del mensaje y se
-   * guarda la ubicación. Sin relevo queda retenido (aviso en la fila) hasta que el operador lo cierre.
+   * Salida por WhatsApp: ubicación a menos de AUTO_WA_RADIO_M, ya pasado el fin planificado.
+   * Cierra si no hay relevo de serie 24 h o si ese relevo ya está presente. El egreso no queda
+   * antes del fin planificado. Si el relevo 24 h todavía no llegó, el aviso queda en la fila.
    */
-  async function autoCerrarPorWA(row: GuardRowModel, entry: WAEntry) {
+  async function autoCerrarPorWA(row: GuardRowModel, entry: WAEntry, finMs?: number) {
     const tieneUbicacion = entry.lat != null && entry.lng != null;
     const distM =
       tieneUbicacion && entry.objLat != null && entry.objLng != null
         ? haversineM(entry.lat as number, entry.lng as number, entry.objLat, entry.objLng)
         : undefined;
+    const cierreMs = finMs ?? entry.msgTs ?? Date.now();
     const ok = await cerrarTurno(row, {
       auto: true,
-      finMs: entry.msgTs ?? Date.now(),
+      finMs: cierreMs,
       ubicacion: tieneUbicacion ? { lat: entry.lat as number, lng: entry.lng as number, distM } : undefined,
     });
     if (!ok) return;
     wa.consumirSalida(entry);
-    const nombre = row.employeeName.includes(',')
-      ? row.employeeName.split(',')[1].trim().split(' ')[0]
-      : row.employeeName.split(' ')[0];
-    wa.responder(entry, `Salida registrada a las ${entry.arrivedAt}. Gracias, ${nombre}.`);
+    const hora = new Date(cierreMs).toLocaleTimeString('es-AR', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+      timeZone: 'America/Argentina/Buenos_Aires',
+    });
+    wa.responder(entry, textoSalidaRegistradaWa(row.employeeName, hora));
   }
 
   const autoSalidaProcesadosRef = useRef<Set<string>>(new Set());
@@ -5787,12 +5830,41 @@ export default function ModoRapidoPage() {
       if (autoSalidaProcesadosRef.current.has(entry.id)) continue;
       const row = classifiedRows.find((r) => r.turno.rowId === entry.rowId);
       if (!row || !estaPresente(row)) continue;
+
+      const finPlan = toStartMs(row.turno.endTimeRaw);
+      const marca = entry.msgTs ?? Date.now();
+      // Antes del fin: le avisamos; el aviso queda en la fila y se cierra al llegar la hora si está en radio.
+      if (Number.isFinite(finPlan) && finPlan > 0 && Date.now() < finPlan) {
+        if (!autoSalidaProcesadosRef.current.has(`early:${entry.id}`)) {
+          autoSalidaProcesadosRef.current.add(`early:${entry.id}`);
+          wa.responder(
+            entry,
+            textoSalidaAntesDeFinWa(row.employeeName, row.salida || formatHHMM(row.turno.endTimeRaw as never)),
+          );
+        }
+        continue;
+      }
+
+      if (entry.lat != null && entry.lng != null && entry.objLat != null && entry.objLng != null) {
+        const distM = haversineM(entry.lat, entry.lng, entry.objLat, entry.objLng);
+        if (distM > AUTO_WA_RADIO_M) {
+          autoSalidaProcesadosRef.current.add(entry.id);
+          wa.responder(entry, textoFueraDeRadioWa(row.employeeName, distM, 'salida'));
+          showToast(
+            `Salida lejos · ${row.employeeName} a ${distM} m: le pedimos que se acerque`,
+            'bg-amber-700',
+          );
+          continue;
+        }
+      }
+
       if (!entradaWaVerificada(entry)) continue;
-      // Sin relevo programado el servicio termina con este guardia: se cierra. Con relevo programado
-      // hay que esperar a que esté presente.
+      // Sin relevo de serie 24 h el servicio termina con este guardia: se cierra. Con relevo
+      // programado hay que esperar a que esté presente.
       if (hayRelevoProgramado(row, classifiedRows) && !hayRelevoLibre(row, classifiedRows)) continue;
+      const finCierre = Number.isFinite(finPlan) && finPlan > 0 ? Math.max(marca, finPlan) : marca;
       autoSalidaProcesadosRef.current.add(entry.id);
-      void autoCerrarPorWA(row, entry);
+      void autoCerrarPorWA(row, entry, finCierre);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- autoCerrarPorWA usa solo refs y callbacks estables de la sesión
   }, [classifiedRows, wa.salidas, autoWa]);
@@ -5820,6 +5892,20 @@ export default function ModoRapidoPage() {
 
   const handleConfirmEntrySidebar = async (entry: WAEntry) => {
     if (busy) return;
+    const turnoSide =
+      (entry.rowId && Object.values(turnos).find((t) => t.rowId === entry.rowId)) ||
+      (entry.rowId && tramosExtra.find((t) => t.rowId === entry.rowId));
+    const marca = entry.msgTs ?? Date.now();
+    if (turnoSide && ingresoDemasiadoAnticipado(turnoSide.startTimeRaw, marca)) {
+      const nombre = turnoSide.name || entry.name;
+      wa.responder(entry, textoIngresoAnticipadoWa(nombre, turnoSide, marca));
+      wa.dismissEntry(entry);
+      showToast(
+        `Muy anticipado · ${nombre}: presencia recién desde 30 min antes del inicio`,
+        'bg-amber-700',
+      );
+      return;
+    }
     setBusy(true);
     try {
       wa.confirmEntry(entry);
@@ -5837,7 +5923,7 @@ export default function ModoRapidoPage() {
         );
         wa.responder(
           entry,
-          textoConfirmacionWA(empName, entry.arrivedAt || nowHHMM(), Object.values(turnos).find((t) => t.rowId === entry.rowId)),
+          textoConfirmacionWA(empName, entry.arrivedAt || nowHHMM(), turnoSide || Object.values(turnos).find((t) => t.rowId === entry.rowId)),
         );
       }
       showToast(`Confirmado WA · ${entry.name}`, 'bg-emerald-700');
