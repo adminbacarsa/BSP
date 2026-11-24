@@ -3344,12 +3344,37 @@ export default function ModoRapidoPage() {
     realTime: string,
     source: 'WA' | 'MANUAL' | 'MANUAL_RADIO',
   ) {
-    const today = new Date();
+    const punchDate = new Date();
     const [hh, mm] = realTime.split(':').map(Number);
-    today.setHours(hh, mm, 0, 0);
-    const realTs = Timestamp.fromDate(today);
+    punchDate.setHours(hh, mm, 0, 0);
+    const punchMs = punchDate.getTime();
     const docId = docIdDe(turnoId);
     const tramo = indiceTramoDe(turnoId) + 1;
+
+    // Misma regla de pago que `resolveCheckInPayClock` (app/portal): hasta T+5 el reloj de pago es
+    // el inicio planificado (o el adelanto formal). La marca temprana no suma minutos a liquidación.
+    const snap = await leerTurnoRapido(docId);
+    const data = (snap.data() || {}) as Record<string, unknown>;
+    const bloques = bloquesDelTurno(data.blocks);
+    const baseMs = toStartMs(data.startTime);
+    let payAnchorMs = baseMs;
+    if (tramo === 1 && data.isEarlyStart === true) {
+      const adj = toStartMs(data.adjustedStartTime);
+      if (!Number.isNaN(adj) && adj > 0) payAnchorMs = adj;
+    } else if (tramo > 1 && bloques && !Number.isNaN(baseMs)) {
+      const tr = tramosDeTurno(baseMs, bloques)[tramo - 1];
+      if (tr) payAnchorMs = tr.startMs;
+    }
+    const PAY_GRACE_MS = 5 * 60 * 1000;
+    const pastGrace =
+      !Number.isNaN(payAnchorMs) && payAnchorMs > 0 && punchMs > payAnchorMs + PAY_GRACE_MS;
+    const realStartMs =
+      pastGrace || Number.isNaN(payAnchorMs) || payAnchorMs <= 0 ? punchMs : payAnchorMs;
+    const realTs = Timestamp.fromMillis(realStartMs);
+    const isLate = pastGrace;
+    const lateMinutes = pastGrace
+      ? Math.max(0, Math.round((punchMs - payAnchorMs) / 60000))
+      : 0;
 
     if (tramo === 1) {
       // `isPresent` es lo que leen el CC clásico, el cierre automático y la protección contra la
@@ -3367,6 +3392,8 @@ export default function ModoRapidoPage() {
           realStartTime: realTs,
           checkInSource: source,
           checkInAt: serverTimestamp(),
+          isLate,
+          lateMinutes,
         }),
         'la presencia',
       );
@@ -3374,10 +3401,6 @@ export default function ModoRapidoPage() {
       // Tramo 2+ de un turno cortado: la presencia vive en `presenciaBloques.bN`. El turno pasa a
       // PRESENT y su fin planificado se corre al fin de este tramo para que el cierre automático
       // del servidor (que solo conoce el primer tramo) no lo cierre en el corte.
-      const snap = await leerTurnoRapido(docId);
-      const data = (snap.data() || {}) as Record<string, unknown>;
-      const bloques = bloquesDelTurno(data.blocks);
-      const baseMs = toStartMs(data.startTime);
       const patch: Record<string, unknown> = {
         status: 'PRESENT',
         isPresent: true,

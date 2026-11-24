@@ -1354,24 +1354,35 @@ export default function ReportsPage() {
 
                 const isFF = s.isFrancoCompensatorio || rawCode === 'FF';
 
-                const rStart = usePlannedHours ? null : (s.realStartTime?.seconds ? new Date(s.realStartTime.seconds*1000) : s.checkInTime?.seconds ? new Date(s.checkInTime.seconds*1000) : null);
+                // FICHADA (auditoría): hora real de marca. LIQ: misma regla que el agregado —
+                // inicio planificado salvo adelanto formal; fin planificado salvo retención.
+                const rStartRaw = usePlannedHours ? null : (s.realStartTime?.seconds ? new Date(s.realStartTime.seconds*1000) : s.checkInTime?.seconds ? new Date(s.checkInTime.seconds*1000) : s.checkInAt?.seconds ? new Date(s.checkInAt.seconds*1000) : null);
                 const rEndRaw = usePlannedHours ? null : (s.realEndTime?.seconds  ? new Date(s.realEndTime.seconds*1000)   : s.checkOutTime?.seconds ? new Date(s.checkOutTime.seconds*1000) : null);
+                const isEarlyStartShift = s.isEarlyStart === true;
+                const isRetentionShift = s.isRetention === true || (s.retentionMinutes ?? 0) > 0;
+                const rStart = rStartRaw;
                 // Relevo anticipado: si salió antes del fin planificado → crédito hasta fin planificado
                 const rEnd   = rEndRaw && endSec && rEndRaw < end ? end : rEndRaw;
+                const payStart = rStartRaw
+                    ? (isEarlyStartShift ? rStartRaw : start)
+                    : null;
+                const payEnd = rEndRaw
+                    ? (endSec
+                        ? (rEndRaw < end ? end : isRetentionShift ? rEndRaw : end)
+                        : rEndRaw)
+                    : null;
                 let rDur: number | null = null;
-                if (rStart && rEnd) {
-                    const rd = (rEnd.getTime() - rStart.getTime() - solapeHuecosMs(huecosPlanificadosCortado(s), rStart.getTime(), rEnd.getTime())) / 3600000;
+                if (payStart && payEnd) {
+                    const rd = (payEnd.getTime() - payStart.getTime() - solapeHuecosMs(huecosPlanificadosCortado(s), payStart.getTime(), payEnd.getTime())) / 3600000;
                     rDur = rd >= 0 && rd <= 36 ? rd : null;
                 }
                 const fichadaTramos = usePlannedHours ? null : fichadaPorTramo(s);
-
-                const isRetentionShift = s.isRetention === true;
                 const plannedWindow = resolveLiquidationPlannedWindow(s, start, end, SHIFT_HOURS_LOOKUP);
                 const planStart = plannedWindow.start;
                 const planEnd = plannedWindow.end;
-                // Diurnas/nocturnas: reales si hay fichada; planificadas con ventana de adelanto/extensión
-                const activeStart = rStart ?? (usePlannedHours ? planStart : start);
-                const activeEnd = rEnd ?? (usePlannedHours ? planEnd : end);
+                // Diurnas/nocturnas sobre la ventana que liquida (no sobre la marca temprana cruda).
+                const activeStart = payStart ?? rStart ?? (usePlannedHours ? planStart : start);
+                const activeEnd = payEnd ?? rEnd ?? (usePlannedHours ? planEnd : end);
                 const effectiveDur = rDur ?? ((isFT || usePlannedHours) && duration > 0 ? duration : 0);
                 const billableForRow = usePlannedHours
                     ? liquidationBillableHoursForShift(s, SHIFT_HOURS_LOOKUP)
