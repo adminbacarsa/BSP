@@ -1100,6 +1100,9 @@ function classifyEstado(
   return { estado: 'ESPERANDO', pendingEntry };
 }
 
+/** Tolerancia de puntualidad: hasta T+5 sigue siendo puntual (igual que el reloj de pago). */
+const PUNTUAL_HASTA_MIN = 5;
+
 function buildDiff(
   expected: string,
   real: string | undefined,
@@ -1111,7 +1114,8 @@ function buildDiff(
     const re = parseHHMMToMins(real);
     if (exp === null || re === null) return { label: '—', tone: 'neutral' };
     const diff = re - exp;
-    if (diff > 0) return { label: `+${diff} min`, tone: 'late' };
+    // Hasta T+5 es puntual; desde T+6 figura la demora.
+    if (diff > PUNTUAL_HASTA_MIN) return { label: `+${diff} min`, tone: 'late' };
     if (diff < 0) return { label: `${diff} min antes`, tone: 'early' };
     return { label: 'puntual', tone: 'early' };
   }
@@ -2821,10 +2825,12 @@ function WACard({
         {entry.tardanzaMins !== undefined && entry.tardanzaMins !== null && (
           <div
             className={`text-[10px] font-medium ${
-              entry.tardanzaMins <= 0 ? 'text-emerald-600' : 'text-amber-600'
+              entry.tardanzaMins <= PUNTUAL_HASTA_MIN ? 'text-emerald-600' : 'text-amber-600'
             }`}
           >
-            {entry.tardanzaMins <= 0 ? 'Puntual' : `+${entry.tardanzaMins} min tarde`}
+            {entry.tardanzaMins <= PUNTUAL_HASTA_MIN
+              ? 'Puntual'
+              : `+${entry.tardanzaMins} min tarde`}
           </div>
         )}
         {entry.lat != null && entry.lng != null && entry.objLat != null && entry.objLng != null && (() => {
