@@ -3,7 +3,13 @@
  * de su foto/ubicación en Modo Rápido.
  */
 
-import { msDeRawWa, WA_VENTANA_INGRESO_MS } from './elegirTurnoWa';
+import {
+  candidatosTurnoWa,
+  elegirTurnoWa,
+  msDeRawWa,
+  WA_VENTANA_INGRESO_MS,
+  type TurnoWaMatch,
+} from './elegirTurnoWa';
 
 export { WA_VENTANA_INGRESO_MS };
 
@@ -109,4 +115,84 @@ export function textoSalidaAntesDeFinWa(
     `⏰ ${saludo(nombreCompleto)}tu turno termina a las ${finHhmm}. ` +
     `Podés avisar la salida a partir de esa hora. Reenviá tu ubicación cuando finalice.`
   );
+}
+
+export function textoSinTurnoWa(nombreCompleto: string): string {
+  return `❌ ${saludo(nombreCompleto)}no encontramos un turno tuyo para hoy. Si tenés que trabajar, avisá al centro de control.`;
+}
+
+export function textoYaPresenteWa(
+  nombreCompleto: string,
+  turno: TurnoParaRespuestaWa & { realStartTime?: string },
+): string {
+  const donde = turno.obj && turno.obj !== '—' ? ` en ${turno.obj}` : '';
+  const desde = turno.realStartTime ? ` desde las ${turno.realStartTime}` : '';
+  const fin = msDeRawWa(turno.endTimeRaw);
+  const hasta = fin > 0 ? ` Termina a las ${hhmmDeMs(fin)}: la salida se avisa a partir de esa hora.` : '';
+  return `✅ ${saludo(nombreCompleto)}ya estás presente${donde}${desde}.${hasta}`;
+}
+
+export function textoTurnoNoAbiertoWa(
+  nombreCompleto: string,
+  turnos: readonly TurnoParaRespuestaWa[],
+): string {
+  let finMs = 0;
+  let obj = '';
+  for (const t of turnos) {
+    const fin = msDeRawWa(t.endTimeRaw);
+    if (fin >= finMs) {
+      finMs = fin;
+      if (t.obj && t.obj !== '—') obj = t.obj;
+    }
+  }
+  const donde = obj ? ` en ${obj}` : '';
+  const hora = finMs > 0 ? ` a las ${hhmmDeMs(finMs)}` : '';
+  return (
+    `⏰ ${saludo(nombreCompleto)}no tenés un turno abierto a esta hora${donde}. ` +
+    `El último terminó${hora}. Si el horario no es ese, avisá al centro de control.`
+  );
+}
+
+export function textoMarcaYaRecibidaWa(nombreCompleto: string): string {
+  return `📥 ${saludo(nombreCompleto)}ya recibimos tu marca de este turno. No hace falta reenviar la ubicación.`;
+}
+
+export type TurnoClasificacionWa = TurnoWaMatch & TurnoParaRespuestaWa & { realStartTime?: string };
+
+/**
+ * Qué contestarle al guardia cuando la foto o la ubicación no se confirma sola.
+ * `cortar`: no sigue como check-in. Salida (presente y ya pasó el fin) y el ingreso
+ * en horario devuelven texto vacío y cortar false: los resuelve Modo Rápido.
+ */
+export function clasificarIngresoWa(input: {
+  turnos: readonly TurnoClasificacionWa[];
+  name: string;
+  phone?: string | null;
+  msgMs: number;
+  yaMarcado: (rowId: string) => boolean;
+}): { texto: string | null; cortar: boolean; turno?: TurnoClasificacionWa } {
+  const { turnos, name, phone, msgMs, yaMarcado } = input;
+  const candidatos = candidatosTurnoWa(turnos, name, phone) as TurnoClasificacionWa[];
+  const turno = elegirTurnoWa(turnos, name, phone, msgMs) as TurnoClasificacionWa | undefined;
+  const quien = turno?.name || name;
+  if (!turno) {
+    if (!candidatos.length) return { texto: textoSinTurnoWa(name), cortar: true };
+    return { texto: textoTurnoNoAbiertoWa(name, candidatos), cortar: true };
+  }
+  const st = String(turno.turnoStatus || 'PENDING').toUpperCase();
+  if (st === 'PRESENT') {
+    const fin = msDeRawWa(turno.endTimeRaw);
+    if (fin > 0 && msgMs >= fin) return { texto: null, cortar: false, turno };
+    return { texto: textoYaPresenteWa(quien, turno), cortar: true, turno };
+  }
+  if (st === 'COMPLETED' || st === 'CANCELED' || st === 'CANCELLED' || st === 'ABSENT') {
+    return { texto: textoTurnoNoAbiertoWa(quien, [turno]), cortar: true, turno };
+  }
+  if (turno.rowId && yaMarcado(turno.rowId)) {
+    return { texto: textoMarcaYaRecibidaWa(quien), cortar: true, turno };
+  }
+  if (ingresoDemasiadoAnticipado(turno.startTimeRaw, msgMs)) {
+    return { texto: textoIngresoAnticipadoWa(quien, turno, msgMs), cortar: false, turno };
+  }
+  return { texto: null, cortar: false, turno };
 }

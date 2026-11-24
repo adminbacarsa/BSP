@@ -4,10 +4,12 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  clasificarIngresoWa,
   ingresoDemasiadoAnticipado,
   textoFueraDeRadioWa,
   textoIngresoAnticipadoWa,
   WA_VENTANA_INGRESO_MS,
+  type TurnoClasificacionWa,
 } from './respuestasWaGuardia.ts';
 
 const ts = (iso: string) => ({ toMillis: () => new Date(iso).getTime() });
@@ -40,5 +42,81 @@ describe('respuestasWaGuardia', () => {
     const t = textoFueraDeRadioWa('ALLASIA, GONZALO', 250, 'ingreso');
     assert.match(t, /250 m/);
     assert.match(t, /80 m/);
+  });
+
+  const nunca = () => false;
+  const turno = (parcial: Partial<TurnoClasificacionWa>): TurnoClasificacionWa => ({
+    rowId: 'doc1',
+    phone: '3515465559',
+    name: 'MARTINEZ, MAURO',
+    turnoStatus: 'PENDING',
+    obj: 'Guardia SP',
+    expected: '18:00',
+    startTimeRaw: ts('2026-11-24T18:00:00-03:00'),
+    endTimeRaw: ts('2026-11-24T22:00:00-03:00'),
+    ...parcial,
+  });
+
+  it('sin turno agendado', () => {
+    const r = clasificarIngresoWa({
+      turnos: [],
+      name: 'Mauro',
+      phone: '3515465559',
+      msgMs: new Date('2026-11-24T15:02:00-03:00').getTime(),
+      yaMarcado: nunca,
+    });
+    assert.equal(r.cortar, true);
+    assert.match(r.texto || '', /no encontramos un turno/);
+  });
+
+  it('ya presente, antes del fin', () => {
+    const r = clasificarIngresoWa({
+      turnos: [turno({ turnoStatus: 'PRESENT', realStartTime: '14:00', expected: '14:00', startTimeRaw: ts('2026-11-24T14:00:00-03:00') })],
+      name: 'Mauro',
+      phone: '3515465559',
+      msgMs: new Date('2026-11-24T15:02:00-03:00').getTime(),
+      yaMarcado: nunca,
+    });
+    assert.equal(r.cortar, true);
+    assert.match(r.texto || '', /ya estás presente/);
+    assert.match(r.texto || '', /22:00/);
+  });
+
+  it('presente y ya pasó el fin: no avisa acá, sigue como salida', () => {
+    const r = clasificarIngresoWa({
+      turnos: [turno({ turnoStatus: 'PRESENT', startTimeRaw: ts('2026-11-24T09:00:00-03:00'), endTimeRaw: ts('2026-11-24T13:00:00-03:00') })],
+      name: 'Mauro',
+      phone: '3515465559',
+      msgMs: new Date('2026-11-24T15:02:00-03:00').getTime(),
+      yaMarcado: nunca,
+    });
+    assert.equal(r.cortar, false);
+    assert.equal(r.texto, null);
+  });
+
+  it('turno de hoy ya terminó', () => {
+    const r = clasificarIngresoWa({
+      turnos: [turno({ turnoStatus: 'COMPLETED', endTimeRaw: ts('2026-11-24T14:00:00-03:00') })],
+      name: 'Mauro',
+      phone: '3515465559',
+      msgMs: new Date('2026-11-24T15:02:00-03:00').getTime(),
+      yaMarcado: nunca,
+    });
+    assert.equal(r.cortar, true);
+    assert.match(r.texto || '', /no tenés un turno abierto/);
+    assert.match(r.texto || '', /14:00/);
+  });
+
+  it('muy antes del inicio dice el horario y no corta el aviso', () => {
+    const r = clasificarIngresoWa({
+      turnos: [turno({})],
+      name: 'Mauro',
+      phone: '3515465559',
+      msgMs: new Date('2026-11-24T15:02:00-03:00').getTime(),
+      yaMarcado: nunca,
+    });
+    assert.equal(r.cortar, false);
+    assert.match(r.texto || '', /18:00/);
+    assert.match(r.texto || '', /30 min/);
   });
 });

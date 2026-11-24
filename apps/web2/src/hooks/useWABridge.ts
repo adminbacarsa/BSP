@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { elegirTurnoWa } from '@/lib/operaciones/elegirTurnoWa';
+import { clasificarIngresoWa } from '@/lib/operaciones/respuestasWaGuardia';
 
 export interface WAEntry {
   id: string;
@@ -323,6 +323,25 @@ export function useWABridge(
     };
   }, []);
 
+  const avisosRef = useRef<Set<string>>(new Set());
+  /** Una sola vez por mensaje y texto. El ingreso muy anticipado lo manda el sondeo y también el automático. */
+  const avisarGuardia = useCallback((id: string, phone: string | undefined, texto: string) => {
+    const url = bridgeUrlRef.current;
+    const tel = String(phone || '').trim();
+    if (!url || !id || !tel || !texto) return;
+    const key = `${id}\n${texto}`;
+    if (avisosRef.current.has(key)) return;
+    avisosRef.current.add(key);
+    fetch(`${url}/reply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ quotedId: id, phone: tel, text: texto.slice(0, 500) }),
+      signal: AbortSignal.timeout(8000),
+    }).catch(() => {
+      /* la respuesta al guardia no bloquea la planilla */
+    });
+  }, []);
+
   const fetchStatus = useCallback(async () => {
     const url = bridgeUrlRef.current;
     if (!url) return;
@@ -397,14 +416,20 @@ export function useWABridge(
         if (typeof m.ts === 'number' && m.ts > 0 && m.ts < inicioDeHoyMs()) continue;
 
         const msgMs = typeof m.ts === 'number' && m.ts > 0 ? m.ts : Date.now();
-        const turno = elegirTurnoWa(
-          listaTurnosWa(turnosRef.current, extrasRef.current),
-          m.name,
-          m.phone,
+        const clasif = clasificarIngresoWa({
+          turnos: listaTurnosWa(turnosRef.current, extrasRef.current),
+          name: m.name,
+          phone: m.phone,
           msgMs,
-        ) as TurnoHoy | undefined;
-        // Regla 1: sin turno planificado hoy → descartar
-        if (!turno) continue;
+          yaMarcado: (rowId) =>
+            pendingRowIdsRef.current.has(rowId) || confirmedRowIdsRef.current.has(rowId),
+        });
+        // Solo lo que acaba de llegar: al abrir la planilla no se le escribe a todo el buffer del bridge.
+        if (clasif.texto && Date.now() - msgMs <= 3 * 60 * 1000) {
+          avisarGuardia(m.id, clasif.turno?.phone || m.phone, clasif.texto);
+        }
+        if (clasif.cortar || !clasif.turno) continue;
+        const turno = clasif.turno as TurnoHoy;
         // Regla 2: ya presente en plataforma → no es un check-in. Si el turno ya terminó y el guardia
         // manda su ubicación, es el aviso de salida; si no, se descarta.
         if (turno.turnoStatus === 'PRESENT') {
@@ -488,7 +513,7 @@ export function useWABridge(
     } catch {
       setStatus('error');
     }
-  }, [fetchStatus]);
+  }, [avisarGuardia, fetchStatus]);
 
   const connect = useCallback(
     (url: string) => {
@@ -619,17 +644,8 @@ export function useWABridge(
   }, []);
 
   const responder = useCallback((entry: WAEntry, texto: string) => {
-    const url = bridgeUrlRef.current;
-    if (!url || !texto) return;
-    fetch(`${url}/reply`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ quotedId: entry.id, phone: entry.phone, text: texto }),
-      signal: AbortSignal.timeout(8000),
-    }).catch(() => {
-      /* ignore — la respuesta al guardia no es crítica */
-    });
-  }, []);
+    avisarGuardia(entry.id, entry.phone, texto);
+  }, [avisarGuardia]);
 
   /** Corta el sondeo y olvida la URL (cambio de empresa o empresa sin bridge). */
   const disconnect = useCallback(() => {
