@@ -127,17 +127,16 @@ function grupoMonitoreado(entry) {
 }
 
 function esDePlataforma(entry) {
+  // Solo grupos que el operador marcó en Modo Rápido. Sin grupo activo = nadie.
+  if (!grupoMonitoreado(entry)) return false;
   const ph = normPhone(entry?.phone);
-  // Con padrones sincronizados: solo esos teléfonos (el chat del grupo no importa).
   if (phonesPlataforma.size > 0) {
     if (ph && phonesPlataforma.has(ph)) return true;
     // Check-in sin LID resuelto todavía, en grupo de la planilla: no ocultar.
-    if (!ph && entry?.cuenta && grupoMonitoreado(entry)) return true;
+    if (!ph && entry?.cuenta) return true;
     return false;
   }
-  // Sin teléfonos aún: al menos los grupos que activó Modo Rápido.
-  if (monitoredGroups.size > 0) return grupoMonitoreado(entry);
-  return false;
+  return true;
 }
 
 function tieneFiltroPlataforma() {
@@ -629,7 +628,8 @@ async function startWA() {
       // Deduplicar: Baileys puede disparar el mismo mensaje varias veces
       if (msg.key.id && (messages.some(m => m.id === msg.key.id) || bitacora.some(m => m.id === msg.key.id))) continue;
 
-      if (monitoredGroups.size > 0 && !monitoredGroups.has(jid)) continue;
+      // Solo grupos marcados en Modo Rápido. Si no hay ninguno, no entra ni se contesta nada.
+      if (!monitoredGroups.has(jid)) continue;
 
       const grp       = availableGroups.find(g => g.id === jid);
       const groupName = grp?.name || jid;
