@@ -422,7 +422,8 @@ export default function ModalRetenesDia({
           <SelectorDestinoRetenes
             destinos={destinos}
             valor={destinoKey}
-            totalRetenes={hoy.length + manana.length}
+            retenesHoy={hoy.length}
+            retenesManana={manana.length}
             orden={orden}
             onChange={setDestinoKey}
             onOrden={setOrden}
@@ -478,7 +479,7 @@ export default function ModalRetenesDia({
                 onClick={() => setDestinoKey(TODOS_LOS_RETENES)}
                 className="mt-4 px-3 py-1.5 rounded-xl border border-violet-200 bg-violet-50 text-violet-700 text-[11px] font-bold hover:bg-violet-100 active:scale-95"
               >
-                Ver todos los retenes ({hoy.length + manana.length})
+                Ver todos los retenes (hoy {hoy.length} · mañana {manana.length})
               </button>
             </div>
           ) : lista.length === 0 ? (

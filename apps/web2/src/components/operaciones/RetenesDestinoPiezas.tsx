@@ -85,20 +85,32 @@ export function SelectorDestinoRetenes({
   destinos,
   valor,
   totalRetenes,
+  retenesHoy,
+  retenesManana,
   orden,
   onChange,
   onOrden,
 }: {
   destinos: DestinoRetenOpcion[];
   valor: string;
-  /** Si viene, se ofrece «Todos los retenes (N)» para ver la lista completa sin elegir destino. */
+  /** @deprecated Preferir retenesHoy + retenesManana (el total sumado confundía con la pestaña Hoy/Mañana). */
   totalRetenes?: number;
+  /** Retenes del día activo en el modal (pestaña Hoy). */
+  retenesHoy?: number;
+  /** Retenes de la pestaña Mañana. */
+  retenesManana?: number;
   orden: OrdenRetenes;
   onChange: (key: string) => void;
   onOrden: (o: OrdenRetenes) => void;
 }) {
   const huecos = destinos.filter((d) => d.tipo === 'hueco');
   const objetivos = destinos.filter((d) => d.tipo === 'objetivo');
+  const etiquetaTodos =
+    retenesHoy !== undefined && retenesManana !== undefined
+      ? `Todos los retenes (hoy ${retenesHoy} · mañana ${retenesManana})`
+      : totalRetenes !== undefined
+        ? `Todos los retenes (${totalRetenes})`
+        : null;
   return (
     <div className="flex flex-wrap items-center gap-2 px-4 py-2 bg-violet-50/70 border-b border-violet-100">
       <label className="text-[10px] font-black uppercase tracking-wide text-violet-700" htmlFor="retenes-destino">
@@ -111,8 +123,8 @@ export function SelectorDestinoRetenes({
         className="flex-1 min-w-[220px] max-w-xl rounded-xl border border-violet-200 bg-white px-2.5 py-1.5 text-[12px] font-semibold text-slate-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
       >
         <option value="">Elegí un hueco u objetivo…</option>
-        {totalRetenes !== undefined && (
-          <option value="__todos__">Todos los retenes ({totalRetenes})</option>
+        {etiquetaTodos && (
+          <option value="__todos__">{etiquetaTodos}</option>
         )}
         {huecos.length > 0 && (
           <optgroup label="Huecos sin cubrir">
