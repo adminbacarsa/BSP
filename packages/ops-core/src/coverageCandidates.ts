@@ -348,13 +348,21 @@ function workStart(shift: CoverageShiftView): number {
 /** REF/ESC/RET: solape con el hueco (misma regla que sourceShiftEligibleForCoverageGap). */
 function sourceOverlapsGap(shift: CoverageShiftView, gap: CoverageGapView): boolean {
   if (shift.coverageUsed === true || shift.isDeleted === true) return false;
-  if (!shift.startMs || !shift.endMs || shift.endMs <= shift.startMs) return false;
   if (!gap.startMs || !gap.endMs || gap.endMs <= gap.startMs) return false;
+  if (!shift.startMs) return false;
   const code = norm(shift.code);
+  let endMs = shift.endMs || 0;
+  // RET con start===end (00:00) = stand-by del día.
+  if (code === 'RET') {
+    if (!endMs || endMs <= shift.startMs) endMs = shift.startMs + 24 * 3600_000;
+    if (shift.startMs >= gap.endMs) return false;
+    if (endMs < gap.startMs) return false;
+    return shift.startMs <= gap.startMs + 60_000;
+  }
+  if (!endMs || endMs <= shift.startMs) return false;
   if (shift.startMs >= gap.endMs) return false;
-  if (shift.endMs < gap.startMs) return false;
-  if (shift.endMs === gap.startMs && code !== 'RET') return false;
-  if (code === 'RET') return shift.startMs <= gap.startMs + 60_000;
+  if (endMs < gap.startMs) return false;
+  if (endMs === gap.startMs) return false;
   const gapBand = norm(gap.band);
   const deploy = norm(shift.deploymentBand);
   const srcBand = WORK_BANDS.has(deploy) ? deploy : (WORK_BANDS.has(code) ? code : deploy || code);

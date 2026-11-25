@@ -56,4 +56,20 @@ report(
   'REF 08–18',
 );
 
+const gapBaez = {
+  startMs: ar('2026-11-25T16:00:00-03:00'),
+  endMs: ar('2026-11-25T17:00:00-03:00'),
+  band: 'T3',
+};
+const retFaroppaCeroHoras = {
+  code: 'RET',
+  startTime: new Date('2026-11-25T00:00:00-03:00'),
+  endTime: new Date('2026-11-25T00:00:00-03:00'),
+};
+report(
+  'ret-start-eq-end-cubre-hueco',
+  sourceShiftEligibleForCoverageGap(retFaroppaCeroHoras, gapBaez),
+  'RET 00:00–00:00 (stand-by del día) cubre Baez 16–17',
+);
+
 console.log('\nFin eval coverage source gap');

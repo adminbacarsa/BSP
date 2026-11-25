@@ -49,19 +49,24 @@ export function sourceShiftEligibleForCoverageGap(
   if (sourceShift.isDeleted === true) return false;
 
   const srcStart = shiftStartMs(sourceShift);
-  const srcEnd = shiftEndMs(sourceShift);
-  if (!srcStart || !srcEnd || srcEnd <= srcStart) return false;
+  let srcEnd = shiftEndMs(sourceShift);
   if (!gap.startMs || !gap.endMs || gap.endMs <= gap.startMs) return false;
+  if (!srcStart) return false;
 
   const code = String(sourceShift.code || '').trim().toUpperCase();
 
-  if (srcStart >= gap.endMs) return false;
-  if (srcEnd < gap.startMs) return false;
-  if (srcEnd === gap.startMs && code !== 'RET') return false;
-
+  // RET suele cargarse con start===end (00:00): es stand-by del día, no un turno de 0 h.
   if (code === 'RET') {
+    if (!srcEnd || srcEnd <= srcStart) srcEnd = srcStart + 24 * 3600_000;
+    if (srcStart >= gap.endMs) return false;
+    if (srcEnd < gap.startMs) return false;
     return srcStart <= gap.startMs + 60_000;
   }
+
+  if (!srcEnd || srcEnd <= srcStart) return false;
+  if (srcStart >= gap.endMs) return false;
+  if (srcEnd < gap.startMs) return false;
+  if (srcEnd === gap.startMs) return false;
 
   const gapBand = String(gap.band || '').trim().toUpperCase();
   const srcBand = resolveOperationalBand(sourceShift);

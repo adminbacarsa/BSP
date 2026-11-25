@@ -435,15 +435,23 @@ export async function applyCoverage(
     const exSnap = await getDoc(doc(db, 'turnos', existingCovId));
     if (exSnap.exists() && isActiveOpsCoverageDoc(exSnap.data() as Record<string, unknown>)) {
       const ex = exSnap.data() as Record<string, unknown>;
-      const exCt = String(ex.coverageType || '').toUpperCase();
-      const completes = titularPartial && completesPartialSegment(exCt, ctEarly);
-      if (completes) {
-        const gapStart = tsMs(titular.startTime) || tsMs(titular.shiftDateObj);
-        const gapEnd = tsMs(titular.endTime) || tsMs(titular.endDateObj);
-        remainder = uncoveredRemainderMs(gapStart, gapEnd, tsMs(ex.startTime), tsMs(ex.endTime));
-      }
-      if (!isDualSiblingOpsCoverage(exCt, ctEarly) && !(completes && remainder)) {
-        throw new CoverageApplyError('ALREADY_COVERED', 'El titular ya tiene cobertura activa');
+      // coverageDocId en la fuente de un EXTEND/ADVANCE/RET apunta al ops_cov de OTRO
+      // titular. No es "ya me cubrieron": solo bloquea si ese doc cubre ESTE turno.
+      const exFor = String(
+        ex.coverageForShiftId || ex.coveredShiftId || ex.absenceShiftId || '',
+      ).trim();
+      const coversThisTitular = !exFor || exFor === titularId;
+      if (coversThisTitular) {
+        const exCt = String(ex.coverageType || '').toUpperCase();
+        const completes = titularPartial && completesPartialSegment(exCt, ctEarly);
+        if (completes) {
+          const gapStart = tsMs(titular.startTime) || tsMs(titular.shiftDateObj);
+          const gapEnd = tsMs(titular.endTime) || tsMs(titular.endDateObj);
+          remainder = uncoveredRemainderMs(gapStart, gapEnd, tsMs(ex.startTime), tsMs(ex.endTime));
+        }
+        if (!isDualSiblingOpsCoverage(exCt, ctEarly) && !(completes && remainder)) {
+          throw new CoverageApplyError('ALREADY_COVERED', 'El titular ya tiene cobertura activa');
+        }
       }
     }
   }

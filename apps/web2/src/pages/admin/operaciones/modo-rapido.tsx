@@ -336,12 +336,15 @@ function useTurnosHoy({
   retenesManana: TurnoHoy[];
   /** Tramos cortados y coberturas OPERATIONS_COVERAGE que no entran al dict por nombre (una fila por turno). */
   tramosExtra: TurnoHoy[];
+  /** Titular ausente → nombres de quien lo cubre (incluye EXT/ADV con horas en la fuente). */
+  coberturaPorTitular: Record<string, string[]>;
   /** Domicilio geocodificado, objetivo titular y experiencia por objetivo (para elegir retenes). */
   empInfo: Record<string, EmpleadoRetenInfo>;
 } {
   const [empInfo, setEmpInfo] = useState<Record<string, EmpleadoRetenInfo>>({});
   const [retenesManana, setRetenesManana] = useState<TurnoHoy[]>([]);
   const [tramosExtra, setTramosExtra] = useState<TurnoHoy[]>([]);
+  const [coberturaPorTitular, setCoberturaPorTitular] = useState<Record<string, string[]>>({});
   const [turnos, setTurnos] = useState<Record<string, TurnoHoy>>({});
   const [cerrados, setCerrados] = useState<Record<string, TurnoHoy>>({});
   const [presenciaMeta, setPresenciaMeta] = useState<Record<string, PresenciaMeta>>({});
@@ -365,6 +368,7 @@ function useTurnosHoy({
       setTurnos({});
       setRetenesManana([]);
       setTramosExtra([]);
+      setCoberturaPorTitular({});
       setPhones([]);
       setEmpInfo({});
       setFrancos([]);
@@ -419,9 +423,23 @@ function useTurnosHoy({
       const tramosAbiertos: TurnoHoy[] = [];
       /** Coberturas ops abiertas: todas van a la lista (no se colapsan por nombre). */
       const coberturasAbiertas: TurnoHoy[] = [];
+      /** Titular → cubridores (incluye EXT/ADV con horas en fuente, que no generan fila propia). */
+      const coberturaLinks = new Map<string, string[]>();
       const metaTramos: Record<string, PresenciaMeta> = {};
       const manana = new Date(now);
       manana.setDate(manana.getDate() + 1);
+      const registrarCoberturaLink = (shift: Record<string, unknown>, employeeName: string) => {
+        if (String(shift.origin || '').toUpperCase() !== 'OPERATIONS_COVERAGE') return;
+        if (shift.coverageSuperseded === true || shift.isDeleted === true) return;
+        if (String(shift.status || '').toUpperCase() === 'CANCELLED') return;
+        const forId = String(
+          shift.coverageForShiftId || shift.coveredShiftId || shift.absenceShiftId || '',
+        ).trim();
+        const quien = String(employeeName || shift.employeeName || '').trim();
+        if (!forId || !quien) return;
+        const prev = coberturaLinks.get(forId) || [];
+        if (!prev.includes(quien)) coberturaLinks.set(forId, [...prev, quien]);
+      };
 
       for (const d of docs) {
         const shift = d.data() as Record<string, unknown>;
@@ -447,7 +465,10 @@ function useTurnosHoy({
         }
         // D12/N12 (extender o adelantar): las horas se llevan en el turno del propio guardia, que sigue
         // siendo su fila con el horario ajustado. El doc de cobertura es solo el vínculo con el ausente.
-        if (shift.coverageHoursOnSource === true) continue;
+        if (shift.coverageHoursOnSource === true) {
+          registrarCoberturaLink(shift, String(shift.employeeName || '').trim());
+          continue;
+        }
 
         const employeeId = String(shift.employeeId ?? '');
         const employeeName = String(shift.employeeName ?? '').trim();
@@ -699,6 +720,7 @@ function useTurnosHoy({
           // Cobertura cortada: todos los tramos abiertos deben figurar en el puesto (no solo el vigente).
           if (mapped.origin === 'OPERATIONS_COVERAGE') {
             for (const a of abiertosDoc) coberturasAbiertas.push(a.turno);
+            registrarCoberturaLink(shift, employeeName);
           }
           continue;
         }
@@ -710,6 +732,7 @@ function useTurnosHoy({
 
         if (mapped.origin === 'OPERATIONS_COVERAGE') {
           coberturasAbiertas.push(mapped);
+          registrarCoberturaLink(shift, employeeName);
         }
         considerar(mapped, startMs);
       }
@@ -732,6 +755,10 @@ function useTurnosHoy({
         vistosExtra.add(t.rowId);
         extrasUnicos.push(t);
       }
+      const coberturaNext: Record<string, string[]> = {};
+      coberturaLinks.forEach((names, forId) => {
+        coberturaNext[forId] = names;
+      });
       for (const d of docs) {
         const shift = d.data() as Record<string, unknown>;
         const realEnd = shift.realEndTime as Timestamp | undefined;
@@ -760,6 +787,7 @@ function useTurnosHoy({
       });
       setTurnos(next);
       setTramosExtra(extrasUnicos);
+      setCoberturaPorTitular(coberturaNext);
       setRetenesManana(retMananaList);
       setCerrados(cerradosNext);
       setPresenciaMeta(metaNext);
@@ -831,7 +859,19 @@ function useTurnosHoy({
     };
   }, [empresaId, scopeEmpresa]);
 
-  return { turnos, loading, phones, francos, presenciaMeta, cerrados, clientePorObj, retenesManana, tramosExtra, empInfo };
+  return {
+    turnos,
+    loading,
+    phones,
+    francos,
+    presenciaMeta,
+    cerrados,
+    clientePorObj,
+    retenesManana,
+    tramosExtra,
+    coberturaPorTitular,
+    empInfo,
+  };
 }
 
 type GuardEstado =
@@ -2514,9 +2554,10 @@ function GuardRow({
         {row.turno.origin === 'OPERATIONS_COVERAGE' && row.turno.coversEmployeeName && (
           <span
             className="mt-0.5 flex w-full min-w-0 items-start gap-1 rounded-md bg-violet-50 px-1.5 py-0.5 text-left text-[10px] font-bold leading-snug text-violet-700"
-            title={`Cobertura operativa: fichada de ingreso/egreso en este puesto (titular ${row.turno.coversEmployeeName})`}
+            title={`Cobertura operativa ${row.turno.expected || ''}–${row.salida || ''}: fichada en este puesto (titular ${row.turno.coversEmployeeName})`}
           >
             Cubre a {row.turno.coversEmployeeName}
+            {row.turno.expected ? ` · ${row.turno.expected}–${row.salida || '—'}` : ''}
           </span>
         )}
         {row.turno.comentario && (
@@ -3181,7 +3222,18 @@ export default function ModoRapidoPage() {
     empresaId: empresaId || null,
     scopeEmpresa,
   });
-  const { turnos, loading, francos, presenciaMeta, cerrados, clientePorObj, retenesManana, tramosExtra, empInfo } = turnosData;
+  const {
+    turnos,
+    loading,
+    francos,
+    presenciaMeta,
+    cerrados,
+    clientePorObj,
+    retenesManana,
+    tramosExtra,
+    coberturaPorTitular,
+    empInfo,
+  } = turnosData;
   const wa = useWABridge(turnos, empresaId, tramosExtra);
 
   const [bridgeUrl, setBridgeUrl] = useState('');
@@ -3652,7 +3704,7 @@ export default function ModoRapidoPage() {
       .sort((a, b) => rowRank(a) - rowRank(b) || String(a.turno.expected).localeCompare(String(b.turno.expected)));
 
     // Segunda pasada: "Cubierto por X" solo con cobertura real (ops_cov) o campo oficial.
-    // No inferir por un FT que comparte horario (eso marcaba a Olmos cubriendo a dos).
+    // Puede haber varios (EXTEND 06–10 + FT resto): se listan todos.
     const normNombre = (s: string) =>
       String(s || '')
         .toLowerCase()
@@ -3663,24 +3715,26 @@ export default function ModoRapidoPage() {
     return base.map((row): GuardRowModel => {
       if (row.estado !== 'NO_LLEGO' && row.estado !== 'AUSENTE') return row;
       const titularDocId = docIdDe(row.turno.rowId);
-      const cover = base.find((other) => {
-        if (other === row) return false;
-        if (other.estado === 'NO_LLEGO' || other.estado === 'AUSENTE') return false;
-        if (other.turno.origin !== 'OPERATIONS_COVERAGE') return false;
-        if (!other.turno.objectiveId || other.turno.objectiveId !== row.turno.objectiveId) return false;
-        if (other.turno.coverageForShiftId && other.turno.coverageForShiftId === titularDocId) {
-          return true;
-        }
-        if (
-          other.turno.coversEmployeeName &&
-          normNombre(other.turno.coversEmployeeName) === normNombre(row.employeeName)
-        ) {
-          return true;
-        }
-        return false;
-      });
-      if (cover) return { ...row, coveredByName: cover.employeeName };
-      // Motor oficial en el titular (sin fila del cubridor visible todavía).
+      const nombres: string[] = [];
+      const pushNombre = (n: string) => {
+        const t = String(n || '').trim();
+        if (!t || nombres.some((x) => normNombre(x) === normNombre(t))) return;
+        nombres.push(t);
+      };
+      for (const n of coberturaPorTitular[titularDocId] || []) pushNombre(n);
+      for (const other of base) {
+        if (other === row) continue;
+        if (other.estado === 'NO_LLEGO' || other.estado === 'AUSENTE') continue;
+        if (other.turno.origin !== 'OPERATIONS_COVERAGE') continue;
+        if (!other.turno.objectiveId || other.turno.objectiveId !== row.turno.objectiveId) continue;
+        const porId =
+          other.turno.coverageForShiftId && other.turno.coverageForShiftId === titularDocId;
+        const porNombre =
+          !!other.turno.coversEmployeeName &&
+          normNombre(other.turno.coversEmployeeName) === normNombre(row.employeeName);
+        if (porId || porNombre) pushNombre(other.employeeName);
+      }
+      if (nombres.length) return { ...row, coveredByName: nombres.join(' + ') };
       if (row.turno.coveredByName) return { ...row, coveredByName: row.turno.coveredByName };
       return row;
     }).concat(
@@ -3701,7 +3755,7 @@ export default function ModoRapidoPage() {
         };
       }),
     );
-  }, [turnos, tramosExtra, wa, nowMs, presenciaMeta, cerrados]);
+  }, [turnos, tramosExtra, coberturaPorTitular, wa, nowMs, presenciaMeta, cerrados]);
 
   // Relevo y aviso de salida de cada guardia presente (para la columna de egreso y el cierre automático).
   const classifiedRows = useMemo((): GuardRowModel[] => {
