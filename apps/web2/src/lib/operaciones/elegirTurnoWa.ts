@@ -1,6 +1,9 @@
 /**
  * Elige a qué fila de Modo Rápido va un mensaje de WhatsApp cuando el guardia
  * tiene más de un turno o tramo hoy (turno cortado, dos franjas, etc.).
+ *
+ * Fuente de verdad: el número de teléfono en RRHH. El nombre/apodo del contacto
+ * en el celular (pushName) no decide el match.
  */
 
 export type TurnoWaMatch = {
@@ -38,7 +41,7 @@ function statusOf(t: TurnoWaMatch): string {
   return String(t.turnoStatus || 'PENDING').toUpperCase();
 }
 
-/** Tokens de nombre ≥ 4 letras, sin tildes, para comparar pushName vs legajo. */
+/** Tokens de nombre ≥ 4 letras, sin tildes (uso opcional / pantallas manuales). */
 export function tokensNombreWa(value: string): string[] {
   return String(value || '')
     .toLowerCase()
@@ -48,10 +51,6 @@ export function tokensNombreWa(value: string): string[] {
     .filter((t) => t.length >= 4);
 }
 
-/**
- * El pushName de WhatsApp y el nombre del legajo deben compartir al menos un token.
- * Evita cerrar el turno de Nahuel cuando manda Franco, aunque el teléfono en RRHH esté mal.
- */
 export function nombresCompatiblesWa(pushName: string, employeeName: string): boolean {
   const a = tokensNombreWa(pushName);
   const b = new Set(tokensNombreWa(employeeName));
@@ -60,10 +59,8 @@ export function nombresCompatiblesWa(pushName: string, employeeName: string): bo
 }
 
 /**
- * Solo por teléfono. El nombre de WhatsApp no filtra acá: si el pushName no calza con el
- * legajo, `resolverTurnoWaIngreso` / `clasificarIngresoWa` buscan el turno del nombre
- * o avisan (antes devolvía «sin turno» aunque el teléfono sí tenía jornada).
- * `permitirNombre` queda por si hace falta en pantallas manuales; el automático no lo usa.
+ * Solo por teléfono. El apodo del contacto en WhatsApp no filtra.
+ * `permitirNombre` solo para pantallas manuales; el automático no lo usa.
  */
 export function candidatosTurnoWa(
   turnos: readonly TurnoWaMatch[],
@@ -131,9 +128,8 @@ export function elegirEntreCandidatosWa(
 }
 
 /**
- * Entre los turnos del mismo guardia: primero el que está PRESENTE y ya terminó
- * (salida); si no, el PRESENTE en curso; recién después un PENDING dentro de la
- * ventana de ingreso. Así la ubicación de egreso del tramo 1 no marca el tramo 2.
+ * Match por teléfono. Entre tramos del mismo número: salida del presente vencido,
+ * luego presente en curso, luego pendiente abierto.
  */
 export function elegirTurnoWa(
   turnos: readonly TurnoWaMatch[],
@@ -143,45 +139,4 @@ export function elegirTurnoWa(
   opts?: { permitirNombre?: boolean },
 ): TurnoWaMatch | undefined {
   return elegirEntreCandidatosWa(candidatosTurnoWa(turnos, name, phone, opts), msgMs);
-}
-
-export type ResolucionTurnoWa = {
-  /** Turno a usar (teléfono+nombre OK, o fallback por nombre si el tel apunta a otro). */
-  turno?: TurnoWaMatch;
-  /** Candidatos del teléfono (aunque el nombre no calce): para avisos de cerrado/anticipado. */
-  candidatosTelefono: TurnoWaMatch[];
-  /** El teléfono está en este legajo y el pushName no calza; no hubo turno propio por nombre. */
-  legajoTelefonoAjeno?: string;
-};
-
-/**
- * Teléfono primero si el nombre calza. Si el número está en otro legajo (Debora→Acosta,
- * Franco→Nahuel), busca el turno de quien mandó por nombre; si no hay, marca el ajeno.
- */
-export function resolverTurnoWaIngreso(
-  turnos: readonly TurnoWaMatch[],
-  name: string,
-  phone?: string | null,
-  msgMs?: number,
-): ResolucionTurnoWa {
-  const candidatosTelefono = candidatosTurnoWa(turnos, name, phone);
-  const porTel = elegirEntreCandidatosWa(candidatosTelefono, msgMs);
-  if (porTel && nombresCompatiblesWa(name, String(porTel.name || ''))) {
-    return { turno: porTel, candidatosTelefono };
-  }
-
-  const porNombre = turnos.filter((t) => nombresCompatiblesWa(name, String(t.name || '')));
-  const propio = elegirEntreCandidatosWa(porNombre, msgMs);
-  if (propio) {
-    return { turno: propio, candidatosTelefono };
-  }
-
-  if (porTel && !nombresCompatiblesWa(name, String(porTel.name || ''))) {
-    return {
-      candidatosTelefono,
-      legajoTelefonoAjeno: String(porTel.name || '').trim() || undefined,
-    };
-  }
-
-  return { candidatosTelefono };
 }

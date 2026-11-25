@@ -4,8 +4,9 @@
  */
 
 import {
+  candidatosTurnoWa,
+  elegirTurnoWa,
   msDeRawWa,
-  resolverTurnoWaIngreso,
   WA_VENTANA_INGRESO_MS,
   type TurnoWaMatch,
 } from './elegirTurnoWa';
@@ -156,15 +157,6 @@ export function textoMarcaYaRecibidaWa(nombreCompleto: string): string {
   return `📥 ${saludo(nombreCompleto)}ya recibimos tu marca de este turno. No hace falta reenviar la ubicación.`;
 }
 
-export function textoWaNoCoincideLegajo(pushName: string, legajoNombre: string): string {
-  const pila = nombrePila(pushName) || 'Hola';
-  const legajo = String(legajoNombre || '').trim() || 'otro legajo';
-  return (
-    `⚠️ ${pila}, este WhatsApp está cargado en el legajo *${legajo}* y no encontramos un turno a tu nombre hoy. ` +
-    `No confirmamos ni cerramos solo. Pedí a Operaciones que corrija el teléfono en RRHH.`
-  );
-}
-
 export type TurnoClasificacionWa = TurnoWaMatch & TurnoParaRespuestaWa & { realStartTime?: string };
 
 export type AvisoWaKind =
@@ -172,11 +164,11 @@ export type AvisoWaKind =
   | 'turno_cerrado'
   | 'ya_presente'
   | 'marca_recibida'
-  | 'anticipado'
-  | 'nombre_distinto';
+  | 'anticipado';
 
 /**
  * Qué contestarle al guardia cuando la foto o la ubicación no se confirma sola.
+ * Match solo por teléfono (RRHH). El apodo del contacto no bloquea ni reasigna.
  * `cortar`: no sigue como check-in. Salida (presente y ya pasó el fin) y el ingreso
  * en horario devuelven texto vacío y cortar false: los resuelve Modo Rápido.
  * `aviso`: clave para no spamear si la ubicación en vivo manda varios eventos.
@@ -194,18 +186,11 @@ export function clasificarIngresoWa(input: {
   aviso?: AvisoWaKind;
 } {
   const { turnos, name, phone, msgMs, yaMarcado } = input;
-  const resuelto = resolverTurnoWaIngreso(turnos, name, phone, msgMs);
-  const candidatos = resuelto.candidatosTelefono as TurnoClasificacionWa[];
-  const turno = resuelto.turno as TurnoClasificacionWa | undefined;
+  const candidatos = candidatosTurnoWa(turnos, name, phone) as TurnoClasificacionWa[];
+  const turno = elegirTurnoWa(turnos, name, phone, msgMs) as TurnoClasificacionWa | undefined;
+  // Textos con el legajo del turno (Acosta/Nievas), no el apodo del celular (Debora/Franco).
   const quien = turno?.name || name;
   if (!turno) {
-    if (resuelto.legajoTelefonoAjeno) {
-      return {
-        texto: textoWaNoCoincideLegajo(name, resuelto.legajoTelefonoAjeno),
-        cortar: true,
-        aviso: 'nombre_distinto',
-      };
-    }
     if (!candidatos.length) {
       return { texto: textoSinTurnoWa(name), cortar: true, aviso: 'sin_turno' };
     }
@@ -218,7 +203,6 @@ export function clasificarIngresoWa(input: {
   const st = String(turno.turnoStatus || 'PENDING').toUpperCase();
   if (st === 'PRESENT') {
     const fin = msDeRawWa(turno.endTimeRaw);
-    // Salida automática solo sobre el turno ya resuelto (tel+nombre o propio por nombre).
     if (fin > 0 && msgMs >= fin) {
       return { texto: null, cortar: false, turno };
     }

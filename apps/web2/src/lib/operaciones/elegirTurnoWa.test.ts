@@ -7,7 +7,6 @@ import {
   elegirTurnoWa,
   msDeRawWa,
   nombresCompatiblesWa,
-  resolverTurnoWaIngreso,
   WA_VENTANA_INGRESO_MS,
 } from './elegirTurnoWa.ts';
 
@@ -64,7 +63,7 @@ describe('elegirTurnoWa', () => {
     assert.equal(elegido?.rowId, 'doc#b1');
   });
 
-  it('el teléfono matchea aunque el pushName no calce; el nombre se valida después', () => {
+  it('el teléfono manda aunque el contacto tenga apodo distinto', () => {
     const msg = new Date('2026-11-24T16:36:00-03:00').getTime();
     const nahuel = {
       rowId: 'nahuel1',
@@ -88,34 +87,5 @@ describe('elegirTurnoWa', () => {
       msg,
     );
     assert.equal(elegido, undefined);
-  });
-
-  it('teléfono en otro legajo: resolver cae al turno propio por nombre', () => {
-    const msg = new Date('2026-11-24T10:35:00-03:00').getTime();
-    const r = resolverTurnoWaIngreso(
-      [
-        {
-          rowId: 'acosta',
-          phone: '3515416836',
-          name: 'ACOSTA, JULIO',
-          turnoStatus: 'PENDING',
-          startTimeRaw: ts('2026-11-24T10:30:00-03:00'),
-          endTimeRaw: ts('2026-11-24T18:30:00-03:00'),
-        },
-        {
-          rowId: 'debora',
-          phone: '3510000000',
-          name: 'QUINTEROS, DEBORA',
-          turnoStatus: 'PENDING',
-          startTimeRaw: ts('2026-11-24T10:00:00-03:00'),
-          endTimeRaw: ts('2026-11-24T18:00:00-03:00'),
-        },
-      ],
-      'Debora Quinteros',
-      '3515416836',
-      msg,
-    );
-    assert.equal(r.turno?.rowId, 'debora');
-    assert.equal(r.legajoTelefonoAjeno, undefined);
   });
 });
