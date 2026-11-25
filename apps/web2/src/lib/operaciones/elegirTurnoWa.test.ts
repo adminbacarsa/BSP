@@ -88,4 +88,28 @@ describe('elegirTurnoWa', () => {
     );
     assert.equal(elegido, undefined);
   });
+
+  it('cobertura OPERATIONS_COVERAGE gana sobre un pendiente propio (fichada en el puesto cubierto)', () => {
+    const msg = new Date('2026-11-24T10:15:00-03:00').getTime();
+    const propio = {
+      rowId: 'propio-m',
+      phone,
+      name: 'OLMOS, MICAELA',
+      turnoStatus: 'PENDING',
+      startTimeRaw: ts('2026-11-24T10:00:00-03:00'),
+      endTimeRaw: ts('2026-11-24T22:00:00-03:00'),
+      origin: 'PLANIFICACION',
+    };
+    const cobertura = {
+      rowId: 'ops-cov-araya',
+      phone,
+      name: 'OLMOS, MICAELA',
+      turnoStatus: 'PENDING',
+      startTimeRaw: ts('2026-11-24T06:00:00-03:00'),
+      endTimeRaw: ts('2026-11-24T14:00:00-03:00'),
+      origin: 'OPERATIONS_COVERAGE',
+    };
+    const elegido = elegirTurnoWa([propio, cobertura], 'OLMOS', phone, msg);
+    assert.equal(elegido?.rowId, 'ops-cov-araya');
+  });
 });

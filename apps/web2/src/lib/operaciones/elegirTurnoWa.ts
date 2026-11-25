@@ -13,6 +13,8 @@ export type TurnoWaMatch = {
   turnoStatus?: string;
   startTimeRaw?: unknown;
   endTimeRaw?: unknown;
+  /** OPERATIONS_COVERAGE: la fichada WA debe ir al puesto que cubre, no a su RET/origen. */
+  origin?: string;
 };
 
 /** Ventana de ingreso: no se toma como llegada un mensaje más de 30 min antes del inicio. */
@@ -123,7 +125,14 @@ export function elegirEntreCandidatosWa(
       if (fin > 0 && msg >= fin) return false;
       return true;
     })
-    .sort((a, b) => msDeRawWa(a.startTimeRaw) - msDeRawWa(b.startTimeRaw));
+    .sort((a, b) => {
+      // Quien cubre debe fichar en el puesto de cobertura, no en su franco/RET origen.
+      const cov = (t: TurnoWaMatch) =>
+        String(t.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE' ? 0 : 1;
+      const byCov = cov(a) - cov(b);
+      if (byCov !== 0) return byCov;
+      return msDeRawWa(a.startTimeRaw) - msDeRawWa(b.startTimeRaw);
+    });
   return pendientes[0];
 }
 

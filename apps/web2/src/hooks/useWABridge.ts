@@ -87,6 +87,10 @@ export interface TurnoHoy {
   coveredByName?: string;
   coverageStatus?: string;
   operacionallyCovered?: boolean;
+  /** En un OPERATIONS_COVERAGE: nombre del titular al que está cubriendo. */
+  coversEmployeeName?: string;
+  /** Id del turno titular que esta cobertura tapa. */
+  coverageForShiftId?: string;
 }
 
 export type WABridgeStatus = 'idle' | 'connecting' | 'connected' | 'error';
