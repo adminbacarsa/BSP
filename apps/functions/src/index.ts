@@ -3743,9 +3743,18 @@ export const processEarlyWithdrawalCallable = functions.https.onCall(async (data
   const actorName =
     String(context.auth.token.name || context.auth.token.email || 'Operador').split('@')[0];
 
+  const bloqueRaw = data?.bloque;
+  const bloque =
+    typeof bloqueRaw === 'number' && Number.isFinite(bloqueRaw)
+      ? Math.max(1, Math.floor(bloqueRaw))
+      : typeof bloqueRaw === 'string' && /^\d+$/.test(bloqueRaw.trim())
+        ? Math.max(1, parseInt(bloqueRaw.trim(), 10))
+        : null;
+
   const result = await processEarlyWithdrawal(db, {
-    shiftId,
+    shiftId: shiftId.replace(/#b\d+$/i, ''),
     reason,
+    bloque,
     operatorReplaceChoice,
     resolvedBy,
     actorUid,

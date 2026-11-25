@@ -334,7 +334,7 @@ function useTurnosHoy({
   clientePorObj: Record<string, string>;
   /** Retenes del día siguiente (para cubrir una noche). No entran al dict del puente WA. */
   retenesManana: TurnoHoy[];
-  /** Tramos abiertos de turnos cortados que no entran al dict del puente WA (una fila por tramo). */
+  /** Tramos cortados y coberturas OPERATIONS_COVERAGE que no entran al dict por nombre (una fila por turno). */
   tramosExtra: TurnoHoy[];
   /** Domicilio geocodificado, objetivo titular y experiencia por objetivo (para elegir retenes). */
   empInfo: Record<string, EmpleadoRetenInfo>;
@@ -417,6 +417,8 @@ function useTurnosHoy({
       const cerradosMap = new Map<string, TurnoHoy>();
       const retMananaList: TurnoHoy[] = [];
       const tramosAbiertos: TurnoHoy[] = [];
+      /** Coberturas ops abiertas: todas van a la lista (no se colapsan por nombre). */
+      const coberturasAbiertas: TurnoHoy[] = [];
       const metaTramos: Record<string, PresenciaMeta> = {};
       const manana = new Date(now);
       manana.setDate(manana.getDate() + 1);
@@ -583,6 +585,11 @@ function useTurnosHoy({
                   .replace(/\s*\([^)]*\)\s*$/, '')
                   .trim() || undefined
               : undefined,
+          coversEmployeeName:
+            String(shift.coversEmployeeName || '').trim() || undefined,
+          coverageForShiftId:
+            String(shift.coverageForShiftId || shift.coveredShiftId || shift.absenceShiftId || '')
+              .trim() || undefined,
           ...(String(shift.comentarioOps || '').trim()
             ? {
                 comentario: String(shift.comentarioOps).trim(),
@@ -602,9 +609,14 @@ function useTurnosHoy({
           if (!prev) {
             byName.set(employeeName, { turno, startMs: turnoStartMs });
           } else {
-            // Un guardia que cubre tiene dos turnos: su RET/origen (ya usado) y el de la cobertura.
-            // La fila viva es la cobertura; el origen usado queda por detrás.
-            const prioridad = (t: TurnoHoy) => (t.origin === 'OPERATIONS_COVERAGE' ? 2 : t.coverageUsed ? 0 : 1);
+            // Regla Mauro: el cubridor debe verse en el puesto cubierto (todas las
+            // OPERATIONS_COVERAGE van aparte). En el dict por nombre gana el turno propio;
+            // RET/origen ya usado queda atrás; cobertura solo si no hay otro turno vivo.
+            const prioridad = (t: TurnoHoy) => {
+              if (t.coverageUsed) return 0;
+              if (t.origin === 'OPERATIONS_COVERAGE') return 1;
+              return 2;
+            };
             const prevPrio = prioridad(prev.turno);
             const nextPrio = prioridad(turno);
             if (nextPrio !== prevPrio) {
@@ -684,6 +696,10 @@ function useTurnosHoy({
           // El tramo 2 recién recibe WA cuando termina el 1 o éste se cierra.
           const vigente = abiertosDoc.find((a) => a.endMs > now) ?? abiertosDoc[0];
           if (vigente) considerar(vigente.turno, vigente.startMs);
+          // Cobertura cortada: todos los tramos abiertos deben figurar en el puesto (no solo el vigente).
+          if (mapped.origin === 'OPERATIONS_COVERAGE') {
+            for (const a of abiertosDoc) coberturasAbiertas.push(a.turno);
+          }
           continue;
         }
 
@@ -692,6 +708,9 @@ function useTurnosHoy({
           continue;
         }
 
+        if (mapped.origin === 'OPERATIONS_COVERAGE') {
+          coberturasAbiertas.push(mapped);
+        }
         considerar(mapped, startMs);
       }
 
@@ -701,7 +720,18 @@ function useTurnosHoy({
         next[name] = v.turno;
       });
       const idsEnDict = new Set(Object.values(next).map((t) => t.rowId));
-      const extrasTramos = tramosAbiertos.filter((t) => !idsEnDict.has(t.rowId));
+      const extrasTramos = [
+        ...tramosAbiertos.filter((t) => !idsEnDict.has(t.rowId)),
+        ...coberturasAbiertas.filter((t) => !idsEnDict.has(t.rowId)),
+      ];
+      // Dedup por rowId (un tramo cortado de cobertura puede estar en ambos arrays).
+      const extrasUnicos: TurnoHoy[] = [];
+      const vistosExtra = new Set<string>();
+      for (const t of extrasTramos) {
+        if (!t.rowId || vistosExtra.has(t.rowId)) continue;
+        vistosExtra.add(t.rowId);
+        extrasUnicos.push(t);
+      }
       for (const d of docs) {
         const shift = d.data() as Record<string, unknown>;
         const realEnd = shift.realEndTime as Timestamp | undefined;
@@ -729,7 +759,7 @@ function useTurnosHoy({
         cerradosNext[id] = turno;
       });
       setTurnos(next);
-      setTramosExtra(extrasTramos);
+      setTramosExtra(extrasUnicos);
       setRetenesManana(retMananaList);
       setCerrados(cerradosNext);
       setPresenciaMeta(metaNext);
@@ -2481,6 +2511,14 @@ function GuardRow({
             {row.turno.bloque}/{row.turno.bloquesTotal}
           </span>
         )}
+        {row.turno.origin === 'OPERATIONS_COVERAGE' && row.turno.coversEmployeeName && (
+          <span
+            className="mt-0.5 flex w-full min-w-0 items-start gap-1 rounded-md bg-violet-50 px-1.5 py-0.5 text-left text-[10px] font-bold leading-snug text-violet-700"
+            title={`Cobertura operativa: fichada de ingreso/egreso en este puesto (titular ${row.turno.coversEmployeeName})`}
+          >
+            Cubre a {row.turno.coversEmployeeName}
+          </span>
+        )}
         {row.turno.comentario && (
           <button
             type="button"
@@ -3614,31 +3652,38 @@ export default function ModoRapidoPage() {
       })
       .sort((a, b) => rowRank(a) - rowRank(b) || String(a.turno.expected).localeCompare(String(b.turno.expected)));
 
-    // Segunda pasada: un turno NO_LLEGO/AUSENTE puede ya estar cubierto por otro turno
-    // real de hoy, mismo objetivo + mismo puesto + mismo horario de inicio, asignado a
-    // otro empleado que sí está presente/esperando (no ausente/no-llegó él mismo).
+    // Segunda pasada: "Cubierto por X" solo con cobertura real (ops_cov) o campo oficial.
+    // No inferir por un FT que comparte horario (eso marcaba a Olmos cubriendo a dos).
+    const normNombre = (s: string) =>
+      String(s || '')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim();
     return base.map((row): GuardRowModel => {
       if (row.estado !== 'NO_LLEGO' && row.estado !== 'AUSENTE') return row;
-      // Cobertura del motor oficial: el propio titular ya lo dice (cubre RET, FT o extensión).
-      if (row.turno.coveredByName) return { ...row, coveredByName: row.turno.coveredByName };
+      const titularDocId = docIdDe(row.turno.rowId);
       const cover = base.find((other) => {
         if (other === row) return false;
         if (other.estado === 'NO_LLEGO' || other.estado === 'AUSENTE') return false;
-        // Solo un FT (franco trabajado) es evidencia real de cobertura: un compañero
-        // haciendo su M/T/N normal en el mismo horario no está cubriendo a nadie.
-        if (other.turno.code !== 'FT') return false;
+        if (other.turno.origin !== 'OPERATIONS_COVERAGE') return false;
         if (!other.turno.objectiveId || other.turno.objectiveId !== row.turno.objectiveId) return false;
-        if (other.turno.expected !== row.turno.expected) return false;
-        if (
-          row.turno.positionName &&
-          other.turno.positionName &&
-          row.turno.positionName !== other.turno.positionName
-        ) {
-          return false;
+        if (other.turno.coverageForShiftId && other.turno.coverageForShiftId === titularDocId) {
+          return true;
         }
-        return true;
+        if (
+          other.turno.coversEmployeeName &&
+          normNombre(other.turno.coversEmployeeName) === normNombre(row.employeeName)
+        ) {
+          return true;
+        }
+        return false;
       });
-      return cover ? { ...row, coveredByName: cover.employeeName } : row;
+      if (cover) return { ...row, coveredByName: cover.employeeName };
+      // Motor oficial en el titular (sin fila del cubridor visible todavía).
+      if (row.turno.coveredByName) return { ...row, coveredByName: row.turno.coveredByName };
+      return row;
     }).concat(
       Object.entries(cerrados).map(([rowId, turno]): GuardRowModel => {
         const nombre = turno.name || '—';
@@ -4707,10 +4752,10 @@ export default function ModoRapidoPage() {
     }
   }
 
-  /** Cambio y retiro de un tramo de turno cortado todavía se hacen desde Operaciones. */
+  /** Intercambio de un tramo de turno cortado todavía se hace desde Operaciones. El retiro anticipado sí va por acá. */
   function bloqueaTramo(row: GuardRowModel): boolean {
     if (!esTramoCortado(row.turno)) return false;
-    showToast('Turno cortado: cambio y retiro se hacen desde Operaciones por ahora', 'bg-slate-700');
+    showToast('Turno cortado: el intercambio se hace desde Operaciones por ahora', 'bg-slate-700');
     return true;
   }
 
@@ -4735,7 +4780,6 @@ export default function ModoRapidoPage() {
   }
 
   function pedirRetiro(row: GuardRowModel) {
-    if (bloqueaTramo(row)) return;
     if (row.estado !== 'PRESENTE_PLAT' && row.estado !== 'PRESENTE_WA') {
       showToast('El retiro anticipado es de un guardia que ya está presente', 'bg-slate-700');
       return;
@@ -4749,10 +4793,23 @@ export default function ModoRapidoPage() {
     setRetiroModal(row);
   }
 
+  /** Fin planificado del retiro: en turno cortado, hasta el último tramo del mismo documento. */
+  function finPlanificadoRetiroMs(row: GuardRowModel): number {
+    let finMs = toStartMs(row.turno.endTimeRaw);
+    if (!esTramoCortado(row.turno)) return finMs;
+    const id = docIdDe(row.turno.rowId);
+    for (const r of classifiedRows) {
+      if (docIdDe(r.turno.rowId) !== id) continue;
+      const e = toStartMs(r.turno.endTimeRaw);
+      if (!Number.isNaN(e) && (Number.isNaN(finMs) || e > finMs)) finMs = e;
+    }
+    return finMs;
+  }
+
   /** Datos del retiro que se está pidiendo: horas que faltan, compañeros y política de reemplazo. */
   const retiroInfo = useMemo(() => {
     if (!retiroModal) return null;
-    const finMs = toStartMs(retiroModal.turno.endTimeRaw);
+    const finMs = finPlanificadoRetiroMs(retiroModal);
     const hoursLeft = Number.isNaN(finMs) ? 0 : hoursRemainingUntilEnd(nowMs, finMs);
     const obj = retiroModal.turno.objectiveId;
     const colleagues = classifiedRows.filter(
@@ -4777,11 +4834,12 @@ export default function ModoRapidoPage() {
     if (row.estado !== 'PRESENTE_PLAT' && row.estado !== 'PRESENTE_WA') return;
     setBusy(true);
     try {
-      const finPlanificadoMs = toStartMs(row.turno.endTimeRaw);
+      const finPlanificadoMs = finPlanificadoRetiroMs(row);
       const retiroMs = Date.now();
       const fn = httpsCallable(functions, 'processEarlyWithdrawalCallable');
       const res = await fn({
-        shiftId: row.turno.rowId,
+        shiftId: docIdDe(row.turno.rowId),
+        bloque: row.turno.bloque ?? 1,
         reason: motivo,
         operatorReplaceChoice,
       });

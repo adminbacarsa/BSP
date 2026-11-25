@@ -18,6 +18,8 @@ import {
 export type ProcessEarlyWithdrawInput = {
   shiftId: string;
   reason: EarlyWithdrawReason;
+  /** Tramo del turno cortado (1-based). Si falta, se asume el primero. */
+  bloque?: number | null;
   operatorReplaceChoice?: boolean | null;
   resolvedBy?: 'OPERACIONES' | 'AUTO';
   actorUid?: string | null;
@@ -142,7 +144,11 @@ export async function processEarlyWithdrawal(
   const scheduledH = Math.max(0.25, (endMsVal - startMs(shift)) / 3600000);
   const workedH = Math.max(0, scheduledH - hoursLeft);
 
-  await ref.update({
+  const blocks = Array.isArray(shift.blocks) ? (shift.blocks as unknown[]) : [];
+  const esCortado = blocks.length > 1;
+  const bloqueN = Math.max(1, Math.min(esCortado ? blocks.length : 1, Number(input.bloque) || 1));
+
+  const patch: Record<string, unknown> = {
     status: 'COMPLETED',
     isCompleted: true,
     isPresent: false,
@@ -150,9 +156,22 @@ export async function processEarlyWithdrawal(
     interrupted: true,
     interruptionReason: input.reason,
     endTime: now,
-    plannedEndTime: shift.endTime ?? Timestamp.fromMillis(endMsVal),
+    plannedEndTime: shift.plannedEndTime ?? shift.endTime ?? Timestamp.fromMillis(endMsVal),
     completionReason: 'EARLY_WITHDRAW',
-  });
+  };
+
+  // Turno cortado: cerrar el tramo actual y los siguientes para que Modo Rápido no deje filas fantasma.
+  if (esCortado) {
+    patch.retiroBloque = bloqueN;
+    for (let n = bloqueN; n <= blocks.length; n++) {
+      patch[`presenciaBloques.b${n}.cerrado`] = true;
+      if (n === bloqueN) {
+        patch[`presenciaBloques.b${n}.realEndTime`] = now;
+      }
+    }
+  }
+
+  await ref.update(patch);
 
   const dateStr = ymdAr(new Date(nowMs));
   await db.collection('ausencias').add({
