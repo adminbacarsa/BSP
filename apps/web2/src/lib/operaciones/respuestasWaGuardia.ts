@@ -4,10 +4,8 @@
  */
 
 import {
-  candidatosTurnoWa,
-  elegirTurnoWa,
   msDeRawWa,
-  nombresCompatiblesWa,
+  resolverTurnoWaIngreso,
   WA_VENTANA_INGRESO_MS,
   type TurnoWaMatch,
 } from './elegirTurnoWa';
@@ -162,8 +160,8 @@ export function textoWaNoCoincideLegajo(pushName: string, legajoNombre: string):
   const pila = nombrePila(pushName) || 'Hola';
   const legajo = String(legajoNombre || '').trim() || 'otro legajo';
   return (
-    `⚠️ ${pila}, este WhatsApp no coincide con el legajo *${legajo}*. ` +
-    `No confirmamos ni cerramos solo. Si sos vos, pedí a Operaciones que revise el teléfono en RRHH.`
+    `⚠️ ${pila}, este WhatsApp está cargado en el legajo *${legajo}* y no encontramos un turno a tu nombre hoy. ` +
+    `No confirmamos ni cerramos solo. Pedí a Operaciones que corrija el teléfono en RRHH.`
   );
 }
 
@@ -196,10 +194,18 @@ export function clasificarIngresoWa(input: {
   aviso?: AvisoWaKind;
 } {
   const { turnos, name, phone, msgMs, yaMarcado } = input;
-  const candidatos = candidatosTurnoWa(turnos, name, phone) as TurnoClasificacionWa[];
-  const turno = elegirTurnoWa(turnos, name, phone, msgMs) as TurnoClasificacionWa | undefined;
+  const resuelto = resolverTurnoWaIngreso(turnos, name, phone, msgMs);
+  const candidatos = resuelto.candidatosTelefono as TurnoClasificacionWa[];
+  const turno = resuelto.turno as TurnoClasificacionWa | undefined;
   const quien = turno?.name || name;
   if (!turno) {
+    if (resuelto.legajoTelefonoAjeno) {
+      return {
+        texto: textoWaNoCoincideLegajo(name, resuelto.legajoTelefonoAjeno),
+        cortar: true,
+        aviso: 'nombre_distinto',
+      };
+    }
     if (!candidatos.length) {
       return { texto: textoSinTurnoWa(name), cortar: true, aviso: 'sin_turno' };
     }
@@ -209,20 +215,11 @@ export function clasificarIngresoWa(input: {
       aviso: 'turno_cerrado',
     };
   }
-  const nombreOk = nombresCompatiblesWa(name, String(turno.name || ''));
   const st = String(turno.turnoStatus || 'PENDING').toUpperCase();
   if (st === 'PRESENT') {
     const fin = msDeRawWa(turno.endTimeRaw);
-    // Salida automática solo si el WhatsApp calza con el legajo (evita Franco → Nahuel).
+    // Salida automática solo sobre el turno ya resuelto (tel+nombre o propio por nombre).
     if (fin > 0 && msgMs >= fin) {
-      if (!nombreOk) {
-        return {
-          texto: textoWaNoCoincideLegajo(name, String(turno.name || '')),
-          cortar: true,
-          turno,
-          aviso: 'nombre_distinto',
-        };
-      }
       return { texto: null, cortar: false, turno };
     }
     return {
@@ -248,21 +245,12 @@ export function clasificarIngresoWa(input: {
       aviso: 'marca_recibida',
     };
   }
-  // Anticipado: el teléfono manda. Aunque el pushName no calce, le decimos el horario real.
   if (ingresoDemasiadoAnticipado(turno.startTimeRaw, msgMs)) {
     return {
       texto: textoIngresoAnticipadoWa(quien, turno, msgMs),
       cortar: true,
       turno,
       aviso: 'anticipado',
-    };
-  }
-  if (!nombreOk) {
-    return {
-      texto: textoWaNoCoincideLegajo(name, String(turno.name || '')),
-      cortar: true,
-      turno,
-      aviso: 'nombre_distinto',
     };
   }
   return { texto: null, cortar: false, turno };

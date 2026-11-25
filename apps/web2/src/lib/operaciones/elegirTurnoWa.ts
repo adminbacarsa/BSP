@@ -61,8 +61,8 @@ export function nombresCompatiblesWa(pushName: string, employeeName: string): bo
 
 /**
  * Solo por teléfono. El nombre de WhatsApp no filtra acá: si el pushName no calza con el
- * legajo, `clasificarIngresoWa` avisa y no confirma/cierra solo (antes devolvía «sin turno»
- * aunque el teléfono sí tenía jornada).
+ * legajo, `resolverTurnoWaIngreso` / `clasificarIngresoWa` buscan el turno del nombre
+ * o avisan (antes devolvía «sin turno» aunque el teléfono sí tenía jornada).
  * `permitirNombre` queda por si hace falta en pantallas manuales; el automático no lo usa.
  */
 export function candidatosTurnoWa(
@@ -87,18 +87,13 @@ export function candidatosTurnoWa(
 }
 
 /**
- * Entre los turnos del mismo guardia: primero el que está PRESENTE y ya terminó
- * (salida); si no, el PRESENTE en curso; recién después un PENDING dentro de la
- * ventana de ingreso. Así la ubicación de egreso del tramo 1 no marca el tramo 2.
+ * Entre candidatos ya filtrados: primero PRESENTE con fin vencido (salida); si no,
+ * PRESENTE en curso; recién después PENDING aún abierto.
  */
-export function elegirTurnoWa(
-  turnos: readonly TurnoWaMatch[],
-  name: string,
-  phone?: string | null,
+export function elegirEntreCandidatosWa(
+  candidatos: readonly TurnoWaMatch[],
   msgMs?: number,
-  opts?: { permitirNombre?: boolean },
 ): TurnoWaMatch | undefined {
-  const candidatos = candidatosTurnoWa(turnos, name, phone, opts);
   if (!candidatos.length) return undefined;
   const msg = msgMs && msgMs > 0 ? msgMs : Date.now();
 
@@ -121,7 +116,6 @@ export function elegirTurnoWa(
     return presentes[0];
   }
 
-  // PENDING aunque falte más de 30 min: la planilla responde al guardia y no confirma.
   const pendientes = candidatos
     .filter((t) => {
       const st = statusOf(t);
@@ -134,4 +128,60 @@ export function elegirTurnoWa(
     })
     .sort((a, b) => msDeRawWa(a.startTimeRaw) - msDeRawWa(b.startTimeRaw));
   return pendientes[0];
+}
+
+/**
+ * Entre los turnos del mismo guardia: primero el que está PRESENTE y ya terminó
+ * (salida); si no, el PRESENTE en curso; recién después un PENDING dentro de la
+ * ventana de ingreso. Así la ubicación de egreso del tramo 1 no marca el tramo 2.
+ */
+export function elegirTurnoWa(
+  turnos: readonly TurnoWaMatch[],
+  name: string,
+  phone?: string | null,
+  msgMs?: number,
+  opts?: { permitirNombre?: boolean },
+): TurnoWaMatch | undefined {
+  return elegirEntreCandidatosWa(candidatosTurnoWa(turnos, name, phone, opts), msgMs);
+}
+
+export type ResolucionTurnoWa = {
+  /** Turno a usar (teléfono+nombre OK, o fallback por nombre si el tel apunta a otro). */
+  turno?: TurnoWaMatch;
+  /** Candidatos del teléfono (aunque el nombre no calce): para avisos de cerrado/anticipado. */
+  candidatosTelefono: TurnoWaMatch[];
+  /** El teléfono está en este legajo y el pushName no calza; no hubo turno propio por nombre. */
+  legajoTelefonoAjeno?: string;
+};
+
+/**
+ * Teléfono primero si el nombre calza. Si el número está en otro legajo (Debora→Acosta,
+ * Franco→Nahuel), busca el turno de quien mandó por nombre; si no hay, marca el ajeno.
+ */
+export function resolverTurnoWaIngreso(
+  turnos: readonly TurnoWaMatch[],
+  name: string,
+  phone?: string | null,
+  msgMs?: number,
+): ResolucionTurnoWa {
+  const candidatosTelefono = candidatosTurnoWa(turnos, name, phone);
+  const porTel = elegirEntreCandidatosWa(candidatosTelefono, msgMs);
+  if (porTel && nombresCompatiblesWa(name, String(porTel.name || ''))) {
+    return { turno: porTel, candidatosTelefono };
+  }
+
+  const porNombre = turnos.filter((t) => nombresCompatiblesWa(name, String(t.name || '')));
+  const propio = elegirEntreCandidatosWa(porNombre, msgMs);
+  if (propio) {
+    return { turno: propio, candidatosTelefono };
+  }
+
+  if (porTel && !nombresCompatiblesWa(name, String(porTel.name || ''))) {
+    return {
+      candidatosTelefono,
+      legajoTelefonoAjeno: String(porTel.name || '').trim() || undefined,
+    };
+  }
+
+  return { candidatosTelefono };
 }

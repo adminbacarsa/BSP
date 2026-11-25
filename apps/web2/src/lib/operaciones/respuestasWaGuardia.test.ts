@@ -140,6 +140,59 @@ describe('respuestasWaGuardia', () => {
     });
     assert.equal(r.cortar, true);
     assert.equal(r.aviso, 'nombre_distinto');
-    assert.match(r.texto || '', /no coincide/);
+    assert.match(r.texto || '', /NIEVAS/);
+    assert.match(r.texto || '', /no encontramos un turno a tu nombre/i);
+  });
+
+  it('Debora con tel de Acosta: si ella tiene turno propio, confirma el de Debora', () => {
+    const r = clasificarIngresoWa({
+      turnos: [
+        turno({
+          rowId: 'acosta1',
+          name: 'ACOSTA, JULIO',
+          phone: '3515416836',
+          expected: '10:30',
+          startTimeRaw: ts('2026-11-24T10:30:00-03:00'),
+          endTimeRaw: ts('2026-11-24T18:30:00-03:00'),
+        }),
+        turno({
+          rowId: 'debora1',
+          name: 'QUINTEROS, DEBORA',
+          phone: '3519999999',
+          expected: '10:00',
+          startTimeRaw: ts('2026-11-24T10:00:00-03:00'),
+          endTimeRaw: ts('2026-11-24T18:00:00-03:00'),
+        }),
+      ],
+      name: 'Debora Quinteros',
+      phone: '3515416836',
+      msgMs: new Date('2026-11-24T10:35:00-03:00').getTime(),
+      yaMarcado: nunca,
+    });
+    assert.equal(r.cortar, false);
+    assert.equal(r.texto, null);
+    assert.equal(r.turno?.rowId, 'debora1');
+  });
+
+  it('Debora con tel de Acosta y sin turno propio: avisa legajo ajeno', () => {
+    const r = clasificarIngresoWa({
+      turnos: [
+        turno({
+          rowId: 'acosta1',
+          name: 'ACOSTA, JULIO',
+          phone: '3515416836',
+          expected: '10:30',
+          startTimeRaw: ts('2026-11-24T10:30:00-03:00'),
+          endTimeRaw: ts('2026-11-24T18:30:00-03:00'),
+        }),
+      ],
+      name: 'Debora Quinteros',
+      phone: '3515416836',
+      msgMs: new Date('2026-11-24T10:35:00-03:00').getTime(),
+      yaMarcado: nunca,
+    });
+    assert.equal(r.cortar, true);
+    assert.equal(r.aviso, 'nombre_distinto');
+    assert.match(r.texto || '', /ACOSTA/);
   });
 });
