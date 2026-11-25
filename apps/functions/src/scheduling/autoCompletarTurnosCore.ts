@@ -40,6 +40,8 @@ import {
 
 const RELEVO_WINDOW_AFTER_MS = 2 * 60 * 60 * 1000;
 const RELEVO_ALIGN_MS = 30 * 60 * 1000;
+/** Tras el fin planificado, esperar egreso WA/manual antes de inventar el cierre (sin relevo). */
+const EGRESO_GRACE_MS = 20 * 60 * 1000;
 
 export type AutoCompleteContext = {
   /**
@@ -433,6 +435,20 @@ export async function runAutoCompletarTurnosPass(
     gapShiftId?: string | null,
     incomingName?: string,
   ) => {
+    // Sin relevo: no inventar egreso al segundo del fin; dar tiempo a la salida por WA / Op.
+    const yaTieneEgreso = !!(
+      shift.realEndTime
+      || String(shift.checkOutSource || '').trim()
+      || shift.isCompleted === true
+    );
+    if (!yaTieneEgreso && FIN_SIN_RELEVO.has(reason)) {
+      const finPlan =
+        finUltimoTramoMs(shift) > 0 ? finUltimoTramoMs(shift) : (shiftEndMs(shift) || realEndMs);
+      if (finPlan > 0 && nowMs < finPlan + EGRESO_GRACE_MS) {
+        actions.push(describe(docSnap.id, shift, 'WAIT', 'ESPERANDO_EGRESO'));
+        return;
+      }
+    }
     const patch = buildAutoClosePatch(shift as Record<string, unknown>, { realEndMs, reason, now, extra });
     if (
       reason === 'RELEVO_PRESENTE'

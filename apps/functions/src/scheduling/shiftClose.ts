@@ -60,6 +60,8 @@ export function buildAutoClosePatch(
     autoCompletedBy: opts.by || 'SYSTEM_SCHEDULER',
     autoCloseReason: opts.reason,
     completionReason: opts.reason,
+    // No heredar el check-in (Op/WA): el egreso lo inventó el scheduler.
+    checkOutSource: 'AUTO',
     ...patchPresenciaBloquesAlCerrar(data, realEnd),
     ...(opts.extra || {}),
   };

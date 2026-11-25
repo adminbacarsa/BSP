@@ -275,6 +275,8 @@ type PresenciaMeta = {
   isRetention: boolean;
   /** Presencia inventada por Modo Demo / autoPresenciaYCierre (no fue App ni operador). */
   autoPresencia: boolean;
+  /** Cierre inventado por el scheduler (autoCompletarTurnos), no egreso WA/Op. */
+  autoCompleted: boolean;
   realEndLabel: string;
   /** HH:MM en que el guardia avisó su salida desde la app (turno todavía abierto). */
   salidaMarcada?: string;
@@ -699,6 +701,13 @@ function useTurnosHoy({
               isCompleted: tramoCerrado,
               isRetention: false,
               autoPresencia: shift.autoPresencia === true || !!shift.modoDemoAt,
+              autoCompleted:
+                !!shift.autoCompletedAt
+                || shift.autoCierre === true
+                || String(shift.autoCompletedBy || '').length > 0
+                || String(shift.completionReason || '').toUpperCase().startsWith('FIN_')
+                || String(shift.completionReason || '').toUpperCase().startsWith('SIN_')
+                || String(shift.checkOutSource || '').toUpperCase() === 'AUTO',
               realEndLabel: realFin
                 ? formatHHMM(realFin)
                 : tramoCerrado && esUltimo && shift.realEndTime
@@ -771,6 +780,13 @@ function useTurnosHoy({
           isCompleted: String(shift.status || '').toUpperCase() === 'COMPLETED' || shift.isCompleted === true,
           isRetention: shift.isRetention === true,
           autoPresencia: shift.autoPresencia === true || !!shift.modoDemoAt,
+          autoCompleted:
+            !!shift.autoCompletedAt
+            || shift.autoCierre === true
+            || String(shift.autoCompletedBy || '').length > 0
+            || String(shift.completionReason || '').toUpperCase().startsWith('FIN_')
+            || String(shift.completionReason || '').toUpperCase().startsWith('SIN_')
+            || String(shift.checkOutSource || '').toUpperCase() === 'AUTO',
           realEndLabel: realEnd ? formatHHMM(realEnd) : '',
           salidaMarcada:
             shift.salidaMarcadaAt &&
@@ -895,14 +911,22 @@ type StatsFilter =
   | 'app'
   | 'cerrado';
 
-type FuenteMarca = 'WA' | 'Radio' | 'App' | 'Op' | 'Demo' | '—';
+type FuenteMarca = 'WA' | 'Radio' | 'App' | 'Op' | 'Demo' | 'Auto' | '—';
 
 function fuenteDe(estado: GuardEstado, meta?: PresenciaMeta): FuenteMarca {
   if (estado === 'PENDIENTE_WA' || estado === 'PRESENTE_WA') return 'WA';
-  // Cerrado por salida WA: la columna refleja el egreso, no el ingreso (que pudo ser Op).
+  // Cerrado: la columna refleja el egreso. Nunca reutilizar el check-in (Op) como si fuera la salida.
   if (estado === 'CERRADO') {
     const out = String(meta?.checkOutSource || '').toUpperCase();
     if (out === 'WA' || out === 'WHATSAPP') return 'WA';
+    if (out === 'AUTO' || out === 'SISTEMA' || out === 'SYSTEM' || meta?.autoCompleted === true) {
+      return 'Auto';
+    }
+    if (out === 'MANUAL_RADIO' || out.includes('RADIO')) return 'Radio';
+    if (out === 'PORTAL_GPS' || out === 'APP_GEO' || out === 'APP_QR') return 'App';
+    if (out === 'MANUAL' || out === 'OPERATIONS' || out === 'MANUAL_PHONE') return 'Op';
+    if (out === 'MODO_DEMO' || out === 'DEMO') return 'Demo';
+    return '—';
   }
   const src = String(meta?.presenciaSource || meta?.checkInMethod || meta?.checkInSource || '').toUpperCase();
   if (src === 'MODO_DEMO' || src === 'DEMO' || meta?.autoPresencia === true) return 'Demo';
@@ -2527,7 +2551,9 @@ function GuardRow({
           ? 'text-emerald-700'
           : row.fuente === 'Demo'
             ? 'text-amber-700'
-            : 'text-slate-500';
+            : row.fuente === 'Auto'
+              ? 'text-slate-600'
+              : 'text-slate-500';
 
   return (
     <div
