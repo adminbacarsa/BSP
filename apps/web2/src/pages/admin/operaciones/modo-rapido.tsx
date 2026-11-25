@@ -273,6 +273,8 @@ type PresenciaMeta = {
   isPresent: boolean;
   isCompleted: boolean;
   isRetention: boolean;
+  /** Presencia inventada por Modo Demo / autoPresenciaYCierre (no fue App ni operador). */
+  autoPresencia: boolean;
   realEndLabel: string;
   /** HH:MM en que el guardia avisó su salida desde la app (turno todavía abierto). */
   salidaMarcada?: string;
@@ -663,6 +665,7 @@ function useTurnosHoy({
               isPresent: status === 'PRESENT',
               isCompleted: tramoCerrado,
               isRetention: false,
+              autoPresencia: shift.autoPresencia === true || !!shift.modoDemoAt,
               realEndLabel: realFin
                 ? formatHHMM(realFin)
                 : tramoCerrado && esUltimo && shift.realEndTime
@@ -710,6 +713,7 @@ function useTurnosHoy({
           isPresent: shift.isPresent === true,
           isCompleted: String(shift.status || '').toUpperCase() === 'COMPLETED' || shift.isCompleted === true,
           isRetention: shift.isRetention === true,
+          autoPresencia: shift.autoPresencia === true || !!shift.modoDemoAt,
           realEndLabel: realEnd ? formatHHMM(realEnd) : '',
           salidaMarcada:
             shift.salidaMarcadaAt &&
@@ -821,7 +825,7 @@ type StatsFilter =
   | 'app'
   | 'cerrado';
 
-type FuenteMarca = 'WA' | 'Radio' | 'App' | 'Op' | '—';
+type FuenteMarca = 'WA' | 'Radio' | 'App' | 'Op' | 'Demo' | '—';
 
 function fuenteDe(estado: GuardEstado, meta?: PresenciaMeta): FuenteMarca {
   if (estado === 'PENDIENTE_WA' || estado === 'PRESENTE_WA') return 'WA';
@@ -831,11 +835,12 @@ function fuenteDe(estado: GuardEstado, meta?: PresenciaMeta): FuenteMarca {
     if (out === 'WA' || out === 'WHATSAPP') return 'WA';
   }
   const src = String(meta?.presenciaSource || meta?.checkInMethod || meta?.checkInSource || '').toUpperCase();
+  if (src === 'MODO_DEMO' || src === 'DEMO' || meta?.autoPresencia === true) return 'Demo';
   if (src === 'PORTAL_GPS' || src === 'APP_GEO' || src === 'APP_QR') return 'App';
   if (src === 'MANUAL_RADIO' || src.includes('RADIO')) return 'Radio';
   if (src === 'WA' || src === 'WHATSAPP') return 'WA';
   if (src === 'MANUAL' || src === 'OPERATIONS' || src === 'MANUAL_PHONE') return 'Op';
-  if (estado === 'PRESENTE_PLAT' && meta?.isPresent) return 'App';
+  // Presente en plataforma sin fuente: operador/sistema, nunca App (antes el fallback mentía).
   if (estado === 'PRESENTE_PLAT') return 'Op';
   return '—';
 }
@@ -2450,7 +2455,9 @@ function GuardRow({
         ? 'text-indigo-700'
         : row.fuente === 'Radio'
           ? 'text-emerald-700'
-          : 'text-slate-500';
+          : row.fuente === 'Demo'
+            ? 'text-amber-700'
+            : 'text-slate-500';
 
   return (
     <div
@@ -3048,59 +3055,65 @@ function WASidebar({
         )}
       </div>
 
-      {confirmados.length > 0 && (
-        <div className="border-t border-slate-200 flex-shrink-0 max-h-[45%] flex flex-col">
-          <div className="px-3 py-2 flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setLogOpen(!logOpen)}
-              className="flex items-center gap-1 text-[10px] font-bold text-slate-600 hover:text-slate-800"
-            >
-              {logOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-              Confirmados hoy
-              <span className="px-1.5 py-0.5 bg-slate-100 rounded-full text-[9px]">
-                {confirmados.length}
-              </span>
-            </button>
-            <span
-              className="ml-auto text-[9px] font-semibold text-slate-400"
-              title="Incluye lo confirmado desde todas las pantallas y sesiones"
-            >
-              <Lock size={10} className="inline -mt-0.5 mr-0.5" aria-hidden />
-              Todas las sesiones
+      <div className="border-t border-slate-200 flex-shrink-0 max-h-[45%] flex flex-col">
+        <div className="px-3 py-2 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setLogOpen(!logOpen)}
+            className="flex items-center gap-1 text-[10px] font-bold text-slate-600 hover:text-slate-800"
+          >
+            {logOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+            Confirmados hoy
+            <span className="px-1.5 py-0.5 bg-slate-100 rounded-full text-[9px]">
+              {confirmados.length}
             </span>
-          </div>
-          {logOpen && (
-            <div className="overflow-y-auto flex-1 min-h-0">
-              {confirmados.length > pageSize && (
-                <div className="px-3 pb-2">
-                  <input
-                    placeholder="Filtrar…"
-                    value={logFilter}
-                    onChange={(e) => {
-                      setLogFilter(e.target.value);
-                      setLogPage(1);
-                    }}
-                    className="w-full px-2 py-1 text-[11px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-1 focus:ring-emerald-400"
-                  />
-                </div>
-              )}
-              {visible.map((e) => (
-                <ConfirmedCard key={e.rowId || e.name + e.arrivedAt} entry={e} />
-              ))}
-              {remaining > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setLogPage((p) => p + 1)}
-                  className="w-full py-2 text-[10px] font-bold text-slate-500 hover:bg-slate-50"
-                >
-                  Ver más · {remaining} restantes
-                </button>
-              )}
-            </div>
-          )}
+          </button>
+          <span
+            className="ml-auto text-[9px] font-semibold text-slate-400"
+            title="Solo ingresos por WhatsApp (todas las pantallas y sesiones). App/Op no entran acá."
+          >
+            <Lock size={10} className="inline -mt-0.5 mr-0.5" aria-hidden />
+            Solo WA
+          </span>
         </div>
-      )}
+        {logOpen && (
+          <div className="overflow-y-auto flex-1 min-h-0">
+            {confirmados.length === 0 ? (
+              <p className="px-3 py-3 text-[10px] text-slate-400 text-center leading-snug">
+                Nadie confirmó ingreso por WhatsApp hoy. Los presentes por App u Op no se listan acá.
+              </p>
+            ) : (
+              <>
+                {confirmados.length > pageSize && (
+                  <div className="px-3 pb-2">
+                    <input
+                      placeholder="Filtrar…"
+                      value={logFilter}
+                      onChange={(e) => {
+                        setLogFilter(e.target.value);
+                        setLogPage(1);
+                      }}
+                      className="w-full px-2 py-1 text-[11px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                    />
+                  </div>
+                )}
+                {visible.map((e) => (
+                  <ConfirmedCard key={e.rowId || e.name + e.arrivedAt} entry={e} />
+                ))}
+                {remaining > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setLogPage((p) => p + 1)}
+                    className="w-full py-2 text-[10px] font-bold text-slate-500 hover:bg-slate-50"
+                  >
+                    Ver más · {remaining} restantes
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        )}
+      </div>
 
       {typeof wa.addFakePending === 'function' && process.env.NODE_ENV === 'development' && (
         <div className="border-t border-slate-100 px-3 py-2 flex-shrink-0">
@@ -3137,7 +3150,7 @@ export default function ModoRapidoPage() {
   const [bridgeUrl, setBridgeUrl] = useState('');
   const [bridgeCfg, setBridgeCfg] = useState<'cargando' | 'ok' | 'sin_config'>('cargando');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [logOpen, setLogOpen] = useState(false);
+  const [logOpen, setLogOpen] = useState(true);
   const [logFilter, setLogFilter] = useState('');
   const [logPage, setLogPage] = useState(1);
   const [nowMs, setNowMs] = useState(() => Date.now());

@@ -63,7 +63,7 @@ describe('elegirTurnoWa', () => {
     assert.equal(elegido?.rowId, 'doc#b1');
   });
 
-  it('no cierra el turno de otro aunque el teléfono en RRHH coincida (Franco ≠ Nahuel)', () => {
+  it('el teléfono matchea aunque el pushName no calce; el nombre se valida después', () => {
     const msg = new Date('2026-11-24T16:36:00-03:00').getTime();
     const nahuel = {
       rowId: 'nahuel1',
@@ -74,7 +74,7 @@ describe('elegirTurnoWa', () => {
       endTimeRaw: ts('2026-11-24T16:30:00-03:00'),
     };
     const elegido = elegirTurnoWa([nahuel], 'Franco Sartori', '3517583423', msg);
-    assert.equal(elegido, undefined);
+    assert.equal(elegido?.rowId, 'nahuel1');
     assert.equal(nombresCompatiblesWa('Franco Sartori', 'NIEVAS, NAHUEL ALEJO'), false);
   });
 

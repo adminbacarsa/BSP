@@ -60,7 +60,9 @@ export function nombresCompatiblesWa(pushName: string, employeeName: string): bo
 }
 
 /**
- * Solo por teléfono. El match por nombre fuzzy cerraba turnos ajenos (Franco → Nahuel).
+ * Solo por teléfono. El nombre de WhatsApp no filtra acá: si el pushName no calza con el
+ * legajo, `clasificarIngresoWa` avisa y no confirma/cierra solo (antes devolvía «sin turno»
+ * aunque el teléfono sí tenía jornada).
  * `permitirNombre` queda por si hace falta en pantallas manuales; el automático no lo usa.
  */
 export function candidatosTurnoWa(
@@ -72,9 +74,7 @@ export function candidatosTurnoWa(
   const np = normPhone(phone);
   if (np) {
     const byPhone = turnos.filter((t) => t.phone && normPhone(t.phone) === np);
-    if (byPhone.length) {
-      return byPhone.filter((t) => nombresCompatiblesWa(name, String(t.name || '')));
-    }
+    if (byPhone.length) return byPhone;
   }
   if (!opts?.permitirNombre) return [];
   const pushName = (name || '').toLowerCase().trim();

@@ -333,11 +333,11 @@ app.post('/send', async (req, res) => {
   if (!phone || !message) return res.status(400).json({ error: 'phone y message requeridos' });
   if (!sock) return res.status(503).json({ error: 'WhatsApp no conectado aún' });
   try {
-    // Normalizar: asegurar formato 549XXXXXXXXXX@s.whatsapp.net
-    const num = phone.replace(/\D/g, '');
-    const jid = (num.startsWith('549') ? num : '549' + num) + '@s.whatsapp.net';
+    // Misma resolución que /reply: preferir LID conocido (intercambio/cobertura).
+    const jid = jidDelGuardia(phone, '');
+    if (!jid) return res.status(400).json({ error: 'teléfono inválido' });
     await sock.sendMessage(jid, { text: message });
-    console.log(`[send] ✓ → ${jid}: "${message.slice(0, 60)}"`);
+    console.log(`[send] ✓ → ${jid}: "${String(message).slice(0, 60)}"`);
     res.json({ ok: true, to: jid });
   } catch (e) {
     console.error(`[send] ✗ ${e.message}`);

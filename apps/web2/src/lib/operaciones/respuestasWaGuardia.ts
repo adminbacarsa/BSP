@@ -7,6 +7,7 @@ import {
   candidatosTurnoWa,
   elegirTurnoWa,
   msDeRawWa,
+  nombresCompatiblesWa,
   WA_VENTANA_INGRESO_MS,
   type TurnoWaMatch,
 } from './elegirTurnoWa';
@@ -157,6 +158,15 @@ export function textoMarcaYaRecibidaWa(nombreCompleto: string): string {
   return `📥 ${saludo(nombreCompleto)}ya recibimos tu marca de este turno. No hace falta reenviar la ubicación.`;
 }
 
+export function textoWaNoCoincideLegajo(pushName: string, legajoNombre: string): string {
+  const pila = nombrePila(pushName) || 'Hola';
+  const legajo = String(legajoNombre || '').trim() || 'otro legajo';
+  return (
+    `⚠️ ${pila}, este WhatsApp no coincide con el legajo *${legajo}*. ` +
+    `No confirmamos ni cerramos solo. Si sos vos, pedí a Operaciones que revise el teléfono en RRHH.`
+  );
+}
+
 export type TurnoClasificacionWa = TurnoWaMatch & TurnoParaRespuestaWa & { realStartTime?: string };
 
 export type AvisoWaKind =
@@ -164,7 +174,8 @@ export type AvisoWaKind =
   | 'turno_cerrado'
   | 'ya_presente'
   | 'marca_recibida'
-  | 'anticipado';
+  | 'anticipado'
+  | 'nombre_distinto';
 
 /**
  * Qué contestarle al guardia cuando la foto o la ubicación no se confirma sola.
@@ -198,10 +209,22 @@ export function clasificarIngresoWa(input: {
       aviso: 'turno_cerrado',
     };
   }
+  const nombreOk = nombresCompatiblesWa(name, String(turno.name || ''));
   const st = String(turno.turnoStatus || 'PENDING').toUpperCase();
   if (st === 'PRESENT') {
     const fin = msDeRawWa(turno.endTimeRaw);
-    if (fin > 0 && msgMs >= fin) return { texto: null, cortar: false, turno };
+    // Salida automática solo si el WhatsApp calza con el legajo (evita Franco → Nahuel).
+    if (fin > 0 && msgMs >= fin) {
+      if (!nombreOk) {
+        return {
+          texto: textoWaNoCoincideLegajo(name, String(turno.name || '')),
+          cortar: true,
+          turno,
+          aviso: 'nombre_distinto',
+        };
+      }
+      return { texto: null, cortar: false, turno };
+    }
     return {
       texto: textoYaPresenteWa(quien, turno),
       cortar: true,
@@ -225,12 +248,21 @@ export function clasificarIngresoWa(input: {
       aviso: 'marca_recibida',
     };
   }
+  // Anticipado: el teléfono manda. Aunque el pushName no calce, le decimos el horario real.
   if (ingresoDemasiadoAnticipado(turno.startTimeRaw, msgMs)) {
     return {
       texto: textoIngresoAnticipadoWa(quien, turno, msgMs),
-      cortar: false,
+      cortar: true,
       turno,
       aviso: 'anticipado',
+    };
+  }
+  if (!nombreOk) {
+    return {
+      texto: textoWaNoCoincideLegajo(name, String(turno.name || '')),
+      cortar: true,
+      turno,
+      aviso: 'nombre_distinto',
     };
   }
   return { texto: null, cortar: false, turno };

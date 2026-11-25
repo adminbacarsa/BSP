@@ -86,6 +86,7 @@ export async function runModoDemoForEmpresa(
         presentAt: lateTs,
         realStartTime: lateTs,
         autoPresencia: true,
+        checkInSource: 'MODO_DEMO',
         llegadaTarde: true,
         modoDemoAt: nowTs,
       });
@@ -128,6 +129,7 @@ export async function runModoDemoForEmpresa(
         presentAt: actualStartTs,
         realStartTime: actualStartTs,
         autoPresencia: true,
+        checkInSource: 'MODO_DEMO',
         modoDemoAt: nowTs,
       });
       batchOps += 1;
@@ -164,6 +166,7 @@ export async function runModoDemoForEmpresa(
       realStartTime: presentAt,
       checkInTime: presentAt,
       autoPresencia: true,
+      checkInSource: 'MODO_DEMO',
       modoDemoAt: nowTs,
     });
     batchOps += 1;

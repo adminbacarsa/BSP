@@ -12,6 +12,7 @@ import {
   type TurnoClasificacionWa,
 } from './respuestasWaGuardia.ts';
 
+
 const ts = (iso: string) => ({ toMillis: () => new Date(iso).getTime() });
 
 describe('respuestasWaGuardia', () => {
@@ -107,7 +108,7 @@ describe('respuestasWaGuardia', () => {
     assert.match(r.texto || '', /14:00/);
   });
 
-  it('muy antes del inicio dice el horario y no corta el aviso', () => {
+  it('muy antes del inicio dice el horario', () => {
     const r = clasificarIngresoWa({
       turnos: [turno({})],
       name: 'Mauro',
@@ -115,8 +116,30 @@ describe('respuestasWaGuardia', () => {
       msgMs: new Date('2026-11-24T15:02:00-03:00').getTime(),
       yaMarcado: nunca,
     });
-    assert.equal(r.cortar, false);
+    assert.equal(r.cortar, true);
+    assert.equal(r.aviso, 'anticipado');
     assert.match(r.texto || '', /18:00/);
     assert.match(r.texto || '', /30 min/);
+  });
+
+  it('Franco con teléfono de Nahuel: no cierra solo la salida', () => {
+    const r = clasificarIngresoWa({
+      turnos: [
+        turno({
+          name: 'NIEVAS, NAHUEL ALEJO',
+          phone: '3517583423',
+          turnoStatus: 'PRESENT',
+          startTimeRaw: ts('2026-11-24T10:30:00-03:00'),
+          endTimeRaw: ts('2026-11-24T16:30:00-03:00'),
+        }),
+      ],
+      name: 'Franco Sartori',
+      phone: '3517583423',
+      msgMs: new Date('2026-11-24T16:36:00-03:00').getTime(),
+      yaMarcado: nunca,
+    });
+    assert.equal(r.cortar, true);
+    assert.equal(r.aviso, 'nombre_distinto');
+    assert.match(r.texto || '', /no coincide/);
   });
 });
