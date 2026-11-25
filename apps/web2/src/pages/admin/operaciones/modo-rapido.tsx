@@ -3679,14 +3679,18 @@ export default function ModoRapidoPage() {
             ? realDisplay
             : undefined;
         const esRet = String(turno.code || '').toUpperCase() === 'RET';
-        const diff = esRet && !realForDiff
-          ? { label: 'en espera', tone: 'neutral' as const }
-          : buildDiff(
-          turno.expected,
-          realForDiff,
-          nowMs,
-          turno.startTimeRaw as Timestamp | undefined,
-        );
+        // Ausente ya quedó resuelto: no seguir contando "hace N min" desde el inicio.
+        const diff =
+          estado === 'AUSENTE'
+            ? { label: '—', tone: 'neutral' as const }
+            : esRet && !realForDiff
+              ? { label: 'en espera', tone: 'neutral' as const }
+              : buildDiff(
+                  turno.expected,
+                  realForDiff,
+                  nowMs,
+                  turno.startTimeRaw as Timestamp | undefined,
+                );
 
         const fuente = fuenteDe(estado, presenciaMeta[turno.rowId]);
         return {
