@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { resolveLiquidationWorkedHours } from './reportesLiquidation.ts';
+import { resolveLiquidationWorkedHours } from './reportesLiquidation';
 
 const ended = { seconds: Math.floor(Date.now() / 1000) - 3600 };
 
