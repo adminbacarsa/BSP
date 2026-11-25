@@ -23,6 +23,8 @@ export interface WAEntry {
   /** Coordenadas del objetivo (para badge de distancia). */
   objLat?: number;
   objLng?: number;
+  /** Objetivo CRM con check-in remoto: no exige radio GPS. */
+  allowRemoteCheckIn?: boolean;
   /** Epoch ms real del mensaje (para registrar la salida a la hora en que el guardia la avisó). */
   msgTs?: number;
 }
@@ -54,6 +56,8 @@ export interface TurnoHoy {
   /** Coordenadas del objetivo para calcular distancia al check-in. */
   objLat?: number;
   objLng?: number;
+  /** Objetivo con check-in remoto (CRM): Modo Rápido no exige radio. */
+  allowRemoteCheckIn?: boolean;
   /** Datos crudos del turno, necesarios para escrituras de cobertura (RET/D12-N12/Intercambio/FT). */
   employeeId?: string;
   objectiveId?: string;
@@ -226,6 +230,7 @@ export function useWABridge(
   const turnosRef = useRef(turnos);
   const extrasRef = useRef(extras);
   const confirmedRowIdsRef = useRef(confirmedRowIds);
+  const monitoredGroupIdsRef = useRef(monitoredGroupIds);
 
   useEffect(() => {
     turnosRef.current = turnos;
@@ -238,6 +243,10 @@ export function useWABridge(
   useEffect(() => {
     confirmedRowIdsRef.current = confirmedRowIds;
   }, [confirmedRowIds]);
+
+  useEffect(() => {
+    monitoredGroupIdsRef.current = monitoredGroupIds;
+  }, [monitoredGroupIds]);
 
   // Un check-in pendiente de una fila que ya quedó presente (confirmada acá, en otra pantalla o
   // por otro medio) es un duplicado: se descarta para no volver a marcar la misma presencia.
@@ -424,6 +433,11 @@ export function useWABridge(
 
         if (m.type === 'protocol') continue;
 
+        // Solo grupos activos en Modo Rápido: sin selección no se confirma ni se contesta.
+        const monitoreados = monitoredGroupIdsRef.current;
+        if (monitoreados.size === 0) continue;
+        if (m.groupId && !monitoreados.has(m.groupId)) continue;
+
         // Mensajes de días anteriores (el bridge guarda los últimos y al cambiar de día
         // el puntero se reinicia): nunca son una llegada de hoy.
         if (typeof m.ts === 'number' && m.ts > 0 && m.ts < inicioDeHoyMs()) continue;
@@ -472,6 +486,7 @@ export function useWABridge(
               obj: turno.obj,
               objLat: turno.objLat,
               objLng: turno.objLng,
+              allowRemoteCheckIn: turno.allowRemoteCheckIn === true,
               msgTs: msgMs,
             });
           }
@@ -506,6 +521,7 @@ export function useWABridge(
           obj: turno?.obj,
           objLat: turno?.objLat,
           objLng: turno?.objLng,
+          allowRemoteCheckIn: turno?.allowRemoteCheckIn === true,
           msgTs: msgMs,
         };
 

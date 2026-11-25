@@ -77,11 +77,18 @@ const isOperationalOriginShift = (shift: any): boolean => {
 
 const shiftHasRealCheckIn = (shift: any): boolean => {
     const st = String(shift?.status || '').toUpperCase();
-    return !!(
+    if (
         shift?.isPresent || shift?.isCompleted
         || shift?.checkInTime?.seconds || shift?.realStartTime?.seconds
         || st === 'COMPLETED' || st === 'PRESENT'
-    );
+    ) return true;
+    const pb = shift?.presenciaBloques;
+    if (pb && typeof pb === 'object') {
+        for (const raw of Object.values(pb as Record<string, { realStartTime?: unknown } | null | undefined>)) {
+            if (raw?.realStartTime) return true;
+        }
+    }
+    return false;
 };
 
 /** Franco planificado (día libre), aún sin marcar FT en Firestore. */
@@ -222,7 +229,10 @@ export function buildFrancoDocLiquidationSkipIds(shifts: any[], opts?: { usePlan
     return skip;
 }
 
-/** Total trabajado para liquidación: fichada real, o jornada FT/cobertura ya finalizada. */
+/**
+ * Total trabajado para liquidación: fichada real completa; si el turno ya venció con ingreso
+ * pero sin egreso, horas planificadas. TURA no se inventa sin fichada (va aparte).
+ */
 export function resolveLiquidationWorkedHours(
     shift: any,
     opts: {
@@ -237,10 +247,15 @@ export function resolveLiquidationWorkedHours(
     if (opts.isAbsent ?? (shift.isAbsent === true)) return 0;
     if (!shiftEndedForLiquidation(shift)) return 0;
     if (opts.rDur != null && opts.rDur >= 0 && opts.rDur <= 36) return opts.rDur;
+    const code = String(shift?.code || '').trim().toUpperCase();
+    if (code === 'TURA') return 0;
     const isFT = opts.isFT ?? isFrancoTrabajadoShift(shift);
-    if (!isFT) return 0;
     const dur = opts.duration ?? resolveShiftDurationHours(shift);
-    return dur > 0 ? dur : 0;
+    if (isFT) return dur > 0 ? dur : 0;
+    if (shiftHasRealCheckIn(shift) || shift?.isCompleted === true) {
+        return dur > 0 ? dur : 0;
+    }
+    return 0;
 }
 
 export function liquidacion200FromWorkedHours(totalTrabajado: number) {

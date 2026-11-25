@@ -1,8 +1,6 @@
 import { Timestamp } from 'firebase-admin/firestore';
-export declare const SHIFT_HARD_CAP_MS: number;
-export declare const STALE_CAP_GRACE_MS: number;
-export declare function shiftWorkStartMs(data: Record<string, unknown>): number;
-export declare function shiftHardCapAtMs(data: Record<string, unknown>): number;
+import { SHIFT_HARD_CAP_MS, STALE_CAP_GRACE_MS, shiftHardCapAtMs, shiftWorkStartMs } from './shiftCloseCore';
+export { SHIFT_HARD_CAP_MS, STALE_CAP_GRACE_MS, shiftHardCapAtMs, shiftWorkStartMs };
 export type AutoCloseOpts = {
     realEndMs: number;
     reason: string;
@@ -11,3 +9,4 @@ export type AutoCloseOpts = {
     extra?: Record<string, unknown>;
 };
 export declare function buildAutoClosePatch(data: Record<string, unknown>, opts: AutoCloseOpts): Record<string, unknown>;
+export declare function clearRetentionOnReliefClose(patch: Record<string, unknown>): Record<string, unknown>;

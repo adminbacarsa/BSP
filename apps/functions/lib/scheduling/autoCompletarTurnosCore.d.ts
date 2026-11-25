@@ -5,6 +5,7 @@ export type AutoCompleteContext = {
     shiftEmpresaId: (shift: FirebaseFirestore.DocumentData) => string;
     sameTenantShift: (a: FirebaseFirestore.DocumentData, b: FirebaseFirestore.DocumentData) => boolean;
     getEmployeeTokens: (db: Firestore, employeeId: string) => Promise<string[]>;
+    isDemo?: (empresaId: unknown) => boolean;
 };
 export type AutoCompleteActionKind = 'CLOSE' | 'RETAIN' | 'RETAIN_QUIET' | 'LINK_RELIEF' | 'WAIT';
 export type AutoCompleteAction = {
@@ -37,6 +38,7 @@ export type AutoCompletarTurnosPassOpts = {
     onlyOutgoingShiftId?: string | null;
     dryRun?: boolean;
     empresaFilter?: (empresaId: string) => boolean;
+    recentEndMs?: number;
 };
 export declare function runAutoCompletarTurnosPass(db: Firestore, ctx: AutoCompleteContext, now?: Timestamp, passOpts?: AutoCompletarTurnosPassOpts): Promise<AutoCompletePassResult>;
 export { loadPositionHasContinuity };

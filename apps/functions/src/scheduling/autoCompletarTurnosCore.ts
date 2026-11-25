@@ -23,7 +23,7 @@ import { rosterIfSameSecond } from '../fichajes/relevoOutgoingMatch';
 import { escalarVacanteSinCobertura } from '../coverage/escalarVacanteSinCobertura';
 import { retentionPendingReason } from './retentionPendingReason';
 import { guardFirstName } from '../common/pushGreeting';
-import { finUltimoTramoMs } from '../common/turnoCortado';
+import { finUltimoTramoMs, turnoCortadoConPresencia } from '../common/turnoCortado';
 import { isEventoShift } from '../eventos/eventoCoverage';
 import {
   finTurnoCopy,
@@ -298,25 +298,50 @@ export async function runAutoCompletarTurnosPass(
     ? passOpts.recentEndMs
     : 0;
 
-  let snap: FirebaseFirestore.QuerySnapshot;
+  /** PRESENT clásicos + cortados en PENDING con presencia (tramo 2 sin egreso, etc.). */
+  let outgoingDocs: QueryDocumentSnapshot[] = [];
   if (onlyOutId) {
     const direct = await db.collection('turnos').doc(onlyOutId).get();
-    snap = direct.exists
-      ? ({ empty: false, docs: [direct] } as FirebaseFirestore.QuerySnapshot)
-      : ({ empty: true, docs: [] } as FirebaseFirestore.QuerySnapshot);
+    if (direct.exists) outgoingDocs = [direct as QueryDocumentSnapshot];
   } else {
-    let q = db
+    let qPresent = db
       .collection('turnos')
       .where('status', '==', 'PRESENT')
       .where('endTime', '<=', cutoff);
     if (recentEndMs) {
-      q = q.where('endTime', '>=', Timestamp.fromMillis(nowMs - recentEndMs));
+      qPresent = qPresent.where('endTime', '>=', Timestamp.fromMillis(nowMs - recentEndMs));
     }
-    snap = await q.get();
+    let qPending = db
+      .collection('turnos')
+      .where('status', '==', 'PENDING')
+      .where('endTime', '<=', cutoff);
+    if (recentEndMs) {
+      qPending = qPending.where('endTime', '>=', Timestamp.fromMillis(nowMs - recentEndMs));
+    }
+    const [presentSnap, pendingSnap] = await Promise.all([qPresent.get(), qPending.get()]);
+    const seen = new Set<string>();
+    for (const d of presentSnap.docs) {
+      seen.add(d.id);
+      outgoingDocs.push(d);
+    }
+    for (const d of pendingSnap.docs) {
+      if (seen.has(d.id)) continue;
+      const data = d.data();
+      if (data.isCompleted === true || data.realEndTime) continue;
+      // Cortado con ingreso (aunque el corte lo haya dejado PENDING) o turno con fichada sin cerrar.
+      if (
+        turnoCortadoConPresencia(data)
+        || data.isPresent === true
+        || data.realStartTime
+      ) {
+        seen.add(d.id);
+        outgoingDocs.push(d);
+      }
+    }
   }
 
   const actions: AutoCompleteAction[] = [];
-  if (snap.empty) return { completed: 0, alertedNoRelief: 0, actions };
+  if (outgoingDocs.length === 0) return { completed: 0, alertedNoRelief: 0, actions };
 
   const completeBatch = db.batch();
   let batchOps = 0;
@@ -335,6 +360,7 @@ export async function runAutoCompletarTurnosPass(
     'FIN_TURNO_EXTRA',
     'FIN_HUECO_SIN_CONTINUIDAD',
     'SIN_LUGAR_FRANJA',
+    'FIN_SIN_EGRESO',
   ]);
   const pendingCloses: {
     ref: FirebaseFirestore.DocumentReference;
@@ -545,7 +571,7 @@ export async function runAutoCompletarTurnosPass(
       }));
   }
 
-  const outgoingDocs = [...snap.docs].sort(
+  outgoingDocs.sort(
     (a, b) => shiftWorkStartMs(a.data()) - shiftWorkStartMs(b.data()),
   );
 
@@ -593,6 +619,18 @@ export async function runAutoCompletarTurnosPass(
     }
     const endTimeMs = finCortadoMs > 0 ? finCortadoMs : shiftEndMs(shift);
     if (!endTimeMs) continue;
+
+    // Cortado (u otro) que quedó PENDING con fichada y sin egreso: al pasar el fin se cierra
+    // con la hora planificada; no espera relevo (p. ej. oficina / Casa Matriz).
+    const stOut = String(shift.status || '').toUpperCase();
+    if (
+      stOut === 'PENDING'
+      && nowMs >= endTimeMs
+      && (turnoCortadoConPresencia(shift) || shift.realStartTime || shift.isPresent === true)
+    ) {
+      close(docSnap, shift, endTimeMs, 'FIN_SIN_EGRESO', { isRetention: false });
+      continue;
+    }
 
     if (recentEndMs) {
       const event = isEventoShift(shift as Record<string, unknown>);

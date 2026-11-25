@@ -347,7 +347,13 @@ function useTurnosHoy({
   const [phones, setPhones] = useState<string[]>([]);
   const [clientePorObj, setClientePorObj] = useState<Record<string, string>>({});
   const [francos, setFrancos] = useState<TurnoHoy[]>([]);
-  const objMapRef = useRef<Map<string, { name: string; clientName: string; lat?: number; lng?: number }>>(new Map());
+  const objMapRef = useRef<Map<string, {
+    name: string;
+    clientName: string;
+    lat?: number;
+    lng?: number;
+    allowRemoteCheckIn?: boolean;
+  }>>(new Map());
   const phoneMapRef = useRef<Map<string, string>>(new Map());
   const lastTurnosSnapRef = useRef<QueryDocumentSnapshot[] | null>(null);
   const francosHoyRef = useRef<TurnoHoy[]>([]);
@@ -373,7 +379,13 @@ function useTurnosHoy({
     end.setHours(23, 59, 59, 999);
 
     const buildObjMap = (docs: QueryDocumentSnapshot[]) => {
-      const m = new Map<string, { name: string; clientName: string; lat?: number; lng?: number }>();
+      const m = new Map<string, {
+        name: string;
+        clientName: string;
+        lat?: number;
+        lng?: number;
+        allowRemoteCheckIn?: boolean;
+      }>();
       docs.forEach((d) => {
         const data = d.data() as Record<string, unknown>;
         const clientName = String(data.name || '');
@@ -389,6 +401,7 @@ function useTurnosHoy({
             clientName,
             lat: lat && !isNaN(lat) ? lat : undefined,
             lng: lng && !isNaN(lng) ? lng : undefined,
+            allowRemoteCheckIn: o.allowRemoteCheckIn === true,
           });
         });
       });
@@ -547,6 +560,8 @@ function useTurnosHoy({
             undefined,
           objLat: objMapRef.current.get(String(shift.objectiveId || ''))?.lat,
           objLng: objMapRef.current.get(String(shift.objectiveId || ''))?.lng,
+          allowRemoteCheckIn:
+            objMapRef.current.get(String(shift.objectiveId || ''))?.allowRemoteCheckIn === true,
           employeeId,
           objectiveId: String(shift.objectiveId || ''),
           positionName: String(shift.positionName || ''),
@@ -2774,11 +2789,13 @@ const AUTO_WA_RADIO_M = WA_RADIO_MAX_M;
 
 /**
  * Un check-in de WhatsApp se puede confirmar sin operador cuando está atado a un turno de hoy y trae
- * ubicación dentro del radio del objetivo. Sin ubicación, sin coordenadas del objetivo o lejos: queda
- * pendiente para que lo mire el operador.
+ * ubicación dentro del radio del objetivo (o el objetivo tiene check-in remoto). Foto sola solo vale
+ * en remoto. Sin eso: queda pendiente para el operador.
  */
 function entradaWaVerificada(e: WAEntry): boolean {
-  if (!e.rowId || !e.hasLocation) return false;
+  if (!e.rowId) return false;
+  if (e.allowRemoteCheckIn) return e.hasLocation || !!e.photo;
+  if (!e.hasLocation) return false;
   if (e.lat == null || e.lng == null || e.objLat == null || e.objLng == null) return false;
   return haversineM(e.lat, e.lng, e.objLat, e.objLng) <= AUTO_WA_RADIO_M;
 }
@@ -2841,7 +2858,9 @@ function WACard({
               : `+${entry.tardanzaMins} min tarde`}
           </div>
         )}
-        {entry.lat != null && entry.lng != null && entry.objLat != null && entry.objLng != null && (() => {
+        {entry.allowRemoteCheckIn ? (
+          <div className="text-[10px] font-medium text-amber-600">REMOTO · sin control de radio</div>
+        ) : entry.lat != null && entry.lng != null && entry.objLat != null && entry.objLng != null ? (() => {
           const d = haversineM(entry.lat!, entry.lng!, entry.objLat!, entry.objLng!);
           const ok = d <= 80;
           const warn = d <= 300;
@@ -2850,7 +2869,7 @@ function WACard({
               {ok ? '✓' : '⚠'} {d < 1000 ? `${d} m` : `${(d / 1000).toFixed(1)} km`} del objetivo
             </div>
           );
-        })()}
+        })() : null}
       </div>
       <div className="flex flex-col items-end gap-1 flex-shrink-0">
         <span className="text-[10px] text-slate-400 font-mono">{entry.arrivedAt}</span>
@@ -5789,7 +5808,14 @@ export default function ModoRapidoPage() {
         continue;
       }
 
-      if (entry.hasLocation && entry.lat != null && entry.lng != null && entry.objLat != null && entry.objLng != null) {
+      if (
+        !entry.allowRemoteCheckIn
+        && entry.hasLocation
+        && entry.lat != null
+        && entry.lng != null
+        && entry.objLat != null
+        && entry.objLng != null
+      ) {
         const distM = haversineM(entry.lat, entry.lng, entry.objLat, entry.objLng);
         if (distM > AUTO_WA_RADIO_M) {
           autoWaProcesadosRef.current.add(entry.id);
@@ -5859,7 +5885,13 @@ export default function ModoRapidoPage() {
         continue;
       }
 
-      if (entry.lat != null && entry.lng != null && entry.objLat != null && entry.objLng != null) {
+      if (
+        !entry.allowRemoteCheckIn
+        && entry.lat != null
+        && entry.lng != null
+        && entry.objLat != null
+        && entry.objLng != null
+      ) {
         const distM = haversineM(entry.lat, entry.lng, entry.objLat, entry.objLng);
         if (distM > AUTO_WA_RADIO_M) {
           autoSalidaProcesadosRef.current.add(entry.id);
@@ -5893,7 +5925,7 @@ export default function ModoRapidoPage() {
     }
     showToast(
       nuevo
-        ? `Presente y salida automáticos por WA activados (ubicación a menos de ${AUTO_WA_RADIO_M} m del objetivo)`
+        ? `Presente y salida automáticos por WA activados (${AUTO_WA_RADIO_M} m; objetivos REMOTO sin radio)`
         : 'Presente y salida automáticos por WA desactivados: confirmás vos',
       'bg-slate-700',
     );
