@@ -40,8 +40,8 @@ import {
 
 const RELEVO_WINDOW_AFTER_MS = 2 * 60 * 60 * 1000;
 const RELEVO_ALIGN_MS = 30 * 60 * 1000;
-/** Tras el fin planificado, esperar egreso WA/manual antes de inventar el cierre (sin relevo). */
-const EGRESO_GRACE_MS = 20 * 60 * 1000;
+/** Tras el fin planificado, 5 min para egreso WA/Op; si no, cierre Auto con hora de planificación. */
+const EGRESO_GRACE_MS = 5 * 60 * 1000;
 
 export type AutoCompleteContext = {
   /**
