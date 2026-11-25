@@ -960,13 +960,13 @@ function hayRelevoLibre(row: GuardRowModel, rows: GuardRowModel[]): boolean {
 }
 
 const COLS_DEFAULT =
-  '3px minmax(270px,2.2fr) minmax(130px,1fr) 96px 52px 5.5rem 5.5rem 5.5rem 5.5rem 6.5rem 4.5rem 6.5rem minmax(11rem,auto)';
+  '3px minmax(270px,2.2fr) 96px 52px 5.5rem 5.5rem 5.5rem 5.5rem 6.5rem 4.5rem 6.5rem minmax(11rem,auto)';
 
 const SHEET_COLS = 'grid-cols-[var(--mr-cols)]';
 
-/** Anchos mínimos (px) de las 12 columnas ajustables: Guardia … Acción. */
-const COLS_MIN = [150, 90, 60, 40, 60, 60, 60, 60, 50, 50, 80, 140];
-const COLS_ANCHOS_KEY = 'mr-col-anchos-v1';
+/** Anchos mínimos (px) de las 11 columnas ajustables: Guardia … Acción (sin Objetivo: ya va en el grupo). */
+const COLS_MIN = [150, 60, 40, 60, 60, 60, 60, 50, 50, 80, 140];
+const COLS_ANCHOS_KEY = 'mr-col-anchos-v2';
 
 function plantillaColumnas(anchos: number[] | null): string {
   if (!anchos || anchos.length !== COLS_MIN.length) return COLS_DEFAULT;
@@ -2534,7 +2534,6 @@ function GuardRow({
           </button>
         )}
       </div>
-      <div className="truncate text-[11px] text-slate-600" title={row.turno.obj}>{row.turno.obj}</div>
       <div className="truncate text-[11px] text-slate-500" title={row.turno.positionName}>{row.turno.positionName || '—'}</div>
       <div className="truncate font-mono text-[11px] text-slate-700">{row.turno.code || row.band || '—'}</div>
       <div
@@ -6665,7 +6664,7 @@ export default function ModoRapidoPage() {
               </div>
             ) : (
               <div
-                className={colAnchos ? undefined : 'min-w-[1280px]'}
+                className={colAnchos ? undefined : 'min-w-[1120px]'}
                 style={
                   {
                     '--mr-cols': plantillaColumnas(colAnchos),
@@ -6679,10 +6678,9 @@ export default function ModoRapidoPage() {
                 >
                   <span />
                   <CabeceraCol idx={0} onResizeStart={iniciarAjusteColumna} onResizeReset={restablecerColumnas}>Guardia</CabeceraCol>
-                  <CabeceraCol idx={1} onResizeStart={iniciarAjusteColumna} onResizeReset={restablecerColumnas}>Objetivo</CabeceraCol>
-                  <CabeceraCol idx={2} onResizeStart={iniciarAjusteColumna} onResizeReset={restablecerColumnas}>Puesto</CabeceraCol>
-                  <CabeceraCol idx={3} onResizeStart={iniciarAjusteColumna} onResizeReset={restablecerColumnas}>Cód</CabeceraCol>
-                  <CabeceraCol idx={4} onResizeStart={iniciarAjusteColumna} onResizeReset={restablecerColumnas}>
+                  <CabeceraCol idx={1} onResizeStart={iniciarAjusteColumna} onResizeReset={restablecerColumnas}>Puesto</CabeceraCol>
+                  <CabeceraCol idx={2} onResizeStart={iniciarAjusteColumna} onResizeReset={restablecerColumnas}>Cód</CabeceraCol>
+                  <CabeceraCol idx={3} onResizeStart={iniciarAjusteColumna} onResizeReset={restablecerColumnas}>
                     <button
                       type="button"
                       onClick={alternarOrdenHorario}
@@ -6698,13 +6696,13 @@ export default function ModoRapidoPage() {
                       )}
                     </button>
                   </CabeceraCol>
-                  <CabeceraCol idx={5} onResizeStart={iniciarAjusteColumna} onResizeReset={restablecerColumnas} className="whitespace-nowrap font-black" title="Ingreso real">Ing. R.</CabeceraCol>
-                  <CabeceraCol idx={6} onResizeStart={iniciarAjusteColumna} onResizeReset={restablecerColumnas} className="whitespace-nowrap" title="Egreso planificado">Egr. P.</CabeceraCol>
-                  <CabeceraCol idx={7} onResizeStart={iniciarAjusteColumna} onResizeReset={restablecerColumnas} className="whitespace-nowrap font-black" title="Egreso real">Egr. R.</CabeceraCol>
-                  <CabeceraCol idx={8} onResizeStart={iniciarAjusteColumna} onResizeReset={restablecerColumnas}>Dif</CabeceraCol>
-                  <CabeceraCol idx={9} onResizeStart={iniciarAjusteColumna} onResizeReset={restablecerColumnas}>Fuente</CabeceraCol>
-                  <CabeceraCol idx={10} onResizeStart={iniciarAjusteColumna} onResizeReset={restablecerColumnas}>Estado</CabeceraCol>
-                  <CabeceraCol idx={11} onResizeStart={iniciarAjusteColumna} onResizeReset={restablecerColumnas}>Acción</CabeceraCol>
+                  <CabeceraCol idx={4} onResizeStart={iniciarAjusteColumna} onResizeReset={restablecerColumnas} className="whitespace-nowrap font-black" title="Ingreso real">Ing. R.</CabeceraCol>
+                  <CabeceraCol idx={5} onResizeStart={iniciarAjusteColumna} onResizeReset={restablecerColumnas} className="whitespace-nowrap" title="Egreso planificado">Egr. P.</CabeceraCol>
+                  <CabeceraCol idx={6} onResizeStart={iniciarAjusteColumna} onResizeReset={restablecerColumnas} className="whitespace-nowrap font-black" title="Egreso real">Egr. R.</CabeceraCol>
+                  <CabeceraCol idx={7} onResizeStart={iniciarAjusteColumna} onResizeReset={restablecerColumnas}>Dif</CabeceraCol>
+                  <CabeceraCol idx={8} onResizeStart={iniciarAjusteColumna} onResizeReset={restablecerColumnas}>Fuente</CabeceraCol>
+                  <CabeceraCol idx={9} onResizeStart={iniciarAjusteColumna} onResizeReset={restablecerColumnas}>Estado</CabeceraCol>
+                  <CabeceraCol idx={10} onResizeStart={iniciarAjusteColumna} onResizeReset={restablecerColumnas}>Acción</CabeceraCol>
                 </div>
                 {nonReteGroups.map(([objName, rows], gi) => {
                   const clienteGrupo = clientePorObj[objName] || SIN_CLIENTE;
