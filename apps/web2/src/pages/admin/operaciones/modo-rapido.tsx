@@ -27,6 +27,7 @@ import {
   ChevronRight,
   ChevronUp,
   Clock,
+  FileText,
   Flame,
   GripVertical,
   Hand,
@@ -102,6 +103,7 @@ import {
   WAEntry,
   useWABridge,
 } from '@/hooks/useWABridge';
+import { generarModoRapidoReportePdf } from '@/lib/operaciones/modoRapidoReportePdf';
 
 const LOG_PAGE = 10;
 const BANDS = ['M', 'T', 'N', 'D12', 'N12'] as const;
@@ -161,6 +163,7 @@ type PresenciaBloque = {
   realEndTime?: unknown;
   cerrado?: boolean;
   checkInSource?: string;
+  checkOutSource?: string;
 };
 
 /**
@@ -3282,6 +3285,9 @@ export default function ModoRapidoPage() {
   const [accionesModal, setAccionesModal] = useState<GuardRowModel | null>(null);
   const [comentarioModal, setComentarioModal] = useState<GuardRowModel | null>(null);
   const [retenesModalOpen, setRetenesModalOpen] = useState(false);
+  const [pdfModalOpen, setPdfModalOpen] = useState(false);
+  const [pdfYmd, setPdfYmd] = useState(() => arYmd(Date.now()));
+  const [pdfBusy, setPdfBusy] = useState(false);
   const [autoWa, setAutoWa] = useState(true);
   const [autoWaCount, setAutoWaCount] = useState(0);
   const autoWaProcesadosRef = useRef<Set<string>>(new Set());
@@ -3388,6 +3394,26 @@ export default function ModoRapidoPage() {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     toastTimerRef.current = setTimeout(() => setToast(null), 3000);
   }, []);
+
+  const generarPdfDia = useCallback(async () => {
+    if (!empresaId || pdfBusy) return;
+    setPdfBusy(true);
+    try {
+      const res = await generarModoRapidoReportePdf({
+        empresaId,
+        scopeEmpresa,
+        empresaNombre: empresa?.name || empresaId,
+        ymd: pdfYmd,
+      });
+      setPdfModalOpen(false);
+      showToast(`PDF · ${res.filas} filas · ${res.fileName}`, 'bg-emerald-700');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'No se pudo generar el PDF';
+      showToast(msg, 'bg-red-700');
+    } finally {
+      setPdfBusy(false);
+    }
+  }, [empresaId, empresa?.name, scopeEmpresa, pdfYmd, pdfBusy, showToast]);
 
   const wabEnviar = wa.enviar;
   const wabConectado = wa.status === 'connected';
@@ -6173,6 +6199,13 @@ export default function ModoRapidoPage() {
       if (comentarioModal) return;
       // El modal de retenes maneja sus propias teclas (Esc): los atajos de la planilla no corren.
       if (retenesModalOpen) return;
+      if (pdfModalOpen) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          if (!pdfBusy) setPdfModalOpen(false);
+        }
+        return;
+      }
       if (confirmacion) {
         if (e.key === 'Escape') {
           e.preventDefault();
@@ -6347,7 +6380,7 @@ export default function ModoRapidoPage() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [sheetRows, activeRowId, hourEdit, arm, swapFromId, coberturaModal, accionesModal, comentarioModal, retenesModalOpen, revertirChoice, confirmacion, busy, pantallaCompleta, retiroModal, retiroMotivo, retiroReemplazo, retiroInfo]);
+  }, [sheetRows, activeRowId, hourEdit, arm, swapFromId, coberturaModal, accionesModal, comentarioModal, retenesModalOpen, pdfModalOpen, pdfBusy, revertirChoice, confirmacion, busy, pantallaCompleta, retiroModal, retiroMotivo, retiroReemplazo, retiroInfo]);
 
   useEffect(() => {
     if (!coberturaModal) setHuecoRetiro(null);
@@ -6467,6 +6500,19 @@ export default function ModoRapidoPage() {
             <span className="text-[10px] text-slate-400">
               {loading ? 'cargando…' : `${Object.keys(turnos).length} guardias hoy`}
             </span>
+            <button
+              type="button"
+              onClick={() => {
+                setPdfYmd(arYmd(Date.now()));
+                setPdfModalOpen(true);
+              }}
+              title="Parte diario PDF"
+              aria-label="Generar parte diario PDF"
+              className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold bg-slate-100 hover:bg-indigo-50 hover:text-indigo-700 text-slate-600"
+            >
+              <FileText size={13} />
+              PDF
+            </button>
             <button
               type="button"
               onClick={() => void togglePantalla()}
@@ -7053,6 +7099,55 @@ export default function ModoRapidoPage() {
         )}
 
         {confirmacion && <ModalConfirmar datos={confirmacion} onResolver={resolverConfirmacion} />}
+
+        {pdfModalOpen && (
+          <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-slate-900/40 p-4">
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="mr-pdf-title"
+              className="w-full max-w-sm rounded-2xl bg-white shadow-lg border border-slate-200 p-4"
+            >
+              <div className="flex items-center gap-2 mb-3">
+                <FileText size={16} className="text-indigo-600" />
+                <h2 id="mr-pdf-title" className="text-sm font-black text-slate-800">
+                  Parte diario PDF
+                </h2>
+              </div>
+              <p className="text-[11px] text-slate-500 mb-3">
+                Elegí la fecha y se descarga un PDF con la misma grilla del modo rápido (sin guardarlo en el servidor).
+              </p>
+              <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1" htmlFor="mr-pdf-fecha">
+                Fecha
+              </label>
+              <input
+                id="mr-pdf-fecha"
+                type="date"
+                value={pdfYmd}
+                onChange={(e) => setPdfYmd(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-slate-50 focus:outline-none focus:ring-1 focus:ring-indigo-400 mb-4"
+              />
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  disabled={pdfBusy}
+                  onClick={() => setPdfModalOpen(false)}
+                  className="px-3 py-1.5 rounded-xl text-[11px] font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={pdfBusy || !pdfYmd}
+                  onClick={() => void generarPdfDia()}
+                  className="px-3 py-1.5 rounded-xl text-[11px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 active:scale-95"
+                >
+                  {pdfBusy ? 'Generando…' : 'Generar PDF'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {toast && (
           <div
