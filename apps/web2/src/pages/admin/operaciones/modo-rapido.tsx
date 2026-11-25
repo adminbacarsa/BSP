@@ -2848,7 +2848,9 @@ function ObjectiveGroup({
               onRevertirAusencia={onRevertirAusencia}
               onIntercambio={onIntercambio}
               onRetiro={onRetiro}
-              swapOrigin={swapFromId === row.turno.rowId}
+              swapOrigin={
+                !!swapFromId && docIdDe(swapFromId) === docIdDe(row.turno.rowId)
+              }
               onMore={onMore}
               onComentario={onComentario}
             />
@@ -4094,7 +4096,8 @@ export default function ModoRapidoPage() {
 
   const esCandidatoValido = (c: GuardRowModel, absent: GuardRowModel): boolean => {
     if (c.turno.rowId === absent.turno.rowId) return false;
-    if (esTramoCortado(c.turno)) return false;
+    // Turno cortado = un solo documento: no intercambiar un tramo consigo mismo.
+    if (docIdDe(c.turno.rowId) === docIdDe(absent.turno.rowId)) return false;
     const mismoObjetivoYHorario =
       !!c.turno.objectiveId &&
       c.turno.objectiveId === absent.turno.objectiveId &&
@@ -4803,13 +4806,6 @@ export default function ModoRapidoPage() {
     } finally {
       setBusy(false);
     }
-  }
-
-  /** Intercambio de un tramo de turno cortado todavía se hace desde Operaciones. El retiro anticipado sí va por acá. */
-  function bloqueaTramo(row: GuardRowModel): boolean {
-    if (!esTramoCortado(row.turno)) return false;
-    showToast('Turno cortado: el intercambio se hace desde Operaciones por ahora', 'bg-slate-700');
-    return true;
   }
 
   /**
@@ -5589,29 +5585,35 @@ export default function ModoRapidoPage() {
           (turnos[coberturaModal.employeeName] as TurnoHoy | undefined)?.employeeId ||
           '',
       );
-      await updateDoc(doc(db, 'turnos', coberturaModal.turno.rowId), {
+      const ausenteDocId = docIdDe(coberturaModal.turno.rowId);
+      const candDocId = docIdDe(candidate.turno.rowId);
+      if (ausenteDocId === candDocId) {
+        showToast('Elegí otro guardia: el cortado se intercambia completo', 'bg-slate-700');
+        return;
+      }
+      await updateDoc(doc(db, 'turnos', ausenteDocId), {
         ...parcheTurnoReasignadoDeAusente(coberturaModal.turno),
         employeeId: candidate.turno.employeeId,
         employeeName: candidate.employeeName,
         origin: 'INTERCAMBIO',
-        intercambioConTurnoId: candidate.turno.rowId,
+        intercambioConTurnoId: candDocId,
       });
-      await updateDoc(doc(db, 'turnos', candidate.turno.rowId), {
+      await updateDoc(doc(db, 'turnos', candDocId), {
         employeeId: absentEmployeeId,
         employeeName: coberturaModal.employeeName,
         origin: 'INTERCAMBIO',
-        intercambioConTurnoId: coberturaModal.turno.rowId,
+        intercambioConTurnoId: ausenteDocId,
       });
       if (coberturaModal.turno.turnoStatus === 'ABSENT') {
         await marcarAusenciaGestionada(
-          docIdDe(coberturaModal.turno.rowId),
+          ausenteDocId,
           { id: candidate.turno.employeeId, name: candidate.employeeName },
           'INTERCAMBIO',
         );
       }
       await addDoc(collection(db, 'novedades'), {
         type: 'INTERCAMBIO_TURNO',
-        turnoAusenteId: coberturaModal.turno.rowId,
+        turnoAusenteId: ausenteDocId,
         turnoAusenteEmpleado: coberturaModal.employeeName,
         turnoAusenteObj: coberturaModal.turno.obj,
         intercambioEmpleado: candidate.employeeName,
@@ -5656,37 +5658,42 @@ export default function ModoRapidoPage() {
 
   async function intercambiarFilas(origen: GuardRowModel, destino: GuardRowModel) {
     if (busy || origen.turno.rowId === destino.turno.rowId) return;
-    if (bloqueaTramo(origen) || bloqueaTramo(destino)) {
+    const origenDocId = docIdDe(origen.turno.rowId);
+    const destinoDocId = docIdDe(destino.turno.rowId);
+    // Turno cortado: un solo documento / un solo legajo. Se intercambia la jornada completa
+    // (todos los tramos), nunca un tramo contra otro del mismo doc.
+    if (origenDocId === destinoDocId) {
       setSwapFromId(null);
+      showToast('Elegí otro guardia: el cortado se intercambia completo, no tramo contra tramo', 'bg-slate-700');
       return;
     }
     setBusy(true);
     try {
       const origenEmployeeId = String(origen.turno.employeeId || '');
-      await updateDoc(doc(db, 'turnos', origen.turno.rowId), {
+      await updateDoc(doc(db, 'turnos', origenDocId), {
         ...parcheTurnoReasignadoDeAusente(origen.turno),
         employeeId: destino.turno.employeeId,
         employeeName: destino.employeeName,
         origin: 'INTERCAMBIO',
-        intercambioConTurnoId: destino.turno.rowId,
+        intercambioConTurnoId: destinoDocId,
       });
-      await updateDoc(doc(db, 'turnos', destino.turno.rowId), {
+      await updateDoc(doc(db, 'turnos', destinoDocId), {
         ...parcheTurnoReasignadoDeAusente(destino.turno),
         employeeId: origenEmployeeId,
         employeeName: origen.employeeName,
         origin: 'INTERCAMBIO',
-        intercambioConTurnoId: origen.turno.rowId,
+        intercambioConTurnoId: origenDocId,
       });
       if (origen.turno.turnoStatus === 'ABSENT') {
         await marcarAusenciaGestionada(
-          docIdDe(origen.turno.rowId),
+          origenDocId,
           { id: destino.turno.employeeId, name: destino.employeeName },
           'INTERCAMBIO',
         );
       }
       if (destino.turno.turnoStatus === 'ABSENT') {
         await marcarAusenciaGestionada(
-          docIdDe(destino.turno.rowId),
+          destinoDocId,
           { id: origenEmployeeId, name: origen.employeeName },
           'INTERCAMBIO',
         );
@@ -5698,7 +5705,7 @@ export default function ModoRapidoPage() {
         destino.estado !== 'AUSENTE';
       await addDoc(collection(db, 'novedades'), {
         type: anticipado ? 'INTERCAMBIO_ANTICIPADO' : 'INTERCAMBIO_TURNO',
-        turnoAusenteId: origen.turno.rowId,
+        turnoAusenteId: origenDocId,
         turnoAusenteEmpleado: origen.employeeName,
         turnoAusenteObj: origen.turno.obj,
         intercambioEmpleado: destino.employeeName,
@@ -5707,7 +5714,9 @@ export default function ModoRapidoPage() {
         operatorId: user?.uid ?? 'cc-modo-rapido',
         createdAt: serverTimestamp(),
       });
-      const tituloToast = `${anticipado ? 'Intercambio anticipado' : 'Intercambio'} · ${origen.employeeName} ↔ ${destino.employeeName}`;
+      const cortadoTxt =
+        esTramoCortado(origen.turno) || esTramoCortado(destino.turno) ? ' (turno completo)' : '';
+      const tituloToast = `${anticipado ? 'Intercambio anticipado' : 'Intercambio'}${cortadoTxt} · ${origen.employeeName} ↔ ${destino.employeeName}`;
       const avisos = [
         {
           phone: origen.turno.phone,
@@ -6243,7 +6252,7 @@ export default function ModoRapidoPage() {
           void cerrarTurno(row);
           return;
         }
-        if (swapFromId && swapFromId !== row.turno.rowId) {
+        if (swapFromId && docIdDe(swapFromId) !== docIdDe(row.turno.rowId)) {
           const from = sheetRows.find((r) => r.turno.rowId === swapFromId);
           if (from) void intercambiarFilas(from, row);
           return;
@@ -6300,9 +6309,10 @@ export default function ModoRapidoPage() {
         return;
       }
       if (k === 'x') {
-        if (bloqueaTramo(row)) return;
         setArm(null);
-        setSwapFromId(row.turno.rowId);
+        setSwapFromId((prev) =>
+          prev && docIdDe(prev) === docIdDe(row.turno.rowId) ? null : row.turno.rowId,
+        );
       }
     };
     window.addEventListener('keydown', onKey);
@@ -6684,8 +6694,10 @@ export default function ModoRapidoPage() {
               const anticipado = !!from
                 && from.estado !== 'NO_LLEGO' && from.estado !== 'AUSENTE'
                 && activeRow.estado !== 'NO_LLEGO' && activeRow.estado !== 'AUSENTE';
-              const titulo = anticipado ? 'Intercambio anticipado' : 'Intercambio';
-              if (from && from.turno.rowId !== activeRow.turno.rowId) {
+              const cortado =
+                (!!from && esTramoCortado(from.turno)) || esTramoCortado(activeRow.turno);
+              const titulo = `${anticipado ? 'Intercambio anticipado' : 'Intercambio'}${cortado ? ' (turno completo)' : ''}`;
+              if (from && docIdDe(from.turno.rowId) !== docIdDe(activeRow.turno.rowId)) {
                 return `${titulo} ${from.employeeName} ↔ ${activeRow.employeeName}. Enter aplica y abre WhatsApp. Esc cancela.`;
               }
               return `${titulo} desde ${from?.employeeName || '—'}. Elegí el otro guardia con las flechas.`;
@@ -6819,11 +6831,15 @@ export default function ModoRapidoPage() {
                     onCobertura={(r) => void abrirCobertura(r)}
                     onRevertirAusencia={(r) => void revertirAusencia(r)}
                     onIntercambio={(r) => {
-                      if (bloqueaTramo(r)) return;
                       setHourEdit(null);
                       setArm(null);
                       setActiveRowId(r.turno.rowId);
-                      setSwapFromId((prev) => (prev === r.turno.rowId ? null : r.turno.rowId));
+                      setSwapFromId((prev) =>
+                        prev && docIdDe(prev) === docIdDe(r.turno.rowId) ? null : r.turno.rowId,
+                      );
+                      if (esTramoCortado(r.turno)) {
+                        showToast('Cortado: se intercambia el turno completo (todos los tramos)', 'bg-indigo-700');
+                      }
                     }}
                     onRetiro={(r) => pedirRetiro(r)}
                     swapFromId={swapFromId}
@@ -6977,11 +6993,13 @@ export default function ModoRapidoPage() {
             onMarcarPresente={(r) => void handleMarcarPresente(r)}
             onMarcarAusente={(r) => void handleRegistrarAusencia(r)}
             onIntercambio={(r) => {
-              if (bloqueaTramo(r)) return;
               setHourEdit(null);
               setArm(null);
               setActiveRowId(r.turno.rowId);
               setSwapFromId(r.turno.rowId);
+              if (esTramoCortado(r.turno)) {
+                showToast('Cortado: se intercambia el turno completo (todos los tramos)', 'bg-indigo-700');
+              }
             }}
             onRetiro={(r) => pedirRetiro(r)}
             onAvisarWa={(r) => {
