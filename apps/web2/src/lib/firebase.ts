@@ -179,7 +179,7 @@ function createFirestoreInstance(): Firestore {
       return getFirestore(app);
     }
   }
-  if (wantsMovilPersistentCache()) {
+  if (wantsPersistentLocalCache()) {
     try {
       return initializeFirestore(app, {
         localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
@@ -191,15 +191,19 @@ function createFirestoreInstance(): Firestore {
   return getFirestore(app);
 }
 
-/** Caché en disco solo en el celular. El escritorio ancho sigue con la caché de memoria. */
-function wantsMovilPersistentCache(): boolean {
+/**
+ * Caché IndexedDB para cortes cortos (Modo Rápido / Ops).
+ * Antes solo móvil; ahora también escritorio (un operador, cortes de minutos).
+ * Opt-out: localStorage `cosp-movil=0` o `cosp-fs-persist=0`.
+ */
+function wantsPersistentLocalCache(): boolean {
   try {
+    if (window.localStorage.getItem('cosp-fs-persist') === '0') return false;
     const choice = window.localStorage.getItem('cosp-movil');
     if (choice === '0') return false;
-    if (choice === '1') return true;
-    return window.innerWidth < 768;
+    return true;
   } catch {
-    return false;
+    return true;
   }
 }
 

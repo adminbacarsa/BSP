@@ -46,6 +46,8 @@ import {
   Smartphone,
   UserX,
   Users,
+  Wifi,
+  WifiOff,
   Zap,
   type LucideIcon,
 } from 'lucide-react';
@@ -108,6 +110,11 @@ import {
   useWABridge,
 } from '@/hooks/useWABridge';
 import { generarModoRapidoReportePdf } from '@/lib/operaciones/modoRapidoReportePdf';
+import {
+  opsOfflineBlockedMessage,
+  type OpsOfflineBlockedAction,
+} from '@/lib/operaciones/opsNetworkStatus';
+import { useOpsNetworkStatus } from '@/hooks/useOpsNetworkStatus';
 
 const LOG_PAGE = 10;
 const BANDS = ['M', 'T', 'N', 'D12', 'N12'] as const;
@@ -3270,6 +3277,7 @@ export default function ModoRapidoPage() {
     empInfo,
   } = turnosData;
   const wa = useWABridge(turnos, empresaId, tramosExtra);
+  const { kind: netKind, online: netOnline } = useOpsNetworkStatus();
 
   const [bridgeUrl, setBridgeUrl] = useState('');
   /** Proveedor WA activo de la empresa (Configuración → WhatsApp). */
@@ -3404,6 +3412,10 @@ export default function ModoRapidoPage() {
 
   const generarPdfDia = useCallback(async () => {
     if (!empresaId || pdfBusy) return;
+    if (!netOnline) {
+      showToast('Sin conexión: el PDF necesita consultar turnos del día.', 'bg-amber-700');
+      return;
+    }
     setPdfBusy(true);
     try {
       const res = await generarModoRapidoReportePdf({
@@ -3420,7 +3432,7 @@ export default function ModoRapidoPage() {
     } finally {
       setPdfBusy(false);
     }
-  }, [empresaId, empresa?.name, scopeEmpresa, pdfYmd, pdfBusy, showToast]);
+  }, [empresaId, empresa?.name, scopeEmpresa, pdfYmd, pdfBusy, showToast, netOnline]);
 
   const wabEnviar = wa.enviar;
   const wabConectado = wa.status === 'connected';
@@ -3548,12 +3560,21 @@ export default function ModoRapidoPage() {
   /**
    * Escritura sin esperar el ack del servidor: el listener ya muestra el cambio al instante
    * (caché local) y la planilla no se traba. Si el servidor la rechaza, se avisa y la fila vuelve.
+   * Offline: con persistentLocalCache la promesa suele resolver al encolar en IndexedDB.
    */
   function escribir(p: Promise<unknown>, que: string) {
     p.catch((err) => {
       console.warn(`[modo-rapido] no se pudo guardar ${que}`, err);
-      showToast(`No se pudo guardar ${que}. Revisá la fila.`, 'bg-red-600');
+      const offlineHint = !netOnline ? ' Sin conexión: al volver la red se reintenta si quedó en cola.' : '';
+      showToast(`No se pudo guardar ${que}.${offlineHint}`, 'bg-red-600');
     });
+  }
+
+  /** false = acción bloqueada (ya mostró toast). */
+  function requireOnline(action: OpsOfflineBlockedAction): boolean {
+    if (netOnline) return true;
+    showToast(opsOfflineBlockedMessage(action), 'bg-amber-700');
+    return false;
   }
 
   async function marcarPresente(
@@ -3668,6 +3689,7 @@ export default function ModoRapidoPage() {
    * servidor no la acepta, la fila no queda a medias y el operador lo ve.
    */
   async function registrarAusencia(rowId: string, _empleado: { name: string }) {
+    if (!requireOnline('ausencia')) return;
     const turnoId = docIdDe(rowId);
     const fn = httpsCallable(functions, 'marcarAusenciaOperaciones');
     const res = (await fn({ shiftId: turnoId })) as { data?: { success?: boolean } };
@@ -4469,6 +4491,7 @@ export default function ModoRapidoPage() {
   }
 
   async function abrirCobertura(row: GuardRowModel) {
+    if (!requireOnline('cobertura')) return;
     if (busy) return;
     if (coberturaBloqueadaPorTramo(row)) return;
     if (row.estado !== 'NO_LLEGO' || row.turno.turnoStatus === 'ABSENT') {
@@ -4516,6 +4539,7 @@ export default function ModoRapidoPage() {
    * convocatorias en curso se pregunta qué hacer (liberar a quien cubre y vuelve el titular, o dejar la AA).
    */
   async function revertirAusencia(row: GuardRowModel) {
+    if (!requireOnline('reversion')) return;
     if (busy) return;
     const turnoId = docIdDe(row.turno.rowId);
     try {
@@ -4562,6 +4586,7 @@ export default function ModoRapidoPage() {
   }
 
   async function ejecutarReversionAusencia(row: GuardRowModel, cancelCoverage: boolean) {
+    if (!requireOnline('reversion')) return;
     if (busy) return;
     const turnoId = docIdDe(row.turno.rowId);
     setBusy(true);
@@ -4612,6 +4637,7 @@ export default function ModoRapidoPage() {
   }
 
   const handleRegistrarAusencia = async (row: GuardRowModel) => {
+    if (!requireOnline('ausencia')) return;
     if (busy) return;
     setBusy(true);
     let apilado = false;
@@ -4909,6 +4935,7 @@ export default function ModoRapidoPage() {
   }
 
   function pedirRetiro(row: GuardRowModel) {
+    if (!requireOnline('retiro')) return;
     if (row.estado !== 'PRESENTE_PLAT' && row.estado !== 'PRESENTE_WA') {
       showToast('El retiro anticipado es de un guardia que ya está presente', 'bg-slate-700');
       return;
@@ -4959,6 +4986,7 @@ export default function ModoRapidoPage() {
   }, [retiroModal, classifiedRows, nowMs, retiroReemplazo]);
 
   async function retirarTurno(row: GuardRowModel, motivo: MotivoRetiro, operatorReplaceChoice: boolean | null) {
+    if (!requireOnline('retiro')) return;
     if (busy) return;
     if (row.estado !== 'PRESENTE_PLAT' && row.estado !== 'PRESENTE_WA') return;
     setBusy(true);
@@ -5174,6 +5202,7 @@ export default function ModoRapidoPage() {
     candidate: GuardRowModel,
     opciones?: { hueco?: GuardRowModel; mensaje?: 'asignacion' | 'consulta' | 'ninguno' },
   ) => {
+    if (!requireOnline('retenes')) return;
     const hueco = opciones?.hueco ?? coberturaModal;
     // Desde la ventana de cobertura puede haber un retiro anticipado; asignando desde el panel de retenes no.
     const retiro = opciones?.hueco ? null : huecoRetiro;
@@ -5388,6 +5417,7 @@ export default function ModoRapidoPage() {
    * declarado ausente (no llegó pasados 30 min) se declara antes, igual que al abrir la cobertura.
    */
   async function asignarRetDesdePanel(ret: GuardRowModel, destino: DestinoRetenOpcion, avisar = true) {
+    if (!requireOnline('retenes')) return;
     if (busy || destino.tipo !== 'hueco') return;
     const hueco = classifiedRows.find((r) => `hueco:${r.turno.rowId}` === destino.key);
     if (!hueco) {
@@ -5452,6 +5482,7 @@ export default function ModoRapidoPage() {
    * motor oficial (EXTEND + ADVANCE), en un solo lote, para que se pueda revertir como en el CC clásico.
    */
   const handleD12N12 = async (d12: GuardRowModel, n12: GuardRowModel) => {
+    if (!requireOnline('dual12')) return;
     if (!coberturaModal || busy || !planD12N12) return;
     setBusy(true);
     try {
@@ -5737,6 +5768,7 @@ export default function ModoRapidoPage() {
   };
 
   async function intercambiarFilas(origen: GuardRowModel, destino: GuardRowModel) {
+    if (!requireOnline('intercambio')) return;
     if (busy || origen.turno.rowId === destino.turno.rowId) return;
     const origenDocId = docIdDe(origen.turno.rowId);
     const destinoDocId = docIdDe(destino.turno.rowId);
@@ -6396,6 +6428,7 @@ export default function ModoRapidoPage() {
         return;
       }
       if (k === 'x') {
+        if (!requireOnline('intercambio')) return;
         setArm(null);
         setSwapFromId((prev) =>
           prev && docIdDe(prev) === docIdDe(row.turno.rowId) ? null : row.turno.rowId,
@@ -6404,7 +6437,7 @@ export default function ModoRapidoPage() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [sheetRows, activeRowId, hourEdit, arm, swapFromId, coberturaModal, accionesModal, comentarioModal, retenesModalOpen, pdfModalOpen, pdfBusy, revertirChoice, confirmacion, busy, pantallaCompleta, retiroModal, retiroMotivo, retiroReemplazo, retiroInfo]);
+  }, [sheetRows, activeRowId, hourEdit, arm, swapFromId, coberturaModal, accionesModal, comentarioModal, retenesModalOpen, pdfModalOpen, pdfBusy, revertirChoice, confirmacion, busy, pantallaCompleta, retiroModal, retiroMotivo, retiroReemplazo, retiroInfo, netOnline]);
 
   useEffect(() => {
     if (!coberturaModal) setHuecoRetiro(null);
@@ -6531,6 +6564,25 @@ export default function ModoRapidoPage() {
           <RelojCabecera />
 
           <div className="ml-auto flex items-center gap-2">
+            <span
+              className={`inline-flex items-center gap-1 px-2 py-1 rounded-xl text-[10px] font-bold border ${
+                netKind === 'offline'
+                  ? 'bg-amber-50 text-amber-800 border-amber-300'
+                  : netKind === 'syncing'
+                    ? 'bg-sky-50 text-sky-800 border-sky-300'
+                    : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+              }`}
+              title={
+                netKind === 'offline'
+                  ? 'Sin red: podés marcar presente/cerrar/comentario; cobertura y ausencias quedan bloqueadas'
+                  : netKind === 'syncing'
+                    ? 'Red recuperada: sincronizando marcas pendientes'
+                    : 'Conectado'
+              }
+            >
+              {netKind === 'offline' ? <WifiOff size={12} /> : <Wifi size={12} />}
+              {netKind === 'offline' ? 'Sin conexión' : netKind === 'syncing' ? 'Sincronizando…' : 'Online'}
+            </span>
             <span className="text-[10px] text-slate-400">
               {loading ? 'cargando…' : `${Object.keys(turnos).length} guardias hoy`}
             </span>
@@ -6663,7 +6715,10 @@ export default function ModoRapidoPage() {
             accent="bg-violet-600 text-white border-violet-600"
             tono="text-violet-600"
             siempre
-            onClick={() => setRetenesModalOpen(true)}
+            onClick={() => {
+              if (!requireOnline('retenes')) return;
+              setRetenesModalOpen(true);
+            }}
           />
           <ChipIcono
             icon={Zap}
@@ -6941,6 +6996,7 @@ export default function ModoRapidoPage() {
                     onCobertura={(r) => void abrirCobertura(r)}
                     onRevertirAusencia={(r) => void revertirAusencia(r)}
                     onIntercambio={(r) => {
+                      if (!requireOnline('intercambio')) return;
                       setHourEdit(null);
                       setArm(null);
                       setActiveRowId(r.turno.rowId);
@@ -7103,6 +7159,7 @@ export default function ModoRapidoPage() {
             onMarcarPresente={(r) => void handleMarcarPresente(r)}
             onMarcarAusente={(r) => void handleRegistrarAusencia(r)}
             onIntercambio={(r) => {
+              if (!requireOnline('intercambio')) return;
               setHourEdit(null);
               setArm(null);
               setActiveRowId(r.turno.rowId);
