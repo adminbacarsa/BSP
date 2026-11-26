@@ -3798,15 +3798,18 @@ export default function ModoRapidoPage() {
 
   /**
    * Ausencia por el camino oficial (el mismo que el Centro de Control clásico): el servidor marca
-   * `isAbsent`, crea el registro de RRHH (`ausencias`), la novedad AUSENCIA_AUTO, la retención del
-   * saliente y, si la empresa no está en modo manual, abre la vacante. Se espera la respuesta: si el
-   * servidor no la acepta, la fila no queda a medias y el operador lo ve.
+   * `isAbsent`, crea el registro de RRHH (`ausencias`) y abre la vacante. Desde Modo Rápido
+   * `skipCascade: true` evita que la cascada asigne RET/REF/ESC directo: el operador elige
+   * con el botón Cobertura. Se espera la respuesta: si el servidor no la acepta, la fila no
+   * queda a medias y el operador lo ve.
    */
   async function registrarAusencia(rowId: string, _empleado: { name: string }) {
     if (!requireOnline('ausencia')) return;
     const turnoId = docIdDe(rowId);
     const fn = httpsCallable(functions, 'marcarAusenciaOperaciones');
-    const res = (await fn({ shiftId: turnoId })) as { data?: { success?: boolean } };
+    const res = (await fn({ shiftId: turnoId, skipCascade: true })) as {
+      data?: { success?: boolean };
+    };
     if (res?.data?.success !== true) {
       throw new Error('El servidor no registró la ausencia');
     }

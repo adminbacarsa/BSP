@@ -5,11 +5,23 @@ import { isEmpresaManualMode } from '../ops/opsManualMode';
 import { isRetShift, isZeroDurationShift } from '../common/retShift';
 import { lateVacancyDue } from './lateAbsenceWindow';
 
+export type OpenLateAbsenceVacancyOpts = {
+  /**
+   * Modo Rápido / operador elige cobertura a mano: marca vacante pero no dispara cascada
+   * (evita asignación directa RET/REF/ESC sin que el operador elija).
+   */
+  skipCascade?: boolean;
+};
+
 /**
  * Abre vacante/cascada: sin aviso al marcar AUTO_T30; con aviso al T+60; o si declara el operador.
  * Idempotente: si ya hay convocatoria activa, la cascada no duplica.
  */
-export async function openLateAbsenceVacancy(db: Firestore, shiftId: string): Promise<boolean> {
+export async function openLateAbsenceVacancy(
+  db: Firestore,
+  shiftId: string,
+  opts?: OpenLateAbsenceVacancyOpts,
+): Promise<boolean> {
   const sid = String(shiftId || '').trim();
   if (!sid) return false;
   const ref = db.collection('turnos').doc(sid);
@@ -20,8 +32,10 @@ export async function openLateAbsenceVacancy(db: Firestore, shiftId: string): Pr
   if (isRetShift(shift) || isZeroDurationShift(shift)) return false;
   if (!lateVacancyDue(shift, Date.now())) return false;
 
+  const holdCascade =
+    opts?.skipCascade === true || shift.absenceCascadeSkip === true;
   const empresaId = String(shift.empresaId || '').trim() || 'bacarsa';
-  const manual = await isEmpresaManualMode(db, empresaId);
+  const manual = holdCascade || (await isEmpresaManualMode(db, empresaId));
   if (!manual && !isExtraNonReliefShift(shift)) {
     const start = shift.startTime as FirebaseFirestore.Timestamp | undefined;
     if (start) {

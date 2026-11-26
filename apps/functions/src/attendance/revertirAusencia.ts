@@ -60,6 +60,8 @@ export async function revertirAusenciaShift(
     absenceType: FieldValue.delete(),
     absenceDetectedAt: FieldValue.delete(),
     absenceDetectedBy: FieldValue.delete(),
+    absenceCascadeSkip: FieldValue.delete(),
+    absenceVacancyOpenedAt: FieldValue.delete(),
     status: 'PRESENT',
     isPresent: true,
     realStartTime: now,

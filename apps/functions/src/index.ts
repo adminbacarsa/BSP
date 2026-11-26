@@ -1564,6 +1564,8 @@ export const marcarAusenciaOperaciones = functions.https.onCall(async (data, con
   }
   const shiftId = String(data?.shiftId || '').trim();
   if (!shiftId) throw new functions.https.HttpsError('invalid-argument', 'shiftId requerido.');
+  // Modo Rápido (u otro cliente que cubre a mano): no cascada RET directo.
+  const skipCascade = data?.skipCascade === true;
   const db = admin.firestore();
   const ref = db.collection('turnos').doc(shiftId);
   const before = await ref.get();
@@ -1574,13 +1576,15 @@ export const marcarAusenciaOperaciones = functions.https.onCall(async (data, con
       absenceType: 'MANUAL_OPS',
       absenceConfirmedBy: context.auth.uid,
       absenceConfirmedAt: admin.firestore.FieldValue.serverTimestamp(),
+      ...(skipCascade ? { absenceCascadeSkip: true } : {}),
     });
   }
   const r = await markShiftAbsent(db, shiftId, {
     reason: 'MANUAL_OPS',
     by: context.auth.uid,
+    ...(skipCascade ? { skipCascadeSideEffects: true } : {}),
   });
-  const vacancyOpened = await openLateAbsenceVacancy(db, shiftId);
+  const vacancyOpened = await openLateAbsenceVacancy(db, shiftId, { skipCascade });
   return { success: r.applied || r.alreadyAbsent === true || cur?.isAbsent === true, vacancyOpened, ...r };
 });
 
