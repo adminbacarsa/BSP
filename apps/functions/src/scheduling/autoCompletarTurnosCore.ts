@@ -30,6 +30,7 @@ import {
   finTurnoDocId,
   type FinTurnoKind,
 } from '../fichajes/relevoNotifications';
+import { avisarFinTurnoPorWhatsApp } from '../whatsapp/enviarFinTurnoWa';
 import {
   buildAutoClosePatch,
   clearRetentionOnReliefClose,
@@ -1009,44 +1010,64 @@ export async function runAutoCompletarTurnosPass(
   if (batchOps) await completeBatch.commit();
 
   for (const c of pendingCloses) {
-    await db.runTransaction(async (tx) => {
-      const snap = await tx.get(c.ref);
-      if (!snap.exists || snap.data()?.isCompleted === true) return;
-      const already = !!snap.data()?.finTurnoAvisoAt;
-      const aviso = !already ? c.aviso : null;
-      let uid: string | null = null;
-      let name = '';
-      if (aviso) {
-        const emp = await tx.get(db.collection('empleados').doc(aviso.employeeId));
-        const row = emp.data() || {};
-        uid = row.uid ? String(row.uid) : null;
-        name = guardFirstName({ firstName: row.firstName, employeeName: aviso.employeeName || row.nombre });
-      }
-      tx.update(c.ref, aviso ? { ...c.patch, finTurnoAvisoAt: now } : c.patch);
-      if (!aviso) return;
-      const msg = finTurnoCopy({
-        kind: aviso.kind,
-        name,
-        place: aviso.place,
-        incomingName: aviso.incomingName,
-        hm: aviso.hm,
+    let avisoEnviado: typeof c.aviso = null;
+    try {
+      avisoEnviado = await db.runTransaction(async (tx) => {
+        const snap = await tx.get(c.ref);
+        if (!snap.exists || snap.data()?.isCompleted === true) return null;
+        const already = !!snap.data()?.finTurnoAvisoAt;
+        const aviso = !already ? c.aviso : null;
+        let uid: string | null = null;
+        let name = '';
+        if (aviso) {
+          const emp = await tx.get(db.collection('empleados').doc(aviso.employeeId));
+          const row = emp.data() || {};
+          uid = row.uid ? String(row.uid) : null;
+          name = guardFirstName({ firstName: row.firstName, employeeName: aviso.employeeName || row.nombre });
+        }
+        tx.update(c.ref, aviso ? { ...c.patch, finTurnoAvisoAt: now } : c.patch);
+        if (!aviso) return null;
+        const msg = finTurnoCopy({
+          kind: aviso.kind,
+          name,
+          place: aviso.place,
+          incomingName: aviso.incomingName,
+          hm: aviso.hm,
+        });
+        tx.set(db.collection('user_notifications').doc(finTurnoDocId(c.ref.id)), {
+          uid,
+          employeeId: aviso.employeeId,
+          userId: aviso.employeeId,
+          title: msg.title,
+          body: msg.body,
+          type: msg.type,
+          target: 'employee',
+          turnoId: c.ref.id,
+          shiftId: c.ref.id,
+          empresaId: aviso.empresaId,
+          read: false,
+          readAt: null,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        return aviso;
       });
-      tx.set(db.collection('user_notifications').doc(finTurnoDocId(c.ref.id)), {
-        uid,
-        employeeId: aviso.employeeId,
-        userId: aviso.employeeId,
-        title: msg.title,
-        body: msg.body,
-        type: msg.type,
-        target: 'employee',
-        turnoId: c.ref.id,
+    } catch (e) {
+      console.warn('[autoCompletarTurnos] cierre:', (e as Error)?.message);
+    }
+    if (avisoEnviado) {
+      void avisarFinTurnoPorWhatsApp(db, {
+        kind: avisoEnviado.kind,
         shiftId: c.ref.id,
-        empresaId: aviso.empresaId,
-        read: false,
-        readAt: null,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
-    }).catch((e) => console.warn('[autoCompletarTurnos] cierre:', (e as Error)?.message));
+        employeeId: avisoEnviado.employeeId,
+        employeeName: avisoEnviado.employeeName,
+        incomingName: avisoEnviado.incomingName,
+        place: avisoEnviado.place,
+        hm: avisoEnviado.hm,
+        empresaId: avisoEnviado.empresaId,
+      }).catch((e) =>
+        console.warn('[autoCompletarTurnos] WA fin de turno:', (e as Error)?.message),
+      );
+    }
   }
 
   for (const esc of capEscalations) {

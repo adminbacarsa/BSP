@@ -576,6 +576,18 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Cola de avisos WA salientes (fin de turno Auto, etc.). Functions crea; Modo Rápido marca sent.
+    match /wa_outbox/{docId} {
+      allow read: if isAdmin() && (
+        isSuperAdmin() || resource.data.empresaId == userEmpresaId()
+      );
+      allow create, delete: if false;
+      allow update: if isAdmin() && (
+        isSuperAdmin() || resource.data.empresaId == userEmpresaId()
+      ) && request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(['status', 'sentAt', 'sentBy', 'error', 'channel']);
+    }
+
     match /roles/{roleId} {
       allow read: if isAdmin() && (isSuperAdmin() || roleReadable(resource.data));
       allow create: if isSuperAdmin() || (

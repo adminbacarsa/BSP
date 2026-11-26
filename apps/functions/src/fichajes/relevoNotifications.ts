@@ -2,6 +2,7 @@ import { FieldValue, Timestamp, type Firestore } from 'firebase-admin/firestore'
 import { guardFirstName } from '../common/pushGreeting';
 import { findPresentOutgoingAlignedToGapStart } from './relevoOutgoingMatch';
 import { isReliefEligibleShift } from '../common/reliefEligibility';
+import { avisarFinTurnoPorWhatsApp } from '../whatsapp/enviarFinTurnoWa';
 
 export function formatHmArgentina(ms: number): string {
   return new Intl.DateTimeFormat('es-AR', {
@@ -107,7 +108,7 @@ export async function claimFinTurnoAviso(
   const shiftRef = db.collection('turnos').doc(params.outDocId);
   const notifRef = db.collection('user_notifications').doc(finTurnoDocId(params.outDocId));
   try {
-    return await db.runTransaction(async (tx) => {
+    const claimed = await db.runTransaction(async (tx) => {
       const snap = await tx.get(shiftRef);
       if (!snap.exists || snap.data()?.finTurnoAvisoAt) return false;
       const emp = await tx.get(db.collection('empleados').doc(empId));
@@ -141,6 +142,21 @@ export async function claimFinTurnoAviso(
       });
       return true;
     });
+    if (claimed) {
+      void avisarFinTurnoPorWhatsApp(db, {
+        kind: params.kind,
+        shiftId: params.outDocId,
+        employeeId: empId,
+        employeeName: params.employeeName,
+        incomingName: params.incomingName,
+        place: params.place,
+        hm: params.hm,
+        empresaId: params.empresaId,
+      }).catch((e) =>
+        console.warn('[relevoNotifications] WA fin de turno:', (e as Error)?.message),
+      );
+    }
+    return claimed;
   } catch (e) {
     console.warn('[relevoNotifications] fin de turno:', (e as Error)?.message);
     return false;

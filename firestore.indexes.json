@@ -1,6 +1,14 @@
 {
   "indexes": [
     {
+      "collectionGroup": "wa_outbox",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "empresaId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "turnos",
       "queryScope": "COLLECTION",
       "fields": [

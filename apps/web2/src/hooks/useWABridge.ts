@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   collection,
+  doc,
   onSnapshot,
   orderBy,
   query,
+  serverTimestamp,
+  updateDoc,
   where,
   limit,
   type Unsubscribe,
@@ -248,6 +251,11 @@ export function useWABridge(
   const transportRef = useRef<'idle' | 'bridge' | 'cloud'>('idle');
   const cloudEmpresaIdRef = useRef('');
   const cloudUnsubRef = useRef<Unsubscribe | null>(null);
+  const outboxUnsubRef = useRef<Unsubscribe | null>(null);
+  const outboxBusyRef = useRef<Set<string>>(new Set());
+  const enviarRef = useRef<(phone: string, texto: string) => Promise<boolean>>(async () => false);
+  /** Último snapshot Cloud: se reprocesa cuando cargan turnos/teléfonos (evita perder el simulate). */
+  const lastCloudMsgsRef = useRef<BridgeMsg[]>([]);
   const lastTsRef = useRef(0);
   const bridgeStartRef = useRef(0);
   const seenIdsRef = useRef<Set<string>>(new Set());
@@ -597,6 +605,10 @@ export function useWABridge(
       cloudUnsubRef.current();
       cloudUnsubRef.current = null;
     }
+    if (outboxUnsubRef.current) {
+      outboxUnsubRef.current();
+      outboxUnsubRef.current = null;
+    }
     bridgeUrlRef.current = '';
     cloudEmpresaIdRef.current = '';
     transportRef.current = 'idle';
@@ -639,6 +651,122 @@ export function useWABridge(
     [poll, fetchStatus, stopTransports],
   );
 
+  /** Clasifica mensajes del inbox Cloud → pending / salidas (misma lógica que el poll del bridge). */
+  const ingestCloudMsgs = useCallback(
+    (msgs: BridgeMsg[]) => {
+      if (!msgs.length || transportRef.current !== 'cloud') return;
+      lastTsRef.current = Date.now();
+      const newEntries: WAEntry[] = [];
+      const salidasNuevas: WAEntry[] = [];
+      let added = 0;
+      const lista = listaTurnosWa(turnosRef.current, extrasRef.current);
+      for (const m of msgs) {
+        if (seenIdsRef.current.has(m.id)) continue;
+        if (m.type === 'protocol') {
+          seenIdsRef.current.add(m.id);
+          continue;
+        }
+        if (typeof m.ts === 'number' && m.ts > 0 && m.ts < inicioDeHoyMs()) {
+          seenIdsRef.current.add(m.id);
+          continue;
+        }
+        const msgMs = typeof m.ts === 'number' && m.ts > 0 ? m.ts : Date.now();
+        const clasif = clasificarIngresoWa({
+          turnos: lista,
+          name: m.name,
+          phone: m.phone,
+          msgMs,
+          yaMarcado: (rowId) =>
+            pendingRowIdsRef.current.has(rowId) || confirmedRowIdsRef.current.has(rowId),
+        });
+        // Sin candidatos: planilla/teléfonos todavía no listos → no marcar visto; se reintenta.
+        if (!clasif.turno && clasif.aviso === 'sin_turno' && lista.length === 0) {
+          continue;
+        }
+        if (!clasif.turno && clasif.aviso === 'sin_turno') {
+          // Teléfono sin match en la planilla de hoy: no quemar el id por si el mapa de phones llega tarde.
+          const hayPhones = lista.some((t) => !!t.phone);
+          if (!hayPhones) continue;
+        }
+        seenIdsRef.current.add(m.id);
+        if (clasif.texto && Date.now() - msgMs <= 3 * 60 * 1000) {
+          avisarGuardia(m.id, m.phone, clasif.texto, clasif.aviso);
+        }
+        if (clasif.cortar || !clasif.turno) continue;
+        const turno = clasif.turno as TurnoHoy;
+        if (turno.turnoStatus === 'PRESENT') {
+          const finMs = msDeRaw(turno.endTimeRaw);
+          if (
+            m.location &&
+            turno.rowId &&
+            finMs > 0 &&
+            msgMs >= finMs &&
+            !salidaRowIdsRef.current.has(turno.rowId)
+          ) {
+            salidaRowIdsRef.current.add(turno.rowId);
+            salidasNuevas.push({
+              id: m.id,
+              rowId: turno.rowId,
+              name: turno.name || m.name,
+              phone: turno.phone || m.phone,
+              arrivedAt: m.time || nowHHMM(),
+              shift: turno.shift,
+              expected: turno.expected,
+              hasLocation: true,
+              lat: m.location.latitude,
+              lng: m.location.longitude,
+              msgType: m.type,
+              obj: turno.obj,
+              objLat: turno.objLat,
+              objLng: turno.objLng,
+              allowRemoteCheckIn: turno.allowRemoteCheckIn === true,
+              msgTs: msgMs,
+            });
+          }
+          continue;
+        }
+        if (turno.turnoStatus === 'COMPLETED') continue;
+        if (
+          turno.rowId &&
+          (pendingRowIdsRef.current.has(turno.rowId) || confirmedRowIdsRef.current.has(turno.rowId))
+        ) {
+          continue;
+        }
+        const arrivedAt = m.time || nowHHMM();
+        const entry: WAEntry = {
+          id: m.id,
+          rowId: turno.rowId,
+          name: turno.name || m.name,
+          phone: turno.phone || m.phone,
+          arrivedAt,
+          shift: turno.shift,
+          expected: turno.expected,
+          tardanzaMins: calcTardanzaMins(arrivedAt, turno.expected),
+          hasLocation: !!m.location,
+          lat: m.location?.latitude,
+          lng: m.location?.longitude,
+          msgType: m.type,
+          photo: typeof m.photo === 'string' && m.photo ? m.photo : undefined,
+          obj: turno.obj,
+          objLat: turno.objLat,
+          objLng: turno.objLng,
+          allowRemoteCheckIn: turno.allowRemoteCheckIn === true,
+          msgTs: msgMs,
+        };
+        if (entry.rowId) pendingRowIdsRef.current.add(entry.rowId);
+        newEntries.push(entry);
+        added += 1;
+      }
+      if (salidasNuevas.length) {
+        setSalidas((prev) => [...salidasNuevas.reverse(), ...prev]);
+      }
+      if (!newEntries.length) return;
+      setPending((prev) => [...[...newEntries].reverse(), ...prev]);
+      setBadge((b) => b + added);
+    },
+    [avisarGuardia],
+  );
+
   /**
    * Escucha el inbox Cloud de la empresa (webhook Meta o simulateWhatsAppCloudInbound).
    * Reutiliza el mismo poll()/clasificación del bridge.
@@ -657,6 +785,7 @@ export function useWABridge(
       setStatus('connecting');
       setGroups([]);
       setMonitoredGroupIds(new Set(['cloud-direct']));
+      lastCloudMsgsRef.current = [];
       const desde = inicioDeHoyMs();
       const q = query(
         collection(db, 'wa_cloud_inbox', eid, 'messages'),
@@ -693,128 +822,23 @@ export function useWABridge(
                   : undefined,
             });
           });
-          // Alimenta el mismo pipeline que el poll HTTP del bridge.
+          lastCloudMsgsRef.current = msgs;
           if (!msgs.length) return;
-          const fake: BridgeMessagesResponse = {
-            ts: Date.now(),
-            startedAt: bridgeStartRef.current || Date.now(),
-            messages: msgs,
-          };
-          if (!bridgeStartRef.current) bridgeStartRef.current = fake.startedAt!;
-          // Inline mínimo: marcar connected y dejar que poll-like logic corra vía helper local
-          void (async () => {
-            const data = fake;
-            if (data.ts) {
-              lastTsRef.current = data.ts;
-              try {
-                localStorage.setItem(lsKey('wa-lastts'), String(data.ts));
-              } catch {
-                /* ignore */
-              }
-            }
-            const nuevos = (data.messages || []).filter((m) => !seenIdsRef.current.has(m.id));
-            if (!nuevos.length) return;
-            // Reusar poll: temporalmente poner transport cloud y llamar ingest
-            // Duplicamos el cuerpo esencial llamando poll no sirve (sin URL).
-            // Disparamos un micro-poll interno:
-            const newEntries: WAEntry[] = [];
-            const salidasNuevas: WAEntry[] = [];
-            let added = 0;
-            for (const m of nuevos) {
-              seenIdsRef.current.add(m.id);
-              if (m.type === 'protocol') continue;
-              if (typeof m.ts === 'number' && m.ts > 0 && m.ts < inicioDeHoyMs()) continue;
-              const msgMs = typeof m.ts === 'number' && m.ts > 0 ? m.ts : Date.now();
-              const clasif = clasificarIngresoWa({
-                turnos: listaTurnosWa(turnosRef.current, extrasRef.current),
-                name: m.name,
-                phone: m.phone,
-                msgMs,
-                yaMarcado: (rowId) =>
-                  pendingRowIdsRef.current.has(rowId) || confirmedRowIdsRef.current.has(rowId),
-              });
-              if (clasif.texto && Date.now() - msgMs <= 3 * 60 * 1000) {
-                avisarGuardia(m.id, m.phone, clasif.texto, clasif.aviso);
-              }
-              if (clasif.cortar || !clasif.turno) continue;
-              const turno = clasif.turno as TurnoHoy;
-              if (turno.turnoStatus === 'PRESENT') {
-                const finMs = msDeRaw(turno.endTimeRaw);
-                if (
-                  m.location &&
-                  turno.rowId &&
-                  finMs > 0 &&
-                  msgMs >= finMs &&
-                  !salidaRowIdsRef.current.has(turno.rowId)
-                ) {
-                  salidaRowIdsRef.current.add(turno.rowId);
-                  salidasNuevas.push({
-                    id: m.id,
-                    rowId: turno.rowId,
-                    name: turno.name || m.name,
-                    phone: turno.phone || m.phone,
-                    arrivedAt: m.time || nowHHMM(),
-                    shift: turno.shift,
-                    expected: turno.expected,
-                    hasLocation: true,
-                    lat: m.location.latitude,
-                    lng: m.location.longitude,
-                    msgType: m.type,
-                    obj: turno.obj,
-                    objLat: turno.objLat,
-                    objLng: turno.objLng,
-                    allowRemoteCheckIn: turno.allowRemoteCheckIn === true,
-                    msgTs: msgMs,
-                  });
-                }
-                continue;
-              }
-              if (turno.turnoStatus === 'COMPLETED') continue;
-              if (
-                turno.rowId &&
-                (pendingRowIdsRef.current.has(turno.rowId) ||
-                  confirmedRowIdsRef.current.has(turno.rowId))
-              ) {
-                continue;
-              }
-              const arrivedAt = m.time || nowHHMM();
-              const entry: WAEntry = {
-                id: m.id,
-                rowId: turno?.rowId,
-                name: turno?.name || m.name,
-                phone: turno?.phone || m.phone,
-                arrivedAt,
-                shift: turno?.shift,
-                expected: turno?.expected,
-                tardanzaMins: calcTardanzaMins(arrivedAt, turno?.expected),
-                hasLocation: !!m.location,
-                lat: m.location?.latitude,
-                lng: m.location?.longitude,
-                msgType: m.type,
-                photo: typeof m.photo === 'string' && m.photo ? m.photo : undefined,
-                obj: turno?.obj,
-                objLat: turno?.objLat,
-                objLng: turno?.objLng,
-                allowRemoteCheckIn: turno?.allowRemoteCheckIn === true,
-                msgTs: msgMs,
-              };
-              if (entry.rowId) pendingRowIdsRef.current.add(entry.rowId);
-              newEntries.push(entry);
-              added += 1;
-            }
-            if (salidasNuevas.length) {
-              setSalidas((prev) => [...salidasNuevas.reverse(), ...prev]);
-            }
-            if (!newEntries.length) return;
-            setPending((prev) => [...[...newEntries].reverse(), ...prev]);
-            setBadge((b) => b + added);
-          })();
+          if (!bridgeStartRef.current) bridgeStartRef.current = Date.now();
+          ingestCloudMsgs(msgs);
         },
         () => setStatus('error'),
       );
     },
-    [stopTransports, avisarGuardia],
+    [stopTransports, ingestCloudMsgs],
   );
+
+  // Cuando llegan turnos/teléfonos después del simulate, reintentar el inbox Cloud.
+  useEffect(() => {
+    if (transport !== 'cloud') return;
+    if (!lastCloudMsgsRef.current.length) return;
+    ingestCloudMsgs(lastCloudMsgsRef.current);
+  }, [turnos, extras, transport, ingestCloudMsgs]);
 
   const toggleGroup = useCallback(async (groupId: string, enable: boolean) => {
     const url = bridgeUrlRef.current;
@@ -922,11 +946,11 @@ export function useWABridge(
   const enviar = useCallback(async (phone: string, texto: string): Promise<boolean> => {
     if (!phone || !texto) return false;
     if (transportRef.current === 'cloud') {
-      const empresaId = cloudEmpresaIdRef.current;
-      if (!empresaId) return false;
+      const eid = cloudEmpresaIdRef.current;
+      if (!eid) return false;
       try {
         const fn = httpsCallable(functions, 'sendWhatsAppCloudText');
-        await fn({ empresaId, phone, text: texto });
+        await fn({ empresaId: eid, phone, text: texto });
         return true;
       } catch {
         return false;
@@ -948,6 +972,77 @@ export function useWABridge(
       return false;
     }
   }, []);
+
+  useEffect(() => {
+    enviarRef.current = enviar;
+  }, [enviar]);
+
+  /**
+   * Drena avisos de fin de turno (y similares) que Functions dejó en `wa_outbox`
+   * porque el bridge corre en el PC del CC (Cloud Functions no lo alcanza).
+   */
+  useEffect(() => {
+    if (outboxUnsubRef.current) {
+      outboxUnsubRef.current();
+      outboxUnsubRef.current = null;
+    }
+    const eid = String(empresaId || '').trim();
+    if (!eid || (transport !== 'bridge' && transport !== 'cloud')) return;
+
+    const q = query(
+      collection(db, 'wa_outbox'),
+      where('empresaId', '==', eid),
+      where('status', '==', 'pending'),
+      limit(40),
+    );
+    outboxUnsubRef.current = onSnapshot(
+      q,
+      (snap) => {
+        for (const d of snap.docs) {
+          if (outboxBusyRef.current.has(d.id)) continue;
+          const data = d.data() || {};
+          const phone = String(data.phone || '').trim();
+          const text = String(data.text || '').trim();
+          if (!phone || !text) continue;
+          outboxBusyRef.current.add(d.id);
+          void (async () => {
+            try {
+              const ok = await enviarRef.current(phone, text);
+              await updateDoc(doc(db, 'wa_outbox', d.id), {
+                status: ok ? 'sent' : 'failed',
+                channel: transportRef.current === 'cloud' ? 'cloud_client' : 'bridge',
+                sentAt: serverTimestamp(),
+                sentBy: 'modo-rapido',
+                ...(ok ? { error: null } : { error: 'send_failed' }),
+              });
+            } catch (e) {
+              try {
+                await updateDoc(doc(db, 'wa_outbox', d.id), {
+                  status: 'failed',
+                  error: (e as Error)?.message || 'error',
+                  sentBy: 'modo-rapido',
+                });
+              } catch {
+                /* ignore */
+              }
+            } finally {
+              outboxBusyRef.current.delete(d.id);
+            }
+          })();
+        }
+      },
+      () => {
+        /* permiso / índice: no tumbar el bridge */
+      },
+    );
+
+    return () => {
+      if (outboxUnsubRef.current) {
+        outboxUnsubRef.current();
+        outboxUnsubRef.current = null;
+      }
+    };
+  }, [empresaId, transport]);
 
   const dismissEntry = useCallback((entry: WAEntry) => {
     setPending((prev) => prev.filter((e) => e.id !== entry.id));
