@@ -919,9 +919,30 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
                 hoursTotalOperativas += duration;
             }
 
-            // Horas reales: solo turnos ya finalizados con fichada real (sin fallback a teórico)
+            // Horas reales: fichada real. Turnos futuros sin ingreso no cuentan.
+            // Presente/en curso (con ingreso, sin egreso): provisional hasta ahora o fin planificado.
             const isAbsent = d.isAbsent === true || st.includes('absent') || st.includes('ausent');
-            if (isAbsent || (!usePlannedHours && end > new Date())) return;
+            if (isAbsent) return;
+
+            const punchToDate = (v: unknown): Date | null => {
+                if (!v) return null;
+                const t = v as { toDate?: () => Date; seconds?: number; _seconds?: number };
+                if (typeof t.toDate === 'function') {
+                    try {
+                        const dte = t.toDate();
+                        return dte instanceof Date && !Number.isNaN(dte.getTime()) ? dte : null;
+                    } catch { /* ignore */ }
+                }
+                const sec = Number(t.seconds ?? t._seconds);
+                return Number.isFinite(sec) && sec > 0 ? new Date(sec * 1000) : null;
+            };
+
+            const rStartRaw = punchToDate(d.realStartTime) || punchToDate(d.checkInTime) || punchToDate(d.checkInAt);
+            let rEndRaw = punchToDate(d.realEndTime) || punchToDate(d.checkOutTime);
+            if (!usePlannedHours && !rStartRaw && end > new Date()) return;
+            if (!usePlannedHours && rStartRaw && !rEndRaw) {
+                rEndRaw = end > new Date() ? new Date() : end;
+            }
 
             // Regla de liquidación:
             // - Inicio: siempre hora planificada (salvo adelanto explícito)
@@ -938,13 +959,6 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
                 if (isRetentionShift)   return real;         // retencion formal -> hora real
                 return plan;                                  // salida tardia sin retencion -> clampear
             };
-
-            const rStartRaw = d.realStartTime?.seconds ? new Date(d.realStartTime.seconds * 1000)
-                            : d.checkInTime?.seconds   ? new Date(d.checkInTime.seconds * 1000)
-                            : null;
-            const rEndRaw   = d.realEndTime?.seconds   ? new Date(d.realEndTime.seconds * 1000)
-                            : d.checkOutTime?.seconds  ? new Date(d.checkOutTime.seconds * 1000)
-                            : null;
 
             const rStart = (!usePlannedHours && rStartRaw) ? clampS(rStartRaw, start) : null;
             const rEnd   = (!usePlannedHours && rEndRaw)   ? clampE(rEndRaw,   end)   : null;

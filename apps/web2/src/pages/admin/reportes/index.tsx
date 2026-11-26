@@ -60,9 +60,29 @@ const PrintStyles = () => (
     `}</style>
 );
 
+/** Timestamp Firestore / Date / ms → Date (para fichadas del detalle por objetivo). */
+function tsToDate(v: unknown): Date | null {
+    if (!v) return null;
+    if (v instanceof Date) return Number.isNaN(v.getTime()) ? null : v;
+    const asTs = v as { toDate?: () => Date; seconds?: number; _seconds?: number };
+    if (typeof asTs.toDate === 'function') {
+        try {
+            const d = asTs.toDate();
+            return d instanceof Date && !Number.isNaN(d.getTime()) ? d : null;
+        } catch { /* ignore */ }
+    }
+    const sec = Number(asTs.seconds ?? asTs._seconds);
+    if (Number.isFinite(sec) && sec > 0) return new Date(sec * 1000);
+    if (typeof v === 'string' || typeof v === 'number') {
+        const d = new Date(v);
+        return Number.isNaN(d.getTime()) ? null : d;
+    }
+    return null;
+}
+
 // Helpers visuales
 const formatTime = (dateInput: any) => {
-    const d = dateInput?.seconds ? new Date(dateInput.seconds * 1000) : new Date(dateInput);
+    const d = tsToDate(dateInput) || (dateInput?.seconds ? new Date(dateInput.seconds * 1000) : new Date(dateInput));
     if (isNaN(d.getTime())) return '';
     return d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
 };
@@ -204,6 +224,7 @@ export default function ReportsPage() {
     const [expandedObjective, setExpandedObjective] = useState<string | null>(null);
     const [objFilterClient, setObjFilterClient] = useState<string>('');
     const [objFilterName, setObjFilterName] = useState<string>('');
+    const [objFilterNameSearch, setObjFilterNameSearch] = useState('');
     const [planFilterObjective, setPlanFilterObjective] = useState<string>('');
     const [planFilterEmployee, setPlanFilterEmployee] = useState<string>('');
     const [planFilterDate, setPlanFilterDate] = useState<string>('');
@@ -585,6 +606,39 @@ export default function ReportsPage() {
         return allClients.filter(c => c.toLowerCase().includes(q));
     }, [objectiveReport, objFilterClientSearch]);
 
+    /** Objetivos del reporte, acotados al cliente elegido (cascada Cliente → Objetivo). */
+    const filteredObjNamesForClient = useMemo(() => {
+        const clientQ = (objFilterClient || objFilterClientSearch).trim().toLowerCase();
+        let names = objectiveReport
+            .filter((r) => {
+                if (!clientQ) return true;
+                if (objFilterClient) return r.client === objFilterClient;
+                return String(r.client || '').toLowerCase().includes(clientQ);
+            })
+            .map((r) => String(r.name || '').trim())
+            .filter(Boolean);
+        names = [...new Set(names)].sort((a, b) => a.localeCompare(b, 'es'));
+        const q = objFilterNameSearch.trim().toLowerCase();
+        if (!q) return names;
+        return names.filter((n) => n.toLowerCase().includes(q));
+    }, [objectiveReport, objFilterClient, objFilterClientSearch, objFilterNameSearch]);
+
+    useEffect(() => {
+        if (!objFilterName) return;
+        const still = objectiveReport.some((r) => {
+            if (r.name !== objFilterName) return false;
+            if (objFilterClient) return r.client === objFilterClient;
+            if (objFilterClientSearch.trim()) {
+                return String(r.client || '').toLowerCase().includes(objFilterClientSearch.trim().toLowerCase());
+            }
+            return true;
+        });
+        if (!still) {
+            setObjFilterName('');
+            setObjFilterNameSearch('');
+        }
+    }, [objFilterClient, objFilterClientSearch, objFilterName, objectiveReport]);
+
     useEffect(() => {
         if (!planFilterEmployee) return;
         if (!planDetailMeta.employeeOptions.includes(planFilterEmployee)) {
@@ -762,32 +816,43 @@ export default function ReportsPage() {
                                                                     </thead>
                                                                     <tbody className="divide-y divide-slate-100">
                                                                         {[...(row.rawShifts || [])].sort((a: any, b: any) => (a.startTime?.seconds || 0) - (b.startTime?.seconds || 0)).map((s: any) => {
-                                                                            const start = s.startTime?.seconds ? new Date(s.startTime.seconds * 1000) : null;
-                                                                            const end = s.endTime?.seconds ? new Date(s.endTime.seconds * 1000) : null;
+                                                                            const start = tsToDate(s.startTime);
+                                                                            const end = tsToDate(s.endTime);
                                                                             const dur = resolveShiftDurationHours(s, SHIFT_HOURS_LOOKUP, { forObjectiveBilling: true });
                                                                             const night = start && end ? getNightDuration(start, end) : 0;
                                                                             const isVacant = isReportVacancyShift(s, empMap);
-                                                                            const rStartRaw = s.realStartTime?.seconds ? new Date(s.realStartTime.seconds*1000) : s.checkInTime?.seconds ? new Date(s.checkInTime.seconds*1000) : null;
-                                                                            const rEndRaw   = s.realEndTime?.seconds   ? new Date(s.realEndTime.seconds*1000)   : s.checkOutTime?.seconds ? new Date(s.checkOutTime.seconds*1000) : null;
-                                                                            // Regla liquidación: inicio = hora planificada (salvo adelanto); fin = planificado (salvo retención)
+                                                                            const rStartRaw = tsToDate(s.realStartTime) || tsToDate(s.checkInTime) || tsToDate(s.checkInAt);
+                                                                            const rEndMarked = tsToDate(s.realEndTime) || tsToDate(s.checkOutTime);
+                                                                            const stUp = String(s.status || '').toUpperCase();
+                                                                            const enCurso = !!rStartRaw && !rEndMarked && (
+                                                                                s.isPresent === true
+                                                                                || stUp === 'PRESENT'
+                                                                                || (end != null && end.getTime() > Date.now())
+                                                                            );
+                                                                            // Sin egreso: en curso → ahora; fin planificado ya pasado → hasta el plan.
+                                                                            let rEndRaw = rEndMarked;
+                                                                            if (!rEndRaw && rStartRaw) {
+                                                                                if (end && end.getTime() > Date.now()) rEndRaw = new Date();
+                                                                                else if (end) rEndRaw = end;
+                                                                                else rEndRaw = new Date();
+                                                                            }
                                                                             const isEarlyStartShift = s.isEarlyStart === true;
                                                                             const isRetentionShift  = s.isRetention === true || (s.retentionMinutes ?? 0) > 0;
-                                                                            // Solo usar start/end planificado si existe un timestamp válido (>0)
-                                                                            const hasValidPlan = (s.startTime?.seconds ?? 0) > 0 && (s.endTime?.seconds ?? 0) > 0;
+                                                                            const hasValidPlan = !!start && !!end;
                                                                             const rStart = rStartRaw && hasValidPlan && !isEarlyStartShift ? start : rStartRaw;
                                                                             const rEnd   = rEndRaw
                                                                                 ? (hasValidPlan
-                                                                                    ? (rEndRaw < end ? end                       // relevo anticipado -> horas completas
-                                                                                      : isRetentionShift ? rEndRaw               // retencion -> hora real
-                                                                                      : end)                                     // sin retencion -> clampear a planificado
-                                                                                    : rEndRaw)                                   // sin planificado -> usar real
+                                                                                    ? (rEndRaw < end! ? end!
+                                                                                      : isRetentionShift ? rEndRaw
+                                                                                      : end!)
+                                                                                    : rEndRaw)
                                                                                 : null;
                                                                             const rDur   = rStart && rEnd ? Math.min(36, Math.max(0, (rEnd.getTime() - rStart.getTime() - solapeHuecosMs(huecosPlanificadosCortado(s), rStart.getTime(), rEnd.getTime())) / 3600000)) : null;
                                                                             const hasOvertime = isRetentionShift && rDur != null && rDur > dur + 0.1;
                                                                             const fmt = (d: Date) => d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
                                                                             const isLeaveRow = isLeaveReportShift(s);
                                                                             return (
-                                                                                <tr key={s.id} className={isVacant ? 'bg-amber-50/60' : hasOvertime ? 'bg-orange-50/40' : isLeaveRow ? 'bg-blue-50/30' : ''}>
+                                                                                <tr key={s.id} className={isVacant ? 'bg-amber-50/60' : hasOvertime ? 'bg-orange-50/40' : isLeaveRow ? 'bg-blue-50/30' : enCurso ? 'bg-emerald-50/40' : ''}>
                                                                                     <td className="py-1.5 pr-3 text-slate-600">{start ? start.toLocaleDateString('es-AR') : '-'}</td>
                                                                                     <td className={`py-1.5 pr-3 font-bold ${isVacant ? 'text-amber-600 italic' : 'text-slate-700'}`}>
                                                                                         {s.employeeName || 'Vacante'}
@@ -802,15 +867,18 @@ export default function ReportsPage() {
                                                                                         {isLeaveRow ? '—' : (start && end ? `${fmt(start)}–${fmt(end)}` : '-')}
                                                                                     </td>
                                                                                     <td className="py-1.5 pr-3 text-[10px]">
-                                                                                        {rStart && rEnd
-                                                                                            ? <span className={hasOvertime ? 'text-orange-600 font-bold' : 'text-slate-500'}>{fmt(rStart)}–{fmt(rEnd)}</span>
-                                                                                            : <span className="text-slate-300">—</span>}
+                                                                                        {rStartRaw && rEndMarked
+                                                                                            ? <span className={hasOvertime ? 'text-orange-600 font-bold' : 'text-slate-500'}>{fmt(rStartRaw)}–{fmt(rEndMarked)}</span>
+                                                                                            : rStartRaw
+                                                                                              ? <span className="text-emerald-700 font-bold" title="Presente / en curso (sin egreso aún)">{fmt(rStartRaw)}–…</span>
+                                                                                              : <span className="text-slate-300">—</span>}
                                                                                     </td>
                                                                                     <td className="py-1.5 pr-3 text-right text-slate-400 text-[10px]">
                                                                                         {isLeaveRow && s._objectiveBillable === false ? '—' : dur.toFixed(1)}
                                                                                     </td>
-                                                                                    <td className={`py-1.5 pr-3 text-right font-bold text-[10px] ${isVacant ? 'text-amber-500' : hasOvertime ? 'text-orange-600' : 'text-indigo-600'}`}>
+                                                                                    <td className={`py-1.5 pr-3 text-right font-bold text-[10px] ${isVacant ? 'text-amber-500' : hasOvertime ? 'text-orange-600' : enCurso ? 'text-emerald-700' : 'text-indigo-600'}`}>
                                                                                         {rDur != null ? rDur.toFixed(1) : '—'}
+                                                                                        {enCurso && rDur != null && <span className="text-[9px] ml-1 text-emerald-500 font-bold">curso</span>}
                                                                                         {hasOvertime && <span className="text-[9px] ml-1 text-orange-400">+{(rDur!-dur).toFixed(1)}</span>}
                                                                                     </td>
                                                                                     <td className="py-1.5 text-right text-slate-500 text-[10px]">{night.toFixed(1)}</td>
@@ -2439,38 +2507,65 @@ export default function ReportsPage() {
                                 step="1"
                                 label="Cliente"
                                 searchValue={objFilterClientSearch}
-                                onSearchChange={setObjFilterClientSearch}
+                                onSearchChange={(v) => {
+                                    setObjFilterClientSearch(v);
+                                    if (objFilterClient && !String(objFilterClient).toLowerCase().includes(v.trim().toLowerCase())) {
+                                        setObjFilterClient('');
+                                    }
+                                }}
                                 searchPlaceholder="Buscar cliente…"
                                 selectValue={objFilterClient}
                                 onSelectChange={(v) => {
                                     setObjFilterClient(v);
                                     if (v) setObjFilterClientSearch(v);
+                                    setObjFilterName('');
+                                    setObjFilterNameSearch('');
                                 }}
                                 emptyLabel="Todos los clientes"
+                                hint={objectiveReport.length === 0 ? 'Generá el reporte para listar clientes del período' : undefined}
                             >
-                                {filteredObjCatalogClientNames.map((c) => (
+                                {(filteredObjClients.length > 0 ? filteredObjClients : filteredObjCatalogClientNames).map((c) => (
                                     <option key={c} value={c}>{c}</option>
                                 ))}
                             </ReportSearchSelect>
-                            <div className="flex flex-col gap-1.5 min-w-0">
-                                <label className="flex items-center gap-2">
-                                    <span className="text-[10px] font-black text-indigo-600">2</span>
-                                    <span className={RPT_FIELD_LABEL}>Objetivo</span>
-                                </label>
-                                <div className="relative">
-                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" aria-hidden />
-                                    <input
-                                        type="search"
-                                        value={objFilterName}
-                                        onChange={(e) => setObjFilterName(e.target.value)}
-                                        placeholder="Filtrar por nombre de objetivo…"
-                                        className={RPT_SEARCH_INPUT}
-                                    />
-                                </div>
-                            </div>
-                            {(objFilterClient || objFilterClientSearch || objFilterName) && (
+                            <ReportSearchSelect
+                                step="2"
+                                label="Objetivo"
+                                searchValue={objFilterNameSearch}
+                                onSearchChange={setObjFilterNameSearch}
+                                searchPlaceholder={
+                                    objFilterClient || objFilterClientSearch.trim()
+                                        ? 'Buscar objetivo de este cliente…'
+                                        : 'Buscar objetivo…'
+                                }
+                                selectValue={objFilterName}
+                                onSelectChange={(v) => {
+                                    setObjFilterName(v);
+                                    if (v) setObjFilterNameSearch(v);
+                                }}
+                                emptyLabel={
+                                    objFilterClient
+                                        ? `Todos los de ${objFilterClient} (${filteredObjNamesForClient.length})`
+                                        : `Todos los objetivos (${filteredObjNamesForClient.length})`
+                                }
+                                hint={
+                                    objFilterClient && filteredObjNamesForClient.length === 0
+                                        ? 'Sin objetivos de este cliente en el reporte'
+                                        : undefined
+                                }
+                            >
+                                {filteredObjNamesForClient.map((n) => (
+                                    <option key={n} value={n}>{n}</option>
+                                ))}
+                            </ReportSearchSelect>
+                            {(objFilterClient || objFilterClientSearch || objFilterName || objFilterNameSearch) && (
                                 <div className="flex items-end">
-                                    <ReportClearButton onClick={() => { setObjFilterClient(''); setObjFilterClientSearch(''); setObjFilterName(''); }} />
+                                    <ReportClearButton onClick={() => {
+                                        setObjFilterClient('');
+                                        setObjFilterClientSearch('');
+                                        setObjFilterName('');
+                                        setObjFilterNameSearch('');
+                                    }} />
                                 </div>
                             )}
                         </ReportFilterSection>
