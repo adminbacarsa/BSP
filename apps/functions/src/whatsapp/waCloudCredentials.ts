@@ -242,7 +242,7 @@ export const sendWhatsAppCloudText = functions
       toPhone: String(payload.phone || ''),
       text: String(payload.text || ''),
     });
-    if (!result.ok) {
+    if (result.ok === false) {
       throw new functions.https.HttpsError('failed-precondition', result.error);
     }
     return result;
