@@ -69,7 +69,7 @@ export default function ConfigPage() {
                             { id: 'USERS',     label: 'Usuarios Admin',   icon: Users },
                             { id: 'ROLES',     label: 'Roles y Permisos', icon: Shield },
                             { id: 'EMPRESAS',  label: 'Empresas',         icon: Building2 },
-                            { id: 'WABRIDGE' as const, label: 'WA Bridge', icon: MessageCircle },
+                            { id: 'WABRIDGE' as const, label: 'WhatsApp', icon: MessageCircle },
                             { id: 'BACKUP',    label: 'Backups',          icon: HardDrive },
                             { id: 'ASSISTANT', label: 'AI Asistente',     icon: Bot },
                             { id: 'HEALTH',    label: 'Salud',            icon: Activity },

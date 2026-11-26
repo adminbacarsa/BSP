@@ -560,6 +560,11 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Token Meta WhatsApp Cloud API: solo Admin SDK. Metadato tokenConfigured en config/whatsapp.
+    match /empresa_wa_cloud_credentials/{empresaId} {
+      allow read, write: if false;
+    }
+
     match /roles/{roleId} {
       allow read: if isAdmin() && (isSuperAdmin() || roleReadable(resource.data));
       allow create: if isSuperAdmin() || (

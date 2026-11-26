@@ -62,6 +62,10 @@ import { useEmpresa } from '@/context/EmpresaContext';
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '@/lib/firebase';
 import { openWhatsApp, waMensaje } from '@/lib/whatsapp';
+import {
+  mergeLegacyBridgeUrl,
+  parseWhatsAppConfig,
+} from '@/lib/whatsapp/empresaWhatsappConfig';
 import { ChipsRetenEvaluado, type DestinoRetenOpcion } from '@/components/operaciones/RetenesDestinoPiezas';
 import {
   compararRetenesEvaluados,
@@ -3268,7 +3272,10 @@ export default function ModoRapidoPage() {
   const wa = useWABridge(turnos, empresaId, tramosExtra);
 
   const [bridgeUrl, setBridgeUrl] = useState('');
-  const [bridgeCfg, setBridgeCfg] = useState<'cargando' | 'ok' | 'sin_config'>('cargando');
+  /** Proveedor WA activo de la empresa (Configuración → WhatsApp). */
+  const [waProvider, setWaProvider] = useState<
+    'cargando' | 'off' | 'bridge' | 'cloud' | 'sin_config'
+  >('cargando');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [logOpen, setLogOpen] = useState(true);
   const [logFilter, setLogFilter] = useState('');
@@ -3460,29 +3467,44 @@ export default function ModoRapidoPage() {
 
   useEffect(() => {
     let cancelled = false;
-    // Cada empresa usa SOLO su bridge (Configuración → WA Bridge). Sin configuración no se
-    // conecta a ninguno: antes caía al bridge de Bacar y leía/escribía en el WhatsApp de otra empresa.
+    // Proveedor por empresa (Configuración → WhatsApp). Bridge = Baileys; cloud = Meta (webhook
+    // en etapa siguiente); off / sin config = sin WA. Nunca cae al bridge de otra empresa.
     setBridgeUrl('');
-    setBridgeCfg('cargando');
+    setWaProvider('cargando');
     wa.disconnect();
     (async () => {
       if (!empresaId) {
-        setBridgeCfg('sin_config');
+        setWaProvider('sin_config');
         return;
       }
       try {
-        const snap = await getDoc(doc(db, 'empresas', empresaId, 'config', 'wa-bridge'));
+        const [snapWa, snapLegacy] = await Promise.all([
+          getDoc(doc(db, 'empresas', empresaId, 'config', 'whatsapp')),
+          getDoc(doc(db, 'empresas', empresaId, 'config', 'wa-bridge')),
+        ]);
         if (cancelled) return;
-        const data = snap.exists() ? (snap.data() as { url?: string }) : null;
-        const url = typeof data?.url === 'string' ? data.url.trim() : '';
-        if (url) {
-          setBridgeUrl(url);
-          setBridgeCfg('ok');
+        let cfg = parseWhatsAppConfig(snapWa.exists() ? snapWa.data() : null);
+        const legacyUrl =
+          snapLegacy.exists() && typeof snapLegacy.data()?.url === 'string'
+            ? String(snapLegacy.data()?.url)
+            : '';
+        cfg = mergeLegacyBridgeUrl(cfg, legacyUrl);
+        if (cfg.provider === 'bridge' && cfg.bridge.url) {
+          setBridgeUrl(cfg.bridge.url);
+          setWaProvider('bridge');
+        } else if (cfg.provider === 'cloud') {
+          setWaProvider('cloud');
+        } else if (cfg.provider === 'off') {
+          setWaProvider('off');
+        } else if (cfg.bridge.url) {
+          // Doc incompleto pero hay URL legacy: seguir con bridge.
+          setBridgeUrl(cfg.bridge.url);
+          setWaProvider('bridge');
         } else {
-          setBridgeCfg('sin_config');
+          setWaProvider('sin_config');
         }
       } catch {
-        if (!cancelled) setBridgeCfg('sin_config');
+        if (!cancelled) setWaProvider('sin_config');
       }
     })();
 
@@ -3500,9 +3522,10 @@ export default function ModoRapidoPage() {
   }, [empresaId]);
 
   useEffect(() => {
-    if (bridgeUrl) wa.connect(bridgeUrl);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- connect al cambiar URL; wa estable por refs internas
-  }, [bridgeUrl]);
+    if (waProvider === 'bridge' && bridgeUrl) wa.connect(bridgeUrl);
+    else wa.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- connect al cambiar URL/proveedor; wa estable por refs
+  }, [bridgeUrl, waProvider]);
 
   const syncedRef = useRef(false);
   useEffect(() => {
@@ -6456,31 +6479,39 @@ export default function ModoRapidoPage() {
           <div
             className="flex items-center gap-1 ml-2 text-[10px] text-slate-500"
             title={
-              bridgeCfg === 'sin_config'
-                ? `${empresa?.name || empresaId || 'Esta empresa'} no tiene WA Bridge configurado (Configuración → WA Bridge)`
-                : bridgeUrl
-                  ? `WA Bridge de ${empresa?.name || empresaId || 'la empresa'}: ${bridgeUrl}`
-                  : undefined
+              waProvider === 'sin_config' || waProvider === 'off'
+                ? `${empresa?.name || empresaId || 'Esta empresa'}: WhatsApp apagado o sin config (Configuración → WhatsApp)`
+                : waProvider === 'cloud'
+                  ? `Cloud API activa · recepción por webhook (en preparación)`
+                  : bridgeUrl
+                    ? `WA Bridge de ${empresa?.name || empresaId || 'la empresa'}: ${bridgeUrl}`
+                    : undefined
             }
           >
             <span
               className={`w-1.5 h-1.5 rounded-full ${
-                bridgeCfg === 'sin_config'
+                waProvider === 'sin_config' || waProvider === 'off'
                   ? 'bg-slate-300'
-                  : wa.status === 'connected'
-                    ? 'bg-emerald-500 animate-pulse'
-                    : wa.status === 'error'
-                      ? 'bg-red-500'
-                      : 'bg-amber-400'
+                  : waProvider === 'cloud'
+                    ? 'bg-indigo-500'
+                    : wa.status === 'connected'
+                      ? 'bg-emerald-500 animate-pulse'
+                      : wa.status === 'error'
+                        ? 'bg-red-500'
+                        : 'bg-amber-400'
               }`}
             />
-            {bridgeCfg === 'sin_config'
-              ? 'sin bridge configurado'
-              : wa.status === 'connected'
-                ? 'conectado'
-                : wa.status === 'error'
-                  ? 'sin respuesta'
-                  : 'conectando…'}
+            {waProvider === 'sin_config'
+              ? 'sin WhatsApp'
+              : waProvider === 'off'
+                ? 'WA apagado'
+                : waProvider === 'cloud'
+                  ? 'Cloud API'
+                  : wa.status === 'connected'
+                    ? 'conectado'
+                    : wa.status === 'error'
+                      ? 'sin respuesta'
+                      : 'conectando…'}
           </div>
 
           <div className="ml-3 relative flex-1 max-w-xs hidden sm:block">

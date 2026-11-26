@@ -4653,3 +4653,9 @@ function db() {
 export { generateDashboardToken, revokeDashboardToken, getDashboardTokenStatus } from './dashboard/generateDashboardToken';
 export { computeDashboardSnapshot } from './dashboard/computeDashboardSnapshot';
 export { getDashboardSnapshot } from './dashboard/getDashboardSnapshot';
+export {
+  setWhatsAppCloudToken,
+  getWhatsAppCloudTokenStatus,
+  clearWhatsAppCloudToken,
+  testWhatsAppCloudSend,
+} from './whatsapp/waCloudCredentials';
