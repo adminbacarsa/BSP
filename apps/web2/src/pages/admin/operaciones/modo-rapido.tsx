@@ -2165,6 +2165,7 @@ function ModalAcciones({
   onClose,
   onMarcarPresente,
   onMarcarAusente,
+  onQuitarPresencia,
   onIntercambio,
   onRetiro,
   onAvisarWa,
@@ -2176,6 +2177,7 @@ function ModalAcciones({
   onComentario: (row: GuardRowModel) => void;
   onMarcarPresente: (row: GuardRowModel) => void;
   onMarcarAusente: (row: GuardRowModel) => void;
+  onQuitarPresencia: (row: GuardRowModel) => void;
   onIntercambio: (row: GuardRowModel) => void;
   onRetiro: (row: GuardRowModel) => void;
   onAvisarWa: (row: GuardRowModel) => void;
@@ -2275,6 +2277,20 @@ function ModalAcciones({
               Retiro anticipado (se siente mal)
             </button>
           )}
+          {(row.estado === 'PRESENTE_PLAT' || row.estado === 'PRESENTE_WA') && (
+            <button
+              type="button"
+              disabled={busy}
+              title="Deshace el presente (Op, Radio, App o WA) y vuelve a esperando"
+              onClick={() => {
+                onQuitarPresencia(row);
+                onClose();
+              }}
+              className="w-full py-2 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-800 border border-slate-300 text-[12px] font-bold disabled:opacity-50"
+            >
+              Quitar presencia (U)
+            </button>
+          )}
           <button
             type="button"
             disabled={!row.turno.phone}
@@ -2344,6 +2360,7 @@ function GuardRow({
   onCobertura,
   onIntercambio,
   onRetiro,
+  onQuitarPresencia,
   swapOrigin,
   onMore,
   onComentario,
@@ -2367,6 +2384,7 @@ function GuardRow({
   onRevertirAusencia: (row: GuardRowModel) => void;
   onIntercambio: (row: GuardRowModel) => void;
   onRetiro: (row: GuardRowModel) => void;
+  onQuitarPresencia: (row: GuardRowModel) => void;
   onMore: (row: GuardRowModel) => void;
   onComentario: (row: GuardRowModel) => void;
   onReabrir: (row: GuardRowModel) => void;
@@ -2529,6 +2547,15 @@ function GuardRow({
           className="mr-btn-retiro px-2 py-1 rounded-lg text-[10px] font-bold disabled:opacity-50"
         >
           Retiro
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          title="Quitar presencia (U): vuelve a esperando. Enter confirma."
+          onClick={() => onQuitarPresencia(row)}
+          className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 text-[10px] font-bold disabled:opacity-50"
+        >
+          Quitar
         </button>
       </>
     );
@@ -2775,6 +2802,7 @@ function ObjectiveGroup({
   onRevertirAusencia,
   onIntercambio,
   onRetiro,
+  onQuitarPresencia,
   swapFromId,
   onMore,
   cliente,
@@ -2813,6 +2841,7 @@ function ObjectiveGroup({
   onRevertirAusencia: (row: GuardRowModel) => void;
   onIntercambio: (row: GuardRowModel) => void;
   onRetiro: (row: GuardRowModel) => void;
+  onQuitarPresencia: (row: GuardRowModel) => void;
   onMore: (row: GuardRowModel) => void;
   onComentario: (row: GuardRowModel) => void;
   onReabrir: (row: GuardRowModel) => void;
@@ -2888,6 +2917,7 @@ function ObjectiveGroup({
               onRevertirAusencia={onRevertirAusencia}
               onIntercambio={onIntercambio}
               onRetiro={onRetiro}
+              onQuitarPresencia={onQuitarPresencia}
               swapOrigin={
                 !!swapFromId && docIdDe(swapFromId) === docIdDe(row.turno.rowId)
               }
@@ -4670,6 +4700,9 @@ export default function ModoRapidoPage() {
         realStartTime: d.realStartTime ?? null,
         checkInSource: d.checkInSource ?? null,
         checkInAt: d.checkInAt ?? null,
+        checkInTime: d.checkInTime ?? null,
+        isLate: d.isLate ?? false,
+        lateMinutes: d.lateMinutes ?? null,
         isPresent: d.isPresent ?? false,
         isCompleted: d.isCompleted ?? false,
         realEndTime: d.realEndTime ?? null,
@@ -4816,12 +4849,12 @@ export default function ModoRapidoPage() {
   }
 
   async function quitarPresencia(row: GuardRowModel) {
-    if (row.fuente === 'WA' || row.estado === 'PRESENTE_WA' || row.estado === 'PENDIENTE_WA') {
-      showToast('La presencia de WhatsApp queda en el puente', 'bg-slate-700');
+    if (row.estado !== 'PRESENTE_PLAT' && row.estado !== 'PRESENTE_WA') {
       setArm(null);
       return;
     }
-    if (row.estado !== 'PRESENTE_PLAT') {
+    if (row.estado === 'CERRADO') {
+      showToast('El turno ya está cerrado: usá Reabrir si hace falta', 'bg-amber-700');
       setArm(null);
       return;
     }
@@ -4829,10 +4862,11 @@ export default function ModoRapidoPage() {
     setBusy(true);
     try {
       await recordarTurno(row.turno.rowId);
-      const refTurno = doc(db, 'turnos', docIdDe(row.turno.rowId));
+      const docId = docIdDe(row.turno.rowId);
+      const refTurno = doc(db, 'turnos', docId);
       const tramoN = row.turno.bloque ?? 1;
       if (esTramoCortado(row.turno) && tramoN > 1) {
-        const snapTurno = await leerTurnoRapido(docIdDe(row.turno.rowId));
+        const snapTurno = await leerTurnoRapido(docId);
         const dataTurno = (snapTurno.data() || {}) as Record<string, unknown>;
         const pbPrevio = (dataTurno.presenciaBloques || {}) as Record<string, PresenciaBloque | undefined>;
         const primerTramoAbierto = !!dataTurno.realStartTime && pbPrevio.b1?.cerrado !== true;
@@ -4840,7 +4874,17 @@ export default function ModoRapidoPage() {
           updateDoc(refTurno, {
             [`presenciaBloques.b${tramoN}`]: deleteField(),
             isPresent: false,
-            ...(primerTramoAbierto ? {} : { status: 'PENDING' }),
+            ...(primerTramoAbierto
+              ? {}
+              : {
+                  status: 'PENDING',
+                  realStartTime: deleteField(),
+                  checkInAt: deleteField(),
+                  checkInTime: deleteField(),
+                  checkInSource: deleteField(),
+                  isLate: deleteField(),
+                  lateMinutes: deleteField(),
+                }),
           }),
           'la presencia',
         );
@@ -4849,17 +4893,25 @@ export default function ModoRapidoPage() {
           updateDoc(refTurno, {
             status: 'PENDING',
             isPresent: false,
+            realStartTime: deleteField(),
+            checkInAt: deleteField(),
+            checkInTime: deleteField(),
+            checkInSource: deleteField(),
+            isLate: deleteField(),
+            lateMinutes: deleteField(),
           }),
           'la presencia',
         );
       }
+      wa.unconfirmRow(row.turno.rowId);
       escribir(
         addDoc(collection(db, 'novedades'), {
           type: 'PRESENCIA_REVERTIDA',
-          turnoId: docIdDe(row.turno.rowId),
+          turnoId: docId,
           employeeName: row.employeeName,
           empresaId,
           operatorId: user?.uid ?? 'cc-modo-rapido',
+          fuentePrevia: row.fuente || null,
           createdAt: serverTimestamp(),
         }),
         'la novedad',
@@ -4871,6 +4923,21 @@ export default function ModoRapidoPage() {
       setBusy(false);
       setArm(null);
     }
+  }
+
+  function pedirQuitarPresencia(row: GuardRowModel) {
+    if (row.estado !== 'PRESENTE_PLAT' && row.estado !== 'PRESENTE_WA') {
+      showToast('Solo se quita la presencia de un guardia presente', 'bg-slate-700');
+      return;
+    }
+    if (arm?.kind === 'quitar' && arm.rowId === row.turno.rowId) {
+      void quitarPresencia(row);
+      return;
+    }
+    setHourEdit(null);
+    setSwapFromId(null);
+    setActiveRowId(row.turno.rowId);
+    setArm({ kind: 'quitar', rowId: row.turno.rowId });
   }
 
   async function deshacer() {
@@ -6849,7 +6916,7 @@ export default function ModoRapidoPage() {
               return `Ausencia AA de ${activeRow.employeeName}. Enter confirma, Esc cancela.`;
             }
             if (arm?.kind === 'quitar' && arm.rowId === activeRow.turno.rowId) {
-              return `Quitar presencia de ${activeRow.employeeName}. Enter confirma. WhatsApp no se toca.`;
+              return `Quitar presencia de ${activeRow.employeeName} (vuelve a esperando). Enter confirma, Esc cancela.`;
             }
             if (arm?.kind === 'cerrar' && arm.rowId === activeRow.turno.rowId) {
               return `Cerrar turno de ${activeRow.employeeName}. Egreso previsto ${activeRow.salida || '—'}. Enter confirma el egreso real de ahora.`;
@@ -7008,6 +7075,7 @@ export default function ModoRapidoPage() {
                       }
                     }}
                     onRetiro={(r) => pedirRetiro(r)}
+                    onQuitarPresencia={(r) => pedirQuitarPresencia(r)}
                     swapFromId={swapFromId}
                     onMore={(r) => setAccionesModal(r)}
                     onComentario={(r) => setComentarioModal(r)}
@@ -7169,6 +7237,9 @@ export default function ModoRapidoPage() {
               }
             }}
             onRetiro={(r) => pedirRetiro(r)}
+            onQuitarPresencia={(r) => {
+              pedirQuitarPresencia(r);
+            }}
             onAvisarWa={(r) => {
               if (!r.turno.phone) {
                 showToast(`${r.employeeName} no tiene teléfono`, 'bg-amber-700');

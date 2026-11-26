@@ -116,6 +116,8 @@ export interface UseWABridgeReturn {
   confirmedEntries: WAConfirmedEntry[];
   confirmedRowIds: ReadonlySet<string>;
   confirmEntry: (entry: WAEntry) => void;
+  /** Saca la fila del set local de confirmados WA (al revertir presencia en Modo Rápido). */
+  unconfirmRow: (rowId: string) => void;
   /**
    * Avisos de salida: ubicación enviada por un guardia que ya está presente, una vez finalizado su turno.
    * No son check-ins: la planilla decide si cierra el turno o lo deja para el operador.
@@ -881,6 +883,31 @@ export function useWABridge(
     }
   }, []);
 
+  const unconfirmRow = useCallback((rowId: string) => {
+    const id = String(rowId || '').trim();
+    if (!id) return;
+    setConfirmedRowIds((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      try {
+        localStorage.setItem(lsKey('wa-confirmed'), JSON.stringify([...next]));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+    setConfirmedEntries((prev) => {
+      const next = prev.filter((e) => e.rowId !== id);
+      try {
+        localStorage.setItem(lsKey('wa-confirmed-log'), JSON.stringify(next));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }, []);
+
   const confirmEntry = useCallback((entry: WAEntry) => {
     setPending((prev) => prev.filter((e) => e.id !== entry.id));
     setBadge((b) => Math.max(0, b - 1));
@@ -1137,6 +1164,7 @@ export function useWABridge(
     confirmedEntries,
     confirmedRowIds,
     confirmEntry,
+    unconfirmRow,
     salidas,
     consumirSalida,
     dismissEntry,
