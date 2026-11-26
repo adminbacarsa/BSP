@@ -105,6 +105,8 @@ export interface TurnoHoy {
   coversEmployeeName?: string;
   /** Id del turno titular que esta cobertura tapa. */
   coverageForShiftId?: string;
+  /** Remanente de retiro anticipado: id del turno original del que se retiró. */
+  remanenteDeTurnoId?: string;
 }
 
 export type WABridgeStatus = 'idle' | 'connecting' | 'connected' | 'error';

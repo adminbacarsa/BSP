@@ -79,7 +79,9 @@ import { invokeCrearConvocatoriaCobertura } from '@/lib/operaciones/opsConvocato
 import {
   absentShiftCoveragePatch,
   applyCoverage,
+  clearTitularCoveragePatch,
   CoverageApplyError,
+  supersedeOpsCoveragesForAbsence,
   syncAusenciaCoberturaGestionada,
 } from '@/lib/operaciones/syncAusenciaCobertura';
 import {
@@ -627,6 +629,8 @@ function useTurnosHoy({
           coverageForShiftId:
             String(shift.coverageForShiftId || shift.coveredShiftId || shift.absenceShiftId || '')
               .trim() || undefined,
+          remanenteDeTurnoId:
+            String(shift.remanenteDeTurnoId || '').trim() || undefined,
           ...(String(shift.comentarioOps || '').trim()
             ? {
                 comentario: String(shift.comentarioOps).trim(),
@@ -2166,6 +2170,7 @@ function ModalAcciones({
   onMarcarPresente,
   onMarcarAusente,
   onQuitarPresencia,
+  onCancelarCobertura,
   onIntercambio,
   onRetiro,
   onAvisarWa,
@@ -2178,6 +2183,7 @@ function ModalAcciones({
   onMarcarPresente: (row: GuardRowModel) => void;
   onMarcarAusente: (row: GuardRowModel) => void;
   onQuitarPresencia: (row: GuardRowModel) => void;
+  onCancelarCobertura: (row: GuardRowModel) => void;
   onIntercambio: (row: GuardRowModel) => void;
   onRetiro: (row: GuardRowModel) => void;
   onAvisarWa: (row: GuardRowModel) => void;
@@ -2291,6 +2297,22 @@ function ModalAcciones({
               Quitar presencia (U)
             </button>
           )}
+          {(!!row.coveredByName ||
+            String(row.turno.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE' ||
+            String(row.turno.origin || '').toUpperCase() === 'RET_COBERTURA') && (
+            <button
+              type="button"
+              disabled={busy}
+              title="Deshace la cobertura: quien cubre vuelve a RET/origen y el titular deja de estar ausente"
+              onClick={() => {
+                onCancelarCobertura(row);
+                onClose();
+              }}
+              className="w-full py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 text-[12px] font-bold disabled:opacity-50"
+            >
+              Deshacer cobertura (C)
+            </button>
+          )}
           <button
             type="button"
             disabled={!row.turno.phone}
@@ -2361,6 +2383,7 @@ function GuardRow({
   onIntercambio,
   onRetiro,
   onQuitarPresencia,
+  onCancelarCobertura,
   swapOrigin,
   onMore,
   onComentario,
@@ -2381,6 +2404,7 @@ function GuardRow({
   onConfirmarWA: (row: GuardRowModel) => void;
   onCerrar: (row: GuardRowModel) => void;
   onCobertura: (row: GuardRowModel) => void;
+  onCancelarCobertura: (row: GuardRowModel) => void;
   onRevertirAusencia: (row: GuardRowModel) => void;
   onIntercambio: (row: GuardRowModel) => void;
   onRetiro: (row: GuardRowModel) => void;
@@ -2407,9 +2431,29 @@ function GuardRow({
   let primary: React.ReactNode = null;
   if (row.estado === 'NO_LLEGO' && row.coveredByName) {
     primary = (
-      <span className="px-2 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold whitespace-nowrap">
-        ✓ Cubierto por {row.coveredByName}
-      </span>
+      <>
+        <span className="px-2 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold whitespace-nowrap">
+          ✓ Cubierto por {row.coveredByName}
+        </span>
+        <button
+          type="button"
+          disabled={busy}
+          title="Deshace la cobertura: quien cubre vuelve a RET/origen y el titular deja de estar ausente"
+          onClick={() => onCancelarCobertura(row)}
+          className="px-2 py-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 text-[10px] font-bold disabled:opacity-50"
+        >
+          Deshacer cob.
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          title="Revertir la ausencia: el titular llegó (hasta T+60)"
+          onClick={() => onRevertirAusencia(row)}
+          className="mr-btn-neutral px-2 py-1 rounded-lg text-[10px] font-bold disabled:opacity-50"
+        >
+          ↩ Llegó
+        </button>
+      </>
     );
   } else if (row.estado === 'NO_LLEGO') {
     primary = (
@@ -2443,7 +2487,16 @@ function GuardRow({
         <button
           type="button"
           disabled={busy}
-          title="Revertir la ausencia: el guardia llegó (hasta T+60)"
+          title="Deshace la cobertura: quien cubre vuelve a RET/origen y el titular deja de estar ausente"
+          onClick={() => onCancelarCobertura(row)}
+          className="px-2 py-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 text-[10px] font-bold disabled:opacity-50"
+        >
+          Deshacer cob.
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          title="Revertir la ausencia: el titular llegó (hasta T+60). Si hay cobertura, pregunta a quién liberar."
           onClick={() => onRevertirAusencia(row)}
           className="mr-btn-neutral px-2 py-1 rounded-lg text-[10px] font-bold disabled:opacity-50"
         >
@@ -2507,6 +2560,9 @@ function GuardRow({
       </button>
     );
   } else if (row.estado === 'ESPERANDO') {
+    const esCoberturaOps =
+      String(row.turno.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE' ||
+      String(row.turno.origin || '').toUpperCase() === 'RET_COBERTURA';
     primary = (
       <>
         <button
@@ -2526,9 +2582,23 @@ function GuardRow({
         >
           {swapOrigin ? 'Origen' : 'Cambiar'}
         </button>
+        {esCoberturaOps && (
+          <button
+            type="button"
+            disabled={busy}
+            title="Deshace la cobertura: volvés a RET/origen y el titular deja de estar ausente"
+            onClick={() => onCancelarCobertura(row)}
+            className="px-2 py-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 text-[10px] font-bold disabled:opacity-50"
+          >
+            Deshacer cob.
+          </button>
+        )}
       </>
     );
   } else if (row.estado === 'PRESENTE_PLAT' || row.estado === 'PRESENTE_WA') {
+    const esCoberturaOps =
+      String(row.turno.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE' ||
+      String(row.turno.origin || '').toUpperCase() === 'RET_COBERTURA';
     primary = (
       <>
         <button
@@ -2557,6 +2627,17 @@ function GuardRow({
         >
           Quitar
         </button>
+        {esCoberturaOps && (
+          <button
+            type="button"
+            disabled={busy}
+            title="Deshace la cobertura: volvés a RET/origen y el titular deja de estar ausente"
+            onClick={() => onCancelarCobertura(row)}
+            className="px-2 py-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 text-[10px] font-bold disabled:opacity-50"
+          >
+            Deshacer cob.
+          </button>
+        )}
       </>
     );
   } else if (row.estado === 'CERRADO') {
@@ -2803,6 +2884,7 @@ function ObjectiveGroup({
   onIntercambio,
   onRetiro,
   onQuitarPresencia,
+  onCancelarCobertura,
   swapFromId,
   onMore,
   cliente,
@@ -2838,6 +2920,7 @@ function ObjectiveGroup({
   onConfirmarWA: (row: GuardRowModel) => void;
   onCerrar: (row: GuardRowModel) => void;
   onCobertura: (row: GuardRowModel) => void;
+  onCancelarCobertura: (row: GuardRowModel) => void;
   onRevertirAusencia: (row: GuardRowModel) => void;
   onIntercambio: (row: GuardRowModel) => void;
   onRetiro: (row: GuardRowModel) => void;
@@ -2918,6 +3001,7 @@ function ObjectiveGroup({
               onIntercambio={onIntercambio}
               onRetiro={onRetiro}
               onQuitarPresencia={onQuitarPresencia}
+              onCancelarCobertura={onCancelarCobertura}
               swapOrigin={
                 !!swapFromId && docIdDe(swapFromId) === docIdDe(row.turno.rowId)
               }
@@ -4650,7 +4734,12 @@ export default function ModoRapidoPage() {
           return;
         }
       }
-      showToast(`Ausencia revertida · ${row.employeeName} figura presente (llegó tarde)`, 'bg-emerald-700');
+      showToast(
+        cancelCoverage
+          ? `Cobertura deshecha · ${row.employeeName} ya no está ausente (quien cubría vuelve a su origen)`
+          : `Ausencia revertida · ${row.employeeName} figura presente (llegó tarde)`,
+        'bg-emerald-700',
+      );
     } catch (err) {
       const code = String((err as { code?: string })?.code || '');
       console.warn('[modo-rapido] ejecutarReversionAusencia', err);
@@ -4661,6 +4750,148 @@ export default function ModoRapidoPage() {
       } else {
         showToast('No se pudo revertir la ausencia', 'bg-red-600');
       }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * Deshace una cobertura operativa (ej. Cristian cubría a Díaz):
+   * - anula el ops_cov / remanente
+   * - el que cubría vuelve a su origen (RET / horario previo)
+   * - el titular deja de estar ausente (no queda AA)
+   * Usa el mismo motor que «↩ Llegó» con cancelCoverage.
+   */
+  async function cancelarCobertura(row: GuardRowModel) {
+    if (!requireOnline('cobertura')) return;
+    if (busy) return;
+
+    const origin = String(row.turno.origin || '').toUpperCase();
+    const esFilaCobertura =
+      origin === 'OPERATIONS_COVERAGE' || origin === 'RET_COBERTURA';
+    const titularId = esFilaCobertura
+      ? String(row.turno.coverageForShiftId || row.turno.remanenteDeTurnoId || '').trim() ||
+        docIdDe(row.turno.rowId)
+      : docIdDe(row.turno.rowId);
+    if (!titularId) {
+      showToast('No se identificó el turno titular de la cobertura', 'bg-red-600');
+      return;
+    }
+
+    const titularSnap = await leerTurnoRapido(titularId);
+    if (!titularSnap.exists()) {
+      showToast('El turno titular ya no existe', 'bg-red-600');
+      return;
+    }
+    const titular = (titularSnap.data() || {}) as Record<string, unknown>;
+    const titularName = String(
+      titular.employeeName || row.turno.coversEmployeeName || row.employeeName || 'titular',
+    );
+    const cubreNombre =
+      row.coveredByName ||
+      row.turno.coveredByName ||
+      String(titular.coveredByEmployeeName || titular.coveringDisplayName || '').trim() ||
+      (esFilaCobertura ? row.employeeName : '');
+    const titularAusente =
+      titular.isAbsent === true || String(titular.status || '').toUpperCase() === 'ABSENT';
+
+    const ok = await pedirConfirmacion({
+      titulo: 'Deshacer cobertura',
+      mensaje: cubreNombre
+        ? `Se deshace la cobertura de ${cubreNombre} sobre ${titularName}.\n\n` +
+          `· ${cubreNombre} vuelve a su turno origen (RET / horario previo).\n` +
+          `· ${titularName} deja de estar ausente (no queda AA).`
+        : `Se deshace la cobertura de ${titularName}. El titular no queda ausente.`,
+      textoOk: 'Deshacer cobertura',
+      tono: 'rojo',
+    });
+    if (!ok) return;
+
+    // Titular ausente: motor oficial (cancela ops_cov, restaura RET y revierte la AA).
+    if (titularAusente) {
+      const titularRow: GuardRowModel = {
+        ...row,
+        employeeName: titularName,
+        estado: 'AUSENTE',
+        coveredByName: cubreNombre || row.coveredByName,
+        turno: {
+          ...row.turno,
+          rowId: titularId,
+          name: titularName,
+          origin: String(titular.origin || row.turno.origin || ''),
+          coveredByName: cubreNombre || undefined,
+          coversEmployeeName: undefined,
+          coverageForShiftId: undefined,
+          remanenteDeTurnoId: undefined,
+        },
+      };
+      setRevertirChoice(null);
+      await ejecutarReversionAusencia(titularRow, true);
+      // Remanentes de retiro (RET_COBERTURA) a veces no llevan absenceShiftId: limpiarlos acá.
+      try {
+        const remSnap = await getDocs(
+          query(collection(db, 'turnos'), where('remanenteDeTurnoId', '==', titularId), limit(10)),
+        );
+        for (const d of remSnap.docs) {
+          if (d.data().coverageSuperseded === true) continue;
+          const srcRet = String(d.data().coberturaDesdeTurnoId || '').trim();
+          await updateDoc(d.ref, {
+            status: 'CANCELLED',
+            coverageSuperseded: true,
+            coverageSupersededAt: serverTimestamp(),
+            coverageSupersededBy: user?.uid ?? 'cc-modo-rapido',
+            coverageSupersededReason: 'DESHACER_COBERTURA_MR',
+          });
+          if (srcRet) {
+            await updateDoc(doc(db, 'turnos', srcRet), { coverageAssignedTo: deleteField() });
+          }
+        }
+      } catch (err) {
+        console.warn('[modo-rapido] remanente al deshacer cobertura', err);
+      }
+      return;
+    }
+
+    // Titular no ausente: solo anular la pata de cobertura y restaurar origen.
+    setBusy(true);
+    try {
+      await recordarTurno(titularId);
+      const batch = writeBatch(db);
+      await supersedeOpsCoveragesForAbsence(db, titularId, batch, {
+        supersededBy: user?.uid ?? 'cc-modo-rapido',
+      });
+      const remSnap = await getDocs(
+        query(collection(db, 'turnos'), where('remanenteDeTurnoId', '==', titularId), limit(10)),
+      );
+      for (const d of remSnap.docs) {
+        if (d.data().coverageSuperseded === true) continue;
+        batch.update(d.ref, {
+          status: 'CANCELLED',
+          coverageSuperseded: true,
+          coverageSupersededAt: serverTimestamp(),
+          coverageSupersededBy: user?.uid ?? 'cc-modo-rapido',
+          coverageSupersededReason: 'DESHACER_COBERTURA_MR',
+        });
+        const srcRet = String(d.data().coberturaDesdeTurnoId || '').trim();
+        if (srcRet) batch.update(doc(db, 'turnos', srcRet), { coverageAssignedTo: deleteField() });
+      }
+      batch.update(doc(db, 'turnos', titularId), clearTitularCoveragePatch());
+      await batch.commit();
+      await addDoc(collection(db, 'novedades'), {
+        type: 'COBERTURA_CANCELADA',
+        title: 'Cobertura deshecha',
+        status: 'ATENDIDA',
+        turnoId: titularId,
+        employeeName: titularName,
+        coveredByEmployeeName: cubreNombre || null,
+        empresaId,
+        operatorId: user?.uid ?? 'cc-modo-rapido',
+        createdAt: serverTimestamp(),
+      });
+      showToast(`Cobertura deshecha · ${cubreNombre || titularName}`, 'bg-emerald-700');
+    } catch (err) {
+      console.warn('[modo-rapido] cancelarCobertura', err);
+      showToast('No se pudo deshacer la cobertura', 'bg-red-600');
     } finally {
       setBusy(false);
     }
@@ -6491,7 +6722,16 @@ export default function ModoRapidoPage() {
         return;
       }
       if (k === 'c' && (row.estado === 'NO_LLEGO' || row.estado === 'AUSENTE')) {
-        void abrirCobertura(row);
+        if (row.coveredByName) void cancelarCobertura(row);
+        else void abrirCobertura(row);
+        return;
+      }
+      if (
+        k === 'c' &&
+        (String(row.turno.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE' ||
+          String(row.turno.origin || '').toUpperCase() === 'RET_COBERTURA')
+      ) {
+        void cancelarCobertura(row);
         return;
       }
       if (k === 'x') {
@@ -7076,6 +7316,7 @@ export default function ModoRapidoPage() {
                     }}
                     onRetiro={(r) => pedirRetiro(r)}
                     onQuitarPresencia={(r) => pedirQuitarPresencia(r)}
+                    onCancelarCobertura={(r) => void cancelarCobertura(r)}
                     swapFromId={swapFromId}
                     onMore={(r) => setAccionesModal(r)}
                     onComentario={(r) => setComentarioModal(r)}
@@ -7239,6 +7480,9 @@ export default function ModoRapidoPage() {
             onRetiro={(r) => pedirRetiro(r)}
             onQuitarPresencia={(r) => {
               pedirQuitarPresencia(r);
+            }}
+            onCancelarCobertura={(r) => {
+              void cancelarCobertura(r);
             }}
             onAvisarWa={(r) => {
               if (!r.turno.phone) {

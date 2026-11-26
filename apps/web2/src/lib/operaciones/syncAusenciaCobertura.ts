@@ -721,6 +721,23 @@ export function opsCoverageLinkFields(
 }
 
 
+/** Saca la marca de cobertura del titular y lo deja ausente, sin cubrir. */
+export function clearTitularCoveragePatch(): Record<string, unknown> {
+  return {
+    coverageType: deleteField(),
+    coverageStatus: deleteField(),
+    coverageDocId: deleteField(),
+    coveredByEmployeeId: deleteField(),
+    coveredByEmployeeName: deleteField(),
+    coveredAt: deleteField(),
+    coveringDisplayName: deleteField(),
+    operacionallyCovered: false,
+    coverageConvocatoriaId: deleteField(),
+    coverageClaimConvocatoriaId: deleteField(),
+    coverageUsed: deleteField(),
+  };
+}
+
 /** Soft-cancel OPERATIONS_COVERAGE previos del mismo absenceShiftId (cliente). */
 export async function supersedeOpsCoveragesForAbsence(
   db: Firestore,

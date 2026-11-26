@@ -17,7 +17,7 @@ export type OpsOfflineBlockedAction =
   | 'dual12';
 
 const BLOCKED_LABEL: Record<OpsOfflineBlockedAction, string> = {
-  cobertura: 'asignar cobertura',
+  cobertura: 'gestionar cobertura',
   intercambio: 'hacer un intercambio',
   ausencia: 'declarar ausencia (requiere servidor)',
   retiro: 'registrar retiro anticipado',
