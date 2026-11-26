@@ -565,6 +565,17 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Índice phoneNumberId → empresaId (webhook). Solo Functions.
+    match /wa_cloud_phone_index/{phoneNumberId} {
+      allow read, write: if false;
+    }
+
+    // Inbox Cloud → Modo Rápido. Escritura solo Functions; lectura admin de la empresa.
+    match /wa_cloud_inbox/{empresaId}/messages/{msgId} {
+      allow read: if isAdmin() && (isSuperAdmin() || empresaId == userEmpresaId());
+      allow write: if false;
+    }
+
     match /roles/{roleId} {
       allow read: if isAdmin() && (isSuperAdmin() || roleReadable(resource.data));
       allow create: if isSuperAdmin() || (

@@ -1,5 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  collection,
+  onSnapshot,
+  orderBy,
+  query,
+  where,
+  limit,
+  type Unsubscribe,
+} from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
 import { clasificarIngresoWa } from '@/lib/operaciones/respuestasWaGuardia';
+import { db, functions } from '@/lib/firebase';
 
 export interface WAEntry {
   id: string;
@@ -119,6 +130,11 @@ export interface UseWABridgeReturn {
   connect: (url: string) => void;
   /** Corta la conexión con el bridge actual (cambio de empresa o sin configuración). */
   disconnect: () => void;
+  /**
+   * Cloud API: escucha `wa_cloud_inbox/{empresaId}/messages` (webhook o simulador).
+   * Misma cola de pending/salidas que el bridge; sin filtro de grupos.
+   */
+  connectCloud: (empresaId: string) => void;
   /** Solo pruebas / demo sin bridge. */
   addFakePending: (partial?: Partial<WAEntry>) => void;
   groups: { id: string; name: string; participants: number }[];
@@ -126,6 +142,8 @@ export interface UseWABridgeReturn {
   toggleGroup: (groupId: string, enable: boolean) => Promise<void>;
   /** Envía lista de teléfonos al bridge para resolver LIDs automáticamente. */
   syncPhones: (phones: string[]) => Promise<void>;
+  /** `bridge` | `cloud` | idle sin conectar. */
+  transport: 'idle' | 'bridge' | 'cloud';
 }
 
 interface BridgeMsg {
@@ -216,6 +234,7 @@ export function useWABridge(
 ): UseWABridgeReturn {
   _lsEmpresaId = empresaId ?? null;
   const [status, setStatus] = useState<WABridgeStatus>('idle');
+  const [transport, setTransport] = useState<'idle' | 'bridge' | 'cloud'>('idle');
   const [badge, setBadge] = useState(0);
   const [pending, setPending] = useState<WAEntry[]>([]);
   const [salidas, setSalidas] = useState<WAEntry[]>([]);
@@ -226,6 +245,9 @@ export function useWABridge(
   const [monitoredGroupIds, setMonitoredGroupIds] = useState<Set<string>>(new Set());
 
   const bridgeUrlRef = useRef('');
+  const transportRef = useRef<'idle' | 'bridge' | 'cloud'>('idle');
+  const cloudEmpresaIdRef = useRef('');
+  const cloudUnsubRef = useRef<Unsubscribe | null>(null);
   const lastTsRef = useRef(0);
   const bridgeStartRef = useRef(0);
   const seenIdsRef = useRef<Set<string>>(new Set());
@@ -333,6 +355,10 @@ export function useWABridge(
         clearInterval(pollTimerRef.current);
         pollTimerRef.current = null;
       }
+      if (cloudUnsubRef.current) {
+        cloudUnsubRef.current();
+        cloudUnsubRef.current = null;
+      }
     };
   }, []);
 
@@ -345,9 +371,8 @@ export function useWABridge(
     texto: string,
     kind?: string,
   ) => {
-    const url = bridgeUrlRef.current;
     const tel = String(phone || '').trim();
-    if (!url || !id || !tel || !texto) return;
+    if (!id || !tel || !texto) return;
     const key = `${id}\n${texto}`;
     if (avisosRef.current.has(key)) return;
     if (kind) {
@@ -358,10 +383,22 @@ export function useWABridge(
       avisosCoolRef.current.set(coolKey, ahora);
     }
     avisosRef.current.add(key);
+    const cuerpo = texto.slice(0, 500);
+    if (transportRef.current === 'cloud') {
+      const empresaId = cloudEmpresaIdRef.current;
+      if (!empresaId) return;
+      const fn = httpsCallable(functions, 'sendWhatsAppCloudText');
+      void fn({ empresaId, phone: tel, text: cuerpo }).catch(() => {
+        /* la respuesta al guardia no bloquea la planilla */
+      });
+      return;
+    }
+    const url = bridgeUrlRef.current;
+    if (!url) return;
     fetch(`${url}/reply`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ quotedId: id, phone: tel, text: texto.slice(0, 500) }),
+      body: JSON.stringify({ quotedId: id, phone: tel, text: cuerpo }),
       signal: AbortSignal.timeout(8000),
     }).catch(() => {
       /* la respuesta al guardia no bloquea la planilla */
@@ -437,10 +474,12 @@ export function useWABridge(
 
         if (m.type === 'protocol') continue;
 
-        // Solo grupos activos en Modo Rápido: sin selección no se confirma ni se contesta.
-        const monitoreados = monitoredGroupIdsRef.current;
-        if (monitoreados.size === 0) continue;
-        if (m.groupId && !monitoreados.has(m.groupId)) continue;
+        // Bridge: solo grupos monitoreados. Cloud 1:1: sin grupos, entra todo el inbox.
+        if (transportRef.current !== 'cloud') {
+          const monitoreados = monitoredGroupIdsRef.current;
+          if (monitoreados.size === 0) continue;
+          if (m.groupId && !monitoreados.has(m.groupId)) continue;
+        }
 
         // Mensajes de días anteriores (el bridge guarda los últimos y al cambiar de día
         // el puntero se reinicia): nunca son una llegada de hoy.
@@ -549,13 +588,27 @@ export function useWABridge(
     }
   }, [avisarGuardia, fetchStatus]);
 
+  const stopTransports = useCallback(() => {
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+    if (cloudUnsubRef.current) {
+      cloudUnsubRef.current();
+      cloudUnsubRef.current = null;
+    }
+    bridgeUrlRef.current = '';
+    cloudEmpresaIdRef.current = '';
+    transportRef.current = 'idle';
+    setTransport('idle');
+  }, []);
+
   const connect = useCallback(
     (url: string) => {
-      if (pollTimerRef.current) {
-        clearInterval(pollTimerRef.current);
-        pollTimerRef.current = null;
-      }
+      stopTransports();
       bridgeUrlRef.current = url;
+      transportRef.current = 'bridge';
+      setTransport('bridge');
       setStatus('connecting');
       // Restaurar grupos seleccionados desde localStorage y re-aplicarlos al bridge
       try {
@@ -583,7 +636,184 @@ export function useWABridge(
         void poll();
       }, 3000);
     },
-    [poll, fetchStatus],
+    [poll, fetchStatus, stopTransports],
+  );
+
+  /**
+   * Escucha el inbox Cloud de la empresa (webhook Meta o simulateWhatsAppCloudInbound).
+   * Reutiliza el mismo poll()/clasificación del bridge.
+   */
+  const connectCloud = useCallback(
+    (empresaId: string) => {
+      const eid = String(empresaId || '').trim();
+      stopTransports();
+      if (!eid) {
+        setStatus('idle');
+        return;
+      }
+      cloudEmpresaIdRef.current = eid;
+      transportRef.current = 'cloud';
+      setTransport('cloud');
+      setStatus('connecting');
+      setGroups([]);
+      setMonitoredGroupIds(new Set(['cloud-direct']));
+      const desde = inicioDeHoyMs();
+      const q = query(
+        collection(db, 'wa_cloud_inbox', eid, 'messages'),
+        where('ts', '>=', desde),
+        orderBy('ts', 'asc'),
+        limit(200),
+      );
+      cloudUnsubRef.current = onSnapshot(
+        q,
+        (snap) => {
+          setStatus('connected');
+          const msgs: BridgeMsg[] = [];
+          snap.forEach((docSnap) => {
+            const d = docSnap.data() as Record<string, unknown>;
+            const loc = d.location as
+              | { lat?: number; lng?: number; latitude?: number; longitude?: number }
+              | null
+              | undefined;
+            const lat = loc?.lat ?? loc?.latitude;
+            const lng = loc?.lng ?? loc?.longitude;
+            msgs.push({
+              id: String(d.id || docSnap.id),
+              ts: typeof d.ts === 'number' ? d.ts : Number(d.ts) || Date.now(),
+              time: String(d.time || nowHHMM()),
+              name: String(d.name || ''),
+              phone: String(d.phone || ''),
+              type: String(d.type || 'text'),
+              hasPhoto: d.hasPhoto === true,
+              photo: typeof d.photo === 'string' ? d.photo : null,
+              groupId: undefined,
+              location:
+                typeof lat === 'number' && typeof lng === 'number'
+                  ? { latitude: lat, longitude: lng }
+                  : undefined,
+            });
+          });
+          // Alimenta el mismo pipeline que el poll HTTP del bridge.
+          if (!msgs.length) return;
+          const fake: BridgeMessagesResponse = {
+            ts: Date.now(),
+            startedAt: bridgeStartRef.current || Date.now(),
+            messages: msgs,
+          };
+          if (!bridgeStartRef.current) bridgeStartRef.current = fake.startedAt!;
+          // Inline mínimo: marcar connected y dejar que poll-like logic corra vía helper local
+          void (async () => {
+            const data = fake;
+            if (data.ts) {
+              lastTsRef.current = data.ts;
+              try {
+                localStorage.setItem(lsKey('wa-lastts'), String(data.ts));
+              } catch {
+                /* ignore */
+              }
+            }
+            const nuevos = (data.messages || []).filter((m) => !seenIdsRef.current.has(m.id));
+            if (!nuevos.length) return;
+            // Reusar poll: temporalmente poner transport cloud y llamar ingest
+            // Duplicamos el cuerpo esencial llamando poll no sirve (sin URL).
+            // Disparamos un micro-poll interno:
+            const newEntries: WAEntry[] = [];
+            const salidasNuevas: WAEntry[] = [];
+            let added = 0;
+            for (const m of nuevos) {
+              seenIdsRef.current.add(m.id);
+              if (m.type === 'protocol') continue;
+              if (typeof m.ts === 'number' && m.ts > 0 && m.ts < inicioDeHoyMs()) continue;
+              const msgMs = typeof m.ts === 'number' && m.ts > 0 ? m.ts : Date.now();
+              const clasif = clasificarIngresoWa({
+                turnos: listaTurnosWa(turnosRef.current, extrasRef.current),
+                name: m.name,
+                phone: m.phone,
+                msgMs,
+                yaMarcado: (rowId) =>
+                  pendingRowIdsRef.current.has(rowId) || confirmedRowIdsRef.current.has(rowId),
+              });
+              if (clasif.texto && Date.now() - msgMs <= 3 * 60 * 1000) {
+                avisarGuardia(m.id, m.phone, clasif.texto, clasif.aviso);
+              }
+              if (clasif.cortar || !clasif.turno) continue;
+              const turno = clasif.turno as TurnoHoy;
+              if (turno.turnoStatus === 'PRESENT') {
+                const finMs = msDeRaw(turno.endTimeRaw);
+                if (
+                  m.location &&
+                  turno.rowId &&
+                  finMs > 0 &&
+                  msgMs >= finMs &&
+                  !salidaRowIdsRef.current.has(turno.rowId)
+                ) {
+                  salidaRowIdsRef.current.add(turno.rowId);
+                  salidasNuevas.push({
+                    id: m.id,
+                    rowId: turno.rowId,
+                    name: turno.name || m.name,
+                    phone: turno.phone || m.phone,
+                    arrivedAt: m.time || nowHHMM(),
+                    shift: turno.shift,
+                    expected: turno.expected,
+                    hasLocation: true,
+                    lat: m.location.latitude,
+                    lng: m.location.longitude,
+                    msgType: m.type,
+                    obj: turno.obj,
+                    objLat: turno.objLat,
+                    objLng: turno.objLng,
+                    allowRemoteCheckIn: turno.allowRemoteCheckIn === true,
+                    msgTs: msgMs,
+                  });
+                }
+                continue;
+              }
+              if (turno.turnoStatus === 'COMPLETED') continue;
+              if (
+                turno.rowId &&
+                (pendingRowIdsRef.current.has(turno.rowId) ||
+                  confirmedRowIdsRef.current.has(turno.rowId))
+              ) {
+                continue;
+              }
+              const arrivedAt = m.time || nowHHMM();
+              const entry: WAEntry = {
+                id: m.id,
+                rowId: turno?.rowId,
+                name: turno?.name || m.name,
+                phone: turno?.phone || m.phone,
+                arrivedAt,
+                shift: turno?.shift,
+                expected: turno?.expected,
+                tardanzaMins: calcTardanzaMins(arrivedAt, turno?.expected),
+                hasLocation: !!m.location,
+                lat: m.location?.latitude,
+                lng: m.location?.longitude,
+                msgType: m.type,
+                photo: typeof m.photo === 'string' && m.photo ? m.photo : undefined,
+                obj: turno?.obj,
+                objLat: turno?.objLat,
+                objLng: turno?.objLng,
+                allowRemoteCheckIn: turno?.allowRemoteCheckIn === true,
+                msgTs: msgMs,
+              };
+              if (entry.rowId) pendingRowIdsRef.current.add(entry.rowId);
+              newEntries.push(entry);
+              added += 1;
+            }
+            if (salidasNuevas.length) {
+              setSalidas((prev) => [...salidasNuevas.reverse(), ...prev]);
+            }
+            if (!newEntries.length) return;
+            setPending((prev) => [...[...newEntries].reverse(), ...prev]);
+            setBadge((b) => b + added);
+          })();
+        },
+        () => setStatus('error'),
+      );
+    },
+    [stopTransports, avisarGuardia],
   );
 
   const toggleGroup = useCallback(async (groupId: string, enable: boolean) => {
@@ -681,21 +911,29 @@ export function useWABridge(
     avisarGuardia(entry.id, entry.phone, texto);
   }, [avisarGuardia]);
 
-  /** Corta el sondeo y olvida la URL (cambio de empresa o empresa sin bridge). */
+  /** Corta el sondeo / inbox y olvida la conexión. */
   const disconnect = useCallback(() => {
-    if (pollTimerRef.current) {
-      clearInterval(pollTimerRef.current);
-      pollTimerRef.current = null;
-    }
-    bridgeUrlRef.current = '';
+    stopTransports();
     setStatus('idle');
     setGroups([]);
-  }, []);
+  }, [stopTransports]);
 
-  /** Envía un mensaje privado por el bridge. `true` solo si el bridge confirmó el envío. */
+  /** Envía un mensaje privado (bridge o Cloud API). */
   const enviar = useCallback(async (phone: string, texto: string): Promise<boolean> => {
+    if (!phone || !texto) return false;
+    if (transportRef.current === 'cloud') {
+      const empresaId = cloudEmpresaIdRef.current;
+      if (!empresaId) return false;
+      try {
+        const fn = httpsCallable(functions, 'sendWhatsAppCloudText');
+        await fn({ empresaId, phone, text: texto });
+        return true;
+      } catch {
+        return false;
+      }
+    }
     const url = bridgeUrlRef.current;
-    if (!url || !phone || !texto) return false;
+    if (!url) return false;
     try {
       const r = await fetch(`${url}/send`, {
         method: 'POST',
@@ -798,6 +1036,7 @@ export function useWABridge(
 
   return {
     status,
+    transport,
     badge,
     pending,
     confirmedEntries,
@@ -810,6 +1049,7 @@ export function useWABridge(
     enviar,
     clearAll,
     connect,
+    connectCloud,
     disconnect,
     addFakePending,
     groups,

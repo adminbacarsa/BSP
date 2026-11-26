@@ -58,6 +58,10 @@ export default function WABridgeTab() {
   const [tokenStatus, setTokenStatus] = useState<TokenStatus | null>(null);
   const [tokenInput, setTokenInput] = useState('');
   const [testPhone, setTestPhone] = useState('');
+  const [simPhone, setSimPhone] = useState('');
+  const [simLat, setSimLat] = useState('-31.4201');
+  const [simLng, setSimLng] = useState('-64.1888');
+  const [simulating, setSimulating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testingBridge, setTestingBridge] = useState(false);
   const [bridgeTest, setBridgeTest] = useState<'ok' | 'error' | null>(null);
@@ -154,6 +158,17 @@ export default function WABridgeTab() {
       );
       // Mantener el doc legacy en sync para lectores viejos (RRHH remap, etc.).
       await setDoc(legacyDoc, { url: cfg.bridge.url.trim() }, { merge: true });
+      if (cfg.cloud.phoneNumberId.trim()) {
+        try {
+          const sync = httpsCallable(functions, 'syncWhatsAppCloudPhoneIndex');
+          await sync({
+            empresaId,
+            phoneNumberId: cfg.cloud.phoneNumberId.trim(),
+          });
+        } catch {
+          /* el índice lo puede armar el webhook al primer mensaje */
+        }
+      }
       setSavedSnap(JSON.stringify(payload));
       toast.success('Configuración de WhatsApp guardada');
     } catch (e: unknown) {
@@ -256,6 +271,37 @@ export default function WABridgeTab() {
       setTestingCloud(false);
     }
   };
+
+  const handleSimulateInbound = async () => {
+    if (!empresaId) return;
+    setSimulating(true);
+    try {
+      const fn = httpsCallable(functions, 'simulateWhatsAppCloudInbound');
+      await fn({
+        empresaId,
+        phone: simPhone || testPhone,
+        name: 'Simulado Cloud',
+        kind: 'location',
+        lat: Number(simLat),
+        lng: Number(simLng),
+      });
+      toast.success(
+        'Ubicación simulada en el inbox. Con provider Cloud, abrí Modo Rápido para ver el pending.',
+      );
+    } catch (e: unknown) {
+      const msg =
+        e && typeof e === 'object' && 'message' in e
+          ? String((e as { message: string }).message)
+          : 'No se pudo simular';
+      toast.error(msg);
+    } finally {
+      setSimulating(false);
+    }
+  };
+
+  const WEBHOOK_URL =
+    'https://us-central1-comtroldata.cloudfunctions.net/whatsappCloudWebhook';
+  const VERIFY_HINT = 'cosp-wa-cloud-verify';
 
   if (loading) {
     return (
@@ -378,10 +424,20 @@ export default function WABridgeTab() {
               Cloud API (Meta)
             </h4>
             <p className="text-xs text-slate-500 mt-1">
-              IDs del App Dashboard. El token de system user se guarda solo en el servidor. El webhook
-              de recepción se conecta en una etapa siguiente; con Cloud activo Modo Rápido no usa el
-              Bridge.
+              IDs del App Dashboard. Token en servidor. Con Cloud activo Modo Rápido lee el inbox
+              Firestore (webhook Meta o simulador abajo). Bridge queda inactivo.
             </p>
+            <div className="mt-2 rounded-xl border border-indigo-100 bg-indigo-50/80 p-3 text-[11px] text-indigo-900 space-y-1">
+              <p>
+                <span className="font-bold">Webhook URL:</span>{' '}
+                <code className="break-all">{WEBHOOK_URL}</code>
+              </p>
+              <p>
+                <span className="font-bold">Verify token:</span>{' '}
+                <code>{VERIFY_HINT}</code> (o secret <code>WA_CLOUD_VERIFY_TOKEN</code> /
+                system_secrets/wa_cloud_webhook)
+              </p>
+            </div>
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2">
@@ -536,6 +592,45 @@ export default function WABridgeTab() {
             >
               {testingCloud && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
               Enviar hello_world
+            </button>
+          </div>
+
+          <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-3 space-y-3">
+            <p className="text-xs font-bold uppercase text-slate-500">
+              Simulador inbound (sin Meta)
+            </p>
+            <p className="text-[11px] text-slate-500">
+              Escribe una ubicación en el inbox. Activá provider Cloud, guardá, abrí Modo Rápido y
+              debería aparecer pending / salida según el turno.
+            </p>
+            <div className="grid gap-2 sm:grid-cols-3">
+              <input
+                value={simPhone}
+                onChange={(e) => setSimPhone(e.target.value)}
+                placeholder="Tel. guardia 549…"
+                className="text-sm font-mono border border-slate-200 rounded-xl px-3 py-2 bg-white"
+              />
+              <input
+                value={simLat}
+                onChange={(e) => setSimLat(e.target.value)}
+                placeholder="lat"
+                className="text-sm font-mono border border-slate-200 rounded-xl px-3 py-2 bg-white"
+              />
+              <input
+                value={simLng}
+                onChange={(e) => setSimLng(e.target.value)}
+                placeholder="lng"
+                className="text-sm font-mono border border-slate-200 rounded-xl px-3 py-2 bg-white"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => void handleSimulateInbound()}
+              disabled={simulating || !(simPhone.trim() || testPhone.trim())}
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold bg-slate-800 text-white rounded-xl hover:bg-slate-900 disabled:opacity-50"
+            >
+              {simulating && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              Simular ubicación
             </button>
           </div>
         </div>

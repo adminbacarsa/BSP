@@ -4658,4 +4658,8 @@ export {
   getWhatsAppCloudTokenStatus,
   clearWhatsAppCloudToken,
   testWhatsAppCloudSend,
+  sendWhatsAppCloudText,
+  simulateWhatsAppCloudInbound,
+  syncWhatsAppCloudPhoneIndex,
 } from './whatsapp/waCloudCredentials';
+export { whatsappCloudWebhook } from './whatsapp/waCloudWebhook';

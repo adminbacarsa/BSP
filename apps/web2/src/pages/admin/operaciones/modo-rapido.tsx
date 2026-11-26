@@ -3523,9 +3523,10 @@ export default function ModoRapidoPage() {
 
   useEffect(() => {
     if (waProvider === 'bridge' && bridgeUrl) wa.connect(bridgeUrl);
+    else if (waProvider === 'cloud' && empresaId) wa.connectCloud(empresaId);
     else wa.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- connect al cambiar URL/proveedor; wa estable por refs
-  }, [bridgeUrl, waProvider]);
+  }, [bridgeUrl, waProvider, empresaId]);
 
   const syncedRef = useRef(false);
   useEffect(() => {
@@ -6482,7 +6483,7 @@ export default function ModoRapidoPage() {
               waProvider === 'sin_config' || waProvider === 'off'
                 ? `${empresa?.name || empresaId || 'Esta empresa'}: WhatsApp apagado o sin config (Configuración → WhatsApp)`
                 : waProvider === 'cloud'
-                  ? `Cloud API activa · recepción por webhook (en preparación)`
+                  ? `Cloud API · inbox Firestore (webhook o simulador)`
                   : bridgeUrl
                     ? `WA Bridge de ${empresa?.name || empresaId || 'la empresa'}: ${bridgeUrl}`
                     : undefined
@@ -6492,13 +6493,11 @@ export default function ModoRapidoPage() {
               className={`w-1.5 h-1.5 rounded-full ${
                 waProvider === 'sin_config' || waProvider === 'off'
                   ? 'bg-slate-300'
-                  : waProvider === 'cloud'
-                    ? 'bg-indigo-500'
-                    : wa.status === 'connected'
-                      ? 'bg-emerald-500 animate-pulse'
-                      : wa.status === 'error'
-                        ? 'bg-red-500'
-                        : 'bg-amber-400'
+                  : wa.status === 'connected'
+                    ? 'bg-emerald-500 animate-pulse'
+                    : wa.status === 'error'
+                      ? 'bg-red-500'
+                      : 'bg-amber-400'
               }`}
             />
             {waProvider === 'sin_config'
@@ -6506,7 +6505,11 @@ export default function ModoRapidoPage() {
               : waProvider === 'off'
                 ? 'WA apagado'
                 : waProvider === 'cloud'
-                  ? 'Cloud API'
+                  ? wa.status === 'connected'
+                    ? 'Cloud conectado'
+                    : wa.status === 'error'
+                      ? 'Cloud error'
+                      : 'Cloud…'
                   : wa.status === 'connected'
                     ? 'conectado'
                     : wa.status === 'error'
