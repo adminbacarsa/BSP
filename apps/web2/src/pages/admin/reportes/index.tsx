@@ -499,16 +499,62 @@ export default function ReportsPage() {
         if (!ok) setPlanQueryEmployeeId('');
     }, [planQueryEmployeeId, planCatalogEmployees]);
 
-    const objCatalogClientNames = useMemo(
-        () => Object.values(clientMap).filter(Boolean).sort((a, b) => a.localeCompare(b, 'es')),
-        [clientMap],
-    );
+    /** Misma razón social puede tener varios docs en `clients` → un solo nombre en el combo. */
+    const normClientName = useCallback((s: string) => {
+        return String(s || '')
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase()
+            .trim()
+            .replace(/\s+/g, ' ');
+    }, []);
+
+    const clientIdsByNormName = useMemo(() => {
+        const m = new Map<string, string[]>();
+        Object.entries(clientMap).forEach(([id, name]) => {
+            const k = normClientName(String(name || ''));
+            if (!k) return;
+            const prev = m.get(k) || [];
+            if (!prev.includes(id)) m.set(k, [...prev, id]);
+        });
+        return m;
+    }, [clientMap, normClientName]);
+
+    const uniqueObjClientNames = useMemo(() => {
+        const byNorm = new Map<string, string>();
+        Object.values(clientMap).forEach((name) => {
+            const t = String(name || '').trim();
+            const k = normClientName(t);
+            if (k && !byNorm.has(k)) byNorm.set(k, t);
+        });
+        objectiveReport.forEach((r) => {
+            const t = String(r.client || '').trim();
+            const k = normClientName(t);
+            if (k && !byNorm.has(k)) byNorm.set(k, t);
+        });
+        return [...byNorm.values()].sort((a, b) => a.localeCompare(b, 'es'));
+    }, [clientMap, objectiveReport, normClientName]);
 
     const filteredObjCatalogClientNames = useMemo(() => {
-        const q = objFilterClientSearch.trim().toLowerCase();
-        if (!q) return objCatalogClientNames;
-        return objCatalogClientNames.filter((c) => c.toLowerCase().includes(q));
-    }, [objCatalogClientNames, objFilterClientSearch]);
+        const q = normClientName(objFilterClientSearch);
+        if (!q) return uniqueObjClientNames;
+        return uniqueObjClientNames.filter((c) => normClientName(c).includes(q));
+    }, [uniqueObjClientNames, objFilterClientSearch, normClientName]);
+
+    const rowMatchesObjClientFilter = useCallback((row: { client?: string; clientId?: string }) => {
+        const selected = String(objFilterClient || '').trim();
+        const search = String(objFilterClientSearch || '').trim();
+        if (!selected && !search) return true;
+        const rowNorm = normClientName(String(row.client || ''));
+        if (selected) {
+            const selNorm = normClientName(selected);
+            if (rowNorm === selNorm) return true;
+            const ids = clientIdsByNormName.get(selNorm) || [];
+            if (row.clientId && ids.includes(String(row.clientId))) return true;
+            return false;
+        }
+        return rowNorm.includes(normClientName(search));
+    }, [objFilterClient, objFilterClientSearch, normClientName, clientIdsByNormName]);
 
     const buildPlanFetchScope = useCallback((): ReportFetchScope | undefined => {
         const scope: ReportFetchScope = {};
@@ -599,45 +645,56 @@ export default function ReportsPage() {
         return planDetailMeta.employeeOptions.filter(n => n.toLowerCase().includes(q));
     }, [planDetailMeta.employeeOptions, planEmployeeSearch]);
 
-    const filteredObjClients = useMemo(() => {
-        const allClients = [...new Set(objectiveReport.map(r => r.client))].sort();
-        const q = objFilterClientSearch.trim().toLowerCase();
-        if (!q) return allClients;
-        return allClients.filter(c => c.toLowerCase().includes(q));
-    }, [objectiveReport, objFilterClientSearch]);
-
-    /** Objetivos del reporte, acotados al cliente elegido (cascada Cliente → Objetivo). */
+    /** Objetivos del cliente elegido: primero del reporte; si no hay, del catálogo CRM. */
     const filteredObjNamesForClient = useMemo(() => {
-        const clientQ = (objFilterClient || objFilterClientSearch).trim().toLowerCase();
-        let names = objectiveReport
-            .filter((r) => {
-                if (!clientQ) return true;
-                if (objFilterClient) return r.client === objFilterClient;
-                return String(r.client || '').toLowerCase().includes(clientQ);
-            })
+        const fromReport = objectiveReport
+            .filter((r) => rowMatchesObjClientFilter(r))
             .map((r) => String(r.name || '').trim())
             .filter(Boolean);
-        names = [...new Set(names)].sort((a, b) => a.localeCompare(b, 'es'));
+
+        let names = [...new Set(fromReport)];
+
+        if (names.length === 0 && (objFilterClient || objFilterClientSearch.trim())) {
+            const selNorm = normClientName(objFilterClient || objFilterClientSearch);
+            const ids = new Set(clientIdsByNormName.get(selNorm) || []);
+            const catalogNames: string[] = [];
+            Object.values(objectiveAliases).forEach((meta) => {
+                const metaClient = clientMap[meta.clientId] || (meta as { client?: string }).client || '';
+                if (ids.has(meta.clientId) || normClientName(metaClient) === selNorm) {
+                    const n = String(meta.name || '').trim();
+                    if (n) catalogNames.push(n);
+                }
+            });
+            names = [...new Set(catalogNames)];
+        } else if (names.length === 0 && !objFilterClient && !objFilterClientSearch.trim()) {
+            names = [...new Set(objectiveReport.map((r) => String(r.name || '').trim()).filter(Boolean))];
+        }
+
+        names.sort((a, b) => a.localeCompare(b, 'es'));
         const q = objFilterNameSearch.trim().toLowerCase();
         if (!q) return names;
         return names.filter((n) => n.toLowerCase().includes(q));
-    }, [objectiveReport, objFilterClient, objFilterClientSearch, objFilterNameSearch]);
+    }, [
+        objectiveReport,
+        objFilterClient,
+        objFilterClientSearch,
+        objFilterNameSearch,
+        rowMatchesObjClientFilter,
+        normClientName,
+        clientIdsByNormName,
+        objectiveAliases,
+        clientMap,
+    ]);
 
     useEffect(() => {
         if (!objFilterName) return;
-        const still = objectiveReport.some((r) => {
-            if (r.name !== objFilterName) return false;
-            if (objFilterClient) return r.client === objFilterClient;
-            if (objFilterClientSearch.trim()) {
-                return String(r.client || '').toLowerCase().includes(objFilterClientSearch.trim().toLowerCase());
-            }
-            return true;
-        });
+        const still = filteredObjNamesForClient.includes(objFilterName)
+            || objectiveReport.some((r) => r.name === objFilterName && rowMatchesObjClientFilter(r));
         if (!still) {
             setObjFilterName('');
             setObjFilterNameSearch('');
         }
-    }, [objFilterClient, objFilterClientSearch, objFilterName, objectiveReport]);
+    }, [objFilterName, filteredObjNamesForClient, objectiveReport, rowMatchesObjClientFilter]);
 
     useEffect(() => {
         if (!planFilterEmployee) return;
@@ -695,10 +752,7 @@ export default function ReportsPage() {
     // --- RENDERIZADO TABLA OBJETIVOS ---
     const renderObjectiveTable = () => {
         const filtered = objectiveReport.filter(row => {
-            if (objFilterClient && row.client !== objFilterClient) return false;
-            if (!objFilterClient && objFilterClientSearch.trim()) {
-                if (!row.client.toLowerCase().includes(objFilterClientSearch.trim().toLowerCase())) return false;
-            }
+            if (!rowMatchesObjClientFilter(row)) return false;
             if (objFilterName && !row.name.toLowerCase().includes(objFilterName.toLowerCase())) return false;
             return true;
         });
@@ -2521,11 +2575,15 @@ export default function ReportsPage() {
                                     setObjFilterName('');
                                     setObjFilterNameSearch('');
                                 }}
-                                emptyLabel="Todos los clientes"
-                                hint={objectiveReport.length === 0 ? 'Generá el reporte para listar clientes del período' : undefined}
+                                emptyLabel={`Todos los clientes (${filteredObjCatalogClientNames.length})`}
+                                hint={
+                                    objectiveReport.length === 0
+                                        ? 'Catálogo CRM (sin duplicar razón social). Generá el reporte para acotar al período.'
+                                        : undefined
+                                }
                             >
-                                {(filteredObjClients.length > 0 ? filteredObjClients : filteredObjCatalogClientNames).map((c) => (
-                                    <option key={c} value={c}>{c}</option>
+                                {filteredObjCatalogClientNames.map((c) => (
+                                    <option key={normClientName(c)} value={c}>{c}</option>
                                 ))}
                             </ReportSearchSelect>
                             <ReportSearchSelect
@@ -2549,8 +2607,8 @@ export default function ReportsPage() {
                                         : `Todos los objetivos (${filteredObjNamesForClient.length})`
                                 }
                                 hint={
-                                    objFilterClient && filteredObjNamesForClient.length === 0
-                                        ? 'Sin objetivos de este cliente en el reporte'
+                                    (objFilterClient || objFilterClientSearch.trim()) && filteredObjNamesForClient.length === 0
+                                        ? 'Sin objetivos para este cliente'
                                         : undefined
                                 }
                             >
