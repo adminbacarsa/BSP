@@ -10,6 +10,7 @@ import {
   coalescePlannedCellBillableHours,
   coalescePlannedTurnosForCell,
 } from '../planning/planningTurnoCoalesce';
+import { isOpsCoverageHoursOnSourceDoc } from '../planning/coverageSemantics';
 import { isEmployeeOnLeave, RRHH_ABSENCE_TYPES } from '../planning/leaveCoverage';
 import { arMinutesOfDay, arYearMonth, arYmd, withArClock } from '../../time/ar';
 
@@ -799,6 +800,9 @@ export function resolveShiftDurationHours(
     );
 
     if (opts?.forObjectiveBilling && !isObjectiveBillableCode(rawCode)) return 0;
+
+    // ops_cov EXT/ADV: trazabilidad; las horas viven en el turno fuente (isExtended / isEarlyStart).
+    if (isOpsCoverageHoursOnSourceDoc(shift as Record<string, unknown>)) return 0;
 
     const endTimeObj = shift.endTime as { seconds?: number; _seconds?: number } | string | undefined;
     const endSecFromShift = typeof endTimeObj === 'object' && endTimeObj

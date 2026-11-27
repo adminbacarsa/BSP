@@ -975,7 +975,12 @@ export default function ReportsPage() {
                                                                             const start = tsToDate(s.startTime);
                                                                             const end = tsToDate(s.endTime);
                                                                             const dur = resolveShiftDurationHours(s, SHIFT_HOURS_LOOKUP, { forObjectiveBilling: true });
-                                                                            const night = start && end ? getNightDuration(start, end) : 0;
+                                                                            const plannedWindow = start && end
+                                                                                ? resolveLiquidationPlannedWindow(s, start, end, SHIFT_HOURS_LOOKUP)
+                                                                                : null;
+                                                                            const planStart = plannedWindow?.start ?? start;
+                                                                            const planEnd = plannedWindow?.end ?? end;
+                                                                            const night = planStart && planEnd ? getNightDuration(planStart, planEnd) : 0;
                                                                             const isVacant = isReportVacancyShift(s, empMap);
                                                                             const rStartRaw = tsToDate(s.realStartTime) || tsToDate(s.checkInTime) || tsToDate(s.checkInAt);
                                                                             const rEndMarked = tsToDate(s.realEndTime) || tsToDate(s.checkOutTime);
@@ -1020,7 +1025,20 @@ export default function ReportsPage() {
                                                                                     </td>
                                                                                     <td className="py-1.5 pr-3 text-slate-500">{s.code || '-'}</td>
                                                                                     <td className="py-1.5 pr-3 text-slate-500 text-[10px]">
-                                                                                        {isLeaveRow ? '—' : (start && end ? `${fmt(start)}–${fmt(end)}` : '-')}
+                                                                                        {isLeaveRow ? '—' : (planStart && planEnd ? (
+                                                                                            <>
+                                                                                                <span className={plannedWindow?.hasCoverageAdjust ? 'text-indigo-700 font-bold' : undefined}>
+                                                                                                    {`${fmt(planStart)}–${fmt(planEnd)}`}
+                                                                                                </span>
+                                                                                                {plannedWindow?.hasCoverageAdjust && start && end && (
+                                                                                                    <span className="block text-[8px] text-slate-400 font-medium normal-case">
+                                                                                                        Banda {fmt(start)}–{fmt(end)}
+                                                                                                        {plannedWindow.isExtDisplay ? ' · extensión' : ''}
+                                                                                                        {plannedWindow.isEarlyDisplay ? ' · adelanto' : ''}
+                                                                                                    </span>
+                                                                                                )}
+                                                                                            </>
+                                                                                        ) : '-')}
                                                                                     </td>
                                                                                     <td className="py-1.5 pr-3 text-[10px]">
                                                                                         {rStartRaw && rEndMarked
@@ -1030,7 +1048,7 @@ export default function ReportsPage() {
                                                                                               : <span className="text-slate-300">—</span>}
                                                                                     </td>
                                                                                     <td className="py-1.5 pr-3 text-right text-slate-400 text-[10px]">
-                                                                                        {isLeaveRow && s._objectiveBillable === false ? '—' : dur.toFixed(1)}
+                                                                                        {isLeaveRow && s._objectiveBillable === false ? '—' : (dur > 0 ? dur.toFixed(1) : '—')}
                                                                                     </td>
                                                                                     <td className={`py-1.5 pr-3 text-right font-bold text-[10px] ${isVacant ? 'text-amber-500' : hasOvertime ? 'text-orange-600' : enCurso ? 'text-emerald-700' : 'text-indigo-600'}`}>
                                                                                         {rDur != null ? rDur.toFixed(1) : '—'}

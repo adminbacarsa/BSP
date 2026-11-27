@@ -5,6 +5,7 @@ import {
   calcPlanningSlaReconciliationHours,
   shiftCoverageExtensionExtraHours,
 } from './planningScheduledHours';
+import { resolveShiftDurationHours } from '../../../../../packages/hours-core/src/motors/liquidation/reportesLiquidation';
 
 const ts = (iso: string) => ({ toDate: () => new Date(iso) });
 
@@ -55,4 +56,17 @@ test('Ops ADVANCE con adjustedStartTime Timestamp (sin segment*): N 22–06 → 
   };
   assert.equal(shiftCoverageExtensionExtraHours(sh), 4);
   assert.equal(calcPlanningBillableShiftHours(sh, { N: 8 }), 12);
+});
+
+test('ops_cov EXT/ADV con coverageHoursOnSource no suma horas (evita 12+4 en objetivo)', () => {
+  const opsCov = {
+    code: 'T',
+    origin: 'OPERATIONS_COVERAGE',
+    coverageType: 'EXTEND',
+    coverageHoursOnSource: true,
+    startTime: ts('2026-11-27T17:00:00.000Z'), // 14:00 AR
+    endTime: ts('2026-11-27T21:00:00.000Z'), // 18:00 AR
+  };
+  assert.equal(calcPlanningBillableShiftHours(opsCov, { T: 8 }), 0);
+  assert.equal(resolveShiftDurationHours(opsCov, { T: 8 }, { forObjectiveBilling: true }), 0);
 });

@@ -27,6 +27,7 @@ import {
     coalescePlannedTurnosForCell,
 } from '@/lib/planificacion/planningTurnoCoalesce';
 import { calcPlanningBillableShiftHours } from '@/lib/planificacion/planningScheduledHours';
+import { isOpsCoverageHoursOnSourceDoc } from '@/lib/cosp/coverageSemantics';
 import {
     buildPersonaBook,
     calculateLiquidationHoursStats as calculateLiquidationHoursStatsCore,
@@ -748,6 +749,9 @@ export function resolveShiftDurationHours(
     );
 
     if (opts?.forObjectiveBilling && !isObjectiveBillableCode(rawCode)) return 0;
+
+    // ops_cov EXT/ADV: trazabilidad; las horas viven en el turno fuente (isExtended / isEarlyStart).
+    if (isOpsCoverageHoursOnSourceDoc(shift as Record<string, unknown>)) return 0;
 
     const isRet = rawCode === 'RET' || shift.isReten === true;
     if (isRet) {
