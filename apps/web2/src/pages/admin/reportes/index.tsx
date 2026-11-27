@@ -1022,13 +1022,17 @@ export default function ReportsPage() {
                                                                             const fmt = (d: Date) => d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
                                                                             const isLeaveRow = isLeaveReportShift(s);
                                                                             return (
-                                                                                <tr key={s.id} className={isVacant ? 'bg-amber-50/60' : isAbsentRow ? 'bg-rose-50/40' : hasOvertime ? 'bg-orange-50/40' : isLeaveRow ? 'bg-blue-50/30' : enCurso ? 'bg-emerald-50/40' : ''}>
+                                                                                <tr key={s.id} className={isVacant ? 'bg-amber-50/60' : isAbsentRow ? 'bg-rose-50/40' : s._isRetStandby ? 'bg-indigo-50/40' : hasOvertime ? 'bg-orange-50/40' : isLeaveRow ? 'bg-blue-50/30' : enCurso ? 'bg-emerald-50/40' : ''}>
                                                                                     <td className="py-1.5 pr-3 text-slate-600">{start ? start.toLocaleDateString('es-AR') : '-'}</td>
-                                                                                    <td className={`py-1.5 pr-3 font-bold ${isVacant ? 'text-amber-600 italic' : isAbsentRow ? 'text-rose-700' : 'text-slate-700'}`}>
+                                                                                    <td className={`py-1.5 pr-3 font-bold ${isVacant ? 'text-amber-600 italic' : isAbsentRow ? 'text-rose-700' : s._isRetStandby ? 'text-indigo-700' : 'text-slate-700'}`}>
                                                                                         {s.employeeName || 'Vacante'}
                                                                                         {isAbsentRow ? (
                                                                                             <span className="block text-[9px] font-bold text-rose-600 normal-case mt-0.5">
                                                                                                 Ausente{s._coveredBy ? ` · cubierto por ${String(s._coveredBy).replace(/\s*\([^)]*\)\s*$/, '').trim()}` : ''}
+                                                                                            </span>
+                                                                                        ) : s._isRetStandby ? (
+                                                                                            <span className="block text-[9px] font-bold text-indigo-600 normal-case mt-0.5">
+                                                                                                RETÉN · stand-by (0 h facturables)
                                                                                             </span>
                                                                                         ) : s._coveringFor ? (
                                                                                             <span className="block text-[9px] font-bold text-emerald-700 normal-case mt-0.5">
@@ -2881,7 +2885,7 @@ export default function ReportsPage() {
                                   {
                                       label: 'Fuera cob.',
                                       value: planFuera.toFixed(1),
-                                      sub: 'RET + REF + ESC teóricas',
+                                      sub: 'REF/ESC + ref. RET (libro)',
                                       icon: '📦',
                                       color: 'from-amber-500 to-amber-600',
                                   },
@@ -2895,7 +2899,7 @@ export default function ReportsPage() {
                                   {
                                       label: 'Reales fuera',
                                       value: realFuera.toFixed(1),
-                                      sub: 'RET + REF + ESC reales',
+                                      sub: 'REF/ESC fichadas (RET stand-by=0)',
                                       icon: '📤',
                                       color: 'from-teal-500 to-teal-600',
                                   },
@@ -2925,7 +2929,7 @@ export default function ReportsPage() {
                                   {
                                       label: 'Fuera cob.',
                                       value: planFuera.toFixed(1),
-                                      sub: fromObj ? 'REF/ESC del objetivo (RET no factura)' : 'RET + REF + ESC teóricas',
+                                      sub: fromObj ? 'Ext+Adel+FT+RET→turno (caja)' : 'RET + REF + ESC teóricas',
                                       icon: '📦',
                                       color: 'from-amber-500 to-amber-600',
                                   },
@@ -2939,7 +2943,7 @@ export default function ReportsPage() {
                                   {
                                       label: 'Reales fuera',
                                       value: realFuera.toFixed(1),
-                                      sub: fromObj ? 'REF/ESC fichadas' : 'REF/ESC fichadas (RET=0)',
+                                      sub: fromObj ? 'caja usada fichada (Ext/Adel/FT/RET→turno)' : 'REF/ESC fichadas (RET stand-by=0)',
                                       icon: '📤',
                                       color: 'from-teal-500 to-teal-600',
                                   },

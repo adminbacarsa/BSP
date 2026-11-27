@@ -26,7 +26,10 @@ import {
     coalescePlannedCellBillableHours,
     coalescePlannedTurnosForCell,
 } from '@/lib/planificacion/planningTurnoCoalesce';
-import { calcPlanningBillableShiftHours } from '@/lib/planificacion/planningScheduledHours';
+import {
+    calcPlanningBillableShiftHours,
+    shiftCoverageExtensionExtraHours,
+} from '@/lib/planificacion/planningScheduledHours';
 import { isOpsCoverageHoursOnSourceDoc } from '@/lib/cosp/coverageSemantics';
 import {
     buildPersonaBook,
@@ -61,6 +64,8 @@ const isObjectiveBillableCode = (code: string) => !OBJECTIVE_NON_BILLABLE_CODES.
 export function shouldBillShiftToObjective(shift: any): boolean {
     const code = String(shift?.code || '').trim().toUpperCase();
     if (!isObjectiveBillableCode(code)) return false;
+    // Cobertura fantasma (cubría a alguien que está presente) — ej. Manuel vs Allasia.
+    if (shift?._phantomCoverage === true) return false;
     if (isEmployeeOnLeave({ shiftCode: code, absenceType: shift?._absenceType, absence: shift?._absenceType ? { type: shift._absenceType } : null })) {
         return false;
     }
@@ -68,6 +73,83 @@ export function shouldBillShiftToObjective(shift: any): boolean {
         return false;
     }
     return true;
+}
+
+/** Extras de “caja” usados: Ext/Adel + FT + cobertura ops plena (RET→turno), no stand-by RET. */
+export function computeObjectiveFueraHours(
+    shifts: any[],
+    opts?: { usePlannedHours?: boolean },
+): { plan: number; real: number } {
+    const usePlannedHours = opts?.usePlannedHours ?? false;
+    let plan = 0;
+    let real = 0;
+    for (const s of shifts) {
+        if (!s || s._phantomCoverage === true) continue;
+        if (isOpsCoverageHoursOnSourceDoc(s as Record<string, unknown>)) continue;
+
+        const code = String(s.code || '').trim().toUpperCase();
+        const isRet = code === 'RET' || s.isReten === true;
+        if (isRet) continue; // stand-by: 0 facturable, no es “fuera usado”
+
+        const isFT = isFrancoTrabajadoShift(s);
+        if (isFT) {
+            const h = resolveShiftDurationHours(s, SHIFT_HOURS_LOOKUP, { forObjectiveBilling: false });
+            if (h > 0) {
+                plan += h;
+                if (usePlannedHours || shiftHasRealCheckIn(s)) real += h;
+            }
+            continue;
+        }
+
+        const extra = shiftCoverageExtensionExtraHours(s, SHIFT_HOURS_LOOKUP);
+        if (extra >= 0.25) {
+            plan += extra;
+            // Reales del extra: si fichó, lo que supera la banda base (hasta el extra planificado).
+            const band = SHIFT_HOURS_LOOKUP[code] ?? 8;
+            const start = parseShiftInstant(s.startTime);
+            const end = parseShiftInstant(s.endTime);
+            if (usePlannedHours) {
+                real += extra;
+            } else if (shiftHasRealCheckIn(s) && start && end) {
+                const rStart = parseShiftInstant(s.realStartTime) || parseShiftInstant(s.checkInTime) || start;
+                let rEnd = parseShiftInstant(s.realEndTime) || parseShiftInstant(s.checkOutTime);
+                if (!rEnd) rEnd = end.getTime() > Date.now() ? new Date() : end;
+                const worked = Math.max(0, Math.min(24, (rEnd.getTime() - rStart.getTime()) / 3600000));
+                real += Math.max(0, Math.min(extra, worked - band));
+            }
+            continue;
+        }
+
+        // RET→turno / cobertura ops plena (no Ext/Adel en fuente): cuenta como uso de caja.
+        const origin = String(s.origin || '').toUpperCase();
+        if (
+            origin === 'OPERATIONS_COVERAGE'
+            && !['EXTEND', 'ADVANCE'].includes(String(s.coverageType || '').toUpperCase())
+            && s.coverageHoursOnSource !== true
+        ) {
+            const h = resolveShiftDurationHours(s, SHIFT_HOURS_LOOKUP, { forObjectiveBilling: true });
+            if (h > 0) {
+                plan += h;
+                if (usePlannedHours || shiftHasRealCheckIn(s)) {
+                    // en vivo: horas fichadas de esa cobertura
+                    const start = parseShiftInstant(s.startTime);
+                    const end = parseShiftInstant(s.endTime);
+                    if (shiftHasRealCheckIn(s) && start && end) {
+                        const rStart = parseShiftInstant(s.realStartTime) || parseShiftInstant(s.checkInTime) || start;
+                        let rEnd = parseShiftInstant(s.realEndTime) || parseShiftInstant(s.checkOutTime);
+                        if (!rEnd) rEnd = end.getTime() > Date.now() ? new Date() : end;
+                        real += Math.max(0, Math.min(h, (rEnd.getTime() - rStart.getTime()) / 3600000));
+                    } else if (usePlannedHours) {
+                        real += h;
+                    }
+                }
+            }
+        }
+    }
+    return {
+        plan: Math.round(plan * 100) / 100,
+        real: Math.round(Math.max(0, real) * 100) / 100,
+    };
 }
 const OPERATIVE_CODES = ['M', 'T', 'N', 'D12', 'N12', 'PU', 'GU', 'FT']; // kept for compat
 const SHIFT_HOURS_LOOKUP: Record<string, number> = {
@@ -1003,6 +1085,9 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
 
             // Horas reales: fichada real. Turnos futuros sin ingreso no cuentan.
             // Presente/en curso (con ingreso, sin egreso): provisional hasta ahora o fin planificado.
+            const isAbsent = d.isAbsent === true || st.includes('absent') || st.includes('ausent');
+            if (isAbsent) return;
+
             const punchToDate = (v: unknown): Date | null => {
                 if (!v) return null;
                 const t = v as { toDate?: () => Date; seconds?: number; _seconds?: number };
@@ -1963,8 +2048,34 @@ export const useReportes = (forcedClientId?: string | null) => {
                         || (dk && isOperationalCoverShift(s) ? coveringForByEmpDate[`${s.employeeId}_${dk}`] : null)
                         || null);
                 // Comentario/mapa viejo “Cubriendo a X” si X está presente → no mostrar
+                let phantomCoverage = false;
                 if (coveringFor && !String(coveringFor).startsWith('Vacante') && !titularNameIsAbsentThatDay(String(coveringFor), dk)) {
                     coveringFor = null;
+                    phantomCoverage = true;
+                }
+                // absenceShiftId apunta a titular presente (Manuel → Allasia fichó)
+                const refForPhantom = s.absenceShiftId ? shiftIdToShift[s.absenceShiftId] : null;
+                if (
+                    refForPhantom
+                    && isPresentTitular(refForPhantom)
+                    && !isAbsentShift(refForPhantom)
+                ) {
+                    phantomCoverage = true;
+                    coveringFor = null;
+                }
+                // Comentario “Cubriendo a X” con X presente
+                const commentCover = String(s.comments || '').match(/Cubriendo a (.+?) \(/);
+                if (commentCover && dk && !titularNameIsAbsentThatDay(commentCover[1].trim(), dk)) {
+                    const maybePresent = rawShifts.some((r: any) =>
+                        shiftCalendarDateKey(r) === dk
+                        && String(r.employeeName || empMap[r.employeeId] || '').trim().toLowerCase()
+                            === commentCover[1].trim().toLowerCase()
+                        && isPresentTitular(r),
+                    );
+                    if (maybePresent) {
+                        phantomCoverage = true;
+                        coveringFor = null;
+                    }
                 }
 
                 return {
@@ -1977,6 +2088,7 @@ export const useReportes = (forcedClientId?: string | null) => {
                     _coveredBy: coveredByName,
                     _coveringFor: coveringFor,
                     _isAbsentRow: isAbsentShift(s),
+                    _phantomCoverage: phantomCoverage,
                 };
             };
 
@@ -2133,13 +2245,40 @@ export const useReportes = (forcedClientId?: string | null) => {
             }
 
             const objLeaveShifts: Record<string, any[]> = {};
+            const objRetShifts: Record<string, any[]> = {};
             rawShifts.forEach((s: any) => {
                 const enriched = enrichShift(s);
-                if (shouldBillShiftToObjective(enriched)) return;
                 const objId = resolveCanonicalObjectiveId(enriched, aliasLookup);
                 if (!objId) return;
+
+                const codeUp = String(enriched.code || '').trim().toUpperCase();
+                const isRetStandby = codeUp === 'RET' || enriched.isReten === true;
+                // RET stand-by del objetivo: se listan abajo con 0 h (no facturan ni van a “fuera”).
+                if (isRetStandby) {
+                    (objRetShifts[objId] ||= []).push({
+                        ...enriched,
+                        employeeName: empMap[enriched.employeeId] || enriched.employeeName || null,
+                        _objectiveBillable: false,
+                        _isRetStandby: true,
+                    });
+                    return;
+                }
+
+                if (shouldBillShiftToObjective(enriched)) return;
+                if (enriched._phantomCoverage === true) return; // no listar cobertura fantasma
                 const leaveCode = resolveLeaveCode(enriched.code, enriched._absenceType);
-                if (!leaveCode && !isEmployeeOnLeave({ shiftCode: enriched.code, absenceType: enriched._absenceType })) return;
+                if (!leaveCode && !isEmployeeOnLeave({ shiftCode: enriched.code, absenceType: enriched._absenceType })) {
+                    // Ausente AA / flag
+                    if (enriched._isAbsentRow || enriched.isAbsent || String(enriched.status || '').toUpperCase() === 'ABSENT') {
+                        (objLeaveShifts[objId] ||= []).push({
+                            ...enriched,
+                            employeeName: empMap[enriched.employeeId] || enriched.employeeName || null,
+                            code: codeUp || 'AA',
+                            _objectiveBillable: false,
+                        });
+                    }
+                    return;
+                }
                 (objLeaveShifts[objId] ||= []).push({
                     ...enriched,
                     employeeName: empMap[enriched.employeeId] || null,
@@ -2175,23 +2314,29 @@ export const useReportes = (forcedClientId?: string | null) => {
                 if (!meta.client || meta.client === 'Sin Cliente') return null;
 
                 const data = objGroups[objId] || { shifts: [], clientId: meta.clientId };
-                const staffedShifts = data.shifts.filter((s: any) => !isReportVacancyShift(s, empMap));
+                const staffedShifts = data.shifts.filter((s: any) => !isReportVacancyShift(s, empMap) && !s._phantomCoverage);
                 const vacantRawShifts = data.shifts.filter((s: any) => isReportVacancyShift(s, empMap));
                 const vacantHours = vacantRawShifts.reduce((acc: number, s: any) =>
                     acc + resolveShiftDurationHours(s, SHIFT_HOURS_LOOKUP, { forObjectiveBilling: true }), 0);
+                const billableStaffed = staffedShifts.filter((s: any) => shouldBillShiftToObjective(s));
                 const stats = calculateLiquidationHoursStats(
-                    staffedShifts.filter((s: any) => shouldBillShiftToObjective(s)),
+                    billableStaffed,
                     holidaysData,
                     { usePlannedHours, hoursCoreEnabled },
                 );
+                // “Fuera” = Ext/Adel + FT + RET→turno (caja usada). No el stand-by RET × 8.
+                const fuera = computeObjectiveFueraHours(billableStaffed, { usePlannedHours });
                 const annotatedShifts = (() => {
                     const merged = [
-                        ...data.shifts.map((s: any) => ({
-                            ...s,
-                            employeeName: empMap[s.employeeId] || null,
-                            _objectiveBillable: true,
-                        })),
+                        ...data.shifts
+                            .filter((s: any) => !s._phantomCoverage)
+                            .map((s: any) => ({
+                                ...s,
+                                employeeName: empMap[s.employeeId] || null,
+                                _objectiveBillable: true,
+                            })),
                         ...(objLeaveShifts[objId] || []),
+                        ...(objRetShifts[objId] || []),
                     ];
                     const byEmp: Record<string, any[]> = {};
                     merged.forEach((s) => {
@@ -2206,17 +2351,17 @@ export const useReportes = (forcedClientId?: string | null) => {
                     name: meta.name,
                     clientId: meta.clientId,
                     client: meta.client || clientMap[meta.clientId] || 'Sin Cliente',
-                    shifts: staffedShifts.length,
+                    shifts: billableStaffed.length,
                     vacantShifts: vacantRawShifts.length,
                     vacantHours,
-                    // Costos por objetivo = cobertura planificada (RET no factura ni entra acá).
+                    // Costos por objetivo = cobertura planificada (RET stand-by no factura).
                     total: stats.horasCobertura,
                     horasTeoricas: stats.horasCobertura,
                     horasCobertura: stats.horasCobertura,
-                    horasDespliegue: stats.horasDespliegue,
+                    horasDespliegue: fuera.plan,
                     horasReales: stats.horasRealesCobertura,
                     horasRealesCobertura: stats.horasRealesCobertura,
-                    horasRealesDespliegue: stats.horasRealesDespliegue,
+                    horasRealesDespliegue: fuera.real,
                     // Diurnas/noct. alineadas al total teórico (no al avance en vivo del día).
                     diurnas: (stats as any).diurnasPlan ?? stats.totalDiurnas,
                     nocturnas: (stats as any).nocturnasPlan ?? stats.totalNocturnas,
