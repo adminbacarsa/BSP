@@ -571,6 +571,80 @@ export default function ReportsPage() {
         return scope;
     }, [planQueryClientId, planQueryObjectiveId, planQueryEmployeeId, planCatalogObjectives]);
 
+    /** Acota Firestore al cliente/objetivo elegido en la pestaña Objetivos (antes solo filtraba la tabla). */
+    const buildObjectiveFetchScope = useCallback((): ReportFetchScope | undefined => {
+        const namePick = String(objFilterName || '').trim();
+        const nameSearch = String(objFilterNameSearch || '').trim();
+        const nameTarget = (namePick || nameSearch).toLowerCase();
+        if (nameTarget) {
+            const exact = !!namePick;
+            const ids = new Set<string>();
+            Object.entries(objectiveAliases).forEach(([key, meta]) => {
+                const n = String(meta.name || '').trim().toLowerCase();
+                if (!n) return;
+                if (exact ? n === nameTarget : n === nameTarget || n.includes(nameTarget)) {
+                    ids.add(meta.canonicalId || key);
+                }
+            });
+            Object.entries(objMap).forEach(([id, n]) => {
+                const nn = String(n || '').trim().toLowerCase();
+                if (!nn) return;
+                if (exact ? nn === nameTarget : nn === nameTarget || nn.includes(nameTarget)) {
+                    ids.add(id);
+                }
+            });
+            objectiveReport.forEach((r: { id?: string; name?: string }) => {
+                const n = String(r.name || '').trim().toLowerCase();
+                if (!n || !r.id) return;
+                if (exact ? n === nameTarget : n === nameTarget || n.includes(nameTarget)) {
+                    ids.add(String(r.id));
+                }
+            });
+            const list = [...ids];
+            if (list.length === 1) return { objectiveId: list[0] };
+            if (list.length > 1) {
+                return { objectiveId: list[0], clientObjectiveIds: list };
+            }
+            if (namePick) {
+                toast.error(`No se encontró el objetivo «${namePick}» en el catálogo. Revisá el nombre o generá planta y filtrá.`);
+                return undefined;
+            }
+        }
+
+        const clientLabel = String(objFilterClient || objFilterClientSearch || '').trim();
+        if (clientLabel) {
+            const selNorm = normClientName(clientLabel);
+            const cids = clientIdsByNormName.get(selNorm) || [];
+            const objIds = new Set<string>();
+            Object.values(objectiveAliases).forEach((meta) => {
+                const metaClient = clientMap[meta.clientId] || '';
+                if (cids.includes(meta.clientId) || normClientName(metaClient) === selNorm) {
+                    if (meta.canonicalId) objIds.add(meta.canonicalId);
+                }
+            });
+            if (objIds.size === 0 && cids.length === 0) {
+                toast.error(`No se encontró el cliente «${clientLabel}» en el catálogo.`);
+                return undefined;
+            }
+            return {
+                ...(cids[0] ? { clientId: cids[0] } : {}),
+                clientObjectiveIds: [...objIds],
+            };
+        }
+        return undefined;
+    }, [
+        objFilterName,
+        objFilterNameSearch,
+        objFilterClient,
+        objFilterClientSearch,
+        objectiveAliases,
+        objMap,
+        objectiveReport,
+        normClientName,
+        clientIdsByNormName,
+        clientMap,
+    ]);
+
     const clearPlanFilters = useCallback(() => {
         setPlanFilterObjective('');
         setPlanObjectiveSearch('');
@@ -604,8 +678,29 @@ export default function ReportsPage() {
             generateReports({ employeeId: liqQueryEmployeeId });
             return;
         }
+        if (activeTab === 'OBJECTIVE') {
+            const scope = buildObjectiveFetchScope();
+            // Si eligió filtro y no resolvió IDs, no arrancar planta completa.
+            if ((objFilterName || objFilterClient || objFilterClientSearch.trim() || objFilterNameSearch.trim()) && !scope) {
+                return;
+            }
+            generateReports(scope);
+            return;
+        }
         generateReports();
-    }, [activeTab, buildPlanFetchScope, generateReports, loadAudit, clearPlanFilters, liqQueryEmployeeId]);
+    }, [
+        activeTab,
+        buildPlanFetchScope,
+        buildObjectiveFetchScope,
+        generateReports,
+        loadAudit,
+        clearPlanFilters,
+        liqQueryEmployeeId,
+        objFilterName,
+        objFilterClient,
+        objFilterClientSearch,
+        objFilterNameSearch,
+    ]);
 
     const planDetailMeta = useMemo(() => {
         if (!objectiveReport.length) {
@@ -668,6 +763,13 @@ export default function ReportsPage() {
             names = [...new Set(catalogNames)];
         } else if (names.length === 0 && !objFilterClient && !objFilterClientSearch.trim()) {
             names = [...new Set(objectiveReport.map((r) => String(r.name || '').trim()).filter(Boolean))];
+            if (names.length === 0) {
+                names = [...new Set(
+                    Object.values(objectiveAliases)
+                        .map((m) => String(m.name || '').trim())
+                        .filter(Boolean),
+                )];
+            }
         }
 
         names.sort((a, b) => a.localeCompare(b, 'es'));
@@ -2556,7 +2658,10 @@ export default function ReportsPage() {
                     )}
 
                     {activeTab === 'OBJECTIVE' && (
-                        <ReportFilterSection title="Filtros por objetivo" subtitle="Aplican al reporte generado">
+                        <ReportFilterSection
+                            title="Filtros por objetivo"
+                            subtitle="Acotan la consulta al generar (recomendado: un cliente u objetivo). Sin filtro = planta por mes."
+                        >
                             <ReportSearchSelect
                                 step="1"
                                 label="Cliente"

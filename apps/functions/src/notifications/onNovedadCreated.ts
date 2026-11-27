@@ -52,6 +52,17 @@ export const onNovedadCreated = functions
     const db = admin.firestore();
     const empresaId: string | null = data?.empresaId || null;
 
+    // Sala Manual (CC o Modo Rápido): el operador ya está a mando — no push ni bandeja.
+    if (empresaId) {
+      const { isEmpresaManualMode } = await import('../ops/opsManualMode');
+      if (await isEmpresaManualMode(db, empresaId)) {
+        console.log(
+          `[onNovedadCreated] Manual: sin push/bandeja type=${data?.type} empresa=${empresaId}`,
+        );
+        return;
+      }
+    }
+
     // ── Resolver tokens destinatarios ────────────────────────────────────────
     // Prioridad 1: operador con sesión activa para esta empresa
     // Prioridad 2: todos los tokens de admins de esta empresa

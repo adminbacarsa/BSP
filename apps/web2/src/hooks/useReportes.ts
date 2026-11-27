@@ -482,10 +482,30 @@ function applyHHmmToShiftDate(base: Date, hhmm: string): Date {
     return d;
 }
 
+/** Timestamp absoluto o HH:mm sobre el día de `base` (Ops guarda adjusted* como Timestamp). */
+function applyCoverageClockToShiftDate(base: Date, clock: unknown): Date {
+    const instant = parseShiftInstant(clock);
+    if (instant) return instant;
+    if (typeof clock === 'string') return applyHHmmToShiftDate(base, clock);
+    return new Date(base);
+}
+
 function hhmmToMinutes(hhmm: string): number | null {
     const m = String(hhmm).trim().slice(0, 5).match(/^(\d{1,2}):(\d{2})$/);
     if (!m) return null;
     return Number(m[1]) * 60 + Number(m[2]);
+}
+
+/** HH:mm AR desde string o Timestamp/Date. */
+function coverageClockHm(val: unknown): string {
+    if (typeof val === 'string' && /^\d{1,2}:\d{2}$/.test(val.trim())) {
+        const m = val.trim().match(/^(\d{1,2}):(\d{2})$/);
+        return m ? `${m[1].padStart(2, '0')}:${m[2]}` : '';
+    }
+    const at = parseShiftInstant(val);
+    if (!at) return '';
+    const x = new Date(at.getTime() - 3 * 3600000);
+    return `${String(x.getUTCHours()).padStart(2, '0')}:${String(x.getUTCMinutes()).padStart(2, '0')}`;
 }
 
 /** Tramo de cobertura que cierra antes del inicio de banda (ej. 18–22 antes de NO 22–06) → adelanto, no extensión al final. */
@@ -496,8 +516,8 @@ function coverageSegmentIsPreBandAdelanto(shift: any, bandStart: Date): boolean 
         || (shift?.isExtended ? (shift.adjustedEndTime || shift.extensionEndTime) : null);
     if (!segFrom || !segTo) return false;
     const bandMin = bandStart.getHours() * 60 + bandStart.getMinutes();
-    const fromM = hhmmToMinutes(String(segFrom));
-    const toM = hhmmToMinutes(String(segTo));
+    const fromM = hhmmToMinutes(coverageClockHm(segFrom));
+    const toM = hhmmToMinutes(coverageClockHm(segTo));
     if (fromM == null || toM == null) return false;
     const tol = 35;
     if (Math.abs(toM - bandMin) <= tol) return true;
@@ -548,14 +568,14 @@ export function resolveLiquidationPlannedWindow(
 
     if (isEarly) {
         const from = shift.adjustedStartTime || shift.segmentFromTime;
-        if (from) dispStart = applyHHmmToShiftDate(plannedStart, String(from));
+        if (from) dispStart = applyCoverageClockToShiftDate(plannedStart, from);
     }
     if (isExt) {
         const to = shift.adjustedEndTime || shift.extensionEndTime || shift.segmentToTime;
         if (to) {
-            dispEnd = applyHHmmToShiftDate(plannedEnd, String(to));
+            dispEnd = applyCoverageClockToShiftDate(plannedEnd, to);
             if (dispEnd.getTime() <= dispStart.getTime()) {
-                dispEnd.setDate(dispEnd.getDate() + 1);
+                dispEnd = new Date(dispEnd.getTime() + 24 * 3600000);
             }
         }
     }
@@ -1192,28 +1212,37 @@ export function buildPayrollExportPayload(
     };
 }
 
-function collectObjectiveIdsForTurnosQuery(
+/**
+ * IDs a consultar por objetivo. Sin alcance (ni objectiveId ni clientId ni lista) → []
+ * para que fetchTurnosForReport use el camino por mes (planta), no 300+ queries.
+ */
+export function collectObjectiveIdsForTurnosQuery(
     fetchScope: ReportFetchScope | undefined,
     aliasLookup: Record<string, ObjectiveMeta>,
 ): string[] {
     const wanted = new Set<string>();
     const single = String(fetchScope?.objectiveId ?? '').trim();
     const cliId = String(fetchScope?.clientId ?? '').trim();
+    const listed = (fetchScope?.clientObjectiveIds || [])
+        .map((id) => String(id || '').trim())
+        .filter(Boolean);
+
+    if (!single && !cliId && listed.length === 0) {
+        return [];
+    }
+
     if (single) {
         wanted.add(aliasLookup[single]?.canonicalId || single);
-    } else if (cliId) {
-        (fetchScope?.clientObjectiveIds || []).forEach((id) => {
-            const k = String(id || '').trim();
-            if (k) wanted.add(aliasLookup[k]?.canonicalId || k);
-        });
+    }
+    listed.forEach((id) => {
+        wanted.add(aliasLookup[id]?.canonicalId || id);
+    });
+    if (cliId && listed.length === 0) {
         Object.values(aliasLookup).forEach((m) => {
             if (m.clientId === cliId && m.canonicalId) wanted.add(m.canonicalId);
         });
-    } else {
-        Object.values(aliasLookup).forEach((m) => {
-            if (m.canonicalId) wanted.add(m.canonicalId);
-        });
     }
+
     const ids = new Set<string>();
     wanted.forEach((c) => ids.add(c));
     Object.entries(aliasLookup).forEach(([key, m]) => {
@@ -1229,7 +1258,8 @@ async function fetchTurnosForReport(opts: {
     scopeEmpresa: boolean;
     fetchScope?: ReportFetchScope;
     aliasLookup: Record<string, ObjectiveMeta>;
-    onProgress?: (label: string) => void;
+    /** fraction 0..1 dentro de la fase de descarga de turnos */
+    onProgress?: (label: string, fraction?: number) => void;
 }): Promise<any[]> {
     const REPORT_TURNOS_TIMEOUT_MS = 180_000;
     const startTs = Timestamp.fromDate(opts.startDate);
@@ -1238,13 +1268,14 @@ async function fetchTurnosForReport(opts: {
     const empId = String(opts.fetchScope?.employeeId ?? '').trim();
 
     if (empId) {
-        opts.onProgress?.('Descargando turnos del legajo…');
+        opts.onProgress?.('Descargando turnos del legajo…', 0.5);
         const snap = await getDocsOnce(query(
             col,
             where('employeeId', '==', empId),
             where('startTime', '>=', startTs),
             where('startTime', '<=', endTs),
         ), { timeoutMs: REPORT_TURNOS_TIMEOUT_MS });
+        opts.onProgress?.('Turnos del legajo listos', 1);
         return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     }
 
@@ -1254,8 +1285,10 @@ async function fetchTurnosForReport(opts: {
         const chunkSize = 8;
         for (let i = 0; i < objectiveIds.length; i += chunkSize) {
             const chunk = objectiveIds.slice(i, i + chunkSize);
+            const done = Math.min(i + chunk.length, objectiveIds.length);
             opts.onProgress?.(
-                `Descargando turnos por objetivo (${Math.min(i + chunk.length, objectiveIds.length)}/${objectiveIds.length})…`,
+                `Descargando turnos por objetivo (${done}/${objectiveIds.length})…`,
+                done / objectiveIds.length,
             );
             const snaps = await Promise.all(chunk.map((oid) => getDocsOnce(query(
                 col,
@@ -1282,6 +1315,7 @@ async function fetchTurnosForReport(opts: {
         if (from > to) continue;
         opts.onProgress?.(
             `Descargando turnos ${String(month).padStart(2, '0')}/${year} (${mi + 1}/${months.length})…`,
+            (mi + 1) / Math.max(1, months.length),
         );
         const fromTs = Timestamp.fromDate(from);
         const toTs = Timestamp.fromDate(to);
@@ -1321,16 +1355,25 @@ function shiftMatchesFetchScope(
     const empId = String(fetchScope.employeeId ?? '').trim();
     const objId = String(fetchScope.objectiveId ?? '').trim();
     const cliId = String(fetchScope.clientId ?? '').trim();
+    const listed = (fetchScope.clientObjectiveIds || [])
+        .map((id) => String(id || '').trim())
+        .filter(Boolean);
     if (empId && String(shift.employeeId ?? '') !== empId) return false;
-    if (cliId && !shiftBelongsToClient(shift, cliId, objectiveAliases, fetchScope.clientObjectiveIds)) return false;
-    if (objId) {
+    if (cliId && !shiftBelongsToClient(shift, cliId, objectiveAliases, listed)) return false;
+    if (objId || (!cliId && listed.length > 0)) {
         const shiftObj = String(shift.objectiveId ?? '').trim();
         if (!shiftObj) return false;
-        if (shiftObj === objId) return true;
-        const picked = objectiveAliases[objId];
+        const allow = new Set<string>();
+        if (objId) allow.add(objId);
+        listed.forEach((id) => allow.add(id));
+        if (allow.has(shiftObj)) return true;
         const shiftMeta = objectiveAliases[shiftObj];
-        if (picked && shiftMeta && picked.canonicalId === shiftMeta.canonicalId) return true;
-        if (picked && (shiftObj === picked.name || shiftObj === picked.canonicalId)) return true;
+        for (const id of allow) {
+            const picked = objectiveAliases[id];
+            if (picked && shiftMeta && picked.canonicalId === shiftMeta.canonicalId) return true;
+            if (picked && (shiftObj === picked.name || shiftObj === picked.canonicalId)) return true;
+            if (shiftMeta?.canonicalId === id) return true;
+        }
         return false;
     }
     return true;
@@ -1609,9 +1652,13 @@ export const useReportes = (forcedClientId?: string | null) => {
                 scopeEmpId || undefined,
             );
 
+            const scopeCliId = String(fetchScope?.clientId ?? '').trim();
+            const scopeObjList = (fetchScope?.clientObjectiveIds || []).length;
             reportProgress(38, scopeEmpId
                 ? 'Descargando turnos del legajo…'
-                : 'Descargando turnos (planta completa, puede demorar)…');
+                : (scopeObjId || scopeCliId || scopeObjList)
+                    ? 'Descargando turnos del alcance elegido…'
+                    : 'Descargando turnos (planta por mes)…');
             const fetchedTurnos = await fetchTurnosForReport({
                 startDate,
                 endDate,
@@ -1619,7 +1666,12 @@ export const useReportes = (forcedClientId?: string | null) => {
                 scopeEmpresa,
                 fetchScope,
                 aliasLookup,
-                onProgress: (label) => reportProgress(40, label),
+                onProgress: (label, fraction) => {
+                    const pct = fraction != null
+                        ? 38 + Math.round(32 * Math.min(1, Math.max(0, fraction)))
+                        : 40;
+                    reportProgress(pct, label);
+                },
             });
 
             reportProgress(45, 'Procesando turnos y novedades');

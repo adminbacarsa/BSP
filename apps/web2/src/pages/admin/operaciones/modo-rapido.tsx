@@ -61,6 +61,7 @@ import ModalRetenesDia, {
 } from '@/components/operaciones/ModalRetenesDia';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
+import { useOperatorSession } from '@/hooks/useOperatorSession';
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '@/lib/firebase';
 import { openWhatsApp, waMensaje } from '@/lib/whatsapp';
@@ -3368,11 +3369,24 @@ export default function ModoRapidoPage() {
   const router = useRouter();
   const { user } = useAuth();
   const { empresaId, empresa } = useEmpresa();
+  const session = useOperatorSession();
   const migracionCompleta = !!(empresa as { migracionCompleta?: boolean } | null)?.migracionCompleta;
   const scopeEmpresa = useMemo(
     () => shouldScopeQueriesToEmpresa(empresaId, migracionCompleta),
     [empresaId, migracionCompleta],
   );
+
+  /**
+   * Abrir Modo Rápido = sala Manual: frena cascada/alertas auto del CC.
+   * No cierra la sesión al salir (igual que el clásico al cambiar de ruta).
+   */
+  const mrSessionStartedRef = useRef(false);
+  useEffect(() => {
+    if (session.loading || !empresaId) return;
+    if (session.inRoom || mrSessionStartedRef.current) return;
+    mrSessionStartedRef.current = true;
+    session.startSession().catch((e) => console.warn('[modo-rapido] sala Manual', e));
+  }, [session.loading, session.inRoom, empresaId, session.startSession]);
 
   const turnosData = useTurnosHoy({
     empresaId: empresaId || null,
@@ -6793,6 +6807,14 @@ export default function ModoRapidoPage() {
           </button>
           <Zap size={14} className="text-emerald-600 ml-1" />
           <span className="text-sm font-black text-slate-800">CC Modo Rápido</span>
+          {session.hasRoomManual && (
+            <span
+              className="ml-1 px-1.5 py-0.5 rounded-md bg-indigo-50 border border-indigo-200 text-[9px] font-black uppercase text-indigo-700"
+              title="Sala Manual: sin cascada ni alertas automáticas en el CC clásico"
+            >
+              Manual
+            </span>
+          )}
           <button
             type="button"
             onClick={() => {

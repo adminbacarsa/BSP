@@ -315,6 +315,27 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
     const migracionCompleta = !!(empresa as any)?.migracionCompleta;
     const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
 
+    /** Sala Manual (CC o Modo Rápido): no fabricar novedades/alertas de protocolo desde el monitor. */
+    const [hasRoomManual, setHasRoomManual] = useState(false);
+    useEffect(() => {
+        if (!empresaId) {
+            setHasRoomManual(false);
+            return;
+        }
+        const q = query(
+            collection(db, 'sesiones_operador'),
+            where('empresaId', '==', empresaId),
+            where('status', '==', 'ACTIVO'),
+            limit(1),
+        );
+        const unsub = onSnapshot(
+            q,
+            (snap) => setHasRoomManual(!snap.empty),
+            () => setHasRoomManual(false),
+        );
+        return () => unsub();
+    }, [empresaId]);
+
     // Fuerza re-suscripción de listeners al volver de background o reconectar red.
     // El intervalo periódico fue eliminado: Firestore gestiona la reconexión internamente
     // y el onError del listener de turnos ya llama setRefreshKey ante fallos de red.
@@ -1341,6 +1362,8 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
     const autoAbsentedIds = useRef<Set<string>>(new Set());
     useEffect(() => {
         if (staleBuild) return;
+        // Manual / Modo Rápido: el operador cubre en el tablero; no generar alertas CC.
+        if (hasRoomManual) return;
         const virtualVacs = processedData.filter((s: any) => s.isVirtual && isSameDay(s.shiftDateObj, now));
         if (!virtualVacs.length) return;
         const nowMs = now.getTime();
@@ -1523,7 +1546,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 })
                 .catch(e => console.warn('[retentionLarga:check]', e));
         }
-    }, [processedData, empresaId, staleBuild]);
+    }, [processedData, empresaId, staleBuild, hasRoomManual]);
 
     // isStable: se activa una sola vez cuando processedData se estabiliza después de isReady.
     // NO vuelve a false — evita que updates de Firestore muestren la pantalla de carga repetidamente.
