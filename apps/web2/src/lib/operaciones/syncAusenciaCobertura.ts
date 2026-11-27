@@ -537,8 +537,13 @@ export async function applyCoverage(
         isEarlyStart: true,
         adjustedStartTime: params.adjustedStartTime,
       });
-    } else if (ct === 'ESC' || ct === 'REF' || ct === 'RET') {
+    } else if (ct === 'ESC' || ct === 'REF') {
+      // ESC/REF: el planificado se convierte en cobertura (baja lógica); el ops_cov lleva la banda.
       batch.update(doc(db, 'turnos', sourceId), { ...(srcData ? buildEscRefSourceConvertedPatch(srcData, covDocId) : {}), ...parcheFuenteAnulada(covDocId, titularId) });
+    } else if (ct === 'RET') {
+      // Paridad con functions: RET solo marca coverageUsed (no soft-delete).
+      // Si se borraba, al deshacer a veces no volvía y Planificación quedaba en COB M.
+      batch.update(doc(db, 'turnos', sourceId), usedBase);
     } else if (ct === 'FT') {
       // FT conserva el franco origen (P9e): el FT real vive en el ops_cov.
       const srcCode = String(srcData?.code || srcData?.shiftCode || '').trim().toUpperCase();
@@ -738,6 +743,47 @@ export function clearTitularCoveragePatch(): Record<string, unknown> {
   };
 }
 
+/**
+ * Restaura turnos origen (RET/ESC/REF) vinculados a coberturas del titular.
+ * Incluye ops_cov ya supersedidas: si el deshacer falló a medias, el RET puede seguir
+ * soft-deleted (CONVERTIDO_EN_COBERTURA) y Planificación queda en COB M.
+ */
+export async function restoreCoverageSourcesForTitular(
+  db: Firestore,
+  titularShiftId: string,
+  batch: WriteBatch,
+  opts?: { extraSourceIds?: string[] | null },
+): Promise<number> {
+  const id = String(titularShiftId || '').trim();
+  if (!id) return 0;
+  const [byAbsence, byCovered, byCoverageFor] = await Promise.all([
+    getDocs(query(collection(db, 'turnos'), where('absenceShiftId', '==', id), limit(40))),
+    getDocs(query(collection(db, 'turnos'), where('coveredShiftId', '==', id), limit(40))),
+    getDocs(query(collection(db, 'turnos'), where('coverageForShiftId', '==', id), limit(40))),
+  ]);
+  const seenSrc = new Set<string>();
+  let n = 0;
+  const restoreOne = async (srcId: string) => {
+    const sid = String(srcId || '').trim();
+    if (!sid || seenSrc.has(sid)) return;
+    seenSrc.add(sid);
+    const srcSnap = await getDoc(doc(db, 'turnos', sid));
+    if (!srcSnap.exists()) return;
+    batch.update(
+      srcSnap.ref,
+      buildRestoreSourceShiftAfterCoveragePatch(srcSnap.data() as Record<string, unknown>),
+    );
+    n += 1;
+  };
+  for (const d of [...byAbsence.docs, ...byCovered.docs, ...byCoverageFor.docs]) {
+    await restoreOne(String((d.data() as Record<string, unknown>).sourceShiftId || ''));
+  }
+  for (const extra of opts?.extraSourceIds || []) {
+    await restoreOne(extra);
+  }
+  return n;
+}
+
 /** Soft-cancel OPERATIONS_COVERAGE previos del mismo absenceShiftId (cliente). */
 export async function supersedeOpsCoveragesForAbsence(
   db: Firestore,
@@ -763,12 +809,7 @@ export async function supersedeOpsCoveragesForAbsence(
     seen.add(d.id);
     if (opts?.keepDocId && d.id === opts.keepDocId) continue;
     const data = d.data() as Record<string, unknown>;
-    if (!isActiveOpsCoverageDoc(data)) continue;
-    const onlyCt = String(opts?.onlySupersedeCoverageType || '').trim().toUpperCase();
-    if (onlyCt) {
-      const docCt = String(data.coverageType || '').toUpperCase();
-      if (docCt !== onlyCt) continue;
-    }
+    // Siempre intentar restaurar origen (también si la cobertura ya estaba cancelada).
     const prevSource = String(data.sourceShiftId || '').trim();
     if (prevSource) {
       const srcSnap = await getDoc(doc(db, 'turnos', prevSource));
@@ -778,6 +819,12 @@ export async function supersedeOpsCoveragesForAbsence(
           buildRestoreSourceShiftAfterCoveragePatch(srcSnap.data() as Record<string, unknown>),
         );
       }
+    }
+    if (!isActiveOpsCoverageDoc(data)) continue;
+    const onlyCt = String(opts?.onlySupersedeCoverageType || '').trim().toUpperCase();
+    if (onlyCt) {
+      const docCt = String(data.coverageType || '').toUpperCase();
+      if (docCt !== onlyCt) continue;
     }
     batch.update(d.ref, {
       coverageSuperseded: true,

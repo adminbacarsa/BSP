@@ -82,6 +82,7 @@ import {
   applyCoverage,
   clearTitularCoveragePatch,
   CoverageApplyError,
+  restoreCoverageSourcesForTitular,
   supersedeOpsCoveragesForAbsence,
   syncAusenciaCoberturaGestionada,
 } from '@/lib/operaciones/syncAusenciaCobertura';
@@ -4831,6 +4832,19 @@ export default function ModoRapidoPage() {
     });
     if (!ok) return;
 
+    // Origen del cubridor (RET) si deshacemos desde la fila COB.
+    let extraSourceIds: string[] = [];
+    if (esFilaCobertura) {
+      const covId = docIdDe(row.turno.rowId);
+      try {
+        const covSnap = await leerTurnoRapido(covId);
+        const src = String((covSnap.data() as Record<string, unknown> | undefined)?.sourceShiftId || '').trim();
+        if (src) extraSourceIds = [src];
+      } catch {
+        /* ignore */
+      }
+    }
+
     // Titular ausente: motor oficial (cancela ops_cov, restaura RET y revierte la AA).
     if (titularAusente) {
       const titularRow: GuardRowModel = {
@@ -4851,15 +4865,20 @@ export default function ModoRapidoPage() {
       };
       setRevertirChoice(null);
       await ejecutarReversionAusencia(titularRow, true);
-      // Remanentes de retiro (RET_COBERTURA) a veces no llevan absenceShiftId: limpiarlos acá.
+      // Remanentes + forzar restauración del RET aunque la cobertura ya estuviera cancelada.
       try {
+        const batchFix = writeBatch(db);
+        await restoreCoverageSourcesForTitular(db, titularId, batchFix, { extraSourceIds });
+        await supersedeOpsCoveragesForAbsence(db, titularId, batchFix, {
+          supersededBy: user?.uid ?? 'cc-modo-rapido',
+        });
         const remSnap = await getDocs(
           query(collection(db, 'turnos'), where('remanenteDeTurnoId', '==', titularId), limit(10)),
         );
         for (const d of remSnap.docs) {
           if (d.data().coverageSuperseded === true) continue;
           const srcRet = String(d.data().coberturaDesdeTurnoId || '').trim();
-          await updateDoc(d.ref, {
+          batchFix.update(d.ref, {
             status: 'CANCELLED',
             coverageSuperseded: true,
             coverageSupersededAt: serverTimestamp(),
@@ -4867,11 +4886,12 @@ export default function ModoRapidoPage() {
             coverageSupersededReason: 'DESHACER_COBERTURA_MR',
           });
           if (srcRet) {
-            await updateDoc(doc(db, 'turnos', srcRet), { coverageAssignedTo: deleteField() });
+            batchFix.update(doc(db, 'turnos', srcRet), { coverageAssignedTo: deleteField() });
           }
         }
+        await batchFix.commit();
       } catch (err) {
-        console.warn('[modo-rapido] remanente al deshacer cobertura', err);
+        console.warn('[modo-rapido] remanente/origen al deshacer cobertura', err);
       }
       return;
     }
@@ -4881,6 +4901,7 @@ export default function ModoRapidoPage() {
     try {
       await recordarTurno(titularId);
       const batch = writeBatch(db);
+      await restoreCoverageSourcesForTitular(db, titularId, batch, { extraSourceIds });
       await supersedeOpsCoveragesForAbsence(db, titularId, batch, {
         supersededBy: user?.uid ?? 'cc-modo-rapido',
       });

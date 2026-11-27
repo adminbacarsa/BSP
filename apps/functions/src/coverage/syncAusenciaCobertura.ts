@@ -308,12 +308,7 @@ export async function supersedeOpsCoveragesForAbsence(
     seen.add(d.id);
     if (opts?.keepDocId && d.id === opts.keepDocId) continue;
     const data = d.data();
-    if (!isActiveOpsCoverageDoc(data)) continue;
-    const onlyCt = String(opts?.onlySupersedeCoverageType || '').trim().toUpperCase();
-    if (onlyCt) {
-      const docCt = String(data.coverageType || '').toUpperCase();
-      if (docCt !== onlyCt) continue;
-    }
+    // Restaurar origen también si la cobertura ya estaba cancelada (RET soft-deleted a medias).
     const prevSource = String(data.sourceShiftId || '').trim();
     if (prevSource) {
       const srcSnap = await db.collection('turnos').doc(prevSource).get();
@@ -323,6 +318,12 @@ export async function supersedeOpsCoveragesForAbsence(
           buildRestoreSourceShiftAfterCoveragePatch(srcSnap.data() as Record<string, unknown>),
         );
       }
+    }
+    if (!isActiveOpsCoverageDoc(data)) continue;
+    const onlyCt = String(opts?.onlySupersedeCoverageType || '').trim().toUpperCase();
+    if (onlyCt) {
+      const docCt = String(data.coverageType || '').toUpperCase();
+      if (docCt !== onlyCt) continue;
     }
     batch.update(d.ref, {
       coverageSuperseded: true,
