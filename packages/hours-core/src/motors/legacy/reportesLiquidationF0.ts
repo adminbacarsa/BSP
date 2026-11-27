@@ -981,7 +981,8 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
             } else if (isFT && !francoDocSkipIds.has(d.id)) {
                 worked = resolveFtLiquidationHours(d, duration);
             } else if (isRet) {
-                worked = duration; // Fix 5: RET sin fichada usa horas referenciales
+                // RET stand-by no ficha: no inventar reales = 8 h referenciales.
+                worked = 0;
             } else if (usePlannedHours) {
                 worked = liquidationBillableHoursForShift(d);
                 if (worked <= 0) worked = Math.min(Math.max(0, duration), 24);

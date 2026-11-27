@@ -910,6 +910,8 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
     let horasDespliegue = 0;     // teóricas RET + REF + ESC (fuera de cobertura)
     let totalDiurnas = 0;
     let totalNocturnas = 0;
+    let diurnasPlan = 0;         // desglose teórico cobertura (para Costos por Objetivo)
+    let nocturnasPlan = 0;
     let hoursFT = 0;           // teóricas FT (para horasTeoricas)
     let horasFTReal = 0;       // reales FT trabajadas (para extra100 y extra50)
     let hoursFeriado = 0;
@@ -984,10 +986,16 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
             const hasPlannedTimes = !!(parseShiftInstant(d.startTime) && parseShiftInstant(d.endTime));
             if (isFT) {
                 hoursFT += duration;
+                diurnasPlan += day;
+                nocturnasPlan += night;
             } else if (isDespliegue && hasPlannedTimes) {
+                // RET ref. 8 h queda en despliegue (libro persona). En pestaña Objetivos el KPI
+                // no lo mira: suma objectiveReport donde RET no entra (0 facturable).
                 horasDespliegue += duration;
             } else if (hasPlannedTimes) {
                 hoursTotalOperativas += duration;
+                diurnasPlan += day;
+                nocturnasPlan += night;
             }
 
             // Horas reales: fichada real. Turnos futuros sin ingreso no cuentan.
@@ -1043,7 +1051,8 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
             } else if (isFT && !francoDocSkipIds.has(d.id)) {
                 worked = resolveFtLiquidationHours(d, duration);
             } else if (isRet) {
-                worked = duration; // Fix 5: RET sin fichada usa horas referenciales
+                // RET no ficha (stand-by). No inventar “reales” = 8 h referenciales.
+                worked = 0;
             } else if (usePlannedHours) {
                 worked = liquidationBillableHoursForShift(d);
                 if (worked <= 0) worked = Math.min(Math.max(0, duration), 24);
@@ -1095,6 +1104,8 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
         horasSimples,
         totalDiurnas,
         totalNocturnas,
+        diurnasPlan,
+        nocturnasPlan,
         extra50: excess,
         extra100: horasFTReal, // Fix 1: usar horas FT reales, no teóricas
         plusFeriado: hoursFeriado,
@@ -2198,15 +2209,17 @@ export const useReportes = (forcedClientId?: string | null) => {
                     shifts: staffedShifts.length,
                     vacantShifts: vacantRawShifts.length,
                     vacantHours,
-                    total: stats.horasTeoricas,
-                    horasTeoricas: stats.horasTeoricas,
+                    // Costos por objetivo = cobertura planificada (RET no factura ni entra acá).
+                    total: stats.horasCobertura,
+                    horasTeoricas: stats.horasCobertura,
                     horasCobertura: stats.horasCobertura,
                     horasDespliegue: stats.horasDespliegue,
-                    horasReales: stats.horasReales,
+                    horasReales: stats.horasRealesCobertura,
                     horasRealesCobertura: stats.horasRealesCobertura,
                     horasRealesDespliegue: stats.horasRealesDespliegue,
-                    diurnas: stats.totalDiurnas,
-                    nocturnas: stats.totalNocturnas,
+                    // Diurnas/noct. alineadas al total teórico (no al avance en vivo del día).
+                    diurnas: (stats as any).diurnasPlan ?? stats.totalDiurnas,
+                    nocturnas: (stats as any).nocturnasPlan ?? stats.totalNocturnas,
                     extra50: stats.extra50,
                     extra100: stats.extra100,
                     plusFeriado: stats.plusFeriado,

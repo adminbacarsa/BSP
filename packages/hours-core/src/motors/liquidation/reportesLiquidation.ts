@@ -952,6 +952,8 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
     let horasDespliegue = 0;     // teóricas RET + REF + ESC (fuera de cobertura)
     let totalDiurnas = 0;
     let totalNocturnas = 0;
+    let diurnasPlan = 0;
+    let nocturnasPlan = 0;
     let hoursFT = 0;           // teóricas FT (para horasTeoricas)
     let horasFTReal = 0;       // reales FT trabajadas (para extra100 y extra50)
     let hoursFeriado = 0;
@@ -1044,10 +1046,14 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
             const hasPlannedTimes = !!(parseShiftInstant(d.startTime) && parseShiftInstant(d.endTime));
             if (isFT) {
                 hoursFT += duration;
+                diurnasPlan += day;
+                nocturnasPlan += night;
             } else if (isDespliegue && hasPlannedTimes) {
                 horasDespliegue += duration;
             } else if (hasPlannedTimes) {
                 hoursTotalOperativas += duration;
+                diurnasPlan += day;
+                nocturnasPlan += night;
             }
 
             // Horas reales: fichada real. Futuros sin ingreso no cuentan.
@@ -1122,7 +1128,8 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
             } else if (isFT && !francoDocSkipIds.has(d.id)) {
                 worked = resolveFtLiquidationHours(d, duration);
             } else if (isRet) {
-                worked = duration; // Fix 5: RET sin fichada usa horas referenciales
+                // RET stand-by no ficha: no inventar reales = 8 h referenciales.
+                worked = 0;
             } else if (usePlannedHours) {
                 worked = liquidationBillableHoursForShift(d);
                 if (worked <= 0) worked = Math.min(Math.max(0, duration), 24);
@@ -1220,6 +1227,8 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
         horasSimples,
         totalDiurnas,
         totalNocturnas,
+        diurnasPlan,
+        nocturnasPlan,
         extra50: excess,
         extra100: horasFTReal, // Fix 1: usar horas FT reales, no teóricas
         plusFeriado: hoursFeriado,

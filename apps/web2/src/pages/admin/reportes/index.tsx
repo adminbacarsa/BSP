@@ -2841,13 +2841,20 @@ export default function ReportsPage() {
                 {(employeeReport.length > 0 || objectiveReport.length > 0) && (() => {
                     const sumEmp = (key: string) =>
                         employeeReport.reduce((a, c) => a + (Number((c as any)[key]) || 0), 0);
-                    const planCob = sumEmp('horasCobertura');
-                    const planFuera = sumEmp('horasDespliegue');
-                    const realCob = sumEmp('horasRealesCobertura');
-                    const realFuera = sumEmp('horasRealesDespliegue');
+                    const sumObj = (key: string) =>
+                        objectiveReport.reduce((a, c) => a + (Number((c as any)[key]) || 0), 0);
+                    // En Objetivos los KPI miran objectiveReport (sin RET de otros lados).
+                    // En Empleado/Liquidación siguen el libro por legajo.
+                    const fromObj = activeTab === 'OBJECTIVE';
+                    const planCob = fromObj ? sumObj('horasCobertura') : sumEmp('horasCobertura');
+                    const planFuera = fromObj ? sumObj('horasDespliegue') : sumEmp('horasDespliegue');
+                    const realCob = fromObj ? sumObj('horasRealesCobertura') : sumEmp('horasRealesCobertura');
+                    const realFuera = fromObj ? sumObj('horasRealesDespliegue') : sumEmp('horasRealesDespliegue');
                     // Fallback si el reporte se generó antes del split
-                    const planTotalFallback = sumEmp('horasTeoricas') || sumEmp('total');
-                    const realTotalFallback = sumEmp('horasReales');
+                    const planTotalFallback = fromObj
+                        ? (sumObj('horasTeoricas') || sumObj('total'))
+                        : (sumEmp('horasTeoricas') || sumEmp('total'));
+                    const realTotalFallback = fromObj ? sumObj('horasReales') : sumEmp('horasReales');
                     const planCobShow = planCob > 0 || planFuera > 0 ? planCob : planTotalFallback;
                     const realCobShow = realCob > 0 || realFuera > 0 ? realCob : realTotalFallback;
 
@@ -2915,21 +2922,21 @@ export default function ReportsPage() {
                                   {
                                       label: 'Fuera cob.',
                                       value: planFuera.toFixed(1),
-                                      sub: 'RET + REF + ESC teóricas',
+                                      sub: fromObj ? 'REF/ESC del objetivo (RET no factura)' : 'RET + REF + ESC teóricas',
                                       icon: '📦',
                                       color: 'from-amber-500 to-amber-600',
                                   },
                                   {
                                       label: 'Reales cob.',
                                       value: realCobShow.toFixed(1),
-                                      sub: 'horas trabajadas cobertura',
+                                      sub: 'horas fichadas cobertura (en vivo)',
                                       icon: '✅',
                                       color: 'from-emerald-500 to-emerald-600',
                                   },
                                   {
                                       label: 'Reales fuera',
                                       value: realFuera.toFixed(1),
-                                      sub: 'RET + REF + ESC reales',
+                                      sub: fromObj ? 'REF/ESC fichadas' : 'REF/ESC fichadas (RET=0)',
                                       icon: '📤',
                                       color: 'from-teal-500 to-teal-600',
                                   },
