@@ -313,12 +313,53 @@ export function isShiftPublishedForReports(shift: any, publishStatusMap: Record<
     return pubKey ? !!publishStatusMap[pubKey] : false;
 }
 
+/** Cobertura ops sin titular ausente/cubierto (tras deshacer cobertura). */
+export function isOrphanOpsCoverageShift(
+    shift: any,
+    shiftById: Record<string, any>,
+): boolean {
+    if (!shift) return false;
+    if (shift.coverageSuperseded === true || shift.isDeleted === true) return true;
+    const origin = String(shift.origin || '').toUpperCase();
+    const id = String(shift.id || '');
+    const isOpsCov =
+        origin === 'OPERATIONS_COVERAGE'
+        || origin === 'RET_COBERTURA'
+        || id.startsWith('ops_cov_');
+    if (!isOpsCov) return false;
+    if (String(shift.status || '').toUpperCase() === 'CANCELLED') return true;
+    if (
+        shift.coverageHoursOnSource === true
+        || ['EXTEND', 'ADVANCE'].includes(String(shift.coverageType || '').toUpperCase())
+    ) {
+        return false;
+    }
+    const titularId = String(
+        shift.absenceShiftId || shift.coveredShiftId || shift.coverageForShiftId || shift.remanenteDeTurnoId || '',
+    ).trim();
+    if (!titularId) return false;
+    const titular = shiftById[titularId];
+    if (!titular) return false;
+    const titularAbsent =
+        titular.isAbsent === true || String(titular.status || '').toUpperCase() === 'ABSENT';
+    const covSt = String(titular.coverageStatus || '').toUpperCase();
+    const coverageActive = covSt === 'COVERED' || covSt === 'PARTIAL';
+    const coveredById = String(titular.coveredByEmployeeId || '').trim();
+    const me = String(shift.employeeId || '').trim();
+    if (coveredById && me && coveredById !== me) return true;
+    if (!titularAbsent && !coverageActive && !coveredById) return true;
+    return false;
+}
+
 export function isShiftEligibleForReports(
     shift: any,
     publishStatusMap: Record<string, boolean>,
     publishFilter: ReportPublishFilter = 'published',
 ): boolean {
     if (!shift?.startTime || !shift?.endTime) return false;
+    if (shift?.coverageSuperseded === true || shift?.isDeleted === true) return false;
+    const statusUpper = String(shift?.status || '').toUpperCase();
+    if (statusUpper === 'CANCELLED' && isOperationalOriginShift(shift)) return false;
 
     const isDraft = shift?.draft === true;
     const isPublished = isShiftPublishedForReports(shift, publishStatusMap);

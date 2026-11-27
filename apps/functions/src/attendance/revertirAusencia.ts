@@ -39,14 +39,17 @@ export async function revertirAusenciaShift(
 
   // La cobertura de un hueco de evento se escribe con origin EVENTO (mismo shape que el EV):
   // se filtra por vínculo y estado, no por origin.
-  const activeCovSnap = await db
-    .collection('turnos')
-    .where('absenceShiftId', '==', shiftId)
-    .limit(10)
-    .get();
-  const activeCov = activeCovSnap.docs.filter(
-    (d) => isActiveOpsCoverageDoc(d.data()) && String(d.data().status || '').toUpperCase() !== 'CANCELLED',
-  );
+  const [byAbsence, byCovered, byCoverageFor] = await Promise.all([
+    db.collection('turnos').where('absenceShiftId', '==', shiftId).limit(20).get(),
+    db.collection('turnos').where('coveredShiftId', '==', shiftId).limit(20).get(),
+    db.collection('turnos').where('coverageForShiftId', '==', shiftId).limit(20).get(),
+  ]);
+  const seenCov = new Set<string>();
+  const activeCov = [...byAbsence.docs, ...byCovered.docs, ...byCoverageFor.docs].filter((d) => {
+    if (seenCov.has(d.id)) return false;
+    seenCov.add(d.id);
+    return isActiveOpsCoverageDoc(d.data()) && String(d.data().status || '').toUpperCase() !== 'CANCELLED';
+  });
 
   if (activeCov.length > 0 && input.cancelCoverage !== true) {
     return { success: false, reason: 'COVERAGE_IN_PROGRESS' };
@@ -188,6 +191,15 @@ export async function revertirAusenciaShift(
       operacionallyCovered: false,
       coverageStatus: FieldValue.delete(),
       coverageUsed: FieldValue.delete(),
+      coverageType: FieldValue.delete(),
+      coverageDocId: FieldValue.delete(),
+      coveredByEmployeeId: FieldValue.delete(),
+      coveredByEmployeeName: FieldValue.delete(),
+      coveredAt: FieldValue.delete(),
+      coveringDisplayName: FieldValue.delete(),
+      coveredBy: FieldValue.delete(),
+      coverageConvocatoriaId: FieldValue.delete(),
+      coverageClaimConvocatoriaId: FieldValue.delete(),
     });
   }
 

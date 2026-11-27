@@ -751,13 +751,14 @@ export async function supersedeOpsCoveragesForAbsence(
 ): Promise<number> {
   const id = String(absenceShiftId || '').trim();
   if (!id) return 0;
-  const [byAbsence, byCovered] = await Promise.all([
+  const [byAbsence, byCovered, byCoverageFor] = await Promise.all([
     getDocs(query(collection(db, 'turnos'), where('absenceShiftId', '==', id), limit(40))),
     getDocs(query(collection(db, 'turnos'), where('coveredShiftId', '==', id), limit(40))),
+    getDocs(query(collection(db, 'turnos'), where('coverageForShiftId', '==', id), limit(40))),
   ]);
   const seen = new Set<string>();
   let n = 0;
-  for (const d of [...byAbsence.docs, ...byCovered.docs]) {
+  for (const d of [...byAbsence.docs, ...byCovered.docs, ...byCoverageFor.docs]) {
     if (seen.has(d.id)) continue;
     seen.add(d.id);
     if (opts?.keepDocId && d.id === opts.keepDocId) continue;

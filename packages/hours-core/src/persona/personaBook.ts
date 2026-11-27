@@ -2,6 +2,7 @@ import {
     calculateLiquidationHoursStats,
     dedupeShiftsByAbsencePriority,
     isShiftEligibleForReports,
+    isOrphanOpsCoverageShift,
     isShiftPublishedForReports,
     prepareShiftsForEmployeeLiquidation,
     propagateFrancoTrabajadoFlags,
@@ -138,7 +139,14 @@ export function buildPersonaBook(input: PersonaBookInput): PersonaBook {
         });
     }
 
-    const rawShifts = input.turnos.filter((d: any) => isShiftEligibleForReports(d, publishStatusMap, publishFilter));
+    const shiftByIdForOrphan: Record<string, any> = {};
+    for (const s of input.turnos) {
+        if (s?.id) shiftByIdForOrphan[s.id] = s;
+    }
+    const rawShifts = input.turnos.filter((d: any) =>
+        isShiftEligibleForReports(d, publishStatusMap, publishFilter)
+        && !isOrphanOpsCoverageShift(d, shiftByIdForOrphan)
+    );
 
     const absenceById: Record<string, any> = {};
     const absenceByEmpDate: Record<string, any> = {};

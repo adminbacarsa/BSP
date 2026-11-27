@@ -317,12 +317,58 @@ export function isShiftPublishedForReports(shift: any, publishStatusMap: Record<
     return pubKey ? !!publishStatusMap[pubKey] : false;
 }
 
+/**
+ * Cobertura ops que ya no tiene titular ausente/cubierto (p.ej. tras Deshacer cobertura
+ * sin coverageSuperseded en el doc). No debe listarse ni liquidarse.
+ */
+export function isOrphanOpsCoverageShift(
+    shift: any,
+    shiftById: Record<string, any>,
+): boolean {
+    if (!shift) return false;
+    if (shift.coverageSuperseded === true || shift.isDeleted === true) return true;
+    const origin = String(shift.origin || '').toUpperCase();
+    const id = String(shift.id || '');
+    const isOpsCov =
+        origin === 'OPERATIONS_COVERAGE'
+        || origin === 'RET_COBERTURA'
+        || id.startsWith('ops_cov_');
+    if (!isOpsCov) return false;
+    if (String(shift.status || '').toUpperCase() === 'CANCELLED') return true;
+    // Ext/Adel de registro: viven en el turno fuente; no aplicar heurística de titular.
+    if (
+        shift.coverageHoursOnSource === true
+        || ['EXTEND', 'ADVANCE'].includes(String(shift.coverageType || '').toUpperCase())
+    ) {
+        return false;
+    }
+    const titularId = String(
+        shift.absenceShiftId || shift.coveredShiftId || shift.coverageForShiftId || shift.remanenteDeTurnoId || '',
+    ).trim();
+    if (!titularId) return false;
+    const titular = shiftById[titularId];
+    if (!titular) return false;
+    const titularAbsent =
+        titular.isAbsent === true || String(titular.status || '').toUpperCase() === 'ABSENT';
+    const covSt = String(titular.coverageStatus || '').toUpperCase();
+    const coverageActive = covSt === 'COVERED' || covSt === 'PARTIAL';
+    const coveredById = String(titular.coveredByEmployeeId || '').trim();
+    const me = String(shift.employeeId || '').trim();
+    if (coveredById && me && coveredById !== me) return true;
+    if (!titularAbsent && !coverageActive && !coveredById) return true;
+    return false;
+}
+
 export function isShiftEligibleForReports(
     shift: any,
     publishStatusMap: Record<string, boolean>,
     publishFilter: ReportPublishFilter = 'published',
 ): boolean {
     if (!shift?.startTime || !shift?.endTime) return false;
+    // Cobertura deshecha / soft-delete: no liquidar ni listar (ej. Manuel tras “Deshacer cobertura”).
+    if (shift?.coverageSuperseded === true || shift?.isDeleted === true) return false;
+    const statusUpper = String(shift?.status || '').toUpperCase();
+    if (statusUpper === 'CANCELLED' && isOperationalOriginShift(shift)) return false;
 
     const isDraft = shift?.draft === true;
     const isPublished = isShiftPublishedForReports(shift, publishStatusMap);
@@ -877,6 +923,7 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
         try {
             const st = (d.status || '').toLowerCase();
             if (st.includes('cancel') || st.includes('delet')) return;
+            if (d.coverageSuperseded === true || d.isDeleted === true) return;
             if (d.type === 'NOVEDAD') return;
             if (
                 d.coverageHoursOnSource === true
@@ -1714,9 +1761,14 @@ export const useReportes = (forcedClientId?: string | null) => {
                     if (s.isFrancoTrabajado || s._inferredFrancoTrabajado) ftShiftIds.add(s.id);
                 });
             });
-            // rawShifts filtrado normalmente
+            const shiftByIdForOrphan: Record<string, any> = {};
+            allShiftsBase.forEach((s: any) => {
+                if (s?.id) shiftByIdForOrphan[s.id] = s;
+            });
+            // rawShifts filtrado normalmente (+ coberturas huérfanas tras deshacer)
             const rawShifts = allShiftsBase.filter((d: any) =>
                 isShiftEligibleForReports(d, publishStatusMap, publishFilter)
+                && !isOrphanOpsCoverageShift(d, shiftByIdForOrphan)
             );
 
             const absenceById: Record<string, any> = {};

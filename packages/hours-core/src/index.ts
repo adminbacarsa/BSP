@@ -127,6 +127,7 @@ export {
   shouldBillShiftToObjective,
   shiftCalendarDateKey as personaShiftDateKey,
   isShiftEligibleForReports,
+  isOrphanOpsCoverageShift,
   PAID_LEAVE_CODES,
   type ReportPublishFilter,
 } from './motors/liquidation/reportesLiquidation';
