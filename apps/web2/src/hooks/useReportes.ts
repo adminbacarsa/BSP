@@ -1854,6 +1854,29 @@ export const useReportes = (forcedClientId?: string | null) => {
                 return false;
             };
 
+            /** Titular fichó / marcado presente: no etiquetar “Cubrió a …”. */
+            const isPresentTitular = (r: any): boolean => {
+                if (!r || isAbsentShift(r) || blocksCoveringLabel(r)) return false;
+                if (r.isUnassigned || r.employeeId === 'VACANTE') return false;
+                const st = String(r.status || '').toUpperCase();
+                if (st === 'PRESENT' || r.isPresent === true) return true;
+                if (r.realStartTime || r.checkInTime || r.checkInAt) return true;
+                return false;
+            };
+
+            const titularNameIsAbsentThatDay = (titularName: string, dk: string | null): boolean => {
+                if (!dk || !titularName) return false;
+                const norm = titularName.trim().toLowerCase();
+                const isVacanteLabel = norm.startsWith('vacante');
+                if (isVacanteLabel) return true;
+                return rawShifts.some((r: any) => {
+                    if (shiftCalendarDateKey(r) !== dk) return false;
+                    const n = String(r.employeeName || empMap[r.employeeId] || '').trim().toLowerCase();
+                    if (n !== norm) return false;
+                    return isAbsentShift(r) || blocksCoveringLabel(r);
+                });
+            };
+
             // Resolver qué cubría un retén/adelanto a partir del shift referenciado
             const resolveCoveringFor = (s: any, dk: string | null): string | null => {
                 // Ausente/licencia no “cubre” a nadie: lo cubren a él (o no aplica).
@@ -1870,14 +1893,23 @@ export const useReportes = (forcedClientId?: string | null) => {
                         const code = (ref.code || '').toUpperCase();
                         return `Vacante${pos ? ' ' + pos : ''}${code ? ' (' + code + ')' : ''}`;
                     }
+                    // Titular presente (ej. Allasia fichó): no decir que Manuel lo cubrió.
+                    if (isPresentTitular(ref) && !isAbsentShift(ref)) return null;
                     return ref.employeeName || null;
                 }
                 // 2. Mapa inverso: ausente apunta al cubridore (solo si este turno es cobertura ops)
                 if (dk && isOperationalCoverShift(s) && coveringForByEmpIdDate[`${s.employeeId}_${dk}`]) {
-                    return coveringForByEmpIdDate[`${s.employeeId}_${dk}`];
+                    const desc = coveringForByEmpIdDate[`${s.employeeId}_${dk}`];
+                    if (desc.startsWith('Vacante') || titularNameIsAbsentThatDay(desc, dk)) return desc;
+                    return null;
                 }
                 // 3. Relevo directo
-                if (s.relievedEmployeeName) return s.relievedEmployeeName;
+                if (s.relievedEmployeeName) {
+                    if (titularNameIsAbsentThatDay(String(s.relievedEmployeeName), dk)) {
+                        return s.relievedEmployeeName;
+                    }
+                    return null;
+                }
                 // 4. Fallback SOLO en turnos operativos (Ext/Adel/RET): nunca en malla planificada del titular
                 if (dk && s.objectiveId && s.positionName && isOperationalCoverShift(s)) {
                     const sameSlotAbsent = rawShifts.find((r: any) =>
@@ -1888,6 +1920,15 @@ export const useReportes = (forcedClientId?: string | null) => {
                         shiftCalendarDateKey(r) === dk
                     );
                     if (sameSlotAbsent?.employeeName) return sameSlotAbsent.employeeName;
+                    // No inventar “Vacante …” si en el mismo slot hay titular presente.
+                    const sameSlotPresent = rawShifts.find((r: any) =>
+                        r.id !== s.id &&
+                        isPresentTitular(r) &&
+                        r.objectiveId === s.objectiveId &&
+                        (r.positionName || '').trim().toLowerCase() === (s.positionName || '').trim().toLowerCase() &&
+                        shiftCalendarDateKey(r) === dk
+                    );
+                    if (sameSlotPresent) return null;
                     const isOpsShift = ['RETEN','EARLY_START','OPERATIONS_COVERAGE'].includes((s.origin||'').toUpperCase());
                     if (isOpsShift) return `Vacante ${s.positionName || ''}`;
                 }
@@ -1905,11 +1946,15 @@ export const useReportes = (forcedClientId?: string | null) => {
                     || null;
 
                 // A quién / qué cubrió este turno operativo (nunca en ausente/licencia ni malla titular sin marca ops)
-                const coveringFor = blocksCoveringLabel(s)
+                let coveringFor = blocksCoveringLabel(s)
                     ? null
                     : (resolveCoveringFor(s, dk)
                         || (dk && isOperationalCoverShift(s) ? coveringForByEmpDate[`${s.employeeId}_${dk}`] : null)
                         || null);
+                // Comentario/mapa viejo “Cubriendo a X” si X está presente → no mostrar
+                if (coveringFor && !String(coveringFor).startsWith('Vacante') && !titularNameIsAbsentThatDay(String(coveringFor), dk)) {
+                    coveringFor = null;
+                }
 
                 return {
                     ...s,
