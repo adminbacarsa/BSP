@@ -550,10 +550,30 @@ function applyHHmmToShiftDate(base: Date, hhmm: string): Date {
     return withArClock(base, Number(m[1]), Number(m[2]));
 }
 
+/** Timestamp absoluto o HH:mm sobre el día de `base` (Ops guarda adjusted* como Timestamp). */
+function applyCoverageClockToShiftDate(base: Date, clock: unknown): Date {
+    const instant = parseShiftInstant(clock);
+    if (instant) return instant;
+    if (typeof clock === 'string') return applyHHmmToShiftDate(base, clock);
+    return new Date(base);
+}
+
 function hhmmToMinutes(hhmm: string): number | null {
     const m = String(hhmm).trim().slice(0, 5).match(/^(\d{1,2}):(\d{2})$/);
     if (!m) return null;
     return Number(m[1]) * 60 + Number(m[2]);
+}
+
+/** HH:mm AR desde string o Timestamp/Date. */
+function coverageClockHm(val: unknown): string {
+    if (typeof val === 'string' && /^\d{1,2}:\d{2}$/.test(val.trim())) {
+        const m = val.trim().match(/^(\d{1,2}):(\d{2})$/);
+        return m ? `${m[1].padStart(2, '0')}:${m[2]}` : '';
+    }
+    const at = parseShiftInstant(val);
+    if (!at) return '';
+    const x = new Date(at.getTime() - 3 * 3600000);
+    return `${String(x.getUTCHours()).padStart(2, '0')}:${String(x.getUTCMinutes()).padStart(2, '0')}`;
 }
 
 /** Tramo de cobertura que cierra antes del inicio de banda (ej. 18–22 antes de NO 22–06) → adelanto, no extensión al final. */
@@ -564,8 +584,8 @@ function coverageSegmentIsPreBandAdelanto(shift: any, bandStart: Date): boolean 
         || (shift?.isExtended ? (shift.adjustedEndTime || shift.extensionEndTime) : null);
     if (!segFrom || !segTo) return false;
     const bandMin = arMinutesOfDay(bandStart);
-    const fromM = hhmmToMinutes(String(segFrom));
-    const toM = hhmmToMinutes(String(segTo));
+    const fromM = hhmmToMinutes(coverageClockHm(segFrom));
+    const toM = hhmmToMinutes(coverageClockHm(segTo));
     if (fromM == null || toM == null) return false;
     const tol = 35;
     if (Math.abs(toM - bandMin) <= tol) return true;
@@ -600,12 +620,12 @@ export function resolveLiquidationPlannedWindow(
 
     if (isEarly) {
         const from = shift.adjustedStartTime || shift.segmentFromTime;
-        if (from) dispStart = applyHHmmToShiftDate(plannedStart, String(from));
+        if (from) dispStart = applyCoverageClockToShiftDate(plannedStart, from);
     }
     if (isExt) {
         const to = shift.adjustedEndTime || shift.extensionEndTime || shift.segmentToTime;
         if (to) {
-            dispEnd = applyHHmmToShiftDate(plannedEnd, String(to));
+            dispEnd = applyCoverageClockToShiftDate(plannedEnd, to);
             if (dispEnd.getTime() <= dispStart.getTime()) {
                 dispEnd = new Date(dispEnd.getTime() + 24 * 3600000);
             }

@@ -474,11 +474,13 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             where('startTime', '<=', Timestamp.fromDate(end)),
         );
         setShiftsFromServer(false);
-        const unsub = onSnapshot(turnosBase, { includeMetadataChanges: true }, (snap) => {
+        // Sin includeMetadataChanges: cada sync de IndexedDB/metadata re-armaba toda la planta
+        // y trababa Ops/Reportes. Cache → server bastan (2 eventos típicos).
+        const unsub = onSnapshot(turnosBase, (snap) => {
             setRawShifts(snap.docs
                 .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
                 .map(d => ({ id: d.id, ...d.data(), shiftDateObj: getSafeDate(d.data().startTime), endDateObj: getSafeDate(d.data().endTime) })));
-            setShiftsFromServer(!snap.metadata.fromCache);
+            if (!snap.metadata.fromCache) setShiftsFromServer(true);
             readyFlags.current.shifts = true; checkReady();
         }, (err) => {
             console.warn('[useOperacionesMonitor] turnos listener error, forzando reconexión:', err.code);

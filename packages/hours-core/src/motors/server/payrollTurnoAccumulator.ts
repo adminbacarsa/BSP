@@ -92,6 +92,16 @@ function authorizedExtensionEnd(data: Record<string, unknown>, plannedEnd: Date)
   const role = String(data.coverageSegmentRole || '').toUpperCase();
   if (data.isExtended !== true && role !== 'EXTENSION') return null;
   const raw = data.adjustedEndTime || data.extensionEndTime || data.segmentToTime;
+  if (raw && typeof (raw as { toDate?: () => Date }).toDate === 'function') {
+    const d = (raw as { toDate: () => Date }).toDate();
+    if (!isNaN(d.getTime()) && d.getTime() > plannedEnd.getTime()) return d;
+  }
+  const sec = (raw as { seconds?: number; _seconds?: number } | null)?.seconds
+    ?? (raw as { _seconds?: number } | null)?._seconds;
+  if (typeof sec === 'number' && sec > 0) {
+    const d = new Date(sec * 1000);
+    if (d.getTime() > plannedEnd.getTime()) return d;
+  }
   const m = String(raw || '').trim().slice(0, 5).match(/^(\d{1,2}):(\d{2})$/);
   if (!m) return null;
   const ymd = dateKeyAR(plannedEnd);

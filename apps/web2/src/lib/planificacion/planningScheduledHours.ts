@@ -30,6 +30,7 @@ export function hoursBetweenClockTimes(from: string, to: string): number | null 
 /**
  * Horas billables adicionales por extensión o adelanto de cobertura (split / cierre SLA).
  * El código base (E1, M, etc.) ya se suma aparte; esto es el tramo extra (segmentFrom→segmentTo).
+ * Modo Rápido / applyCoverage guarda adjusted* como Timestamp: se lee igual que HH:mm.
  */
 export function shiftCoverageExtensionExtraHours(
   shift: any,
@@ -37,10 +38,22 @@ export function shiftCoverageExtensionExtraHours(
 ): number {
   if (!shift || shift.isDeleted) return 0;
 
-  const fromRaw = shift.segmentFromTime
+  let fromRaw: unknown = shift.segmentFromTime
     || (shift.isEarlyStart ? shift.adjustedStartTime : null);
-  const toRaw = shift.segmentToTime
+  let toRaw: unknown = shift.segmentToTime
     || (shift.isExtended ? (shift.adjustedEndTime || shift.extensionEndTime) : null);
+
+  // Ops EXTEND/ADVANCE en el turno fuente: solo adjusted* (Timestamp), sin segment*.
+  if (!(fromRaw && toRaw)) {
+    if (shift.isExtended && (shift.adjustedEndTime || shift.extensionEndTime)) {
+      fromRaw = fromRaw || shift.endTime;
+      toRaw = toRaw || shift.adjustedEndTime || shift.extensionEndTime;
+    }
+    if (shift.isEarlyStart && shift.adjustedStartTime) {
+      fromRaw = fromRaw || shift.adjustedStartTime;
+      toRaw = toRaw || shift.startTime;
+    }
+  }
 
   const hasCoverageSegment = !!(
     shift.coveragePackageId
@@ -51,17 +64,19 @@ export function shiftCoverageExtensionExtraHours(
   );
 
   if (fromRaw && toRaw && hasCoverageSegment) {
-    const from = String(fromRaw).slice(0, 5);
-    const to = String(toRaw).slice(0, 5);
-    if (from === to) return 0;
-    const h = hoursBetweenClockTimes(from, to);
-    if (h != null && h >= 0.25 && h <= 6) {
-      const code = String(shift.code || '').toUpperCase();
-      const codeBase = SHIFT_HOURS_LOOKUP[code] ?? slaHoursHint?.[code];
-      if (codeBase !== undefined && h >= codeBase - 0.5) {
-        return Math.max(0, Math.min(h - codeBase, 12));
+    const from = horaArDe(fromRaw);
+    const to = horaArDe(toRaw);
+    if (from && to) {
+      if (from === to) return 0;
+      const h = hoursBetweenClockTimes(from, to);
+      if (h != null && h >= 0.25 && h <= 6) {
+        const code = String(shift.code || '').toUpperCase();
+        const codeBase = SHIFT_HOURS_LOOKUP[code] ?? slaHoursHint?.[code];
+        if (codeBase !== undefined && h >= codeBase - 0.5) {
+          return Math.max(0, Math.min(h - codeBase, 12));
+        }
+        return Math.min(h, 12);
       }
-      return Math.min(h, 12);
     }
   }
 
@@ -73,21 +88,23 @@ export function shiftCoverageExtensionExtraHours(
   if (!shift.isExtended && !shift.isEarlyStart) return 0;
 
   if (fromRaw && toRaw) {
-    const from = String(fromRaw).slice(0, 5);
-    const to = String(toRaw).slice(0, 5);
-    const h = hoursBetweenClockTimes(from, to);
-    if (h != null && h > 0) {
-      if (h < 0.25) return 0;
-      const code = String(shift.code || '').toUpperCase();
-      const codeBase = SHIFT_HOURS_LOOKUP[code] ?? slaHoursHint?.[code];
-      if (codeBase !== undefined && h >= codeBase - 0.5) {
-        return Math.max(0, Math.min(h - codeBase, 12));
+    const from = horaArDe(fromRaw);
+    const to = horaArDe(toRaw);
+    if (from && to) {
+      const h = hoursBetweenClockTimes(from, to);
+      if (h != null && h > 0) {
+        if (h < 0.25) return 0;
+        const code = String(shift.code || '').toUpperCase();
+        const codeBase = SHIFT_HOURS_LOOKUP[code] ?? slaHoursHint?.[code];
+        if (codeBase !== undefined && h >= codeBase - 0.5) {
+          return Math.max(0, Math.min(h - codeBase, 12));
+        }
+        if (h <= 5 && (shift.isExtended || shift.isEarlyStart)) return h;
+        if (codeBase !== undefined) {
+          return Math.max(0, Math.min(h - codeBase, 12));
+        }
+        return 0;
       }
-      if (h <= 5 && (shift.isExtended || shift.isEarlyStart)) return h;
-      if (codeBase !== undefined) {
-        return Math.max(0, Math.min(h - codeBase, 12));
-      }
-      return 0;
     }
   }
 
