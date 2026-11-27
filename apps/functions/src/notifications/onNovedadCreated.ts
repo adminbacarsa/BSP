@@ -52,12 +52,12 @@ export const onNovedadCreated = functions
     const db = admin.firestore();
     const empresaId: string | null = data?.empresaId || null;
 
-    // Sala Manual (CC o Modo Rápido): el operador ya está a mando — no push ni bandeja.
+    // Sala Manual o Modo Rápido por defecto: nadie mira el CC clásico — no push ni bandeja.
     if (empresaId) {
-      const { isEmpresaManualMode } = await import('../ops/opsManualMode');
-      if (await isEmpresaManualMode(db, empresaId)) {
+      const { shouldSuppressCcAutoAlerts } = await import('../ops/opsManualMode');
+      if (await shouldSuppressCcAutoAlerts(db, empresaId)) {
         console.log(
-          `[onNovedadCreated] Manual: sin push/bandeja type=${data?.type} empresa=${empresaId}`,
+          `[onNovedadCreated] Manual/MR-default: sin push/bandeja type=${data?.type} empresa=${empresaId}`,
         );
         return;
       }

@@ -49,7 +49,7 @@ import { runConvocadoFollowUp } from './attendance/convocadoFollowUp';
 import { revertConvocadoFalseAbsencesRun } from './attendance/revertConvocadoFalseAbsences';
 import { revertirAusenciaShift } from './attendance/revertirAusencia';
 import { loadPositionHasContinuity, positionHasContinuityFromSlaDoc } from './coverage/positionHasContinuity';
-import { isEmpresaManualMode } from './ops/opsManualMode';
+import { shouldSuppressCcAutoAlerts } from './ops/opsManualMode';
 import { sesionOperadorCallable } from './ops/sesionOperadorHandler';
 import { resolvePanelPermissionsCallable, resolveStaffProfileCallable } from './ops/resolveStaffProfileHandler';
 import { runAutoCompletarTurnosPass } from './scheduling/autoCompletarTurnosCore';
@@ -901,10 +901,10 @@ export const onTurnoAbsenciaDetectada = onDocumentUpdatedV2(
       return;
     }
 
-    const manual = cascadeCreatedBy !== 'MODO_DEMO' && (await isEmpresaManualMode(db, empresaId));
+    const manual = cascadeCreatedBy !== 'MODO_DEMO' && (await shouldSuppressCcAutoAlerts(db, empresaId));
     if (manual) {
       console.log(
-        `[onTurnoAbsenciaDetectada] Manual: solo retención, sin cascada empresa=${empresaId} shift=${event.params.shiftId}`,
+        `[onTurnoAbsenciaDetectada] Manual/MR-default: solo retención, sin cascada empresa=${empresaId} shift=${event.params.shiftId}`,
       );
       return;
     }
@@ -3014,8 +3014,8 @@ export const gestionarVacantes = functions
         await docSnap.ref.update({ vacanteProtocoloAt: now, vacanteEscalada: true });
 
         const vacEmpresa = shiftEmpresaId(shift) || 'bacarsa';
-        const vacManual = await isEmpresaManualMode(db, vacEmpresa);
-        // Manual / Modo Rápido: marca el puesto, sin alerta CC ni cascada.
+        const vacManual = await shouldSuppressCcAutoAlerts(db, vacEmpresa);
+        // Manual / MR por defecto: marca el puesto, sin alerta CC ni cascada.
         if (!vacManual) {
           {
             const safeId = docSnap.id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
@@ -3074,7 +3074,7 @@ export const gestionarVacantes = functions
         });
 
         const vacEmpresa = shiftEmpresaId(shift) || 'bacarsa';
-        const vacManual = await isEmpresaManualMode(db, vacEmpresa);
+        const vacManual = await shouldSuppressCcAutoAlerts(db, vacEmpresa);
         if (!vacManual) {
           // ID determinístico = mismo que usa el front (autodev_prot_) para evitar duplicar
           {

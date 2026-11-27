@@ -487,8 +487,8 @@ export async function aplicarEventualNoSePresento(
   let cascadaOmitida: 'MANUAL' | null = null;
   try {
     const fresco = (await shiftRef.get()).data() || {};
-    const { isEmpresaManualMode } = await import('../ops/opsManualMode');
-    if (await isEmpresaManualMode(db, empresaId)) {
+    const { shouldSuppressCcAutoAlerts } = await import('../ops/opsManualMode');
+    if (await shouldSuppressCcAutoAlerts(db, empresaId)) {
       cascadaOmitida = 'MANUAL';
       throw new ManualModeSkip();
     }

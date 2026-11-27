@@ -91,7 +91,7 @@ import {
   type EarlyWithdrawReplacePolicy,
 } from '@/lib/operaciones/earlyWithdrawPolicy';
 import { empresaCollectionQuery, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
-import { readPreferOpsModoRapido, writePreferOpsModoRapido } from '@/lib/panelViewPrefs';
+import { readPreferOpsModoRapido, writePreferOpsModoRapido, syncOpsPreferModoRapidoEmpresa } from '@/lib/panelViewPrefs';
 import { isRevertAbsenceExpired } from '@/lib/operaciones/revertAbsenceWindow';
 import { arHmOnYmdMs, arYmd } from '@/lib/arClock';
 import { isRestFrancoShift } from '@/hooks/useOperacionesMonitor';
@@ -3529,8 +3529,15 @@ export default function ModoRapidoPage() {
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    setPreferOpsRapido(readPreferOpsModoRapido(user?.uid));
-  }, [user?.uid]);
+    const on = readPreferOpsModoRapido(user?.uid);
+    setPreferOpsRapido(on);
+    // Pin viejo solo en localStorage: publicar a la empresa para que Functions corte alertas CC.
+    if (on && empresaId) {
+      void syncOpsPreferModoRapidoEmpresa(empresaId, true).catch((e) =>
+        console.warn('[modo-rapido] sync prefer empresa (boot)', e),
+      );
+    }
+  }, [user?.uid, empresaId]);
 
   const showToast = useCallback((msg: string, color = 'bg-slate-800') => {
     setToast({ msg, color });
@@ -6821,16 +6828,19 @@ export default function ModoRapidoPage() {
               const next = !preferOpsRapido;
               writePreferOpsModoRapido(user?.uid, next);
               setPreferOpsRapido(next);
+              void syncOpsPreferModoRapidoEmpresa(empresaId, next).catch((e) =>
+                console.warn('[modo-rapido] sync prefer empresa', e),
+              );
               showToast(
                 next
-                  ? 'Preferencia: al entrar a Operaciones se abre el modo rápido'
-                  : 'Preferencia quitada: al entrar se abre el clásico',
+                  ? 'Por defecto: Modo Rápido — sin alertas del CC clásico'
+                  : 'Preferencia quitada: al entrar se abre el clásico (alertas CC activas)',
                 next ? 'bg-emerald-700' : 'bg-slate-700',
               );
             }}
             title={preferOpsRapido
-              ? 'Preferencia activa: al entrar a Operaciones se abre el modo rápido'
-              : 'Fijar modo rápido por preferencia al entrar'}
+              ? 'Preferencia activa: Modo Rápido al entrar y sin alertas del CC clásico'
+              : 'Fijar modo rápido por defecto (también silencia alertas del CC clásico)'}
             aria-pressed={preferOpsRapido}
             className={`ml-1 px-1.5 py-1 rounded-lg border text-[10px] font-bold flex items-center gap-1 transition-colors ${preferOpsRapido ? 'border-emerald-700 bg-emerald-600 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-300 hover:text-emerald-700'}`}
           >

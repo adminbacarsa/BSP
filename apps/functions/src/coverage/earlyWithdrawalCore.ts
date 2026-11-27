@@ -1,7 +1,7 @@
 import * as admin from 'firebase-admin';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { iniciarEarlyWithdrawCascade } from './earlyWithdrawCascade';
-import { isEmpresaManualMode } from '../ops/opsManualMode';
+import { shouldSuppressCcAutoAlerts } from '../ops/opsManualMode';
 import {
   countColleaguesPresentSameObjective,
   escalarVacanteSinCobertura,
@@ -231,7 +231,7 @@ export async function processEarlyWithdrawal(
     });
 
     if (isAutoMode && empresaId) {
-      const manual = await isEmpresaManualMode(db, empresaId);
+      const manual = await shouldSuppressCcAutoAlerts(db, empresaId);
       if (!manual) {
         await iniciarEarlyWithdrawCascade(
           db,

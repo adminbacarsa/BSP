@@ -1,7 +1,7 @@
 import { Timestamp, type Firestore } from 'firebase-admin/firestore';
 import { iniciarCascadaCobertura } from '../coverage/convocatoriasCobertura';
 import { isExtraNonReliefShift } from '../common/reliefEligibility';
-import { isEmpresaManualMode } from '../ops/opsManualMode';
+import { shouldSuppressCcAutoAlerts } from '../ops/opsManualMode';
 import { isRetShift, isZeroDurationShift } from '../common/retShift';
 import { lateVacancyDue } from './lateAbsenceWindow';
 
@@ -35,7 +35,7 @@ export async function openLateAbsenceVacancy(
   const holdCascade =
     opts?.skipCascade === true || shift.absenceCascadeSkip === true;
   const empresaId = String(shift.empresaId || '').trim() || 'bacarsa';
-  const manual = holdCascade || (await isEmpresaManualMode(db, empresaId));
+  const manual = holdCascade || (await shouldSuppressCcAutoAlerts(db, empresaId));
   if (!manual && !isExtraNonReliefShift(shift)) {
     const start = shift.startTime as FirebaseFirestore.Timestamp | undefined;
     if (start) {

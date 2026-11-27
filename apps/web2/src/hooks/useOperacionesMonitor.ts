@@ -317,6 +317,8 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
 
     /** Sala Manual (CC o Modo Rápido): no fabricar novedades/alertas de protocolo desde el monitor. */
     const [hasRoomManual, setHasRoomManual] = useState(false);
+    /** Pin empresa "MR por defecto" — silencia alertas CC aunque no haya sesión abierta. */
+    const [preferModoRapidoEmpresa, setPreferModoRapidoEmpresa] = useState(false);
     useEffect(() => {
         if (!empresaId) {
             setHasRoomManual(false);
@@ -335,6 +337,20 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         );
         return () => unsub();
     }, [empresaId]);
+    useEffect(() => {
+        if (!empresaId) {
+            setPreferModoRapidoEmpresa(false);
+            return;
+        }
+        const ref = doc(db, 'empresas', empresaId, 'config', 'ops');
+        const unsub = onSnapshot(
+            ref,
+            (snap) => setPreferModoRapidoEmpresa(snap.data()?.preferModoRapido === true),
+            () => setPreferModoRapidoEmpresa(false),
+        );
+        return () => unsub();
+    }, [empresaId]);
+    const suppressCcAutoAlerts = hasRoomManual || preferModoRapidoEmpresa;
 
     // Fuerza re-suscripción de listeners al volver de background o reconectar red.
     // El intervalo periódico fue eliminado: Firestore gestiona la reconexión internamente
@@ -1364,8 +1380,8 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
     const autoAbsentedIds = useRef<Set<string>>(new Set());
     useEffect(() => {
         if (staleBuild) return;
-        // Manual / Modo Rápido: el operador cubre en el tablero; no generar alertas CC.
-        if (hasRoomManual) return;
+        // Manual / MR por defecto: el operador cubre en el tablero; no generar alertas CC.
+        if (suppressCcAutoAlerts) return;
         const virtualVacs = processedData.filter((s: any) => s.isVirtual && isSameDay(s.shiftDateObj, now));
         if (!virtualVacs.length) return;
         const nowMs = now.getTime();
@@ -1548,7 +1564,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 })
                 .catch(e => console.warn('[retentionLarga:check]', e));
         }
-    }, [processedData, empresaId, staleBuild, hasRoomManual]);
+    }, [processedData, empresaId, staleBuild, suppressCcAutoAlerts]);
 
     // isStable: se activa una sola vez cuando processedData se estabiliza después de isReady.
     // NO vuelve a false — evita que updates de Firestore muestren la pantalla de carga repetidamente.

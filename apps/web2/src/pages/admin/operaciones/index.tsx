@@ -25,7 +25,7 @@ import { useStaleBuild } from '@/hooks/useStaleBuild';
 import { useOperatorSession } from '@/hooks/useOperatorSession';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
-import { readPreferOpsModoRapido, writePreferOpsModoRapido } from '@/lib/panelViewPrefs';
+import { readPreferOpsModoRapido, writePreferOpsModoRapido, syncOpsPreferModoRapidoEmpresa } from '@/lib/panelViewPrefs';
 import { POPUP_STYLES } from '@/components/operaciones/mapStyles';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -1790,8 +1790,14 @@ export default function OperacionesPage() {
     const [preferOpsRapido, setPreferOpsRapido] = useState(false);
     useEffect(() => { setManualAssist(readManualAssistPreference()); }, []);
     useEffect(() => {
-        setPreferOpsRapido(readPreferOpsModoRapido(user?.uid));
-    }, [user?.uid]);
+        const on = readPreferOpsModoRapido(user?.uid);
+        setPreferOpsRapido(on);
+        if (on && empresaId) {
+            void syncOpsPreferModoRapidoEmpresa(empresaId, true).catch((e) =>
+                console.warn('[ops] sync prefer empresa (boot)', e),
+            );
+        }
+    }, [user?.uid, empresaId]);
     // Preferencia: al abrir Operaciones (escritorio) ir directo a modo rápido, salvo ?classic=1.
     // readMovilMode() sincrónico: useMovilMode arranca en false y redirigiría el celular por error.
     useEffect(() => {
@@ -4006,13 +4012,16 @@ export default function OperacionesPage() {
                                             const next = !preferOpsRapido;
                                             writePreferOpsModoRapido(user?.uid, next);
                                             setPreferOpsRapido(next);
+                                            void syncOpsPreferModoRapidoEmpresa(empresaId, next).catch((e) =>
+                                                console.warn('[ops] sync prefer empresa', e),
+                                            );
                                             toast.message(next
-                                                ? 'Preferencia: al entrar a Operaciones se abre el modo rápido'
-                                                : 'Preferencia quitada: al entrar se abre el Centro de Control clásico');
+                                                ? 'Por defecto: Modo Rápido — sin alertas del CC clásico'
+                                                : 'Preferencia quitada: al entrar se abre el CC clásico (alertas activas)');
                                         }}
                                         title={preferOpsRapido
-                                            ? 'Preferencia activa: al entrar a Operaciones se abre el modo rápido (clic para quitar)'
-                                            : 'Fijar modo rápido por preferencia al entrar a Operaciones'}
+                                            ? 'Preferencia activa: Modo Rápido al entrar y sin alertas del CC clásico (clic para quitar)'
+                                            : 'Fijar modo rápido por defecto (también silencia alertas del CC clásico)'}
                                         aria-pressed={preferOpsRapido}
                                         className={`px-1.5 py-1 font-bold text-[10px] rounded-r-lg border transition-colors flex items-center ${preferOpsRapido ? 'bg-emerald-700 text-white border-emerald-800' : 'bg-white text-emerald-700 border-emerald-600 hover:bg-emerald-50'}`}
                                     >

@@ -1,4 +1,6 @@
 /** Preferencias de vista (localStorage) por usuario: modo rápido al entrar. */
+import { doc, setDoc } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 
 function uidKey(uid: string | null | undefined): string {
   return uid || 'anon';
@@ -36,6 +38,26 @@ export function readPreferOpsModoRapido(uid: string | null | undefined): boolean
 
 export function writePreferOpsModoRapido(uid: string | null | undefined, on: boolean): void {
   writeFlag(opsKey(uid), on);
+}
+
+/**
+ * Persiste el pin "Por defecto" a nivel empresa para que Functions silencie
+ * push/bandeja/cascada del CC clásico (localStorage solo alcanza al navegador).
+ */
+export async function syncOpsPreferModoRapidoEmpresa(
+  empresaId: string | null | undefined,
+  on: boolean,
+): Promise<void> {
+  const eid = String(empresaId || '').trim();
+  if (!eid) return;
+  await setDoc(
+    doc(db, 'empresas', eid, 'config', 'ops'),
+    {
+      preferModoRapido: on,
+      preferModoRapidoUpdatedAt: new Date().toISOString(),
+    },
+    { merge: true },
+  );
 }
 
 export function readPreferPlanifModoRapido(uid: string | null | undefined): boolean {

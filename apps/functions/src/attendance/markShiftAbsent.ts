@@ -151,11 +151,11 @@ export async function markShiftAbsent(
     .where('type', '==', 'AUSENCIA_AUTO')
     .limit(1)
     .get();
-  // Sala Manual / Modo Rápido: el operador trabaja el tablero; no generar alerta CC.
+  // Sala Manual / MR por defecto: el operador trabaja el tablero; no generar alerta CC.
   let skipNovedadAlert = opts.skipCascadeSideEffects === true;
   if (!skipNovedadAlert) {
-    const { isEmpresaManualMode } = await import('../ops/opsManualMode');
-    skipNovedadAlert = await isEmpresaManualMode(db, shiftEmpresaId(shift));
+    const { shouldSuppressCcAutoAlerts } = await import('../ops/opsManualMode');
+    skipNovedadAlert = await shouldSuppressCcAutoAlerts(db, shiftEmpresaId(shift));
   }
   if (!skipNovedadAlert && novSnap.empty) {
     const elapsedMin =
