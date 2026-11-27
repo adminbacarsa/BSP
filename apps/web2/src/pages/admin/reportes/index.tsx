@@ -1647,10 +1647,13 @@ export default function ReportsPage() {
                 const activeStart = payStart ?? rStart ?? (usePlannedHours ? planStart : start);
                 const activeEnd = payEnd ?? rEnd ?? (usePlannedHours ? planEnd : end);
                 const effectiveDur = rDur ?? ((isFT || usePlannedHours) && duration > 0 ? duration : 0);
-                const billableForRow = usePlannedHours
-                    ? liquidationBillableHoursForShift(s, SHIFT_HOURS_LOOKUP)
-                    : (effectiveDur > 0 ? effectiveDur : duration);
-                const night = zeroHours || (!rStart && !rEnd && !usePlannedHours)
+                // Sin fichada y sin modo planificado: no inventar diurnas con la teórica (ausente/pendiente).
+                const billableForRow = isUnjustAbsentDetail
+                    ? 0
+                    : usePlannedHours
+                        ? liquidationBillableHoursForShift(s, SHIFT_HOURS_LOOKUP)
+                        : (effectiveDur > 0 ? effectiveDur : 0);
+                const night = zeroHours || isUnjustAbsentDetail || (!rStart && !rEnd && !usePlannedHours)
                     ? 0
                     : getNightDuration(activeStart, activeEnd);
                 const day = Math.max(0, billableForRow - night);

@@ -996,6 +996,9 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
             const isFT = isFrancoTrabajadoShift(d);
             if (['FF', 'V', 'L', 'PG', 'A', 'E', 'AA'].includes(rawCode) && !isFT) return;
             if (rawCode === 'F' && !isFT) return;
+            // Ausente (AA / cubierto): no trabaja → 0 teóricas/diurnas/liquidación.
+            const isAbsentEarly = d.isAbsent === true || st.includes('absent') || st.includes('ausent');
+            if (isAbsentEarly && !isFT) return;
             // Doc F sin fichada: liquida en el turno de cobertura si ese día tiene fichada
             if (isFT && rawCode === 'F' && !shiftHasRealCheckIn(d) && francoDocSkipIds.has(d.id)) return;
 
@@ -1058,9 +1061,6 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
 
             // Horas reales: fichada real. Futuros sin ingreso no cuentan.
             // Presente/en curso (ingreso sin egreso): provisional hasta ahora o fin planificado.
-            const isAbsent = d.isAbsent === true || st.includes('absent') || st.includes('ausent');
-            if (isAbsent) return;
-
             const punchToDate = (v: unknown): Date | null => {
                 if (!v) return null;
                 const t = v as { toDate?: () => Date; seconds?: number; _seconds?: number };
