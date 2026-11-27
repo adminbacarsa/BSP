@@ -27,6 +27,7 @@ import { toYyyyMmDd } from '@/lib/firestoreDates';
 import { shouldScopeQueriesToEmpresa, filterSlaRowsByEmpresa } from '@/lib/multiempresa';
 import { slaService } from '@/services/slaService';
 import { useReportes, resolveShiftDurationHours, dedupeShiftsByAbsencePriority, mapAbsenceStatusLabel, LEAVE_REPORT_CODES, isLeaveReportShift, isReportVacancyShift, buildPayrollExportPayload, shouldBillShiftToObjective, isFrancoTrabajadoShift, propagateFrancoTrabajadoFlags, buildFrancoDocLiquidationSkipIds, resolveLiquidationWorkedHours, liquidacion200FromWorkedHours, collapseShiftsByEmployeeDayForLiquidation, liquidationBillableHoursForShift, resolveLiquidationPlannedWindow, type ReportPublishFilter, type ReportFetchScope } from '@/hooks/useReportes';
+import { isOpsCoverageHoursOnSourceDoc } from '@/lib/cosp/coverageSemantics';
 import { toast } from 'sonner';
 import { huecosPlanificadosCortado, solapeHuecosMs, tramosPlanificadosCortado } from '@cosp/hours-core';
 import { useAuth } from '@/context/AuthContext';
@@ -971,7 +972,10 @@ export default function ReportsPage() {
                                                                         </tr>
                                                                     </thead>
                                                                     <tbody className="divide-y divide-slate-100">
-                                                                        {[...(row.rawShifts || [])].sort((a: any, b: any) => (a.startTime?.seconds || 0) - (b.startTime?.seconds || 0)).map((s: any) => {
+                                                                        {[...(row.rawShifts || [])]
+                                                                            // ops_cov Ext/Adel: horas en el turno fuente; no listar el tramo fantasma.
+                                                                            .filter((s: any) => !isOpsCoverageHoursOnSourceDoc(s as Record<string, unknown>))
+                                                                            .sort((a: any, b: any) => (a.startTime?.seconds || 0) - (b.startTime?.seconds || 0)).map((s: any) => {
                                                                             const start = tsToDate(s.startTime);
                                                                             const end = tsToDate(s.endTime);
                                                                             const dur = resolveShiftDurationHours(s, SHIFT_HOURS_LOOKUP, { forObjectiveBilling: true });
@@ -980,8 +984,13 @@ export default function ReportsPage() {
                                                                                 : null;
                                                                             const planStart = plannedWindow?.start ?? start;
                                                                             const planEnd = plannedWindow?.end ?? end;
-                                                                            const night = planStart && planEnd ? getNightDuration(planStart, planEnd) : 0;
+                                                                            const night = dur > 0 && planStart && planEnd ? getNightDuration(planStart, planEnd) : 0;
                                                                             const isVacant = isReportVacancyShift(s, empMap);
+                                                                            const codeUpRow = String(s.code || '').trim().toUpperCase();
+                                                                            const isAbsentRow = s._isAbsentRow === true
+                                                                                || s.isAbsent === true
+                                                                                || String(s.status || '').toUpperCase() === 'ABSENT'
+                                                                                || (codeUpRow === 'AA' && !s.isFrancoTrabajado);
                                                                             const rStartRaw = tsToDate(s.realStartTime) || tsToDate(s.checkInTime) || tsToDate(s.checkInAt);
                                                                             const rEndMarked = tsToDate(s.realEndTime) || tsToDate(s.checkOutTime);
                                                                             const stUp = String(s.status || '').toUpperCase();
@@ -1013,15 +1022,19 @@ export default function ReportsPage() {
                                                                             const fmt = (d: Date) => d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
                                                                             const isLeaveRow = isLeaveReportShift(s);
                                                                             return (
-                                                                                <tr key={s.id} className={isVacant ? 'bg-amber-50/60' : hasOvertime ? 'bg-orange-50/40' : isLeaveRow ? 'bg-blue-50/30' : enCurso ? 'bg-emerald-50/40' : ''}>
+                                                                                <tr key={s.id} className={isVacant ? 'bg-amber-50/60' : isAbsentRow ? 'bg-rose-50/40' : hasOvertime ? 'bg-orange-50/40' : isLeaveRow ? 'bg-blue-50/30' : enCurso ? 'bg-emerald-50/40' : ''}>
                                                                                     <td className="py-1.5 pr-3 text-slate-600">{start ? start.toLocaleDateString('es-AR') : '-'}</td>
-                                                                                    <td className={`py-1.5 pr-3 font-bold ${isVacant ? 'text-amber-600 italic' : 'text-slate-700'}`}>
+                                                                                    <td className={`py-1.5 pr-3 font-bold ${isVacant ? 'text-amber-600 italic' : isAbsentRow ? 'text-rose-700' : 'text-slate-700'}`}>
                                                                                         {s.employeeName || 'Vacante'}
-                                                                                        {s._coveringFor && (
+                                                                                        {isAbsentRow ? (
+                                                                                            <span className="block text-[9px] font-bold text-rose-600 normal-case mt-0.5">
+                                                                                                Ausente{s._coveredBy ? ` · cubierto por ${String(s._coveredBy).replace(/\s*\([^)]*\)\s*$/, '').trim()}` : ''}
+                                                                                            </span>
+                                                                                        ) : s._coveringFor ? (
                                                                                             <span className="block text-[9px] font-bold text-emerald-700 normal-case mt-0.5">
                                                                                                 (Cubrió a {s._coveringFor})
                                                                                             </span>
-                                                                                        )}
+                                                                                        ) : null}
                                                                                     </td>
                                                                                     <td className="py-1.5 pr-3 text-slate-500">{s.code || '-'}</td>
                                                                                     <td className="py-1.5 pr-3 text-slate-500 text-[10px]">
@@ -1055,7 +1068,7 @@ export default function ReportsPage() {
                                                                                         {enCurso && rDur != null && <span className="text-[9px] ml-1 text-emerald-500 font-bold">curso</span>}
                                                                                         {hasOvertime && <span className="text-[9px] ml-1 text-orange-400">+{(rDur!-dur).toFixed(1)}</span>}
                                                                                     </td>
-                                                                                    <td className="py-1.5 text-right text-slate-500 text-[10px]">{night.toFixed(1)}</td>
+                                                                                    <td className="py-1.5 text-right text-slate-500 text-[10px]">{dur > 0 ? night.toFixed(1) : '—'}</td>
                                                                                 </tr>
                                                                             );
                                                                         })}
@@ -1412,11 +1425,15 @@ export default function ReportsPage() {
                                         {showEmpCol && (
                                             <td className="p-4 text-xs font-bold text-indigo-700">
                                                 {s._empName}
-                                                {s._coveringFor && (
+                                                {(s._isAbsentRow || s.isAbsent || String(s.status || '').toUpperCase() === 'ABSENT' || (rawCode === 'AA' && !s.isFrancoTrabajado)) ? (
+                                                    <span className="block text-[9px] font-bold text-rose-600 normal-case mt-0.5">
+                                                        Ausente{s._coveredBy ? ` · cubierto por ${String(s._coveredBy).replace(/\s*\([^)]*\)\s*$/, '').trim()}` : ''}
+                                                    </span>
+                                                ) : s._coveringFor ? (
                                                     <span className="block text-[9px] font-bold text-emerald-700 normal-case mt-0.5">
                                                         (Cubrió a {s._coveringFor})
                                                     </span>
-                                                )}
+                                                ) : null}
                                             </td>
                                         )}
                                         <td className="p-4 text-center">
@@ -1438,16 +1455,20 @@ export default function ReportsPage() {
                                         </td>
                                         <td className="p-4 text-xs max-w-[160px]">
                                             {(() => {
+                                                const codeHere = String(s.code || '').trim().toUpperCase();
+                                                const isAbsentHere = s._isAbsentRow || s.isAbsent || String(s.status || '').toUpperCase() === 'ABSENT'
+                                                    || (codeHere === 'AA' && !s.isFrancoTrabajado)
+                                                    || (['A','E','L','V','PG'].includes(codeHere) && !s.isFrancoTrabajado);
                                                 const isVacancyCover = s._coveringFor && s._coveringFor.startsWith('Vacante');
                                                 const lines = [];
-                                                if (s._coveringFor) {
+                                                if (!isAbsentHere && s._coveringFor) {
                                                     lines.push(
                                                         <p key="cf" className={`font-bold ${isVacancyCover ? 'text-violet-700' : 'text-emerald-700'}`}>
                                                             <span className="text-slate-400 font-normal">{isVacancyCover ? '→' : '→ Cubrió a:'}</span> {s._coveringFor}
                                                         </p>
                                                     );
                                                 }
-                                                if (s._coveredBy && !s._coveringFor) {
+                                                if (s._coveredBy && (isAbsentHere || !s._coveringFor)) {
                                                     lines.push(
                                                         <p key="cb" className="text-slate-500">
                                                             <span className="text-slate-400">← Cubierto por:</span> {s._coveredBy}
@@ -2023,6 +2044,7 @@ export default function ReportsPage() {
         const filtered = assignedShifts
             .sort((a, b) => (a.startTime?.seconds || 0) - (b.startTime?.seconds || 0))
             .filter(s => {
+                if (isOpsCoverageHoursOnSourceDoc(s as Record<string, unknown>)) return false;
                 if (planFilterObjective) {
                     if (s._objName !== planFilterObjective) return false;
                 } else if (objSearch && !String(s._objName || '').toLowerCase().includes(objSearch)) {
@@ -2233,13 +2255,17 @@ export default function ReportsPage() {
                                     <tr key={s.id} className={`hover:bg-indigo-50/30 dark:hover:bg-slate-700/30 ${isVacant ? 'bg-amber-50/30' : ''}`}>
                                         <td className="p-4 font-bold text-slate-700 dark:text-slate-200 whitespace-nowrap">{startD ? formatDate(s.startTime) : '-'}</td>
                                         <td className="p-4 text-xs text-slate-500 capitalize">{dayName}</td>
-                                        <td className={`p-4 font-bold text-sm ${isVacant ? 'text-amber-600 italic' : 'text-slate-700 dark:text-slate-200'}`}>
+                                        <td className={`p-4 font-bold text-sm ${isVacant ? 'text-amber-600 italic' : (s._isAbsentRow || s.isAbsent || String(s.status || '').toUpperCase() === 'ABSENT' || (code === 'AA' && !s.isFrancoTrabajado)) ? 'text-rose-700' : 'text-slate-700 dark:text-slate-200'}`}>
                                             {s.employeeName || 'VACANTE'}
-                                            {s._coveringFor && (
+                                            {(s._isAbsentRow || s.isAbsent || String(s.status || '').toUpperCase() === 'ABSENT' || (code === 'AA' && !s.isFrancoTrabajado)) ? (
+                                                <span className="block text-[9px] font-bold text-rose-600 normal-case mt-0.5">
+                                                    Ausente{s._coveredBy ? ` · cubierto por ${String(s._coveredBy).replace(/\s*\([^)]*\)\s*$/, '').trim()}` : ''}
+                                                </span>
+                                            ) : s._coveringFor ? (
                                                 <span className="block text-[9px] font-bold text-emerald-700 normal-case mt-0.5">
                                                     (Cubrió a {s._coveringFor})
                                                 </span>
-                                            )}
+                                            ) : null}
                                         </td>
                                         <td className="p-4 text-xs text-slate-600 dark:text-slate-400 font-bold truncate max-w-[160px]">{s._objName || '-'}</td>
                                         <td className="p-4 text-xs text-slate-400 truncate max-w-[120px]">{s._clientName || '-'}</td>

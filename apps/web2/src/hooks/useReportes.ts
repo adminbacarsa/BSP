@@ -1779,39 +1779,63 @@ export const useReportes = (forcedClientId?: string | null) => {
                 if (!coveringForByEmpIdDate[key]) coveringForByEmpIdDate[key] = desc;
             });
 
+            // AA / flag: ausente injustificado (etiqueta “Ausente”). Licencias: no cubren a nadie.
+            const LEAVE_NO_COVER_CODES = new Set(['AA', 'A', 'E', 'L', 'V', 'PG']);
+            const isAbsentShift = (s: any): boolean => {
+                if (s?.isAbsent === true || String(s?.status || '').toUpperCase() === 'ABSENT') return true;
+                const code = String(s?.code || '').trim().toUpperCase();
+                return code === 'AA' && !s?.isFrancoTrabajado;
+            };
+            const blocksCoveringLabel = (s: any): boolean => {
+                if (isAbsentShift(s)) return true;
+                const code = String(s?.code || '').trim().toUpperCase();
+                return LEAVE_NO_COVER_CODES.has(code) && !s?.isFrancoTrabajado;
+            };
+
+            const isOperationalCoverShift = (s: any): boolean => {
+                const orig = String(s?.origin || '').toUpperCase();
+                if (['RETEN', 'EARLY_START', 'OPERATIONS_COVERAGE', 'SLA_VIRTUAL'].includes(orig)) return true;
+                if (s?.isReten === true || s?.isEarlyStart === true || s?.isExtended === true) return true;
+                if (s?.absenceShiftId || s?.relievedEmployeeName) return true;
+                const comments = String(s?.comments || '');
+                if (/Cubriendo a /i.test(comments)) return true;
+                return false;
+            };
+
             // Resolver qué cubría un retén/adelanto a partir del shift referenciado
             const resolveCoveringFor = (s: any, dk: string | null): string | null => {
+                // Ausente/licencia no “cubre” a nadie: lo cubren a él (o no aplica).
+                if (blocksCoveringLabel(s)) return null;
+                // ops_cov Ext/Adel: horas en el turno fuente; no etiquetar el tramo fantasma.
+                if (isOpsCoverageHoursOnSourceDoc(s as Record<string, unknown>)) return null;
+
                 const refId = s.absenceShiftId;
                 if (refId && shiftIdToShift[refId]) {
                     const ref = shiftIdToShift[refId];
                     const isVacancy = !ref.employeeId || ref.employeeId === 'VACANTE' || ref.isUnassigned;
                     if (isVacancy) {
-                        // Vacante: mostrar puesto y código
                         const pos = ref.positionName || '';
                         const code = (ref.code || '').toUpperCase();
                         return `Vacante${pos ? ' ' + pos : ''}${code ? ' (' + code + ')' : ''}`;
-                    } else {
-                        // Ausente: mostrar nombre del titular
-                        return ref.employeeName || null;
                     }
+                    return ref.employeeName || null;
                 }
-                // 2. Mapa inverso: ausente apunta al cubridore
-                if (dk && coveringForByEmpIdDate[`${s.employeeId}_${dk}`]) {
+                // 2. Mapa inverso: ausente apunta al cubridore (solo si este turno es cobertura ops)
+                if (dk && isOperationalCoverShift(s) && coveringForByEmpIdDate[`${s.employeeId}_${dk}`]) {
                     return coveringForByEmpIdDate[`${s.employeeId}_${dk}`];
                 }
                 // 3. Relevo directo
                 if (s.relievedEmployeeName) return s.relievedEmployeeName;
-                // 4. Fallback: buscar ausente en mismo objetivo+puesto+día
-                if (dk && s.objectiveId && s.positionName) {
+                // 4. Fallback SOLO en turnos operativos (Ext/Adel/RET): nunca en malla planificada del titular
+                if (dk && s.objectiveId && s.positionName && isOperationalCoverShift(s)) {
                     const sameSlotAbsent = rawShifts.find((r: any) =>
                         r.id !== s.id &&
-                        (r.isAbsent || r.status === 'ABSENT') &&
+                        isAbsentShift(r) &&
                         r.objectiveId === s.objectiveId &&
                         (r.positionName || '').trim().toLowerCase() === (s.positionName || '').trim().toLowerCase() &&
                         shiftCalendarDateKey(r) === dk
                     );
                     if (sameSlotAbsent?.employeeName) return sameSlotAbsent.employeeName;
-                    // Si no hay ausente, puede ser una vacante (turno no planificado)
                     const isOpsShift = ['RETEN','EARLY_START','OPERATIONS_COVERAGE'].includes((s.origin||'').toUpperCase());
                     if (isOpsShift) return `Vacante ${s.positionName || ''}`;
                 }
@@ -1828,10 +1852,12 @@ export const useReportes = (forcedClientId?: string | null) => {
                     || (dk ? coverageByEmpDate[`${s.employeeId}_${dk}`] : null)
                     || null;
 
-                // A quién / qué cubrió este turno operativo
-                const coveringFor = resolveCoveringFor(s, dk)
-                    || (dk ? coveringForByEmpDate[`${s.employeeId}_${dk}`] : null)
-                    || null;
+                // A quién / qué cubrió este turno operativo (nunca en ausente/licencia ni malla titular sin marca ops)
+                const coveringFor = blocksCoveringLabel(s)
+                    ? null
+                    : (resolveCoveringFor(s, dk)
+                        || (dk && isOperationalCoverShift(s) ? coveringForByEmpDate[`${s.employeeId}_${dk}`] : null)
+                        || null);
 
                 return {
                     ...s,
@@ -1842,6 +1868,7 @@ export const useReportes = (forcedClientId?: string | null) => {
                     _absenceReason: abs?.reason || null,
                     _coveredBy: coveredByName,
                     _coveringFor: coveringFor,
+                    _isAbsentRow: isAbsentShift(s),
                 };
             };
 
