@@ -74,8 +74,14 @@ function listFilesRecursive(dir) {
 
 function assertNotEmulatorBuild() {
   const files = listFilesRecursive(distWeb).filter((f) => /\.(js|html|json)$/.test(f));
-  // La config viaja como JSON escapado dentro del bundle: \"useEmulator\":true
-  const hit = files.find((f) => /\\?"useEmulator\\?"\s*:\s*true/.test(fs.readFileSync(f, 'utf8')));
+  // Config real del bundle: "useEmulator":true / \"useEmulator\":true / useEmulator:!0,
+  // No confundir con el chequeo minificado `useEmulator:!0===e.useEmulator`.
+  const hit = files.find((f) => {
+    const text = fs.readFileSync(f, 'utf8');
+    if (/\\?"useEmulator\\?"\s*:\s*true\b/.test(text)) return true;
+    if (/useEmulator\s*:\s*!0(?!==)/.test(text)) return true;
+    return false;
+  });
   if (hit) {
     console.error(`\n✗ El build web quedó en modo emulador (${path.relative(repoRoot, hit)}) — abortando deploy.`);
     process.exit(1);
@@ -109,24 +115,41 @@ function main() {
   const labPublic = path.join(repoRoot, 'apps', 'web2', 'public');
   const isProdDeploy =
     process.env.COSP_GUARD_WEB_PROD === '1' || !destArg || !path.resolve(dest).startsWith(path.resolve(labPublic));
-  // Expo toma el .env aunque el proceso traiga la variable: .env.production.local tiene prioridad en export.
+  // Expo a veces pisa el env del proceso con apps/mobile-guardia/.env (USE_EMULATOR=true del lab).
+  // Para prod: forzar false en .env + .env.production.local y restaurar .env al salir.
   const prodEnvFile = path.join(mobileRoot, '.env.production.local');
+  const labEnvFile = path.join(mobileRoot, '.env');
+  let labEnvBackup = null;
   if (isProdDeploy) {
     const lines = ['EXPO_PUBLIC_USE_EMULATOR=false'];
     const vapid = readWeb2VapidKey(labRoot);
     if (vapid) lines.push(`EXPO_PUBLIC_FIREBASE_VAPID_KEY=${vapid}`);
     else console.warn('\n⚠ Sin NEXT_PUBLIC_FIREBASE_VAPID_KEY en apps/web2/.env.local: /app no va a recibir push web.');
     fs.writeFileSync(prodEnvFile, `${lines.join('\n')}\n`);
+    if (fs.existsSync(labEnvFile)) {
+      labEnvBackup = fs.readFileSync(labEnvFile, 'utf8');
+      const patched = labEnvBackup.replace(
+        /^EXPO_PUBLIC_USE_EMULATOR=.*$/m,
+        'EXPO_PUBLIC_USE_EMULATOR=false',
+      );
+      fs.writeFileSync(
+        labEnvFile,
+        /EXPO_PUBLIC_USE_EMULATOR=/m.test(patched)
+          ? patched
+          : `${patched.trimEnd()}\nEXPO_PUBLIC_USE_EMULATOR=false\n`,
+      );
+    }
   }
   try {
     // --clear: la caché de Metro reutiliza el bundle con la config del lab incrustada.
     run(
       isProdDeploy ? 'npm run build:web -- --clear' : 'npm run build:web',
       mobileRoot,
-      isProdDeploy ? { EXPO_PUBLIC_USE_EMULATOR: 'false' } : {},
+      isProdDeploy ? { EXPO_PUBLIC_USE_EMULATOR: 'false', NODE_ENV: 'production' } : {},
     );
   } finally {
     if (isProdDeploy && fs.existsSync(prodEnvFile)) fs.rmSync(prodEnvFile);
+    if (isProdDeploy && labEnvBackup != null) fs.writeFileSync(labEnvFile, labEnvBackup);
   }
   assertDistWebReady();
   if (isProdDeploy) assertNotEmulatorBuild();
